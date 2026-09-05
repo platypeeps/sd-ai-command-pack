@@ -279,10 +279,16 @@ on its own, onto prepaid and company bills included; every pass writes a cost
 row and Today shows it.
 
 One bill has a cap from day one. `baseten` is company money, and its bill
-carries `cap_usd_month: 50`. The library sums cost rows per bill per calendar
-month; at the cap, fallthrough skips every provider on that bill, direct
-choice refuses by name with the month's total, and Today shows spend against
-cap. The dashboard raises the cap in one action, and it enables, disables and
+carries `cap_usd_month: 50`. The library enforces the cap per call, not per
+month in arrears: before each dispatch it computes a bound, prompt tokens
+plus the entry's `max_tokens` at the entry's price, and reserves it against
+the bill in one transaction with the month's settled and still-reserved
+rows, as B's requirement 6 specifies; a bound that would carry the month
+past the cap is refused before anything is sent, so two calls racing for
+the last dollar cannot both go, and the reservation settles to the real
+cost after. At the cap, fallthrough skips every provider on that bill,
+direct choice refuses by name with the month's total, reserved included,
+and Today shows spend against cap. The dashboard raises the cap in one action, and it enables, disables and
 reorders providers the same way: the registry file holds identity and seeds
 B's `provider` and `bill` tables, the rows hold what the page changes, and
 the library merges the two on every read, so the file is never edited from a
@@ -369,19 +375,25 @@ warning; in a checkout on the branch that is behind `rev`, they report that
 instead and compare nothing; what `sd-ship` commits always agrees, because
 it refreshes first. In any other checkout, on `main`
 after the merge or in a linked worktree on another branch, and in CI, they
-read the mirror alone. A `done` row compares with nothing, and `done` is
-never written into a mirror: the transition to `done` deletes the directory,
-below, so a mirror carries only the states its branch passed through. Until
-B's library exists the frontmatter is the only copy, and the switch is one
-migration.
+read the mirror alone. `done` reaches the mirror the same way every other
+state does, and in the merge itself: `sd-ship` writes `status: done` into the
+mirror as the last commit of the branch before it merges, so `main`, every
+database-free checkout and CI read `done` the moment the merge lands, and no
+reader waits on a later run to learn it. If the merge then fails, the branch
+carries `done` ahead of a row that does not, and the lint reports that
+disagreement like any other; the row turns `done` only when the merge is
+confirmed. Every reader that picks an item, `sd-review --scope planning`
+among them, excludes a `done` mirror, so a merged item is never the "single
+open item" of a checkout that has no database. Until B's library exists the
+frontmatter is the only copy, and the switch is one migration.
 
 The status vocabulary gains one state, `ready_to_send`, for a finished artifact
 waiting on the operator's external action, and keeps `blocked`. Nothing else
 changes.
 
-No sweep, no park, no archive. A merged item is `done` in the row and its
-directory is deleted at the next `sd-plan` run, only when every file in it is
-tracked and committed: `git status --porcelain --ignored -- <dir>` empty, so
+No sweep, no park, no archive. A merged item is `done` in the row and in
+the mirror, above, and its directory is deleted at the next `sd-plan` run,
+only when every file in it is tracked and committed: `git status --porcelain --ignored -- <dir>` empty, so
 that ignored files count alongside untracked and modified ones, and every path
 under the directory listed by `git ls-files -- <dir>` and present at `HEAD`.
 When that holds, the deletion is `git rm -r` of those tracked paths and
@@ -735,7 +747,12 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    provider, and fails by name when no other provider carries the role; a test
    asserts both, and asserts that a change authored by `codex` resolves to
    `claude` and one authored by `claude` resolves to `codex`, for every entry
-   on the `author` line. Outside the runner: a test ships two commits under
+   on the `author` line. The cap: a test sets a bill's remaining room to less
+   than one call's bound and asserts the call is refused before dispatch
+   naming the bill and the month's total; a second test starts two calls
+   concurrently against room for exactly one and asserts one goes and one is
+   refused, with the settled rows summing under the cap afterwards. Outside
+   the runner: a test ships two commits under
    `SD_AUTHOR=codex` and asserts both carry `Authored-with: codex` and that
    resolution skips every openai entry; a branch with one `claude` and one
    `codex` trailer resolves to the first entry of neither vendor; a branch
@@ -791,7 +808,12 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     and ships. A test resets the branch to a commit older than the row's
     `rev` and asserts that `sd mirror refresh` refuses naming both commits,
     that the lint reports the checkout as behind and does not compare, and
-    that `--rebind` proceeds and writes a note. Tests cover all five. The pack's installer installs B's
+    that `--rebind` proceeds and writes a note. A test ships an item to
+    merge, then reads the merged tree with no database and asserts the
+    mirror says `done`, that `sd-status` reports it done, and that
+    `sd-review --scope planning` in that checkout does not pick it and,
+    with no other item open, refuses naming none. Tests cover all five,
+    and the merge. The pack's installer installs B's
     `sd_db` into the pack's virtualenv, asserted by a test that runs the
     installer against a fixture system checkout and imports it. Before B
     exists, this criterion is recorded as waiting, not as met.
@@ -1125,3 +1147,24 @@ Waiting on the operator, not open: model pins and prices for the `kimi`,
     branch's trailers name, `human` is reviewed by the first entry, and an
     unnamed author is refused with the flag named. Criterion 6; the
     design's Providers section.
+
+- **2026-09-05** — Planning review, round six of fifteen: two blocking
+  findings, both addressed.
+  - C-15, requirement 5: `done` was never written into a mirror and the
+    directory was deleted only at a later `sd-plan` run, so `main`, every
+    database-free checkout and CI read a merged item as still open, and the
+    single-open-item fallback for `sd-review --scope planning` could pick a
+    finished item. Addressed: `sd-ship` writes `done` into the mirror as the
+    branch's last commit before the merge; every reader that picks an item
+    excludes a `done` mirror; criterion 13 tests the merged tree without a
+    database.
+  - C-16, requirement 3: the company cap was checked against settled cost
+    rows only, so two calls racing for the last of the month could both go,
+    and a single call whose cost exceeded the remaining room was not refused
+    before dispatch. Addressed: the cap is enforced per call through B's
+    reservation, a bound reserved in one transaction with the month's
+    settled and reserved rows, refused when it would pass the cap; criterion
+    6 gains the oversize-bound and concurrent-call tests.
+  - Model pins written into the design's registry block on the operator's
+    yes: `kimi-k3`, `MiniMax-M3` with its price marked `unverified`,
+    DeepSeek V4 Pro 0813 for both Baseten tools, `max_tokens` 16384 on all.

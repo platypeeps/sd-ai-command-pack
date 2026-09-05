@@ -140,10 +140,11 @@ Eight commands, one local review, no artifacts.
 Change that earns a work item: `sd-plan` writes `prd.md` after asking three to
 five questions, or none when the loop runs unattended. Then the small-change
 path, with the two development review points. After the merge the item's row is
-`done` and its directory is deleted at the next `sd-plan` run, when every file
-in it is tracked and committed and nothing untracked or ignored sits beside
-them; otherwise it stays and the run names the files. Git history keeps what is
-deleted.
+`done`, `sd-ship` has written `done` into the mirror as the branch's last
+commit so that `main` and CI read it without the database, and the directory
+is deleted at the next `sd-plan` run, when every file in it is tracked and
+committed and nothing untracked or ignored sits beside them; otherwise it
+stays and the run names the files. Git history keeps what is deleted.
 
 ## Modes
 
@@ -179,18 +180,30 @@ never vendors.
     providers:
       claude:  { start: "claude -p",  vendor: anthropic, bill: anthropic, roles: [author, reviewer], reader: claude-json }
       codex:   { start: "codex exec", vendor: openai,    bill: openai,    roles: [author, reviewer], reader: codex-json }
-      kimi:    { url: "<moonshot endpoint>", model: "<pinned>", vendor: moonshot, bill: moonshot,
-                 roles: [reviewer], max_tokens: 32768, price: { in: <usd per M>, out: <usd per M> } }
-      minimax: { url: "<minimax endpoint>", model: "<pinned>", vendor: minimax, bill: minimax,
-                 roles: [reviewer], max_tokens: 32768, price: { in: <usd per M>, out: <usd per M> } }
-      prism:   { start: "prism", vendor: "<maker of the pinned model>", bill: baseten, roles: [reviewer], reader: prism-json }
-      gito:    { start: "gito",  vendor: "<maker of the pinned model>", bill: baseten, roles: [reviewer],
+      kimi:    { url: "https://api.moonshot.ai/v1", model: kimi-k3, vendor: moonshot, bill: moonshot,
+                 roles: [reviewer], max_tokens: 16384, price: { in: 3.00, out: 15.00 } }
+      minimax: { url: "https://api.minimax.io/v1", model: MiniMax-M3, vendor: minimax, bill: minimax,
+                 roles: [reviewer], max_tokens: 16384, price: { in: 0.30, out: 1.20, unverified: true } }
+      prism:   { start: "prism", model: deepseek-ai/DeepSeek-V4-Pro-0813, vendor: deepseek, bill: baseten,
+                 roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 }, reader: prism-json }
+      gito:    { start: "gito",  model: deepseek-ai/DeepSeek-V4-Pro-0813, vendor: deepseek, bill: baseten,
+                 roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 },
                  enabled: false, reason: "start line and report reader unverified" }
       exo:     { url: "http://localhost:52415/v1", model: "<pinned>", vendor: local, bill: local,
                  roles: [author, reviewer], enabled: false, reason: "model not pinned" }
     roles:
       author:   [claude, codex]
       reviewer: [codex, claude, kimi, minimax, prism, gito, exo]
+
+Pins as of 2026-09-05, each read from the vendor's model list on that day:
+`kimi-k3` is Moonshot's current flagship with a one-million-token window;
+`MiniMax-M3` is MiniMax's newest, and its price is a proxy from an index
+because the vendor publishes none, hence `unverified`, which Today shows
+beside the number until a real price replaces it; the two Baseten tools pin
+DeepSeek V4 Pro, whose 0813 build is the cheapest of Baseten's frontier
+reviewers. `max_tokens` is the same on all four because a review reply that
+needs more than sixteen thousand tokens is a review that should have been
+scoped. A pin is changed by editing this file, never by a page.
 
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched
@@ -202,8 +215,11 @@ a missing binary, a failed run or a timeout falls through to the next, and the
 run says which one reviewed and why the earlier ones did not. With none left,
 the review refuses by name rather than reading its own work. `vendor` is the
 maker of the model, not the tool; `bill` is whose money. A bill with
-`cap_usd_month` is skipped for the rest of the month once its cost rows reach
-the cap, and a direct pick of it refuses with the month's total. Entries with
+`cap_usd_month` is enforced per call: the library reserves each call's bound,
+prompt plus `max_tokens` at the entry's price, against the month's settled and
+reserved rows in one transaction, refuses the call when the bound would pass
+the cap, and skips that bill in fallthrough for the rest of the month; a
+direct pick of it refuses with the month's total. Entries with
 `url` share one OpenAI-compatible client and one reader. This file is
 identity and seed; enabled, order and caps are rows the dashboard edits, and
 the library merges file and rows on every read.
