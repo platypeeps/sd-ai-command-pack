@@ -669,9 +669,14 @@ pushed and Notion mirrors for its audience. That is intended and stays.
   explicit line. Today `sd_lib.mode()` reads the local block and falls back to
   `full`, so an unconfigured shared repository gets the most invasive mode by
   default. This is the one piece of requirement 6 that is new code: the fallback
-  asks three questions of the remote before returning `full`: the owner is the
-  operator, the repository is not a fork, and the operator is its only
-  collaborator. Any other answer, and any failure to answer, returns `guest`
+  asks three questions of the remote before returning `full`: the operator
+  holds admin permission on it, in a personal namespace or in an
+  organisation alike, the repository is not a fork, and nobody else has
+  push or higher on it, direct collaborators, organisation members and
+  teams counted the same way, from A's round twenty-six; the questions
+  ask who can merge and who can read, never whose name the namespace
+  carries, which is what keeps `mezmo-world-simulator` `full` under
+  `answerbook`. Any other answer, and any failure to answer, returns `guest`
   for the artifact question while leaving the merge question to the policy
   above, which is off unless set. A personal fork of a shared upstream and a
   personally owned repository with collaborators both resolve to `guest`.
@@ -681,10 +686,16 @@ pushed and Notion mirrors for its audience. That is intended and stays.
   planning artifact in the tree, `sd-plan`'s commit of the triad, and
   before every push `sd-ship` makes, not only at merge time, and a `no`
   makes the effective mode `guest` for that run whatever the line says:
-  the write goes to the fork's integration branch or is refused naming
-  the answer, the collaborator, the fork or the owner, the push of a
-  branch that carries the triad is refused the same way before anything
-  leaves the machine, and a note on the item records the demotion. What
+  the write goes to the fork's integration branch or, where the operator
+  holds no fork, to a local branch that no push carries, naming the
+  answer, the collaborator, the fork or the permission; a push that
+  would carry the triad to the remote that answered `no` is refused the
+  same way before anything leaves the machine, and the check is of the
+  destination and not of the branch, from A's round twenty-six: the
+  fork's integration branch is the guest destination, a remote the
+  operator alone holds, so the closure commit that carries the triad
+  there is the guest path and proceeds, and the same branch offered to
+  the upstream is refused; and a note on the item records the demotion. What
   is already in the shared tree from before the answer changed is the
   operator's to move, and `sd-status` names it. An explicit `mode:
   guest` is never raised by a `yes`. The
@@ -1117,23 +1128,30 @@ confirmed by the next `sd-ship` run alone.
     rule 5 passes on a body with no `Work:` line when no work item is present,
     and still fails a body naming an item that does not resolve.
 11. Without an explicit `mode:` line, `full` is the resolved mode only when the
-    remote owner is the operator, the repository is not a fork, and the operator
-    is its sole collaborator; every other answer resolves to `guest`. A test
-    covers five cases: owned sole-collaborator remote, unowned remote, a
-    personal fork of a shared upstream, an owned remote with a second
-    collaborator, and a root with no remote or no git at all. The last resolves
+    operator holds admin permission on the remote, the repository is not a
+    fork, and nobody else has push or higher on it; every other answer
+    resolves to `guest`. A test covers six cases: a personal remote only
+    the operator can push to, an organisation remote only the operator can
+    push to, which resolves to `full`, a remote the operator cannot
+    administer, a personal fork of a shared upstream, an owned remote
+    with a second collaborator, and a root with no remote or no git at
+    all. The last resolves
     to `full` for artifacts, since a local scratch repository has no one to
     expose anything to, and is named and asserted as its own case rather than
     left to whichever branch an exception reaches. An explicit `mode:` line
     wins over detection downward and never upward: a test installs a
     repository with `mode: full`, ships one item, adds a second
     collaborator to the fixture remote, and asserts that the next
-    `sd-plan` write places the triad on the integration branch naming
-    the collaborator, that `sd-ship` refuses to push a branch carrying
-    the triad with the fixture remote seeing no push, that the item
-    carries a demotion note, and that `sd-status` names the artifacts
-    already in the shared tree; and that with the collaborator removed
-    the next run is `full` again with no edit to the line. Unattended
+    `sd-plan` write places the triad on a local branch naming the
+    collaborator, since the fixture holds no fork, that `sd-ship`
+    refuses to push a branch carrying the triad to that remote with the
+    fixture remote seeing no push, that the item carries a demotion
+    note, and that `sd-status` names the artifacts already in the shared
+    tree; that with the collaborator removed the next run is `full`
+    again with no edit to the line; and, on a guest fixture with a fork
+    of the operator's own, that the closure commit carrying the triad
+    reaches the fork's integration branch while the same branch offered
+    to the upstream is refused with the upstream seeing no push. Unattended
     merge is never derived from mode: a
     test asserts the loop stops at pull-request-ready in a `full` repository
     whose row lacks `merge: auto`, and another enables `merge: auto`, ships
@@ -1938,3 +1956,22 @@ from a number the operator types.
     naming the answer, and `sd-status` names what is already in the tree.
     Criterion 11 installs `full`, adds a collaborator, and asserts the
     demotion; the design's Modes section says the same.
+- **2026-09-05** — Planning review, round twenty-six of forty: two
+  blocking findings, addressed.
+  - C-51, requirement 6: the first of the three questions asked whether
+    the owner is the operator, which `mezmo-world-simulator` under the
+    `answerbook` organisation can never answer yes, and round twenty-five
+    had made the live answer override a stored `full`, so the contract
+    demoted the repository the requirement names as staying `full`.
+    Addressed: the questions ask about access, admin permission for the
+    operator and push for nobody else, and never about the namespace.
+    Criterion 11 gains the organisation case; the design's Modes section
+    says the same.
+  - C-52, requirement 6: the pre-push rule refused any branch carrying
+    the triad whenever the remote answered `no`, and requirement 5's guest
+    closure pushes exactly such a branch to the fork's integration branch,
+    so no guest closure could complete. Addressed: the check is of the
+    destination, the fork's integration branch is the operator's own
+    remote and the push there proceeds, the same branch offered upstream
+    is refused, and an owned repository with no fork keeps the triad on a
+    local branch. Criterion 11 asserts both pushes on a guest fixture.

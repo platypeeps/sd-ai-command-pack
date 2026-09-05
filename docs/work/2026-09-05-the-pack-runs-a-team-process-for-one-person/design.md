@@ -197,16 +197,19 @@ the block; the file is untracked by construction.
 | `minimal` | nowhere; no work items | the small-change path only |
 | `guest` | the fork's integration branch | the small-change path to pull-request-ready; no posts, no labels |
 
-Ownership decides where artifacts go, whichever organisation holds the
+Access decides where artifacts go, whichever namespace holds the
 repository. Without a `mode:` line, the pack asks three questions of the
-remote: is the owner you, is it not a fork, are you the only collaborator. Three
-yes: `full`. Anything else, including no answer: `guest`. A root with no remote
+remote: can you administer it, is it not a fork, can anyone else push. Admin,
+not a fork, nobody else: `full`, in your namespace or an organisation's.
+Anything else, including no answer: `guest`. A root with no remote
 is `full`; there is no one to expose anything to. The questions are asked
 again before every artifact write and every push, and a `no` makes the
 run `guest` whatever the line says: a `mode: full` you wrote is a floor,
 never a ceiling, so a repository that gains a collaborator stops
 receiving your planning artifacts before the next push, not after the
-next merge. Mode never decides merging.
+next merge. The push check is of the destination: your fork's integration
+branch is your own remote, and the guest push there proceeds while the
+same branch offered upstream is refused. Mode never decides merging.
 `merge: auto` is a per-repository policy you set once on the dashboard, off by
 default, and nothing derives it. It is necessary, not sufficient: every merge
 asks the three questions again, and a no suspends it with the reason shown.
