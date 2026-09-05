@@ -8,9 +8,15 @@ states rules the payload contradicts is the stale-document failure this item
 exists to remove, so the page moves to the root in the commit that makes it
 true.
 
-Open question 1 in `prd.md` applies to the Overrides section below: the three
-keys it names do not exist in `sd_lib.py`, which reads `mode:` and `check:`
-only.
+The Overrides section carries the keys `sd_lib.py` already reads and no others.
+Three further keys were drafted and cut on 2026-09-05: an opt-in lane is asked
+for by name, which needs no configuration to read, no default to resolve and no
+key to go stale.
+
+The read set is `mode:` plus `check:`, `test:` and `lint:` — the last three are
+`CHECK_NAMES` at `bin/sd_lib.py:36`, consumed together at
+`_local_block_entrypoints` (`:391-412`). The first draft of this page named only
+`mode:` and `check:`, which was wrong by two.
 
 ---
 
@@ -96,13 +102,18 @@ A repository you do not own defaults to `guest`.
 
 ## Overrides
 
-Set these in the `CLAUDE.local.md` block to change a default for one
-repository.
+The `CLAUDE.local.md` block carries these keys, and the pack reads no others.
 
     mode: full | minimal | guest
     check: <the command that verifies this repo>
-    spec: on            # run sd-spec inside sd-ship
-    codex: on           # request the second-model lane on every work item
-    copilot: block      # let Copilot findings block the merge
+    test: <optional, when the repo spells its tests separately>
+    lint: <optional, same>
 
-Omit a key and the default above applies.
+`check`, `test` and `lint` run in that order and are each optional; a repository
+that spells everything as one command sets `check` alone.
+
+Everything under **Opt-in** above is asked for by name, in the moment, rather
+than switched on in a file. Naming it is already the whole cost, and a key that
+turns a lane on permanently is a default in disguise — it stops being a decision
+you make about this change and becomes one you made about this repository, months
+ago, for reasons the file does not record.

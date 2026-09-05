@@ -88,9 +88,15 @@ recorded here as the requirements below, grouped by what they touch.
 
 `WORKFLOW.md` at the repository root states, for a consuming repository: what
 runs by default, what is opt-in, what is advisory, what never touches a shared
-repository, the path for a change at each size, the three modes, and the
-override keys. `sd-help` names it. The `CLAUDE.local.md` block the installer
-writes links to it.
+repository, the path for a change at each size, and the three modes. `sd-help`
+names it. The `CLAUDE.local.md` block the installer writes links to it.
+
+The block carries the keys the pack already reads and no others: `mode:`, plus
+the entrypoint names `check:`, `test:` and `lint:` from `CHECK_NAMES`
+(`bin/sd_lib.py:36`, consumed at `:391-412`). Every opt-in lane is asked for by
+name in the moment. A key that turns a lane on permanently is a default in
+disguise: it converts a decision about one change into a decision about the
+repository, taken once and unrecorded.
 
 ### Requirement 2 — the ship path is tiered, not uniform
 
@@ -221,7 +227,11 @@ narrative leaves `pipeline.md` and `permissions.md`.
 1. `WORKFLOW.md` exists at the repository root, states the default, opt-in,
    advisory and never-in-a-shared-repository sets, and is reachable from both
    `sd-help` and the `CLAUDE.local.md` block the installer writes. A test
-   asserts the installer's block names it.
+   asserts the installer's block names it. A test asserts the set of keys
+   `WORKFLOW.md` documents equals the set `sd_lib.py` reads, enumerated from
+   `MODES` and `CHECK_NAMES` in the source rather than from a list written down
+   beside it. The set today is `mode`, `check`, `test`, `lint`; the test must
+   fail if a fifth key is added to either side alone.
 2. `sd-ship` invoked on a change with no work item performs no `sd-spec` run, no
    `Work:` line, and no remote-branch deletion command, and its settle step
    issues no shell polling loop. Asserted against the skill text, not inferred.
@@ -275,13 +285,11 @@ narrative leaves `pipeline.md` and `permissions.md`.
 
 ## Open questions
 
-1. The three override keys the policy page names (`spec:`, `codex:`,
-   `copilot:`) do not exist. `sd_lib.py` reads `mode:` and `check:` only.
-   Adding three keys to satisfy a document is exactly the kind of machinery this
-   item exists to remove — but leaving the page describing knobs that do nothing
-   is worse. Either implement the three, or rewrite the page to say "ask for it
-   by name" and carry no keys at all. The second is cheaper and matches how the
-   opt-in lanes are actually invoked.
+1. **Settled 2026-09-05: no new keys.** The drafted `spec:`, `codex:` and
+   `copilot:` keys are cut. `sd_lib.py` continues to read `mode:` and `check:`
+   and nothing else, and every opt-in lane is asked for by name. Recorded here
+   rather than deleted because the alternative is the one this item would
+   otherwise have drifted into: three keys added to make a document true.
 2. Requirement 6's untracked-local-path mechanism for shared repositories is
    stated but not designed. `CLAUDE.local.md` works because the installer puts
    one line in the global excludes. A `docs/work.local/` would need the same,
@@ -313,3 +321,15 @@ narrative leaves `pipeline.md` and `permissions.md`.
   weight, and writing-pipeline throughput. Twenty decisions recorded as
   requirements 1 through 10 above. The policy page draft exists and lands with
   the first implementation commit.
+- **2026-09-05** — Open question 1 settled: the drafted `spec:`, `codex:` and
+  `copilot:` keys are cut, and opt-in lanes are asked for by name. Requirement 1
+  and acceptance criterion 1 now bound the key set to what `sd_lib.py` already
+  reads, checked by enumeration rather than by a list. Four open questions
+  remain.
+
+  Writing that criterion found a defect in the same edit that introduced it: the
+  first draft said the block carries `mode:` and `check:`. It carries four keys —
+  `mode:` plus the three `CHECK_NAMES` entrypoints — so the page was wrong by two
+  before it was ever written down as policy. Enumerating from `sd_lib.py` caught
+  it; reading the draft would not have. That is the argument for the criterion,
+  made by the criterion, an hour before anything implements it.
