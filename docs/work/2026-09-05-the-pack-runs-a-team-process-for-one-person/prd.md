@@ -230,7 +230,20 @@ pass gets one verification pass over the diff since the reviewed head, and
 that is the last automatic pass on the pull request: a blocking finding from
 it marks the item `blocked`. `sd-ship` pushes a head that is the reviewed head
 or a verified fix of it, and nothing else; a further commit waits for the
-operator to ask for a pass by name.
+operator to ask for a pass by name. That rule governs the author's
+changes. The base's changes are governed by another, because the default
+branch moves while a pull request waits, another item's merge or its
+closure, and the protection then refuses the pull request until it
+carries the move: an integration update, the default branch merged into
+the branch with nothing else in the commit, is not a fix and spends no
+pass. `sd-ship` makes it when the remote reports the branch behind, runs
+the branch review once over the combined head, since two changes each
+reviewed alone were never reviewed together, waits for CI, and merges,
+unattended and as often as the default branch moves while the pull
+request waits its turn in the serial lane. A blocking finding from an
+integration review marks the item `blocked` like any other; a clean one
+merges the head it reviewed. The operator is asked for nothing that a
+moving base caused.
 
 **The reviewer is a different vendor from the author, by policy.** Today Claude
 writes and Codex reviews. If the primary moves to OpenCode or a local model, the
@@ -520,7 +533,15 @@ move, the update reruns the rule on the merged tree, and a failure sends
 the closure back rather than through: `sd-ship` re-cuts it from the
 current default branch with the directory kept and the new reader named.
 `docs/work/archive/` and its 941 files are removed in one commit that names
-`46ec7fb85` as the commit that recovers any of them. The 100 parked items go
+`46ec7fb85` as the commit that recovers any of them, and the same commit
+migrates every reader the archive has, eleven tracked files today,
+`CONTRIBUTING.md`, `CHANGELOG.md`, `docs/spec/guides/index.md`, the
+`artifacts-as-product` item's `design.md` and `implement.md`, and
+`.gito/config.toml` among them: a link into the archive becomes a
+permalink to the same path at `46ec7fb85`, a literal mention in prose
+gains that commit beside it, and the ignore pattern in `.gito/config.toml`
+goes. The reader guard above is not bypassed for being a bulk deletion;
+it is satisfied in the commit that deletes. The 100 parked items go
 with the 386 imported ones: a backlog nobody opened in four months is not a
 backlog, and B names one surface for later work.
 
@@ -1044,7 +1065,12 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     deletion test asserts `git rm` removed only tracked paths; a test runs
     `sd-plan` on a repository holding a `done` directory kept for a reader
     and asserts the directory is untouched; a grep of `bin/` for the
-    eligibility function names one caller.
+    eligibility function names one caller. After the archive commit, the
+    lint rule from requirement 5 passes on the tree, `git grep` finds no
+    relative link into `docs/work/archive/` from a tracked file, and the
+    two `docs/spec/guides/index.md` lines and the two
+    `artifacts-as-product/design.md` lines that linked in resolve as
+    permalinks at `46ec7fb85`.
 22. The pull-request template links only to files that exist. A test walks its
     links.
 23. The caveman plugin is absent from the global settings, and the writing
@@ -1543,3 +1569,20 @@ from a number the operator types.
     taken on the next planning run. Addressed: the closure is the one
     deleter, through one eligibility function with one caller; `sd-plan`
     deletes nothing. Criterion 21 runs `sd-plan` over a kept directory.
+- **2026-09-05** — Planning review, round sixteen of thirty: two blocking
+  findings, both addressed.
+  - C-32, requirement 3: the reviewed-head rule had no path for a branch
+    the default branch left behind, so under the up-to-date protection a
+    second pull request finishing beside a first needed the operator to
+    ask for a pass its own changes had not caused. Addressed: an
+    integration update, the default branch merged in and nothing else, is
+    not a fix and spends no pass; `sd-ship` makes it, reviews the combined
+    head once, waits for CI and merges, unattended, as often as the base
+    moves.
+  - C-33, requirement 5: the archive's 941 files were deleted in one
+    commit with no regard for the eleven tracked files that link into the
+    archive, `docs/spec/guides/index.md` and the retained
+    `artifacts-as-product/design.md` among them. Addressed: the deletion
+    commit migrates every reader, links to permalinks at `46ec7fb85`,
+    prose gains the commit, the ignore pattern goes. Criterion 21 lints
+    the resulting tree.
