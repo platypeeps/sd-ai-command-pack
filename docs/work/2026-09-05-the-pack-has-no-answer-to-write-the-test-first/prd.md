@@ -95,7 +95,12 @@ no longer here.
    proven is `disciplined`, some but not all is `partial`, none is
    `abandoned`. The classifier is when valid red was *observed* relative to the
    change, not when the test was authored, since authorship admits a test
-   written and never run. **A session with no production changes closes
+   written and never run. `proven` requires **both** halves of the cycle to
+   have been observed — the red against a tree lacking the change, and the
+   change then passing with the suite green — because a bound that fires
+   between them leaves real untested production code in the tree, and a
+   classifier keyed on the red step alone would close that session
+   `disciplined`. **A session with no production changes closes
    `disciplined`**, and the skill says so in those words: with no changes both
    outer predicates are vacuously true, so a requirement that merely demanded a
    tie-break without naming its result would leave the same ambiguity it exists
@@ -112,8 +117,11 @@ no longer here.
    Two adjacent questions — bootstrapping a test for code that does not exist
    yet, and recovering evidence for a test written late — were each answered
    twice and failed review both times. The skill names them, says what was
-   tried and why it failed, and tells the reader to use judgement and report
-   what they did.
+   tried and why it failed. Where an open question would otherwise require
+   writing production code before valid red, the skill does **not** authorise
+   the reader to resolve it alone: an open section cannot issue an instruction
+   that contradicts a gate the skill still enforces, so it says to stop and ask
+   the user, and the outcome is reported.
 9. `sd-typed-holes` carries a `## Lineage` section recording its own
    provenance: the upstream it was re-authored from, that upstream's licence
    status, the revision, and the two hops by which it reached this pack. It
@@ -573,6 +581,46 @@ recorded.
 `addressed`.** Lineage was appended after the operational sections, so "the
 safety rules below" and "Four rules below" referred to rules above them.
 
+### Round 5
+
+Run against `b56334c0`. Two blocking, no non-blocking — and the first of them
+is the one the previous round's fix was predicted to cause. Every cross-rule
+consistency edit in this item has introduced a new defect elsewhere; this made
+it five for five, which is why the round was run rather than shipping on the
+round-4 remediation.
+
+**C-30 — a bound could close an incomplete cycle as `disciplined`.
+`addressed`.** The C-24 fix defined `proven` as "valid red was observed against
+a tree that did not yet contain the change", keying on the red step alone.
+Concrete case: valid red observed, production code written, a *time* bound
+fires before the rerun. Step 9 counted the change proven and closed
+`disciplined`, while real untested code sat in the tree — it could not be
+`Deferred`, having been reached and implemented, and the Cycles bullet demanded
+pass-and-suite evidence that did not exist. `proven` now requires **both**
+halves of the cycle: the red, and the change then seen to pass with the suite
+green. An interrupted change falls to `unproven`, the session closes `partial`,
+and the report names which half is missing — the report bullet now distinguishes
+"never seen to fail" from "seen to fail and then left before it was seen to
+pass", the second being the more dangerous state because nothing has run
+against that code since. `Deferred` is unchanged and does not overlap: it is
+behaviours nothing was written for.
+
+**C-31 — the C-25 remediation was not propagated. `addressed`.** The skill was
+changed to say "stop and ask" for the bootstrap question, while requirement 8
+and D7 still said it "tells the reader to use judgement". Two artifacts
+authorised autonomous resolution of a question the third routed to the user.
+Both corrected, and D7 now records the constraint the round-4 fix taught: an
+open question may not issue a positive instruction that contradicts a rule the
+skill still enforces.
+
+**What the lane confirmed.** It ran the closing classifier over its state space
+— `combinations=36 exactly_one_failures=0` — and confirmed `Deferred` and
+`Behaviours already present` do not collide, C-26 names `disciplined` for the
+empty session, C-28's attribution is right, C-29's references now say "above",
+requirements 1-7 and 9 agree with D1-D7 and both skill files, `sd-typed-holes`
+differs only by one appended `## Lineage`, and the two-file criterion run with
+its pathspec prints exactly the two expected paths.
+
 ### What the lane could not run
 
 `make check` and the companion/citation unittests failed inside the read-only
@@ -611,3 +659,9 @@ command ran there verbatim.
   without its pathspec). The lane confirmed the closing-state classifier is
   exhaustive and mutually exclusive, `sd-debug` byte-identical to `origin/main`,
   and the `sd-typed-holes` diff exactly one appended `## Lineage`.
+- 2026-09-05 codex round 5 against `b56334c0`: two blocking, none non-blocking.
+  C-30 was the defect the round-4 fix was predicted to introduce — `proven`
+  keyed on the red step alone, so a time bound firing mid-cycle closed
+  `disciplined` over untested code. `proven` now requires both halves of the
+  cycle. C-31 was unpropagated wording from the C-25 fix. The lane verified the
+  classifier over 36 combinations with zero exclusivity failures.
