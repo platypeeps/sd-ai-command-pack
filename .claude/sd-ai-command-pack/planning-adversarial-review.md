@@ -67,8 +67,8 @@ implementation approval and prevents `task.py start`.
 When addressed concerns change a planning artifact, rerun the host review
 against the updated artifact set, plus a fresh run of any additional lane that
 was available in the initial round. Reconcile each remediation round through
-the same ledger. Run at most twenty-nine remediation rounds
-(thirty automatic rounds total); do not start a thirty-first automatic round.
+the same ledger. Run at most thirty-nine remediation rounds
+(forty automatic rounds total); do not start a forty-first automatic round.
 
 Expect a remediation round to find defects the previous round's own fixes
 introduced. A value corrected in one artifact and left standing in another is
