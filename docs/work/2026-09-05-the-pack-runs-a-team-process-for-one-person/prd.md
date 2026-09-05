@@ -233,6 +233,34 @@ nothing about vendors: tiers, categories, paths, `sensitive`, the severity
 floor. Tier lists keep naming providers by registry name; the names are
 validated against the registry where one exists, and pass as strings in CI.
 
+**Fallback is the reviewer list, read in order.** The `reviewer` line names
+providers in order of preference. The first that is enabled, carries the role,
+is not the author's vendor, and passes its preflight reviews. A rate limit, a
+missing binary, failed authentication, a non-zero exit and a timeout each fall
+through to the next, and the run records which provider reviewed and why the
+earlier ones did not, on the assignment row and in the JSON it emits. An entry
+carries `vendor:`, the maker of the model behind it, and the different-vendor
+rule compares vendors, not names. `prism` and `gito` both run
+`openai/gpt-5.6-sol` through OpenRouter today, so they are the same vendor as
+`codex` on a different bill: the fallback for a rate-limited Codex, and never
+the reviewer of Codex-authored code. `kimi` is Moonshot; `exo` is whatever
+model it serves. An entry also carries `enabled:`, with `reason:` when false,
+and `reader:`, the parser for the provider's output. Today `codex` and `prism`
+have a working start line and reader; `gito` and `kimi` have neither, and they
+ship in the registry disabled with the reason the `BACKENDS` table already
+records. Enabling one is a verified start line and a reader, and the entry
+flips.
+
+Choosing directly is one flag and one picker. `sd-review --provider <name>`
+runs one named provider for one run, validated against the registry, and the
+item records the choice. The dashboard's item screen offers the same picker
+over the registry table, with vendor, cost, enabled and reason beside each
+name. Switching the default is the `reviewer` line. GitHub-side reviewers,
+Copilot and Greptile, are not registry entries: they post on the pull request,
+which the local lane never does, and they stay advisory under requirement 4.
+The local lane runs before every push regardless, so a Copilot outage costs
+nothing; the local list is its fallback by construction.
+
 **Code review is an experiment, not yet a rule.** The seven passes already run
 on `mezmo-world-simulator` are scored first: findings accepted against findings
 rejected, per pass. Then the other vendor reviews the next ten code pull
@@ -490,7 +518,13 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
    provider, and fails by name when no other provider carries the role; a test
    asserts both. `bin/sd-review` contains no provider table, `sd-review.json`
    contains no key ending in `_providers`, and every provider name in its
-   tiers resolves against the registry on a machine that has one.
+   tiers resolves against the registry on a machine that has one. The
+   reviewer list falls through: a test disables the first entry, then makes
+   it fail preflight, and asserts the second reviews and the output names the
+   fallthrough. `sd-review --provider <name>` refuses a name not in the
+   registry, and refuses a disabled one by its reason. Every entry carries
+   `vendor:`, and a test asserts `prism` is refused as reviewer of a
+   `codex`-authored change.
 7. The seven `mezmo-world-simulator` passes are scored, accepted against
    rejected per pass, and the scores are recorded on this item before the code
    review point runs on any new pull request.
@@ -704,3 +738,16 @@ are filed as rows on this item once B's library exists, and in the log before.
   Second: `bin/sd-review` and `.github/sd-review.json` each carried their own
   provider list beside the registry. The registry owns providers; the other
   two keep policy only. Requirement 3 and criterion 6.
+- **2026-09-05** — Fallbacks and direct choice, from the operator's question.
+  The `reviewer` line becomes an ordered list; rate limit, missing binary,
+  failed authentication, failed run and timeout fall through, and the run
+  records which provider reviewed. `sd-review --provider <name>` and a
+  dashboard picker choose one directly. Entries gain `vendor:`, `enabled:`,
+  `reason:` and `reader:`. Checked while writing this: `prism` and `gito`
+  both run `openai/gpt-5.6-sol` through OpenRouter, per `~/.prism/.env` and
+  `~/.gito/.env`, so they are OpenAI-vendor reviewers on a metered bill, not
+  a second vendor beside Codex; `local-prism/README.md` still says the active
+  provider is Moonshot and is stale. `gito` and `kimi` stay disabled until
+  each has a verified start line and a reader. Copilot has no local fallback
+  to add: the local lane runs before every push, and Copilot only advises.
+  Requirement 3 and criterion 6.

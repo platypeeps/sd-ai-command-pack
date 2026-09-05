@@ -166,18 +166,32 @@ One file, read by the library, maps roles to providers. Skills name roles and
 never vendors.
 
     providers:
-      claude:  { start: "claude -p", roles: [author, reviewer], cost: subscription }
-      codex:   { start: "codex exec", roles: [author, reviewer], cost: subscription }
-      exo:     { url: "http://localhost:52415/v1", roles: [author, reviewer], cost: local }
+      claude: { start: "claude -p",  vendor: anthropic, roles: [author, reviewer], cost: subscription, reader: claude-json }
+      codex:  { start: "codex exec", vendor: openai,    roles: [author, reviewer], cost: subscription, reader: codex-json }
+      prism:  { start: "prism",      vendor: openai,    roles: [reviewer], cost: metered, reader: prism-json }
+      gito:   { start: "gito",       vendor: openai,    roles: [reviewer], cost: metered,
+                enabled: false, reason: "start line and report reader unverified" }
+      kimi:   { start: "kimi -p",    vendor: moonshot,  roles: [reviewer], cost: metered,
+                enabled: false, reason: "stream-json needs a reader" }
+      exo:    { url: "http://localhost:52415/v1", vendor: local, roles: [author, reviewer], cost: local,
+                enabled: false, reason: "model not pinned" }
     roles:
       author:   claude
-      reviewer: codex
+      reviewer: [codex, prism, kimi, gito, exo]
 
-Adding a provider is an entry. Changing who writes or who reviews is a role
-line. The two roles never resolve to the same provider: when the change was
-authored by the provider on the `reviewer` line, the next provider carrying
-the `reviewer` role reviews it, and with none to take, the review refuses by
-name rather than reading its own work.
+Adding a provider is an entry. Changing who writes is the `author` line.
+`reviewer` is an ordered list: the first entry that is enabled, is not the
+author's vendor, and answers its preflight reviews the change. A rate limit,
+a missing binary, a failed run or a timeout falls through to the next, and the
+run says which one reviewed and why the earlier ones did not. With none left,
+the review refuses by name rather than reading its own work. `vendor` is the
+maker of the model, not the tool: `prism` and `gito` on `gpt-5.6-sol` are
+OpenAI, whatever bill they run on.
+
+`sd-review --provider <name>` picks one entry for one run. The dashboard's
+item screen offers the same list, with vendor, cost and reason beside each
+name. Copilot and Greptile are not entries: they post on the pull request, and
+this lane never posts.
 
 This file is the only list of providers. `sd-review` reads it through the
 library; `.github/sd-review.json` carries repository policy, tiers, paths and
