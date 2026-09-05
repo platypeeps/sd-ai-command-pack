@@ -74,9 +74,10 @@ These run only when asked by name.
 
 - A work item under `docs/work/<date>-<slug>/prd.md`. Create one when the
   work spans more than one session or more than about 300 changed lines.
-  `design.md` and `implement.md` exist only when you ask for them. Status is on
-  the item's row, never in the file; `ready_to_send` marks a finished artifact
-  waiting on you.
+  `design.md` and `implement.md` exist only when you ask for them. Status lives
+  on the item's row; the file's `status:` line is a mirror the library writes
+  in the checkout on the item's branch, for checkouts and CI runners that have
+  no database. `ready_to_send` marks a finished artifact waiting on you.
 - `sd-spec`. Run it when a change alters behaviour that `docs/spec/` documents.
 - A review pass beyond the table below. Ask for it by name; the item records
   that you did.
@@ -136,8 +137,9 @@ Change that earns a work item: `sd-plan` writes `prd.md` after asking three to
 five questions, or none when the loop runs unattended. Then the small-change
 path, with the two development review points. After the merge the item's row is
 `done` and its directory is deleted at the next `sd-plan` run, when every file
-in it is tracked and committed; otherwise it stays and the run names the files.
-Git history keeps what is deleted.
+in it is tracked and committed and nothing untracked or ignored sits beside
+them; otherwise it stays and the run names the files. Git history keeps what is
+deleted.
 
 ## Modes
 

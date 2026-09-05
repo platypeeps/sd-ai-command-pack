@@ -90,3 +90,17 @@ naming.
 3. Should `done` items be checked too? They are already excluded by status, so
    a leftover `branch:` on a `done` item costs nothing today — but it is the
    same dangling claim, and the host-parsing item only avoided it by hand.
+
+## Log
+
+- **2026-09-05** — Recorded from the planning review of
+  `2026-09-05-the-pack-runs-a-team-process-for-one-person`, round two, finding
+  C-7 against criterion 5 here: counting remote-tracking refs does not
+  establish that a branch is live. A deleted branch's ref survives until
+  `git fetch -p`, and a branch never fetched has no ref at all, so the rule as
+  written can keep hiding the deleted-branch item this item exists for, or
+  flag live work on another machine. If this item proceeds, criterion 5 must
+  say whether liveness is a fresh remote query or a cached observation, use
+  one per-root query with failure reported as unknown, or keep branch
+  resolution advisory. That item's criterion 21 removes the sweep; when it
+  lands, this item closes as superseded and the question is moot.

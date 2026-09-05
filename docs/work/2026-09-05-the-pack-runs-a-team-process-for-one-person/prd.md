@@ -248,13 +248,20 @@ in an unattended run it asks none and records its assumptions.
 **Git owns the artifacts; the database owns the state.** `prd.md`, `design.md`
 and `implement.md` stay in the repository as the decision trail. The item row in
 `sd.db` holds status, dates, links and notes, and points at the files by path.
-The `status:` line in `prd.md` stays, as a derived mirror the library writes on
-every change and nothing else writes: a fresh checkout and a CI runner have no
-database, and `make check` runs the documentation lint there. On the machine,
-`sd_lib.py` and `sd-docs-lint` read the row and fail when the mirror disagrees
-with it; in CI they read the mirror. `sd-ship` refreshes the mirror before it
-commits. Until B's library exists the frontmatter is the only copy, and the
-switch is one migration.
+The `status:` line in `prd.md` stays, as a derived mirror the library writes
+and nothing else writes: a fresh checkout and a CI runner have no database, and
+`make check` runs the documentation lint there. The row carries the item's
+branch, and that branch is the mirror's revision identity. Git checks a branch
+out in one worktree at a time, so exactly one checkout on this machine holds
+the mirror the row describes. The library writes the mirror only in that
+checkout; `sd_lib.py` and `sd-docs-lint` compare row and mirror only there,
+and fail by name when they disagree. In any other checkout, on `main` after the
+merge or in a linked worktree on another branch, and in CI, they read the
+mirror alone. A `done` row compares with nothing, and `done` is never written
+into a mirror: the transition to `done` deletes the directory, below, so a
+mirror carries only the states its branch passed through. `sd-ship` refreshes
+the mirror before it commits. Until B's library exists the frontmatter is the
+only copy, and the switch is one migration.
 
 The status vocabulary gains one state, `ready_to_send`, for a finished artifact
 waiting on the operator's external action, and keeps `blocked`. Nothing else
@@ -262,9 +269,13 @@ changes.
 
 No sweep, no park, no archive. A merged item is `done` in the row and its
 directory is deleted at the next `sd-plan` run, only when every file in it is
-tracked and committed: `git status --porcelain -- <dir>` empty and the paths
-present at `HEAD`. Otherwise the directory stays and `sd-plan` reports the
-untracked or modified files by name. Git history holds what is deleted.
+tracked and committed: `git status --porcelain --ignored -- <dir>` empty, so
+that ignored files count alongside untracked and modified ones, and every path
+under the directory listed by `git ls-files -- <dir>` and present at `HEAD`.
+When that holds, the deletion is `git rm -r` of those tracked paths and
+nothing else. When it does not, the directory stays and `sd-plan` reports the
+untracked, ignored or modified files by name. Git history holds what is
+deleted.
 `docs/work/archive/` and its 941 files are removed in one commit that names
 `46ec7fb85` as the commit that recovers any of them. The 100 parked items go
 with the 386 imported ones: a backlog nobody opened in four months is not a
@@ -485,12 +496,16 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     whose row lacks `merge: auto`. All three modes appear in `README.md`.
 12. `README.md`'s writes-nothing claim names the installer as its subject and
     lists the skills that write tracked files.
-13. Once B's library exists: on a machine with the database, `sd_lib.py` and
-    `sd-docs-lint` derive an item's status from its row, and a `prd.md` whose
-    `status:` mirror disagrees with the row fails the lint by name. Without the
-    database, as in CI, both read the mirror and pass. `sd-ship` refreshes the
-    mirror before committing, asserted by a test that changes a row and ships.
-    Before B exists, this criterion is recorded as waiting, not as met.
+13. Once B's library exists: on a machine with the database, in a checkout on
+    the item's branch, `sd_lib.py` and `sd-docs-lint` derive an item's status
+    from its row, and a `prd.md` whose `status:` mirror disagrees with the row
+    fails the lint by name. In a checkout on any other branch, and without the
+    database as in CI, both read the mirror and pass. Tests cover all three:
+    the item's branch with a disagreeing mirror fails; a linked worktree on
+    another branch with the same mirror passes; no database passes. `sd-ship`
+    refreshes the mirror before committing, asserted by a test that changes a
+    row and ships. Before B exists, this criterion is recorded as waiting, not
+    as met.
 14. `make check` runs documentation-lint rules 1 through 4 when `docs/work/`
     exists, and skips them cleanly when it does not.
 15. The coverage floor applies to `bin/sd_install.py` and to no other file. The
@@ -512,8 +527,10 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
     `46ec7fb85` as the commit that recovers them. `sd-plan` deletes a `done`
     item's directory rather than moving it, and only when the directory is
     clean and fully tracked; no sweep or park code path remains. Tests cover
-    the deletion path, an untracked file that blocks it, and an uncommitted
-    edit that blocks it, and assert the report names the file.
+    the deletion path, an untracked file that blocks it, an ignored file that
+    blocks it, and an uncommitted edit that blocks it, and assert the report
+    names the file; the deletion test asserts `git rm` removed only tracked
+    paths.
 22. The pull-request template links only to files that exist. A test walks its
     links.
 23. The caveman plugin is absent from the global settings, and the writing
@@ -635,3 +652,26 @@ are filed as rows on this item once B's library exists, and in the log before.
     automatic passes; advancement needs every blocking finding dispositioned;
     an open one past the cap marks the item `blocked`. Requirement 2 and 3, and
     the page.
+- **2026-09-05** — Planning review, round two, same lane. Three blocking
+  findings: two addressed, one recorded on the item it belongs to. This is the
+  last remediation round the contract allows.
+  - C-5, requirement 5: `git status --porcelain` omits ignored files, so the
+    deletion guard could pass over ignored notes or evidence and delete them
+    beyond recovery. Addressed: the guard adds `--ignored`, the deletion is
+    `git rm -r` of the paths `git ls-files` enumerates and nothing else, and a
+    directory left non-empty stays. Criterion 21 gains the ignored-file case.
+  - C-6, requirement 5: one machine-local row over a versioned mirror had no
+    revision identity; with linked worktrees, a second checkout's committed
+    mirror would fail lint, and refreshing it would commit `done` onto
+    unfinished work. Addressed: the row carries the item's branch, git holds a
+    branch in one worktree at a time, the library writes the mirror only in
+    that checkout, comparison happens only there, a `done` row compares with
+    nothing, and `done` is never written into a mirror because `done` deletes
+    the directory. Every other checkout reads the mirror as CI does. Criterion
+    13 gains the three cases; B's `item` table gains the `branch` column.
+  - C-7, `2026-09-04-the-sweep-trusts-a-branch-field-it-never-resolves`,
+    criterion 5: remote-tracking refs stay until pruned, so counting them does
+    not establish that a branch is live. Valid, and not this item's: criterion
+    21 removes the sweep, so that item is superseded when this one lands. The
+    finding is recorded on that item's Log so it survives if the sweep outlives
+    this item. Not addressed here.
