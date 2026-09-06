@@ -230,6 +230,10 @@ class PolicyTests(ReviewFixture):
             sd_review.load_policy(root)
 
 
+def _planned_for(case: Any, *, start: str) -> list[dict[str, Any]]:
+    return sd_review._planned([case.provider(start=start)], pathlib.Path("/repo"), "prompt")
+
+
 class ReaderTests(ReviewFixture):
     """What a registry entry's `reader` decides, now that no table does."""
 
@@ -258,6 +262,37 @@ class ReaderTests(ReviewFixture):
         self.assertEqual(outcome.status, sd_review.NOT_RUN)
         self.assertIn("claude-json", outcome.detail)
         self.assertEqual(runner.calls, [], "an unreadable provider is not started")
+
+    def test_an_entry_whose_start_line_names_no_program_is_refused(self) -> None:
+        """Copilot found this. `shlex.split("")` is empty, so the hardened
+        invocation's first flag became the executable and the run tried to
+        start `--sandbox`."""
+
+        runner = FakeRunner()
+        outcome = sd_review.run_provider(
+            self.provider(start=""),
+            pathlib.Path("/nonexistent"),
+            sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
+            "prompt",
+            runner,
+            {},
+            60,
+        )
+        self.assertEqual(outcome.status, sd_review.REFUSED)
+        self.assertIn("names no program", outcome.detail)
+        self.assertEqual(runner.calls, [], "nothing is started")
+
+    def test_the_dry_run_does_not_offer_an_argv_that_starts_with_a_flag(self) -> None:
+        """The same defect reached `--dry-run`, which prints the invocation for
+        a person to read. Asserted over the whole plan rather than one entry, so
+        a future reader that forgets the check fails here too."""
+
+        for row in _planned_for(self, start=""):
+            self.assertFalse(row["would_run"])
+            self.assertEqual(row["argv"], [])
+        for row in _planned_for(self, start="codex exec"):
+            self.assertTrue(row["would_run"])
+            self.assertFalse(row["argv"][0].startswith("-"), row["argv"])
 
     def test_the_entrys_start_line_is_what_runs(self) -> None:
         """`codex-json` names a protocol, not one executable. An entry that
@@ -721,6 +756,62 @@ class TheExplainRenderTests(ReviewFixture):
         text = stream.getvalue()
         self.assertNotIn("explain only", text)
         self.assertNotIn("reviewer chain", text)
+
+
+class AnEmptyChainThatWantedReviewersTests(ReviewFixture):
+    """`skipped` exits zero. Only tier `skip` may claim it.
+
+    Copilot found the second half of this. The missing-registry case was fixed
+    by special-casing that one refusal, which left every other way of emptying
+    the chain reporting `skipped` -- a repository with a registry and no
+    `reviewers` line reviewed nothing and exited 0 saying so. The rule is not
+    about registries: a run that wanted reviewers and got none is
+    `unavailable`, and `depth == 0` is the only thing that earns `skipped`.
+    """
+
+    def review(self, root: pathlib.Path, **overrides: Any) -> dict[str, Any]:
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        return sd_review.review(
+            root, namespace(**overrides), runner, self.environment(), self.chatgpt_home()
+        )
+
+    def test_no_consent_line_is_unavailable_not_skipped(self) -> None:
+        root = self.make_repo()
+        (root / "CLAUDE.local.md").unlink()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        result = self.review(root)
+        self.assertEqual(result["providers"], [])
+        self.assertEqual(result["status"], "unavailable")
+        self.assertNotEqual(sd_review.STATUS_EXIT[result["status"]], sd_review.EXIT_OK)
+
+    def test_every_entry_being_the_authors_vendor_is_unavailable(self) -> None:
+        """The chain empties for a third reason, and answers the same way."""
+
+        root = self.make_repo()
+        # A branch, so `base..head` holds the commit whose trailer is the point.
+        subprocess.run(["git", "checkout", "--quiet", "-b", "topic"], cwd=str(root), check=True)
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "--quiet", "-m", "c\n\nAuthored-with: codex/openai"],
+            cwd=str(root), check=True, capture_output=True,
+        )
+        result = self.review(root, scope="branch")
+        self.assertEqual(result["authored_with"], ["openai"])
+        reasons = " ".join(row["reason"] for row in result["chain"] if not row["eligible"])
+        self.assertIn("openai", reasons)
+
+    def test_a_docs_only_change_is_still_skipped_and_exits_zero(self) -> None:
+        """The control. Tier `skip` means nothing needed reviewing, which is a
+        different sentence from "nobody could review", and still exits 0."""
+
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "docs" / "note.md").write_text("hello\n", encoding="utf-8")
+        result = self.review(root)
+        self.assertEqual(result["route"]["depth"], 0)
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(sd_review.STATUS_EXIT.get(result["status"], sd_review.EXIT_OK), sd_review.EXIT_OK)
 
 
 class TheTrailerBlockTests(ReviewFixture):

@@ -193,18 +193,11 @@ POLICY_KEYS = frozenset(DEFAULT_POLICY) | {"$schema"}
 #: the file is not malformed, it is a version behind, and the remedy is a
 #: deletion rather than a correction.
 RETIRED_POLICY_KEYS = {
-    "tiers": (
-        "a tier no longer names a provider chain. Delete the key; the tier now "
-        "says how many reviewers a change earns and the registry's 'reviewer' "
-        "list says who they are"
-    ),
-    "challenge_providers": (
-        "the challenge stance is a prompt, not a provider. Delete the key"
-    ),
-    "planning_providers": (
-        "planning scope reviews through the same chain as everything else. "
-        "Delete the key"
-    ),
+    "tiers": "a tier now says how many reviewers a change earns, and the registry's "
+    "'reviewer' list says who they are. Delete the key",
+    "challenge_providers": "the challenge stance is a prompt, not a provider. Delete the key",
+    "planning_providers": "planning reviews through the same chain as everything else. "
+    "Delete the key",
 }
 _STRING_LIST_KEYS = ("docs_skip", "never_skip", "sensitive", "authors")
 
@@ -924,6 +917,14 @@ def run_provider(
         return _outcome(provider.name, REFUSED, refusal)
 
     if provider.reader == "codex-json":
+        # Refused before it becomes argv: an entry whose start line names no
+        # program would otherwise run `--sandbox` as the executable.
+        if not sd_registry.executable(provider.start or ""):
+            detail = (
+                f"{provider.name} reads back as 'codex-json' but its 'start' line "
+                f"names no program ({provider.start!r}). Give it one, or a 'url'."
+            )
+            return _outcome(provider.name, REFUSED, detail)
         try:
             codex_preflight(codex_auth_home)
         except Refusal as error:
@@ -1168,11 +1169,12 @@ def review(
         for outcome in outcomes
     ]
     result["findings"] = disposed
-    # `unavailable` and not `_overall`'s `skipped`: with no registry the chain
-    # is empty for the same reason tier `skip` empties it, and `skipped` exits
-    # zero saying "nothing needed reviewing" about a machine that could not
-    # have reviewed anything.
-    result["status"] = "unavailable" if registry_refusal else _overall(outcomes, disposed, providers)
+    # A run that wanted reviewers and got none is `unavailable`, whatever
+    # emptied the chain -- no registry, no consent line, every entry the
+    # author's own vendor. `_overall` would call it `skipped`, which exits zero
+    # saying "nothing needed reviewing" about a change nobody was able to read.
+    # Only tier `skip` earns `skipped`, and that is `depth == 0`.
+    result["status"] = "unavailable" if depth and not chosen else _overall(outcomes, disposed, providers)
     result["remaining"] = [
         outcome.backend for outcome in outcomes if outcome.status in (RATE_LIMITED, NOT_RUN)
     ]
@@ -1184,11 +1186,12 @@ def _planned(
 ) -> list[dict[str, Any]]:
     planned: list[dict[str, Any]] = []
     for provider in chosen:
-        if provider.reader != "codex-json":
-            reason = f"this build implements no {provider.reader!r} reader"
+        start = provider.start or ""
+        if provider.reader != "codex-json" or not sd_registry.executable(start):
+            reason = f"nothing here runs a {provider.reader!r} entry starting {start!r}"
             planned.append({"backend": provider.name, "argv": [], "would_run": False, "reason": reason})
             continue
-        argv = codex_argv(root, pathlib.Path("<attempt-dir>"), prompt, provider.start or "")
+        argv = codex_argv(root, pathlib.Path("<attempt-dir>"), prompt, start)
         planned.append({"backend": provider.name, "argv": argv, "would_run": True, "reason": ""})
     return planned
 
@@ -1232,10 +1235,8 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write(f"  policy      {result['policy_source']}  (severity floor {result['severity_floor']})\n")
     write(f"  route       tier {route['tier']}  category {route['category'] or '-'}\n")
     write(f"  because     {route['reason']}\n")
-    picked = ", ".join(result["providers"]) or "(none)"
-    write(f"  providers   {picked}\n")
-    wrote = ", ".join(result["authored_with"]) or "no vendor (human-authored)"
-    write(f"  authored    {wrote}\n")
+    write(f"  providers   {', '.join(result['providers']) or '(none)'}\n")
+    write(f"  authored    {', '.join(result['authored_with']) or 'no vendor (human-authored)'}\n")
     preflight = result["codex_preflight"]
     state = "ok (ChatGPT subscription)" if preflight["ok"] else f"would refuse: {preflight['reason']}"
     write(f"  codex auth  {state}\n")
