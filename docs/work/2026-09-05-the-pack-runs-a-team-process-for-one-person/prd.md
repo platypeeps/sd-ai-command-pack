@@ -796,10 +796,14 @@ is `done` and fourteen lines in twelve tracked files link into it, which
 a deletion would have had to detect and a kept directory serves. No pack
 surface deletes an item directory. When the operator wants the listing
 short, once a quarter or never, they delete with `git rm -r` in a change
-of their own, and a link that breaks then is theirs to see. The lint
-rule, the two reader scans, the eligibility function and the re-cut path
-are not built; the up-to-date setting stays for the reason requirement 3
-gives, which is not this one.
+of their own, and a link that breaks then is theirs to see — which is only
+true if something says the link broke, so C-27's lint rule **is** built, as
+criterion 33. The two reader scans, the eligibility function and the re-cut
+path are not; they were machinery for detecting a link before a deletion,
+and there is no deletion. The rule survives them because the need does: a
+reference into `docs/work/` can break without any deletion at all, and on
+2026-09-05 nothing in this repository would have said so. The up-to-date
+setting stays for the reason requirement 3 gives, which is not this one.
 `docs/work/archive/` stays as it is, by the operator's decision on
 2026-09-05 after A's round twenty, which overturns the first draft's
 answer to its third question. The pack stops reading it instead:
@@ -873,8 +877,9 @@ pushed and Notion mirrors for its audience. That is intended and stays.
 
 ### Requirement 7 — the checks that cannot fail are removed or wired up
 
-- `sd-docs-lint` runs in no Makefile target and no workflow. Rules 1 through 4
-  move into `make check`, conditional on `docs/work/` existing.
+- `sd-docs-lint` runs in no Makefile target and no workflow. The rules that
+  need no database move into `make check`, conditional on `docs/work/`
+  existing, enumerated from the lint rather than named by number.
 - The 100% coverage floor stays for `bin/sd_install.py`, which writes files under
   the operator's home directory. It is dropped elsewhere.
 - The four line-count ceilings print a warning and stop failing the suite. They
@@ -1124,20 +1129,21 @@ log, not here.
 **Shared scripts.**
 
 - Bugs: `bin/sd-status:851` passes `root` to `handoff.resolve_root`;
-  `bin/sd-docs-lint:242` compares the token before ` - ` with `none` instead
-  of `startswith`.
+  `bin/sd-docs-lint:244` tests `value.startswith("none")` where it must
+  compare the whole token with `none`, so `Work: nonexistent-item` fails as a
+  missing reason rather than as an unresolved path.
 - Cuts: protection gap analysis, acknowledgement loading, both schema files
   and `.github/sd-status.json` (`bin/sd-status:226-836`) become one
   `protected: yes/no` line; `bin/sd_sweep.py`, the `sweep` verb
   (`bin/sd:2703-2737,2916-2925`) and `tests/test_sd_sweep.py`; the archive
   walk and the `archived` and `parked` fields (`bin/sd_lib.py:355-368`,
   `:271-282`, `:302-303`, `:350`) and every reader (`bin/sd-status:183,190,
-  1122-1129,1234-1242,1254-1287`, `bin/sd-docs-lint:87-91`), so
+  1122-1129,1234-1242,1254-1287`), so
   `work_item_dirs` is one `iterdir` that skips `archive` by name; `bin/sd_ledger.py` moves to B with the
   database; `record_load` (`bin/sd-handoff-restore:157-288`); the six helpers
   copied from `bin/sd-handoff` (`bin/sd-handoff-restore:72-140,356-370`) are
   imported the way `bin/sd-status:96` does; the `authors` policy key
-  (`bin/sd-review:287`, `:1092`, `bin/sd_setup_github.py:230,267`, the schema,
+  (`bin/sd-review:276`, `:283`, `:1098`, `bin/sd_setup_github.py:230,267`, the schema,
   `.github/sd-review.json`); the unreachable gito and kimi argv branches
   (`bin/sd-review:830-834`) and `except Refusal` (`:1354-1356`); the constant
   `posted` key and its grep test (`bin/sd-review:1110`,
@@ -1532,8 +1538,12 @@ confirmed by the next `sd-ship` run alone.
     installer against a fixture system checkout, imports it, and checks
     the imported file is not under that checkout. Before B
     exists, this criterion is recorded as waiting, not as met.
-14. `make check` runs documentation-lint rules 1 through 4 when `docs/work/`
-    exists, and skips them cleanly when it does not.
+14. `make check` runs the documentation-lint rules that need no database when
+    `docs/work/` exists, and skips them cleanly when it does not. The set is
+    enumerated from the lint itself, not written into the `Makefile` as a
+    range, so criterion 33's rule and any rule added later run without a
+    second edit. A test asserts the wired set equals the lint's own
+    no-database set, and fails if a rule is added to one side alone.
 15. The coverage floor applies to `bin/sd_install.py` and to no other file. The
     four line-count ceilings emit a warning and exit zero when exceeded. A test
     asserts the warning path, not only the passing one.
@@ -1560,10 +1570,14 @@ confirmed by the next `sd-ship` run alone.
     2026-09-05 and none of them is a sweep or park code path: `sd_install.py`
     pruning its own empty parents at `:693` and `:700`, its untrack-and-re-run
     error string at `:791`, and the five uninstall commands in `sd-status`'s
-    `RESIDUE` tuple, of which criterion 18's Trellis removal takes one,
-    leaving seven. The test asserts the set has not grown, not that the grep
-    is empty — an earlier phrasing said "names nothing", which no cut in this
-    item can make true, since `bin/sd_sweep.py` is in none of the eight. A test ships a `done` item and runs
+    `RESIDUE` tuple. Requirement 13 cuts that tuple with the residue detectors
+    at `bin/sd-status:960-1018`, which takes five of the eight — but that cut
+    is gated on "one clean run across the fleet", the run is scheduled
+    nowhere, and no pull request names the detectors, so the frozen set is
+    eight until it happens and three after. The test asserts the set has not
+    grown, not that the grep is empty: "names nothing" is unreachable in
+    either state, since `bin/sd_install.py:791` is an error message rather
+    than a temporary path, and `bin/sd_sweep.py` is in none of the eight. A test ships a `done` item and runs
     `sd-plan` and `sd-ship` again in that repository, and asserts the
     directory is untouched.
 22. The pull-request template links only to files that exist. A test walks its
@@ -1615,7 +1629,7 @@ confirmed by the next `sd-ship` run alone.
     criterion 4, for each returns nothing: `sd_sweep`, `parked`, `archived`, `record_load`,
     `carrier_branches`, `_protection_gaps`, `load_acknowledgements`,
     `--stash-ref`, `--push`, `--park`, the `authors` policy key
-    (`bin/sd-review:287`, `:1092`, `bin/sd_setup_github.py:230,267`, the
+    (`bin/sd-review:276`, `:283`, `:1098`, `bin/sd_setup_github.py:230,267`, the
     schema and `.github/sd-review.json`) and not the word, since criterion 6
     introduces `authors` as a row field and a bare grep cannot tell the two
     apart, `argument-vocabulary`,
@@ -1634,6 +1648,25 @@ confirmed by the next `sd-ship` run alone.
     `skills/sd-fact-check/SKILL.md`, read from both files. One provider
     list, one git wrapper, one status vocabulary and one ACTIVE set exist,
     asserted by a grep that finds no second definition of each.
+33. No document names a path under `docs/work/` that does not resolve.
+    `sd-docs-lint` gains a rule that enumerates tracked `*.md` from git,
+    excluding `docs/work/archive/` and `CHANGELOG.md`, reads every
+    `docs/work/<path>` reference in them, and fails on one that names nothing
+    in the checkout. A token carrying a metavariable — `YYYY`, `MM`, `DD` or
+    `<` — is a pattern and not a path, and is skipped; a test asserts that
+    skip, so the escape is a property of the rule rather than a list of
+    exceptions. Two tests cover the rule: one seeds a markdown file naming a
+    missing item directory and asserts the failure names the file and the
+    path, and one seeds a metavariable and asserts it passes. Run over this
+    repository on 2026-09-05 the rule reads 62 references across 138 files and
+    reports **none** unresolved, so it is green on the day it lands; run again
+    with the four directories pull request 743 would have moved treated as
+    gone, it reports **15 unresolved across 11 files**, which is the case it
+    exists for. The rule is C-27's, from round fourteen, which was written for
+    requirement 5's deletion and dropped with it; the deletion is gone and the
+    need is not. It joins the no-database set criterion 14 wires into
+    `make check`, and because criterion 14 enumerates that set from the lint,
+    it is wired by existing rather than by being named.
 
 ## Open questions
 
@@ -3203,3 +3236,44 @@ from a number the operator types.
     `2026-08-29-artifacts-as-product`, is the case this item cites at
     `prd.md:794` for keeping directories. Merging it would also have broken
     the thirteen references C-164 names.
+  - C-166, decision: criterion 33 added, on the operator's word, closing the
+    gap C-164 recorded. `sd-docs-lint` gains a rule that enumerates tracked
+    `*.md` from git, outside `docs/work/archive/` and `CHANGELOG.md`, and
+    fails on a `docs/work/<path>` reference that names nothing. Written by
+    running it first, not after: over this repository it reads 62 references
+    in 138 files with **none** unresolved, and with pull request 743's four
+    renames applied it reports **15 across 11 files**. Metavariable tokens
+    (`YYYY`, `MM`, `DD`, `<`) are skipped as a property of the rule, with a
+    test, rather than as an exception list. One reference in the tree does not
+    resolve — `docs/work/.status-source`, the marker PR 7 creates — which is
+    why the rule lands in PR 7 and not earlier. The one other exception was an
+    illustrative unresolved item path in the implementation page's own C-154
+    text; it is reworded rather than exempted, and this entry avoids writing
+    it for the same reason. This is C-27's rule from round
+    fourteen, dropped with requirement 5's deletion; the deletion is gone and
+    the need is not.
+  - C-167, blocking: requirement 13's removal list has an entry no pull
+    request lands. "The residue detectors (`bin/sd-status:960-1018`) after one
+    clean run across the fleet" is the `RESIDUE` tuple and `residue_section`,
+    and the string `residue` appears nowhere in `implement.md`. The cut is
+    gated on a fleet run this item does not schedule, and criterion 31 cannot
+    catch the omission because `residue` is not among the symbols it greps.
+    Found while correcting C-152, which enumerated criterion 21's eight grep
+    hits without noticing that five of them sit inside a range requirement 13
+    already claims. C-152's fix stands — the criterion is still unreachable as
+    "names nothing", since `bin/sd_install.py:791` survives every cut — but
+    its account of the frozen set was wrong twice over: the set is eight now
+    and three after a cut that may never happen, and PR 4's criterion-18
+    removal is not what governs it. Addressed: the frozen set is stated for
+    both states, and PR 2 carries the detectors as a named deferred cut so
+    the requirement's entry has a landing site a reader can find.
+  - C-168, material: three corrections from this session landed in
+    `implement.md` and not in `prd.md`, which is where requirement 13's
+    removal list actually lives. The `prd.md` still carried the backwards
+    `bin/sd-docs-lint:242` bug (C-154), `bin/sd-docs-lint:87-91` as a reader
+    of the `archived` and `parked` fields (C-162), and the `authors` policy
+    key at `bin/sd-review:287`, `:1092` in two places (C-157). A fix applied
+    to the page that cites a requirement, and not to the requirement, leaves
+    the wrong text in the document the implementer is told to enumerate from.
+    All three corrected. Checked by grepping both files for each wrong value
+    rather than by re-reading the paragraphs that were edited.
