@@ -298,6 +298,12 @@ class TheRefusals(unittest.TestCase):
                 )
                 self.assertIs(registry.providers["two"].enabled, expected)
 
+    def test_a_url_that_names_no_host(self) -> None:
+        message = self.refuse(
+            self.filled().replace('"http://localhost:1/v1"', '"file:///tmp/x"')
+        )
+        self.assertIn("names no host", message)
+
     def test_a_vendor_with_padding_or_a_capital(self) -> None:
         """The other half of the same exact match. A registry vendor that is
         not already in the form a trailer is folded into could never match
@@ -375,8 +381,13 @@ class TheConsentLine(unittest.TestCase):
         self.assertIn("empty entry", self.refuse_consent("@host"))
         self.assertIn("empty recipient", self.refuse_consent("codex@"))
 
-    def test_a_second_separator_leaves_the_recipient_a_guess(self) -> None:
-        self.assertIn("more than one", self.refuse_consent("codex@one@two"))
+    def test_a_recipient_carrying_its_own_separator_is_one_pair(self) -> None:
+        """A url entry's recipient is its netloc, userinfo included. The first
+        separator splits and only the first, so this is well defined -- an
+        earlier version of the duplicate check refused it as ambiguous and made
+        such an entry impossible to consent to."""
+        allowed = sd_registry.parse_consent("codex@user:pw@host.example")
+        self.assertEqual(allowed["codex"].recipient, "user:pw@host.example")
 
     def test_commas_and_spaces_separate_the_same_way(self) -> None:
         self.assertEqual(

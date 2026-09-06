@@ -492,6 +492,12 @@ def _provider(
             f"{path}: provider {name!r} needs exactly one of 'start' or 'url'; "
             f"it has " + ("both" if start else "neither")
         )
+    if url and not urlsplit(str(url)).netloc:
+        raise RegistryError(
+            f"{path}: provider {name!r} has url {url!r}, which names no host. "
+            f"A url entry's recipient is its host, and consent is granted to "
+            f"that host, so an entry without one could never be consented to."
+        )
     if "bill" not in body:
         raise RegistryError(f"{path}: provider {name!r} has no 'bill'")
     bill_name = str(body["bill"])
@@ -647,12 +653,9 @@ def parse_consent(line: str | None) -> dict[str, Allowance]:
                 f"for a start entry -- because consent is to a destination and "
                 f"not to a name that could be repointed at one."
             )
-        if part.count(CONSENT_SEPARATOR) > 1:
-            raise ConsentRefusal(
-                f"{part!r} on the 'reviewers' line carries more than one "
-                f"{CONSENT_SEPARATOR!r}, so which half is the recipient is a "
-                f"guess. One pair per entry."
-            )
+        # The first separator splits, and only the first: a url entry's
+        # recipient is its netloc, which carries any userinfo the url had, so
+        # `p@user:pw@host` is one well-defined pair and not an ambiguous one.
         entry, _, recipient = part.partition(CONSENT_SEPARATOR)
         recipient, _, fingerprint = recipient.partition(FINGERPRINT_JOIN)
         if not entry or not recipient:
