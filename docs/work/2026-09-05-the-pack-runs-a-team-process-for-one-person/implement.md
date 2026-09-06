@@ -520,6 +520,37 @@ notes on the squash commit and `deliver` on the item screen
 
 B's one sitting for `docs/work`: freeze, import once more, verify, snapshot,
 then remove every item's `status:` line outside the archive in one commit.
+
+**Three things land in that commit and in this pull request that an earlier
+draft of this page named nowhere.** All three come from item B's criterion 7,
+enumerated clause by clause in B's round five, and each is a pack file no
+`system` pull request can reach.
+
+*The tracked marker.* `prd.md:585` and `prd.md:2527` both say the retire
+commit adds `docs/work/.status-source`, one line, `row`. This page named
+`status_source` — the column — and never the file. It is what a checkout
+without a database reads, so it lands in the same commit as the removal, not
+after it.
+
+*The lint's sign inverts.* `bin/sd-docs-lint` rule 1 fails today when a
+`status:` line is **missing** (`bin/sd-docs-lint:121-123`,
+`if status not in ITEM_STATUSES`). B's `prd.md:1235-1237` requires it to fail
+when one is **present** in a `prd.md` under `docs/work/` outside the archive,
+asserted with one seeded. The two signs cannot both hold, so the inversion
+belongs in the commit that removes the lines — this one — and not in a later
+pull request that would leave the lint failing on every item in between.
+`bin/sd-docs-lint` is already in this pull request's Touches for the reader.
+
+*`sd-ship` writes `shipped_at` and a `Closes:` trailer on a merge.* B's
+`prd.md:911-913` names three writers of `shipped_at` and gives the merge to
+`sd-ship`; B's clause 7.18 asserts a cancel writes `done` with a `cancelled`
+note and that the next `sd-ship` merge carries `Closes:` with no `Delivers:`
+and no extra pull request; clause 7.21 asserts a merge confirmed through the
+fixture remote writes `done` with `shipped_at` and one `status_change` note;
+and B's clause 15.25 asserts the field does not move on a second merge.
+Neither string appeared anywhere in this item before B's round five.
+`skills/sd-ship/` is already in this pull request's Touches for
+`--deliver`.
 The command is B's; the pull request is this item's slice, and it lands
 **after** PR 6, from A's rounds thirty-six and thirty-seven, so that the
 pack installed at every point between reads every item as it is.
@@ -535,7 +566,15 @@ of the branch against its base — the retire step's scope is items outside
 the archive, and an archive rewritten by a migration would be a record
 altered after the fact.
 
-**Verification.** Criteria 13 and 21. Criterion 13 is recorded as waiting
+**Verification.** Criteria 13 and 21, and **item B's criterion 7 clauses
+this pull request builds**: the retire itself (7.1, 7.3), the seeded-line
+lint failure (7.2), `sd_lib.delivered` refusing under a pack that lacks it
+(7.4), the marker and `status_source` read by a checkout with no database
+(7.6), the retained worktree's line ignored (7.7), the sitting's two
+kill-and-rerun points (7.8), and `sd-ship`'s `Closes:` and `shipped_at` on a
+merge (7.18, 7.21, and B's clause 15.25's `shipped_at` half). B records these
+as hand-offs 11 and 12 with the note that this plan did not schedule them;
+it does now. Criterion 13 is recorded as waiting
 **before the second slice**, not before this one: `prd.md:1194-1195` says
 "Before the second slice, criteria 13 and 32 are recorded as waiting" — and
 "before the second slice" means before slice 2 opens, not before every pull

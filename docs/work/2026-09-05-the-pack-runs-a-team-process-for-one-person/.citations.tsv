@@ -13,11 +13,15 @@ implement.md:514	prd.md:1396-1397	2026-09-05-the-pack-runs-a-team-process-for-on
 implement.md:517	prd.md:1435-1449	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1435	status change touches no file, asserted by a tes
 implement.md:518	prd.md:1470-1479	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1470	never, and a guest clone retained on the fork's 
 implement.md:519	prd.md:1523-1529	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1523	the delivering case on a fixture remote that gai
-implement.md:539	prd.md:1194-1195	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1194	row open, requirement 5. Before the second slice
-implement.md:543	prd.md:1178-1182	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1178	## Landing order
-implement.md:555	prd.md:984-998	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	984	### Requirement 12 — handoff loses nothing, beca
-implement.md:557	prd.md:1571-1573	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1571	25. `sd skill try <name>` installs from `contrib
-implement.md:561	prd.md:993-995	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	993	the conversation. A `PreCompact` hook and a `Ses
-implement.md:568	prd.md:955	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	955	`mezmo_benchmark` 1). They are shadowed, not imp
-implement.md:709	prd.md:1523-1529	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1523	the delivering case on a fixture remote that gai
-implement.md:783	prd.md:1523-1529	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1523	the delivering case on a fixture remote that gai
+implement.md:529	prd.md:585	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	585	`docs/work/.status-source`, one line, `row`, bes
+implement.md:529	prd.md:2527	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	2527	retire commit adds a tracked marker, `docs/work/
+implement.md:537	prd.md:1235-1237	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	the provider-registry documentation.
+implement.md:545	prd.md:911-913	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	911	which does not exist. Fixed or removed.
+implement.md:578	prd.md:1194-1195	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1194	row open, requirement 5. Before the second slice
+implement.md:582	prd.md:1178-1182	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1178	## Landing order
+implement.md:594	prd.md:984-998	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	984	### Requirement 12 — handoff loses nothing, beca
+implement.md:596	prd.md:1571-1573	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1571	25. `sd skill try <name>` installs from `contrib
+implement.md:600	prd.md:993-995	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	993	the conversation. A `PreCompact` hook and a `Ses
+implement.md:607	prd.md:955	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	955	`mezmo_benchmark` 1). They are shadowed, not imp
+implement.md:748	prd.md:1523-1529	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1523	the delivering case on a fixture remote that gai
+implement.md:822	prd.md:1523-1529	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1523	the delivering case on a fixture remote that gai

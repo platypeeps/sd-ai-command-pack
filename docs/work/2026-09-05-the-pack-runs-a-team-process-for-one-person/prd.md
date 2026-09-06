@@ -3062,3 +3062,26 @@ from a number the operator types.
     target, within four lines, and records that line's number.
   Both were found by running the rule against real drift rather than a
   fixture, which is the only way either would have surfaced.
+- **2026-09-05** — Three obligations this item owns, found by item B's round
+  five while enumerating its criterion 7 clause by clause. Each is a pack
+  file no `system` pull request can reach, and each was named in a `prd.md`
+  — B's or this one's — and in no pull request body.
+  - C-149, blocking: `docs/work/.status-source`. `prd.md:585` and
+    `prd.md:2527` both say the retire commit adds the tracked marker, one
+    line, `row`. This page named the `status_source` column and never the
+    file, so the thing a checkout without a database actually reads was
+    scheduled nowhere. Added to PR 7, in the same commit as the removal.
+  - C-150, blocking: `sd-docs-lint` rule 1's sign. It fails today when a
+    `status:` line is missing; B's criterion 7 requires it to fail when one
+    is present outside the archive. The two cannot both hold, so the
+    inversion lands in the commit that removes the lines rather than in a
+    later pull request that would leave the lint failing on every item in
+    between. `bin/sd-docs-lint` was already in PR 7's Touches, for the
+    reader — the file was right and the obligation was missing, which is why
+    four rounds of Touches checks did not surface it.
+  - C-151, blocking: `shipped_at` and `Closes:`. Neither string appeared
+    anywhere in this item. B's `prd.md:911-913` gives the merge write to
+    `sd-ship`, and B's clauses 7.18, 7.21 and 15.25 all assert it. Both PR 6
+    and PR 7 list `skills/sd-ship/`; the merge path is PR 7's, through
+    `--deliver`, so it lands there. B records these as its hand-offs 11 and
+    12.
