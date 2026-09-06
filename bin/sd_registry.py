@@ -185,6 +185,36 @@ def read(
         raise RegistryError(str(error)) from None
 
 
+def read_or_report(
+    path: Path | str | None = None,
+    *,
+    home: Path | str | None = None,
+    connection: Any = None,
+) -> tuple[Registry, str]:
+    """The registry, or an empty one and the reason it is empty.
+
+    A machine with no registry is a fact to report, not a crash. `sd-review
+    --explain` prints the plan and asks nobody, so it has to answer on a bare
+    CI runner that has never run the installer -- and a real review with no
+    registry has to say "nobody could be reached" rather than exiting before it
+    can say anything at all.
+
+    Falling back to the copy in the pack checkout was the other option and is
+    worse: it would review with the shipped pins while reporting them as the
+    operator's, and the whole point of seeding the file into the home is that
+    what is there afterwards is theirs.
+
+    A caller that must have a real registry -- one resolving a named entry, say
+    -- checks the second value and refuses. `RegistryError` still comes out of
+    `read` for callers that want it.
+    """
+    target = Path(path) if path is not None else registry_path(home)
+    try:
+        return read(target, connection=connection), ""
+    except RegistryError as error:
+        return Registry(target, {}, {}), str(error)
+
+
 def _adapt(registry: Any) -> Registry:
     """`sd_db`'s registry in this module's shapes.
 

@@ -1034,10 +1034,16 @@ def review(
     item = getattr(args, "item", None)
     subject = resolve_subject(root, args.scope, item)
     plan = sd_route.route(subject.paths, subject.lines, args.draft, policy)
-    # The registry is read from the home this run was handed, not from the
-    # process's, so a run given a different environment reads that operator's
-    # pins rather than the one whose shell happened to start it.
-    registry = sd_registry.read(sd_registry.registry_path(environ=dict(env)))
+    # Read from the home this run was handed, not from the process's, so a run
+    # given a different environment reads that operator's pins. A missing
+    # registry reports rather than raises; `read_or_report` says why.
+    registry, registry_refusal = sd_registry.read_or_report(
+        sd_registry.registry_path(environ=dict(env))
+    )
+    if registry_refusal and getattr(args, "provider", None):
+        # A named entry cannot be answered from an empty registry: the refusal
+        # it would get -- "no such provider" -- would be a lie about the name.
+        raise sd_registry.RegistryError(registry_refusal)
     try:
         consent = sd_registry.parse_consent(sd_lib.local_block(root).get(sd_lib.CONSENT_KEY))
         consent_refusal = ""
@@ -1081,6 +1087,7 @@ def review(
         },
         "providers": list(providers),
         "registry": str(registry.path),
+        "registry_refusal": registry_refusal,
         "consent_refusal": consent_refusal,
         "authored_with": list(vendors),
         "chain": [
@@ -1166,7 +1173,11 @@ def review(
         for outcome in outcomes
     ]
     result["findings"] = disposed
-    result["status"] = _overall(outcomes, disposed, providers)
+    # `unavailable` and not `_overall`'s `skipped`: with no registry the chain
+    # is empty for the same reason tier `skip` empties it, and `skipped` exits
+    # zero saying "nothing needed reviewing" about a machine that could not
+    # have reviewed anything.
+    result["status"] = "unavailable" if registry_refusal else _overall(outcomes, disposed, providers)
     result["remaining"] = [
         outcome.backend for outcome in outcomes if outcome.status in (RATE_LIMITED, NOT_RUN)
     ]
@@ -1179,14 +1190,8 @@ def _planned(
     planned: list[dict[str, Any]] = []
     for provider in chosen:
         if provider.reader != "codex-json":
-            planned.append(
-                {
-                    "backend": provider.name,
-                    "argv": [],
-                    "would_run": False,
-                    "reason": f"this build implements no {provider.reader!r} reader",
-                }
-            )
+            reason = f"this build implements no {provider.reader!r} reader"
+            planned.append({"backend": provider.name, "argv": [], "would_run": False, "reason": reason})
             continue
         argv = codex_argv(root, pathlib.Path("<attempt-dir>"), prompt, provider.start or "")
         planned.append({"backend": provider.name, "argv": argv, "would_run": True, "reason": ""})
@@ -1245,6 +1250,8 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
 
     if result.get("explain_only"):
         write(f"\nreviewer chain ({result['registry']}):\n")
+    if result["registry_refusal"]:
+        write(f"  {result['registry_refusal']}\n")
     if result["consent_refusal"]:
         write(f"  {result['consent_refusal']}\n")
         for row in result["chain"]:

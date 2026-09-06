@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -645,6 +646,92 @@ class CliTests(ReviewFixture):
         self.assertEqual(finished.returncode, sd_review.EXIT_USAGE)
         self.assertNotIn("Traceback", finished.stderr)
         self.assertIn("not valid JSON", finished.stderr)
+
+
+class NoRegistryOnThisMachineTests(ReviewFixture):
+    """A machine with no installed registry still answers.
+
+    CI found this, not a test. The routing lane runs `sd-review --explain` on a
+    bare runner, which has never run the installer, and the first version of the
+    registry reader let the refusal reach `main` and exit 2: `sd-review: error:
+    no provider registry at /home/runner/.local/share/sd/providers.yaml`. The
+    lane exists to report the plan and asks nobody, so needing an install to
+    print one was backwards.
+    """
+
+    def bare(self) -> dict[str, str]:
+        """An environment whose HOME holds no registry."""
+        empty = self.tmp / "no-registry-home"
+        empty.mkdir()
+        return {"HOME": str(empty)}
+
+    def test_explain_answers_without_an_installed_registry(self) -> None:
+        root = self.make_repo()
+        runner = FakeRunner()
+        result = sd_review.review(
+            root, namespace(explain=True), runner, self.bare(), self.chatgpt_home()
+        )
+        self.assertEqual(result["status"], "explained")
+        self.assertIn("no provider registry", result["registry_refusal"])
+        self.assertEqual(result["providers"], [])
+        self.assertEqual(runner.calls, [])
+
+    def test_the_explain_render_prints_the_reason(self) -> None:
+        root = self.make_repo()
+        result = sd_review.review(
+            root, namespace(explain=True), FakeRunner(), self.bare(), self.chatgpt_home()
+        )
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        self.assertIn("no provider registry", stream.getvalue())
+
+    def test_a_real_review_is_unavailable_and_not_skipped(self) -> None:
+        """`skipped` exits 0 and means "nothing needed reviewing". A machine
+        that could not have reviewed anything must not borrow that word."""
+
+        root = self.make_repo()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        result = sd_review.review(
+            root, namespace(), runner, self.bare(), self.chatgpt_home()
+        )
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(sd_review.STATUS_EXIT[result["status"]], sd_review.EXIT_GATE)
+        self.assertNotEqual(sd_review.STATUS_EXIT[result["status"]], sd_review.EXIT_OK)
+
+    def test_a_named_provider_is_refused_rather_than_answered_emptily(self) -> None:
+        """With no registry, `pick` would say "no provider 'codex'", which reads
+        as "that name is wrong" rather than "there is no registry here"."""
+
+        root = self.make_repo()
+        with self.assertRaises(sd_review.sd_registry.RegistryError) as caught:
+            sd_review.review(
+                root, namespace(provider="codex"), FakeRunner(), self.bare(), self.chatgpt_home()
+            )
+        self.assertIn("no provider registry", str(caught.exception))
+
+
+class TheRoutingLaneRunsOnABareRunner(ReviewFixture):
+    """The lane's own invocation, run the way the workflow runs it.
+
+    `.github/actions/review-route` calls `bin/sd-review --scope pr --explain`
+    and fails the job on a non-zero exit. This asserts that exit code against a
+    HOME with no registry, which is what a GitHub runner is.
+    """
+
+    def test_explain_exits_zero_with_an_empty_home(self) -> None:
+        empty = self.tmp / "runner-home"
+        empty.mkdir()
+        finished = subprocess.run(
+            [sys.executable, str(SD_REVIEW), "--explain"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+            env={**os.environ, "HOME": str(empty)},
+        )
+        self.assertEqual(finished.returncode, 0, finished.stderr)
+        self.assertIn("no provider registry", finished.stdout)
 
 
 class ScopeProvidersOverASkipTier(unittest.TestCase):
