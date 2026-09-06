@@ -10,16 +10,16 @@ implement.md:474	prd.md:874	2026-09-05-the-pack-runs-a-team-process-for-one-pers
 implement.md:478	prd.md:1400-1401	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1400	fixture remote whose default branch does not req
 implement.md:527	prd.md:1238-1240	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1238	identical. Every skill that runs a review names 
 implement.md:587	prd.md:1402-1403	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1402	branch, asserted by the fixture remote seeing no
-implement.md:595	prd.md:1441-1455	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1441	status change touches no file, asserted by a tes
-implement.md:596	prd.md:1476-1485	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1476	never, and a guest clone retained on the fork's 
-implement.md:597	prd.md:1529-1535	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1529	the delivering case on a fixture remote that gai
-implement.md:607	prd.md:585	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	585	`docs/work/.status-source`, one line, `row`, bes
-implement.md:607	prd.md:2567	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	2567	retire commit adds a tracked marker, `docs/work/
-implement.md:670	prd.md:1200-1201	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1200	row open, requirement 5. Before the second slice
-implement.md:674	prd.md:1184-1188	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1184	## Landing order
-implement.md:686	prd.md:989-1003	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	989	### Requirement 12 — handoff loses nothing, beca
-implement.md:688	prd.md:1592-1594	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1592	25. `sd skill try <name>` installs from `contrib
-implement.md:692	prd.md:998-1000	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	998	the conversation. A `PreCompact` hook and a `Ses
-implement.md:699	prd.md:960	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	960	`mezmo_benchmark` 1). They are shadowed, not imp
-implement.md:847	prd.md:1529-1535	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1529	the delivering case on a fixture remote that gai
-implement.md:922	prd.md:1529-1535	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1529	the delivering case on a fixture remote that gai
+implement.md:601	prd.md:1441-1455	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1441	status change touches no file, asserted by a tes
+implement.md:602	prd.md:1476-1485	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1476	never, and a guest clone retained on the fork's 
+implement.md:603	prd.md:1529-1535	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1529	the delivering case on a fixture remote that gai
+implement.md:613	prd.md:585	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	585	`docs/work/.status-source`, one line, `row`, bes
+implement.md:613	prd.md:2567	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	2567	retire commit adds a tracked marker, `docs/work/
+implement.md:676	prd.md:1200-1201	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1200	row open, requirement 5. Before the second slice
+implement.md:680	prd.md:1184-1188	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1184	## Landing order
+implement.md:692	prd.md:989-1003	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	989	### Requirement 12 — handoff loses nothing, beca
+implement.md:694	prd.md:1592-1594	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1592	25. `sd skill try <name>` installs from `contrib
+implement.md:698	prd.md:998-1000	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	998	the conversation. A `PreCompact` hook and a `Ses
+implement.md:705	prd.md:960	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	960	`mezmo_benchmark` 1). They are shadowed, not imp
+implement.md:853	prd.md:1529-1535	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1529	the delivering case on a fixture remote that gai
+implement.md:928	prd.md:1529-1535	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1529	the delivering case on a fixture remote that gai

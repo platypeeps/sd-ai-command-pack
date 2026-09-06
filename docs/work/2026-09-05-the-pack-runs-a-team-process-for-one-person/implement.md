@@ -585,8 +585,14 @@ under `docs/work/` outside the archive, and — for criterion 13, which the
 closure table filed here while this list reached none of it —
 `bin/sd_lib.py`, `bin/sd-status` and `bin/sd-docs-lint`, which derive an
 item's status from its row (`prd.md:1402-1403`) — and, in `bin/sd-docs-lint`
-alone, `item_directories` and `check_shape`, for rule 1's archive predicate
-below, plus **rule 7 and its two tests**, criterion 33's dangling-reference
+alone, `item_directories`, `check_shape` and **`check_ready`**, for rule 1's
+archive predicate below and for rule 2, which stops matching anything when
+the `status:` lines go — `check_ready` returns early on
+`if status not in WORKABLE_STATUSES: continue` (`bin/sd-docs-lint:141-143`),
+so the retire commit switches off three checks for every active item in every
+registered repository unless rule 2 reads the row; B's criterion 7 carries the
+clause and B's round fifty-five carries the fixture. Plus **rule 7 and its two
+tests**, criterion 33's dangling-reference
 scan, which lands here because this pull request creates
 `docs/work/.status-source` and that marker is one of the three references in
 the tree that does not resolve until it does; `skills/sd-ship/` and
@@ -612,7 +618,7 @@ after it.
 
 *The lint's sign changes outside the archive, and rule 1 gains a signature to
 tell the two apart.* `bin/sd-docs-lint` rule 1 fails today when a `status:`
-line is **missing** (`bin/sd-docs-lint:122-124`,
+line is **missing** (`bin/sd-docs-lint:121-123`,
 `if status not in ITEM_STATUSES`). `B/prd.md:1252-1253` requires it to fail
 when one is **present** in a `prd.md` under `docs/work/` outside the archive,
 asserted with one seeded. **Both signs must hold at once**, and an earlier

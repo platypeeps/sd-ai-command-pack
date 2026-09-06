@@ -3277,3 +3277,22 @@ from a number the operator types.
     the wrong text in the document the implementer is told to enumerate from.
     All three corrected. Checked by grepping both files for each wrong value
     rather than by re-reading the paragraphs that were edited.
+  - C-169, blocking, from item B's round fifty-five: PR 7 removes every
+    `status:` line and thereby switches off `sd-docs-lint` rule 2. Rule 1's
+    sign was the obligation this item recorded; rule 2 is the larger half and
+    nobody named it. `check_ready` returns early on
+    `if status not in WORKABLE_STATUSES: continue` (`bin/sd-docs-lint:141-143`,
+    `WORKABLE_STATUSES = ("ready", "in_progress")` at `:53`), so after the
+    retire commit rule 2 matches nothing and three checks go silent for every
+    active item in every registered repository: acceptance criteria stated, no
+    open `BLOCKING:` line, `in_progress` records its branch. A fixture with
+    the line fails all three; without it, `rule 2 failures: []`. `check_ready`
+    joins `item_directories` and `check_shape` in PR 7's Touches; B's
+    criterion 7 carries the clause and the fixture.
+  - C-170, minor: C-155's citation of rule 1 was wrong. This page said
+    `bin/sd-docs-lint:122-124`; the block is `:121-123` — `:121` reads the
+    status, `:122` tests it, `:123` fails. `122-124` drops the read and adds
+    an unrelated line. B's page had it right. This is the fourth citation in
+    this area to be corrected in one session, all four by counting from a
+    sentence instead of reading the file; the numbers above were read with
+    `sed -n '121,124p'`.
