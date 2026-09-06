@@ -2808,3 +2808,132 @@ from a number the operator types.
   - **Not reached in this round:** item B's `prd.md` is in the `system`
     repository, outside this checkout, so `implement.md`'s "item B's
     criterion 13" and B's slice numbering are unverified against B's text.
+- **2026-09-05** — Adversarial re-review, round three. Twenty findings: six
+  blocking, eight material, six minor. The named failure mode recurred a
+  third time, one layer down each round. Round one left the Touches lists
+  stale under a rebuilt criterion mapping. Round two rebuilt the Touches
+  lists and left the **ordering section** and the **cross-item attributions**
+  stale under them: four of the six blocking findings are contradictions
+  round two's own edits created, and the other two are criteria whose
+  operative subject the rebuilt file sets still could not reach.
+  - C-119, blocking: C-103 scoped criterion 4 from the *filename*
+    `planning-adversarial-review-codex.md` and never from what the criterion
+    greps for. `git grep -niE 'second-model lane|codex (review )?lane'` over
+    the governed tree returns `AGENTS.md:14`, `skills/sd-plan/SKILL.md:40`
+    ("routes them to the codex second-model lane") and
+    `skills/sd-receive-review/SKILL.md:3`. The middle one — the payload's own
+    statement of the lane, in the skill that invokes it — was in PR 2's and
+    PR 4's Touches, neither of which claims criterion 4, so the grep came
+    back dirty at PR 1's merge. Addressed.
+  - C-120, blocking: criterion 6's *first* clause is that the provider
+    registry format "is documented in `WORKFLOW.md`" (`prd.md:1232-1234`).
+    C-100's rebuild derived PR 6's Touches from the criterion's runtime
+    clauses and skipped the documentation obligation, and PR 6 claims
+    criterion 6 whole. Addressed, and PR 1 is ordered before PR 6 for it.
+  - C-121, blocking: criteria 24 and 25 both have "**the installer** renders"
+    as their operative verb, and PR 5's three-file Touches — the data file,
+    the trial directory and the `sd skill try` subcommand — held none of the
+    code they assert. `bin/sd_install.py:224-229` is the enumeration the
+    paths file replaces. This is round two's headline defect verbatim, on the
+    one pull request round two changed the character of. Addressed.
+  - C-122, blocking: C-110 ordered PR 1 before PR 6 for `WORKFLOW.md` and, in
+    the same edit batch, added `WORKFLOW.md` to PR 4's Touches without
+    ordering PR 4. The file does not exist. PR 4 merging first would edit a
+    missing file or create a second one, and criterion 5's "exactly two
+    places" test would pass against a page PR 1 then overwrites. Addressed.
+  - C-123, blocking: C-118 added `skills/paths.json` to PR 8's Touches for
+    criterion 27 and did not order PR 8 after PR 5, which creates the file.
+    Both were constrained only to be after B's slice 1, so PR 8 could merge
+    first and criterion 27's branch-content test would have nothing to assert
+    against. Addressed.
+  - C-124, blocking: the `sd_db` installer step was filed on two pull
+    requests at once — PR 6's Verification and the ordering section, and
+    PR 7's Touches and the closure table — and called "item B's criterion
+    13", which is a dashboard criterion in B's slice 4
+    (`B/prd.md:1420-1430`) with nothing to do with an installer. The clause
+    is **this item's criterion 13** at `prd.md:1523-1529`, carried by B's
+    settled open question 3. Addressed: PR 7 alone, under its own number.
+  - C-125, material: C-118 resolved PR 2's and PR 5's duplicate claim on
+    `contrib/` by declaring PR 5 the creator, which made PR 2 depend on a
+    slice-2 pull request while leaving PR 2 in the "any order" group. The
+    directory does not exist. Addressed by the ordering, which is the half
+    that gives.
+  - C-126, material: C-108 named three files as the ones criterion 5's vendor
+    grep returns beyond "every skill that runs a review". The criterion's own
+    four-name grep over `skills/` returns **twelve**, including
+    `sd-research-repo/SKILL.md:84` and the rendered
+    `sd-research-repo/templates/CLAUDE.md:82,87`, which carry more `codex`
+    invocations than the reference file beside them that was named. The
+    enumeration came from the sentence that reported the gap. Addressed.
+  - C-127, material: C-100's new citation said `bin/sd-review`'s provider
+    table is at `:200-266` with `tiers` at `:265`. `BACKENDS` is `:193-248`;
+    `:200` is inside the *second* entry, so the range omits the `codex` row
+    criterion 6 names most often, and `:266` is eighteen lines past the table
+    inside `DEFAULT_POLICY`, whose `tiers` dict is at `:262`. Deleting the
+    cited range would leave the table's head and remove the tier lists —
+    inverting both halves of criterion 6. Addressed.
+  - C-128, material: `.coveragerc` has two `include` keys. C-105's citation
+    gave `[run] include` the range `:11-24`, which spans into `[report]`, and
+    placed `fail_under = 100` inside the `[run]` list. `[run] include` is
+    `:11-13`; `[report] include` is `:21-22` and already names
+    `bin/sd_install.py` alone, which is what criterion 15 asks for. The file
+    that changes is `[run]`'s `:13`. Addressed.
+  - C-129, material: the section C-112 added opens "`tests/` appeared in
+    exactly one Touches list above — as a file to delete", which its own next
+    sentence refutes three times over, and claims Touches coverage for
+    `tests/test_sd_docs_lint.py`, which was named only in PR 6's prose — a
+    pull request that removes none of the symbols breaking it. Addressed, and
+    the file is in PR 2's Touches, whose `none - ` cut breaks it.
+  - C-130, material: PR 8's hooks list was justified as "all five requirement
+    12 names (`prd.md:993-995`)". Requirement 12 names three — `PreCompact`,
+    `SessionEnd`, `SessionStart`. `PreToolUse` and `UserPromptSubmit` are
+    criterion 26's (`prd.md:1571-1573`). Both criteria are PR 8's, so the
+    file set was right and the count, the source and the citation were not.
+    Addressed.
+  - C-131, material: PR 4 edits `bin/sd-review`'s copilot rows at `:238-248`,
+    which are inside the `BACKENDS` table PR 6 deletes, and the two were
+    unordered. Criterion 9's grep also returns a fifth payload surface,
+    `skills/sd-review/SKILL.md:80`, that C-102's four-surface enumeration
+    missed. Addressed: PR 6 before PR 4, and the fifth surface is in PR 4.
+  - C-132, material: C-109 added the global settings, the system
+    repository's guide and the writing repository's style override to PR 4's
+    Touches without reconciling them with the page's own framing that each
+    numbered unit is one pull request carrying `Item:`. Three of PR 4's
+    obligations cannot appear in a diff against this repository — criterion
+    19's subject is `~/.claude/settings.json`, in no repository at all.
+    Addressed: PR 4 is one pull request here plus three landings that are
+    recorded separately. PR 8 carries a smaller version of the same shape.
+  - C-133, minor: "the forty files carrying `R10-D`" is thirty-nine. Forty is
+    reached only by counting `docs/fleet/README.md`, which is outside the six
+    trees named and outside the governed tree criterion 31 greps. An
+    off-by-one introduced by C-99's own `git grep -l` rebuild. Addressed.
+  - C-134, minor: C-114 prepended "238 today," and left "237 `prd.md` files
+    under `docs/work/` have the line" attached to the verb, so the sentence
+    carried both numbers with the false one doing the work. 238 is correct.
+    Addressed.
+  - C-135, minor: "the four files stating the planning review rule" was never
+    enumerated, and the neighbouring "the same three files" double-counted
+    `AGENTS.md`. Criterion 20 closes on the count. Enumerated: six statements
+    today plus a seventh in `skills/sd-plan/SKILL.md:38-41` that states it as
+    a numbered step. Addressed.
+  - C-136, minor: `tests.yml:101` is the `bash32` job header, not the
+    invocation, and `tests/test_loc_caps.py:193-217` is `assert_cap` plus the
+    first method calling it — the fail-the-suite line is `:195-202`. Both
+    were inside round two's claim that "every path, line citation and symbol
+    in `implement.md` resolves on disk". Addressed.
+  - C-137, minor: `README.md` is in four Touches lists with one ordering
+    among them, and criterion 11's `README.md` clause was claimed by both
+    PR 1 and PR 6. The closure table already puts it in PR 1. Addressed by
+    saying so in the ordering section.
+  - C-138, minor: `sd shadow sync` was listed as an existing surface. It does
+    not exist — this file introduces it at `prd.md:955`, criterion 28 says
+    only "after a sync", and no `shadow sync` string appears in the pack.
+    Addressed: marked new, like `WORKFLOW.md` and `skills/paths.json`.
+  - Verified sound and recorded as such: the nineteen-file Trellis list is
+    exact and its subcounts hold; C-113's eighteen literal-string hits;
+    criterion 8's two places are exactly two; the fifty-six
+    `argument-vocabulary` files, the five `agents/*.md` and seven
+    `skills/*/SKILL.md` carrying `Active item:`, and the three `none - `
+    files; 495 `prd.md` files and 8 active items; B's slice numbering,
+    criterion 23 and open question 3 quoted correctly; and C-115's
+    `bin/sd_lib.py:391-414` correction.
