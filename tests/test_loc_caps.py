@@ -1,9 +1,10 @@
 """The three line-count ceilings, enforced instead of remembered.
 
 The design fixes a ceiling for each part of the replacement world -- `bin/` at
-14,000 lines (R11-D15, re-derived from built code after 8,000 was busted with
-six of the eleven commands still unwritten -- `sd-plan`, `sd-ship`, `sd-spec`,
-`sd-deps`, `sd-suggest`, `sd-map`), the temporary `migrate-*` tools at 1,500
+14,700 lines (R11-D15 set 14,000, re-derived from built code after 8,000 was
+busted with six of the eleven commands still unwritten -- `sd-plan`, `sd-ship`,
+`sd-spec`, `sd-deps`, `sd-suggest`, `sd-map`; re-derived again at R11-D31 for
+the registry reader), the temporary `migrate-*` tools at 1,500
 outside it, `dashboard/` at 4,350 with 2,300 of it carrying code (R11-D24, with the total
 re-derived at R11-D29) -- and says in as many words that "caps are
 CI tests; a cap is never raised in the PR that busts it". That rule survives
@@ -11,7 +12,10 @@ every re-derivation: 14,000, 4,000 and 4,300 were each set in their own
 decision record by a change that fit under the ceiling it replaced, not in a
 pull request that did not fit. 4,350 was set the same way at R11-D29, by a
 change touching this file and one design record and nothing under `dashboard/`,
-while the directory stood at 4,190 against the 4,300 it replaced.
+while the directory stood at 4,190 against the 4,300 it replaced. 14,700 was
+set the same way at R11-D31, by a change touching this file and one item's
+planning pages and nothing under `bin/`, while the directory stood at 13,307
+against the 14,000 it replaced.
 
 **Downward-only now attaches to the code cap, not to the dashboard total.**
 R11-D17 said 4,000 could only fall; R11-D24 raised it anyway, and said so in
@@ -21,7 +25,12 @@ blanks, which is house style, and one ceiling over both halves means a branch
 and a paragraph bid for the same line -- the paragraph loses, because the
 branch is what the change is for. So the total may be re-derived with an
 itemisation, and `DASHBOARD_CODE_CAP` is the one that may only move downward.
-`bin/`'s 14,000 keeps the original clause, untouched and nowhere near binding.
+`bin/`'s ceiling keeps the original clause and is no longer untouched: it stood
+unmoved from R11-D15 to 2026-09-06, when the registry the review lane reads
+brought the directory within 134 lines of it. It has no code half of its own,
+because `bin/` has no equivalent of `dashboard/app.js` -- one file large enough
+that a paragraph and a branch measurably compete -- and inventing one on the
+day the total first bound would be a mechanism chosen to make a number pass.
 
 Until now they were prose. The retired stack this repository is replacing
 reached 95,000 lines one defensible commit at a time, and no single one of
@@ -58,7 +67,52 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # Each cap names the design decision it enforces, so a failure points at the
 # record rather than at a bare number.
-BIN_CAP = 14_000           # R11-D15: derived from built code, not from unwritten scope
+# R11-D31, re-derived 2026-09-06 for item A's PR 6, the registry reader, which
+# cannot land without it: `bin/` stands at 13,307 on `main` against the 14,000
+# R11-D15 set, and PR 6's first half alone measures +559.
+#
+# 13,307 measured + 559 measured - 158 measured + 888 reserved + 104 unclaimed
+# = 14,700.
+#
+# The 559 is `bin/sd_registry.py` and the installer's registry seed, measured on
+# `feat/the-registry-reader` rather than described: that half is built.
+#
+# The 158 is criterion 6's mandated deletions, measured span by span on `main`
+# -- the `Backend` tuple with `BACKENDS` and `BACKENDS_BY_NAME` at
+# `bin/sd-review:170-251` (82), `argv_backend_argv` at `:812-840` (29),
+# `backend_rows` at `:1036-1050` (15), `plan_providers` at `:1051-1073` (23),
+# and `DEFAULT_POLICY`'s `tiers` block with the two `_providers` keys (9). The
+# criterion requires each by name: no provider table in `bin/sd-review`, and no
+# key ending in `_providers` and no `tiers` key in `sd-review.json`.
+#
+# The 888 is a **reservation and not a measurement**, and the difference from
+# R11-D29 and R11-D30 is stated rather than blurred: both of those measured a
+# replacement body their item's `implement.md` pinned verbatim. This item's does
+# not pin bodies for PR 6, so there is nothing to measure. It is derived the way
+# R11-D15 derived this cap in the first place -- from built code -- by taking
+# each remaining unit's nearest built analogue in `bin/`, which is the only
+# input here that is not an opinion:
+#
+#   the reviewer chain, a routed decision over a list with refusals   257
+#     -- `bin/sd_route.py`, which is that shape for tiers
+#   `sd attribute` and the trailer scan, a verb group with a reader   235
+#     -- `bin/sd_restore.py`
+#   criterion 11's mode predicate, the three questions of the remote  165
+#     -- half of `bin/sd_setup_github.py`, the GitHub-facing surface
+#   the `url` client and the `<think>`/`reasoning_content` reader     151
+#     -- `bin/sd_skill.py`
+#   the installer's `reviewers` consent prompt                         80
+#     -- `seed_registry` plus the offer, the flag and the rerun path
+#
+# An analogue is not a promise. If PR 6's runtime comes in over 888, that busts
+# a ceiling visibly, which is the behaviour this constant exists to produce; it
+# does not license a second re-derivation inside that pull request.
+#
+# The 104 unclaimed is what a round 14,700 left after the subtraction, stated as
+# such. Nothing else in this item is funded here: PRs 7 and 8 are unwritten
+# scope, and R11-D15's clause is that this cap is derived from built code and
+# not from that.
+BIN_CAP = 14_700           # R11-D31: re-derived from built code for PR 6
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
 # R11-D29, re-derived 2026-09-03 with the itemisation R11-D24's clause asks
 # for: 4,190 measured on `main`, 158 measured on the branch that carries the
