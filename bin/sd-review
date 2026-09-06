@@ -1140,8 +1140,18 @@ def _planned(
     planned: list[dict[str, Any]] = []
     for provider in chosen:
         start = provider.start or ""
-        if provider.reader != "codex-json" or not sd_registry.executable(start):
-            reason = f"nothing here runs a {provider.reader!r} entry starting {start!r}"
+        if provider.reader not in READERS or not sd_registry.executable(start):
+            # `READERS`, not a spelled-out name: this list and the chain's have
+            # to be the same list, or the dry run and the real run disagree
+            # about what would happen. The wording splits the same two cases
+            # the chain splits, for the same reason -- a `url` entry names no
+            # reader because it spawns nothing, and saying it named `None` was
+            # a typo nobody made.
+            reason = (
+                f"{provider.name} is a 'url' entry, and nothing here runs one yet"
+                if provider.url
+                else f"nothing here runs a {provider.reader!r} entry starting {start!r}"
+            )
             planned.append({"backend": provider.name, "argv": [], "would_run": False, "reason": reason})
             continue
         argv = codex_argv(root, pathlib.Path("<attempt-dir>"), prompt, start)

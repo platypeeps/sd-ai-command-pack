@@ -442,6 +442,14 @@ class TheConsentLine(unittest.TestCase):
         self.assertEqual(allowed, want)
         self.assertIsNone(sd_registry.refuse_allowance(provider, allowed))
 
+    def test_a_recipient_holding_a_hash_keeps_it(self) -> None:
+        """`shlex` treats `#` as a comment, which the quote-aware split
+        inherited: `codex@codex#x` silently consented to `codex`. Nothing on
+        this line is a comment, and a truncated recipient is consent to a
+        destination the operator did not write."""
+        allowed = sd_registry.parse_consent("codex@codex#x")
+        self.assertEqual(allowed["codex"].recipient, "codex#x")
+
     def test_a_recipient_carrying_its_own_separator_is_one_pair(self) -> None:
         """A url entry's recipient is its netloc, userinfo included. The first
         separator splits and only the first, so this is well defined -- an

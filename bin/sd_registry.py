@@ -746,6 +746,10 @@ def consent_parts(line: str) -> list[str]:
     lexer = shlex.shlex(line, posix=True)
     lexer.whitespace = " \t\n\r,"
     lexer.whitespace_split = True
+    # `shlex` treats `#` as a comment by default, which quietly truncated a
+    # recipient that held one: `codex@codex#x` consented to `codex`. Nothing
+    # on this line is a comment.
+    lexer.commenters = ""
     try:
         return list(lexer)
     except ValueError as error:

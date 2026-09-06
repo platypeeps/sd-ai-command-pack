@@ -1255,8 +1255,13 @@ def cmd_user(ctx: Context, out) -> int:
         print(f"  SessionStart hook registered: {hook}", file=out)
     if excludes_changed:
         print(f"  global excludes: {EXCLUDES_LINE} -> {excludes}", file=out)
-    if seeded_registry:
-        print(f"  {registry_report}", file=out)
+    # Printed whichever way it went. `seed_registry` says its report "says
+    # which -- an install that quietly did nothing is the same output as one
+    # that quietly overwrote", and printing only the seeding case made the
+    # sentence false for the two outcomes it was written for. The one that
+    # cost most was the missing source: no registry, no reviewer resolves, and
+    # nothing on screen to say so.
+    print(f"  {registry_report}", file=out)
     for path, reason in skipped:
         print(f"  left in place ({reason}): {path}", file=out)
     return 0

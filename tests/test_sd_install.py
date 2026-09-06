@@ -1732,6 +1732,26 @@ class ProviderRegistrySeedTests(InstallerHarness):
         self.assertIn("would seed", report)
         self.assertFalse(self.target.exists())
 
+    def test_the_install_says_it_seeded_nothing_when_there_was_nothing(self):
+        """Copilot found this. `seed_registry` promises its report "says which
+        -- an install that quietly did nothing is the same output as one that
+        quietly overwrote", and the caller printed it only when it had seeded.
+        So the outcome that costs most -- no registry, so no reviewer resolves
+        -- was the one that printed nothing at all."""
+        checkout = self.make_checkout("sd-kept")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context(checkout), out), 0)
+        self.assertIn("no reviewer resolves", out.getvalue())
+
+    def test_the_install_says_it_left_an_existing_registry_alone(self):
+        checkout = self.make_checkout("sd-kept")
+        self.with_registry(checkout)
+        self.target.parent.mkdir(parents=True, exist_ok=True)
+        self.target.write_text("bills: {}\n", encoding="utf-8")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context(checkout), out), 0)
+        self.assertIn("left as it is", out.getvalue())
+
     def test_the_install_reports_the_seed_and_the_file_is_readable(self):
         checkout = self.make_checkout("sd-kept")
         self.with_registry(checkout)
