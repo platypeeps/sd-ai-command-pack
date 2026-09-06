@@ -633,7 +633,9 @@ def attribution(root: pathlib.Path, base: str, head: str) -> dict[str, str]:
     """
     own: dict[str, str] = {}
     claimed: dict[str, str] = {}
-    for sha, message in commit_messages(root, base, head):
+    commits = commit_messages(root, base, head)
+    shas = [sha for sha, _ in commits]
+    for sha, message in commits:
         # Git's trailer block -- the last paragraph -- and unindented, which is
         # what makes a trailer a trailer. Reading the whole message, stripped,
         # reads a trailer quoted inside a commit that was describing one.
@@ -644,7 +646,9 @@ def attribution(root: pathlib.Path, base: str, head: str) -> dict[str, str]:
             elif line.startswith(ATTRIBUTES_TRAILER):
                 parts = line[len(ATTRIBUTES_TRAILER) :].split()
                 if len(parts) == 2:
-                    claimed.setdefault(parts[0], parts[1])
+                    named = _in_range(parts[0], shas)
+                    if named:
+                        claimed.setdefault(named, parts[1])
     # A commit's own trailer outranks a later commit's claim about it, and the
     # two dictionaries exist to make that ordering explicit. Merging in one
     # walk let a later `Attributes:` overwrite what a commit said about itself,
@@ -652,6 +656,24 @@ def attribution(root: pathlib.Path, base: str, head: str) -> dict[str, str]:
     # thereby buying it an anthropic reviewer -- took one line in a later
     # message. `Attributes:` is for commits that said nothing.
     return {**claimed, **own}
+
+
+def _in_range(named: str, shas: list[str]) -> str:
+    """The full sha `named` refers to, or "" if the range does not hold it.
+
+    A claim about a commit outside `base..head` says nothing about the work
+    under review, and keeping it bought a vendor a place in the author set --
+    and so cost that vendor its seat as a reviewer -- for a commit nobody is
+    reviewing. Three ways it happens, one answer for all of them: the named
+    commit already merged, a rebase moved it, or the line is simply wrong.
+
+    A prefix is enough, the way it is everywhere else in git, but only when it
+    picks out one commit. Two matches name nothing in particular.
+    """
+    if len(named) < 7:
+        return ""
+    matches = [sha for sha in shas if sha.startswith(named)]
+    return matches[0] if len(matches) == 1 else ""
 
 
 def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:

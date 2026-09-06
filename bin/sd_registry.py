@@ -356,6 +356,10 @@ def _value(text: str, line: int) -> Any:
             key, _, rest = part.partition(":")
             if not _:
                 raise RegistryError(f"line {line}: {part.strip()!r} has no ':'")
+            if key.strip() in body:
+                raise RegistryError(
+                    f"line {line}: {key.strip()!r} twice in one mapping"
+                )
             body[key.strip()] = _value(rest, line)
         return body
     if text.startswith("[") and text.endswith("]"):
@@ -395,6 +399,11 @@ def _document(text: str, path: Path) -> dict[str, dict[str, Any]]:
         if not separator:
             raise RegistryError(f"{path}: line {number}: {line.strip()!r} has no ':'")
         if not indented:
+            if key.strip() in sections:
+                raise RegistryError(
+                    f"{path}: line {number}: a second {key.strip()!r} section. "
+                    f"The later one would silently replace the first."
+                )
             current = {}
             sections[key.strip()] = current
             if rest.strip():
@@ -405,6 +414,12 @@ def _document(text: str, path: Path) -> dict[str, dict[str, Any]]:
             continue
         if current is None:
             raise RegistryError(f"{path}: line {number}: an entry before any section")
+        if key.strip() in current:
+            raise RegistryError(
+                f"{path}: line {number}: a second {key.strip()!r} entry. The "
+                f"later one would silently replace the first, so the file "
+                f"would not say what it appears to say."
+            )
         current[key.strip()] = _value(rest, number)
     if pending:
         raise RegistryError(f"{path}: line {start}: a flow value is never closed")
@@ -496,6 +511,15 @@ def _provider(
     if "vendor" not in body:
         raise RegistryError(f"{path}: provider {name!r} has no 'vendor'")
 
+    enabled = body.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise RegistryError(
+            f"{path}: provider {name!r} has enabled={enabled!r}, which is not "
+            f"true or false. 'no', 'off' and a quoted 'false' are strings "
+            f"here, and every non-empty string is true, so the entry would "
+            f"stay on. Write true or false, unquoted."
+        )
+
     declared = body.get("roles")
     if declared is None:
         roles = tuple(role for role in ROLES if name in role_lists.get(role, []))
@@ -519,7 +543,7 @@ def _provider(
         price=dict(body.get("price") or {}),
         env=tuple(str(variable) for variable in (body.get("env") or ())),
         roles=roles,
-        enabled=bool(body.get("enabled", True)),
+        enabled=enabled,
         reason=body.get("reason"),
         ranks={
             role: role_lists[role].index(name)

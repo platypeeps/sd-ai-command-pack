@@ -982,6 +982,40 @@ class TheTrailerBlockTests(ReviewFixture):
         self.commit(root, f"chore: attribute it\n\nAuthored-with: human\nAttributes: {early} codex/openai")
         self.assertEqual(sd_review.author_vendors(root, self.subject(root, base)), ("openai",))
 
+    def test_attributes_naming_a_commit_outside_the_range_says_nothing(self) -> None:
+        """Copilot's fourth pass. A claim about a commit nobody is reviewing
+        put its vendor in the author set anyway, and an author's vendor is
+        barred from reviewing -- so one line naming an already-merged sha
+        struck a reviewer off the chain for work it did not write."""
+
+        root = self.make_repo()
+        outsider = self.commit(root, "on main\n\nAuthored-with: kimi/moonshot")
+        subprocess.run(
+            ["git", "checkout", "--quiet", "-b", "work"],
+            cwd=str(root), check=True, capture_output=True,
+        )
+        self.commit(
+            root,
+            f"the only commit under review\n\nAuthored-with: human\n"
+            f"Attributes: {outsider} kimi/moonshot",
+        )
+        self.assertEqual(
+            sd_review.author_vendors(root, self.subject(root, outsider)), ()
+        )
+
+    def test_a_short_sha_still_names_its_commit(self) -> None:
+        """Git takes a prefix everywhere else, so the range check does too."""
+
+        root = self.make_repo()
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+        early = self.commit(root, "feat: written before the convention")
+        self.commit(
+            root, f"chore: attribute it\n\nAuthored-with: human\nAttributes: {early[:8]} codex/openai"
+        )
+        self.assertEqual(sd_review.author_vendors(root, self.subject(root, base)), ("openai",))
+
 
 class NoRegistryOnThisMachineTests(ReviewFixture):
     """A machine with no installed registry still answers.

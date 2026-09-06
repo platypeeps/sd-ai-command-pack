@@ -248,6 +248,56 @@ class TheRefusals(unittest.TestCase):
     def test_an_unknown_role(self) -> None:
         self.assertIn("'auditor'", self.refuse(self.filled() + "  auditor: [two]\n"))
 
+    def test_a_second_section_of_the_same_name(self) -> None:
+        message = self.refuse(self.filled() + "roles:\n  reviewer: [one]\n")
+        self.assertIn("second 'roles' section", message)
+
+    def test_a_second_entry_of_the_same_name(self) -> None:
+        """The later one won and the file did not say so. An operator reading
+        the first entry -- its vendor, its bill, whether it is on at all --
+        was reading something the code had already discarded."""
+        message = self.refuse(
+            self.filled().replace(
+                "roles:\n",
+                '  one: { url: "http://localhost:9/v1", vendor: omega, '
+                "bill: free, roles: [author] }\nroles:\n",
+                1,
+            )
+        )
+        self.assertIn("second 'one' entry", message)
+
+    def test_a_key_twice_in_one_flow_mapping(self) -> None:
+        message = self.refuse(
+            self.filled().replace("vendor: beta,", "vendor: beta, vendor: gamma,")
+        )
+        self.assertIn("'vendor' twice", message)
+
+    def test_enabled_written_as_anything_but_true_or_false(self) -> None:
+        """`no`, `off` and a quoted `"false"` are strings in this subset, and
+        `bool()` of any non-empty string is true. An entry turned off with one
+        of them stayed on, and stayed on the reviewer chain, which is the one
+        place a silent misread sends the repository's diff somewhere the
+        operator had already said no to."""
+        for literal in ("no", "off", '"false"', "nope"):
+            with self.subTest(enabled=literal):
+                message = self.refuse(
+                    self.filled().replace(
+                        "vendor: beta,", f"enabled: {literal}, vendor: beta,"
+                    )
+                )
+                self.assertIn("not true or false", message)
+
+    def test_enabled_written_true_or_false_is_read(self) -> None:
+        for literal, expected in (("true", True), ("false", False)):
+            with self.subTest(enabled=literal):
+                registry = sd_registry.parse(
+                    self.filled().replace(
+                        "vendor: beta,", f"enabled: {literal}, vendor: beta,"
+                    ),
+                    "fixture.yaml",
+                )
+                self.assertIs(registry.providers["two"].enabled, expected)
+
     def filled(self) -> str:
         """`MINIMAL` with the bill each entry needs, so a test that is not
         about the bill does not fail on it."""
