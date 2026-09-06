@@ -3180,3 +3180,26 @@ from a number the operator types.
     `skills/sd-ship/SKILL.md:54` "citing the page instead of naming 800",
     which reads as a description of the file. That line names 800 literally
     today. Restated as the work.
+  - C-164, material: C-156's own fix names a check that does not exist. It
+    moved the dangling-link duty off `tests/test_doc_citations.py` and onto
+    "the link checker whose `documentationRoots` cover the page". There is no
+    such checker. `documentationRoots` occurs in five files, every one of them
+    prose, and the passage cited is a recommendation in an archived August
+    item. Nothing in `.github/`, the `Makefile`, `bin/` or `tests/` runs a
+    link checker. Found while reviewing pull request 743, which moved four
+    `done` item directories into `archive/2026-09` as pure renames and left
+    thirteen references in nine tracked files pointing at the old paths, with
+    `sd-docs-lint` clean and `make check` at 40 OK. Addressed in the Touches
+    list: the four referrers are updated by enumeration and no gate is
+    claimed. **The gap itself is left open**: this item's decision to keep
+    `done` directories rests on their inbound links resolving, and no surface
+    checks that they do. Recorded, not scheduled — a new criterion here is a
+    scope change for the operator to make.
+  - C-165, decision: pull request 743, "sweep four merged items into
+    archive/2026-09", closed unmerged on 2026-09-06. It is one run of the
+    mechanism requirement 13 deletes, opened at 04:00Z on 2026-09-05 and
+    overtaken by the operator's decision that same day at `prd.md:785` — no
+    sweep, no archive, the directory stays. Its first swept item,
+    `2026-08-29-artifacts-as-product`, is the case this item cites at
+    `prd.md:794` for keeping directories. Merging it would also have broken
+    the thirteen references C-164 names.

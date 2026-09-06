@@ -34,10 +34,18 @@ Every other carries `Item:` and leaves the row open.
 a wrong model of where the deleted lane lives —
 `docs/planning-adversarial-review-codex.md` (the lane page itself),
 `AGENTS.md`, `docs/spec/backend/manifest-and-filesystem.md`,
-`skills/sd-research-repo/references/conventions.md`, and the link checker
-whose `documentationRoots` cover the page
-(`docs/spec/backend/manifest-and-filesystem.md:1517-1519`), which is what a
-dangling link trips. **Not `tests/test_doc_citations.py`**, which an earlier
+`skills/sd-research-repo/references/conventions.md`. **Nothing gates the
+reference.** An earlier draft named "the link checker whose
+`documentationRoots` cover the page", citing
+`docs/spec/backend/manifest-and-filesystem.md:1517-1519`. That passage is a
+recommendation from an archived August item, not a description of a running
+check: `documentationRoots` appears in five files repository-wide, all of
+them prose — that spec page, an archived item's `design.md` and
+`implement.md`, and this item's own two pages — and no workflow, `Makefile`
+target or script in `.github/`, `bin/` or `tests/` invokes any link checker.
+So deleting the lane page breaks its four referrers silently, and this pull
+request updates all four by enumeration rather than relying on a gate to
+catch a miss. **Not `tests/test_doc_citations.py`** either, which an earlier
 draft listed as "the file that breaks when the page goes": it does not break,
 on two counts run on 2026-09-05. Its `anchored_citations()` globs
 `docs/**/*.md` only, so `AGENTS.md` and
