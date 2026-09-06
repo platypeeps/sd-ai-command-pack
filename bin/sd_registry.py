@@ -35,7 +35,7 @@ import hashlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 #: Beside the database, in `~/.local/share/sd/`. The same path `sd_db` uses;
@@ -649,7 +649,7 @@ def refuse_allowance(provider: Provider, allowed: Allowance | None) -> str | Non
     return None
 
 
-def refuse_environment(provider: Provider, environ: dict[str, str]) -> str | None:
+def refuse_environment(provider: Provider, environ: Mapping[str, str]) -> str | None:
     """A variable whose value is a URL, which a spawned session may not receive.
 
     A key is a secret and the operator has consented to that; a URL in the

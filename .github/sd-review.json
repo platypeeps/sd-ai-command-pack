@@ -1,12 +1,6 @@
 {
   "$schema": "./sd-review.schema.json",
   "tier_order": ["skip", "cheap", "standard", "deep"],
-  "tiers": {
-    "skip": [],
-    "cheap": ["codex"],
-    "standard": ["codex", "prism"],
-    "deep": ["codex", "prism", "gito"]
-  },
   "default_tier": "standard",
   "categories": [
     {"name": "installer", "required": true, "paths": ["bin/sd_install.py"], "tier": "deep"},
@@ -26,7 +20,5 @@
   ],
   "large_change_lines": 800,
   "authors": ["sdelmas"],
-  "severity_floor": "medium",
-  "challenge_providers": ["codex"],
-  "planning_providers": ["codex"]
+  "severity_floor": "medium"
 }

@@ -107,12 +107,14 @@ class EnvironmentTests(ReviewFixture):
                 "codex": sd_review.Completed(0, '{"findings": []}', ""),
             }
         )
-        parent = {
-            "PATH": "/usr/bin",
-            "CODEX_API_KEY": "sk-metered",
-            "CODEX_ACCESS_TOKEN": "tok-metered",
-            "OPENAI_API_KEY": "sk-unrelated",
-        }
+        # HOME is where the run reads the provider registry from, so it is in
+        # every environment here; it is not a credential and is not scrubbed.
+        parent = self.environment(
+            PATH="/usr/bin",
+            CODEX_API_KEY="sk-metered",
+            CODEX_ACCESS_TOKEN="tok-metered",
+            OPENAI_API_KEY="sk-unrelated",
+        )
         result = sd_review.review(
             root, namespace(), runner, parent, self.chatgpt_home()
         )
@@ -140,7 +142,7 @@ class EnvironmentTests(ReviewFixture):
             root,
             namespace(),
             runner,
-            {"PATH": "/usr/bin", "OPENAI_API_KEY": "sk-unrelated"},
+            self.environment(PATH="/usr/bin", OPENAI_API_KEY="sk-unrelated"),
             self.chatgpt_home(),
         )
         self.assertEqual(result["outcomes"][0]["status"], sd_review.CLEAN)
@@ -152,7 +154,7 @@ class RefusalReachesTheRunTests(ReviewFixture):
         root = self.make_repo()
         (root / "src.py").write_text("x = 1\n", encoding="utf-8")
         runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
-        result = sd_review.review(root, namespace(), runner, {"PATH": "/bin"}, home)
+        result = sd_review.review(root, namespace(), runner, self.environment(PATH="/bin"), home)
         return result, runner
 
     def test_a_refused_preflight_never_starts_codex(self) -> None:
@@ -172,7 +174,7 @@ class RefusalReachesTheRunTests(ReviewFixture):
         root = self.make_repo()
         home = write_auth(self.tmp / "explain-home", {"auth_mode": "apikey"})
         runner = FakeRunner()
-        result = sd_review.review(root, namespace(explain=True), runner, {}, home)
+        result = sd_review.review(root, namespace(explain=True), runner, self.environment(), home)
         self.assertFalse(result["codex_preflight"]["ok"])
         self.assertIn("auth_mode", result["codex_preflight"]["reason"])
         self.assertEqual(runner.calls, [])
@@ -196,7 +198,7 @@ class NoCredentialReachesOutputTests(ReviewFixture):
             }
         )
         result = sd_review.review(
-            root, namespace(), runner, {"PATH": "/bin", **secrets}, self.chatgpt_home()
+            root, namespace(), runner, self.environment(PATH="/bin", **secrets), self.chatgpt_home()
         )
         serialised = json.dumps(result)
         import io

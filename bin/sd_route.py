@@ -1,4 +1,4 @@
-"""Review routing: which providers see a change, and why.
+"""Review routing: how deeply a change is read, and why.
 
 One pure function. ``route`` takes the paths a change touches, how many lines it
 moves, whether the pull request is a draft, and a policy dictionary the caller
@@ -6,15 +6,21 @@ loaded from JSON. It returns a :class:`Plan`. It reads no files, runs no
 subprocesses, and asks no network -- everything it decides is a function of its
 arguments, so a fixture is a dict and a plan is comparable with ``==``.
 
-The policy is data on purpose. Which categories exist, which paths are sensitive,
-which tier each category starts at, and which providers each tier chains are all
-per-repository choices; the rules for combining them are not.
+The policy is data on purpose. Which categories exist, which paths are sensitive
+and which tier each category starts at are per-repository choices; the rules for
+combining them are not.
+
+**It no longer says who reviews.** A tier used to name a provider chain, and the
+policy carried the table; criterion 6 moves every provider name into the
+registry, so a tier now says only how many reviewers off that chain a change
+earns. The counts in ``TIER_DEPTH`` are the lengths of the rows the deleted
+table carried, so a change is read by as many providers as it was before -- what
+changed is that the policy no longer gets to say which.
 
 Policy shape (every key optional unless noted)::
 
     {
       "tier_order": ["skip", "cheap", "standard", "deep"],
-      "tiers": {"skip": [], "cheap": ["codex"], "deep": ["codex", "prism"]},
       "default_tier": "standard",
       "categories": [
         {"name": "tooling", "required": true, "paths": ["bin/**"],
@@ -35,12 +41,21 @@ from typing import Any, Mapping, NamedTuple, Sequence
 DEFAULT_TIER_ORDER: tuple[str, ...] = ("skip", "cheap", "standard", "deep")
 DEFAULT_LARGE_CHANGE_LINES = 800
 
+#: How many reviewers off the chain each tier earns. Read off the deleted
+#: provider table's own rows -- ``skip`` named none, ``cheap`` one, ``standard``
+#: two, ``deep`` three -- so the depth a change gets is unchanged and only the
+#: naming of who provides it has moved. A tier this does not name gets one,
+#: because a repository may declare its own ``tier_order`` and a tier that
+#: reviews nothing would be a silent hole rather than a policy.
+TIER_DEPTH: dict[str, int] = {"skip": 0, "cheap": 1, "standard": 2, "deep": 3}
+DEFAULT_DEPTH = 1
+
 
 class Plan(NamedTuple):
     """The routing decision for one change."""
 
     tier: str
-    providers: tuple[str, ...]
+    depth: int
     category: str | None
     reason: str
 
@@ -51,7 +66,7 @@ def route(
     draft: bool,
     policy: Mapping[str, Any],
 ) -> Plan:
-    """Decide which review tier a change gets, and which providers run in it.
+    """Decide which review tier a change gets, and how many readers that buys.
 
     The order below is the whole contract, and each step can only be reached
     when the one before it did not settle the question:
@@ -76,7 +91,6 @@ def route(
     """
 
     order = _tier_order(policy)
-    tiers = policy.get("tiers") or {}
     ordered_paths = tuple(paths)
 
     default_tier = _clamp(str(policy.get("default_tier") or order[-1]), order)
@@ -116,8 +130,12 @@ def route(
         else:
             reasons.append("draft pull request, already at the cheapest reviewing tier")
 
-    providers = tuple(str(name) for name in tiers.get(tier, ()))
-    return Plan(tier=tier, providers=providers, category=category, reason="; ".join(reasons))
+    return Plan(
+        tier=tier,
+        depth=TIER_DEPTH.get(tier, DEFAULT_DEPTH),
+        category=category,
+        reason="; ".join(reasons),
+    )
 
 
 def _tier_order(policy: Mapping[str, Any]) -> tuple[str, ...]:

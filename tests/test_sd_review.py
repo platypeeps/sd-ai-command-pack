@@ -12,6 +12,7 @@ import argparse
 import importlib.machinery
 import importlib.util
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -83,10 +84,37 @@ def namespace(**overrides: Any) -> argparse.Namespace:
         "dry_run": False,
         "json": False,
         "draft": False,
+        "provider": None,
         "timeout": 60,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
+
+
+#: The fixture's own registry, deliberately not the shipped one. A test that
+#: read `providers.yaml` would assert against whichever providers happen to be
+#: pinned this month, and every chain assertion below would change meaning the
+#: next time an entry is added. Two entries with the same reader is the shape
+#: the chain tests need: a second reviewer that actually runs.
+FIXTURE_REGISTRY = """
+bills:
+  first:  { cost: subscription }
+  second: { cost: subscription }
+
+providers:
+  codex:  { start: "codex exec", vendor: openai, bill: first,
+            roles: [reviewer], reader: codex-json, env: [] }
+  second: { start: "second exec", vendor: secondvendor, bill: second,
+            roles: [author, reviewer], reader: codex-json, env: [] }
+
+roles:
+  author: [second]
+  reviewer: [codex, second]
+"""
+
+#: What the fixture repository consents to. `entry@executable` for both, which
+#: is what `recipient()` derives from each entry's start line.
+FIXTURE_CONSENT = "codex@codex, second@second"
 
 
 class ReviewFixture(unittest.TestCase):
@@ -94,6 +122,25 @@ class ReviewFixture(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.tmp = pathlib.Path(self._tmp.name).resolve()
+        self.registry_home = self.tmp / "registry-home"
+        (self.registry_home / ".local" / "share" / "sd").mkdir(parents=True)
+        (self.registry_home / ".local" / "share" / "sd" / "providers.yaml").write_text(
+            FIXTURE_REGISTRY, encoding="utf-8"
+        )
+
+    def environment(self, **extra: str) -> dict[str, str]:
+        """An environment whose HOME is the fixture's, so the run reads the
+        fixture's registry rather than the developer's."""
+        return {"HOME": str(self.registry_home), **extra}
+
+    def local_block(self, root: pathlib.Path, *lines: str) -> None:
+        body = "\n".join((f"{sd_review.sd_lib.CONSENT_KEY}: {FIXTURE_CONSENT}", *lines))
+        (root / "CLAUDE.local.md").write_text(
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\n"
+            f"{body}\n"
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n",
+            encoding="utf-8",
+        )
 
     def make_repo(self, name: str = "repo") -> pathlib.Path:
         root = self.tmp / name
@@ -105,6 +152,7 @@ class ReviewFixture(unittest.TestCase):
         ):
             subprocess.run(["git", *args], cwd=str(root), check=True, capture_output=True)
         (root / "README.md").write_text("seed\n", encoding="utf-8")
+        self.local_block(root)
         subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "--quiet", "-m", "seed"], cwd=str(root), check=True, capture_output=True
@@ -161,8 +209,7 @@ class PolicyTests(ReviewFixture):
         self.assert_rejects("{not json", "not valid JSON")
         self.assert_rejects([], "must be a JSON object")
         self.assert_rejects({"nonsense": 1}, "unknown key(s) nonsense")
-        self.assert_rejects({"tiers": {"nope": []}}, "tiers.nope is not in tier_order")
-        self.assert_rejects({"tiers": {"cheap": ["nosuch"]}}, "unknown backend 'nosuch'")
+        self.assert_rejects({"tiers": {"cheap": []}}, "tiers is retired")
         self.assert_rejects({"default_tier": "gold"}, "default_tier must be one of")
         self.assert_rejects({"categories": [{"paths": ["a"]}]}, "name must be a non-empty string")
         self.assert_rejects({"categories": [{"name": "x", "paths": []}]}, "must name at least one glob")
@@ -171,7 +218,8 @@ class PolicyTests(ReviewFixture):
         self.assert_rejects({"severity_floor": "urgent"}, "severity_floor must be one of")
         self.assert_rejects({"authors": [3]}, "authors[0] must be a string")
         self.assert_rejects({"tier_order": ["a", "a"]}, "must not repeat a tier")
-        self.assert_rejects({"challenge_providers": ["ghost"]}, "names unknown backend 'ghost'")
+        self.assert_rejects({"challenge_providers": ["x"]}, "challenge_providers is retired")
+        self.assert_rejects({"planning_providers": ["x"]}, "planning_providers is retired")
 
     def test_a_broken_policy_never_falls_back_to_the_default(self) -> None:
         root = self.make_repo()
@@ -181,29 +229,24 @@ class PolicyTests(ReviewFixture):
             sd_review.load_policy(root)
 
 
-class BackendTableTests(unittest.TestCase):
-    def test_probe_gated_backends_are_declared_disabled_with_a_reason(self) -> None:
-        for name in ("antigravity", "exo", "baseten"):
-            row = sd_review.BACKENDS_BY_NAME[name]
-            self.assertFalse(row.enabled, name)
-            self.assertEqual(row.strategy, "none", name)
-            self.assertTrue(row.disabled_reason.strip(), f"{name} is disabled without a reason")
+class ReaderTests(ReviewFixture):
+    """What a registry entry's `reader` decides, now that no table does."""
 
-    def test_github_backends_are_declared_but_never_local(self) -> None:
-        for name in ("copilot", "greptile"):
-            row = sd_review.BACKENDS_BY_NAME[name]
-            self.assertEqual(row.lane, "github", name)
-            self.assertFalse(row.enabled, name)
+    def provider(self, **overrides: Any) -> Any:
+        fields: dict[str, Any] = {
+            "name": "someone",
+            "vendor": "somevendor",
+            "bill": "first",
+            "start": "someone review",
+            "reader": "codex-json",
+        }
+        fields.update(overrides)
+        return sd_review.sd_registry.Provider(**fields)
 
-    def test_codex_heads_every_tier_that_reviews_anything(self) -> None:
-        for tier, chain in sd_review.DEFAULT_POLICY["tiers"].items():
-            if chain:
-                self.assertEqual(chain[0], "codex", tier)
-
-    def test_a_disabled_backend_reports_its_reason_instead_of_running(self) -> None:
+    def test_an_unimplemented_reader_is_not_run_and_names_itself(self) -> None:
         runner = FakeRunner()
-        outcome = sd_review.run_backend(
-            sd_review.BACKENDS_BY_NAME["baseten"],
+        outcome = sd_review.run_provider(
+            self.provider(reader="claude-json"),
             pathlib.Path("/nonexistent"),
             sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
             "prompt",
@@ -211,9 +254,20 @@ class BackendTableTests(unittest.TestCase):
             {},
             60,
         )
-        self.assertEqual(outcome.status, sd_review.DISABLED)
-        self.assertIn("gap gate", outcome.detail)
-        self.assertEqual(runner.calls, [])
+        self.assertEqual(outcome.status, sd_review.NOT_RUN)
+        self.assertIn("claude-json", outcome.detail)
+        self.assertEqual(runner.calls, [], "an unreadable provider is not started")
+
+    def test_the_entrys_start_line_is_what_runs(self) -> None:
+        """`codex-json` names a protocol, not one executable. An entry that
+        speaks it through a wrapper runs the wrapper, and a reader that
+        hardcoded `codex` would silently review with the wrong binary."""
+
+        argv = sd_review.codex_argv(
+            pathlib.Path("/repo"), pathlib.Path("/work"), "prompt", "wrapped codex exec"
+        )
+        self.assertEqual(argv[:3], ["wrapped", "codex", "exec"])
+        self.assertIn("--sandbox", argv)
 
 
 class SubjectTests(ReviewFixture):
@@ -396,7 +450,7 @@ class PipelineTests(ReviewFixture):
             root,
             namespace(**overrides),
             runner,
-            dict(env or {}),
+            self.environment(**dict(env or {})),
             self.chatgpt_home(),
         )
 
@@ -438,16 +492,16 @@ class PipelineTests(ReviewFixture):
             {
                 "sd-check": sd_review.Completed(0, "{}", ""),
                 "codex": sd_review.Completed(1, "", "usage limit reached"),
-                "prism": sd_review.Completed(0, '{"findings": []}', ""),
+                "second": sd_review.Completed(0, '{"findings": []}', ""),
             }
         )
         result = self.run_review(root, runner)
         self.assertEqual(result["status"], "rate_limited")
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["codex"], sd_review.RATE_LIMITED)
-        self.assertEqual(statuses["prism"], sd_review.NOT_RUN)
-        self.assertEqual(sorted(result["remaining"]), ["codex", "prism"])
-        self.assertNotIn("prism", [pathlib.Path(call["argv"][0]).name for call in runner.calls])
+        self.assertEqual(statuses["second"], sd_review.NOT_RUN)
+        self.assertEqual(sorted(result["remaining"]), ["codex", "second"])
+        self.assertNotIn("second", [pathlib.Path(call["argv"][0]).name for call in runner.calls])
 
     def test_an_unavailable_provider_lets_the_chain_continue(self) -> None:
         root = self.make_repo()
@@ -456,13 +510,13 @@ class PipelineTests(ReviewFixture):
             {
                 "sd-check": sd_review.Completed(0, "{}", ""),
                 "codex": sd_review.Completed(127, "", "codex: not found on PATH", False),
-                "prism": sd_review.Completed(0, '{"findings": []}', ""),
+                "second": sd_review.Completed(0, '{"findings": []}', ""),
             }
         )
         result = self.run_review(root, runner)
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["codex"], sd_review.UNAVAILABLE)
-        self.assertEqual(statuses["prism"], sd_review.CLEAN)
+        self.assertEqual(statuses["second"], sd_review.CLEAN)
         self.assertEqual(result["status"], "clean")
 
     def test_every_provider_unavailable_is_not_a_clean_review(self) -> None:
@@ -517,13 +571,7 @@ class PipelineTests(ReviewFixture):
     def test_the_local_block_reaches_the_prompt(self) -> None:
         root = self.make_repo()
         self.prepare(root)
-        local = root / "CLAUDE.local.md"
-        local.write_text(
-            "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\n"
-            "check: make check\n"
-            "<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n",
-            encoding="utf-8",
-        )
+        self.local_block(root, "check: make check")
         result = self.run_review(root, FakeRunner(), dry_run=True)
         self.assertTrue(result["local_block_prepended"])
         prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["argv"][-1]
@@ -536,7 +584,8 @@ class PipelineTests(ReviewFixture):
         (root / "feature.py").write_text("y = 2\n", encoding="utf-8")
         subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, capture_output=True)
         subprocess.run(
-            ["git", "commit", "--quiet", "-m", "f"], cwd=str(root), check=True, capture_output=True
+            ["git", "commit", "--quiet", "-m", "f\n\nAuthored-with: human"],
+            cwd=str(root), check=True, capture_output=True
         )
         result = self.run_review(root, FakeRunner(), dry_run=True, scope="branch")
         prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["argv"][-1]
@@ -555,12 +604,16 @@ class PipelineTests(ReviewFixture):
 
 class CliTests(ReviewFixture):
     def run_cli(self, args: list[str], cwd: pathlib.Path) -> subprocess.CompletedProcess[str]:
+        # The fixture's HOME, so the CLI reads the fixture registry. Without it
+        # these tests would pass or fail on whether whoever runs them has run
+        # the installer, which is not what they are about.
         return subprocess.run(
             [sys.executable, str(SD_REVIEW), *args],
             cwd=str(cwd),
             capture_output=True,
             text=True,
             check=False,
+            env={**os.environ, "HOME": str(self.registry_home)},
         )
 
     def test_explain_against_this_repository_exits_zero(self) -> None:
@@ -594,27 +647,6 @@ class CliTests(ReviewFixture):
         self.assertIn("not valid JSON", finished.stderr)
 
 
-class EnabledBackendTests(unittest.TestCase):
-    """A row ships enabled only after its argv was checked against the real CLI.
-
-    codex and prism were: `codex exec` with the hardened invocation, and
-    `prism review range|codebase ... --format json`, both read off the installed
-    binaries' help. gito's and kimi's transcribed spellings were wrong (gito
-    takes `--what`, has no `--json`, and writes a report folder; `kimi review`
-    is not a subcommand at all), so they ship disabled. Re-enabling one means
-    editing this test too, which is the point: it is the record of what was
-    verified, not a summary of what is intended.
-    """
-
-    def test_only_verified_argv_rows_ship_enabled(self) -> None:
-        enabled = {row.name for row in sd_review.BACKENDS if row.enabled}
-        self.assertEqual(enabled, {"codex", "prism"})
-
-    def test_every_disabled_row_says_why(self) -> None:
-        for row in sd_review.BACKENDS:
-            if not row.enabled:
-                self.assertTrue(row.disabled_reason.strip(), f"{row.name} is silently off")
-
 class ScopeProvidersOverASkipTier(unittest.TestCase):
     """A `skip` tier silences the tier, not the scope.
 
@@ -622,13 +654,16 @@ class ScopeProvidersOverASkipTier(unittest.TestCase):
     `docs/work/2026-09-02-dashboard-ack-and-mutation-count/design.md` claimed
     `sd-review --scope planning` never asks a provider, reasoning correctly that
     `docs_skip` routes every work item to tier `skip` and then stopping one
-    function short of `plan_providers`, which prepends what a *scope* names
-    ahead of whatever the tier asked for. Nothing in the repository disagreed,
-    because nothing pinned the interaction. The concern survived a review round
-    and an explanation to its owner before anyone ran it.
+    function short of the floor a scope puts under the tier's depth. Nothing in
+    the repository disagreed, because nothing pinned the interaction. The
+    concern survived a review round and an explanation to its owner before
+    anyone ran it.
 
-    So this is not coverage of a line. It is the assertion that would have
-    refuted the claim in the round it was made.
+    The seam moved when the tier stopped naming providers: it used to be
+    `plan_providers`, prepending names to the tier's chain, and it is now
+    `review_depth`, raising the tier's count. The claim it refutes is the same
+    one, so the class is kept and re-aimed rather than deleted with the
+    function -- a deleted test is a claim that becomes true again quietly.
     """
 
     def setUp(self) -> None:
@@ -641,97 +676,48 @@ class ScopeProvidersOverASkipTier(unittest.TestCase):
         """The half of C-18 that was right, kept so the rest has a subject."""
 
         self.assertEqual(self.skip.tier, "skip")
-        self.assertEqual(tuple(self.skip.providers), ())
+        self.assertEqual(self.skip.depth, 0)
 
     def test_planning_scope_asks_a_provider_even_at_tier_skip(self) -> None:
-        chain = sd_review.plan_providers(
-            self.skip, self.policy, challenge=False, scope="planning")
-        self.assertTrue(
-            chain,
-            "scope=planning produced an empty provider chain at tier skip. Either"
-            " `plan_providers` stopped honouring `planning_providers`, or the"
-            " policy stopped naming one -- and `sd-plan` gates `planning ->"
-            " ready` on a lane that now asks nobody.")
-        self.assertEqual(chain, tuple(self.policy["planning_providers"]))
+        self.assertEqual(
+            sd_review.review_depth(self.skip, challenge=False, scope="planning"), 1,
+            "scope=planning earned no reviewer at tier skip. Either `review_depth`"
+            " stopped honouring FLOOR_SCOPES, or `planning` left it -- and"
+            " `sd-plan` gates `planning -> ready` on a lane that now asks nobody.")
 
     def test_challenge_asks_a_provider_even_at_tier_skip(self) -> None:
         """The same seam, reached by the other role that uses it."""
 
-        chain = sd_review.plan_providers(
-            self.skip, self.policy, challenge=True, scope="worktree")
-        self.assertEqual(chain, tuple(self.policy["challenge_providers"]))
+        self.assertEqual(
+            sd_review.review_depth(self.skip, challenge=True, scope="worktree"), 1)
 
     def test_an_ordinary_scope_at_tier_skip_asks_nobody(self) -> None:
-        """The control. Without it the three above pass on a chain that is
-        never empty, which would prove nothing about the scope."""
+        """The control. Without it the two above pass on a floor that is never
+        zero, which would prove nothing about the scope."""
 
         self.assertEqual(
-            sd_review.plan_providers(
-                self.skip, self.policy, challenge=False, scope="worktree"),
-            ())
+            sd_review.review_depth(self.skip, challenge=False, scope="worktree"), 0)
 
     def test_the_scope_adds_to_the_tier_rather_than_replacing_it(self) -> None:
-        """`plan_providers` says "an extra stance, not a substitute". At tier
-        `skip` those two readings agree, so the difference is only visible
-        against a tier that asks for something."""
+        """The floor is a minimum, not a setting. At tier `skip` those two
+        readings agree, so the difference is only visible against a tier that
+        already asks for more than one."""
 
         deep = sd_review.sd_route.route(
             ["bin/sd_install.py"], lines=1, draft=False, policy=self.policy)
         self.assertEqual(deep.tier, "deep")
-        chain = sd_review.plan_providers(
-            deep, self.policy, challenge=False, scope="planning")
-        for name in deep.providers:
-            self.assertIn(name, chain, f"the scope dropped {name}, which the tier asked for")
-
-    def test_the_scopes_provider_goes_in_front(self) -> None:
-        """Ordering, pinned against a fixture chosen so that it can fail.
-
-        The live policy cannot show this. Its `deep` tier starts with codex and
-        its `planning_providers` is codex, so prepending and appending produce
-        the same chain and an ordering assertion over it passes either way --
-        which is what the first version of this test did, and a mutation that
-        swapped `extra + chain` for `chain + extra` survived it.
-
-        What the substituted name has to be is not *absent* from the tier's
-        chain -- it may well be in it, and here it is -- but not *first* in it,
-        because first is the one position where the two orders agree. So it is
-        taken from the tier's own chain rather than written down, and the
-        expected order is derived from that chain too: this pins how
-        `plan_providers` composes, not which providers the policy currently
-        names.
-        """
-
-        deep = sd_review.sd_route.route(
-            ["bin/sd_install.py"], lines=1, draft=False, policy=self.policy)
-        tier = tuple(str(name) for name in deep.providers)
-        self.assertTrue(tier, "the deep tier asks for nobody, so order is unobservable")
-        later = [name for name in tier if name != tier[0]]
-        self.assertTrue(
-            later,
-            "every provider in the deep chain is the first one, so prepending and"
-            " appending agree and this assertion could not fail")
-        scope_provider = later[0]
-
-        policy = dict(self.policy, planning_providers=[scope_provider])
-        chain = sd_review.plan_providers(deep, policy, challenge=False, scope="planning")
+        self.assertGreater(deep.depth, 1, "the deep tier asks for one reviewer, so a"
+                           " floor of one and a replacement of one agree here")
         self.assertEqual(
-            chain[0], scope_provider,
-            "the scope's provider must lead the chain: it is the stance the run"
-            " was asked for, and a chain read in order spends its budget on"
-            " whatever comes first.")
-        self.assertEqual(
-            chain,
-            (scope_provider,) + tuple(name for name in tier if name != scope_provider),
-            "the scope's provider moves to the front of the tier's chain; the rest"
-            " keep the tier's order and nothing is dropped or duplicated")
+            sd_review.review_depth(deep, challenge=False, scope="planning"), deep.depth,
+            "the scope's floor reduced the deep tier's read")
 
-    def test_the_policy_still_names_a_planning_provider(self) -> None:
-        """The claim above is about this repository's live policy, so it is
-        asserted rather than assumed. A policy that dropped the key would make
-        C-18 true again, and should fail here rather than quietly downstream."""
+    def test_every_floor_scope_is_a_scope_the_cli_accepts(self) -> None:
+        """A typo in FLOOR_SCOPES is a floor that never fires, and every
+        assertion above would still pass: they name their scope directly."""
 
-        self.assertTrue(self.policy.get("planning_providers"),
-                        ".github/sd-review.json no longer names a planning provider")
+        for scope in sd_review.FLOOR_SCOPES:
+            self.assertIn(scope, sd_review.SCOPES, f"{scope!r} is not a scope")
 
 
 if __name__ == "__main__":
