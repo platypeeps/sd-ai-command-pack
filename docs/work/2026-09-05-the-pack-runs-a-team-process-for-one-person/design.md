@@ -113,8 +113,14 @@ past the cap marks the item `blocked`; non-blocking findings hold nothing.
 The code pass reads a head. A fix that changes it gets one verification pass
 over the diff since the reviewed head, the last automatic pass on that pull
 request; `sd-ship` pushes only the reviewed head or a verified fix of it,
-and merges naming that head, so a head that moved after the review is
-refused at GitHub.
+and merges naming that head with `gh pr merge --squash --match-head-commit <the
+reviewed sha>` — equivalently `PUT /repos/{owner}/{repo}/pulls/{n}/merge`
+with `sha=` — so a head that moved after the review is refused at GitHub with
+a 405. The flag is what does the refusing, and until 2026-09-05 neither page
+named it: `skills/sd-ship/SKILL.md:70` passes `-t` and `-b` alone, which are
+message text and refuse nothing, so criterion 32's "asserts the merge call
+named the reviewed head and was refused" was asserting against a call that
+could not refuse.
 
 The reviewer is a different vendor from the author, always. Skills name the
 roles `author` and `reviewer`; the provider registry below maps them.

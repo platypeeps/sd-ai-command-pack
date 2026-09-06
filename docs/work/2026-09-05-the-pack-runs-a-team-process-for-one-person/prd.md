@@ -1555,8 +1555,15 @@ confirmed by the next `sd-ship` run alone.
     there. No item directory is deleted by any pack surface: no mark
     touches a file, `sd-plan` moves, parks and sweeps nothing and deletes
     nothing, no sweep or park code path remains, and a grep of `bin/` and
-    `skills/` for `git rm`, `rmtree` and `rmdir` names nothing outside the
-    installer's own temporary paths. A test ships a `done` item and runs
+    `skills/` for `git rm`, `rmtree` and `rmdir` names nothing outside a
+    frozen set the implementation page enumerates. That set is eight lines on
+    2026-09-05 and none of them is a sweep or park code path: `sd_install.py`
+    pruning its own empty parents at `:693` and `:700`, its untrack-and-re-run
+    error string at `:791`, and the five uninstall commands in `sd-status`'s
+    `RESIDUE` tuple, of which criterion 18's Trellis removal takes one,
+    leaving seven. The test asserts the set has not grown, not that the grep
+    is empty — an earlier phrasing said "names nothing", which no cut in this
+    item can make true, since `bin/sd_sweep.py` is in none of the eight. A test ships a `done` item and runs
     `sd-plan` and `sd-ship` again in that repository, and asserts the
     directory is untouched.
 22. The pull-request template links only to files that exist. A test walks its
@@ -3085,3 +3092,91 @@ from a number the operator types.
     and PR 7 list `skills/sd-ship/`; the merge path is PR 7's, through
     `--deliver`, so it lands there. B records these as its hand-offs 11 and
     12.
+
+- **2026-09-05** — Executable review. A reviewer built the fixtures and ran
+  the commands this item's pages prescribe, on the real repository, rather
+  than reading them. Four prose rounds had read the same lines and executed
+  none of them; the three blocking findings below are all commands that were
+  never run.
+  - C-152, blocking: criterion 21's deletion-verb grep could not go green.
+    Both pages assumed deleting `bin/sd_sweep.py` and the `parked` handling
+    would empty `git grep -nE 'git rm|rmtree|rmdir' -- bin skills`. Run, it
+    returns eight lines and `sd_sweep.py` is in none of them: five are
+    `RESIDUE` uninstall command **strings** in `bin/sd-status`, and
+    `bin/sd_install.py:693`, `:700` and `:791` are the installer's own
+    `rmdir` loop and an untrack error message. A criterion phrased "names
+    nothing" was therefore unsatisfiable, and this page makes a green suite a
+    precondition of all eight merges. Addressed: the criterion becomes an
+    enumerate-and-freeze over those eight, asserting the set has not grown
+    and that no hit is a sweep or park code path. `bin/sd-status`'s `RESIDUE`
+    tuple and `bin/sd_install.py` join PR 2's Touches.
+  - C-153, material: C-152's first fix claimed criterion 18 already deletes
+    four of the five `RESIDUE` commands. It deletes one — `:965`, the
+    `.trellis` entry — because criterion 18's literals are `Trellis`,
+    `.trellis` and `task.py`, and the other four name `.githooks`, the
+    vendored scripts, the router workflow and the candidate ledger. Corrected
+    before the fix landed; recorded because the wrong count would have made
+    the frozen set shrink by three on PR 4's merge.
+  - C-154, blocking: requirement 13's second bug was documented backwards.
+    The page said `bin/sd-docs-lint:242` compares with `none` where it should
+    use `startswith`. `:242` is a `report.note` call; the load-bearing line is
+    `:244`, which already reads `if value.startswith("none"):` — and that
+    `startswith` **is** the bug, since `'nonexistent-item'.startswith('none')`
+    is `True`. The page prescribed the current behaviour as the cure, so an
+    implementer following it would have changed nothing and the criterion 31
+    regression test would have been written against the wrong assertion.
+    Addressed: `:244`, `if value == "none":`, and the test asserts the
+    **unresolved path** failure.
+  - C-155, blocking: C-150 above is refuted. The two signs of rule 1 *can*
+    both hold, and must. `item_directories` returns active and archived items
+    in one flat list — its own docstring says so — and
+    `git grep -l '^status:' -- 'docs/work/archive/*/*/prd.md'` returns 487.
+    A sign inversion fails every one of them on the retire commit. This is a
+    signature change: `check_shape` must be told which items are archived,
+    then keep `if status not in ITEM_STATUSES` inside `docs/work/archive/`
+    and fail on a present `status` key outside it. C-150 stands as written,
+    superseded here. The commit boundary it argued for is unchanged.
+  - C-156, material: PR 2's Touches named `tests/test_doc_citations.py` as
+    "the file that breaks when the lane page goes". It does not break. Its
+    `anchored_citations()` globs `docs/**/*.md`, so `AGENTS.md` and
+    `skills/sd-research-repo/references/conventions.md` are never read, and a
+    citation whose target is missing is skipped by `is_inside_repo()` rather
+    than failed, which its own docstring calls deliberate. `Ran 4 tests` /
+    `OK` with the page deleted. The real gate is the link checker's
+    `documentationRoots`.
+  - C-157, material: the `authors` policy key sites were cited at
+    `bin/sd-review:287` and `:1092`, which are a `raise PolicyError` and
+    `"scope": args.scope`. The key is at `:276`, `:283` and `:1098`, and
+    `:283` is the shared `_STRING_LIST_KEYS` tuple, so that site is an edit
+    and not a line deletion.
+  - C-158, material: the criteria 30/31/32 transposition note has now cited
+    the wrong lines twice. A first draft said 1580 and 1590; its correction
+    said 1591, 1592 and 1602, all four low, with two of the three again
+    landing mid-body of a different criterion. The lines are 1595, 1596 and
+    1606, read from `grep -n '^3[012]\. '` rather than counted from the
+    previous sentence.
+  - C-159, material: two cross-item citations were written `B's prd.md:N`.
+    Rule 6 resolves the bare `prd.md:` against *this* item, so both anchored
+    into this file's own text and passed the lint while pointing at the wrong
+    document. The `B/prd.md:` form used elsewhere in the page fails to
+    resolve instead, which is the safe failure. Both rewritten, and their
+    targets re-read: `B/prd.md:911-913` for `shipped_at`'s three writers,
+    `B/prd.md:1252-1253` for rule 1's archive predicate.
+  - C-160, material: criterion 32's merge refusal named no mechanism. Both
+    the `design.md` and `skills/sd-ship/SKILL.md:70` describe a merge with
+    `-t` and `-b` alone, which refuse nothing, so "asserts the merge call
+    named the reviewed head and was refused" was asserting against a call
+    that cannot refuse. The flag is `gh pr merge --match-head-commit <sha>`,
+    present in gh 2.98.0; the `design.md` now names it.
+  - C-161, minor: the ordering section said PR 1 writes the `mode` and
+    `check` keys into `DEFAULT_BLOCK_BODY`. Both already stand there
+    (`bin/sd_install.py:766-772`). PR 1's block work is `test` and `lint`;
+    `reviewers` is PR 6's. As written, PR 1's edit was a no-op and criterion
+    1's five-key set stayed two keys short.
+  - C-162, minor: `bin/sd-docs-lint:87-91` was listed among the readers of the
+    `archived` and `parked` fields. It reads neither field; the line range is
+    unrelated. Removed from PR 2's reader enumeration.
+  - C-163, minor: requirement 13's threshold cut was written as
+    `skills/sd-ship/SKILL.md:54` "citing the page instead of naming 800",
+    which reads as a description of the file. That line names 800 literally
+    today. Restated as the work.

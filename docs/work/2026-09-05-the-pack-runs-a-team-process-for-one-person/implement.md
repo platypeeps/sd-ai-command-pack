@@ -34,8 +34,17 @@ Every other carries `Item:` and leaves the row open.
 a wrong model of where the deleted lane lives —
 `docs/planning-adversarial-review-codex.md` (the lane page itself),
 `AGENTS.md`, `docs/spec/backend/manifest-and-filesystem.md`,
-`skills/sd-research-repo/references/conventions.md` and
-`tests/test_doc_citations.py`, which breaks when the page goes. Plus **`skills/sd-plan/SKILL.md`**, whose step 3 at `:38-41` "routes them to
+`skills/sd-research-repo/references/conventions.md`, and the link checker
+whose `documentationRoots` cover the page
+(`docs/spec/backend/manifest-and-filesystem.md:1517-1519`), which is what a
+dangling link trips. **Not `tests/test_doc_citations.py`**, which an earlier
+draft listed as "the file that breaks when the page goes": it does not break,
+on two counts run on 2026-09-05. Its `anchored_citations()` globs
+`docs/**/*.md` only, so `AGENTS.md` and
+`skills/sd-research-repo/references/conventions.md` are never read; and a
+citation whose target no longer exists is skipped rather than failed —
+`is_inside_repo()` returns `False` and the loop continues, which the test's
+own docstring calls deliberate. `Ran 4 tests` / `OK` with the page deleted. Plus **`skills/sd-plan/SKILL.md`**, whose step 3 at `:38-41` "routes them to
 the codex second-model lane" — the payload's own statement of the thing
 criterion 4 greps for, which two earlier drafts scoped from the *filename*
 `planning-adversarial-review-codex.md` instead. Criterion 4 is a grep for the
@@ -150,7 +159,7 @@ PR 6's, where the registry reader and the fixture harness are.
 **Touches:** enumerated from **requirement 13's own removal list**
 (`prd.md:1112-1160`), which gives a file and a line range for every cut, and
 then widened by `git grep -l` over criterion 31's symbol list
-(`prd.md:1604-1608`) to catch the readers requirement 13 does not name. An
+(`prd.md:1611-1615`) to catch the readers requirement 13 does not name. An
 earlier draft claimed the second derivation alone and did not run it: seven
 of the nineteen symbols — `parked`, `archived`, `--stash-ref`, `--push`,
 `--park`, `authors` and `Standing rule` — had no enumeration at all, and
@@ -175,7 +184,7 @@ For the seven symbols an earlier list left unenumerated, from requirement
 13's own line references and then the readers: the `archived` and `parked`
 fields at `bin/sd_lib.py:355-368`, `:271-282`, `:302-303`, `:350` and every
 reader — `bin/sd-status:183,190,1122-1129,1234-1242,1254-1287`,
-`bin/sd-docs-lint:87-91`, `dashboard/work.py`, `dashboard/app.js`,
+`dashboard/work.py`, `dashboard/app.js`,
 `tests/test_dashboard_work.py`, `tests/test_sd_lib.py`,
 `tests/test_sd_docs_lint.py`, `skills/sd-receive-review/SKILL.md`,
 `.claude/sd-ai-command-pack/planning-adversarial-review.md`,
@@ -184,11 +193,21 @@ reader — `bin/sd-status:183,190,1122-1129,1234-1242,1254-1287`,
 `tests/test_sd_handoff.py`; `--park` and `--push` in
 `skills/sd-handoff/SKILL.md`, `skills/sd-plan/SKILL.md`,
 `skills/sd-status/SKILL.md` and `tests/test_skill_frontmatter.py`; the
-`authors` **policy key** at `bin/sd-review:287`, `:1092`,
+`authors` **policy key** at `bin/sd-review:276`, `:283` and `:1098` — `:283`
+is the shared `_STRING_LIST_KEYS` tuple, so that one is an edit and not a
+line deletion; an earlier draft cited `:287` and `:1092`, which are a
+`raise PolicyError` and `"scope": args.scope` —
 `bin/sd_setup_github.py:230,267`, `.github/sd-review.schema.json` and
 `.github/sd-review.json:28`; and `Standing rule` in `bin/sd`,
 `skills/sd-plan/templates/decision.md`, `skills/sd-suggest/SKILL.md` and
 `tests/test_sd_plugin.py`.
+
+And, for criterion 21's deletion-verb grep, two sites no other clause of this
+pull request reaches: `bin/sd-status`'s `RESIDUE` tuple at `:960-996` — the
+file is already above for the `sd_lib` field readers, named again because the
+grep lands on a different block of it — and `bin/sd_install.py:693`, `:700`
+and `:791`. Neither is a deletion here. Both are enumerate-and-freeze sites,
+for the reason Verification gives below.
 
 **`authors` is two different things and criterion 31's grep cannot tell them
 apart.** Requirement 13 removes the `authors` *policy key* at the five sites
@@ -204,13 +223,21 @@ For the named bug fixes: `bin/sd_research_review.py`, `bin/sd-research-kit`,
 `agents/sd-claim-verifier.md`, `skills/sd-fact-check/SKILL.md`, the
 `adversarial-gate` surface, and **`bin/sd-docs-lint`**, which criterion 31's
 regression-test clause reaches through requirement 13's second bug:
-`bin/sd-docs-lint:242` compares the token before ` - ` with `none` instead of
-`startswith`, so `Work: nonexistent-item` fails as a missing reason rather
-than an unresolved path. No Touches list held that file for this pull
+`bin/sd-docs-lint:244` tests `value.startswith("none")` where it must compare
+the whole token with `none`, so any `Work:` value beginning with those four
+letters — `nonexistent-item`, `nonesuch` — fails as a missing reason rather
+than as an unresolved path. The fix is `if value == "none":`. An earlier
+draft had this backwards, citing `:242`, which is a `report.note` call, and
+prescribing `startswith` — which is the bug — as the cure; a reader following
+it would have changed nothing. Executed against `check_pr_link` on
+2026-09-05: `'nonexistent-item'` returns "Work: none needs a reason", and
+`'docs/work/nope'` returns "does not resolve to a work item", so the two
+paths are distinguishable and only the first is wrong. The regression test
+asserts `Work: nonexistent-item` produces the **unresolved path** failure. No Touches list held that file for this pull
 request, which claims the criterion that mandates its test. Plus
 `skills/sd-plan/`, `skills/sd-status/`, `skills/sd-ship/`,
 `skills/sd-plan/templates/work-README.md`, `tests/test_sd_docs_lint.py`, for the
-`bin/sd-docs-lint:242` regression test above and **not** for the `none - `
+`bin/sd-docs-lint:244` regression test above and **not** for the `none - `
 form, which is criterion 10's and PR 6's — an earlier draft moved the file
 here saying "the `none - ` form this cut removes", and requirement 13 names
 no such cut; and `contrib/`, created in PR 5, which therefore lands before
@@ -228,8 +255,9 @@ Every finding three read-only reviewers confirmed by source reading on
 README template;
 the flags table for a `bin/sd-plan` that does not exist; the
 `--from-suggestion` and `--from-proposal` flags; one work-item threshold
-rather than two, with `skills/sd-ship/SKILL.md:54` citing the page instead
-of naming 800; `sd-grill` moving to `contrib/` where a trial decides
+rather than two, which makes `skills/sd-ship/SKILL.md:54` cite the page
+instead of naming 800 — that line names 800 literally today, so this is the
+work and not a description of what the file already says; `sd-grill` moving to `contrib/` where a trial decides
 whether it stays.
 
 **One path in the `prd.md` is a shorthand.** It cites
@@ -249,10 +277,28 @@ in the log rather than here.
 one test lists the symbols, flags and files the cuts remove and asserts a
 grep of the governed tree returns nothing for each — `sd_sweep`, `parked`,
 `archived`, `record_load` and the rest. Plus **criterion 21's code-path
-half**: "no sweep or park code path remains, and a grep of `bin/` and
-`skills/` for `git rm`, `rmtree` and `rmdir` names nothing outside the
-installer's own temporary paths." Deleting `bin/sd_sweep.py` and the
-`parked` handling is this pull request's work; criterion 31's grep covers
+half**, whose grep this pull request must also make true, and an earlier
+draft assumed deleting `bin/sd_sweep.py` would do it. It does not. Run on
+2026-09-05, `git grep -nE 'git rm|rmtree|rmdir' -- bin skills` returns eight
+lines and `bin/sd_sweep.py` is in none of them: five are removal-suggestion
+**strings** at `bin/sd-status:965-995`, telling an operator how to uninstall
+a Trellis or legacy footprint; `bin/sd_install.py:693` and `:700` are the
+installer pruning its own empty parents, which the criterion's own words
+allow; and `bin/sd_install.py:791` is an error message reading "Untrack it
+(git rm --cached) and re-run", which is neither a code path nor a temporary
+path. So deleting `sd_sweep.py` and the `parked` handling clears **zero** of
+the eight, and a criterion phrased as "names nothing" cannot go green — while
+`implement.md`'s own ordering makes a green suite a precondition of all eight
+merges. The grep is restated as an enumerate-and-freeze: it names the two
+installer lines and the five `sd-status` `RESIDUE` commands as the known set,
+of which PR 4's criterion-18 removal takes exactly one — `:965`, the `.trellis`
+entry, which is why `bin/sd-status` is already among that criterion's nineteen
+files — and asserts the set has not grown and that no hit is a sweep or park
+code path. The other four `RESIDUE` commands name `.githooks`,
+`scripts/sd-ai-command-pack-*`, the router workflow and the candidate ledger;
+none is Trellis, none is a park or sweep, and all four stay. `bin/sd-status`'s
+`RESIDUE` tuple and `bin/sd_install.py` join this pull request's Touches for
+that reason. Criterion 31's grep covers
 the symbols but not the deletion verbs, and PR 7 — which was given criterion
 21 alone — touches no code and cannot remove a code path.
 
@@ -511,7 +557,9 @@ same reviewer order from the same `providers.yaml`.
 under `docs/work/` outside the archive, and — for criterion 13, which the
 closure table filed here while this list reached none of it —
 `bin/sd_lib.py`, `bin/sd-status` and `bin/sd-docs-lint`, which derive an
-item's status from its row (`prd.md:1396-1397`); `skills/sd-ship/` and
+item's status from its row (`prd.md:1396-1397`) — and, in `bin/sd-docs-lint`
+alone, `item_directories` and `check_shape`, for rule 1's archive predicate
+below; `skills/sd-ship/` and
 `dashboard/`, for `sd-ship --deliver`, the hand-merge reconciliation, the
 notes on the squash commit and `deliver` on the item screen
 (`prd.md:1435-1449`) and the three kill-and-reconcile tests
@@ -526,23 +574,37 @@ draft of this page named nowhere.** All three come from item B's criterion 7,
 enumerated clause by clause in B's round five, and each is a pack file no
 `system` pull request can reach.
 
-*The tracked marker.* `prd.md:585` and `prd.md:2527` both say the retire
+*The tracked marker.* `prd.md:585` and `prd.md:2534` both say the retire
 commit adds `docs/work/.status-source`, one line, `row`. This page named
 `status_source` — the column — and never the file. It is what a checkout
 without a database reads, so it lands in the same commit as the removal, not
 after it.
 
-*The lint's sign inverts.* `bin/sd-docs-lint` rule 1 fails today when a
-`status:` line is **missing** (`bin/sd-docs-lint:121-123`,
-`if status not in ITEM_STATUSES`). B's `prd.md:1235-1237` requires it to fail
+*The lint's sign changes outside the archive, and rule 1 gains a signature to
+tell the two apart.* `bin/sd-docs-lint` rule 1 fails today when a `status:`
+line is **missing** (`bin/sd-docs-lint:122-124`,
+`if status not in ITEM_STATUSES`). `B/prd.md:1252-1253` requires it to fail
 when one is **present** in a `prd.md` under `docs/work/` outside the archive,
-asserted with one seeded. The two signs cannot both hold, so the inversion
-belongs in the commit that removes the lines — this one — and not in a later
-pull request that would leave the lint failing on every item in between.
-`bin/sd-docs-lint` is already in this pull request's Touches for the reader.
+asserted with one seeded. **Both signs must hold at once**, and an earlier
+draft of this paragraph said they could not: rule 1 iterates
+`item_directories`, whose own docstring is "Every work item, active or
+archived", and archived items keep their `status:` line because they are
+records of what was. `git grep -l '^status:' -- 'docs/work/archive/*/*/prd.md'`
+returns **487** on 2026-09-05, every one of which a naive inversion would
+fail on the retire commit. So this is not a sign flip. `item_directories`
+returns a flat list with no marker, so `check_shape` must be given the
+distinction — either two enumerations or `(path, archived)` pairs — and then
+keeps `if status not in ITEM_STATUSES` for items under `docs/work/archive/`
+and gains a failure for a `status` key present outside it. That signature
+change is `bin/sd-docs-lint` work in its own right. The Touches entry above
+names that file only for deriving an item's status from its row; rule 1's
+archive predicate and the `item_directories` signature are a second reason,
+recorded here so the implementer does not read the entry as covered. It
+still lands in the commit that removes the lines, since the window between
+two merges is what the ordering exists to avoid.
 
-*`sd-ship` writes `shipped_at` and a `Closes:` trailer on a merge.* B's
-`prd.md:911-913` names three writers of `shipped_at` and gives the merge to
+*`sd-ship` writes `shipped_at` and a `Closes:` trailer on a merge.*
+`B/prd.md:911-913` names three writers of `shipped_at` and gives the merge to
 `sd-ship`; B's clause 7.18 asserts a cancel writes `done` with a `cancelled`
 note and that the next `sd-ship` merge carries `Closes:` with no `Delivers:`
 and no extra pull request; clause 7.21 asserts a merge confirmed through the
@@ -593,7 +655,7 @@ the same sentence, and neither this pull request nor PR 6 noted it.
 `SessionEnd` and `SessionStart` hooks — **five hooks from two criteria, not
 five from one requirement**. Requirement 12 (`prd.md:984-998`) names three:
 `PreCompact` and `SessionEnd` prompt the packet, `SessionStart` loads the
-item's open rows. The other two come from criterion 26 (`prd.md:1571-1573`),
+item's open rows. The other two come from criterion 26 (`prd.md:1578-1580`),
 "The `PreToolUse` and `UserPromptSubmit` hooks write `skill_use` rows". Both
 criteria are this pull request's, so the file set was right and the
 justification was not: an earlier draft called all five "requirement 12
@@ -650,14 +712,18 @@ dropped.
 
 ## Two things about the criteria list itself
 
-**Criteria 31 and 32 are out of order in the `prd.md`.** 32 appears at line
-1592 and 31 at line 1602, with 30 between them at 1591. Nothing depends on
+**Criteria 31 and 32 are out of order in the `prd.md`.** 30 is at line
+`1595`, 32 at `1596` and 31 at `1606`. Nothing depends on
 it and no test reads the order, but a reader working down the list will hit
 32 where they expect 31 and wonder what they missed. It is a `prd.md` edit,
-noted here rather than made silently. An earlier draft of this paragraph
-cited 1580 and 1590, which fall mid-body of criteria 29 and 32 — a reader
-following the citation to fix the transposition would have landed inside a
-different criterion.
+noted here rather than made silently. **This paragraph got the numbers wrong
+twice.** A first draft cited 1580 and 1590, which fall mid-body of criteria
+29 and 32. The correction of that draft cited 1591, 1592 and 1602 — all
+three off by four, and 1592 and 1602 again land mid-body of criteria 29 and
+32, the identical failure at a smaller offset. The numbers above were read
+from `grep -n '^3[012]\. ' prd.md` on 2026-09-05 rather than counted from a
+previous sentence, which is the only method that has produced a right answer
+here.
 
 **Criterion 30 is `make check` passes.** It is closed by PR 3 in the sense
 that PR 3 is where the suite changes shape, but every pull request in this
@@ -702,7 +768,10 @@ opposite directions. Each constraint below names the file that forces it.
   `skills/sd-review/SKILL.md:80`, which is in PR 4's Touches for that reason.
 - **`bin/sd_install.py` is written by four pull requests**, and only three of
   them were transitively ordered by the constraints above. PR 1 writes the
-  `mode` and `check` keys into `DEFAULT_BLOCK_BODY` (`:766-772`); PR 5
+  `test` and `lint` keys into `DEFAULT_BLOCK_BODY` (`:766-772`), where `mode`
+  and `check` already stand — an earlier draft named the two that are already
+  there, which would have made PR 1's block edit a no-op and left criterion
+  1's five-key set two keys short; PR 5
   replaces the disk enumeration at `:224-229` with the paths file; PR 6 adds
   the `reviewers` consent line to the same block PR 1 writes; PR 7 adds the
   `sd_db` step. PR 1 → PR 6 → PR 7 already follows from `WORKFLOW.md` and
