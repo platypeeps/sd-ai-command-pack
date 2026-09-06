@@ -510,6 +510,14 @@ def _provider(
         )
     if "vendor" not in body:
         raise RegistryError(f"{path}: provider {name!r} has no 'vendor'")
+    vendor = str(body["vendor"])
+    if vendor != vendor.strip().lower():
+        raise RegistryError(
+            f"{path}: provider {name!r} has vendor {vendor!r}. A vendor is "
+            f"compared against a commit trailer by exact match, so one with "
+            f"padding or a capital could never match, and the entry would "
+            f"review work its own vendor wrote. Write it lower case."
+        )
 
     enabled = body.get("enabled", True)
     if not isinstance(enabled, bool):
@@ -533,7 +541,7 @@ def _provider(
         roles = tuple(role for role in ROLES if role in claimed)
     return Provider(
         name=name,
-        vendor=str(body["vendor"]),
+        vendor=vendor,
         bill=bill_name,
         start=start or None,
         url=url or None,
@@ -639,8 +647,28 @@ def parse_consent(line: str | None) -> dict[str, Allowance]:
                 f"for a start entry -- because consent is to a destination and "
                 f"not to a name that could be repointed at one."
             )
+        if part.count(CONSENT_SEPARATOR) > 1:
+            raise ConsentRefusal(
+                f"{part!r} on the 'reviewers' line carries more than one "
+                f"{CONSENT_SEPARATOR!r}, so which half is the recipient is a "
+                f"guess. One pair per entry."
+            )
         entry, _, recipient = part.partition(CONSENT_SEPARATOR)
         recipient, _, fingerprint = recipient.partition(FINGERPRINT_JOIN)
+        if not entry or not recipient:
+            raise ConsentRefusal(
+                f"{part!r} on the 'reviewers' line has an empty "
+                + ("entry" if not entry else "recipient")
+                + ". Consent is one named entry reaching one named "
+                "destination, and half a pair names neither."
+            )
+        if entry in allowances:
+            raise ConsentRefusal(
+                f"the 'reviewers' line names {entry!r} twice, as "
+                f"{allowances[entry].recipient!r} and {recipient!r}. The later "
+                f"one silently won, so the line granted a destination the "
+                f"person reading it had no reason to expect."
+            )
         allowances[entry] = Allowance(entry, recipient, fingerprint or None)
     return allowances
 

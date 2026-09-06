@@ -693,7 +693,13 @@ def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
         if value == HUMAN_AUTHOR:
             continue
         entry, separator, vendor = value.partition("/")
-        if not separator or not entry.strip() or not vendor.strip():
+        # Stripped and folded, because the comparison this feeds is an exact
+        # `in` against the registry's vendor. `claude / anthropic` yielded
+        # " anthropic", which matched no entry, so the author's own vendor
+        # stayed on the chain and reviewed the branch it had written -- the
+        # one thing the trailer exists to stop, failing open and in silence.
+        entry, vendor = entry.strip(), vendor.strip().lower()
+        if not separator or not entry or not vendor:
             raise TrailerError(
                 f"{sha[:12]} says {AUTHORED_TRAILER} {value!r}, which is neither "
                 f"{HUMAN_AUTHOR!r} nor an '<entry>/<vendor>' pair. A trailer that "

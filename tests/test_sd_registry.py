@@ -298,6 +298,17 @@ class TheRefusals(unittest.TestCase):
                 )
                 self.assertIs(registry.providers["two"].enabled, expected)
 
+    def test_a_vendor_with_padding_or_a_capital(self) -> None:
+        """The other half of the same exact match. A registry vendor that is
+        not already in the form a trailer is folded into could never match
+        one, and the entry would review work its own vendor wrote."""
+        for value in ('" beta"', "Beta", '"beta "'):
+            with self.subTest(vendor=value):
+                message = self.refuse(
+                    self.filled().replace("vendor: beta,", f"vendor: {value},")
+                )
+                self.assertIn("lower case", message)
+
     def filled(self) -> str:
         """`MINIMAL` with the bill each entry needs, so a test that is not
         about the bill does not fail on it."""
@@ -344,6 +355,28 @@ class TheConsentLine(unittest.TestCase):
         message = str(caught.exception)
         self.assertIn("bare name", message)
         self.assertIn("entry@host", message.replace("`", ""))
+
+    def refuse_consent(self, line: str) -> str:
+        with self.assertRaises(sd_registry.ConsentRefusal) as caught:
+            sd_registry.parse_consent(line)
+        return str(caught.exception)
+
+    def test_the_same_entry_twice_is_refused_naming_both(self) -> None:
+        """Copilot found this. The later pair silently won, so a line an
+        operator wrote to allow one destination allowed a different one, and
+        the discarded half left no trace. This is the consent boundary, which
+        is the worst place in the pack for a quiet answer."""
+        message = self.refuse_consent("codex@one, codex@two")
+        self.assertIn("twice", message)
+        self.assertIn("'one'", message)
+        self.assertIn("'two'", message)
+
+    def test_half_a_pair_names_neither_side(self) -> None:
+        self.assertIn("empty entry", self.refuse_consent("@host"))
+        self.assertIn("empty recipient", self.refuse_consent("codex@"))
+
+    def test_a_second_separator_leaves_the_recipient_a_guess(self) -> None:
+        self.assertIn("more than one", self.refuse_consent("codex@one@two"))
 
     def test_commas_and_spaces_separate_the_same_way(self) -> None:
         self.assertEqual(

@@ -1003,6 +1003,25 @@ class TheTrailerBlockTests(ReviewFixture):
             sd_review.author_vendors(root, self.subject(root, outsider)), ()
         )
 
+    def test_a_padded_or_capitalised_vendor_still_names_its_vendor(self) -> None:
+        """The chain compares `provider.vendor in author_vendors` by exact
+        match. `claude / anthropic` yielded " anthropic", which matched no
+        entry, so the branch's own vendor stayed eligible and reviewed what it
+        had written. The rule failed open, and said nothing."""
+
+        root = self.make_repo()
+        for value in ("claude / anthropic", "Claude/Anthropic", " claude/anthropic "):
+            with self.subTest(trailer=value):
+                base = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=str(root), check=True, capture_output=True, text=True,
+                ).stdout.strip()
+                self.commit(root, f"work\n\nAuthored-with: {value}")
+                self.assertEqual(
+                    sd_review.author_vendors(root, self.subject(root, base)),
+                    ("anthropic",),
+                )
+
     def test_a_short_sha_still_names_its_commit(self) -> None:
         """Git takes a prefix everywhere else, so the range check does too."""
 
