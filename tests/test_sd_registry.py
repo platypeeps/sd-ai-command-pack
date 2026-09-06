@@ -759,6 +759,17 @@ class ThePick(unittest.TestCase):
             sd_registry.pick(registry, "kimi", consent=self.all)
         self.assertIn("on no reviewer list", str(caught.exception))
 
+    def test_a_url_entry_refuses_the_direct_pick_for_the_chain_s_reason(self) -> None:
+        """`pick` says it "is refused for the same reasons a fallthrough
+        skips", and it took no `readers`, so `--provider` reached an entry the
+        chain had already marked unrunnable -- the one path where the promise
+        was written down and not kept."""
+        with self.assertRaises(sd_registry.RegistryError) as caught:
+            sd_registry.pick(
+                self.registry, "kimi", consent=self.all, readers=("codex-json",)
+            )
+        self.assertIn("'url' entry", str(caught.exception))
+
     def test_a_bill_at_its_cap_refuses_the_direct_pick_too(self) -> None:
         with self.assertRaises(sd_registry.ConsentRefusal) as caught:
             sd_registry.pick(

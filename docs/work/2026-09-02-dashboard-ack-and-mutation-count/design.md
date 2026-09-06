@@ -476,7 +476,7 @@ at C-10.
   `skip` tier and a scope's provider list; a test asserting that
   `scope=planning` yields a non-empty chain at tier `skip` would have refuted
   this in the round it was written. That test now exists:
-  `ScopeProvidersOverASkipTier` (`tests/test_sd_review.py:1142-1221`), six
+  `ScopeProvidersOverASkipTier` (`tests/test_sd_review.py:1181-1260`), six
   tests. It was written against `plan_providers`, killed there by four
   mutations — the planning branch deleted, its provider list emptied, the scope
   appended instead of prepended, and the scope replacing the chain rather than

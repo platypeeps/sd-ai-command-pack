@@ -849,6 +849,31 @@ def refuse_allowance(provider: Provider, allowed: Allowance | None) -> str | Non
     return None
 
 
+def refuse_reader(provider: Provider, readers: tuple[str, ...]) -> str | None:
+    """Why this build cannot run this entry, or `None` when it can.
+
+    One function, because three places asked the question and answered it
+    differently: the chain marked the entry, the dry run planned it, and the
+    run reported it, and each carried its own sentence. Two of them said a
+    `url` entry named a reader called `None`, which is not a thing anyone
+    wrote -- a `url` entry names no reader because a reader parses what a
+    spawned command prints, and it spawns nothing.
+    """
+    if not readers:
+        return None
+    if provider.url:
+        return (
+            f"{provider.name} is a 'url' entry, and this build has no client "
+            f"for one yet; it runs 'start' entries."
+        )
+    if provider.reader not in readers:
+        return (
+            f"{provider.name} reads back as {provider.reader!r}, and this "
+            f"build implements no such reader."
+        )
+    return None
+
+
 def refuse_environment(provider: Provider, environ: Mapping[str, str]) -> str | None:
     """A variable whose value is a URL, which a spawned session may not receive.
 
@@ -922,27 +947,12 @@ def reviewer_chain(
     """
     candidates: list[Candidate] = []
     for provider in registry.order("reviewer"):
-        refusal = None
-        if readers and provider.reader not in readers:
-            # A reader this build does not implement is decided here and not at
-            # the run, because a tier's depth is a count of entries taken off
-            # this list: an entry that cannot run would occupy a slot and the
-            # change would be read by fewer providers than its tier asked for,
-            # while still reporting clean. That is a fact about the build, not
-            # about the machine at this second, so it belongs in the chain.
-            # Two different situations, and one message for both said the
-            # wrong thing about the commoner one. Four of the five entries on
-            # the shipped chain are `url` entries, which declare no reader at
-            # all because a reader parses a spawned command's output; what
-            # they wait on is a client for `url`. Reporting them as naming a
-            # reader called `None` described a typo nobody made.
-            refusal = (
-                f"{provider.name} is a 'url' entry, and this build has no "
-                f"client for one yet; it runs 'start' entries."
-                if provider.url
-                else f"{provider.name} reads back as {provider.reader!r}, and "
-                f"this build implements no such reader."
-            )
+        # Decided here and not at the run, because a tier's depth is a count
+        # of entries taken off this list: an entry that cannot run would occupy
+        # a slot and the change would be read by fewer providers than its tier
+        # asked for, while still reporting clean. That is a fact about the
+        # build, not about the machine at this second, so it belongs here.
+        refusal = refuse_reader(provider, readers)
         if refusal is None:
             refusal = refuse_allowance(provider, consent.get(provider.name))
         if refusal is None and provider.vendor in author_vendors:
@@ -967,6 +977,7 @@ def pick(
     consent: dict[str, Allowance],
     author_vendors: tuple[str, ...] = (),
     capped_bills: tuple[str, ...] = (),
+    readers: tuple[str, ...] = (),
 ) -> Provider:
     """`--provider <name>`: one entry for one run, or a refusal that says why.
 
@@ -994,6 +1005,7 @@ def pick(
         consent=consent,
         author_vendors=author_vendors,
         capped_bills=capped_bills,
+        readers=readers,
     ):
         if candidate.provider.name != name:
             continue

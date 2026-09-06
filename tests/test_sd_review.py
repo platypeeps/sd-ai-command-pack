@@ -263,6 +263,45 @@ class ReaderTests(ReviewFixture):
         self.assertIn("claude-json", outcome.detail)
         self.assertEqual(runner.calls, [], "an unreadable provider is not started")
 
+    def test_a_url_entry_is_not_run_and_does_not_borrow_a_start_entry_s_words(
+        self,
+    ) -> None:
+        """Copilot found this. `refuse_environment` ran first and unconditionally
+        -- it speaks of what a spawned session inherits and ends "No session was
+        started" -- so a `url` entry, which spawns nothing, was answered in the
+        language of a mechanism it does not use, and then fell through to the
+        message claiming it named a reader called `None`.
+
+        The environment here holds a URL on purpose: that is what used to
+        trigger the start-session refusal on an entry that starts nothing.
+        """
+        runner = FakeRunner()
+        outcome = sd_review.run_provider(
+            self.provider(start=None, url="https://api.example/v1", reader=None),
+            pathlib.Path("/nonexistent"),
+            sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
+            "prompt",
+            runner,
+            {"SOMEVENDOR_KEY": "https://elsewhere.example"},
+            60,
+        )
+        self.assertEqual(outcome.status, sd_review.NOT_RUN)
+        self.assertIn("'url' entry", outcome.detail)
+        self.assertNotIn("None", outcome.detail)
+        self.assertNotIn("No session was started", outcome.detail)
+        self.assertEqual(runner.calls, [])
+
+    def test_the_three_places_that_ask_give_one_answer(self) -> None:
+        """The chain marks it, the dry run plans it, the run reports it. Each
+        had its own sentence, and two of the three were wrong about the same
+        case, so fixing one left the others saying the old thing."""
+        provider = self.provider(start=None, url="https://api.example/v1", reader=None)
+        expected = sd_review.sd_registry.refuse_reader(provider, sd_review.READERS)
+        self.assertIsNotNone(expected)
+        planned = sd_review._planned([provider], pathlib.Path("/nonexistent"), "prompt")
+        self.assertEqual(planned[0]["reason"], expected)
+        self.assertFalse(planned[0]["would_run"])
+
     def test_an_entry_whose_start_line_names_no_program_is_refused(self) -> None:
         """Copilot found this. `shlex.split("")` is empty, so the hardened
         invocation's first flag became the executable and the run tried to
