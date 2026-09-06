@@ -31,10 +31,12 @@ one document either reader parses.
 
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 #: Beside the database, in `~/.local/share/sd/`. The same path `sd_db` uses;
 #: stated here rather than imported, because this module answers before the
@@ -514,3 +516,253 @@ def _refuse_author_reviewing(registry: Registry) -> None:
             f"'reviewer' list, so a review would be by the author. Reorder one "
             f"list, or disable the entry for one role."
         )
+
+
+# --------------------------------------------------------------------------
+# Consent
+# --------------------------------------------------------------------------
+#
+# The registry says who *can* review. `CLAUDE.local.md`'s `reviewers` line says
+# who may receive *this repository's* diff, and nothing derives it: the
+# installer asks once, the operator answers, and a repository that was skipped
+# refuses its first review naming the key.
+#
+# The line names entries, because the entry is the recipient. Each pair carries
+# that recipient beside the name -- the host of a `url` entry, the executable of
+# a `start` entry with a fingerprint over its command line and the variables it
+# receives -- so an entry repointed at another host, or given another argument,
+# is refused until the line is rewritten. Consent to send a diff somewhere is
+# consent to send it *there*, and an entry is a name for a destination rather
+# than the destination itself.
+
+
+#: `<entry>@<recipient>`, and for a `start` entry `<entry>@<executable>+<hash>`.
+CONSENT_SEPARATOR = "@"
+FINGERPRINT_JOIN = "+"
+FINGERPRINT_LENGTH = 8
+
+
+class ConsentRefusal(RegistryError):
+    """This repository has not allowed this entry to receive its diff."""
+
+
+@dataclass(frozen=True)
+class Allowance:
+    """One pair off the `reviewers` line."""
+
+    entry: str
+    recipient: str
+    fingerprint: str | None = None
+
+    def __str__(self) -> str:
+        tail = f"{FINGERPRINT_JOIN}{self.fingerprint}" if self.fingerprint else ""
+        return f"{self.entry}{CONSENT_SEPARATOR}{self.recipient}{tail}"
+
+
+def parse_consent(line: str | None) -> dict[str, Allowance]:
+    """The `reviewers` line as a mapping of entry name to what it may reach.
+
+    An absent line and an empty one are the same answer and both mean no
+    reviewer resolves; the caller distinguishes them because the installer
+    writes no line for an empty answer.
+    """
+    if line is None:
+        raise ConsentRefusal(
+            "this repository has no 'reviewers' line in CLAUDE.local.md, so no "
+            "entry may receive its diff and no reviewer resolves. The installer "
+            "asks for it once per repository; add the key, or re-run the "
+            "installer with --reviewers."
+        )
+    allowances: dict[str, Allowance] = {}
+    for part in line.replace(",", " ").split():
+        if CONSENT_SEPARATOR not in part:
+            raise ConsentRefusal(
+                f"{part!r} on the 'reviewers' line is a bare name. Each entry "
+                f"names its recipient too -- "
+                f"`entry{CONSENT_SEPARATOR}host` for a url entry, "
+                f"`entry{CONSENT_SEPARATOR}executable{FINGERPRINT_JOIN}fingerprint` "
+                f"for a start entry -- because consent is to a destination and "
+                f"not to a name that could be repointed at one."
+            )
+        entry, _, recipient = part.partition(CONSENT_SEPARATOR)
+        recipient, _, fingerprint = recipient.partition(FINGERPRINT_JOIN)
+        allowances[entry] = Allowance(entry, recipient, fingerprint or None)
+    return allowances
+
+
+def fingerprint(provider: Provider) -> str:
+    """A short digest over a `start` entry's command line and its `env` names.
+
+    The names and not the values: the digest goes in a file the operator reads
+    and a diff someone else may see, and a value is a key. An argument added to
+    the start line, or a variable added to the list, changes it, which is the
+    point -- a spawned command that gained `--upload` is a different recipient
+    wearing the same executable.
+    """
+    material = "\n".join([provider.start or "", *sorted(provider.env)])
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()[:FINGERPRINT_LENGTH]
+
+
+def recipient(provider: Provider) -> Allowance:
+    """What the `reviewers` line must name for this entry, as it stands now."""
+    if provider.url:
+        return Allowance(provider.name, urlsplit(provider.url).netloc)
+    executable = (provider.start or "").split()
+    return Allowance(
+        provider.name, executable[0] if executable else "", fingerprint(provider)
+    )
+
+
+def refuse_allowance(provider: Provider, allowed: Allowance | None) -> str | None:
+    """Why this entry may not receive the diff, or `None` when it may.
+
+    Returns rather than raises: the chain reports every entry it passed over
+    and why, and an exception would let it report only the first.
+    """
+    if allowed is None:
+        return (
+            f"{provider.name} is not on the repository's 'reviewers' line. A "
+            f"registry entry is capability; the line is consent, and a new entry "
+            f"resolves nowhere until the line names it."
+        )
+    current = recipient(provider)
+    if allowed.recipient != current.recipient:
+        kind = "host" if provider.url else "executable"
+        return (
+            f"{provider.name} is allowed to reach the {kind} "
+            f"{allowed.recipient!r} and the registry now points it at "
+            f"{current.recipient!r}. Rewrite the 'reviewers' line if that is "
+            f"where this repository's diff should go."
+        )
+    # Checked when the line carries one, and not required. The installer writes
+    # the fingerprint for every `start` entry it offers, so a line without one
+    # is a line written by hand, and that is allowed to be the weaker
+    # statement it looks like: this executable, whatever it is asked to do.
+    # Requiring it would make the shorter form -- which `WORKFLOW.md` and the
+    # criteria both use in prose -- refuse every entry it names.
+    if allowed.fingerprint and allowed.fingerprint != current.fingerprint:
+        return (
+            f"{provider.name} is allowed as {allowed} and its start line or "
+            f"'env' list now fingerprints as {current.fingerprint}. The "
+            f"executable is the same one; what it is asked to do is not."
+        )
+    return None
+
+
+def refuse_environment(provider: Provider, environ: dict[str, str]) -> str | None:
+    """A variable whose value is a URL, which a spawned session may not receive.
+
+    A key is a secret and the operator has consented to that; a URL in the
+    environment is a destination the `reviewers` line never named, and a session
+    that inherits one can send the diff somewhere this repository did not agree
+    to. Named without its value, because printing it would put the destination
+    in the log that reports the refusal.
+    """
+    for name in provider.env:
+        value = environ.get(name, "")
+        if value.startswith(("http://", "https://")):
+            return (
+                f"{provider.name} would receive {name}, whose value in this "
+                f"environment is a URL. A start entry's recipient is the one the "
+                f"'reviewers' line names; a variable carrying another is a second "
+                f"destination nobody consented to. No session was started."
+            )
+    return None
+
+
+# --------------------------------------------------------------------------
+# The chain
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Candidate:
+    """One entry on the reviewer list, and whether this run may use it."""
+
+    provider: Provider
+    eligible: bool
+    reason: str = ""
+
+
+def reviewer_chain(
+    registry: Registry,
+    *,
+    consent: dict[str, Allowance],
+    author_vendors: tuple[str, ...] = (),
+    capped_bills: tuple[str, ...] = (),
+) -> list[Candidate]:
+    """Every enabled entry holding `reviewer`, in order, each marked.
+
+    Marked rather than filtered, because the run has to say which providers it
+    passed over and why. A chain that returned only the survivors would report
+    "codex reviewed" where the interesting sentence is "codex reviewed;
+    claude was skipped as the author's vendor and minimax's bill is at its cap".
+
+    Preflight is not decided here. Whether a binary answers is a fact about the
+    machine at this second, and this function is a decision about the registry,
+    the repository's consent and the branch's trailers -- all three of which are
+    the same for a dry run as for a real one.
+    """
+    candidates: list[Candidate] = []
+    for provider in registry.order("reviewer"):
+        refusal = refuse_allowance(provider, consent.get(provider.name))
+        if refusal is None and provider.vendor in author_vendors:
+            refusal = (
+                f"{provider.name} is an entry of vendor {provider.vendor}, and "
+                f"this branch carries {provider.vendor} authorship. The reviewer "
+                f"is a different vendor from the author, always."
+            )
+        if refusal is None and provider.bill in capped_bills:
+            refusal = (
+                f"{provider.name} is billed to {provider.bill}, which is at its "
+                f"cap for the month."
+            )
+        candidates.append(Candidate(provider, refusal is None, refusal or ""))
+    return candidates
+
+
+def pick(
+    registry: Registry,
+    name: str,
+    *,
+    consent: dict[str, Allowance],
+    author_vendors: tuple[str, ...] = (),
+    capped_bills: tuple[str, ...] = (),
+) -> Provider:
+    """`--provider <name>`: one entry for one run, or a refusal that says why.
+
+    A direct pick is refused for the same reasons a fallthrough skips, and
+    reaches entries a fallthrough never sees -- a disabled one is not on the
+    chain at all, and picking it by name should answer with the reason it ships
+    disabled rather than with 'no such provider'.
+    """
+    provider = registry.providers.get(name)
+    if provider is None:
+        raise RegistryError(
+            f"no provider {name!r} in {registry.path}. The registry is the only "
+            f"list of providers; add an entry to it rather than a flag here."
+        )
+    if "reviewer" not in provider.roles:
+        raise RegistryError(
+            f"{name!r} does not hold the 'reviewer' role, so it cannot review."
+        )
+    if not provider.enabled:
+        raise RegistryError(
+            f"{name!r} is disabled: {provider.reason or 'no reason recorded'}"
+        )
+    for candidate in reviewer_chain(
+        registry,
+        consent=consent,
+        author_vendors=author_vendors,
+        capped_bills=capped_bills,
+    ):
+        if candidate.provider.name != name:
+            continue
+        if candidate.eligible:
+            return candidate.provider
+        raise ConsentRefusal(candidate.reason)
+    raise RegistryError(
+        f"{name!r} holds the 'reviewer' role but is on no reviewer list in "
+        f"{registry.path}, so nothing ranks it. Add it to the list, or pick an "
+        f"entry the list names."
+    )
