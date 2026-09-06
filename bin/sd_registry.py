@@ -438,6 +438,13 @@ def parse(text: str, path: Path | str = REGISTRY_NAME) -> Registry:
     for name, body in document["bills"].items():
         if not isinstance(body, dict) or "cost" not in body:
             raise RegistryError(f"{path}: bill {name!r} has no 'cost'")
+        for key, kind, form in (
+            ("cost", str, "a cost basis"),
+            ("meter", str, "a meter name"),
+            ("cap_usd_month", (int, float), "an amount"),
+        ):
+            if body.get(key) is not None:
+                _typed(body[key], kind, f"{key!r} of bill {name!r}", form, path)
         bills[name] = Bill(
             name=name,
             cost_basis=str(body["cost"]),
@@ -479,6 +486,22 @@ def parse(text: str, path: Path | str = REGISTRY_NAME) -> Registry:
     return registry
 
 
+def _typed(
+    value: Any, kind: type | tuple[type, ...], what: str, form: str, path: Path
+) -> Any:
+    """`value`, or a refusal naming what it should have been.
+
+    Every field below is read straight into a `Provider`, so a value of the
+    wrong shape does not fail here -- it fails somewhere later, or worse, does
+    not fail at all. `env: OPENAI_API_KEY` in place of a one-item list walked
+    the string and produced fourteen single-character variable names, which
+    the fingerprint then covered and the environment check then looked for.
+    """
+    if not isinstance(value, kind) or isinstance(value, bool) and kind is not bool:
+        raise RegistryError(f"{path}: {what} is {value!r}, which is not {form}")
+    return value
+
+
 def _provider(
     name: str,
     body: dict[str, Any],
@@ -486,6 +509,23 @@ def _provider(
     role_lists: dict[str, list[str]],
     path: Path,
 ) -> Provider:
+    where = f"provider {name!r}"
+    for key, kind, form in (
+        ("start", str, "a command line"),
+        ("url", str, "a url"),
+        ("vendor", str, "a name"),
+        ("bill", str, "the name of a bill"),
+        ("model", str, "a model name"),
+        ("reader", str, "the name of a reader"),
+        ("reason", str, "a sentence"),
+        ("max_tokens", int, "a whole number"),
+        ("env", list, "a list of variable names"),
+        ("price", dict, "a mapping"),
+        ("roles", list, "a list of role names"),
+    ):
+        if body.get(key) is not None:
+            _typed(body[key], kind, f"{key!r} of {where}", form, path)
+
     start, url = body.get("start"), body.get("url")
     if bool(start) == bool(url):
         raise RegistryError(
@@ -624,8 +664,19 @@ class Allowance:
     fingerprint: str | None = None
 
     def __str__(self) -> str:
+        """The pair as it is written on the line, and readable back off it.
+
+        A recipient holding a space or a comma is quoted, because that is what
+        `consent_parts` needs to see one word where the operator meant one. A
+        pair that renders unquoted here and cannot be parsed there would put
+        the two halves of consent out of step in the direction that matters:
+        a line the installer wrote, refused by the reader.
+        """
         tail = f"{FINGERPRINT_JOIN}{self.fingerprint}" if self.fingerprint else ""
-        return f"{self.entry}{CONSENT_SEPARATOR}{self.recipient}{tail}"
+        recipient = self.recipient
+        if any(character in recipient for character in ' \t,"\''):
+            recipient = shlex.quote(recipient)
+        return f"{self.entry}{CONSENT_SEPARATOR}{recipient}{tail}"
 
 
 def parse_consent(line: str | None) -> dict[str, Allowance]:
@@ -643,7 +694,7 @@ def parse_consent(line: str | None) -> dict[str, Allowance]:
             "installer with --reviewers."
         )
     allowances: dict[str, Allowance] = {}
-    for part in line.replace(",", " ").split():
+    for part in consent_parts(line):
         if CONSENT_SEPARATOR not in part:
             raise ConsentRefusal(
                 f"{part!r} on the 'reviewers' line is a bare name. Each entry "
@@ -674,6 +725,28 @@ def parse_consent(line: str | None) -> dict[str, Allowance]:
             )
         allowances[entry] = Allowance(entry, recipient, fingerprint or None)
     return allowances
+
+
+def consent_parts(line: str) -> list[str]:
+    """The pairs on a `reviewers` line, split the way a start line is split.
+
+    Commas and whitespace separate, and a quoted recipient survives both. A
+    plain `str.split` could not name a `start` entry whose executable holds a
+    space -- the very case `executable()` is shlex-aware to support -- so the
+    one line that could consent to it was unparseable, and refused as a bare
+    name. The two halves of the same consent have to agree on where a word
+    ends.
+    """
+    lexer = shlex.shlex(line, posix=True)
+    lexer.whitespace = " \t\n\r,"
+    lexer.whitespace_split = True
+    try:
+        return list(lexer)
+    except ValueError as error:
+        raise ConsentRefusal(
+            f"the 'reviewers' line cannot be read: {error}. A recipient with a "
+            f"space in it is quoted, the way it is on a 'start' line."
+        ) from error
 
 
 def fingerprint(provider: Provider) -> str:

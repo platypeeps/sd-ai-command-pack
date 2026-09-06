@@ -298,6 +298,38 @@ class TheRefusals(unittest.TestCase):
                 )
                 self.assertIs(registry.providers["two"].enabled, expected)
 
+    def test_a_field_of_the_wrong_shape_is_named_and_refused(self) -> None:
+        """Copilot's sixth pass. Each of these was read straight into a
+        `Provider` and failed later, or did not fail at all. `env` given a
+        bare name walked the string: fourteen single-character variable
+        names, which the fingerprint then covered and the environment check
+        then looked for -- so consent was granted over a list nobody wrote."""
+        for edit, expected in (
+            (", env: OPENAI_API_KEY", "'env' of provider 'two'"),
+            (", price: [1, 2]", "'price' of provider 'two'"),
+            (", max_tokens: many", "'max_tokens' of provider 'two'"),
+            (", reader: 7", "'reader' of provider 'two'"),
+        ):
+            with self.subTest(field=edit):
+                message = self.refuse(
+                    self.filled().replace(
+                        "roles: [reviewer] }", "roles: [reviewer]" + edit + " }"
+                    )
+                )
+                self.assertIn(expected, message)
+
+    def test_a_role_list_written_as_one_name(self) -> None:
+        """It walked the string too, and refused for a reason that named five
+        single letters instead of the shape it was given."""
+        message = self.refuse(self.filled().replace("roles: [reviewer]", "roles: reviewer"))
+        self.assertIn("'roles' of provider 'two'", message)
+
+    def test_a_bill_amount_that_is_not_one(self) -> None:
+        message = self.refuse(
+            self.filled().replace("cost: local }", "cost: local, cap_usd_month: lots }")
+        )
+        self.assertIn("'cap_usd_month' of bill 'free'", message)
+
     def test_a_url_that_names_no_host(self) -> None:
         message = self.refuse(
             self.filled().replace('"http://localhost:1/v1"', '"file:///tmp/x"')
@@ -380,6 +412,23 @@ class TheConsentLine(unittest.TestCase):
     def test_half_a_pair_names_neither_side(self) -> None:
         self.assertIn("empty entry", self.refuse_consent("@host"))
         self.assertIn("empty recipient", self.refuse_consent("codex@"))
+
+    def test_a_recipient_with_a_space_is_quoted_and_reads_back(self) -> None:
+        """Copilot's sixth pass, and a contradiction between two earlier
+        fixes. `executable()` was made shlex-aware so a quoted path with a
+        space consents to the program that actually runs; `parse_consent`
+        still split on whitespace, so the one line that could name such an
+        entry was unreadable -- and was refused as a bare name, which it was
+        not. The two halves of consent have to agree where a word ends."""
+        provider = sd_registry.Provider(
+            name="codex", vendor="v", bill="b", start='"/opt/my tools/codex" exec'
+        )
+        want = sd_registry.recipient(provider)
+        line = str(want)
+        self.assertIn("'/opt/my tools/codex'", line)
+        allowed = sd_registry.parse_consent(line)["codex"]
+        self.assertEqual(allowed, want)
+        self.assertIsNone(sd_registry.refuse_allowance(provider, allowed))
 
     def test_a_recipient_carrying_its_own_separator_is_one_pair(self) -> None:
         """A url entry's recipient is its netloc, userinfo included. The first
