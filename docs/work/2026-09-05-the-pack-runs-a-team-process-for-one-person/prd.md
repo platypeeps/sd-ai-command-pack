@@ -2622,3 +2622,78 @@ from a number the operator types.
     here: the fix belongs with criterion 18's scope, which `implement.md`
     carries. Severity: material, and it survived forty review rounds because
     every check for it searched for the string rather than listing the tree.
+  - **C-90, criterion 6 was filed onto a documentation pull request.** The
+    closure table gave it to PR 1, whose scope was `WORKFLOW.md`,
+    `skills/sd-help/`, `bin/sd_install.py` and `.claude/rules/`. Criterion 6
+    is requirement 3's whole runtime — roughly a hundred and thirty lines
+    covering `sd attribute`, the trailers, `SD_AUTHOR`, `bin/sd-review`
+    losing its provider table, the `--provider` flag's refusals, bill caps,
+    `meter` rows, fallthrough and the installer's consent line. Only
+    `bin/sd_install.py` overlapped. Requirement 3 is the largest requirement
+    in the item and reached the plan through this one criterion, so filing
+    it wrong scheduled the requirement nowhere. Severity: blocking.
+    Addressed: criterion 6 is PR 6's, with the registry reader.
+  - **C-91, criterion 11 was in two places and the table had the wrong
+    one.** PR 6's prose claimed it; the table gave it to PR 1 and omitted it
+    from PR 6. The table is what an implementer works from, so criterion 11
+    would have closed on its last sentence — all three modes appear in
+    `README.md` — while the merge-time consent re-check went unverified.
+    That check is the thing that stops an unattended merge into a
+    repository that gained a collaborator since the row was set. Severity:
+    blocking. Addressed.
+  - **C-92, "PRs 1 through 5 need no database" was false four times.**
+    Criterion 24 reads active trial rows and asserts the installer never
+    renders from `contrib/` without one; criterion 25's printed date is the
+    row's expiry, so there is no install half observable without the row,
+    and both are asserted against a temporary database in the criterion's
+    own words; criteria 6 and 11 need rows and B's fixture harness.
+    Severity: blocking. Addressed: PR 5 moves into slice 2 and takes
+    criteria 24 and 25 whole, and the page now says four pull requests need
+    no database rather than five.
+  - **C-93, criterion 18's scope covered one file of nineteen.** PR 4's
+    Touches named the routing block, `.claude/rules/`, the global settings,
+    `CONTRIBUTING.md`, the system guide and the pull-request template. A
+    grep of the governed tree for `Trellis`, `.trellis` and `task.py`
+    returns nineteen files, including two test files and seven `docs/spec/`
+    pages — and neither the routing block nor `.claude/rules/` is among
+    them, while `bin/sd`, `bin/sd-status` and `bin/sd_setup_github.py` are.
+    Severity: blocking. Addressed: the nineteen are enumerated in the page.
+    The scope had been written from a summary of where Trellis was thought
+    to be, rather than from the grep the criterion specifies.
+  - **C-94, the governed tree names a directory that is not there.**
+    Criterion 4's definition lists `templates/`; there is no top-level
+    `templates/` in this repository and the templates live under
+    `skills/*/templates/`. The grep skips a missing path without error, so
+    every absence assertion built on that definition passes today partly for
+    the wrong reason. Severity: material. **Not addressed here**, because
+    the definition is a criteria-list edit; recorded so it travels with the
+    next one.
+  - **C-95, four smaller misassignments.** Criterion 21's "no sweep or park
+    code path remains" clause was given to PR 7, which touches no code;
+    it belongs with PR 2's cut set. Criterion 12 was claimed by a pull
+    request whose Touches excluded `README.md`, and criterion 9 by one
+    excluding `WORKFLOW.md`. Criterion 8's two real sites are
+    `.claude/sd-ai-command-pack/planning-adversarial-review.md` and
+    `skills/sd-receive-review/SKILL.md`, neither of which was in scope.
+    Criteria 4 and 5 need edits across `skills/`, and PR 1 scoped `skills/`
+    to `sd-help/`. PR 8's Touches omitted the Codex nightly parse,
+    `skills/paths.json`, `dashboard/` and `skills/sd-propose-skills/`, each
+    named by a criterion it claimed. Severity: material each. All addressed.
+  - **C-96, criterion 28 asserts against a file this repository does not
+    have.** It enumerates `commands.yaml` to prove `sd suggest publish` is
+    no palette entry; `git ls-files` finds no `commands.yaml` here, because
+    it is item B's. The assertion is sound but cross-item, and the plan
+    scheduled the criterion without noting it. Severity: material.
+    Addressed: flagged in the page and sequenced behind B's slice 4.
+  - **C-97, both line citations in "Two things about the criteria list
+    itself" were wrong.** It read 1580 and 1590; the criteria are at 1592
+    and 1602. Both cited lines fall mid-body of a different criterion, so a
+    reader following the citation to fix the transposition would have edited
+    the wrong place. Severity: minor. Addressed. The substantive point — a
+    reader hits 32 where they expect 31 — was correct.
+  - **The lane also refuted six candidate findings before reporting**,
+    including one where a cited line range was imprecise rather than wrong,
+    and confirmed that every value appearing in both this file and
+    `implement.md` agrees and that every path, line citation and symbol in
+    `implement.md` resolves on disk. Recorded because a review that reports
+    only what it found, and not what it cleared, cannot be weighed.

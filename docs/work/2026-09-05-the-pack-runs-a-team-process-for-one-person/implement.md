@@ -1,18 +1,26 @@
 ---
-title: implement — five pull requests that need no database, then three that do
+title: implement — four pull requests that need no database, then four that do
 status: planning
 created: 2026-09-05
 ---
 
 # Implement
 
-Eight pull requests. Five of them touch no row and can land before item B
-exists at all; three are B's slice 2 and wait on the library. The `prd.md`'s
-landing order names only the second group, because that is the part whose
-order is contested. The first group is where most of this item's work
-actually is, and putting it first is not a scheduling preference: it means
-the pack gets smaller before it gets a database, rather than carrying every
-cut across the migration.
+Eight pull requests. **Four** of them touch no row and can land before item
+B exists at all; four wait on the library or on B's fixture harness. The
+`prd.md`'s landing order names only the second group, because that is the
+part whose order is contested. The first group is where most of this item's
+work actually is, and putting it first is not a scheduling preference: it
+means the pack gets smaller before it gets a database, rather than carrying
+every cut across the migration.
+
+An earlier draft of this page said five pull requests needed no database and
+was wrong four times over. Criterion 6 is a hundred and thirty lines of
+provider-registry runtime, not a policy page. Criterion 11 needs rows and
+six fixture-remote cases. Criterion 24 reads active trial rows. Criterion
+25's printed date *is* the row's expiry, so there is no install half
+observable without the row. Each is corrected below, and PR 5 is the one
+that changes character: it now lands with the rows, not before them.
 
 Only the last slice's merge delivers the item, `Delivers:` on its message.
 Every other carries `Item:` and leaves the row open.
@@ -20,7 +28,24 @@ Every other carries `Item:` and leaves the row open.
 ## PR 1 — `WORKFLOW.md`, and the review table in exactly two places
 
 **Touches:** `WORKFLOW.md` (new), `skills/sd-help/`, `bin/sd_install.py`,
-`.claude/rules/`.
+`.claude/rules/`, `.claude/sd-ai-command-pack/planning-adversarial-review.md`,
+`skills/sd-receive-review/SKILL.md`, every skill that runs a review, and
+`README.md`.
+
+**Why the Touches list reaches across `skills/`.** Criterion 5 asks that
+*every* skill that runs a review name its point in the table and read the
+cap from it, and that a grep of the payload for a vendor name inside a
+skill's instructions return only the registry documentation. Criterion 4
+asks that a grep of the governed tree for the deleted second-model lane
+return nothing outside `CHANGELOG.md`, which means deleting that lane's
+skill and agent files. Criterion 8 asks that the concern-ledger and
+cross-artifact-sweep obligations become conditional on a `sensitive` path
+"in every place they appear", and a governed-tree grep finds exactly two:
+`.claude/sd-ai-command-pack/planning-adversarial-review.md` and
+`skills/sd-receive-review/SKILL.md` — neither of which is the `.claude/rules/`
+file. Criterion 11's closing sentence puts all three modes in `README.md`.
+None of these is a documentation edit, and an earlier draft scoped this pull
+request to `skills/sd-help/` alone.
 
 The policy page at the repository root: the two flows and the spine they
 share, what runs by default, what is opt-in, what is advisory, what never
@@ -41,9 +66,24 @@ appears in exactly two places, `WORKFLOW.md` and that rule — which is
 criterion 5, and is the reason this PR touches the rule file rather than
 leaving it to PR 4.
 
-**Verification.** Criteria 1, 4, 5, 6, 8, 11 and 20. Criterion 4 is the
-sharp one: exactly one second-model lane named anywhere in the payload,
-which is a grep over the governed tree and not a reading of the page.
+**Verification.** Criteria 1, 5, 8 and 20, and criterion 4 whole. Criterion
+4 is the sharp one: exactly one second-model lane named anywhere in the
+payload, which is a grep over the governed tree and not a reading of the
+page.
+
+**Criteria 6 and 11 are not here**, though an earlier draft's closure table
+put them here. Criterion 6 is requirement 3's whole runtime — `sd attribute`
+and its two forms, `Authored-with:` and `Attributes:` trailer writing and
+reading, `SD_AUTHOR` handling and its refusal at commit, `bin/sd-review`
+losing its provider table, `sd-review.json` losing `_providers` and `tiers`,
+a `--provider` flag refusing an unknown name and a disabled one by its
+reason, bill caps and `meter` rows, fallthrough over disabled, failing and
+capped entries, installer consent writing a `reviewers` line, and
+url/executable/fingerprint/env refusals against a recording fixture. Only
+`bin/sd_install.py` overlaps this pull request at all. Criterion 11 needs a
+`full` repository whose row lacks `merge: auto`, six mode-detection cases
+against fixture remotes, and a collaborator added and removed. Both are
+PR 6's, where the registry reader and the fixture harness are.
 
 ## PR 2 — requirement 13's confirmed cuts and bugs
 
@@ -77,7 +117,13 @@ in the log rather than here.
 **Verification.** Criterion 31, which closes requirement 13 line by line:
 one test lists the symbols, flags and files the cuts remove and asserts a
 grep of the governed tree returns nothing for each — `sd_sweep`, `parked`,
-`archived`, `record_load` and the rest.
+`archived`, `record_load` and the rest. Plus **criterion 21's code-path
+half**: "no sweep or park code path remains, and a grep of `bin/` and
+`skills/` for `git rm`, `rmtree` and `rmdir` names nothing outside the
+installer's own temporary paths." Deleting `bin/sd_sweep.py` and the
+`parked` handling is this pull request's work; criterion 31's grep covers
+the symbols but not the deletion verbs, and PR 7 — which was given criterion
+21 alone — touches no code and cannot remove a code path.
 
 ## PR 3 — the checks that cannot fail
 
@@ -104,9 +150,50 @@ repository spent a whole pull request re-deriving one.
 
 ## PR 4 — the instruction layers stop contradicting each other
 
-**Touches:** the routing block, `.claude/rules/`, the global settings,
-`CONTRIBUTING.md`, the system repository's guide, the pull-request
-template.
+**Touches:** the nineteen governed-tree files that carry the forbidden
+strings, enumerated below; the global settings; `CONTRIBUTING.md`; the
+system repository's guide; and `WORKFLOW.md`.
+
+**The Trellis removal is nineteen files, not three.** Criterion 18 demands a
+governed-tree grep for `Trellis`, `.trellis` and `task.py` return nothing.
+The governed tree is `bin/`, `skills/`, `templates/`, `dashboard/`,
+`tests/`, `.claude/`, `.github/`, `CLAUDE.md`, `AGENTS.md`, `README.md` and
+`docs/spec/`. Grepping exactly that set on 2026-09-05 returns:
+
+```
+.claude/sd-ai-command-pack/planning-adversarial-review.md
+.github/PULL_REQUEST_TEMPLATE.md
+.github/copilot-instructions.md
+AGENTS.md
+bin/sd
+bin/sd-status
+bin/sd_setup_github.py
+dashboard/sessions.py
+dashboard/work.py
+docs/spec/backend/error-handling.md
+docs/spec/backend/index.md
+docs/spec/backend/manifest-and-filesystem.md
+docs/spec/backend/quality-guidelines.md
+docs/spec/guides/code-reuse-thinking-guide.md
+docs/spec/guides/cross-layer-thinking-guide.md
+docs/spec/guides/index.md
+skills/sd-plan/SKILL.md
+tests/test_sd_agents.py
+tests/test_sd_status.py
+```
+
+Two of them are test files and seven are `docs/spec/` pages. An earlier
+draft named "the routing block" and `.claude/rules/`, and **neither carries
+a hit**: `bin/sd_route.py` is clean, while `bin/sd`, `bin/sd-status` and
+`bin/sd_setup_github.py` are not, and the `.claude/` file with hits is
+`.claude/sd-ai-command-pack/planning-adversarial-review.md`. So the old
+scope covered one of nineteen.
+
+**The governed tree names a directory that does not exist.** Criterion 4's
+definition lists `templates/`; there is no top-level `templates/` here, and
+the templates live under `skills/*/templates/`. The grep above skips it
+without error, so the criterion passes today for the wrong reason. Recorded
+in the `prd.md` log; the definition is a criteria-list edit.
 
 Every mention of Trellis leaves the routing block and the planning
 contract, and the two `.trellis` allow rules leave the global settings; no
@@ -129,20 +216,35 @@ command prompting; dropping the globs while the rule stands leaves a rule
 with no failure left to prevent, contradicted by 59% of Bash calls. Either
 half alone is worse than neither.
 
-**Verification.** Criteria 9, 18, 19, 22 and 23, plus criterion 12
-(`README.md`'s writes-nothing claim naming the installer as its subject).
+**Verification.** Criteria 9, 18, 19, 22 and 23, plus criterion 12.
+Criterion 9 needs `WORKFLOW.md` to state that Copilot review is off on
+repositories the operator pays for personally, so `WORKFLOW.md` is in the
+Touches list above; criterion 12 needs `README.md`'s writes-nothing claim at
+line 21 to name the installer as its subject, and `README.md` is edited in
+PR 1 where criterion 11 already requires it. An earlier draft claimed both
+criteria against a Touches list that excluded both files.
 
-## PR 5 — skills install because a path names them
+## Slice 2, PR 5 — skills install because a path names them
 
 **Touches:** `skills/paths.json` (new), `contrib/`, `bin/sd`.
 
 `skills/paths.json` naming three paths, with every directory under them
-accounted for, and `sd skill try <name>` installing from `contrib/`. The
-row this writes is PR 8's; the installation mechanism is this PR's, and
-they are separate because one needs no database.
+accounted for, and `sd skill try <name>` installing from `contrib/`,
+writing a trial row with an expiry and printing the date.
 
-**Verification.** Criterion 24 whole; criterion 25's install half, its
-trial-row half deferred to PR 8 and said so here.
+**This pull request needs rows, and an earlier draft said it did not.**
+Criterion 24 requires the installer to render "exactly the union of the
+paths plus **active trials**", and that `contrib/` exists and the installer
+"never renders from it **without a trial row**" — both are row reads.
+Criterion 25 requires `sd skill try` to write the trial row and print the
+expiry, "both asserted by tests against a temporary database", and the
+printed date *is* the row's expiry, so the install half is not observable
+without the row. The earlier split into a PR 5 install half and a PR 8
+trial-row half would have landed `paths.json` rendering three static paths
+with no trials concept, and criterion 24's test would then have had to be
+rewritten in PR 8, a pull request that did not claim it.
+
+**Verification.** Criteria 24 and 25 whole, against a temporary database.
 
 ## Slice 2, PR 6 — the registry reader, the tiered path, the protection
 
@@ -175,8 +277,11 @@ both call and neither restates. Any no, or no answer, and the item ends
 `ready_to_send` with the changed answer named, the row keeping `merge:
 auto` and the dashboard showing it suspended.
 
-**Verification.** Criteria 2, 3, 10, 11 and 32. Criterion 32 is the one
-that has to hold in both worlds: before B's library is installed, the
+**Verification.** Criteria 2, 3, 6, 10, 11 and 32, and item B's criterion 13,
+the installer step. Criterion 6 is the largest of them — requirement 3's
+whole runtime, listed under PR 1 above where it used to be filed — and
+criterion 11's six mode-detection cases run against the fixture remotes B's
+harness provides. Criterion 32 is the one that has to hold in both worlds: before B's library is installed, the
 file-only reader and, once it exists, the library resolver must return the
 same reviewer order from the same `providers.yaml`.
 
@@ -207,8 +312,21 @@ before this slice, which the landing order says in those words.
 
 ## Slice 2, PR 8 — rows for trials, uses, suggestions and handoff
 
-**Touches:** `bin/sd`, the `PreToolUse` and `UserPromptSubmit` hooks,
-`skills/sd-suggest/`, the handoff path.
+**Touches:** `bin/sd`, the `PreToolUse` and `UserPromptSubmit` hooks, the
+nightly parse of `~/.codex/sessions`, `skills/sd-suggest/`,
+`skills/sd-propose-skills/`, `skills/paths.json`, `dashboard/`, and the
+handoff path.
+
+**Four surfaces the criteria name and an earlier Touches list did not.**
+Criterion 26 requires "the Codex nightly parse writes the same shape", with
+a test feeding one recorded session of each kind — so the parse is in scope,
+and the OpenCode plugin is named by requirement 10 for when that surface is
+in use. Criterion 27 requires the promotion and demotion pull request to
+move the directory **and edit `paths.json`**, opened by the library and
+never by the dashboard directly, which puts both `skills/paths.json` and
+`dashboard/` in scope. Criterion 28 requires the `skill-proposal` kind to be
+absent from the writing manifest and `sd-propose-skills` to write no vault
+note.
 
 `sd skill try` writing a trial row; the two hooks writing `skill_use` rows;
 promotion and demotion each producing one pull request that moves the
@@ -217,15 +335,26 @@ handoff losing nothing because nothing lives only in context — a session
 killed mid-task and restarted in the same directory begins from the row and
 not from a re-read.
 
-**Verification.** Criteria 25's trial-row half, 26, 27, 28 and 29.
+**Verification.** Criteria 26, 27, 28 and 29.
+
+**Criterion 28 asserts against a file this repository does not have.** It
+requires `sd suggest publish` to be no palette entry, "asserted by
+enumerating `commands.yaml`"; `git ls-files` finds no `commands.yaml`
+anywhere here, because it is item B's, written by B's dashboard. The
+assertion is real but it runs against B's file, so this pull request sits
+behind B's slice 4 for that clause alone. Flagged rather than quietly
+dropped.
 
 ## Two things about the criteria list itself
 
 **Criteria 31 and 32 are out of order in the `prd.md`.** 32 appears at line
-1580 and 31 at line 1590. Nothing depends on it and no test reads the
-order, but a reader working down the list will hit 32 where they expect 31
-and wonder what they missed. It is a `prd.md` edit, noted here rather than
-made silently.
+1592 and 31 at line 1602, with 30 between them at 1591. Nothing depends on
+it and no test reads the order, but a reader working down the list will hit
+32 where they expect 31 and wonder what they missed. It is a `prd.md` edit,
+noted here rather than made silently. An earlier draft of this paragraph
+cited 1580 and 1590, which fall mid-body of criteria 29 and 32 — a reader
+following the citation to fix the transposition would have landed inside a
+different criterion.
 
 **Criterion 30 is `make check` passes.** It is closed by PR 3 in the sense
 that PR 3 is where the suite changes shape, but every pull request in this
@@ -235,15 +364,26 @@ merges, not an achievement of one.
 
 ## Order and dependency
 
-PRs 1 through 5 in any order and at any time; they need no database and no
-other item. PR 6 after B's slice 1 lands the library. PR 7 after PR 6. PR 8
-after PR 6.
+PRs 1 through 4 in any order and at any time; they need no database and no
+other item. **PR 5 needs a database** — criteria 24 and 25 both read trial
+rows — so it lands with B's slice 1 library, not before it. PR 6 after B's
+slice 1 lands the library and B's harness. PR 7 after PR 6. PR 8 after PR 6,
+and its criterion 28 `commands.yaml` clause after B's slice 4.
 
 The one hard ordering that reaches outside this item: B's fixture harness
 merges before any pull request in any item that claims a criterion naming
-it, which B's criterion 23 asserts from the log. Several criteria here name
-a fixture repository, so PRs 6, 7 and 8 sit behind that harness whatever
-else is true.
+it, which B's criterion 23 asserts from the log. Criterion 6 needs a fixture
+remote and a fixture system checkout; criterion 11 needs six fixture-remote
+cases plus a collaborator added and removed. So PRs 5 through 8 sit behind
+that harness whatever else is true.
+
+**Item B's criterion 13 is this item's, and B's plan depends on it.** B's
+settled open question 3 puts the pack's installer provisioning `sd_db` into
+the pack's virtualenv from B's checkout, as a built copy at a tag and never
+editable, and says "Item A's criterion 13 carries it". Without it B's
+library lands and nothing installs it, and the first `sd today` after B's
+PR 2 fails on import. It rides with PR 6, the first pull request here that
+needs the library present.
 
 ## Closing the item
 
@@ -272,15 +412,15 @@ reports "nothing over 45 days: 8 active", and `sd-docs-lint` is clean over
 
 | Criterion | Closed by |
 |---|---|
-| 1, 4, 5, 6, 8, 11, 20 — the policy page and the review table | PR 1 |
+| 1, 4, 5, 8, 20 — the policy page, the lane, the review table, the conditional obligations | PR 1 |
 | 31 — requirement 13 line by line | PR 2 |
+| 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) |
 | 14, 15, 16, 17, 30 — the checks | PR 3 |
 | 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4 |
-| 24 — `skills/paths.json` and its three paths | PR 5 |
-| 25 — `sd skill try` installs, and writes a trial row | PR 5 (install), PR 8 (row) |
-| 2, 3, 10, 32 — the tiered path, trailers, reviewed head | PR 6 |
-| 13, 21 — status from the row, archive untouched | PR 7 |
-| 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8 |
+| 24, 25 — `paths.json`, the union with active trials, `sd skill try` and its row | PR 5 |
+| 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | PR 6 |
+| 13 — status from the row | PR 7 |
+| 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` clause behind B's slice 4 |
 | 7 — the seven `mezmo-world-simulator` passes scored | see below |
 
 Criterion 7 is scored against another repository's passes and is the one
