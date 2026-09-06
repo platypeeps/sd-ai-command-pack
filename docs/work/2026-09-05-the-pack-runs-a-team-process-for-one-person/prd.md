@@ -3032,3 +3032,18 @@ from a number the operator types.
     entirely, most of item B, the `system` repository,
     `~/.claude/settings.json`, every measurement-window figure in the
     `prd.md`, and ten criteria checked only for presence in the closure table.
+- **2026-09-05** — Decision recorded from item B, on the operator's word: the
+  `sd` verbs are the pack's, so PR 8 keeps `sd shadow sync`. Round four found
+  item B's PR 3 building the same new command inside `local-sd-db/`, with
+  neither item naming the other. B's PR 3 now lands only the `watermark` state
+  kind the command resumes from and the cron entry that invokes it, recorded
+  there as that item's hand-off 10. B's shadow migration cannot run end to end
+  until PR 8 merges.
+- **2026-09-05** — `sd-docs-lint` gains rule 6, which watches document line
+  citations the way `tests/test_doc_citations.py` watches symbol citations.
+  The adjacency rule skips a citation with no backticked symbol beside it,
+  which is every citation into `prd.md` prose — and those were six of the
+  findings across four review rounds. Each is now recorded in
+  `.citations.tsv` against a snippet of its target line, with
+  `--update-citations` to re-record and the manifest's own diff as the thing
+  to review after an edit.

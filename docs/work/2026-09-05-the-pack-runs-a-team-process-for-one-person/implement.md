@@ -572,6 +572,15 @@ sync` string appears anywhere in the pack. An earlier draft listed it as an
 existing surface; it is built here, and marked new like `WORKFLOW.md` and
 `skills/paths.json` are.
 
+**Item B's PR 3 scheduled the same command, and no longer does.** Round four
+found both items building `sd shadow sync` as new greenfield work in two
+repositories, neither naming the other. Settled 2026-09-05 with B's wider
+`sd` verb question: the verbs are the pack's, so this pull request keeps the
+command and B's PR 3 keeps only the `watermark` state kind it resumes from
+(`B/prd.md:212`) and the cron entry that invokes it. B records it as that
+item's hand-off 10, and B's shadow migration cannot run end to end until
+this pull request merges.
+
 **Four surfaces the criteria name and an earlier Touches list did not.**
 Criterion 26 requires "the Codex nightly parse writes the same shape", with
 a test feeding one recorded session of each kind — so the parse is in scope,
