@@ -3047,3 +3047,18 @@ from a number the operator types.
   `.citations.tsv` against a snippet of its target line, with
   `--update-citations` to re-record and the manifest's own diff as the thing
   to review after an edit.
+- **2026-09-05** — Rule 6 corrected twice on its first real use, both times by
+  its own output.
+  - It reported four drifted citations inside item D's Log, and re-anchoring
+    them silently rewrote a finding's account of the citation that had been
+    wrong on the day it was found. A Log entry quotes a page as it stood; it
+    makes no claim about the file as it stands. Rule 6 now stops at the `Log`
+    heading, the same reasoning that already skips `archive/`.
+  - It reported one citation as "now at lines 2, 8, 10, 18, …" — thirty-three
+    of them. The cited line was blank, so its snippet was empty and matched
+    every blank line in the file. A blank line is not an anchor; a citation to
+    a heading's blank line is a citation to the paragraph under it. The
+    manifest now anchors to the first line with text at or just after the
+    target, within four lines, and records that line's number.
+  Both were found by running the rule against real drift rather than a
+  fixture, which is the only way either would have surfaced.

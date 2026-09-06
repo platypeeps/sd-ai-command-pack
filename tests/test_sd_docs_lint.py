@@ -395,6 +395,26 @@ class Rule6CitationTests(LintFixture):
         (item / "design.md").write_text("The reader is at `bin/sd:1378`.\n", encoding="utf-8")
         self.assertEqual(lint.item_citations(item, self.work), [])
 
+    def test_a_citation_below_the_log_heading_is_a_quotation_not_a_claim(self) -> None:
+        item = self.cited_item()
+        (item / "design.md").write_text(
+            "# design\n\nThe ladder is at `prd.md:3`.\n\n"
+            "## Log\n\n- C-1: `prd.md:3` was wrong on the day.\n",
+            encoding="utf-8",
+        )
+        citations = lint.item_citations(item, self.work)
+        self.assertEqual([entry[0] for entry in citations], ["design.md:3"])
+
+    def test_a_blank_target_line_anchors_to_the_text_under_it(self) -> None:
+        item = self.cited_item()
+        prd = item / "prd.md"
+        lines = prd.read_text(encoding="utf-8").splitlines()
+        lines[2] = ""
+        prd.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        lint.write_citation_manifest(item, self.work)
+        recorded = (item / lint.CITATION_MANIFEST).read_text(encoding="utf-8").split("\t")
+        self.assertNotEqual(recorded[4].strip(), "")
+
 
 if __name__ == "__main__":
     unittest.main()
