@@ -849,8 +849,12 @@ def attribution(root: pathlib.Path, base: str, head: str) -> dict[str, str]:
     """
     said: dict[str, str] = {}
     for sha, message in _trailers(root, base, head):
-        for line in message.splitlines():
-            line = line.strip()
+        # Git's trailer block -- the last paragraph -- and unindented, which is
+        # what makes a trailer a trailer. Reading the whole message, stripped,
+        # reads a trailer quoted inside a commit that was describing one. This
+        # commit's own first draft did exactly that and refused itself.
+        for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
+            line = line.rstrip()
             if line.startswith(AUTHORED_TRAILER):
                 said.setdefault(sha, line[len(AUTHORED_TRAILER) :].strip())
             elif line.startswith(ATTRIBUTES_TRAILER):
@@ -1090,16 +1094,7 @@ def review(
         "registry_refusal": registry_refusal,
         "consent_refusal": consent_refusal,
         "authored_with": list(vendors),
-        "chain": [
-            {
-                "provider": candidate.provider.name,
-                "vendor": candidate.provider.vendor,
-                "bill": candidate.provider.bill,
-                "eligible": candidate.eligible,
-                "reason": candidate.reason,
-            }
-            for candidate in chain
-        ],
+        "chain": [candidate.row for candidate in chain],
         "codex_preflight": codex_preflight_state(codex_auth_home),
         "scrubbed_env_names": list(scrubbed_names(env)),
         "posted": False,
@@ -1237,7 +1232,7 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write(f"  policy      {result['policy_source']}  (severity floor {result['severity_floor']})\n")
     write(f"  route       tier {route['tier']}  category {route['category'] or '-'}\n")
     write(f"  because     {route['reason']}\n")
-    picked = ", ".join(result["providers"]) or "(none: this tier reviews nothing)"
+    picked = ", ".join(result["providers"]) or "(none)"
     write(f"  providers   {picked}\n")
     wrote = ", ".join(result["authored_with"]) or "no vendor (human-authored)"
     write(f"  authored    {wrote}\n")

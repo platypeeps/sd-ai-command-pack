@@ -648,6 +648,65 @@ class CliTests(ReviewFixture):
         self.assertIn("not valid JSON", finished.stderr)
 
 
+class TheTrailerBlockTests(ReviewFixture):
+    """A trailer is the last paragraph, unindented. Not any matching line.
+
+    Found by running the tool on its own branch. A commit whose message
+    *quoted* a refusal -- "2 commit(s) carry no Authored-with: trailer" --
+    had that quoted line read as its own trailer, and the branch refused
+    itself with a value of "trailer, starting at 76fb9d750096.".
+    """
+
+    def commit(self, root: pathlib.Path, message: str) -> str:
+        (root / f"f{len(list(root.iterdir()))}.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "--quiet", "-m", message], cwd=str(root), check=True, capture_output=True
+        )
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    def subject(self, root: pathlib.Path, base: str) -> Any:
+        return sd_review.Subject("branch", base, "HEAD", (), 0, "")
+
+    def test_a_quoted_trailer_in_the_body_is_not_this_commits_trailer(self) -> None:
+        root = self.make_repo()
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+        self.commit(
+            root,
+            "chore: describe a refusal\n\n"
+            "    sd-review: refused: a commit carries no\n"
+            "    Authored-with: trailer, starting at abc123.\n\n"
+            "Authored-with: human",
+        )
+        self.assertEqual(sd_review.author_vendors(root, self.subject(root, base)), ())
+
+    def test_an_indented_trailer_is_not_a_trailer(self) -> None:
+        """Git does not read one, so neither does this. A commit that only
+        mentions a trailer has said nothing, and saying nothing refuses."""
+
+        root = self.make_repo()
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+        self.commit(root, "chore: mention one\n\n    Authored-with: claude/anthropic")
+        with self.assertRaises(sd_review.Refusal) as caught:
+            sd_review.author_vendors(root, self.subject(root, base))
+        self.assertIn("carry no Authored-with:", str(caught.exception))
+
+    def test_attributes_names_an_earlier_commit_from_a_later_one(self) -> None:
+        root = self.make_repo()
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+        early = self.commit(root, "feat: written before the convention")
+        self.commit(root, f"chore: attribute it\n\nAuthored-with: human\nAttributes: {early} codex/openai")
+        self.assertEqual(sd_review.author_vendors(root, self.subject(root, base)), ("openai",))
+
+
 class NoRegistryOnThisMachineTests(ReviewFixture):
     """A machine with no installed registry still answers.
 

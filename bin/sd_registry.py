@@ -713,6 +713,22 @@ class Candidate:
     eligible: bool
     reason: str = ""
 
+    @property
+    def row(self) -> dict[str, Any]:
+        """What a report shows: who, on whose money, and whether they may.
+
+        Shaped here rather than at each caller, because a chain that is
+        reported differently by the review, the dashboard and the doctor is
+        three answers to one question.
+        """
+        return {
+            "provider": self.provider.name,
+            "vendor": self.provider.vendor,
+            "bill": self.provider.bill,
+            "eligible": self.eligible,
+            "reason": self.reason,
+        }
+
 
 def reviewer_chain(
     registry: Registry,
