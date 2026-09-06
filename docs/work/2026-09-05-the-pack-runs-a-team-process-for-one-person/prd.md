@@ -950,9 +950,17 @@ Usage counts cannot decide what stays, because none exist. Cohesion can.
 
 ### Requirement 11 — filing an improvement is one skill and one row
 
-Internal GitHub issues stop. Two are open across repositories the operator owns
-(`sd-ai-command-pack` 1, `mezmo_benchmark` 1); they import to the database and
-close on GitHub with a pointer.
+Internal GitHub issues stop being the place new work is filed. Two are open
+across repositories the operator contributes to (`sd-ai-command-pack` 1,
+`mezmo_benchmark` 1). They are shadowed, not imported: `sd shadow sync` keeps
+their state, both stay open on GitHub, and neither is closed with a pointer,
+from the operator's decision of 2026-09-05. `mezmo_benchmark` is
+`answerbook`'s and eight people can read it, so an issue closed with a pointer
+to a database only the operator can reach would take information away from
+every other reader and give them nothing. "Owns" was wrong of both
+repositories here before that decision: the operator owns
+`sd-ai-command-pack` and is the main contributor to `mezmo_benchmark`, which
+belongs to the employer.
 
 `sd-suggest` is the one way to file, for the operator and for the agent. It
 captures a fixed small set: repository, what happened, what it cost, what was
@@ -1570,8 +1578,10 @@ confirmed by the next `sd-ship` run alone.
     test per mode against a recording GitHub fixture that saw no call; `sd
     suggest publish` files one issue at the destination `--to` names,
     refuses without one, and is no palette entry, asserted by enumerating
-    `commands.yaml`. The two
-    open internal issues are closed on GitHub with a pointer to their rows. The
+    `commands.yaml`. The two open internal issues stay open on GitHub and
+    appear as `shadow` rows after a sync, asserted by a test that runs the
+    sync against a recording fixture holding both and then asserts the rows
+    and that the fixture saw no close call. The
     `skill-proposal` kind is absent from the writing manifest and
     `sd-propose-skills` writes no vault note.
 29. A session killed mid-task and restarted in the same directory begins from
@@ -2579,3 +2589,36 @@ from a number the operator types.
     its trailers standing. Criterion 13 runs the sequence.
   - B's C-86: the retire sitting reads every branch of the remote and
     refuses naming an item whose branches disagree. Requirement 5.
+
+- **2026-09-05** — Adversarial planning review of `implement.md`, one lane,
+  ten findings: four blocking, five material, one minor, and six candidate
+  findings refuted before recording. The lane read the `prd.md` as the
+  authority and checked every citation on the filesystem. Its two category
+  verdicts came back clean: every value appearing in both documents agrees,
+  and every path, line citation and symbol in `implement.md` resolves. The
+  findings are addressed in `implement.md`; the two that reach this file are
+  recorded here.
+  - **C-88, requirement 11 called both repositories the operator's own.** It
+    read "Two are open across repositories the operator owns
+    (`sd-ai-command-pack` 1, `mezmo_benchmark` 1)". `mezmo_benchmark`'s
+    remote is `git@github.com:answerbook/mezmo_benchmark.git`: the employer's
+    repository, eight contributors, of which the operator is the main one but
+    not the owner. Corrected in place, and the distinction now stated rather
+    than assumed. Severity: material. It mattered because the sentence
+    licensed the next one.
+  - **C-89, the two issues are shadowed, not imported and closed.** The
+    operator's decision of 2026-09-05, and the ownership correction is why:
+    closing an issue in a repository eight people read, with a pointer to a
+    database only the operator can reach, takes information away from every
+    other reader and gives them nothing back. Both issues stay open,
+    `sd shadow sync` keeps their state, and criterion 28's clause is rewritten
+    to assert the rows and a recording fixture that saw no close call.
+    Requirement 11's premise changes with it: internal issues stop being where
+    work is filed, they do not stop existing. Severity: blocking, since the
+    old criterion asserted a close that must not happen.
+  - **The governed tree names a directory that is not there.** Criterion 4's
+    definition lists `templates/`; the pack has no top-level `templates/`, and
+    the templates live under `skills/*/templates/`. Recorded, not corrected
+    here: the fix belongs with criterion 18's scope, which `implement.md`
+    carries. Severity: material, and it survived forty review rounds because
+    every check for it searched for the string rather than listing the tree.
