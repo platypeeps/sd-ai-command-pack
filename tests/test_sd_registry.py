@@ -245,6 +245,25 @@ class TheRefusals(unittest.TestCase):
     def test_a_flow_value_that_never_closes(self) -> None:
         self.assertIn("never closed", self.refuse(self.filled().replace("cost: local }", "cost: local")))
 
+    def test_a_role_with_no_list_at_all(self) -> None:
+        """Copilot found this. The list is the order, so a section without one
+        left every entry declaring that role holding it in name only: the file
+        said `a` reviews, and the registry answered that nothing does."""
+        message = self.refuse(self.filled().replace("  reviewer: [two]\n", ""))
+        self.assertIn("no 'reviewer' list", message)
+
+    def test_a_role_list_naming_the_same_entry_twice(self) -> None:
+        message = self.refuse(self.filled().replace("reviewer: [two]", "reviewer: [two, two]"))
+        self.assertIn("more than once", message)
+
+    def test_an_empty_list_is_how_nobody_is_written(self) -> None:
+        """Refusing the missing list is only fair if there is a way to say it
+        on purpose."""
+        registry = sd_registry.parse(
+            self.filled().replace("reviewer: [two]", "reviewer: []"), "fixture.yaml"
+        )
+        self.assertEqual(list(registry.order("reviewer")), [])
+
     def test_an_unknown_role(self) -> None:
         self.assertIn("'auditor'", self.refuse(self.filled() + "  auditor: [two]\n"))
 

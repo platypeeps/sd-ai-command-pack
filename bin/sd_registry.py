@@ -453,12 +453,27 @@ def parse(text: str, path: Path | str = REGISTRY_NAME) -> Registry:
         )
 
     role_lists: dict[str, list[str]] = {}
+    for role in ROLES:
+        if role not in document["roles"]:
+            raise RegistryError(
+                f"{path}: the 'roles' section has no {role!r} list. The list "
+                f"is the order, so without one no entry holds the role however "
+                f"many declare it. Write `{role}: []` to mean nobody."
+            )
     for role, names in document["roles"].items():
         if role not in ROLES:
             raise RegistryError(f"{path}: no role {role!r}")
         if not isinstance(names, list):
             raise RegistryError(f"{path}: role {role!r} is not a list")
-        role_lists[role] = [str(name) for name in names]
+        ordered = [str(name) for name in names]
+        repeated = sorted({name for name in ordered if ordered.count(name) > 1})
+        if repeated:
+            raise RegistryError(
+                f"{path}: the {role!r} list names {repeated} more than once. "
+                f"The list is an order, and a name cannot be in two places in "
+                f"one."
+            )
+        role_lists[role] = ordered
 
     providers: dict[str, Provider] = {}
     for name, body in document["providers"].items():

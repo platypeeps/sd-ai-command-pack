@@ -873,6 +873,23 @@ class AnEmptyChainThatWantedReviewersTests(ReviewFixture):
         self.assertEqual(result["status"], "unavailable")
         self.assertNotEqual(sd_review.STATUS_EXIT[result["status"]], sd_review.EXIT_OK)
 
+    def test_an_ordinary_run_says_why_it_had_nobody(self) -> None:
+        """Copilot found this. The reasons were computed either way and
+        printed only under `--explain`, so a plain run said the one word
+        "unavailable" and exited 5. The operator whose repository has no
+        'reviewers' line is the last one who would think to re-run with a flag
+        to learn that."""
+        root = self.make_repo()
+        (root / "CLAUDE.local.md").unlink()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        result = self.review(root)
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        printed = stream.getvalue()
+        self.assertIn("no reviewer was available:", printed)
+        self.assertIn("reviewers", printed)
+        self.assertIn("unavailable", printed)
+
     def test_every_entry_being_the_authors_vendor_is_unavailable(self) -> None:
         """The chain empties for a third reason, and answers the same way."""
 

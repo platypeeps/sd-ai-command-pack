@@ -1255,6 +1255,19 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     remaining = result.get("remaining") or []
     if remaining:
         write(f"\nnot reviewed: {', '.join(remaining)} -- rerun when the quota resets\n")
+    if result["status"] == "unavailable":
+        # The reasons were computed either way and printed only under
+        # `--explain`, so an ordinary run wanting a reviewer and finding none
+        # said the single word "unavailable" and exited 5. The operator whose
+        # repository has no 'reviewers' line is exactly the one who will not
+        # think to re-run with a flag to find that out.
+        write("\nno reviewer was available:\n")
+        for refusal in (result["registry_refusal"], result["consent_refusal"]):
+            if refusal:
+                write(f"  {refusal}\n")
+        for row in result["chain"]:
+            if not row["eligible"]:
+                write(f"  {row['provider']:<12} {row['reason']}\n")
     write(f"\nsd-review: {result['status']}\n")
 
 
