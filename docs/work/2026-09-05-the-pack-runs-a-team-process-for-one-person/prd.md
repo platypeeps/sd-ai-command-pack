@@ -3534,3 +3534,29 @@ from a number the operator types.
     itself uses, so the two cannot disagree about where the library lives.
     Recorded because a skip that names a real reason reads as a machine
     limitation rather than as a bug, which is how this one survived.
+  - C-188, blocking, found on the first CI run that could reach the library:
+    the pack advertised `requires-python = ">=3.10"` and `sd_db` declares
+    `>=3.13`. The 3.10 matrix leg failed at the install with `Package 'sd-db'
+    requires a different Python: 3.10.21 not in '>=3.13'`. The advertised
+    floor was already fiction: `sd restore` and `sd skill` read the database
+    through that library, so on 3.10 two of the pack's verbs cannot work
+    whatever CI says. Raised to 3.13 on the operator's word, in every place
+    that names it -- `pyproject.toml`'s `requires-python` and mypy
+    `python_version`, the matrix, the README badge and the README's CI table.
+    Rejected: keeping the leg and exempting it from the sibling-dependent
+    tests, which buys a matrix row that tests less than the other one and a
+    skip gate with a documented hole, to advertise support the pack does not
+    have. One consequence worth naming: `bin/sd_skill.py` had spelled UTC as
+    `datetime.timezone.utc` because `datetime.UTC` is 3.11 and mypy was pinned
+    at 3.10; that workaround is gone.
+  - C-189, material, from the same run: `TheProvisioningMode`'s two tests
+    asserted facts about the machine they ran on. `main` derives the checkout
+    from the module's own location and has no flag for it, so the tests
+    reached the real checkout, found a `.venv` on the machine they were
+    written on, and did not find one on CI -- where the "no virtualenv"
+    refusal arrives before the branch under test. They drive the dispatch
+    through a stubbed `provision_library` now, which is what the dispatch
+    actually does: turn a report into an exit code. A third test was added
+    with them, giving the stub a report whose words contradict its flag, so
+    the defect these tests exist for -- an exit code that read `"installed"
+    in report` -- cannot come back by wording.

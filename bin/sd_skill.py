@@ -67,10 +67,7 @@ def available(root: pathlib.Path) -> list[str]:
 
 def expiry(started: datetime.datetime | None = None) -> str:
     """Thirty days out, in the one format the library compares rows as text."""
-    # `timezone.utc` and not `datetime.UTC`: the latter is 3.11, and this
-    # repository's mypy is pinned at 3.10, so the alias fails the lint on a
-    # runtime that would accept it.
-    moment = started or datetime.datetime.now(datetime.timezone.utc)
+    moment = started or datetime.datetime.now(datetime.UTC)
     return (moment + datetime.timedelta(days=TRIAL_DAYS)).isoformat(timespec="seconds")
 
 

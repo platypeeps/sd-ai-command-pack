@@ -22,9 +22,15 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            python-version: "3.10"
-          - os: ubuntu-latest
             python-version: "3.13"
+          # 3.10 is gone. `sd_db` declares `requires-python = ">=3.13"`, and
+          # two of this pack's verbs -- `sd restore` and `sd skill` -- read
+          # the database through it, so a 3.10 leg could not install the
+          # library and could not run their tests. Keeping the leg would have
+          # meant a matrix row that tests less than the other one and a skip
+          # gate with a hole in it, to advertise a floor the pack no longer
+          # has. `pyproject.toml` and the README badge say 3.13 too.
+          #
           # macOS is dropped for the duration of the artifacts-as-product
           # rollout (R11-D4). Restored at step 7, where "verify protection"
           # already sits on the checklist.

@@ -1,6 +1,6 @@
 # SD AI Command Pack
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.13%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/tests-unittest-2E7D32)](#verify)
 [![License: MIT](https://img.shields.io/github/license/platypeeps/sd-ai-command-pack)](LICENSE)
 [![Source](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/platypeeps/sd-ai-command-pack)
@@ -183,7 +183,7 @@ CI is four jobs, named here as branch protection sees them:
 
 | Job | What it runs |
 |---|---|
-| `unittest` (matrix) | The suite on Ubuntu, Python 3.10 and 3.13, plus the installer coverage gate |
+| `unittest` | The suite on Ubuntu, Python 3.13, plus the installer coverage gate |
 | `lint` | Ruff and mypy over `bin/` |
 | `bash 3.2 syntax` | Every tracked shell script parsed by a bash 3.2 built from source |
 | `security` | Bandit over `bin/`, zizmor over the workflows, ShellCheck |

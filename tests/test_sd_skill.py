@@ -437,37 +437,60 @@ class TheLibraryDoor(unittest.TestCase):
 class TheProvisioningMode(unittest.TestCase):
     """`--provision-library`, the one door `make setup` goes through.
 
-    Through `main`, so the dispatch and its exit code are what is tested.
-    The checkout is this repository -- `main` derives it from the module's
-    own location and has no flag for it -- so neither test may reach `pip`:
-    one is a `--dry-run`, the other points the environment at a directory
-    holding no library. Both return before anything is installed.
+    What the dispatch does is turn a report into an exit code, and that is
+    what these test. `main` derives the checkout from the module's own
+    location and has no flag for it, so a test that went all the way to
+    `pip` would be asserting facts about the machine it runs on: the first
+    version did, and it passed here and failed on CI, where the checkout has
+    no `.venv` and the refusal arrives before anything else can. The
+    provisioning itself is covered by `TheLibraryDoor` against a fixture.
     """
 
     def setUp(self) -> None:
         scratch = tempfile.TemporaryDirectory()
         self.addCleanup(scratch.cleanup)
         self.home = Path(scratch.name).resolve()
+        self.saved = sd_install.provision_library
+        self.addCleanup(setattr, sd_install, "provision_library", self.saved)
 
-    def run_mode(self, checkout: Path, *extra: str) -> tuple[int, str]:
+    def answer(self, installed: bool, report: str) -> None:
+        def stub(ctx, out):
+            del ctx, out
+            return installed, report
+
+        sd_install.provision_library = stub
+
+    def run_mode(self) -> tuple[int, str]:
         out = io.StringIO()
         code = sd_install.main(
-            ["--provision-library", "--home", str(self.home), *extra],
-            environ={"SD_SYSTEM_CHECKOUT": str(checkout)},
+            ["--provision-library", "--home", str(self.home)],
+            environ={"SD_SYSTEM_CHECKOUT": str(self.home / "system")},
             out=out,
         )
         return code, out.getvalue()
 
     def test_a_machine_it_cannot_provision_exits_one_and_says_why(self) -> None:
-        code, output = self.run_mode(self.home / "no-system-checkout-here")
+        self.answer(False, "no library at /nowhere; sd_db is absent, trials unavailable")
+        code, output = self.run_mode()
         self.assertEqual(code, 1)
-        self.assertIn("no library at", output)
         self.assertIn("sd_db is absent", output)
 
-    def test_a_dry_run_reports_what_it_would_do_and_exits_zero(self) -> None:
-        code, output = self.run_mode(REPO_ROOT.parent.parent / "system", "--dry-run")
-        self.assertEqual(code, 0, output)
-        self.assertIn("would install sd_db from", output)
+    def test_a_successful_provision_exits_zero_and_says_so(self) -> None:
+        self.answer(True, "sd_db installed from /somewhere")
+        code, output = self.run_mode()
+        self.assertEqual(code, 0)
+        self.assertIn("sd_db installed from", output)
+
+    def test_the_exit_code_follows_the_flag_and_not_the_words(self) -> None:
+        """The defect this replaced: the dispatch used to read its own prose.
+
+        `"installed" in report` is true of "sd_db not installed", so the one
+        machine the exit code exists for returned zero. A report whose words
+        say the opposite of its flag pins that the words no longer decide.
+        """
+        self.answer(False, "sd_db installed from /somewhere")
+        code, _ = self.run_mode()
+        self.assertEqual(code, 1)
 
 
 if __name__ == "__main__":
