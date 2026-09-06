@@ -1,4 +1,4 @@
-"""Green and red fixtures for each of the five rules in bin/sd-docs-lint."""
+"""Green and red fixtures for each of the six rules in bin/sd-docs-lint."""
 
 from __future__ import annotations
 
@@ -144,7 +144,7 @@ class Rule1ShapeTests(LintFixture):
 
     def test_red_stray_file_in_a_work_item(self) -> None:
         (self.work / "2026-08-29-a-workable-item" / "task.json").write_text("{}", encoding="utf-8")
-        self.assert_fails("prd.md, design.md and implement.md only")
+        self.assert_fails("prd.md, design.md, implement.md and .citations.tsv only")
 
     def test_red_archive_bucket_is_not_a_month(self) -> None:
         (self.work / "archive" / "july").mkdir(parents=True)
@@ -181,6 +181,27 @@ class Rule2ReadyTests(LintFixture):
             + "\nBLOCKING: the API is not designed yet.\n",
         )
         self.assert_fails("no open BLOCKING line")
+
+    def test_red_open_blocking_line_as_a_list_item(self) -> None:
+        self.write_item(
+            "2026-08-30-blocked-bullet",
+            GOOD_PRD.replace("created: 2026-08-29", "created: 2026-08-30")
+            + "\n- BLOCKING: the API is not designed yet.\n",
+        )
+        self.assert_fails("no open BLOCKING line")
+
+    def test_green_prose_that_quotes_the_marker(self) -> None:
+        """The word inside a sentence is a record, not an open blocker.
+
+        An item's own log discusses blocking findings; matching the token
+        anywhere on a line meant such an item could never be `in_progress`.
+        """
+        self.write_item(
+            "2026-08-30-discusses",
+            GOOD_PRD.replace("created: 2026-08-29", "created: 2026-08-30")
+            + "\nRule 2 checks that no open `BLOCKING:` line remains.\n",
+        )
+        self.assert_clean()
 
     def test_red_in_progress_without_a_branch(self) -> None:
         self.write_item(
@@ -320,6 +341,100 @@ class RepositoryTests(unittest.TestCase):
     def test_cli_refuses_outside_a_git_repository(self) -> None:
         with tempfile.TemporaryDirectory() as raw, in_directory(pathlib.Path(raw)):
             self.assertEqual(lint.main([]), 2)
+
+
+class Rule6CitationTests(LintFixture):
+    """A `prd.md:N` citation still points at the line it was written against.
+
+    Across four adversarial review rounds of one planning batch, six findings
+    were citation drift, and twice the round that corrected the citations was
+    the round that invalidated them: a fix inserted four lines into `prd.md`
+    and re-anchored nothing below it. Rule 6 records what each citation points
+    at and reports where the text went, so re-anchoring is a read rather than
+    arithmetic.
+
+    What it does not do is certify that a citation was right when it was
+    recorded. The baseline is what the page says today; the rule watches it
+    from there.
+    """
+
+    def cited_item(self) -> pathlib.Path:
+        item = self.write_item("2026-08-29-a-cited-item", GOOD_PRD)
+        (item / "design.md").write_text(
+            "# design\n\nThe ladder is at `prd.md:3`.\n", encoding="utf-8"
+        )
+        return item
+
+    def record(self) -> int:
+        return lint.write_citation_manifest(self.cited_item(), self.work)
+
+    def test_green_a_recorded_citation_that_has_not_moved(self) -> None:
+        self.record()
+        self.assert_clean()
+
+    def test_red_an_insertion_above_the_target_moves_it(self) -> None:
+        self.record()
+        item = self.work / "2026-08-29-a-cited-item"
+        lines = (item / "prd.md").read_text(encoding="utf-8").splitlines()
+        lines.insert(1, "an inserted line")
+        (item / "prd.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        failures = self.assert_fails("was written against")
+        self.assertIn("that text is now at line 4", "\n".join(failures))
+
+    def test_red_the_cited_text_deleted_altogether(self) -> None:
+        self.record()
+        item = self.work / "2026-08-29-a-cited-item"
+        lines = (item / "prd.md").read_text(encoding="utf-8").splitlines()
+        del lines[2]
+        (item / "prd.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.assert_fails("that text is gone from the file")
+
+    def test_red_a_malformed_manifest_row(self) -> None:
+        item = self.cited_item()
+        (item / lint.CITATION_MANIFEST).write_text("two\tfields\n", encoding="utf-8")
+        self.assert_fails("a manifest row is not five fields")
+
+    def test_an_item_with_no_manifest_is_not_checked(self) -> None:
+        self.cited_item()
+        report = self.run_lint()
+        self.assertEqual(report.failures, [])
+        self.assertIn("across 0 recorded item(s)", "\n".join(report.notes))
+
+    def test_the_manifest_is_not_a_stray_file_under_rule_1(self) -> None:
+        self.record()
+        self.assert_clean()
+
+    def test_a_citation_that_leaves_the_work_root_does_not_resolve(self) -> None:
+        item = self.cited_item()
+        (item / "design.md").write_text(
+            "See `../../../etc/passwd.md:1`.\n", encoding="utf-8"
+        )
+        self.assertEqual(lint.item_citations(item, self.work), [])
+
+    def test_a_citation_into_code_is_left_to_the_adjacency_rule(self) -> None:
+        item = self.cited_item()
+        (item / "design.md").write_text("The reader is at `bin/sd:1378`.\n", encoding="utf-8")
+        self.assertEqual(lint.item_citations(item, self.work), [])
+
+    def test_a_citation_below_the_log_heading_is_a_quotation_not_a_claim(self) -> None:
+        item = self.cited_item()
+        (item / "design.md").write_text(
+            "# design\n\nThe ladder is at `prd.md:3`.\n\n"
+            "## Log\n\n- C-1: `prd.md:3` was wrong on the day.\n",
+            encoding="utf-8",
+        )
+        citations = lint.item_citations(item, self.work)
+        self.assertEqual([entry[0] for entry in citations], ["design.md:3"])
+
+    def test_a_blank_target_line_anchors_to_the_text_under_it(self) -> None:
+        item = self.cited_item()
+        prd = item / "prd.md"
+        lines = prd.read_text(encoding="utf-8").splitlines()
+        lines[2] = ""
+        prd.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        lint.write_citation_manifest(item, self.work)
+        recorded = (item / lint.CITATION_MANIFEST).read_text(encoding="utf-8").split("\t")
+        self.assertNotEqual(recorded[4].strip(), "")
 
 
 if __name__ == "__main__":

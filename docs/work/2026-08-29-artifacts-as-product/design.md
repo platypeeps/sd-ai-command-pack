@@ -2362,7 +2362,7 @@ enforcement is the easy half. The half that decides whether the step is safe to 
 note gets back to disk.
 
 **The reader this repository already has is lossy, and that is deliberate.** `frontmatter()`
-(`bin/sd:1249`) is the twin of `sd-writing-pack/scripts/pack.py:244-258` -- the vault-side tool
+(`bin/sd:1252`) is the twin of `sd-writing-pack/scripts/pack.py:244-258` -- the vault-side tool
 step 10 deletes, in the sibling repository of that name, not in this one -- down to what it cannot
 see: a value spanning
 lines comes back as the empty string, because the continuation line does not match the key
@@ -2380,7 +2380,7 @@ about.
 all**. Each key reads back as `""` and its items are not in the dictionary at all, so the rebuild
 emits a bare `tags:` and drops what was under it.
 
-*Quoted scalars lose their quotes.* The reader ends `.strip('"')` (`bin/sd:1277`), which is
+*Quoted scalars lose their quotes.* The reader ends `.strip('"')` (`bin/sd:1280`), which is
 correct for reading and destructive for writing: **146 of the 244** carry a quoted value whose
 text contains a `:` or opens a `[[wikilink]]`, and re-emitting those bare is not lossy YAML but
 *malformed* YAML — `source-brief: [[2026-08-15 - Daily Intel Brief]]` and a `description:` with a

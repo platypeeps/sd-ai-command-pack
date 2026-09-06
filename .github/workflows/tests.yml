@@ -22,9 +22,15 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            python-version: "3.10"
-          - os: ubuntu-latest
             python-version: "3.13"
+          # 3.10 is gone. `sd_db` declares `requires-python = ">=3.13"`, and
+          # two of this pack's verbs -- `sd restore` and `sd skill` -- read
+          # the database through it, so a 3.10 leg could not install the
+          # library and could not run their tests. Keeping the leg would have
+          # meant a matrix row that tests less than the other one and a skip
+          # gate with a hole in it, to advertise a floor the pack no longer
+          # has. `pyproject.toml` and the README badge say 3.13 too.
+          #
           # macOS is dropped for the duration of the artifacts-as-product
           # rollout (R11-D4). Restored at step 7, where "verify protection"
           # already sits on the checklist.
@@ -42,8 +48,40 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-dev.txt
 
+      # `sd_db` is the one database's library. It lives in a second private
+      # repository, is not vendored here and is not on any index, so this job
+      # cannot run the suite without it: `tests/test_sd_skill.py` imports it
+      # at module scope for hand-off 7's assertion, and
+      # `tests/test_sd_restore.py` skips a class without it, which the skip
+      # gate below is right to fail on.
+      #
+      # The destination is `~/repos/system` because that is
+      # `sd_install.SYSTEM_CHECKOUT_DEFAULT`, not a path invented here. The
+      # token is a secret the maintainer owns; `GITHUB_TOKEN` is scoped to
+      # this repository and cannot read a sibling private one.
+      - name: Check out the system checkout, for sd_db
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: platypeeps/system
+          token: ${{ secrets.SYSTEM_REPO_TOKEN }}
+          path: system-checkout
+          persist-credentials: false
+
+      - name: Put it where the installer looks
+        shell: bash
+        run: |
+          mkdir -p "$HOME/repos"
+          mv system-checkout "$HOME/repos/system"
+
       - name: Install test dependencies
         run: python3 -m pip install --require-hashes -r requirements-dev.txt
+
+      # A built copy, never `-e`: an editable install would resolve into the
+      # checkout above, and a branch switch there would change this pack's
+      # library under its feet. That is B's criterion 1, and
+      # `test_sd_skill.TheHarnessIsImportableHere` asserts it.
+      - name: Install sd_db from that checkout
+        run: python3 -m pip install "$HOME/repos/system/local-sd-db"
 
       - name: Run tests
         # Shards the suite by module across workers (coverage --parallel-mode

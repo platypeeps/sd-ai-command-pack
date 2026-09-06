@@ -1,0 +1,66 @@
+{
+  "$comment": [
+    "What the installer renders. Requirement 10: a skill installs because a",
+    "path names it, or because a trial row says it is on trial. Usage counts",
+    "cannot decide what stays -- none exist, and three counts over identical",
+    "data gave six, thirteen and eighty-one. Cohesion can.",
+    "",
+    "Each path is a pipeline that can be named end to end. A skill rides on a",
+    "path because the path would be broken without it, never because it is",
+    "adjacent to one. Everything else is in contrib/, in git and not installed,",
+    "where `sd skill try <name>` brings it back for thirty days and use decides.",
+    "",
+    "A directory under skills/ that no path names fails `make check`. The list",
+    "is enumerated at install, never recited: this file is the enumeration."
+  ],
+  "paths": {
+    "research": {
+      "summary": "sources to brief to handoff",
+      "skills": [
+        "sd-brief",
+        "sd-capture",
+        "sd-continuity-packet",
+        "sd-digest",
+        "sd-distill",
+        "sd-fact-check",
+        "sd-handoff",
+        "sd-knowledge-capture",
+        "sd-research",
+        "sd-research-repo"
+      ]
+    },
+    "development": {
+      "summary": "plan to build to ship",
+      "skills": [
+        "sd-check",
+        "sd-debug",
+        "sd-gate-probes",
+        "sd-help",
+        "sd-plan",
+        "sd-receive-review",
+        "sd-review",
+        "sd-ship",
+        "sd-spec",
+        "sd-status",
+        "sd-suggest"
+      ]
+    },
+    "act": {
+      "summary": "brief to draft to send",
+      "skills": [
+        "sd-author",
+        "sd-decide",
+        "sd-diagram",
+        "sd-distill",
+        "sd-explain",
+        "sd-humanizer",
+        "sd-presentation",
+        "sd-proposal",
+        "sd-prose-lint",
+        "sd-publish",
+        "sd-technical-editor",
+        "sd-topic-radar"
+      ]
+    }
+  }
+}

@@ -58,22 +58,31 @@ naming.
 ## Acceptance criteria
 
 1. An item whose `branch:` names a branch that does not exist in *its own*
-   repository is no longer excluded from the sweep — it appears as due if it is
-   otherwise due.
-2. An item whose `branch:` names a live branch is still excluded, unchanged.
+   repository is annotated gone and appears as due if it is otherwise due.
+2. An item whose `branch:` names a live branch is annotated live and appears
+   as due if it is otherwise due; the annotation changes, the listing does
+   not.
 3. Resolution is per-root. A branch name that exists in one swept repository and
    not another gives different answers for items in each, and a test asserts
    that rather than assuming it.
 4. "git cannot answer" is a distinct outcome from "the branch is absent". A root
-   that is not a git checkout, or a git invocation that fails, must not convert
-   every item inside it into a sweep candidate. The conservative answer there is
-   to keep excluding, and to say so.
-5. Both remote and local refs count. A branch pushed but not checked out locally
-   is live work; a sweep that only consulted `refs/heads` would report it as
-   abandoned on any machine that has not fetched it.
-6. Mutation-tested, per the standing bar. At minimum: the exclusion inverted,
+   that is not a git checkout, or a git invocation that fails, annotates every
+   item inside it unknown and says so once per root; it neither adds nor
+   removes an item from the report.
+5. Branch liveness is advisory, never an exclusion. The sweep asks the remote
+   once per root, `git ls-remote --heads <remote>` with no branch argument,
+   holds every head the answer lists, and matches each item's `branch:`
+   against that set and against local refs by exact ref name; a branch found
+   in either is annotated live, a branch found in neither is annotated gone,
+   and a query that fails annotates every item in the root unknown. Every
+   item past the age threshold is in the report with its annotation; none is
+   hidden by it. A test covers each of the three annotations and asserts the
+   report's item count is the same across all three; a fixture root with two
+   items whose branches exist only on the remote asserts both are annotated
+   live and that the recording remote answered exactly one query.
+6. Mutation-tested, per the standing bar. At minimum: live and gone swapped,
    the per-root argument replaced by a fixed root, and the "git cannot answer"
-   path made to fall through.
+   path made to report gone.
 
 ## Open questions
 
@@ -90,3 +99,32 @@ naming.
 3. Should `done` items be checked too? They are already excluded by status, so
    a leftover `branch:` on a `done` item costs nothing today — but it is the
    same dangling claim, and the host-parsing item only avoided it by hand.
+
+## Log
+
+- **2026-09-05** — Recorded from the planning review of
+  `2026-09-05-the-pack-runs-a-team-process-for-one-person`, round two, finding
+  C-7 against criterion 5 here: counting remote-tracking refs does not
+  establish that a branch is live. A deleted branch's ref survives until
+  `git fetch -p`, and a branch never fetched has no ref at all, so the rule as
+  written can keep hiding the deleted-branch item this item exists for, or
+  flag live work on another machine. If this item proceeds, criterion 5 must
+  say whether liveness is a fresh remote query or a cached observation, use
+  one per-root query with failure reported as unknown, or keep branch
+  resolution advisory. That item's criterion 21 removes the sweep; when it
+  lands, this item closes as superseded and the question is moot.
+- **2026-09-05** — Criterion 5 rewritten from the planning review of
+  `2026-09-05-the-pack-runs-a-team-process-for-one-person`, round four,
+  finding C-12 there: liveness is advisory, one fresh remote query per root,
+  failure is unknown, and no annotation hides an item. The supersession
+  recorded above still stands.
+- **2026-09-05** — Criteria 1, 2, 4 and 6 brought in line with criterion 5,
+  from the planning review of
+  `2026-09-05-the-pack-runs-a-team-process-for-one-person`, round five,
+  finding C-13 there: liveness annotates, nothing excludes, and the mutation
+  set tests the annotation.
+- **2026-09-05** — From the solo-first item's ninth planning review, C-20:
+  one remote query per root filtered by one item's branch could only
+  classify that item, and a second remote-only branch in the same root was
+  annotated gone. Criterion 5 now fetches every remote head once per root
+  and matches locally; the fixture has two remote-only branches.

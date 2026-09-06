@@ -1,0 +1,294 @@
+"""`sd restore` — the verb group a restored database is settled through.
+
+The library it reads, `sd_db`, reaches this virtualenv through the pack's
+installer. So two things are tested here and they are different things: what
+the verbs do **when the library is absent**, which is every machine before
+`make setup` and any machine whose `system` checkout has moved, and what they
+do against a real database, which is exercised with `sd_db` put on `sys.path`
+from the `system` checkout when that checkout is present beside this one.
+
+Absence is now simulated rather than found. Before PR 5 the first class held
+by stripping `local-sd-db` from `sys.path`, because nothing else could supply
+the module; the installer provisions a built copy into this virtualenv's
+site-packages, so that stripping stopped meaning anything and the refusal
+under test went untested. `NoLibrary` on `sys.meta_path` refuses the import
+by name, which is the state the refusal exists for and does not depend on
+where the module happens to be installed today.
+
+Where the sibling checkout is absent that second class skips, with the reason
+stated -- the only skip in this file, and one that says what it could not
+reach rather than passing on nothing. On a machine with both checkouts, which
+is every machine this is developed on, it runs.
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import importlib
+import importlib.util
+import io
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+import unittest
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(REPO_ROOT / "bin") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "bin"))
+
+import sd_restore  # noqa: E402
+
+
+def _library_source() -> pathlib.Path | None:
+    """Where `sd_db`'s source is, asked the way the installer asks.
+
+    This used to be `REPO_ROOT.parent.parent / "system" / "local-sd-db"` -- a
+    guess about directory layout that happened to hold on the machine it was
+    written on and nowhere else. CI checks the sibling out at
+    `sd_install.SYSTEM_CHECKOUT_DEFAULT`, not beside this repository, so the
+    guess resolved to nothing there and the class below skipped, silently
+    asserting nothing about the verbs against real rows.
+
+    `sd_install.library_source` is the one resolution: `SD_SYSTEM_CHECKOUT`
+    if set, `~/repos/system` otherwise. Asking it here means this file and
+    the installer cannot disagree about where the library lives.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "sd_install_for_restore_tests", REPO_ROOT / "bin" / "sd_install.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    # Registered before exec: `sd_install` defines a frozen dataclass, and
+    # `dataclasses` looks the defining module up in `sys.modules` by name.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    source = module.library_source(dict(os.environ))
+    return source if (source / "sd_db" / "__init__.py").exists() else None
+
+
+#: The `system` checkout's library, if this machine has one. Preferred over
+#: the installed copy only as a fallback: when the installer has provisioned
+#: `sd_db` there is nothing to put on `sys.path`, and putting the source
+#: there anyway would shadow the built copy with the thing B's criterion 1
+#: says must not be imported.
+LIBRARY = _library_source()
+
+
+def run(handler, **arguments):
+    """Call a handler and capture what a person would see."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        status = handler(argparse.Namespace(**arguments))
+    return status, out.getvalue(), err.getvalue()
+
+
+class NoLibrary:
+    """A `sys.meta_path` finder that refuses `sd_db` wherever it is installed."""
+
+    def find_module(self, name, path=None):  # pragma: no cover - legacy hook
+        return None
+
+    def find_spec(self, name, path=None, target=None):
+        if name == "sd_db" or name.startswith("sd_db."):
+            raise ImportError("sd_db is not installed (blocked by the test)")
+        return None
+
+
+class WithoutTheLibrary(unittest.TestCase):
+    """Every machine before `make setup`, and any whose checkout has moved."""
+
+    def setUp(self) -> None:
+        self.saved = dict(sys.modules)
+        sys.modules.pop("sd_db", None)
+        self.blocker = NoLibrary()
+        sys.meta_path.insert(0, self.blocker)
+
+    def tearDown(self) -> None:
+        sys.meta_path.remove(self.blocker)
+        sys.modules.clear()
+        sys.modules.update(self.saved)
+
+    def test_the_block_is_what_it_claims_to_be(self) -> None:
+        """Without this, the two refusals below can pass for the wrong reason.
+
+        Both assert a refusal, and `sd restore` refuses for several reasons --
+        no database, no unresolved row. If the block ever stopped working the
+        library would import, a different refusal would be raised, and only
+        one of the two tests would notice. This one notices directly.
+        """
+        with self.assertRaises(ImportError):
+            importlib.import_module("sd_db")
+
+    def test_resume_refuses_with_the_remedy_and_not_a_traceback(self) -> None:
+        with self.assertRaises(sd_restore.RestoreRefusal) as raised:
+            sd_restore.resume(argparse.Namespace())
+        message = str(raised.exception)
+        self.assertIn("sd_db is not installed", message)
+        self.assertIn("sd-install", message)
+
+    def test_reimport_refuses_the_same_way(self) -> None:
+        with self.assertRaises(sd_restore.RestoreRefusal) as raised:
+            sd_restore.reimport(argparse.Namespace(repository="/repos/one"))
+        self.assertIn("sd_db is not installed", str(raised.exception))
+
+
+class TheCommandLine(unittest.TestCase):
+    def test_the_group_is_registered_with_both_verbs(self) -> None:
+        completed = subprocess.run(
+            [str(REPO_ROOT / "bin" / "sd"), "restore", "--help"],
+            capture_output=True, text=True, input="",
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("reimport", completed.stdout)
+        self.assertIn("resume", completed.stdout)
+
+    def test_a_refusal_exits_one_and_says_why(self) -> None:
+        completed = subprocess.run(
+            [str(REPO_ROOT / "bin" / "sd"), "restore", "resume"],
+            capture_output=True, text=True, input="",
+            env={**os.environ, "PYTHONPATH": ""},
+        )
+        # Not which refusal -- that depends on whether this machine has run
+        # the installer and whether it has a database. That it is a refusal
+        # and not a traceback is the contract, and it holds either way.
+        self.assertEqual(completed.returncode, 1)
+        self.assertTrue(completed.stderr.startswith("sd: "), completed.stderr)
+        self.assertNotIn("Traceback", completed.stderr)
+
+    def test_a_missing_verb_is_a_usage_error(self) -> None:
+        completed = subprocess.run(
+            [str(REPO_ROOT / "bin" / "sd"), "restore"],
+            capture_output=True, text=True, input="",
+        )
+        self.assertEqual(completed.returncode, 2)
+
+
+class AgainstADatabase(unittest.TestCase):
+    """The verbs against real rows, with `sd_db` from the sibling checkout."""
+
+    #: Set when this class put the source on `sys.path` and must take it off.
+    added = False
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        try:
+            cls.sd_db = importlib.import_module("sd_db")
+            return
+        except ImportError:
+            pass
+        if LIBRARY is None:
+            raise unittest.SkipTest(
+                "sd_db is neither installed nor resolvable from a `system` "
+                "checkout; these tests would assert nothing. Run "
+                "`make setup`, or set SD_SYSTEM_CHECKOUT"
+            )
+        sys.path.insert(0, str(LIBRARY))
+        cls.added = True
+        cls.sd_db = importlib.import_module("sd_db")
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        if cls.added and str(LIBRARY) in sys.path:
+            sys.path.remove(str(LIBRARY))
+            cls.added = False
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = pathlib.Path(self.tmp.name)
+        (self.home / ".local/share/sd").mkdir(parents=True)
+        self.saved_home = os.environ.get("HOME")
+        os.environ["HOME"] = str(self.home)
+        self.addCleanup(self._restore_home)
+        self.sd_db.initialise(home=self.home)
+        self.connection = self.sd_db.connect(home=self.home)
+        self.addCleanup(self.connection.close)
+
+    def _restore_home(self) -> None:
+        if self.saved_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = self.saved_home
+
+    def open_restore(self, key: str = "2026-09-06") -> int:
+        return self.sd_db.record_state(self.connection, "restore", key=key)
+
+    def test_resume_with_no_restore_says_there_is_nothing_to_clear(self) -> None:
+        with self.assertRaises(sd_restore.RestoreRefusal) as raised:
+            sd_restore.resume(argparse.Namespace())
+        self.assertIn("no unresolved restore", str(raised.exception))
+
+    def test_resume_names_what_is_blocked_and_what_is_frozen(self) -> None:
+        self.sd_db.upsert_repo(self.connection, "/repos/one")
+        item = self.sd_db.create_item(self.connection, kind="work", title="A thing")
+        assignment = self.sd_db.create_assignment(
+            self.connection, role="reviewer", status="queued", item=item)
+        self.sd_db.update_assignment(self.connection, assignment, status="blocked")
+        self.connection.execute(
+            "INSERT INTO bill (name, cost_basis, cap_usd_month) VALUES ('baseten', 'company', 50)")
+        row = self.open_restore()
+
+        status, out, _err = run(sd_restore.resume)
+
+        self.assertEqual(status, 0)
+        self.assertIn(f"assignment {assignment} (reviewer)", out)
+        self.assertIn("baseten", out)
+        self.assertIn("Dispatch resumes", out)
+        self.assertEqual(self.sd_db.unresolved_state(self.connection, "restore"), [])
+        del row
+
+    def test_resume_refuses_while_a_repository_is_still_retiring(self) -> None:
+        self.sd_db.upsert_repo(self.connection, "/repos/one", status_source="retiring")
+        self.open_restore()
+        with self.assertRaises(sd_restore.RestoreRefusal) as raised:
+            sd_restore.resume(argparse.Namespace())
+        message = str(raised.exception)
+        self.assertIn("/repos/one (status_source)", message)
+        self.assertIn("sd restore reimport", message)
+        self.assertEqual(len(self.sd_db.unresolved_state(self.connection, "restore")), 1)
+
+    def test_a_verified_row_in_the_snapshot_proves_the_repository(self) -> None:
+        self.sd_db.upsert_repo(self.connection, "/repos/one", status_source="retiring")
+        self.sd_db.record_state(
+            self.connection, "verified", key="/repos/one:status_source", body="hash")
+        self.open_restore()
+        status, out, _err = run(sd_restore.resume)
+        self.assertEqual(status, 0)
+        self.assertIn("Dispatch resumes", out)
+
+    def test_two_unresolved_restores_are_not_this_command_s_call(self) -> None:
+        self.open_restore("2026-09-05")
+        self.open_restore("2026-09-06")
+        with self.assertRaises(sd_restore.RestoreRefusal) as raised:
+            sd_restore.resume(argparse.Namespace())
+        self.assertIn("2 unresolved restores", str(raised.exception))
+
+    def test_reimport_refuses_an_unregistered_repository(self) -> None:
+        self.open_restore()
+        with self.assertRaises(sd_restore.RestoreRefusal) as raised:
+            sd_restore.reimport(argparse.Namespace(repository="/repos/absent"))
+        self.assertIn("not a registered repository", str(raised.exception))
+
+    def test_reimport_refuses_a_repository_that_is_not_awaiting_one(self) -> None:
+        self.sd_db.upsert_repo(self.connection, "/repos/one", status_source="row")
+        self.open_restore()
+        with self.assertRaises(sd_restore.RestoreRefusal) as raised:
+            sd_restore.reimport(argparse.Namespace(repository="/repos/one"))
+        self.assertIn("not awaiting a reimport", str(raised.exception))
+
+    def test_reimport_reports_what_is_held_and_says_the_import_is_not_here(self) -> None:
+        """The verb group lands now; the per-kind import lands with the
+        migration that wrote the rows, and says so rather than pretending."""
+        self.sd_db.upsert_repo(self.connection, "/repos/one", status_source="retiring")
+        self.open_restore()
+        status, out, _err = run(sd_restore.reimport, repository="/repos/one")
+        self.assertEqual(status, 1)
+        self.assertIn("retiring for status_source", out)
+        self.assertIn("rehearsal rows", out)
+        self.assertIn("rerun the sitting", out)
+
+
+if __name__ == "__main__":
+    unittest.main()

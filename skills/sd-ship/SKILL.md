@@ -42,7 +42,9 @@ before anything was pushed.
    mode: shape · ready · decision shape · spec index · PR link.
 4. **Commit enumerated paths only.**
 5. **`sd-review --scope branch --challenge`** — the adversarial pass, on the
-   commits, before anything leaves the machine. Dispose every blocking finding
+   commits, before anything leaves the machine. This is the development flow's
+   *code, before merge* point, and its cap is that row's in
+   `.claude/rules/sd-planning-adversarial-review.md`. Dispose every blocking finding
    here: fix it, or record the decision and the reason it stands. A fix is not
    dispositioned until it is committed and the lane has run again — the head
    that gets pushed must be the head the lane passed, not the one it failed.

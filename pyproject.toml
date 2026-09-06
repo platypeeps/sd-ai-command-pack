@@ -2,7 +2,7 @@
 name = "sd-ai-command-pack"
 version = "0.0.0"
 description = "Repository tooling project; not a distributable package."
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -38,7 +38,7 @@ extend-exclude = [
 select = ["E4", "E7", "E9", "F", "I", "B"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.13"
 check_untyped_defs = true
 warn_unused_ignores = true
 mypy_path = ".github/scripts"
@@ -54,4 +54,14 @@ scripts_are_modules = true
 # be made in whichever pull request happened to add the stubs.
 [[tool.mypy.overrides]]
 module = ["markdown"]
+ignore_missing_imports = true
+
+# `sd_db` is the one database's library. It is not vendored here and not on
+# PyPI: `make setup` builds a copy from the `system` checkout into this
+# virtualenv, so whether mypy can see it depends on whether that ran. Declared
+# here for the same reason `markdown` is -- an inline ignore in bin/sd_restore.py
+# was correct on a machine without the library and, with `warn_unused_ignores`
+# above, a lint failure on every machine with it.
+[[tool.mypy.overrides]]
+module = ["sd_db", "sd_db.*"]
 ignore_missing_imports = true

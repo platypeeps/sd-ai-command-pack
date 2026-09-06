@@ -81,11 +81,13 @@ a document.
    script can decide; the adversarial pass over the claims is yours, and
    `references/conventions.md` has the eight steps.
 7. Get the independent pass where the document carries a decision someone will
-   act on. The second reader is the Codex plugin, invoked on the working tree
-   with focus text that redirects it from code review to prose — the exact
-   invocation and its limits are in `references/conventions.md`. If it is
-   unavailable, record that in Status rather than letting self-review pass as
-   review.
+   act on. This is the research flow's review point *after the brief and
+   decisions*, and its cap is that row's in
+   `.claude/rules/sd-planning-adversarial-review.md`. The second reader is a
+   CLI invoked on the working tree with focus text that redirects it from code
+   review to prose — the exact invocation and its limits are in
+   `references/conventions.md`. If it is unavailable, record that in Status
+   rather than letting self-review pass as review.
 8. Publish to Notion, not as an artifact, in the mirror shape the reference
    gives. Record the page in the repo's README table. Handling restrictions
    survive the mirror.

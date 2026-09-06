@@ -20,6 +20,11 @@ disable-model-invocation: true
 4. **Findings are dispositioned here**, against this repository's severity
    floor, and printed.
 
+`--scope planning` is the development flow's *prd and design* review point;
+`--scope branch` before a push is *code, before merge*. Both caps are those
+rows' in `.claude/rules/sd-planning-adversarial-review.md`, and this tool
+states neither.
+
 ## Nothing is ever posted
 
 There is no PR comment, no review submission, no label, no check-run update,
@@ -40,10 +45,12 @@ the CI lane's business, installed separately by `sd-review setup-github`.
 
 ## Flags
 
-`--challenge` (adversarial design-challenge stance) · `--explain` (print the
+`--challenge` (adversarial design-challenge stance) · `--item NAME` (planning
+scope only: the one active item whose directory is NAME, when two are
+active) · `--explain` (print the
 routing decision and why, run nothing) · `--dry-run` (print the exact
 invocations, run nothing) · `--json` · `--draft` (routing reduces the tier) ·
-`--timeout SECONDS` (per provider, default 900).
+`--timeout SECONDS` (per provider, default 1800).
 
 There is **no `--repo` and there will not be one** (R10-D6): a session that can
 be pointed at another checkout is a session that reviews the wrong diff.

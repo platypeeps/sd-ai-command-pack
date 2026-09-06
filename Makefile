@@ -9,6 +9,7 @@ VENV_BIN = $(VENV)/bin
 setup:
 	"$(PYTHON)" -m venv "$(VENV)"
 	"$(VENV_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
+	"$(VENV_PYTHON)" bin/sd_install.py --provision-library
 
 # `generate` and `surface-check` are gone with step 3e. They regenerated the
 # committed per-platform copies under templates/ from .github/command-sources/,

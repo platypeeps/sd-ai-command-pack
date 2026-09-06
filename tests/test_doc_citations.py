@@ -8,11 +8,12 @@ growing `bin/sd` from 1,553 lines to 2,006 moved `frontmatter()` from 1231 to
 branch that changed the file, and the branch that broke them was also the
 branch editing the document that carried them.
 
-The planning-adversarial-review contract already asks for this sweep, and it
-did catch those three. But it only runs at a planning convergence boundary. A
-pure code change that edits no `prd.md`, `design.md` or `implement.md` breaks
-citations with nothing to notice; 8-iv was swept only because it happened to
-edit `design.md` as well. This runs on every change instead.
+The planning review rule -- `.claude/rules/sd-planning-adversarial-review.md`,
+and the contract it points at -- already asks for this sweep, and it did catch
+those three. But it only runs at a planning convergence boundary. A pure code
+change that edits no `prd.md`, `design.md` or `implement.md` breaks citations
+with nothing to notice; 8-iv was swept only because it happened to edit
+`design.md` as well. This runs on every change instead.
 
 **The rule is adjacency.** A citation that directly follows a backticked
 symbol -- `` `status_filter` (`bin/sd:1378`) `` -- is a claim *about that

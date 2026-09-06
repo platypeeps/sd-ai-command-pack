@@ -1,6 +1,6 @@
 # SD AI Command Pack
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.13%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Tests](https://img.shields.io/badge/tests-unittest-2E7D32)](#verify)
 [![License: MIT](https://img.shields.io/github/license/platypeeps/sd-ai-command-pack)](LICENSE)
 [![Source](https://img.shields.io/badge/source-GitHub-181717?logo=github)](https://github.com/platypeeps/sd-ai-command-pack)
@@ -21,6 +21,20 @@ replacement renders from `skills/` at install time, so there are no copies to
 keep in sync, no versions to roll out, and nothing tracked in a repository that
 the framework owns.
 
+What renders is what a path names. `skills/paths.json` describes three
+pipelines — **research**, sources to brief to handoff; **development**, plan to
+build to ship; **act**, brief to draft to send — and the installer writes
+exactly the skills those paths name. Every other skill lives in `contrib/`: in
+this repository, versioned, documented, and not installed. `sd skill try
+<name>` installs one for thirty days and writes down when it started; if
+nothing used it by then, the next install run removes it and says so.
+
+The split is not a ranking. Nothing decided it by usage, because no usage
+counts existed — three ways of counting the same eight days of history gave
+six skills, thirteen, and eighty-one. What a path can say is which skills are
+steps in one sequence somebody actually runs, and that is what these three
+say. A skill in `contrib/` is one command away, and use is what moves it.
+
 **What it writes on a machine:**
 
 - `~/.claude/skills/sd-*/SKILL.md`
@@ -36,6 +50,19 @@ the framework owns.
 lives in `CLAUDE.local.md`, which is untracked by way of that one excludes line.
 `bin/sd_install.py --repo` refuses outright if `CLAUDE.local.md` turns out to be
 tracked, rather than edit a file under version control.
+
+That block's `mode:` line carries one of three values, and the workflow each
+selects is stated in [WORKFLOW.md](WORKFLOW.md):
+
+- `full` — planning artifacts live in `docs/work/` in the repository, and the
+  whole path runs; an unattended merge additionally needs `merge: auto` on the
+  item's row.
+- `minimal` — no work items anywhere, and the small-change path only.
+- `guest` — planning artifacts go to the fork's integration branch, the loop
+  stops at pull-request-ready, and nothing is posted upstream.
+
+Without a `mode:` line the mode is detected, and detection only ever lowers a
+line you wrote.
 
 Agents render to Claude only. Codex keeps its agents as TOML with the
 instructions embedded in a quoted string, and producing that would be a
@@ -87,8 +114,9 @@ The receipt at `~/.local/state/sd-ai-command-pack/installed.json` records every
 path the installer wrote together with the digest of what it wrote. That single
 fact is what makes the rest safe:
 
-- A surface you rename or retire in `skills/` disappears from every platform on
-  the next `--user`, because the receipt knows the old path was ours.
+- A surface you rename or retire in `skills/` — or move to `contrib/` —
+  disappears from every platform on the next `--user`, because the receipt
+  knows the old path was ours.
 - A rendered file you have since edited by hand is **kept** and reported, never
   silently deleted.
 - `--uninstall` removes those paths and nothing else. The global excludes line
@@ -104,10 +132,17 @@ every platform. Each is documented in its own `skills/sd-*/SKILL.md`, which is
 the file that gets installed, so the documentation and the artifact are the
 same object.
 
-`skills/` also holds the skills these commands draw on — knowledge and
-procedure with no standing side-effect authority, loaded when relevant rather
-than invoked. They are not listed here: `sd-help` reads the installed tree at
-runtime, which is the only inventory that cannot go stale. The one structural
+`skills/` and `contrib/` also hold the skills these commands draw on —
+knowledge and procedure with no standing side-effect authority, loaded when
+relevant rather than invoked. They are not listed here: `sd-help` reads the
+installed tree at runtime, and `sd skill list` reads both roots, which are the
+only two inventories that cannot go stale.
+
+Three of the twelve named surfaces — `sd-deps`, `sd-map` and `sd-skill-adopt` —
+are in `contrib/` rather than on a path. They are still commands, and the table
+below still describes them; they install with `sd skill try` rather than by
+default. A command is a thing that authorizes side effects, which is a claim
+about the frontmatter, not a claim that everyone needs it installed. The one structural
 difference is in the frontmatter, and it is what the taxonomy means: each of
 the eleven commands sets `disable-model-invocation`, so invoking it is a
 deliberate act; every other surface, `sd-help` included, does not.
@@ -148,7 +183,7 @@ CI is four jobs, named here as branch protection sees them:
 
 | Job | What it runs |
 |---|---|
-| `unittest` (matrix) | The suite on Ubuntu, Python 3.10 and 3.13, plus the installer coverage gate |
+| `unittest` | The suite on Ubuntu, Python 3.13, plus the installer coverage gate |
 | `lint` | Ruff and mypy over `bin/` |
 | `bash 3.2 syntax` | Every tracked shell script parsed by a bash 3.2 built from source |
 | `security` | Bandit over `bin/`, zizmor over the workflows, ShellCheck |

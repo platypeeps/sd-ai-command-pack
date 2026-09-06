@@ -1514,9 +1514,11 @@ no markers ships no files", and one row breaks all three at once:
   wherever Trellis installed its own Codex adapter, so marking on those files
   auto-selects `codex` in essentially every consumer.
 - *It is a practice of this repository.* Ship nothing. Put the file outside
-  `templates/`, give it no manifest row, and point at it from `AGENTS.md` —
-  inside the link checker's `documentationRoots`, so the reference is gated.
-  `docs/planning-adversarial-review-codex.md` is the worked example.
+  `templates/`, give it no manifest row, and point at it from `AGENTS.md`.
+  Nothing gates such a reference: no link checker runs here, and
+  `documentationRoots` appears in this repository only as prose. So the change
+  that deletes the file updates its referrers by enumeration, or breaks them
+  silently.
 
 The second is not a lesser form of the first. A pack-shipped file that names
 a platform's CLI registers as undeclared usage in every consumer that never

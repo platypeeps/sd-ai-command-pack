@@ -28,8 +28,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # the generated command surfaces; step 3e deleted them, and the installer
 # renders from `skills/` at install time rather than from committed copies. So
 # there is exactly one authored tree to scan, which is the point.
+#
+# Requirement 10 made that tree two directories rather than one authored
+# surface: `contrib/` holds skills a path does not name, and `sd skill try`
+# installs any of them on demand. A skill that is one command away from a
+# reader's machine is shipped, so `contrib/` is scanned exactly as `skills/`
+# is -- the retired selector must not regrow there either.
 SHIPPED_ROOTS = (
     "skills",
+    "contrib",
     "docs",
 )
 
@@ -184,7 +191,7 @@ class SelectorContractDriftTests(unittest.TestCase):
             )
         )
         self.assertEqual(
-            exempt, ["skills/sd-coherence-audit/references/ledger-format.md"]
+            exempt, ["contrib/sd-coherence-audit/references/ledger-format.md"]
         )
 
 

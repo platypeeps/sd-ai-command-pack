@@ -79,6 +79,10 @@ The product — read what the reader gets, not what you meant:
 8. After mirroring, check Notion against the source, and that handling restrictions survived
    the mirror.
 
+This pass is the research flow's review point *after the brief and decisions*; the pass over
+the final product before the send box is the second point. Both caps live in the pack's
+`.claude/rules/sd-planning-adversarial-review.md`, and this page states neither.
+
 The second reader is Codex, **run through the CLI, not a plugin**. The `codex@openai-codex`
 plugin is not a dependency of this kit and may not be installed, so `/codex:*` slash commands
 must not be reached for. `codex` itself is the supported path:

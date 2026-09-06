@@ -41,6 +41,13 @@ import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SKILLS = REPO_ROOT / "skills"
+#: Requirement 10 splits the tree in two without splitting the conventions.
+#: `skills/` is what a path names and the installer renders; `contrib/` is
+#: everything `sd skill try` can still reach. A skill in either is a skill
+#: in this pack, so every rule in this file reads both roots -- a skill that
+#: moves to `contrib/` must not lose its frontmatter on the way.
+CONTRIB = REPO_ROOT / "contrib"
+ROOTS = (SKILLS, CONTRIB)
 
 # The eleven commands. With `sd-help` in SKILL_KIND below they are the twelve
 # surfaces the design names -- the split is the taxonomy's, which makes catalog
@@ -81,12 +88,41 @@ def frontmatter(text: str) -> dict[str, str] | None:
     return None  # unterminated block within the bound
 
 
-def surfaces() -> list[pathlib.Path]:
-    """Every `skills/*/SKILL.md` on disk."""
+def directories() -> list[pathlib.Path]:
+    """Every skill directory in the pack, installed or in `contrib/`.
 
-    if not SKILLS.is_dir():
-        return []
-    return sorted(p / "SKILL.md" for p in SKILLS.iterdir() if (p / "SKILL.md").is_file())
+    Directories only. `skills/` holds `paths.json` beside them, and every
+    caller here re-checked `is_dir()` for a while, which made this function's
+    name a description of its callers rather than of itself -- and would have
+    handed the next root file to whichever caller forgot.
+    """
+
+    return sorted(
+        (
+            entry
+            for root in ROOTS
+            if root.is_dir()
+            for entry in root.iterdir()
+            if entry.is_dir()
+        ),
+        key=lambda entry: entry.name,
+    )
+
+
+def surfaces() -> list[pathlib.Path]:
+    """Every `SKILL.md` on disk, under either root."""
+
+    return [p / "SKILL.md" for p in directories() if (p / "SKILL.md").is_file()]
+
+
+def skill_file(name: str) -> pathlib.Path | None:
+    """Where `name` keeps its `SKILL.md`, or None if no root holds it."""
+
+    for root in ROOTS:
+        candidate = root / name / "SKILL.md"
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 class InventoryTests(unittest.TestCase):
@@ -94,10 +130,22 @@ class InventoryTests(unittest.TestCase):
         found = {p.parent.name for p in surfaces()}
         self.assertEqual(set(EXPECTED) - found, set(), "a named surface left the tree")
 
+    def test_directories_returns_directories(self) -> None:
+        """The contract, pinned, because `skills/` holds a file beside them.
+
+        `paths.json` lives at the root of the tree. Every caller in this file
+        happens to re-check `is_dir()`; that is not the same as this function
+        being right, and the next caller is the one that would not.
+        """
+        found = directories()
+        self.assertTrue(found, "no skill directories in either root")
+        self.assertEqual([d for d in found if not d.is_dir()], [])
+        self.assertNotIn("paths.json", [d.name for d in found])
+
     def test_every_directory_holds_a_skill_file(self) -> None:
         if not SKILLS.is_dir():
             self.skipTest("skills/ does not exist yet")
-        for entry in sorted(SKILLS.iterdir()):
+        for entry in directories():
             # `_shared` holds reference files the installer fans out by
             # citation; it is deliberately not a surface and has no SKILL.md.
             if entry.is_dir() and entry.name != SHARED_DIR:
@@ -466,7 +514,10 @@ class RunsAsColumn(unittest.TestCase):
         missing a prose-runner declaration it was never supposed to make.
         `frontmatter()` is the parser the rest of this file already trusts.
         """
-        fields = frontmatter((SKILLS / skill / "SKILL.md").read_text(encoding="utf-8"))
+        path = skill_file(skill)
+        if path is None:
+            return False
+        fields = frontmatter(path.read_text(encoding="utf-8"))
         return bool(fields) and fields.get(MARKER) == "true"
 
     def expected(self) -> set[str]:
@@ -483,7 +534,7 @@ class RunsAsColumn(unittest.TestCase):
         model-invocable.
         """
         marked = {
-            d.name for d in SKILLS.iterdir()
+            d.name for d in directories()
             if (d / "SKILL.md").is_file() and self.marks_itself(d.name)
         }
         self.assertEqual(
@@ -533,7 +584,7 @@ class RunsAsColumn(unittest.TestCase):
         for name in names:
             with self.subTest(command=name):
                 self.assertTrue(
-                    (SKILLS / name / "SKILL.md").is_file(),
+                    skill_file(name) is not None,
                     f"README's table names `{name}`, which is not a skill",
                 )
 

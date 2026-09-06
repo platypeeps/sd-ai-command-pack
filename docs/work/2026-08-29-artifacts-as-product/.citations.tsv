@@ -1,0 +1,14 @@
+prd.md:127	implement.md:563-567	2026-08-29-artifacts-as-product/implement.md	563	- **Deliberately not built, so the gap is a reco
+prd.md:129	implement.md:1429	2026-08-29-artifacts-as-product/implement.md	1429	`intents/` does not exist yet; the dashboard cre
+prd.md:221	implement.md:2069-2076	2026-08-29-artifacts-as-product/implement.md	2069	**And R11-D10's own deletion criterion is not me
+implement.md:2364	design.md:725	2026-08-29-artifacts-as-product/design.md	725	- **R9b-D1** `~/.gemini/commands/sd` TOML render
+implement.md:2365	design.md:549	2026-08-29-artifacts-as-product/design.md	549	five local commits of our own on top. That is fo
+implement.md:2395	prd.md:28	2026-08-29-artifacts-as-product/prd.md	28	| Fleet-wide open tasks | ~306 Trellis tasks acr
+implement.md:2632	design.md:549	2026-08-29-artifacts-as-product/design.md	549	five local commits of our own on top. That is fo
+implement.md:2636	design.md:106	2026-08-29-artifacts-as-product/design.md	106	### Commands (11 — grown from 8, each growth car
+implement.md:2640	design.md:106	2026-08-29-artifacts-as-product/design.md	106	### Commands (11 — grown from 8, each growth car
+implement.md:2653	design.md:106	2026-08-29-artifacts-as-product/design.md	106	### Commands (11 — grown from 8, each growth car
+implement.md:2694	design.md:620	2026-08-29-artifacts-as-product/design.md	620	**The recipient send-guard was dead at review ti
+implement.md:2747	design.md:289	2026-08-29-artifacts-as-product/design.md	289	r5 wrote these as TOML `[kinds.<name>]` tables a
+implement.md:3065	implement.md:2956	2026-08-29-artifacts-as-product/implement.md	2956	rollout keeps finding, this time in its own new 
+implement.md:3075	design.md:1153	2026-08-29-artifacts-as-product/design.md	1153	330 over**, and that is the optimistic figure. T
