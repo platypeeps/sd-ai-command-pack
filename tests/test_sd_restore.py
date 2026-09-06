@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import importlib
+import importlib.util
 import io
 import os
 import pathlib
@@ -40,11 +41,39 @@ if str(REPO_ROOT / "bin") not in sys.path:
 
 import sd_restore  # noqa: E402
 
-#: The `system` checkout, if it sits beside this one. These tests import the
-#: library from the checkout rather than relying on the installer having run,
-#: so the file states what it needs instead of inheriting a provisioned venv.
-SIBLING = REPO_ROOT.parent.parent / "system" / "local-sd-db"
-LIBRARY = SIBLING if (SIBLING / "sd_db" / "__init__.py").exists() else None
+
+def _library_source() -> pathlib.Path | None:
+    """Where `sd_db`'s source is, asked the way the installer asks.
+
+    This used to be `REPO_ROOT.parent.parent / "system" / "local-sd-db"` -- a
+    guess about directory layout that happened to hold on the machine it was
+    written on and nowhere else. CI checks the sibling out at
+    `sd_install.SYSTEM_CHECKOUT_DEFAULT`, not beside this repository, so the
+    guess resolved to nothing there and the class below skipped, silently
+    asserting nothing about the verbs against real rows.
+
+    `sd_install.library_source` is the one resolution: `SD_SYSTEM_CHECKOUT`
+    if set, `~/repos/system` otherwise. Asking it here means this file and
+    the installer cannot disagree about where the library lives.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "sd_install_for_restore_tests", REPO_ROOT / "bin" / "sd_install.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    # Registered before exec: `sd_install` defines a frozen dataclass, and
+    # `dataclasses` looks the defining module up in `sys.modules` by name.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    source = module.library_source(dict(os.environ))
+    return source if (source / "sd_db" / "__init__.py").exists() else None
+
+
+#: The `system` checkout's library, if this machine has one. Preferred over
+#: the installed copy only as a fallback: when the installer has provisioned
+#: `sd_db` there is nothing to put on `sys.path`, and putting the source
+#: there anyway would shadow the built copy with the thing B's criterion 1
+#: says must not be imported.
+LIBRARY = _library_source()
 
 
 def run(handler, **arguments):
@@ -139,20 +168,31 @@ class TheCommandLine(unittest.TestCase):
 class AgainstADatabase(unittest.TestCase):
     """The verbs against real rows, with `sd_db` from the sibling checkout."""
 
+    #: Set when this class put the source on `sys.path` and must take it off.
+    added = False
+
     @classmethod
     def setUpClass(cls) -> None:
+        try:
+            cls.sd_db = importlib.import_module("sd_db")
+            return
+        except ImportError:
+            pass
         if LIBRARY is None:
             raise unittest.SkipTest(
-                "the `system` checkout is not beside this one; `sd_db` cannot "
-                "be imported and these tests would assert nothing"
+                "sd_db is neither installed nor resolvable from a `system` "
+                "checkout; these tests would assert nothing. Run "
+                "`make setup`, or set SD_SYSTEM_CHECKOUT"
             )
         sys.path.insert(0, str(LIBRARY))
+        cls.added = True
         cls.sd_db = importlib.import_module("sd_db")
 
     @classmethod
     def tearDownClass(cls) -> None:
-        if LIBRARY is not None and str(LIBRARY) in sys.path:
+        if cls.added and str(LIBRARY) in sys.path:
             sys.path.remove(str(LIBRARY))
+            cls.added = False
 
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

@@ -3504,3 +3504,33 @@ from a number the operator types.
     wrong today; the name described the callers rather than the function, and
     the next caller is the one that would not check. Filtered at the source,
     with a test that says so.
+  - C-186, blocking, found when PR 5's own pull request could not merge: the
+    pack's test suite acquired a dependency on a second private repository and
+    CI has no way to reach one. `tests/test_sd_skill.py` imports `sd_db` at
+    module scope for hand-off 7's assertion, which is a hard failure without
+    it; `tests/test_sd_restore.py` skipped a class without it, which the
+    "fail on skipped tests" gate is right to fail on. Both `unittest` legs are
+    required checks, so the branch was unmergeable. `GITHUB_TOKEN` is scoped
+    to the repository it runs in and cannot read a sibling private repo, so
+    this needs a credential the operator owns; the workflow checks
+    `platypeeps/system` out under `secrets.SYSTEM_REPO_TOKEN` and installs the
+    library from it, as a built copy and never `-e`. Chosen over gating the
+    twenty-five tests behind the sibling's presence, which would have narrowed
+    the skip gate permanently and left criterion 23's "the harness is
+    importable here" asserted on one machine and nowhere else. Recorded
+    because C-177 moved the `sd_db` step into this pull request on the
+    reasoning that criteria 24 and 25 could not otherwise be verified, and
+    stopped at the local checkout -- the same argument reaches CI, and nothing
+    in the ordering section said where the library comes from there.
+  - C-187, material, found while fixing C-186 and older than it:
+    `tests/test_sd_restore.py` resolved the library as
+    `REPO_ROOT.parent.parent / "system" / "local-sd-db"` -- a guess about
+    directory layout, true on the machine it was written on and nowhere else.
+    CI checks the sibling out at the installer's own default, so the guess
+    resolved to nothing, the class skipped, and the verbs against real rows
+    asserted nothing there. The skip was the visible symptom; a hardcoded
+    layout that no other file agrees with was the defect. It asks
+    `sd_install.library_source` now, which is the one resolution the installer
+    itself uses, so the two cannot disagree about where the library lives.
+    Recorded because a skip that names a real reason reads as a machine
+    limitation rather than as a bug, which is how this one survived.
