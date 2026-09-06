@@ -765,10 +765,14 @@ BLOCK_END = "<!-- sd-ai-command-pack:end -->"
 
 DEFAULT_BLOCK_BODY = """\
 sd-ai-command-pack, machine-scope. Work items live under `docs/work/`; nothing
-else in this repo belongs to the framework.
+else in this repo belongs to the framework. The workflow these keys override is
+`WORKFLOW.md` in the pack checkout; it is the one page that states the policy.
 
     mode: full
     check: <the command that verifies this repo, e.g. `make check`>
+    test: <optional, when this repo spells its tests separately>
+    lint: <optional, same>
+    reviewers: <registry entries allowed to receive this repo's diff>
 """
 
 

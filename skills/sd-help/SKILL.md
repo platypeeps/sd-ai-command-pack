@@ -21,6 +21,11 @@ be wrong.
   prefix and interface version.
 - The pack banner: checkout, commit, branch, and whether that checkout is
   dirty.
+- Where the policy is written: `WORKFLOW.md` in the pack checkout, which
+  states the two flows, what runs by default, what is opt-in, what is
+  advisory, what never touches a shared repository, the review table with its
+  caps, the path for a change at each size, and the modes with their
+  resolution rule. `sd-help` names that page and does not restate it.
 
 ## The one rule that keeps it honest
 

@@ -20,6 +20,11 @@ disable-model-invocation: true
 4. **Findings are dispositioned here**, against this repository's severity
    floor, and printed.
 
+`--scope planning` is the development flow's *prd and design* review point;
+`--scope branch` before a push is *code, before merge*. Both caps are those
+rows' in `.claude/rules/sd-planning-adversarial-review.md`, and this tool
+states neither.
+
 ## Nothing is ever posted
 
 There is no PR comment, no review submission, no label, no check-run update,

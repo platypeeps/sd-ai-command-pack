@@ -172,12 +172,17 @@ the same caveats. `adversarial-gate render --lens research-brief` prints the
 focus text for the command below; `adversarial-gate run` does the whole pass for
 a caller that wants the scripted path.
 
-**The second reader is the `codex` CLI, not a Claude plugin.** This is the same
-position `docs/planning-adversarial-review-codex.md` takes for the pack's own
-review lane, and it holds here for the same reason: the `codex@openai-codex`
-plugin is not a dependency of this kit, it may not be installed, and a research
-repo that tells its reader to run `/codex:adversarial-review` sends them to a
-command that does not exist. Do not reach for the `/codex:*` slash commands.
+This pass is the research flow's first review point, *after the brief and
+decisions*, and its cap is that row's in
+`.claude/rules/sd-planning-adversarial-review.md`. The pass over the final
+product, before the send box, is the second row and has its own cap. Read the
+caps there; this file states none.
+
+**The second reader is the `codex` CLI, not a Claude plugin.** The
+`codex@openai-codex` plugin is not a dependency of this kit, it may not be
+installed, and a research repo that tells its reader to run
+`/codex:adversarial-review` sends them to a command that does not exist. Do
+not reach for the `/codex:*` slash commands.
 
 ```
 codex doctor                              # is it installed, is it logged in

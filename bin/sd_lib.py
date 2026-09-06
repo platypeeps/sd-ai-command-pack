@@ -35,6 +35,12 @@ DEFAULT_MODE = "full"
 #: The three names every repository is asked about, in the order they run.
 CHECK_NAMES = ("check", "test", "lint")
 
+#: Consent, not policy: the registry entries a repository allows to receive
+#: its diff. The installer asks for it once and writes the key; nothing
+#: derives the value. Named here so the installer's block, `WORKFLOW.md` and
+#: the test that compares them all read one source.
+CONSENT_KEY = "reviewers"
+
 GIT_TIMEOUT_SECONDS = 15
 
 _DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")

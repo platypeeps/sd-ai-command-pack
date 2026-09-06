@@ -9,13 +9,10 @@ Instructions for AI assistants working in this repository.
   `sd-ai-command-pack` work uncovers a `Trellis`-owned change, document the
   finding and provide a paste-ready handoff instead of opening a `Trellis` PR.
 - At the planning convergence boundary, follow
-  [docs/planning-adversarial-review-codex.md](docs/planning-adversarial-review-codex.md)
-  in addition to the shipped planning contract. It adds a second, independent
-  Codex review lane and amends sections 3 through 5 of that contract. It is
-  deliberately not part of the rendered payload — it is not a `skills/sd-*`
-  surface — because a rendered file invoking the `codex` CLI would register as
-  undeclared codex usage everywhere it landed. The lane applies to this
-  repository only.
+  [.claude/rules/sd-planning-adversarial-review.md](.claude/rules/sd-planning-adversarial-review.md).
+  That file is the one statement of the rule and holds the review table every
+  review point reads its cap from; this bullet states nothing of its own, so
+  there is no second copy to drift.
 - `skills/**` holds the one copy of the payload. Nothing renders into this
   repository, so there are no copies to keep synchronized: change the skill and
   you have changed the

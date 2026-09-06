@@ -1,6 +1,6 @@
 ---
 title: the pack runs a team process for a repository with one person in it
-status: planning
+status: in_progress
 created: 2026-09-05
 branch: feat/solo-first-workflow-policy
 ---
@@ -3377,3 +3377,17 @@ from a number the operator types.
     `docs/planning-adversarial-review-codex.md` and the lane it defines. The
     `codex` invocations beside them stay until the registry can answer for
     them.
+  - C-176, blocking, confirmed by a fixture: `bin/sd-docs-lint:47`
+    `\bBLOCKING\b` matching prose. Round nineteen recorded this as one of four
+    plausible findings "not recorded as requirements until a fixture confirms
+    them". The fixture is this item. Moving its `status:` from `planning` to
+    `in_progress` turned rule 2 on and the run failed at `prd.md:3297` — a
+    ledger line that quotes "no open `BLOCKING:` line" while describing what
+    rule 2 checks. The rule could not tell a marker from a quotation, so an
+    item whose own log discusses blocking findings could never be
+    `in_progress`, which is every item this method produces. `BLOCKING_RE` is
+    now line-anchored, `^\s*(?:[-*]\s+)?BLOCKING\b`, so a marker is a line
+    that starts with the word, optionally as a list item. Three tests:
+    the existing bare marker, a bullet marker, and prose quoting it, the last
+    of which fails against the old pattern. The other three findings from that
+    round stay unconfirmed.

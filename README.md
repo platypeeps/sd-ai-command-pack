@@ -37,6 +37,19 @@ lives in `CLAUDE.local.md`, which is untracked by way of that one excludes line.
 `bin/sd_install.py --repo` refuses outright if `CLAUDE.local.md` turns out to be
 tracked, rather than edit a file under version control.
 
+That block's `mode:` line carries one of three values, and the workflow each
+selects is stated in [WORKFLOW.md](WORKFLOW.md):
+
+- `full` — planning artifacts live in `docs/work/` in the repository, and the
+  whole path runs; an unattended merge additionally needs `merge: auto` on the
+  item's row.
+- `minimal` — no work items anywhere, and the small-change path only.
+- `guest` — planning artifacts go to the fork's integration branch, the loop
+  stops at pull-request-ready, and nothing is posted upstream.
+
+Without a `mode:` line the mode is detected, and detection only ever lowers a
+line you wrote.
+
 Agents render to Claude only. Codex keeps its agents as TOML with the
 instructions embedded in a quoted string, and producing that would be a
 translation layer — the one thing this renderer refuses to be, since a

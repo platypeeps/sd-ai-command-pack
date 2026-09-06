@@ -5,6 +5,13 @@ creates or materially updates an active Trellis task's `prd.md`, `design.md`,
 or `implement.md`. It supplements the active Trellis planning workflow without
 modifying or replacing Trellis.
 
+**Two of the obligations below are conditional.** The concern ledger of
+section 3 and the per-round cross-artifact sweep of section 2 apply when the
+changed artifact set touches a path listed under `sensitive` in
+`.github/sd-review.json`, and nowhere else. Off a sensitive path the review
+still runs and still reports; it carries no stable-id ledger and no sweep, and
+section 5's report says so rather than inventing either.
+
 ## 1. Trigger and baseline
 
 Before the first planning-artifact write in a coherent edit batch, record for
@@ -26,7 +33,8 @@ the commitments in `prd.md` and `design.md`. Verify claims against repository
 code, specs, and task context rather than accepting any review lane at face
 value, including your own.
 
-Also check the task's artifacts against each other, not only against the
+**On a `sensitive` path**, also check the task's artifacts against each other,
+not only against the
 repository. A measurement, count, size, path, or identifier usually appears in
 more than one of `prd.md`, `design.md`, `implement.md`, and `task.json`, and one
 artifact often cites what another "states". Correcting a figure in one place
@@ -46,8 +54,9 @@ else will catch what it misses.
 
 ## 3. Concern disposition
 
-Merge and deduplicate every lane that ran into one concern ledger. Assign
-stable IDs `C-1`, `C-2`, and so on. For every material concern record:
+**On a `sensitive` path**, merge and deduplicate every lane that ran into one
+concern ledger. Assign stable IDs `C-1`, `C-2`, and so on. For every material
+concern record:
 
 - severity and whether it blocks implementation;
 - the repository or artifact evidence used to verify it;

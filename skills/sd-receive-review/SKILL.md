@@ -1,6 +1,6 @@
 ---
 name: sd-receive-review
-description: Use when review findings have arrived on the user's own work — pull request comments, a second-model lane, a colleague's notes — and each must get exactly one evidenced disposition rather than reflex agreement or reflex defence.
+description: Use when review findings have arrived on the user's own work — pull request comments, an automated reviewer, a colleague's notes — and each must get exactly one evidenced disposition rather than reflex agreement or reflex defence.
 ---
 
 # sd-receive-review
@@ -17,8 +17,11 @@ The subject is the work. Neither the reviewer nor the author is being assessed.
 ## When to use
 
 Use when findings exist on a change the user is responsible for and must be
-answered — a pull request review, an automated reviewer's comments, a second
-model's lane, a planning contract's concern ledger, or notes from a colleague.
+answered — a pull request review, an automated reviewer's comments, or notes
+from a colleague. A planning contract's concern ledger is one more source, on
+the repositories that keep one: the ledger and the per-round cross-artifact
+sweep apply to paths listed under `sensitive` in `.github/sd-review.json` and
+nowhere else.
 
 The failure this exists for has two faces and the second is the common one.
 Reflex defence is easy to see. **Agreement-by-default is not**: a finding

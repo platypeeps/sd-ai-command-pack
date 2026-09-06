@@ -182,6 +182,27 @@ class Rule2ReadyTests(LintFixture):
         )
         self.assert_fails("no open BLOCKING line")
 
+    def test_red_open_blocking_line_as_a_list_item(self) -> None:
+        self.write_item(
+            "2026-08-30-blocked-bullet",
+            GOOD_PRD.replace("created: 2026-08-29", "created: 2026-08-30")
+            + "\n- BLOCKING: the API is not designed yet.\n",
+        )
+        self.assert_fails("no open BLOCKING line")
+
+    def test_green_prose_that_quotes_the_marker(self) -> None:
+        """The word inside a sentence is a record, not an open blocker.
+
+        An item's own log discusses blocking findings; matching the token
+        anywhere on a line meant such an item could never be `in_progress`.
+        """
+        self.write_item(
+            "2026-08-30-discusses",
+            GOOD_PRD.replace("created: 2026-08-29", "created: 2026-08-30")
+            + "\nRule 2 checks that no open `BLOCKING:` line remains.\n",
+        )
+        self.assert_clean()
+
     def test_red_in_progress_without_a_branch(self) -> None:
         self.write_item(
             "2026-08-30-adrift",
