@@ -72,8 +72,20 @@ def looks_like_shell(path):
 
 class NoShippedShellTests(unittest.TestCase):
     def test_the_render_surface_is_markdown_only(self):
-        """`skills/` is copied verbatim; a script there is a shipped script."""
-        rendered = [p for p in tracked_files() if p.startswith(RENDER_ROOT)]
+        """A skill directory is copied verbatim; a script there is shipped.
+
+        The surface is `skills/<name>/...`, not everything under `skills/`.
+        Requirement 10 put one file at the root of the tree -- `paths.json`,
+        which says *which* directories install -- and the installer reads it
+        rather than rendering it: it iterates the named skills, each of which
+        is a directory, so a file beside them cannot reach a platform home.
+        The test below pins that, so the carve-out here stays one named file
+        rather than a hole anything at the root can fall through.
+        """
+        rendered = [
+            p for p in tracked_files()
+            if p.startswith(RENDER_ROOT) and "/" in p[len(RENDER_ROOT):]
+        ]
         self.assertTrue(rendered, "render surface is empty; the pack ships nothing")
 
         offenders = [p for p in rendered if not p.endswith(".md")]
@@ -84,6 +96,20 @@ class NoShippedShellTests(unittest.TestCase):
             "so a non-markdown file here is payload. If that is intended, the "
             "renderer, its parity test, and R11-D6's premise all need revisiting",
         )
+
+    def test_the_only_file_at_the_root_of_the_tree_is_the_paths_file(self):
+        """The carve-out above, pinned to one name.
+
+        `paths.json` is exempt from the markdown rule because the installer
+        reads it instead of rendering it. Nothing else may join it quietly:
+        a second root file would be exempt by shape rather than by decision,
+        and if it *were* rendered the exemption would have hidden it.
+        """
+        root_files = [
+            p for p in tracked_files()
+            if p.startswith(RENDER_ROOT) and "/" not in p[len(RENDER_ROOT):]
+        ]
+        self.assertEqual(root_files, ["skills/paths.json"])
 
     def test_shell_lives_only_in_this_repository_s_own_tooling(self):
         offenders = [

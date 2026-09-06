@@ -108,7 +108,7 @@ def skill_try(args: argparse.Namespace) -> int:
     # precision the removal -- which happens on the next install run, not at
     # the instant of expiry -- does not have.
     print(f"{name} on trial until {expires[:10]}")
-    print(f"run `sd-install` to render it, and use it -- use is what decides")
+    print("run `sd-install` to render it, and use it -- use is what decides")
     return 0
 
 

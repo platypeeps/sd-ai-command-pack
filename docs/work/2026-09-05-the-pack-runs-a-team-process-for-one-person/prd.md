@@ -3450,3 +3450,36 @@ from a number the operator types.
     stop the path naming it. Recorded because "the test broke" and "the test
     was describing the old contract" look identical from the failure line, and
     only one of them is a reason to change the code.
+  - C-182, blocking, found by the remote review of PR 5's `system` half: the
+    library compares timestamps as text and accepted two spellings of one
+    instant. `now()` writes `+00:00`; `2026-09-06T19:11:39Z` is the same
+    moment and sorts *after* it, because `Z` is 0x5A and `+` is 0x2B. Mixed
+    shapes order correctly everywhere except at a tie on the same second --
+    which is precisely where `skill_use_since` and `active_trials` are asked
+    their question, and precisely the boundary C-179 added the `timestamp`
+    parameter to make answerable. `active_trials`'s own docstring stated the
+    invariant as something "the caller is expected to use", which is not a
+    property a reader can rely on: one production caller passed `+00:00` and
+    every test passed `Z`, so no test exercised what production writes.
+    Closed by normalizing at the write -- `stamp()` on `record_skill_use`'s
+    `timestamp`, `start_trial`'s `expires`, `active_trials`'s `moment` and
+    `skill_use_since`'s `since` -- rather than by asking callers to remember.
+    A naive stamp is refused, not assumed UTC: read as UTC it is wrong by the
+    offset and says nothing about it. Recorded because C-179 found half of
+    this defect, wrote the parameter that exposes the other half, and stopped.
+  - C-183, material, found by `make check` after the commit and not before it:
+    two of this repository's gates enumerate from the git index, so a new file
+    is ungated until it is tracked. `LINT_BIN := $(shell git ls-files -- bin)`
+    left `bin/sd_skill.py` unlinted, and `tests/test_no_shipped_shell.py`
+    reads `tracked_files()`, so `skills/paths.json` was invisible to the
+    markdown rule. Both passed every pre-commit run and failed the first
+    post-commit one. The enumeration is right -- it is what stops a hand-kept
+    list going stale, and `Makefile:32-38` records that it was added because a
+    hand-kept list had already done so. What is missing is that a run before
+    `git add` is a weaker check than the same run after it, and the commit
+    that claimed "make check exit 0" was verified by the weaker one. Both
+    findings were real: an unused f-prefix, and a premise -- "`skills/` is
+    copied verbatim" -- that requirement 10 had made too broad, since the
+    installer iterates named directories and cannot render a file beside them.
+    The rule this leaves: for any change that adds a tracked file, the run
+    that counts is the one after `git add`.
