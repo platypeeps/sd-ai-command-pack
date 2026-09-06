@@ -147,8 +147,15 @@ PR 6's, where the registry reader and the fixture harness are.
 
 ## PR 2 — requirement 13's confirmed cuts and bugs
 
-**Touches:** enumerated from criterion 31's own symbol list
-(`prd.md:1604-1608`) with `git grep -l`, not from prose. `bin/sd_sweep.py`,
+**Touches:** enumerated from **requirement 13's own removal list**
+(`prd.md:1112-1160`), which gives a file and a line range for every cut, and
+then widened by `git grep -l` over criterion 31's symbol list
+(`prd.md:1604-1608`) to catch the readers requirement 13 does not name. An
+earlier draft claimed the second derivation alone and did not run it: seven
+of the nineteen symbols — `parked`, `archived`, `--stash-ref`, `--push`,
+`--park`, `authors` and `Standing rule` — had no enumeration at all, and
+twenty-two governed-tree files carrying them sat outside this pull request
+while it claimed the criterion whose test greps for them. `bin/sd_sweep.py`,
 `bin/sd`, `tests/test_sd_sweep.py` (`sd_sweep`); `bin/sd-handoff-restore`,
 `tests/test_sd_handoff_restore.py` (`record_load`); `bin/sd-status`,
 `tests/test_sd_status.py` (`carrier_branches`, `_protection_gaps`,
@@ -162,14 +169,52 @@ carrying `Active item:`; `agents/sd-rust-fill.md`,
 `skills/sd-typed-holes/SKILL.md`; `README.md`, `bin/sd-skill-adopt`,
 `skills/sd-deps/SKILL.md`, `tests/test_loc_caps.py`,
 `tests/test_permission_allowlist.py`, `tests/test_skill_frontmatter.py`
-(`sd-deps`). For the named bug fixes: `bin/sd_research_review.py`,
-`bin/sd-research-kit`, `agents/sd-claim-verifier.md`,
-`skills/sd-fact-check/SKILL.md` and the `adversarial-gate` surface. Plus
+(`sd-deps`).
+
+For the seven symbols an earlier list left unenumerated, from requirement
+13's own line references and then the readers: the `archived` and `parked`
+fields at `bin/sd_lib.py:355-368`, `:271-282`, `:302-303`, `:350` and every
+reader — `bin/sd-status:183,190,1122-1129,1234-1242,1254-1287`,
+`bin/sd-docs-lint:87-91`, `dashboard/work.py`, `dashboard/app.js`,
+`tests/test_dashboard_work.py`, `tests/test_sd_lib.py`,
+`tests/test_sd_docs_lint.py`, `skills/sd-receive-review/SKILL.md`,
+`.claude/sd-ai-command-pack/planning-adversarial-review.md`,
+`docs/spec/backend/quality-guidelines.md` and `docs/spec/guides/index.md`;
+`--stash-ref` at `bin/sd-handoff:374` with `skills/sd-handoff/SKILL.md` and
+`tests/test_sd_handoff.py`; `--park` and `--push` in
+`skills/sd-handoff/SKILL.md`, `skills/sd-plan/SKILL.md`,
+`skills/sd-status/SKILL.md` and `tests/test_skill_frontmatter.py`; the
+`authors` **policy key** at `bin/sd-review:287`, `:1092`,
+`bin/sd_setup_github.py:230,267`, `.github/sd-review.schema.json` and
+`.github/sd-review.json:28`; and `Standing rule` in `bin/sd`,
+`skills/sd-plan/templates/decision.md`, `skills/sd-suggest/SKILL.md` and
+`tests/test_sd_plugin.py`.
+
+**`authors` is two different things and criterion 31's grep cannot tell them
+apart.** Requirement 13 removes the `authors` *policy key* at the five sites
+above. Criterion 6 **introduces** `authors` as a row field —
+`prd.md:1277`, "the row's `authors` naming both" — and PR 6 lands it in
+`bin/sd_lib.py`, inside the governed tree, after this pull request. A bare
+governed-tree grep for `authors` therefore passes here and fails again at
+PR 6's merge, breaking criterion 30, which this page calls a precondition of
+every merge. The criterion is scoped to the policy key in this item's ledger;
+this pull request removes the key and not the word.
+
+For the named bug fixes: `bin/sd_research_review.py`, `bin/sd-research-kit`,
+`agents/sd-claim-verifier.md`, `skills/sd-fact-check/SKILL.md`, the
+`adversarial-gate` surface, and **`bin/sd-docs-lint`**, which criterion 31's
+regression-test clause reaches through requirement 13's second bug:
+`bin/sd-docs-lint:242` compares the token before ` - ` with `none` instead of
+`startswith`, so `Work: nonexistent-item` fails as a missing reason rather
+than an unresolved path. No Touches list held that file for this pull
+request, which claims the criterion that mandates its test. Plus
 `skills/sd-plan/`, `skills/sd-status/`, `skills/sd-ship/`,
-`skills/sd-plan/templates/work-README.md`, `tests/test_sd_docs_lint.py` —
-which carries the `none - ` form this cut removes and was named only in PR 6's
-prose — and `contrib/`, created in PR 5, which therefore lands before this
-pull request; the ordering section states it.
+`skills/sd-plan/templates/work-README.md`, `tests/test_sd_docs_lint.py`, for the
+`bin/sd-docs-lint:242` regression test above and **not** for the `none - `
+form, which is criterion 10's and PR 6's — an earlier draft moved the file
+here saying "the `none - ` form this cut removes", and requirement 13 names
+no such cut; and `contrib/`, created in PR 5, which therefore lands before
+this pull request, as the ordering section states.
 
 An earlier draft ended this list with "and the rest of the line-by-line
 list", which is a pointer back to the requirement the list is meant to
@@ -279,7 +324,8 @@ four-surface enumeration missed; and the writing repository's style override,
 which criterion 23 deletes and which no Touches list named.
 
 **`bin/sd-review`'s copilot rows are inside the table PR 6 deletes**, at
-`bin/sd-review:238-248` within `BACKENDS` (`:193-248`). The two pull requests
+`bin/sd-review:238-243` within `BACKENDS` (`:193-248`), with `greptile` at
+`:244-247` and `:248` closing the tuple. The two pull requests
 were unordered and edit the same lines in opposite directions. PR 6 lands
 first, so criterion 9's edit lands on the registry and the skill page rather
 than on rows that no longer exist; the ordering section states it.
@@ -362,7 +408,23 @@ and the rewrite documented the split instead of closing it.
 
 ## Slice 2, PR 5 — skills install because a path names them
 
-**Touches:** `skills/paths.json` (new), `contrib/`, `bin/sd`.
+**Touches:** `skills/paths.json` (new), `contrib/`, `bin/sd`,
+**`bin/sd_install.py`** and `tests/`.
+
+**The installer is the operative verb of both criteria this pull request
+claims, and two earlier Touches lists held none of its code.** Criterion 24
+is "**the installer renders** exactly the union of the paths plus active
+trials, asserted by a test that adds an unlisted skill directory and sees
+`make check` fail", and "`contrib/` exists and **the installer never renders
+from it** without a trial row". Criterion 25 is "**the next install run**
+after expiry with no `skill_use` rows removes the skill and says so". The
+installer is `bin/sd_install.py`, whose `:224-229` enumerates
+`skills/sd-*/SKILL.md` from disk today — the exact behaviour the paths file
+replaces. The three-file list covered the data file, the trial directory and
+the `sd skill try` subcommand, and none of the code whose behaviour the
+criteria assert. Recorded as C-121 and marked addressed in the round-three
+ledger; the prose beneath was rewritten to answer a different half of that
+finding and the list it named was left alone.
 
 `skills/paths.json` naming three paths, with every directory under them
 accounted for, and `sd skill try <name>` installing from `contrib/`,
@@ -475,9 +537,15 @@ altered after the fact.
 
 **Verification.** Criteria 13 and 21. Criterion 13 is recorded as waiting
 **before the second slice**, not before this one: `prd.md:1194-1195` says
-"Before the second slice, criteria 13 and 32 are recorded as waiting", and
-this is the third. An earlier draft moved the boundary a slice later and
-said the landing order said so "in those words". Criterion 32 is covered by
+"Before the second slice, criteria 13 and 32 are recorded as waiting" — and
+"before the second slice" means before slice 2 opens, not before every pull
+request inside it. This pull request is **in** slice 2, as its heading says:
+this item's landing order defers to B's (`prd.md:1178-1182`), and B's slice 2
+at `B/prd.md:1145-1148` is where "`docs/work` and the register retire … in
+the run that lands their writers". An earlier draft moved the boundary a
+slice later and said the landing order said so "in those words"; a later one
+argued the point by calling this the third slice, which contradicted the
+heading above it and B's numbering both. Criterion 32 is covered by
 the same sentence, and neither this pull request nor PR 6 noted it.
 
 ## Slice 2, PR 8 — rows for trials, uses, suggestions and handoff
@@ -579,11 +647,23 @@ opposite directions. Each constraint below names the file that forces it.
   would make that parenthetical false, so the ordering is the half that gives.
 - **PR 6 before PR 4** — `bin/sd-review`'s `BACKENDS` table. Criterion 6
   requires `bin/sd-review` to contain no provider table, and criterion 9's
-  copilot rows that PR 4 edits are `bin/sd-review:238-248`, inside that table.
+  copilot rows that PR 4 edits are `bin/sd-review:238-243`, inside that table.
   PR 6 deletes the table; PR 4 then edits the registry and the skill page
   instead. Landed the other way, PR 4's edit has no target after PR 6.
   Criterion 9's grep also reaches a fifth payload surface,
   `skills/sd-review/SKILL.md:80`, which is in PR 4's Touches for that reason.
+- **`bin/sd_install.py` is written by four pull requests**, and only three of
+  them were transitively ordered by the constraints above. PR 1 writes the
+  `mode` and `check` keys into `DEFAULT_BLOCK_BODY` (`:766-772`); PR 5
+  replaces the disk enumeration at `:224-229` with the paths file; PR 6 adds
+  the `reviewers` consent line to the same block PR 1 writes; PR 7 adds the
+  `sd_db` step. PR 1 → PR 6 → PR 7 already follows from `WORKFLOW.md` and
+  from PR 7's slice, and **PR 5 before PR 6** is added here, since PR 5's
+  renderer edit and PR 6's block edit both land in this file and the block is
+  rendered by the enumeration PR 5 replaces. An earlier ordering rebuild
+  derived its constraints from the files it had just changed rather than from
+  the union of every Touches list, which is how the item's second-most
+  contended file ended up with no constraint at all.
 - **PR 1 and PR 6 both list `README.md`, and the clause is PR 1's.** The
   closure table puts criterion 11's `README.md` clause in PR 1; PR 6 keeps
   the file in its Touches only for the criterion's closing sentence, which it

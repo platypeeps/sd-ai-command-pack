@@ -1218,9 +1218,13 @@ confirmed by the next `sd-ship` run alone.
    contract, or `AGENTS.md`. A grep of the governed tree for the deleted
    lane returns nothing outside `CHANGELOG.md`. The governed tree, for
    this and every absence assertion below, from A's round twenty-three,
-   is what runs or governs: `bin/`, `skills/`, `templates/`, `dashboard/`,
+   is what runs or governs: `bin/`, `skills/`, `agents/`, `dashboard/`,
    `tests/`, `.claude/`, `.github/`, `CLAUDE.md`, `AGENTS.md`, `README.md`
-   and `docs/spec/`; `docs/work/`, this item and the archive alike, and
+   and `docs/spec/`; `agents/` replaces a `templates/` that has never
+   existed at the repository root, and it holds five `agents/*.md` carrying
+   `Active item:` and three carrying `sd-rust-*`, all of them symbols
+   requirement 13 removes, so a definition that omitted it let criteria 4,
+   18 and 31 pass without inspecting payload the work itself edits; `docs/work/`, this item and the archive alike, and
    `CHANGELOG.md` are history and are excluded by name, since the archive
    is kept unchanged and holds every name the cuts remove.
 5. The review table appears in exactly two places, `WORKFLOW.md` and the one
@@ -1603,7 +1607,11 @@ confirmed by the next `sd-ship` run alone.
     and files the cuts remove and asserts a grep of the governed tree,
     criterion 4, for each returns nothing: `sd_sweep`, `parked`, `archived`, `record_load`,
     `carrier_branches`, `_protection_gaps`, `load_acknowledgements`,
-    `--stash-ref`, `--push`, `--park`, `authors`, `argument-vocabulary`,
+    `--stash-ref`, `--push`, `--park`, the `authors` policy key
+    (`bin/sd-review:287`, `:1092`, `bin/sd_setup_github.py:230,267`, the
+    schema and `.github/sd-review.json`) and not the word, since criterion 6
+    introduces `authors` as a row field and a bare grep cannot tell the two
+    apart, `argument-vocabulary`,
     `Standing rule`, `R10-D`, `five gates`, `cron-jobs.sh`, `Active item:`,
     `sd-rust-reviewer`, `sd-deps`. Each bug has a regression test: planning scope on a
     fixture with two planning items and one `ready` item picks the item
@@ -2937,3 +2945,90 @@ from a number the operator types.
     files; 495 `prd.md` files and 8 active items; B's slice numbering,
     criterion 23 and open question 3 quoted correctly; and C-115's
     `bin/sd_lib.py:391-414` correction.
+- **2026-09-05** — Adversarial re-review, round four. Nine findings: two
+  blocking, five material, two minor. Sixteen of round three's twenty entries
+  hold on disk, verified one by one. The recurring defect narrowed but did
+  not stop: it is now a fix recorded as applied that was not, and a Touches
+  list whose stated derivation method does not reproduce.
+  - C-139, blocking: **C-121 was recorded "Addressed" and was never
+    applied.** PR 5's Touches was still the identical three-file list C-121
+    declared insufficient — `skills/paths.json`, `contrib/`, `bin/sd` — with
+    `bin/sd_install.py` absent from the whole section. C-121 named the fix
+    target verbatim, `bin/sd_install.py:224-229`, and that range is real. The
+    prose beneath PR 5 was rewritten to answer a different half of the
+    finding while the list the finding actually named was left alone. This
+    one is the writer's own: the edit script that carried the fix aborted on
+    an unrelated string mismatch, and only part of what remained was re-run.
+    Addressed, and every edit batch since is validated whole before any write.
+  - C-140, blocking: PR 2's Touches opened "enumerated from criterion 31's
+    own symbol list (`prd.md:1604-1608`) with `git grep -l`, not from prose"
+    and that derivation does not reproduce. Seven of the nineteen symbols —
+    `parked`, `archived`, `--stash-ref`, `--push`, `--park`, `authors`,
+    `Standing rule` — had no enumeration, and twenty-two governed-tree files
+    carrying them sat outside the pull request that claims the criterion
+    whose test greps for them. Addressed: derived from requirement 13's own
+    file-and-line removal list (`prd.md:1112-1160`) first, then widened by
+    the grep. A stated derivation that is not run is worse than none, because
+    it stops the next reader from running it.
+  - C-141, blocking and a `prd.md` defect: criterion 31 lists `authors` among
+    the symbols a governed-tree grep must return nothing for, while criterion
+    6 **introduces** `authors` as a row field (`prd.md:1277`, "the row's
+    `authors` naming both"), landing in `bin/sd_lib.py` at PR 6. The grep
+    would pass at PR 2 and fail again at PR 6, breaking criterion 30, which
+    this page calls a precondition of every merge. Requirement 13's actual
+    target is the `authors` **policy key** at five named sites. Addressed:
+    the criterion names the key and not the word.
+  - C-142, material: PR 2 and PR 6 both claimed the `none - ` removal, PR 2
+    saying "the `none - ` form this cut removes". Requirement 13 names no
+    such cut — its `bin/sd-docs-lint` clause is a bug, not a cut — so the
+    removal is criterion 10's and PR 6's alone. C-129 moved the test file
+    into PR 2 on that false justification, and its sentence "named only in
+    PR 6's prose" is now false of PR 6's Touches list. Addressed.
+  - C-143, material: PR 2 claims criterion 31, whose second half is "Each bug
+    has a regression test", and `bin/sd-docs-lint` — where requirement 13
+    puts the second bug, at `:242` — was in no Touches list of that pull
+    request. Round two's enumeration covered the symbol half of criterion 31
+    and never the bug half. Addressed.
+  - C-144, material: PR 7's heading says "Slice 2" and its own Verification
+    paragraph argued "this is the third". This item's landing order defers to
+    B's (`prd.md:1178-1182`), and B's slice 2 (`B/prd.md:1145-1148`) is where
+    "`docs/work` and the register retire". The heading was right; C-111's fix
+    argued the waiting boundary by asserting a slice number that contradicts
+    it. Addressed: "before the second slice" means before slice 2 opens.
+  - C-145, material: `bin/sd_install.py` is written by four pull requests and
+    the ordering section — which states it was re-derived from the Touches
+    lists and that any file two pull requests write needs a stated order —
+    named no constraint for it. Three were transitively ordered by other
+    constraints and PR 5's edit was ordered against none. Addressed: PR 5
+    before PR 6. The rebuild had derived its constraints from the files it
+    had just changed rather than from the union of every Touches list.
+  - C-146, material and a `prd.md` defect: criterion 4's governed-tree
+    definition names `templates/`, which has never existed at the repository
+    root, and omits `agents/`, which does exist, is payload, and holds five
+    `agents/*.md` carrying `Active item:` and three carrying `sd-rust-*` —
+    all symbols requirement 13 removes and PR 2's Touches edits. So criteria
+    4, 18 and 31 passed without inspecting a directory the work itself
+    changes. The definition's own words are "what runs or governs", and
+    `agents/` runs. Addressed: `agents/` named, `templates/` dropped. Round
+    three verified the `templates/` half and stopped there.
+  - C-147, minor: `design.md` called a written `mode: full` "a floor, never a
+    ceiling". `prd.md:1365-1366` says an explicit `mode:` line "wins over
+    detection downward and never upward", so detection can only lower it,
+    which makes it a ceiling. The clause after the label described the
+    behaviour correctly. Addressed. Pre-existing, untouched by rounds one
+    through three.
+  - C-148, minor: `bin/sd-review:238-248` was cited as "the copilot rows".
+    `:238-243` is copilot, `:244-247` is greptile and `:248` closes the
+    tuple. The plural and the ordering conclusion it supports are both right;
+    the range's last line is a delimiter. Introduced by C-131. Addressed.
+  - Re-verified sound this round and recorded as such: C-119, C-120, C-122
+    through C-128, C-130 through C-138 all hold on disk, each checked
+    individually. Also reproduced: the eighteen-file literal and nineteen-file
+    unescaped-dot Trellis greps with their subcounts; the twelve-file vendor
+    grep; 56 `argument-vocabulary` files; 39 `R10-D` files; 238 `prd.md`
+    files carrying `branch:` out of 495; the closure table covering all 32
+    criteria exactly once.
+  - Not reached, and recorded as not checked rather than clean: item C
+    entirely, most of item B, the `system` repository,
+    `~/.claude/settings.json`, every measurement-window figure in the
+    `prd.md`, and ten criteria checked only for presence in the closure table.
