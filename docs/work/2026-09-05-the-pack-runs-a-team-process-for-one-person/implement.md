@@ -65,9 +65,9 @@ whether it stays.
 `templates/work-README.md:11`; there is no top-level `templates/`
 directory, and the file is `skills/sd-plan/templates/work-README.md`. Line
 11 there is the sweep sentence the cut names, checked, so the citation is
-right about the content and short about the path. Worth correcting in the
-`prd.md`, and worth spelling out here so nobody greps for a directory that
-does not exist.
+right about the content and short about the path. **Corrected in the
+`prd.md` on 2026-09-05**, and spelled out here so nobody greps for a
+directory that does not exist.
 
 **Nothing in this PR adds a mechanism.** That is the requirement's own
 framing and it is the property that makes the PR reviewable: every line is
@@ -248,25 +248,25 @@ else is true.
 ## Closing the item
 
 PR 7 or PR 8, whichever merges last, carries `Delivers:`. Then `prd.md`
-goes to `status: done`, and drops its `branch:` field in the same edit —
-**once it has one.**
+goes to `status: done` and drops its `branch:` field in the same edit.
 
-It does not today, and that is a small live defect rather than a note about
-the future. This repository's items carry `branch:` by convention: 237
+That field was missing when this file was first written, and adding it was
+the fix. This repository's items carry `branch:` by convention — 237
 `prd.md` files under `docs/work/` have the line, and the sibling item
 `2026-09-04-the-plan-interview-is-one-sentence` reads `branch:
-skill/sd-grill` in its front matter. This item's front matter has `title`,
-`status` and `created` and stops there, while the item sits on
+skill/sd-grill` — while this item's front matter had `title`, `status` and
+`created` and stopped there, with the item sitting on
 `feat/solo-first-workflow-policy`.
 
-The consequence runs the opposite way from the usual one.
+The consequence ran the opposite way from the usual one.
 `bin/sd_sweep.py:91` skips an item when `item.status != SWEEPABLE_STATUS or
 item.branch`. A stale field left behind excludes an item that should be
 swept; a **missing** field includes an item that should not be. This item
-is `planning` with no branch recorded, so once it passes the 45-day
-threshold the sweep will offer it as long-idle while it is actively being
-worked on a branch. Created 2026-09-05, so there is time — and the fix is
-one line in the front matter, not a change to the sweep.
+was `planning` with no branch recorded, so at 45 days the sweep would have
+offered it as long-idle while it was being actively worked. `branch:
+feat/solo-first-workflow-policy` is now in the front matter, `sd sweep`
+reports "nothing over 45 days: 8 active", and `sd-docs-lint` is clean over
+495 items.
 
 ## What closes the criteria
 
