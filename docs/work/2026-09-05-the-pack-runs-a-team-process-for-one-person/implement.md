@@ -62,26 +62,43 @@ lane as a concept, and `git grep -niE 'second-model lane|codex (review
 first and third were already here; the second was in PR 2's and PR 4's
 Touches, neither of which claims criterion 4.
 
-For criterion 5's vendor grep, the enumeration is the criterion's own
-four-name list run over the whole `skills/` tree, not a subset. `git grep
--liE 'codex|openai|anthropic|claude' -- skills` returns **twelve** files:
+For criterion 5's vendor grep, the enumeration is the criterion's bare-token
+shape run over the whole `skills/` tree, not a subset, and **not** the
+case-insensitive four-name grep an earlier draft ran. That grep returns
+**twelve** files:
 `_shared/references/subagent-dispatch.md`, `sd-check/SKILL.md`,
 `sd-handoff/SKILL.md`, `sd-help/SKILL.md`, `sd-plan/SKILL.md`,
 `sd-propose-skills/SKILL.md`, `sd-research-repo/SKILL.md`,
 `sd-research-repo/references/conventions.md`,
 `sd-research-repo/templates/CLAUDE.md`, `sd-review/SKILL.md`,
-`sd-ship/SKILL.md` and `sd-skill-adopt/SKILL.md`. All twelve are in scope
-here. An earlier draft named three of them as "files the grep returns that
+`sd-ship/SKILL.md` and `sd-skill-adopt/SKILL.md`. Seven of
+those twelve carry the strings only inside a path, a filename, an
+environment variable, an MCP tool identifier, a URL or the product name
+`Claude Code`, and none of those ever leaves; the criterion as first written
+asked for a residue of "only the provider-registry documentation", which is
+in `WORKFLOW.md` and so is in no skill at all, and could not pass. The
+bare-token grep returns **thirty-two** hits across **eight** files, and all
+eight are **PR 6's**, not this pull request's. What replaces a bare vendor
+token is a role name, and nothing resolves a role until PR 6 lands the
+registry reader; converting here would leave the research flow naming a
+`reviewer` it cannot start, which is the stale-document failure inverted
+again. So criterion 5's vendor clause closes in PR 6 whole.
+
+What this pull request removes from those files instead is criterion 4's
+deleted lane, a narrower grep — `second-model lane|codex (review )?lane` —
+that returns `skills/sd-plan/SKILL.md:40`, plus the two references to the
+lane page: `skills/sd-research-repo/SKILL.md:84` and
+`skills/sd-research-repo/references/conventions.md:167,175-177`. The `codex
+doctor` and `codex exec -s read-only` invocations beside them are how the
+research pass is started today and stay until PR 6 can answer for them. An
+earlier draft named three of the twelve files as "files the grep returns that
 run no review" and stopped, having enumerated from the sentence that reported
-the gap rather than re-running the criterion's grep. The two that matter most
-are `sd-research-repo/SKILL.md:84` and the rendered
-`sd-research-repo/templates/CLAUDE.md:82,87`, which carry more `codex`
-invocations than the reference file beside them that was named.
+the gap rather than re-running the criterion's grep.
 
 **Why the Touches list reaches across `skills/`.** Criterion 5 asks that
 *every* skill that runs a review name its point in the table and read the
-cap from it, and that a grep of the payload for a vendor name inside a
-skill's instructions return only the registry documentation. Criterion 4
+cap from it, and that no skill's instructions carry a bare vendor token.
+Criterion 4
 asks that a grep of the governed tree for the deleted second-model lane
 return nothing outside `CHANGELOG.md`. An earlier draft said this "means
 deleting that lane's skill and agent files". It has neither: `ls agents/`
@@ -143,10 +160,13 @@ appears in exactly two places, `WORKFLOW.md` and that rule — which is
 criterion 5, and is the reason this PR touches the rule file rather than
 leaving it to PR 4.
 
-**Verification.** Criteria 1, 5, 8 and 20, and criterion 4 whole. Criterion
-4 is the sharp one: exactly one second-model lane named anywhere in the
-payload, which is a grep over the governed tree and not a reading of the
-page.
+**Verification.** Criteria 1, 8 and 20, criterion 4 whole, and criterion 5's
+two table clauses — the table in exactly two identical copies, and every
+skill that runs a review naming its point and reading its cap from it.
+Criterion 5's vendor clause is PR 6's whole, since a converted token names a
+role and nothing resolves a role until PR 6's registry reader. Criterion 4 is
+the sharp one: exactly one second-model lane named anywhere in the payload,
+which is a grep over the governed tree and not a reading of the page.
 
 **Criteria 6 and 11 are not here**, though an earlier draft's closure table
 put them here. Criterion 6 is requirement 3's whole runtime — `sd attribute`
@@ -167,7 +187,7 @@ PR 6's, where the registry reader and the fixture harness are.
 **Touches:** enumerated from **requirement 13's own removal list**
 (`prd.md:1117-1165`), which gives a file and a line range for every cut, and
 then widened by `git grep -l` over criterion 31's symbol list
-(`prd.md:1625-1629`) to catch the readers requirement 13 does not name. An
+(`prd.md:1634-1638`) to catch the readers requirement 13 does not name. An
 earlier draft claimed the second derivation alone and did not run it: seven
 of the nineteen symbols — `parked`, `archived`, `--stash-ref`, `--push`,
 `--park`, `authors` and `Standing rule` — had no enumeration at all, and
@@ -220,7 +240,7 @@ for the reason Verification gives below.
 **`authors` is two different things and criterion 31's grep cannot tell them
 apart.** Requirement 13 removes the `authors` *policy key* at the five sites
 above. Criterion 6 **introduces** `authors` as a row field —
-`prd.md:1283`, "the row's `authors` naming both" — and PR 6 lands it in
+`prd.md:1292`, "the row's `authors` naming both" — and PR 6 lands it in
 `bin/sd_lib.py`, inside the governed tree, after this pull request. A bare
 governed-tree grep for `authors` therefore passes here and fails again at
 PR 6's merge, breaking criterion 30, which this page calls a precondition of
@@ -475,7 +495,7 @@ quoted at `prd.md:874` — and not line 21, which is a claim about rendered
 copies; an implementer following the old citation would have edited the
 wrong paragraph and left "nothing, ever" unscoped. And criterion 12 has a
 second half that appeared in no pull request at all: `README.md` must also
-**list the skills that write tracked files** (`prd.md:1400-1401`). Both
+**list the skills that write tracked files** (`prd.md:1409-1410`). Both
 halves land here. C-95 recorded this criterion as addressed; it was not,
 and the rewrite documented the split instead of closing it.
 
@@ -540,7 +560,24 @@ step is criterion 13's and is PR 7's, not this one's; and `bin/sd`, for `sd attr
 `bin/sd-docs-lint`, which holds rule 5 and is the only file besides
 `skills/sd-ship/SKILL.md` and `tests/test_sd_docs_lint.py` carrying the
 `none - ` form, and `bin/sd_setup_github.py`, the other file naming rule 5.
-And `README.md`, for criterion 11's closing sentence — see below.
+And `README.md`, for criterion 11's closing sentence — see below. And
+`skills/sd-review/SKILL.md`, which stood in no pull request's Touches while
+documenting exactly what criterion 6 deletes: `codex_preflight` at `:66-72`,
+the `BACKENDS` table at `:74-80` — naming `prism` and `gito` as shipped,
+which requirement 3 removes — and the tier policy at `:82-88`.
+
+**Criterion 5's vendor clause is here, whole.** All thirty-two bare vendor
+tokens across eight files convert to the role vocabulary in this pull
+request, because a role only resolves once this pull request's registry
+reader exists: `skills/sd-handoff/SKILL.md:73,84`,
+`skills/sd-plan/SKILL.md:40`, `skills/sd-propose-skills/SKILL.md:100`,
+`skills/sd-research-repo/SKILL.md:84`,
+`skills/sd-research-repo/references/conventions.md` (eleven),
+`skills/sd-research-repo/templates/CLAUDE.md` (seven),
+`skills/sd-review/SKILL.md` (five) and `skills/sd-ship/SKILL.md`'s `--agent
+claude|codex` at `:141,150-151,212` (five). PR 1 lands the review table
+those files read their caps from and removes criterion 4's lane; it converts
+no vendor token.
 
 The default path becomes: commit enumerated paths, local review, push, open
 the pull request, wait for CI once, merge, close the item on the default
@@ -584,7 +621,7 @@ same reviewer order from the same `providers.yaml`.
 under `docs/work/` outside the archive, and — for criterion 13, which the
 closure table filed here while this list reached none of it —
 `bin/sd_lib.py`, `bin/sd-status` and `bin/sd-docs-lint`, which derive an
-item's status from its row (`prd.md:1402-1403`) — and, in `bin/sd-docs-lint`
+item's status from its row (`prd.md:1411-1412`) — and, in `bin/sd-docs-lint`
 alone, `item_directories`, `check_shape` and **`check_ready`**, for rule 1's
 archive predicate below and for rule 2, which stops matching anything when
 the `status:` lines go — `check_ready` returns early on
@@ -598,9 +635,9 @@ scan, which lands here because this pull request creates
 the tree that does not resolve until it does; `skills/sd-ship/` and
 `dashboard/`, for `sd-ship --deliver`, the hand-merge reconciliation, the
 notes on the squash commit and `deliver` on the item screen
-(`prd.md:1441-1455`) and the three kill-and-reconcile tests
-(`prd.md:1476-1485`); and `bin/sd_install.py`, for the `sd_db` step
-(`prd.md:1529-1535`).
+(`prd.md:1450-1464`) and the three kill-and-reconcile tests
+(`prd.md:1485-1494`); and `bin/sd_install.py`, for the `sd_db` step
+(`prd.md:1538-1544`).
 
 B's one sitting for `docs/work`: freeze, import once more, verify, snapshot,
 then remove every item's `status:` line outside the archive in one commit.
@@ -610,7 +647,7 @@ draft of this page named nowhere.** All three come from item B's criterion 7,
 enumerated clause by clause in B's round five, and each is a pack file no
 `system` pull request can reach.
 
-*The tracked marker.* `prd.md:585` and `prd.md:2567` both say the retire
+*The tracked marker.* `prd.md:585` and `prd.md:2576` both say the retire
 commit adds `docs/work/.status-source`, one line, `row`. This page named
 `status_source` — the column — and never the file. It is what a checkout
 without a database reads, so it lands in the same commit as the removal, not
@@ -691,7 +728,7 @@ the same sentence, and neither this pull request nor PR 6 noted it.
 `SessionEnd` and `SessionStart` hooks — **five hooks from two criteria, not
 five from one requirement**. Requirement 12 (`prd.md:989-1003`) names three:
 `PreCompact` and `SessionEnd` prompt the packet, `SessionStart` loads the
-item's open rows. The other two come from criterion 26 (`prd.md:1592-1594`),
+item's open rows. The other two come from criterion 26 (`prd.md:1601-1603`),
 "The `PreToolUse` and `UserPromptSubmit` hooks write `skill_use` rows". Both
 criteria are this pull request's, so the file set was right and the
 justification was not: an earlier draft called all five "requirement 12
@@ -850,7 +887,7 @@ slice 4 (`B/prd.md:1420-1430`: "Status change, assign, promote, demote and
 to do with an installer. And they filed the step on two pull requests: this
 section and PR 6's Verification put it on PR 6, while PR 7's Touches and the
 closure table put it on PR 7. The clause is A's own criterion 13, at
-`prd.md:1529-1535`, whose files (`bin/sd_install.py`) are in PR 7's Touches,
+`prd.md:1538-1544`, whose files (`bin/sd_install.py`) are in PR 7's Touches,
 so PR 7 carries it and PR 6 does not. B's dependency is on the merge, not on
 which of the two pull requests holds it, and PR 7 lands after PR 6.
 
@@ -917,15 +954,16 @@ recounted.
 
 | Criterion | Closed by |
 |---|---|
-| 1, 4, 5, 8, 20 — the policy page, the lane, the review table, the conditional obligations | PR 1 |
+| 1, 4, 8, 20 — the policy page, the lane, the conditional obligations | PR 1 |
+| 5 — the review table in exactly two places, and no bare vendor token in a skill | PR 1 (the two table clauses), PR 6 (the vendor clause whole: a converted token names a role, and no role resolves before PR 6's registry reader) |
 | 31 — requirement 13 line by line | PR 2 |
 | 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) |
 | 14, 15, 16, 17, 30 — the checks | PR 3 |
 | 33 — no document names a `docs/work/` path that does not resolve | PR 7, which adds the rule; wired by criterion 14's enumeration in PR 3, which lands first |
 | 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4 |
 | 24, 25 — `paths.json`, the union with active trials, `sd skill try` and its row | PR 5 |
-| 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | PR 6, with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
-| 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1529-1535`, whose files are in its Touches and in no other pull request's claim) |
+| 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | PR 6, which also carries criterion 5's vendor clause; with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
+| 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1538-1544`, whose files are in its Touches and in no other pull request's claim) |
 | 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` clause behind B's slice 4 |
 | 7 — the seven `mezmo-world-simulator` passes scored | see below |
 

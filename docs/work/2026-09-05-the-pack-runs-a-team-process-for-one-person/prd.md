@@ -153,12 +153,12 @@ advisory, what never touches a shared repository; the review table with its
 caps; the path for a change at each size; and the modes and how they resolve.
 `sd-help` names it. The `CLAUDE.local.md` block the installer writes links to it.
 
-The block carries the keys the pack already reads and no others: `mode:`, plus
-the entrypoint names `check:`, `test:` and `lint:` from `CHECK_NAMES`
-(`bin/sd_lib.py:36`, consumed at `:391-412`). Every opt-in lane is asked for by
-name in the moment. A key that turns a lane on permanently is a default in
-disguise: it converts a decision about one change into a decision about the
-repository, taken once and unrecorded.
+The block carries the keys the pack reads and no others: `mode:` (`MODES`,
+`bin/sd_lib.py:32`), `check:`, `test:` and `lint:` (`CHECK_NAMES`, `:36`, read
+at `:391-414`), and `reviewers:`, the consent key requirement 6 adds. Every
+opt-in lane is asked for by name in the moment. A key that turns a lane on
+permanently is a default in disguise: it converts a decision about one change
+into a decision about the repository, taken once and unrecorded.
 
 ### Requirement 2 — the ship path is tiered, and it can run unattended
 
@@ -1236,9 +1236,18 @@ confirmed by the next `sd-ship` run alone.
 5. The review table appears in exactly two places, `WORKFLOW.md` and the one
    rule file under `.claude/rules/`, and a test asserts the two copies are
    identical. Every skill that runs a review names its point in the table and
-   reads the cap from it. A grep of the payload for a vendor name (`codex`,
-   `claude`, `openai`, `anthropic`) inside a skill's instructions returns only
-   the provider-registry documentation.
+   reads the cap from it. A grep of `skills/` for a **bare** vendor token —
+   `codex`, `claude`, `openai` or `anthropic` with none of `/`, `.`, `_`, `~`
+   or `-` against either side, and not the product name `Claude Code` —
+   returns nothing. The exclusion is a shape and not a file list: it drops
+   paths, filenames, environment variables, MCP tool identifiers and URLs,
+   and it drops no vendor named as a choice of who runs a pass. The registry
+   is documented in `WORKFLOW.md`, which is not a skill, so the permitted
+   residue is zero rather than "only the registry documentation". Measured
+   2026-09-06: fifty-two case-insensitive hits on the four names across
+   twelve files, of which thirty-two are bare tokens across eight files. All
+   eight convert in the pull request that lands the registry reader, since a
+   converted token names a role and no role resolves before that reader.
 6. The provider registry format is documented in `WORKFLOW.md` with the role
    vocabulary `author` and `reviewer`, and a test asserts the registry the
    library ships resolves both roles to different providers. Adding a provider
@@ -3296,3 +3305,75 @@ from a number the operator types.
     this area to be corrected in one session, all four by counting from a
     sentence instead of reading the file; the numbers above were read with
     `sed -n '121,124p'`.
+  - C-171, blocking, found on starting PR 1: requirement 1's prose
+    contradicted criterion 1. The requirement said the block carries "the keys
+    the pack already reads and no others: `mode:`, plus ... `check:`, `test:`
+    and `lint:`" — four keys, no `reviewers`. Criterion 1 requires five, and
+    C-104 recorded that correction; it landed in the criterion and not in the
+    requirement PR 1 implements, so the page PR 1 was to write from named a
+    four-key block. The citation was wrong as well: `_local_block_entrypoints`
+    runs `:391-414`, not `:391-412` (`sed -n '391,414p' bin/sd_lib.py`). Both
+    corrected. C-115 recorded the `:414` correction "in both pages" on
+    2026-09-05 and meant `design.md` and `implement.md`; `prd.md` was the
+    third page nobody counted, which is C-168's shape again. The check is a
+    grep for the changed value across all three artifacts, not a re-reading
+    of the file that was edited.
+  - C-172, blocking, found by running criterion 5's own grep: the criterion
+    could not pass as written. It asked that a grep of the payload for
+    `codex`, `claude`, `openai` or `anthropic` "inside a skill's
+    instructions" return "only the provider-registry documentation" — but the
+    registry is documented in `WORKFLOW.md`, which is not a skill, so the
+    permitted residue named a set no skill file could be in, while
+    `~/.claude`, `CLAUDE.local.md`, `CLAUDE_PROJECT_DIR`,
+    `mcp__claude_ai_Gmail`, `~/.codex/skills`, `gh:openai/whisper#42` and the
+    product name `Claude Code` carry the four strings across seven skill
+    files and never leave. Run on 2026-09-06 the criterion's grep returns
+    fifty-two hits in twelve files and no wording of "only the registry
+    documentation" reaches zero. Restated as a bare-token shape — the four
+    names with none of `/`, `.`, `_`, `~` or `-` against either side, and not
+    `Claude Code` — which returns thirty-two hits across eight files today
+    and is a rule rather than a list of exceptions. Three of those thirty-two
+    are true positives the old reading would have let stand: `claude -p` in
+    `skills/sd-handoff/SKILL.md:84`, "Codex/OpenCode sessions" at `:73`, and
+    the `- claude` frontmatter tag at
+    `skills/sd-propose-skills/SKILL.md:100`.
+  - C-173, blocking, same run: criterion 5 cannot close in PR 1. PR 1 put all
+    twelve files the old grep returned in its own scope. Two of them,
+    `skills/sd-review/SKILL.md` and `skills/sd-ship/SKILL.md`, document
+    payload criterion 6 removes — `codex_preflight` and the `BACKENDS` table
+    at `:66-80`, the 800-line escalation at `:87`, and `--agent
+    claude|codex` at `sd-ship/SKILL.md:141,150-151,212`. Deleting that prose
+    in PR 1 while the preflight and the flag still run is the stale-document
+    failure this item exists to remove, with the two halves swapped. Those
+    two files and their ten bare tokens move to PR 6. PR 1 closes criterion
+    5's two table clauses and converts the twenty-two tokens in the six
+    planning and research surfaces; the vendor clause closes in PR 6.
+  - C-174, material, same run: `skills/sd-review/SKILL.md` stood in no pull
+    request's Touches at all, while criterion 6 deletes `bin/sd-review`'s
+    `BACKENDS` table and `.github/sd-review.json`'s `tiers`, both of which
+    that page documents — the `prism` and `gito` entries requirement 3 says
+    are gone are named at `:77-78` as shipped. Added to PR 6's Touches
+    beside them.
+  - C-175, blocking, supersedes C-173's split: criterion 5's vendor clause is
+    PR 6's **whole**, not for two files of eight. C-173 moved
+    `skills/sd-review/SKILL.md` and `skills/sd-ship/SKILL.md` on the ground
+    that they document payload criterion 6 removes, and left the other six
+    in PR 1. The ground is wider than the two files. A bare vendor token in a
+    skill is a provider choice, and the thing that replaces it is a role name
+    the registry resolves — so every one of the thirty-two conversions
+    depends on the registry reader, which is criterion 6's and lands in PR 6.
+    `skills/sd-research-repo/references/conventions.md:183-215` is the clear
+    case: it is `codex doctor`, `codex exec -s read-only` and the focus text
+    a reader runs today, and replacing it with "the `reviewer` role" in PR 1
+    leaves the research flow with a review it cannot start until PR 6 merges.
+    That is the same stale-document failure C-173 named, in the file C-173
+    left behind. PR 1 keeps criterion 5's two table clauses — the table in
+    exactly two identical copies, and every skill that runs a review naming
+    its point and reading its cap. What PR 1 still removes from those six
+    files is criterion 4's deleted lane, whose grep is
+    `second-model lane|codex (review )?lane` and is narrower than the vendor
+    grep: `skills/sd-plan/SKILL.md:40`, `skills/sd-research-repo/SKILL.md:84`
+    and `conventions.md:167,175-177`, which name
+    `docs/planning-adversarial-review-codex.md` and the lane it defines. The
+    `codex` invocations beside them stay until the registry can answer for
+    them.

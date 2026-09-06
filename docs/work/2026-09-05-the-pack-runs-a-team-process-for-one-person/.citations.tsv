@@ -1,25 +1,25 @@
-design.md:212	prd.md:1366-1371	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1366	fork, and nobody else has push or higher on it; 
-design.md:217	prd.md:1371-1372	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1371	with a second collaborator, and a root with no r
+design.md:212	prd.md:1375-1380	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1375	fork, and nobody else has push or higher on it; 
+design.md:217	prd.md:1380-1381	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1380	with a second collaborator, and a root with no r
 design.md:250	prd.md:448-451	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	448	Baseten, `local` for exo. The `reviewer` line ru
-implement.md:93	prd.md:1223-1224	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1223	4. Exactly one second-model lane is named anywhe
-implement.md:111	prd.md:1211-1215	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1211	asserts the set of keys `WORKFLOW.md` documents 
-implement.md:168	prd.md:1117-1165	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1117	adaptation and omission ledgers and the approval
-implement.md:170	prd.md:1625-1629	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1625	return the same reviewer order from the same `pr
-implement.md:223	prd.md:1283	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1283	same second slice resolves the same, from A's ro
-implement.md:474	prd.md:874	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	874	- `README.md`'s claim that the pack writes "noth
-implement.md:478	prd.md:1400-1401	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1400	fixture remote whose default branch does not req
-implement.md:527	prd.md:1238-1240	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1238	identical. Every skill that runs a review names 
-implement.md:587	prd.md:1402-1403	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1402	branch, asserted by the fixture remote seeing no
-implement.md:601	prd.md:1441-1455	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1441	status change touches no file, asserted by a tes
-implement.md:602	prd.md:1476-1485	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1476	never, and a guest clone retained on the fork's 
-implement.md:603	prd.md:1529-1535	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1529	the delivering case on a fixture remote that gai
-implement.md:613	prd.md:585	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	585	`docs/work/.status-source`, one line, `row`, bes
-implement.md:613	prd.md:2567	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	2567	retire commit adds a tracked marker, `docs/work/
-implement.md:676	prd.md:1200-1201	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1200	row open, requirement 5. Before the second slice
-implement.md:680	prd.md:1184-1188	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1184	## Landing order
-implement.md:692	prd.md:989-1003	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	989	### Requirement 12 — handoff loses nothing, beca
-implement.md:694	prd.md:1592-1594	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1592	25. `sd skill try <name>` installs from `contrib
-implement.md:698	prd.md:998-1000	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	998	the conversation. A `PreCompact` hook and a `Ses
-implement.md:705	prd.md:960	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	960	`mezmo_benchmark` 1). They are shadowed, not imp
-implement.md:853	prd.md:1529-1535	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1529	the delivering case on a fixture remote that gai
-implement.md:928	prd.md:1529-1535	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1529	the delivering case on a fixture remote that gai
+implement.md:110	prd.md:1223-1224	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1223	4. Exactly one second-model lane is named anywhe
+implement.md:128	prd.md:1211-1215	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1211	asserts the set of keys `WORKFLOW.md` documents 
+implement.md:188	prd.md:1117-1165	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1117	adaptation and omission ledgers and the approval
+implement.md:190	prd.md:1634-1638	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1634	return the same reviewer order from the same `pr
+implement.md:243	prd.md:1292	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1292	same second slice resolves the same, from A's ro
+implement.md:494	prd.md:874	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	874	- `README.md`'s claim that the pack writes "noth
+implement.md:498	prd.md:1409-1410	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1409	fixture remote whose default branch does not req
+implement.md:547	prd.md:1238-1240	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1238	identical. Every skill that runs a review names 
+implement.md:624	prd.md:1411-1412	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1411	branch, asserted by the fixture remote seeing no
+implement.md:638	prd.md:1450-1464	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1450	status change touches no file, asserted by a tes
+implement.md:639	prd.md:1485-1494	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1485	never, and a guest clone retained on the fork's 
+implement.md:640	prd.md:1538-1544	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1538	the delivering case on a fixture remote that gai
+implement.md:650	prd.md:585	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	585	`docs/work/.status-source`, one line, `row`, bes
+implement.md:650	prd.md:2576	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	2576	retire commit adds a tracked marker, `docs/work/
+implement.md:713	prd.md:1200-1201	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1200	row open, requirement 5. Before the second slice
+implement.md:717	prd.md:1184-1188	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1184	## Landing order
+implement.md:729	prd.md:989-1003	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	989	### Requirement 12 — handoff loses nothing, beca
+implement.md:731	prd.md:1601-1603	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1601	25. `sd skill try <name>` installs from `contrib
+implement.md:735	prd.md:998-1000	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	998	the conversation. A `PreCompact` hook and a `Ses
+implement.md:742	prd.md:960	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	960	`mezmo_benchmark` 1). They are shadowed, not imp
+implement.md:890	prd.md:1538-1544	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1538	the delivering case on a fixture remote that gai
+implement.md:966	prd.md:1538-1544	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1538	the delivering case on a fixture remote that gai

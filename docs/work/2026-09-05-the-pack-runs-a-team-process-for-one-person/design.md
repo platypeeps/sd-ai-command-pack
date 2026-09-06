@@ -209,12 +209,12 @@ not a fork, nobody else: `full`, in your namespace or an organisation's.
 Anything else, including no answer: `guest`. A root with no remote, **or
 no git at all**, is `full`; there is no one to expose anything to. The
 no-git case is named and asserted on its own, because criterion 11 requires
-exactly that (`prd.md:1366-1371`) — it is the case that otherwise gets
+exactly that (`prd.md:1375-1380`) — it is the case that otherwise gets
 swept into whichever exception branch the remote lookup raises. The questions are asked
 again before every artifact write and every push, and a `no` makes the
 run `guest` whatever the line says: a `mode: full` you wrote is a ceiling,
 never a floor — detection lowers it and never raises it, which is
-`prd.md:1371-1372`'s "wins over detection downward and never upward" — so a repository that gains a collaborator stops
+`prd.md:1380-1381`'s "wins over detection downward and never upward" — so a repository that gains a collaborator stops
 receiving your planning artifacts before the next push, not after the
 next merge. The push check is of the destination: your fork's integration
 branch is your own remote, and the guest push there proceeds while the
