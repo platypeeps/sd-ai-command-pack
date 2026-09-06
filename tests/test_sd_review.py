@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import importlib.machinery
 import importlib.util
+import io
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -83,10 +85,37 @@ def namespace(**overrides: Any) -> argparse.Namespace:
         "dry_run": False,
         "json": False,
         "draft": False,
+        "provider": None,
         "timeout": 60,
     }
     values.update(overrides)
     return argparse.Namespace(**values)
+
+
+#: The fixture's own registry, deliberately not the shipped one. A test that
+#: read `providers.yaml` would assert against whichever providers happen to be
+#: pinned this month, and every chain assertion below would change meaning the
+#: next time an entry is added. Two entries with the same reader is the shape
+#: the chain tests need: a second reviewer that actually runs.
+FIXTURE_REGISTRY = """
+bills:
+  first:  { cost: subscription }
+  second: { cost: subscription }
+
+providers:
+  codex:  { start: "codex exec", vendor: openai, bill: first,
+            roles: [reviewer], reader: codex-json, env: [] }
+  second: { start: "second exec", vendor: secondvendor, bill: second,
+            roles: [author, reviewer], reader: codex-json, env: [] }
+
+roles:
+  author: [second]
+  reviewer: [codex, second]
+"""
+
+#: What the fixture repository consents to. `entry@executable` for both, which
+#: is what `recipient()` derives from each entry's start line.
+FIXTURE_CONSENT = "codex@codex, second@second"
 
 
 class ReviewFixture(unittest.TestCase):
@@ -94,6 +123,25 @@ class ReviewFixture(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.tmp = pathlib.Path(self._tmp.name).resolve()
+        self.registry_home = self.tmp / "registry-home"
+        (self.registry_home / ".local" / "share" / "sd").mkdir(parents=True)
+        (self.registry_home / ".local" / "share" / "sd" / "providers.yaml").write_text(
+            FIXTURE_REGISTRY, encoding="utf-8"
+        )
+
+    def environment(self, **extra: str) -> dict[str, str]:
+        """An environment whose HOME is the fixture's, so the run reads the
+        fixture's registry rather than the developer's."""
+        return {"HOME": str(self.registry_home), **extra}
+
+    def local_block(self, root: pathlib.Path, *lines: str) -> None:
+        body = "\n".join((f"{sd_review.sd_lib.CONSENT_KEY}: {FIXTURE_CONSENT}", *lines))
+        (root / "CLAUDE.local.md").write_text(
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\n"
+            f"{body}\n"
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n",
+            encoding="utf-8",
+        )
 
     def make_repo(self, name: str = "repo") -> pathlib.Path:
         root = self.tmp / name
@@ -105,6 +153,7 @@ class ReviewFixture(unittest.TestCase):
         ):
             subprocess.run(["git", *args], cwd=str(root), check=True, capture_output=True)
         (root / "README.md").write_text("seed\n", encoding="utf-8")
+        self.local_block(root)
         subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, capture_output=True)
         subprocess.run(
             ["git", "commit", "--quiet", "-m", "seed"], cwd=str(root), check=True, capture_output=True
@@ -161,8 +210,7 @@ class PolicyTests(ReviewFixture):
         self.assert_rejects("{not json", "not valid JSON")
         self.assert_rejects([], "must be a JSON object")
         self.assert_rejects({"nonsense": 1}, "unknown key(s) nonsense")
-        self.assert_rejects({"tiers": {"nope": []}}, "tiers.nope is not in tier_order")
-        self.assert_rejects({"tiers": {"cheap": ["nosuch"]}}, "unknown backend 'nosuch'")
+        self.assert_rejects({"tiers": {"cheap": []}}, "tiers is retired")
         self.assert_rejects({"default_tier": "gold"}, "default_tier must be one of")
         self.assert_rejects({"categories": [{"paths": ["a"]}]}, "name must be a non-empty string")
         self.assert_rejects({"categories": [{"name": "x", "paths": []}]}, "must name at least one glob")
@@ -171,7 +219,8 @@ class PolicyTests(ReviewFixture):
         self.assert_rejects({"severity_floor": "urgent"}, "severity_floor must be one of")
         self.assert_rejects({"authors": [3]}, "authors[0] must be a string")
         self.assert_rejects({"tier_order": ["a", "a"]}, "must not repeat a tier")
-        self.assert_rejects({"challenge_providers": ["ghost"]}, "names unknown backend 'ghost'")
+        self.assert_rejects({"challenge_providers": ["x"]}, "challenge_providers is retired")
+        self.assert_rejects({"planning_providers": ["x"]}, "planning_providers is retired")
 
     def test_a_broken_policy_never_falls_back_to_the_default(self) -> None:
         root = self.make_repo()
@@ -181,29 +230,28 @@ class PolicyTests(ReviewFixture):
             sd_review.load_policy(root)
 
 
-class BackendTableTests(unittest.TestCase):
-    def test_probe_gated_backends_are_declared_disabled_with_a_reason(self) -> None:
-        for name in ("antigravity", "exo", "baseten"):
-            row = sd_review.BACKENDS_BY_NAME[name]
-            self.assertFalse(row.enabled, name)
-            self.assertEqual(row.strategy, "none", name)
-            self.assertTrue(row.disabled_reason.strip(), f"{name} is disabled without a reason")
+def _planned_for(case: Any, *, start: str) -> list[dict[str, Any]]:
+    return sd_review._planned([case.provider(start=start)], pathlib.Path("/repo"), "prompt")
 
-    def test_github_backends_are_declared_but_never_local(self) -> None:
-        for name in ("copilot", "greptile"):
-            row = sd_review.BACKENDS_BY_NAME[name]
-            self.assertEqual(row.lane, "github", name)
-            self.assertFalse(row.enabled, name)
 
-    def test_codex_heads_every_tier_that_reviews_anything(self) -> None:
-        for tier, chain in sd_review.DEFAULT_POLICY["tiers"].items():
-            if chain:
-                self.assertEqual(chain[0], "codex", tier)
+class ReaderTests(ReviewFixture):
+    """What a registry entry's `reader` decides, now that no table does."""
 
-    def test_a_disabled_backend_reports_its_reason_instead_of_running(self) -> None:
+    def provider(self, **overrides: Any) -> Any:
+        fields: dict[str, Any] = {
+            "name": "someone",
+            "vendor": "somevendor",
+            "bill": "first",
+            "start": "someone review",
+            "reader": "codex-json",
+        }
+        fields.update(overrides)
+        return sd_review.sd_registry.Provider(**fields)
+
+    def test_an_unimplemented_reader_is_not_run_and_names_itself(self) -> None:
         runner = FakeRunner()
-        outcome = sd_review.run_backend(
-            sd_review.BACKENDS_BY_NAME["baseten"],
+        outcome = sd_review.run_provider(
+            self.provider(reader="claude-json"),
             pathlib.Path("/nonexistent"),
             sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
             "prompt",
@@ -211,9 +259,90 @@ class BackendTableTests(unittest.TestCase):
             {},
             60,
         )
-        self.assertEqual(outcome.status, sd_review.DISABLED)
-        self.assertIn("gap gate", outcome.detail)
+        self.assertEqual(outcome.status, sd_review.NOT_RUN)
+        self.assertIn("claude-json", outcome.detail)
+        self.assertEqual(runner.calls, [], "an unreadable provider is not started")
+
+    def test_a_url_entry_is_not_run_and_does_not_borrow_a_start_entry_s_words(
+        self,
+    ) -> None:
+        """Copilot found this. `refuse_environment` ran first and unconditionally
+        -- it speaks of what a spawned session inherits and ends "No session was
+        started" -- so a `url` entry, which spawns nothing, was answered in the
+        language of a mechanism it does not use, and then fell through to the
+        message claiming it named a reader called `None`.
+
+        The environment here holds a URL on purpose: that is what used to
+        trigger the start-session refusal on an entry that starts nothing.
+        """
+        runner = FakeRunner()
+        outcome = sd_review.run_provider(
+            self.provider(start=None, url="https://api.example/v1", reader=None),
+            pathlib.Path("/nonexistent"),
+            sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
+            "prompt",
+            runner,
+            {"SOMEVENDOR_KEY": "https://elsewhere.example"},
+            60,
+        )
+        self.assertEqual(outcome.status, sd_review.NOT_RUN)
+        self.assertIn("'url' entry", outcome.detail)
+        self.assertNotIn("None", outcome.detail)
+        self.assertNotIn("No session was started", outcome.detail)
         self.assertEqual(runner.calls, [])
+
+    def test_the_three_places_that_ask_give_one_answer(self) -> None:
+        """The chain marks it, the dry run plans it, the run reports it. Each
+        had its own sentence, and two of the three were wrong about the same
+        case, so fixing one left the others saying the old thing."""
+        provider = self.provider(start=None, url="https://api.example/v1", reader=None)
+        expected = sd_review.sd_registry.refuse_reader(provider, sd_review.READERS)
+        self.assertIsNotNone(expected)
+        planned = sd_review._planned([provider], pathlib.Path("/nonexistent"), "prompt")
+        self.assertEqual(planned[0]["reason"], expected)
+        self.assertFalse(planned[0]["would_run"])
+
+    def test_an_entry_whose_start_line_names_no_program_is_refused(self) -> None:
+        """Copilot found this. `shlex.split("")` is empty, so the hardened
+        invocation's first flag became the executable and the run tried to
+        start `--sandbox`."""
+
+        runner = FakeRunner()
+        outcome = sd_review.run_provider(
+            self.provider(start=""),
+            pathlib.Path("/nonexistent"),
+            sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
+            "prompt",
+            runner,
+            {},
+            60,
+        )
+        self.assertEqual(outcome.status, sd_review.REFUSED)
+        self.assertIn("names no program", outcome.detail)
+        self.assertEqual(runner.calls, [], "nothing is started")
+
+    def test_the_dry_run_does_not_offer_an_argv_that_starts_with_a_flag(self) -> None:
+        """The same defect reached `--dry-run`, which prints the invocation for
+        a person to read. Asserted over the whole plan rather than one entry, so
+        a future reader that forgets the check fails here too."""
+
+        for row in _planned_for(self, start=""):
+            self.assertFalse(row["would_run"])
+            self.assertEqual(row["argv"], [])
+        for row in _planned_for(self, start="codex exec"):
+            self.assertTrue(row["would_run"])
+            self.assertFalse(row["argv"][0].startswith("-"), row["argv"])
+
+    def test_the_entrys_start_line_is_what_runs(self) -> None:
+        """`codex-json` names a protocol, not one executable. An entry that
+        speaks it through a wrapper runs the wrapper, and a reader that
+        hardcoded `codex` would silently review with the wrong binary."""
+
+        argv = sd_review.codex_argv(
+            pathlib.Path("/repo"), pathlib.Path("/work"), "prompt", "wrapped codex exec"
+        )
+        self.assertEqual(argv[:3], ["wrapped", "codex", "exec"])
+        self.assertIn("--sandbox", argv)
 
 
 class SubjectTests(ReviewFixture):
@@ -396,7 +525,7 @@ class PipelineTests(ReviewFixture):
             root,
             namespace(**overrides),
             runner,
-            dict(env or {}),
+            self.environment(**dict(env or {})),
             self.chatgpt_home(),
         )
 
@@ -438,16 +567,16 @@ class PipelineTests(ReviewFixture):
             {
                 "sd-check": sd_review.Completed(0, "{}", ""),
                 "codex": sd_review.Completed(1, "", "usage limit reached"),
-                "prism": sd_review.Completed(0, '{"findings": []}', ""),
+                "second": sd_review.Completed(0, '{"findings": []}', ""),
             }
         )
         result = self.run_review(root, runner)
         self.assertEqual(result["status"], "rate_limited")
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["codex"], sd_review.RATE_LIMITED)
-        self.assertEqual(statuses["prism"], sd_review.NOT_RUN)
-        self.assertEqual(sorted(result["remaining"]), ["codex", "prism"])
-        self.assertNotIn("prism", [pathlib.Path(call["argv"][0]).name for call in runner.calls])
+        self.assertEqual(statuses["second"], sd_review.NOT_RUN)
+        self.assertEqual(sorted(result["remaining"]), ["codex", "second"])
+        self.assertNotIn("second", [pathlib.Path(call["argv"][0]).name for call in runner.calls])
 
     def test_an_unavailable_provider_lets_the_chain_continue(self) -> None:
         root = self.make_repo()
@@ -456,13 +585,13 @@ class PipelineTests(ReviewFixture):
             {
                 "sd-check": sd_review.Completed(0, "{}", ""),
                 "codex": sd_review.Completed(127, "", "codex: not found on PATH", False),
-                "prism": sd_review.Completed(0, '{"findings": []}', ""),
+                "second": sd_review.Completed(0, '{"findings": []}', ""),
             }
         )
         result = self.run_review(root, runner)
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["codex"], sd_review.UNAVAILABLE)
-        self.assertEqual(statuses["prism"], sd_review.CLEAN)
+        self.assertEqual(statuses["second"], sd_review.CLEAN)
         self.assertEqual(result["status"], "clean")
 
     def test_every_provider_unavailable_is_not_a_clean_review(self) -> None:
@@ -517,13 +646,7 @@ class PipelineTests(ReviewFixture):
     def test_the_local_block_reaches_the_prompt(self) -> None:
         root = self.make_repo()
         self.prepare(root)
-        local = root / "CLAUDE.local.md"
-        local.write_text(
-            "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\n"
-            "check: make check\n"
-            "<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n",
-            encoding="utf-8",
-        )
+        self.local_block(root, "check: make check")
         result = self.run_review(root, FakeRunner(), dry_run=True)
         self.assertTrue(result["local_block_prepended"])
         prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["argv"][-1]
@@ -536,7 +659,8 @@ class PipelineTests(ReviewFixture):
         (root / "feature.py").write_text("y = 2\n", encoding="utf-8")
         subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, capture_output=True)
         subprocess.run(
-            ["git", "commit", "--quiet", "-m", "f"], cwd=str(root), check=True, capture_output=True
+            ["git", "commit", "--quiet", "-m", "f\n\nAuthored-with: human"],
+            cwd=str(root), check=True, capture_output=True
         )
         result = self.run_review(root, FakeRunner(), dry_run=True, scope="branch")
         prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["argv"][-1]
@@ -555,12 +679,16 @@ class PipelineTests(ReviewFixture):
 
 class CliTests(ReviewFixture):
     def run_cli(self, args: list[str], cwd: pathlib.Path) -> subprocess.CompletedProcess[str]:
+        # The fixture's HOME, so the CLI reads the fixture registry. Without it
+        # these tests would pass or fail on whether whoever runs them has run
+        # the installer, which is not what they are about.
         return subprocess.run(
             [sys.executable, str(SD_REVIEW), *args],
             cwd=str(cwd),
             capture_output=True,
             text=True,
             check=False,
+            env={**os.environ, "HOME": str(self.registry_home)},
         )
 
     def test_explain_against_this_repository_exits_zero(self) -> None:
@@ -594,41 +722,513 @@ class CliTests(ReviewFixture):
         self.assertIn("not valid JSON", finished.stderr)
 
 
-class EnabledBackendTests(unittest.TestCase):
-    """A row ships enabled only after its argv was checked against the real CLI.
+class TheExplainRenderTests(ReviewFixture):
+    """What `--explain` prints, and what a run that is not explaining must not.
 
-    codex and prism were: `codex exec` with the hardened invocation, and
-    `prism review range|codebase ... --format json`, both read off the installed
-    binaries' help. gito's and kimi's transcribed spellings were wrong (gito
-    takes `--what`, has no `--json`, and writes a report folder; `kimi review`
-    is not a subcommand at all), so they ship disabled. Re-enabling one means
-    editing this test too, which is the point: it is the record of what was
-    verified, not a summary of what is intended.
+    Copilot found this on the pull request. `render`'s explain block had been
+    edited by text substitution and its nesting was wrong: the chain table sat
+    inside the consent-refusal branch, so it printed only when consent was
+    refused, and a real run that hit a consent refusal printed "explain only,
+    nothing ran" and returned before its outcomes.
+
+    The manual check that passed before this landed had both a missing registry
+    and a missing consent line, which is the one combination under which the
+    broken nesting looks right.
     """
 
-    def test_only_verified_argv_rows_ship_enabled(self) -> None:
-        enabled = {row.name for row in sd_review.BACKENDS if row.enabled}
-        self.assertEqual(enabled, {"codex", "prism"})
+    def explain(self, root: pathlib.Path, env: Mapping[str, str] | None = None) -> str:
+        result = sd_review.review(
+            root,
+            namespace(explain=True),
+            FakeRunner(),
+            dict(env) if env is not None else self.environment(),
+            self.chatgpt_home(),
+        )
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        return stream.getvalue()
 
-    def test_every_disabled_row_says_why(self) -> None:
-        for row in sd_review.BACKENDS:
-            if not row.enabled:
-                self.assertTrue(row.disabled_reason.strip(), f"{row.name} is silently off")
+    def test_a_scope_with_no_commits_does_not_claim_human_authorship(self) -> None:
+        """Copilot found this. The fixture repository's only commit says
+        `Authored-with: human`, but a worktree scope never reads a trailer at
+        all, and printing "human-authored" there answers a question the run did
+        not ask. It printed exactly that over a repository whose only commit
+        said `claude/anthropic`."""
+
+        text = self.explain(self.make_repo())
+        self.assertIn("not read: worktree scope", text)
+        self.assertNotIn("human-authored", text)
+
+    def test_the_chain_prints_when_nothing_is_refused(self) -> None:
+        """The fixture repository consents to both entries and has a registry,
+        so there is no refusal to carry the table into view."""
+
+        text = self.explain(self.make_repo())
+        self.assertIn("reviewer chain", text)
+        self.assertIn("use codex", " ".join(text.split()))
+        self.assertIn("second", text)
+        self.assertIn("explain only, nothing ran", text)
+
+    def test_a_real_run_does_not_print_the_explain_footer(self) -> None:
+        """A run that reviews must not claim it explained. This is the half of
+        the defect that changed what a real invocation reported."""
+
+        root = self.make_repo()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        runner = FakeRunner(
+            {
+                "sd-check": sd_review.Completed(0, "{}", ""),
+                "codex": sd_review.Completed(0, '{"findings": []}', ""),
+            }
+        )
+        result = sd_review.review(
+            root, namespace(), runner, self.environment(), self.chatgpt_home()
+        )
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        text = stream.getvalue()
+        self.assertNotIn("explain only", text)
+        self.assertIn("outcomes:", text)
+
+    def test_a_consent_refusal_does_not_turn_a_real_run_into_an_explain(self) -> None:
+        """The exact shape of the defect: a repository with no `reviewers`
+        line, reviewed for real."""
+
+        root = self.make_repo()
+        (root / "CLAUDE.local.md").unlink()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        result = sd_review.review(
+            root, namespace(), runner, self.environment(), self.chatgpt_home()
+        )
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        text = stream.getvalue()
+        self.assertNotIn("explain only", text)
+        self.assertNotIn("reviewer chain", text)
+
+
+class DepthCountsProvidersThatCanAnswerTests(ReviewFixture):
+    """A tier's depth is a count of reviewers, not of chain positions.
+
+    Copilot found this. Entries were marked eligible without regard to whether
+    this build can run them, so on the shipped registry a `deep` change --
+    depth 3, chain `codex, claude, minimax, ...` -- spent two of its three
+    slots on readers that do not exist, ran one provider, and reported `clean`
+    with exit 0. The commit that introduced the depth model claimed "a change
+    is read by as many providers as before", which that made false.
+
+    Whether a reader is implemented is a fact about the build, knowable without
+    touching the machine, so unlike preflight it belongs in the chain.
+    """
+
+    def registry_with(self, *readers: str) -> pathlib.Path:
+        entries = "\n".join(
+            f'  p{i}: {{ start: "p{i} exec", vendor: v{i}, bill: first, '
+            f"roles: [reviewer], reader: {reader}, env: [] }}"
+            for i, reader in enumerate(readers)
+        )
+        names = ", ".join(f"p{i}" for i in range(len(readers)))
+        text = (
+            "bills:\n  first: { cost: subscription }\n\n"
+            f"providers:\n{entries}\n  author: {{ start: \"author exec\", vendor: av, "
+            "bill: first, roles: [author], reader: codex-json, env: [] }\n\n"
+            f"roles:\n  author: [author]\n  reviewer: [{names}]\n"
+        )
+        home = self.tmp / f"home-{abs(hash(readers))}"
+        (home / ".local" / "share" / "sd").mkdir(parents=True)
+        (home / ".local" / "share" / "sd" / "providers.yaml").write_text(text, encoding="utf-8")
+        return home
+
+    def consenting_repo(self, count: int) -> pathlib.Path:
+        """A repository consenting to every `pN` entry, so the only thing left
+        to make an entry ineligible is its reader."""
+        root = self.make_repo()
+        self.local_block(root)
+        line = ", ".join(f"p{i}@p{i}" for i in range(count))
+        (root / "CLAUDE.local.md").write_text(
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\n"
+            f"{sd_review.sd_lib.CONSENT_KEY}: {line}\n"
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n",
+            encoding="utf-8",
+        )
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        return root
+
+    def explained(self, home: pathlib.Path, count: int) -> dict[str, Any]:
+        return sd_review.review(
+            self.consenting_repo(count),
+            namespace(explain=True),
+            FakeRunner(),
+            {"HOME": str(home)},
+            self.chatgpt_home(),
+        )
+
+    def test_an_unimplemented_reader_is_ineligible_and_says_why(self) -> None:
+        rows = self.explained(self.registry_with("claude-json", "codex-json"), 2)["chain"]
+        self.assertFalse(rows[0]["eligible"])
+        self.assertIn("claude-json", rows[0]["reason"])
+        self.assertTrue(rows[1]["eligible"], rows[1]["reason"])
+
+    def test_it_does_not_consume_a_depth_slot(self) -> None:
+        """The defect in one assertion: with an unrunnable entry ahead of a
+        runnable one, the run still picks the one that can answer."""
+
+        result = self.explained(self.registry_with("claude-json", "codex-json"), 2)
+        self.assertGreaterEqual(result["route"]["depth"], 1)
+        self.assertEqual(result["providers"][:1], ["p1"], result["chain"])
+
+    def test_every_reader_this_build_names_is_one_a_provider_can_run(self) -> None:
+        """`READERS` is the allow-list the chain filters on. A name in it that
+        `run_provider` does not implement would mark an entry eligible and then
+        refuse it at the run, which is the hole this closes reopened."""
+
+        self.assertEqual(sd_review.READERS, ("codex-json",))
+
+
+class AnEmptyChainThatWantedReviewersTests(ReviewFixture):
+    """`skipped` exits zero. Only tier `skip` may claim it.
+
+    Copilot found the second half of this. The missing-registry case was fixed
+    by special-casing that one refusal, which left every other way of emptying
+    the chain reporting `skipped` -- a repository with a registry and no
+    `reviewers` line reviewed nothing and exited 0 saying so. The rule is not
+    about registries: a run that wanted reviewers and got none is
+    `unavailable`, and `depth == 0` is the only thing that earns `skipped`.
+    """
+
+    def review(self, root: pathlib.Path, **overrides: Any) -> dict[str, Any]:
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        return sd_review.review(
+            root, namespace(**overrides), runner, self.environment(), self.chatgpt_home()
+        )
+
+    def test_no_consent_line_is_unavailable_not_skipped(self) -> None:
+        root = self.make_repo()
+        (root / "CLAUDE.local.md").unlink()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        result = self.review(root)
+        self.assertEqual(result["providers"], [])
+        self.assertEqual(result["status"], "unavailable")
+        self.assertNotEqual(sd_review.STATUS_EXIT[result["status"]], sd_review.EXIT_OK)
+
+    def test_an_ordinary_run_says_why_it_had_nobody(self) -> None:
+        """Copilot found this. The reasons were computed either way and
+        printed only under `--explain`, so a plain run said the one word
+        "unavailable" and exited 5. The operator whose repository has no
+        'reviewers' line is the last one who would think to re-run with a flag
+        to learn that."""
+        root = self.make_repo()
+        (root / "CLAUDE.local.md").unlink()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        result = self.review(root)
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        printed = stream.getvalue()
+        self.assertIn("no reviewer was available:", printed)
+        self.assertIn("reviewers", printed)
+        self.assertIn("unavailable", printed)
+
+    def test_every_entry_being_the_authors_vendor_is_unavailable(self) -> None:
+        """The chain empties for a third reason, and answers the same way."""
+
+        root = self.make_repo()
+        # A branch, so `base..head` holds the commit whose trailer is the point.
+        subprocess.run(["git", "checkout", "--quiet", "-b", "topic"], cwd=str(root), check=True)
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "--quiet", "-m", "c\n\nAuthored-with: codex/openai"],
+            cwd=str(root), check=True, capture_output=True,
+        )
+        result = self.review(root, scope="branch")
+        self.assertEqual(result["authored_with"], ["openai"])
+        reasons = " ".join(row["reason"] for row in result["chain"] if not row["eligible"])
+        self.assertIn("openai", reasons)
+
+    def test_a_docs_only_change_is_still_skipped_and_exits_zero(self) -> None:
+        """The control. Tier `skip` means nothing needed reviewing, which is a
+        different sentence from "nobody could review", and still exits 0."""
+
+        root = self.make_repo()
+        (root / "docs").mkdir()
+        (root / "docs" / "note.md").write_text("hello\n", encoding="utf-8")
+        result = self.review(root)
+        self.assertEqual(result["route"]["depth"], 0)
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(sd_review.STATUS_EXIT.get(result["status"], sd_review.EXIT_OK), sd_review.EXIT_OK)
+
+
+class TheTrailerBlockTests(ReviewFixture):
+    """A trailer is the last paragraph, unindented. Not any matching line.
+
+    Found by running the tool on its own branch. A commit whose message
+    *quoted* a refusal -- "2 commit(s) carry no Authored-with: trailer" --
+    had that quoted line read as its own trailer, and the branch refused
+    itself with a value of "trailer, starting at 76fb9d750096.".
+    """
+
+    def commit(self, root: pathlib.Path, message: str) -> str:
+        (root / f"f{len(list(root.iterdir()))}.py").write_text("x = 1\n", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "--quiet", "-m", message], cwd=str(root), check=True, capture_output=True
+        )
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    def subject(self, root: pathlib.Path, base: str) -> Any:
+        return sd_review.Subject("branch", base, "HEAD", (), 0, "")
+
+    def test_a_quoted_trailer_in_the_body_is_not_this_commits_trailer(self) -> None:
+        root = self.make_repo()
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+        self.commit(
+            root,
+            "chore: describe a refusal\n\n"
+            "    sd-review: refused: a commit carries no\n"
+            "    Authored-with: trailer, starting at abc123.\n\n"
+            "Authored-with: human",
+        )
+        self.assertEqual(sd_review.author_vendors(root, self.subject(root, base)), ())
+
+    def test_an_indented_trailer_is_not_a_trailer(self) -> None:
+        """Git does not read one, so neither does this. A commit that only
+        mentions a trailer has said nothing, and saying nothing refuses."""
+
+        root = self.make_repo()
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+        self.commit(root, "chore: mention one\n\n    Authored-with: claude/anthropic")
+        with self.assertRaises(sd_review.Refusal) as caught:
+            sd_review.author_vendors(root, self.subject(root, base))
+        self.assertIn("carry no Authored-with:", str(caught.exception))
+
+    def test_a_commits_own_trailer_outranks_a_later_claim_about_it(self) -> None:
+        """Copilot found this, and it inverted the rule the trailers exist for.
+
+        Both dictionaries were merged in one walk with `setdefault`, and the
+        log is newest-first, so a later commit's `Attributes:` won. Relabelling
+        an anthropic-authored commit as an openai one -- and thereby buying it
+        an anthropic reviewer, the exact thing the vendor rule forbids -- took
+        one line in a later commit message.
+        """
+
+        root = self.make_repo()
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+        early = self.commit(root, "real work\n\nAuthored-with: claude/anthropic")
+        self.commit(root, f"later\n\nAuthored-with: human\nAttributes: {early} codex/openai")
+        self.assertEqual(
+            sd_review.sd_lib.attribution(root, base, "HEAD")[early], "claude/anthropic"
+        )
+        self.assertEqual(sd_review.author_vendors(root, self.subject(root, base)), ("anthropic",))
+
+    def test_attributes_names_an_earlier_commit_from_a_later_one(self) -> None:
+        root = self.make_repo()
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+        early = self.commit(root, "feat: written before the convention")
+        self.commit(root, f"chore: attribute it\n\nAuthored-with: human\nAttributes: {early} codex/openai")
+        self.assertEqual(sd_review.author_vendors(root, self.subject(root, base)), ("openai",))
+
+    def test_attributes_naming_a_commit_outside_the_range_says_nothing(self) -> None:
+        """Copilot's fourth pass. A claim about a commit nobody is reviewing
+        put its vendor in the author set anyway, and an author's vendor is
+        barred from reviewing -- so one line naming an already-merged sha
+        struck a reviewer off the chain for work it did not write."""
+
+        root = self.make_repo()
+        outsider = self.commit(root, "on main\n\nAuthored-with: kimi/moonshot")
+        subprocess.run(
+            ["git", "checkout", "--quiet", "-b", "work"],
+            cwd=str(root), check=True, capture_output=True,
+        )
+        self.commit(
+            root,
+            f"the only commit under review\n\nAuthored-with: human\n"
+            f"Attributes: {outsider} kimi/moonshot",
+        )
+        self.assertEqual(
+            sd_review.author_vendors(root, self.subject(root, outsider)), ()
+        )
+
+    def test_a_padded_or_capitalised_vendor_still_names_its_vendor(self) -> None:
+        """The chain compares `provider.vendor in author_vendors` by exact
+        match. `claude / anthropic` yielded " anthropic", which matched no
+        entry, so the branch's own vendor stayed eligible and reviewed what it
+        had written. The rule failed open, and said nothing."""
+
+        root = self.make_repo()
+        for value in ("claude / anthropic", "Claude/Anthropic", " claude/anthropic "):
+            with self.subTest(trailer=value):
+                base = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=str(root), check=True, capture_output=True, text=True,
+                ).stdout.strip()
+                self.commit(root, f"work\n\nAuthored-with: {value}")
+                self.assertEqual(
+                    sd_review.author_vendors(root, self.subject(root, base)),
+                    ("anthropic",),
+                )
+
+    def test_a_merge_commit_is_not_work_and_is_not_asked(self) -> None:
+        """Found by merging `main` into this branch to land it. A merge commit
+        introduces no change of its own, so there is nobody for it to name,
+        and asking refused the whole range over a commit that wrote nothing.
+        The commits it brings in are in the range already, each answering for
+        itself."""
+
+        root = self.make_repo()
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "checkout", "--quiet", "-b", "side"],
+            cwd=str(root), check=True, capture_output=True,
+        )
+        self.commit(root, "side work\n\nAuthored-with: claude/anthropic")
+        subprocess.run(
+            ["git", "checkout", "--quiet", "-"],
+            cwd=str(root), check=True, capture_output=True,
+        )
+        self.commit(root, "main work\n\nAuthored-with: human")
+        subprocess.run(
+            ["git", "merge", "--no-ff", "--no-edit", "side"],
+            cwd=str(root), check=True, capture_output=True,
+        )
+        self.assertEqual(
+            sd_review.author_vendors(root, self.subject(root, base)), ("anthropic",)
+        )
+
+    def test_a_short_sha_still_names_its_commit(self) -> None:
+        """Git takes a prefix everywhere else, so the range check does too."""
+
+        root = self.make_repo()
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+        early = self.commit(root, "feat: written before the convention")
+        self.commit(
+            root, f"chore: attribute it\n\nAuthored-with: human\nAttributes: {early[:8]} codex/openai"
+        )
+        self.assertEqual(sd_review.author_vendors(root, self.subject(root, base)), ("openai",))
+
+
+class NoRegistryOnThisMachineTests(ReviewFixture):
+    """A machine with no installed registry still answers.
+
+    CI found this, not a test. The routing lane runs `sd-review --explain` on a
+    bare runner, which has never run the installer, and the first version of the
+    registry reader let the refusal reach `main` and exit 2: `sd-review: error:
+    no provider registry at /home/runner/.local/share/sd/providers.yaml`. The
+    lane exists to report the plan and asks nobody, so needing an install to
+    print one was backwards.
+    """
+
+    def bare(self) -> dict[str, str]:
+        """An environment whose HOME holds no registry."""
+        empty = self.tmp / "no-registry-home"
+        empty.mkdir()
+        return {"HOME": str(empty)}
+
+    def test_explain_answers_without_an_installed_registry(self) -> None:
+        root = self.make_repo()
+        runner = FakeRunner()
+        result = sd_review.review(
+            root, namespace(explain=True), runner, self.bare(), self.chatgpt_home()
+        )
+        self.assertEqual(result["status"], "explained")
+        self.assertIn("no provider registry", result["registry_refusal"])
+        self.assertEqual(result["providers"], [])
+        self.assertEqual(runner.calls, [])
+
+    def test_the_explain_render_prints_the_reason(self) -> None:
+        root = self.make_repo()
+        result = sd_review.review(
+            root, namespace(explain=True), FakeRunner(), self.bare(), self.chatgpt_home()
+        )
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        self.assertIn("no provider registry", stream.getvalue())
+
+    def test_a_real_review_is_unavailable_and_not_skipped(self) -> None:
+        """`skipped` exits 0 and means "nothing needed reviewing". A machine
+        that could not have reviewed anything must not borrow that word."""
+
+        root = self.make_repo()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        result = sd_review.review(
+            root, namespace(), runner, self.bare(), self.chatgpt_home()
+        )
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(sd_review.STATUS_EXIT[result["status"]], sd_review.EXIT_GATE)
+        self.assertNotEqual(sd_review.STATUS_EXIT[result["status"]], sd_review.EXIT_OK)
+
+    def test_a_named_provider_is_refused_rather_than_answered_emptily(self) -> None:
+        """With no registry, `pick` would say "no provider 'codex'", which reads
+        as "that name is wrong" rather than "there is no registry here"."""
+
+        root = self.make_repo()
+        with self.assertRaises(sd_review.sd_registry.RegistryError) as caught:
+            sd_review.review(
+                root, namespace(provider="codex"), FakeRunner(), self.bare(), self.chatgpt_home()
+            )
+        self.assertIn("no provider registry", str(caught.exception))
+
+
+class TheRoutingLaneRunsOnABareRunner(ReviewFixture):
+    """The lane's own invocation, run the way the workflow runs it.
+
+    `.github/actions/review-route` calls `bin/sd-review --scope pr --explain`
+    and fails the job on a non-zero exit. This asserts that exit code against a
+    HOME with no registry, which is what a GitHub runner is.
+    """
+
+    def test_explain_exits_zero_with_an_empty_home(self) -> None:
+        empty = self.tmp / "runner-home"
+        empty.mkdir()
+        finished = subprocess.run(
+            [sys.executable, str(SD_REVIEW), "--explain"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+            env={**os.environ, "HOME": str(empty)},
+        )
+        self.assertEqual(finished.returncode, 0, finished.stderr)
+        self.assertIn("no provider registry", finished.stdout)
+
 
 class ScopeProvidersOverASkipTier(unittest.TestCase):
     """A `skip` tier silences the tier, not the scope.
+
+    Kept last in this file on purpose. Its line span is cited from
+    `docs/work/2026-09-02-dashboard-ack-and-mutation-count/design.md`, and it
+    drifted four times in one pull request because every new class landed above
+    it. Last means only its own edits move it.
 
     This exists because its absence let a false concern stand. C-18 in
     `docs/work/2026-09-02-dashboard-ack-and-mutation-count/design.md` claimed
     `sd-review --scope planning` never asks a provider, reasoning correctly that
     `docs_skip` routes every work item to tier `skip` and then stopping one
-    function short of `plan_providers`, which prepends what a *scope* names
-    ahead of whatever the tier asked for. Nothing in the repository disagreed,
-    because nothing pinned the interaction. The concern survived a review round
-    and an explanation to its owner before anyone ran it.
+    function short of the floor a scope puts under the tier's depth. Nothing in
+    the repository disagreed, because nothing pinned the interaction. The
+    concern survived a review round and an explanation to its owner before
+    anyone ran it.
 
-    So this is not coverage of a line. It is the assertion that would have
-    refuted the claim in the round it was made.
+    The seam moved when the tier stopped naming providers: it used to be
+    `plan_providers`, prepending names to the tier's chain, and it is now
+    `review_depth`, raising the tier's count. The claim it refutes is the same
+    one, so the class is kept and re-aimed rather than deleted with the
+    function -- a deleted test is a claim that becomes true again quietly.
     """
 
     def setUp(self) -> None:
@@ -641,97 +1241,48 @@ class ScopeProvidersOverASkipTier(unittest.TestCase):
         """The half of C-18 that was right, kept so the rest has a subject."""
 
         self.assertEqual(self.skip.tier, "skip")
-        self.assertEqual(tuple(self.skip.providers), ())
+        self.assertEqual(self.skip.depth, 0)
 
     def test_planning_scope_asks_a_provider_even_at_tier_skip(self) -> None:
-        chain = sd_review.plan_providers(
-            self.skip, self.policy, challenge=False, scope="planning")
-        self.assertTrue(
-            chain,
-            "scope=planning produced an empty provider chain at tier skip. Either"
-            " `plan_providers` stopped honouring `planning_providers`, or the"
-            " policy stopped naming one -- and `sd-plan` gates `planning ->"
-            " ready` on a lane that now asks nobody.")
-        self.assertEqual(chain, tuple(self.policy["planning_providers"]))
+        self.assertEqual(
+            sd_review.review_depth(self.skip, challenge=False, scope="planning"), 1,
+            "scope=planning earned no reviewer at tier skip. Either `review_depth`"
+            " stopped honouring FLOOR_SCOPES, or `planning` left it -- and"
+            " `sd-plan` gates `planning -> ready` on a lane that now asks nobody.")
 
     def test_challenge_asks_a_provider_even_at_tier_skip(self) -> None:
         """The same seam, reached by the other role that uses it."""
 
-        chain = sd_review.plan_providers(
-            self.skip, self.policy, challenge=True, scope="worktree")
-        self.assertEqual(chain, tuple(self.policy["challenge_providers"]))
+        self.assertEqual(
+            sd_review.review_depth(self.skip, challenge=True, scope="worktree"), 1)
 
     def test_an_ordinary_scope_at_tier_skip_asks_nobody(self) -> None:
-        """The control. Without it the three above pass on a chain that is
-        never empty, which would prove nothing about the scope."""
+        """The control. Without it the two above pass on a floor that is never
+        zero, which would prove nothing about the scope."""
 
         self.assertEqual(
-            sd_review.plan_providers(
-                self.skip, self.policy, challenge=False, scope="worktree"),
-            ())
+            sd_review.review_depth(self.skip, challenge=False, scope="worktree"), 0)
 
     def test_the_scope_adds_to_the_tier_rather_than_replacing_it(self) -> None:
-        """`plan_providers` says "an extra stance, not a substitute". At tier
-        `skip` those two readings agree, so the difference is only visible
-        against a tier that asks for something."""
+        """The floor is a minimum, not a setting. At tier `skip` those two
+        readings agree, so the difference is only visible against a tier that
+        already asks for more than one."""
 
         deep = sd_review.sd_route.route(
             ["bin/sd_install.py"], lines=1, draft=False, policy=self.policy)
         self.assertEqual(deep.tier, "deep")
-        chain = sd_review.plan_providers(
-            deep, self.policy, challenge=False, scope="planning")
-        for name in deep.providers:
-            self.assertIn(name, chain, f"the scope dropped {name}, which the tier asked for")
-
-    def test_the_scopes_provider_goes_in_front(self) -> None:
-        """Ordering, pinned against a fixture chosen so that it can fail.
-
-        The live policy cannot show this. Its `deep` tier starts with codex and
-        its `planning_providers` is codex, so prepending and appending produce
-        the same chain and an ordering assertion over it passes either way --
-        which is what the first version of this test did, and a mutation that
-        swapped `extra + chain` for `chain + extra` survived it.
-
-        What the substituted name has to be is not *absent* from the tier's
-        chain -- it may well be in it, and here it is -- but not *first* in it,
-        because first is the one position where the two orders agree. So it is
-        taken from the tier's own chain rather than written down, and the
-        expected order is derived from that chain too: this pins how
-        `plan_providers` composes, not which providers the policy currently
-        names.
-        """
-
-        deep = sd_review.sd_route.route(
-            ["bin/sd_install.py"], lines=1, draft=False, policy=self.policy)
-        tier = tuple(str(name) for name in deep.providers)
-        self.assertTrue(tier, "the deep tier asks for nobody, so order is unobservable")
-        later = [name for name in tier if name != tier[0]]
-        self.assertTrue(
-            later,
-            "every provider in the deep chain is the first one, so prepending and"
-            " appending agree and this assertion could not fail")
-        scope_provider = later[0]
-
-        policy = dict(self.policy, planning_providers=[scope_provider])
-        chain = sd_review.plan_providers(deep, policy, challenge=False, scope="planning")
+        self.assertGreater(deep.depth, 1, "the deep tier asks for one reviewer, so a"
+                           " floor of one and a replacement of one agree here")
         self.assertEqual(
-            chain[0], scope_provider,
-            "the scope's provider must lead the chain: it is the stance the run"
-            " was asked for, and a chain read in order spends its budget on"
-            " whatever comes first.")
-        self.assertEqual(
-            chain,
-            (scope_provider,) + tuple(name for name in tier if name != scope_provider),
-            "the scope's provider moves to the front of the tier's chain; the rest"
-            " keep the tier's order and nothing is dropped or duplicated")
+            sd_review.review_depth(deep, challenge=False, scope="planning"), deep.depth,
+            "the scope's floor reduced the deep tier's read")
 
-    def test_the_policy_still_names_a_planning_provider(self) -> None:
-        """The claim above is about this repository's live policy, so it is
-        asserted rather than assumed. A policy that dropped the key would make
-        C-18 true again, and should fail here rather than quietly downstream."""
+    def test_every_floor_scope_is_a_scope_the_cli_accepts(self) -> None:
+        """A typo in FLOOR_SCOPES is a floor that never fires, and every
+        assertion above would still pass: they name their scope directly."""
 
-        self.assertTrue(self.policy.get("planning_providers"),
-                        ".github/sd-review.json no longer names a planning provider")
+        for scope in sd_review.FLOOR_SCOPES:
+            self.assertIn(scope, sd_review.SCOPES, f"{scope!r} is not a scope")
 
 
 if __name__ == "__main__":

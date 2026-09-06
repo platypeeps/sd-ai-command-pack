@@ -29,7 +29,7 @@ import argparse
 import json
 import pathlib
 import sys
-from typing import Any, Callable, Mapping, Sequence, TextIO
+from typing import Any, Callable, Mapping, TextIO
 
 _BIN = str(pathlib.Path(__file__).resolve().parent)
 if _BIN not in sys.path:
@@ -190,14 +190,16 @@ def setup_github(
     args: argparse.Namespace,
     *,
     load_policy: Callable[[pathlib.Path], tuple[Mapping[str, Any], str]],
-    backends: Sequence[Any],
 ) -> dict[str, Any]:
     """Install the routing lane in this repository, or refuse and say why.
 
-    `load_policy` and `backends` are the seam `bin/sd-review` names: the
-    installer reads the policy through the same validator a review does, so a
-    policy this refuses to install against is one no review would have run
-    against either.
+    `load_policy` is the whole seam `bin/sd-review` names: the installer reads
+    the policy through the same validator a review does, so a policy this
+    refuses to install against is one no review would have run against either.
+    The lane used to be handed the backend table as well, to name the providers
+    it was not going to ask. It names none now -- a provider list belongs to the
+    registry, and this lane reads the registry for the same reason it posts a
+    review: it does not.
     """
 
     repo_mode = sd_lib.mode(root)
@@ -228,7 +230,6 @@ def setup_github(
         "mode": repo_mode,
         "policy_source": policy_source,
         "authors": list(policy["authors"]),
-        "github_backends": [row.name for row in backends if row.lane == "github"],
         "workflow": str(WORKFLOW_RELATIVE_PATH),
         "action": action_reference(pin),
         "pin": pin,
@@ -271,10 +272,7 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     if result["legacy_found"]:
         state = "removed" if result["legacy_removed"] else "still present"
         write(f"  legacy      {', '.join(result['legacy_found'])} ({state})\n")
-    write(
-        f"  not asked   {', '.join(result['github_backends'])} "
-        "(this lane reports a plan; it requests nobody)\n"
-    )
+    write("  not asked   every provider (this lane reports a plan; it requests nobody)\n")
     write(f"\nsd-review setup-github: {result['status']}\n")
 
 
@@ -307,14 +305,13 @@ def main(
     argv: list[str],
     *,
     load_policy: Callable[[pathlib.Path], tuple[Mapping[str, Any], str]],
-    backends: Sequence[Any],
 ) -> int:
     args = build_parser().parse_args(argv)
     try:
         root = sd_lib.repo_root(None)
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
-        result = setup_github(root, args, load_policy=load_policy, backends=backends)
+        result = setup_github(root, args, load_policy=load_policy)
     except (UsageError, sd_lib.ConfigError, OSError) as error:
         print(f"sd-review setup-github: error: {error}", file=sys.stderr)
         return EXIT_USAGE

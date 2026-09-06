@@ -27,11 +27,23 @@ TREE = ast.parse(SOURCE)
 BIN_FILES = tuple(
     path for path in sorted((REPO_ROOT / "bin").iterdir()) if path.is_file()
 )
-# `sd_lib` and `sd_route` are shared core, budgeted on the design's core line
-# rather than the lane's. Everything else `bin/sd-review` imports out of `bin/`
-# is the lane, derived from the import graph so a module added to the lane
-# starts counting against it without anyone remembering to add it here.
-SHARED_CORE = frozenset({"sd_lib", "sd_route"})
+# `sd_lib`, `sd_route` and `sd_registry` are shared core, budgeted on the
+# design's core line rather than the lane's. Everything else `bin/sd-review`
+# imports out of `bin/` is the lane, derived from the import graph so a module
+# added to the lane starts counting against it without anyone remembering to
+# add it here.
+#
+# This list is a judgement, not a derivation, and is written down rather than
+# computed because no computable rule separates these three: `sd_route` and
+# `sd_registry` each have exactly one importer in `bin/` today, so "imported by
+# more than one entry point" would evict the router as well and prove only that
+# the rule was chosen to fit. What earns `sd_registry` its place is that
+# `bin/sd_install.py` already depends on its contract -- it restates
+# `REGISTRY_RELATIVE` because the installer runs before anything in `bin/` is
+# importable, and `ProviderRegistrySeedTests` fails if the two ever disagree.
+# The registry reader answers "who may review"; the lane's budget is for the
+# code that runs a review.
+SHARED_CORE = frozenset({"sd_lib", "sd_route", "sd_registry"})
 
 
 def _bin_imports(path: pathlib.Path) -> frozenset:
@@ -124,12 +136,18 @@ class NeverPostsTests(unittest.TestCase):
             "os",
             "pathlib",
             "re",
+            "shlex",
             "subprocess",
             "sys",
             "tempfile",
             "typing",
             "sd_lib",
             "sd_route",
+            # The registry reader. It opens one file in the operator's home and
+            # has no client of any kind, so it widens the allow-list without
+            # widening the boundary -- the same standing as `sd_setup_github`
+            # below, and it is held to the never-posts assertions too.
+            "sd_registry",
             # The installer, imported inside the one dispatch branch. It is in
             # this repository and is itself held to the never-posts assertions
             # below, so it widens the allow-list without widening the boundary.

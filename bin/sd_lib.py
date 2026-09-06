@@ -582,3 +582,136 @@ def detect_entrypoints(root: pathlib.Path) -> Detection:
 def entrypoints(root: pathlib.Path) -> dict[str, list[str]]:
     """The repo-native check commands, keyed by name, in `CHECK_NAMES` order."""
     return detect_entrypoints(root).commands
+
+
+# --------------------------------------------------------------------------
+# Commit trailers: who wrote a change, said by the change itself
+# --------------------------------------------------------------------------
+
+#: The scopes that resolve to a commit range. Only these carry trailers.
+TRAILER_SCOPES = ("branch", "pr")
+
+#: `Authored-with: <entry>/<vendor>` on the commit that made the change, and
+#: `Attributes: <sha> <entry>/<vendor>` on a later commit for one that was made
+#: before the convention reached it. `sd-ship` and `sd attribute` write them.
+AUTHORED_TRAILER = "Authored-with:"
+ATTRIBUTES_TRAILER = "Attributes:"
+
+#: What a commit a person wrote says. Spelled out rather than left implicit,
+#: because the absence of a trailer has to keep meaning "nobody said" -- if an
+#: untagged commit read as human-authored, an anthropic-written commit would
+#: become reviewable by anthropic every time the trailer was forgotten.
+HUMAN_AUTHOR = "human"
+
+
+class TrailerError(Exception):
+    """A commit that does not say, or says something unreadable."""
+
+
+def commit_messages(root: pathlib.Path, base: str, head: str) -> list[tuple[str, str]]:
+    """Each commit in the range as `(sha, message)`, newest first.
+
+    Merges are not among them. A merge commit introduces no change of its
+    own -- it records that two histories met -- so there is no work for it to
+    say who wrote, and asking cost a real branch its review: merging `main` to
+    catch up produced one untagged commit, and the whole range refused. The
+    commits it brings in are already in the range, each answering for itself.
+    """
+    raw = git_output(["log", "--no-merges", "--format=%H%x1f%B%x1e", f"{base}..{head}"], root)
+    if not raw:
+        return []
+    records = []
+    for chunk in raw.split("\x1e"):
+        if "\x1f" not in chunk:
+            continue
+        sha, _, message = chunk.strip().partition("\x1f")
+        records.append((sha.strip(), message))
+    return records
+
+
+def attribution(root: pathlib.Path, base: str, head: str) -> dict[str, str]:
+    """`<sha> -> <entry>/<vendor>` for every commit in the range that says.
+
+    A commit says either by carrying its own `Authored-with:` or by being named
+    in a later commit's `Attributes:`. Nothing takes a flag for this: a branch
+    is a set of commits and each one answers for itself, because a single
+    `--author` for the whole range is a claim about work the person making the
+    claim may not have done.
+    """
+    own: dict[str, str] = {}
+    claimed: dict[str, str] = {}
+    commits = commit_messages(root, base, head)
+    shas = [sha for sha, _ in commits]
+    for sha, message in commits:
+        # Git's trailer block -- the last paragraph -- and unindented, which is
+        # what makes a trailer a trailer. Reading the whole message, stripped,
+        # reads a trailer quoted inside a commit that was describing one.
+        for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
+            line = line.rstrip()
+            if line.startswith(AUTHORED_TRAILER):
+                own.setdefault(sha, line[len(AUTHORED_TRAILER) :].strip())
+            elif line.startswith(ATTRIBUTES_TRAILER):
+                parts = line[len(ATTRIBUTES_TRAILER) :].split()
+                if len(parts) == 2:
+                    named = _in_range(parts[0], shas)
+                    if named:
+                        claimed.setdefault(named, parts[1])
+    # A commit's own trailer outranks a later commit's claim about it, and the
+    # two dictionaries exist to make that ordering explicit. Merging in one
+    # walk let a later `Attributes:` overwrite what a commit said about itself,
+    # so relabelling an anthropic-authored commit as an openai one -- and
+    # thereby buying it an anthropic reviewer -- took one line in a later
+    # message. `Attributes:` is for commits that said nothing.
+    return {**claimed, **own}
+
+
+def _in_range(named: str, shas: list[str]) -> str:
+    """The full sha `named` refers to, or "" if the range does not hold it.
+
+    A claim about a commit outside `base..head` says nothing about the work
+    under review, and keeping it bought a vendor a place in the author set --
+    and so cost that vendor its seat as a reviewer -- for a commit nobody is
+    reviewing. Three ways it happens, one answer for all of them: the named
+    commit already merged, a rebase moved it, or the line is simply wrong.
+
+    A prefix is enough, the way it is everywhere else in git, but only when it
+    picks out one commit. Two matches name nothing in particular.
+    """
+    if len(named) < 7:
+        return ""
+    matches = [sha for sha in shas if sha.startswith(named)]
+    return matches[0] if len(matches) == 1 else ""
+
+
+def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
+    """The vendors this range was written with. Raises when a commit is silent."""
+    said = attribution(root, base, head)
+    untagged = [sha for sha, _ in commit_messages(root, base, head) if sha not in said]
+    if untagged:
+        raise TrailerError(
+            f"{len(untagged)} commit(s) in {base}..{head} carry no "
+            f"{AUTHORED_TRAILER} trailer, starting at {untagged[-1][:12]}. A "
+            f"commit that does not say who wrote it cannot be reviewed by "
+            f"somebody else on purpose. Record it with "
+            f"`sd attribute {untagged[-1][:12]} <entry>`."
+        )
+    vendors = []
+    for sha, value in said.items():
+        if value == HUMAN_AUTHOR:
+            continue
+        entry, separator, vendor = value.partition("/")
+        # Stripped and folded, because the comparison this feeds is an exact
+        # `in` against the registry's vendor. `claude / anthropic` yielded
+        # " anthropic", which matched no entry, so the author's own vendor
+        # stayed on the chain and reviewed the branch it had written -- the
+        # one thing the trailer exists to stop, failing open and in silence.
+        entry, vendor = entry.strip(), vendor.strip().lower()
+        if not separator or not entry or not vendor:
+            raise TrailerError(
+                f"{sha[:12]} says {AUTHORED_TRAILER} {value!r}, which is neither "
+                f"{HUMAN_AUTHOR!r} nor an '<entry>/<vendor>' pair. A trailer that "
+                f"cannot be read is not a weaker claim than one that is missing."
+            )
+        if vendor not in vendors:
+            vendors.append(vendor)
+    return tuple(vendors)

@@ -1,0 +1,52 @@
+# The provider registry. One file, and the only list of providers anywhere.
+#
+# `WORKFLOW.md`'s Providers section documents this format and is where the
+# rules live; this is the file those rules describe. The installer copies it
+# to `~/.local/share/sd/providers.yaml` when that file is absent, and never
+# over one that is already there -- pins, bills and disabled reasons are
+# edited by hand and a reinstall must not roll them back.
+#
+# Identity is here. State -- enabled, the reason it is not, the order of each
+# role list, a bill's cap -- lives in the `provider` and `bill` rows, which
+# this file seeds once. `sd_db.registry` merges the two on every read; the
+# pack's own reader reads this file alone, for a checkout with no database.
+#
+# Adding a provider is an entry. Adding money is a bill. Neither is a code
+# change: an `exo` entry with an OpenAI-compatible URL resolves because every
+# `url` entry resolves, not because anything here knows the name.
+
+bills:
+  anthropic: { cost: subscription }
+  openai:    { cost: subscription }
+  moonshot:  { cost: prepaid }
+  minimax:   { cost: plan, meter: "https://www.minimax.io/v1/token_plan/remains" }
+  baseten:   { cost: company, cap_usd_month: 50 }
+  local:     { cost: local }
+
+providers:
+  claude:  { start: "claude -p",  vendor: anthropic, bill: anthropic,
+             roles: [author, reviewer], reader: claude-json, env: [] }
+  codex:   { start: "codex exec", vendor: openai,    bill: openai,
+             roles: [author, reviewer], reader: codex-json, env: [OPENAI_API_KEY] }
+  kimi:    { url: "https://api.moonshot.ai/v1", model: kimi-k3, vendor: moonshot,
+             bill: moonshot, roles: [reviewer], max_tokens: 16384,
+             price: { in: 3.00, out: 15.00 }, env: [MOONSHOT_API_KEY] }
+  minimax: { url: "https://api.minimax.io/v1", model: MiniMax-M3, vendor: minimax,
+             bill: minimax, roles: [reviewer], max_tokens: 16384,
+             price: { in: 0, out: 0 }, env: [MINIMAX_API_KEY] }
+  baseten: { url: "https://inference.baseten.co/v1",
+             model: deepseek-ai/DeepSeek-V4-Pro-0813, vendor: deepseek,
+             bill: baseten, roles: [reviewer], max_tokens: 16384,
+             price: { in: 1.32, out: 3.96 }, env: [BASETEN_API_KEY] }
+  # Shipped disabled: the local model is not pinned, and R11-D1 requires a
+  # name checked against /v1/models before a call. A disabled entry never
+  # resolves, so criterion 6's "adding an entry needs no code change" test
+  # writes its own enabled entry into a fixture registry rather than
+  # enabling this one.
+  exo:     { url: "http://localhost:52415/v1", model: "<pinned>", vendor: local,
+             bill: local, roles: [author, reviewer], enabled: false,
+             reason: "model not pinned", env: [] }
+
+roles:
+  author:   [claude, codex]
+  reviewer: [codex, claude, minimax, kimi, baseten, exo]

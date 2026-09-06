@@ -50,6 +50,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -60,12 +61,14 @@ if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
 import sd_lib  # noqa: E402
+import sd_registry  # noqa: E402
 import sd_route  # noqa: E402
 
-# All that `bin/sd_setup_github.py` reaches through: the resolved policy and
-# the backend table, read unchanged, to write a workflow file. Nothing in
-# this file writes one.
-SETUP_GITHUB_SEAM = "load_policy + BACKENDS; consumed by bin/sd_setup_github.py"
+# All that `bin/sd_setup_github.py` reaches through: the resolved policy, read
+# unchanged, to write a workflow file. Nothing in this file writes one. The
+# backend table used to be handed over with it; there is no table now, and the
+# lane names no provider at all -- it reports a plan and requests nobody.
+SETUP_GITHUB_SEAM = "load_policy; consumed by bin/sd_setup_github.py"
 
 POLICY_RELATIVE_PATH = pathlib.Path(".github") / "sd-review.json"
 SCOPES = ("worktree", "branch", "pr", "planning")
@@ -161,95 +164,6 @@ class PolicyError(Exception):
 class Refusal(Exception):
     """A preflight said no. Exit 3, and the message names what was wrong."""
 
-
-# --------------------------------------------------------------------------
-# Backends: rows in a table, not branches in a function.
-# --------------------------------------------------------------------------
-
-
-class Backend(NamedTuple):
-    """One reviewer the pack knows how to name.
-
-    `strategy` is how this lane invokes it: `codex` is the hardened CLI
-    invocation below, `argv` is the generic "run it, read JSON" seam, and
-    `none` means the row is declared but has no implementation behind it.
-
-    A row with `enabled=False` still exists on purpose. A policy may name it,
-    `--explain` reports it, and the run reports why it did not happen -- which
-    is strictly more useful than an unknown-backend error, and is how a
-    probe-gated backend stays visible until its probe is run.
-    """
-
-    name: str
-    kind: str
-    lane: str
-    cost: str
-    role: str
-    strategy: str
-    enabled: bool
-    disabled_reason: str
-
-
-BACKENDS: tuple[Backend, ...] = (
-    Backend(
-        "codex", "local CLI", "local",
-        "$0 (ChatGPT subscription; rate-limited is a distinct outcome)",
-        "heads every chain; default planning-review provider", "codex", True, "",
-    ),
-    Backend(
-        "prism", "local CLI over an openai-compatible service", "local", "~low",
-        "standard fallback", "argv", True, "",
-    ),
-    Backend(
-        "gito", "local CLI over an openai-compatible service", "local", "per-file",
-        "deep fallback", "none", False,
-        "the row was written from the design's transcription, and gito 4.4.4's real "
-        "surface does not match it: the ref to review is `--what/-w` (not `--head`), "
-        "there is no `--json`, and the report lands in a folder given by `--out`. "
-        "Re-enable with a verified argv and a reader for that report, not before",
-    ),
-    Backend(
-        "kimi", "argv", "local", "low", "--challenge, fan-out", "none", False,
-        "`kimi review` is not a subcommand -- the CLI is prompt-driven "
-        "(`kimi -p <prompt> --output-format text|stream-json`), so the transcribed "
-        "`kimi review --range ... --json` cannot run. `stream-json` is an agent event "
-        "stream, not a findings array, so enabling this row needs a reader as well as "
-        "an argv",
-    ),
-    Backend(
-        "antigravity", "local CLI", "local",
-        "$0 conditional on a paid subscription and a training opt-out",
-        "planning/branch diversity", "none", False,
-        "probe P2 (non-TTY stdout under `agy -p --output-format json`) has not been "
-        "run. R9b-D2 says P2 fail -> pty wrapper -> else delete the row, so the row "
-        "stays declared and unimplemented until the probe answers",
-    ),
-    Backend(
-        "exo", "openai-compatible endpoint", "local", "$0", "cheap tiers only",
-        "none", False,
-        "the severity-floor probe has not been run, and R11-D1 requires the model to "
-        "be pinned by name and checked against /v1/models before a call. Reaching an "
-        "endpoint directly is also the one thing this lane deliberately has no seam for",
-    ),
-    Backend(
-        "baseten", "openai-compatible endpoint", "local", "metered", "none", "none", False,
-        "ships disabled per r8b: metered billing behind a gap gate that does not exist yet",
-    ),
-    Backend(
-        "copilot", "github", "github", "credits", "remote default (opt-in)", "none", False,
-        "GitHub-side backend. It reviews on the pull request, which means posting, "
-        "which this lane never does. It is installed by `sd-review setup-github` and "
-        "runs in CI",
-    ),
-    Backend(
-        "greptile", "github", "github", "per-PR", "opt-in", "none", False,
-        "GitHub-side backend, same as copilot: it posts, so it is a CI lane, not a local one",
-    ),
-)
-
-BACKENDS_BY_NAME: dict[str, Backend] = {row.name: row for row in BACKENDS}
-
-
 # --------------------------------------------------------------------------
 # Policy
 # --------------------------------------------------------------------------
@@ -259,12 +173,6 @@ BACKENDS_BY_NAME: dict[str, Backend] = {row.name: row for row in BACKENDS}
 # sensitive or large escalates. A repository that wants otherwise writes the file.
 DEFAULT_POLICY: dict[str, Any] = {
     "tier_order": ["skip", "cheap", "standard", "deep"],
-    "tiers": {
-        "skip": [],
-        "cheap": ["codex"],
-        "standard": ["codex", "prism"],
-        "deep": ["codex", "prism", "gito"],
-    },
     "default_tier": "standard",
     "categories": [
         {"name": "docs", "required": False, "paths": ["docs/**", "*.md"], "tier": "cheap"},
@@ -275,11 +183,27 @@ DEFAULT_POLICY: dict[str, Any] = {
     "large_change_lines": 800,
     "authors": [],
     "severity_floor": "medium",
-    "challenge_providers": ["codex"],
-    "planning_providers": ["codex"],
 }
 
 POLICY_KEYS = frozenset(DEFAULT_POLICY) | {"$schema"}
+
+#: Keys this file used to carry, and what to do instead. Criterion 6 moves every
+#: provider name out of repository policy and into the registry, so a repository
+#: still carrying one of these is refused by name rather than by "unknown key":
+#: the file is not malformed, it is a version behind, and the remedy is a
+#: deletion rather than a correction.
+#: The readers this build can run an entry with. The chain marks an entry
+#: whose `reader` is not here ineligible, so a tier's depth counts providers
+#: that can actually answer rather than slots an unrunnable entry occupied.
+READERS = ("codex-json",)
+
+RETIRED_POLICY_KEYS = {
+    "tiers": "a tier now says how many reviewers a change earns, and the registry's "
+    "'reviewer' list says who they are. Delete the key",
+    "challenge_providers": "the challenge stance is a prompt, not a provider. Delete the key",
+    "planning_providers": "planning reviews through the same chain as everything else. "
+    "Delete the key",
+}
 _STRING_LIST_KEYS = ("docs_skip", "never_skip", "sensitive", "authors")
 
 
@@ -307,6 +231,8 @@ def validate_policy(value: object, source: str) -> dict[str, Any]:
 
     _require(isinstance(value, dict), f"{source}: the policy must be a JSON object")
     assert isinstance(value, dict)
+    for key, remedy in RETIRED_POLICY_KEYS.items():
+        _require(key not in value, f"{source}: {key} is retired -- {remedy}")
     unknown = sorted(set(value) - POLICY_KEYS)
     _require(
         not unknown,
@@ -321,21 +247,6 @@ def validate_policy(value: object, source: str) -> dict[str, Any]:
     _require(bool(order), f"{source}: tier_order must name at least one tier")
     _require(len(set(order)) == len(order), f"{source}: tier_order must not repeat a tier")
     policy["tier_order"] = order
-
-    tiers = policy["tiers"]
-    _require(isinstance(tiers, dict), f"{source}: tiers must be an object")
-    assert isinstance(tiers, dict)
-    for tier_name, chain in tiers.items():
-        _require(tier_name in order, f"{source}: tiers.{tier_name} is not in tier_order")
-        named = _string_list(chain, f"{source}: tiers.{tier_name}")
-        for index, provider in enumerate(named):
-            _require(
-                provider in BACKENDS_BY_NAME,
-                f"{source}: tiers.{tier_name}[{index}] names unknown backend "
-                f"{provider!r}; known backends are {', '.join(sorted(BACKENDS_BY_NAME))}",
-            )
-    for tier_name in order:
-        tiers.setdefault(tier_name, [])
 
     default_tier = policy["default_tier"]
     _require(isinstance(default_tier, str) and default_tier in order, f"{source}: default_tier must be one of {', '.join(order)}")
@@ -368,12 +279,6 @@ def validate_policy(value: object, source: str) -> dict[str, Any]:
     floor = policy["severity_floor"]
     _require(isinstance(floor, str) and floor in BLOCKING_ORDER, f"{source}: severity_floor must be one of {', '.join(SEVERITIES)}")
 
-    for key in ("challenge_providers", "planning_providers"):
-        for index, provider in enumerate(_string_list(policy[key], f"{source}: {key}")):
-            _require(
-                provider in BACKENDS_BY_NAME,
-                f"{source}: {key}[{index}] names unknown backend {provider!r}",
-            )
     return policy
 
 
@@ -777,7 +682,9 @@ def build_prompt(subject: Subject, challenge: bool, conventions: str) -> str:
 # --------------------------------------------------------------------------
 
 
-def codex_argv(root: pathlib.Path, workdir: pathlib.Path, prompt: str) -> list[str]:
+def codex_argv(
+    root: pathlib.Path, workdir: pathlib.Path, prompt: str, start: str = "codex exec"
+) -> list[str]:
     """The hardened codex invocation, carried over in intent from review-local.py.
 
     `--sandbox read-only` bounds the shell the model gets; `--ignore-user-config`
@@ -790,8 +697,10 @@ def codex_argv(root: pathlib.Path, workdir: pathlib.Path, prompt: str) -> list[s
     """
 
     return [
-        "codex",
-        "exec",
+        # The registry entry's own start line, so `codex-json` names a protocol
+        # and not a single executable: a fork or a wrapper that speaks it is a
+        # different entry, not a different reader.
+        *shlex.split(start),
         "--sandbox",
         "read-only",
         "--ignore-user-config",
@@ -809,41 +718,13 @@ def codex_argv(root: pathlib.Path, workdir: pathlib.Path, prompt: str) -> list[s
     ]
 
 
-def argv_backend_argv(backend: Backend, root: pathlib.Path, subject: Subject) -> list[str]:
-    """Argv for the generic seam rows.
-
-    These exist to prove the seam is a seam: one table row, one argv builder,
-    one JSON reader, no branch anywhere else in the pipeline.
-
-    Checked against the installed CLIs rather than transcribed: prism's
-    `review range <range> --format json` and `review codebase --paths ...
-    --format json` are real, so its row ships enabled. gito's and kimi's were
-    not, and their rows ship disabled with the mismatch named -- their branches
-    stay here because re-enabling one is meant to be an edit in this function
-    and its table row, nowhere else.
-    """
-
-    if subject.scope in ("branch", "pr"):
-        range_argument = f"{subject.base}..{subject.head}"
-    else:
-        range_argument = ""
-    if backend.name == "prism":
-        if range_argument:
-            return ["prism", "review", "range", range_argument, "--format", "json"]
-        return ["prism", "review", "codebase", "--paths", ",".join(subject.paths), "--format", "json"]
-    if backend.name == "gito":
-        if range_argument:
-            return ["gito", "review", "--vs", subject.base, "--head", subject.head, "--json"]
-        return ["gito", "review", "--vs", "HEAD", "--json"]
-    return ["kimi", "review", "--range", range_argument or "HEAD", "--json"]
-
-
-def _finding(raw: object) -> dict[str, Any] | None:
+def _finding(raw: Any) -> dict[str, Any] | None:
     """Normalise one provider finding, or drop it.
 
-    Two shapes are accepted: the flat one the codex output schema pins, and the
-    nested one prism emits. Anything else is dropped rather than guessed at --
-    a finding whose path or severity had to be invented is not evidence.
+    Two shapes are accepted: the flat one the codex output schema pins, and a
+    nested `locations` one other providers emit. Anything else is dropped
+    rather than guessed at -- a finding whose path or severity had to be
+    invented is not evidence.
     """
 
     if not isinstance(raw, dict):
@@ -923,8 +804,35 @@ def _failure(backend: str, result: Completed, argv: Sequence[str], scrubbed: Seq
     return _outcome(backend, status, detail, argv, scrubbed)
 
 
-def run_backend(
-    backend: Backend,
+# --------------------------------------------------------------------------
+# Who wrote this, so the chain can pick somebody else
+# --------------------------------------------------------------------------
+#
+# The trailer vocabulary and its reader live in `bin/sd_lib.py`: `sd attribute`
+# writes what this reads, `sd-ship` writes it on every commit, and a second
+# implementation of "what did this commit say" is how the two would disagree.
+TRAILER_SCOPES = sd_lib.TRAILER_SCOPES
+AUTHORED_TRAILER = sd_lib.AUTHORED_TRAILER
+
+
+def author_vendors(root: pathlib.Path, subject: Subject) -> tuple[str, ...]:
+    """The vendors this range was written with, refusing what does not say.
+
+    Refuses rather than guessing. A commit with no trailer could have been
+    written by anyone, and treating it as human -- the convenient default --
+    would let an anthropic-written commit be reviewed by anthropic whenever the
+    trailer was forgotten, which is the one outcome the vendor rule prevents.
+    """
+    if subject.scope not in TRAILER_SCOPES:
+        return ()
+    try:
+        return sd_lib.author_vendors(root, subject.base, subject.head)
+    except sd_lib.TrailerError as error:
+        raise Refusal(str(error)) from None
+
+
+def run_provider(
+    provider: sd_registry.Provider,
     root: pathlib.Path,
     subject: Subject,
     prompt: str,
@@ -933,22 +841,42 @@ def run_backend(
     timeout: int,
     codex_auth_home: pathlib.Path | None = None,
 ) -> Outcome:
-    """Run one backend on the resolved subject and report a typed outcome."""
+    """Run one registry entry on the resolved subject, and report an outcome.
 
-    if backend.lane != "local":
+    The entry says how to reach the provider; this function says how to read it
+    back. A `reader` this build has no implementation for is `NOT_RUN` and names
+    itself, so a registry that pins a provider ahead of its client says so on
+    the run rather than resolving to nothing.
+    """
+
+    # First, because the rest of this function is about starting a session and
+    # reading it back. `refuse_environment` speaks of what a spawned session
+    # would inherit and ends "No session was started"; running it against a
+    # `url` entry answered a question nobody had asked, in the language of a
+    # mechanism that entry does not use.
+    unrunnable = sd_registry.refuse_reader(provider, READERS)
+    if unrunnable is not None:
         return _outcome(
-            backend.name,
-            NOT_RUN,
-            f"{backend.name} is a GitHub-lane backend: {backend.disabled_reason}",
+            provider.name, NOT_RUN, f"{unrunnable} The entry resolves; nothing runs it."
         )
-    if not backend.enabled or backend.strategy == "none":
-        return _outcome(backend.name, DISABLED, backend.disabled_reason)
 
-    if backend.strategy == "codex":
+    refusal = sd_registry.refuse_environment(provider, env)
+    if refusal is not None:
+        return _outcome(provider.name, REFUSED, refusal)
+
+    if provider.reader in READERS:
+        # Refused before it becomes argv: an entry whose start line names no
+        # program would otherwise run `--sandbox` as the executable.
+        if not sd_registry.executable(provider.start or ""):
+            detail = (
+                f"{provider.name} reads back as 'codex-json' but its 'start' line "
+                f"names no program ({provider.start!r}). Give it one, or a 'url'."
+            )
+            return _outcome(provider.name, REFUSED, detail)
         try:
             codex_preflight(codex_auth_home)
         except Refusal as error:
-            return _outcome(backend.name, REFUSED, str(error))
+            return _outcome(provider.name, REFUSED, str(error))
         child = child_environment(env)
         removed = scrubbed_names(env)
         with tempfile.TemporaryDirectory(prefix="sd-review-") as raw_dir:
@@ -956,15 +884,15 @@ def run_backend(
             (workdir / CODEX_SCHEMA_FILE).write_text(
                 json.dumps(CODEX_OUTPUT_SCHEMA), encoding="utf-8"
             )
-            argv = codex_argv(root, workdir, prompt)
+            argv = codex_argv(root, workdir, prompt, provider.start or "")
             result = runner(argv, child, root, timeout)
             answer = workdir / CODEX_ANSWER_FILE
             text = answer.read_text(encoding="utf-8") if answer.is_file() else result.stdout
         findings = parse_findings(text)
         if result.exit_code != 0 or findings is None:
-            return _failure(backend.name, result, argv, removed)
+            return _failure(provider.name, result, argv, removed)
         return Outcome(
-            backend.name,
+            provider.name,
             FINDINGS if findings else CLEAN,
             tuple(findings),
             f"{len(findings)} finding(s)",
@@ -972,18 +900,14 @@ def run_backend(
             removed,
         )
 
-    argv = argv_backend_argv(backend, root, subject)
-    result = runner(argv, env, root, timeout)
-    findings = parse_findings(result.stdout)
-    if result.exit_code != 0 or findings is None:
-        return _failure(backend.name, result, argv, ())
-    return Outcome(
-        backend.name,
-        FINDINGS if findings else CLEAN,
-        tuple(findings),
-        f"{len(findings)} finding(s)",
-        tuple(argv),
-        (),
+    # Unreachable while `READERS` holds one name: `refuse_reader` above has
+    # already sent every other entry back. Kept as the honest answer if a
+    # second reader is added to the list before its branch is written here.
+    return _outcome(
+        provider.name,
+        NOT_RUN,
+        f"{provider.name} reads back as {provider.reader!r}, which this build "
+        f"lists but does not run here.",
     )
 
 
@@ -1033,43 +957,37 @@ def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeou
     }
 
 
-def backend_rows() -> list[dict[str, Any]]:
-    return [
-        {
-            "name": row.name,
-            "kind": row.kind,
-            "lane": row.lane,
-            "cost": row.cost,
-            "role": row.role,
-            "enabled": row.enabled,
-            "disabled_reason": row.disabled_reason,
-        }
-        for row in BACKENDS
-    ]
+#: Scopes that earn a reviewer whatever the tier said. `planning` is here
+#: because a work item is documentation by path, `docs_skip` routes it to tier
+#: `skip`, and `sd-plan` gates `planning -> ready` on this lane: without the
+#: floor the gate would pass by asking nobody. The tier decides how deep a
+#: change is read; a scope decides that it is read at all.
+FLOOR_SCOPES = ("planning",)
 
 
-def plan_providers(plan: sd_route.Plan, policy: Mapping[str, Any], challenge: bool, scope: str) -> tuple[str, ...]:
-    """The provider chain this run will attempt, in order.
+def _authored_report(scope: str, vendors: tuple[str, ...]) -> str:
+    """What the run may say about who wrote the change.
 
-    The router owns the tier. `--challenge` and `planning` scope add the
-    providers policy names for those roles ahead of the chain, without removing
-    what the tier asked for: a challenge run is an extra stance, not a
-    substitute for the review.
+    A scope with no commits behind it -- `worktree`, `planning` -- is never
+    read for trailers, and saying "human-authored" there is an answer to a
+    question nobody asked. It printed exactly that over a repository whose only
+    commit said `Authored-with: claude/anthropic`.
     """
+    if scope not in TRAILER_SCOPES:
+        return f"not read: {scope} scope has no commits to carry a trailer"
+    return ", ".join(vendors) or "human (every commit says so)"
 
-    chain = [str(name) for name in plan.providers]
-    extra: list[str] = []
-    if challenge:
-        extra += [str(name) for name in policy.get("challenge_providers", ())]
-    if scope == "planning":
-        extra += [str(name) for name in policy.get("planning_providers", ())]
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for name in extra + chain:
-        if name not in seen:
-            seen.add(name)
-            ordered.append(name)
-    return tuple(ordered)
+
+def review_depth(plan: sd_route.Plan, challenge: bool, scope: str) -> int:
+    """How many reviewers this run takes off the chain.
+
+    The floor adds to the tier rather than replacing it: a challenge run on a
+    deep change still gets the deep read, because a challenge is an extra
+    stance and not a cheaper review.
+    """
+    if challenge or scope in FLOOR_SCOPES:
+        return max(plan.depth, 1)
+    return plan.depth
 
 
 def review(
@@ -1085,7 +1003,42 @@ def review(
     item = getattr(args, "item", None)
     subject = resolve_subject(root, args.scope, item)
     plan = sd_route.route(subject.paths, subject.lines, args.draft, policy)
-    providers = plan_providers(plan, policy, args.challenge, args.scope)
+    # Read from the home this run was handed, not from the process's, so a run
+    # given a different environment reads that operator's pins. A missing
+    # registry reports rather than raises; `read_or_report` says why.
+    registry, registry_refusal = sd_registry.read_or_report(
+        sd_registry.registry_path(environ=dict(env))
+    )
+    if registry_refusal and getattr(args, "provider", None):
+        # A named entry cannot be answered from an empty registry: the refusal
+        # it would get -- "no such provider" -- would be a lie about the name.
+        raise sd_registry.RegistryError(registry_refusal)
+    try:
+        consent = sd_registry.parse_consent(sd_lib.local_block(root).get(sd_lib.CONSENT_KEY))
+        consent_refusal = ""
+    except sd_registry.ConsentRefusal as error:
+        # Not fatal, deliberately. With no line the chain marks every entry
+        # ineligible and `--explain` prints why, which is the answer somebody
+        # running this on a fresh repository actually needs.
+        consent, consent_refusal = {}, str(error)
+    vendors = author_vendors(root, subject)
+    chain = sd_registry.reviewer_chain(
+        registry, consent=consent, author_vendors=vendors, readers=READERS
+    )
+    depth = review_depth(plan, args.challenge, args.scope)
+    if getattr(args, "provider", None):
+        chosen = [
+            sd_registry.pick(
+                registry,
+                args.provider,
+                consent=consent,
+                author_vendors=vendors,
+                readers=READERS,
+            )
+        ]
+    else:
+        chosen = [candidate.provider for candidate in chain if candidate.eligible][:depth]
+    providers = [provider.name for provider in chosen]
     result: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "repo": str(root),
@@ -1105,12 +1058,17 @@ def review(
         },
         "route": {
             "tier": plan.tier,
-            "providers": list(plan.providers),
+            "depth": plan.depth,
             "category": plan.category,
             "reason": plan.reason,
         },
         "providers": list(providers),
-        "backends": backend_rows(),
+        "registry": str(registry.path),
+        "registry_refusal": registry_refusal,
+        "consent_refusal": consent_refusal,
+        "authored_with": list(vendors),
+        "authored_with_report": _authored_report(args.scope, vendors),
+        "chain": [candidate.row for candidate in chain],
         "codex_preflight": codex_preflight_state(codex_auth_home),
         "scrubbed_env_names": list(scrubbed_names(env)),
         "posted": False,
@@ -1132,7 +1090,7 @@ def review(
     result["local_block_prepended"] = bool(conventions)
 
     if args.dry_run:
-        result["planned_invocations"] = _planned(providers, root, subject, prompt)
+        result["planned_invocations"] = _planned(chosen, root, prompt)
         result["status"] = "dry_run"
         return result
 
@@ -1144,19 +1102,19 @@ def review(
 
     outcomes: list[Outcome] = []
     stopped = False
-    for name in providers:
+    for provider in chosen:
         if stopped:
             outcomes.append(
                 _outcome(
-                    name,
+                    provider.name,
                     NOT_RUN,
                     "a provider ahead of this one stopped on its rate limit; the "
                     "chain does not silently substitute another provider for it",
                 )
             )
             continue
-        outcome = run_backend(
-            BACKENDS_BY_NAME[name],
+        outcome = run_provider(
+            provider,
             root,
             subject,
             prompt,
@@ -1184,25 +1142,38 @@ def review(
         for outcome in outcomes
     ]
     result["findings"] = disposed
-    result["status"] = _overall(outcomes, disposed, providers)
+    # A run that wanted reviewers and got none is `unavailable`, whatever
+    # emptied the chain -- no registry, no consent line, every entry the
+    # author's own vendor. `_overall` would call it `skipped`, which exits zero
+    # saying "nothing needed reviewing" about a change nobody was able to read.
+    # Only tier `skip` earns `skipped`, and that is `depth == 0`.
+    result["status"] = "unavailable" if depth and not chosen else _overall(outcomes, disposed, providers)
     result["remaining"] = [
         outcome.backend for outcome in outcomes if outcome.status in (RATE_LIMITED, NOT_RUN)
     ]
     return result
 
 
-def _planned(providers: Sequence[str], root: pathlib.Path, subject: Subject, prompt: str) -> list[dict[str, Any]]:
+def _planned(
+    chosen: Sequence[sd_registry.Provider], root: pathlib.Path, prompt: str
+) -> list[dict[str, Any]]:
     planned: list[dict[str, Any]] = []
-    for name in providers:
-        backend = BACKENDS_BY_NAME[name]
-        if backend.lane != "local" or not backend.enabled or backend.strategy == "none":
-            planned.append({"backend": name, "argv": [], "would_run": False, "reason": backend.disabled_reason})
+    for provider in chosen:
+        start = provider.start or ""
+        if sd_registry.refuse_reader(provider, READERS) or not sd_registry.executable(start):
+            # `READERS`, not a spelled-out name: this list and the chain's have
+            # to be the same list, or the dry run and the real run disagree
+            # about what would happen. The wording splits the same two cases
+            # the chain splits, for the same reason -- a `url` entry names no
+            # reader because it spawns nothing, and saying it named `None` was
+            # a typo nobody made.
+            reason = sd_registry.refuse_reader(provider, READERS) or (
+                f"{provider.name} names no program to start ({start!r})"
+            )
+            planned.append({"backend": provider.name, "argv": [], "would_run": False, "reason": reason})
             continue
-        if backend.strategy == "codex":
-            argv = codex_argv(root, pathlib.Path("<attempt-dir>"), prompt)
-        else:
-            argv = argv_backend_argv(backend, root, subject)
-        planned.append({"backend": name, "argv": argv, "would_run": True, "reason": ""})
+        argv = codex_argv(root, pathlib.Path("<attempt-dir>"), prompt, start)
+        planned.append({"backend": provider.name, "argv": argv, "would_run": True, "reason": ""})
     return planned
 
 
@@ -1245,8 +1216,8 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write(f"  policy      {result['policy_source']}  (severity floor {result['severity_floor']})\n")
     write(f"  route       tier {route['tier']}  category {route['category'] or '-'}\n")
     write(f"  because     {route['reason']}\n")
-    chain = ", ".join(result["providers"]) or "(none: this tier reviews nothing)"
-    write(f"  providers   {chain}\n")
+    write(f"  providers   {', '.join(result['providers']) or '(none)'}\n")
+    write(f"  authored    {result['authored_with_report']}\n")
     preflight = result["codex_preflight"]
     state = "ok (ChatGPT subscription)" if preflight["ok"] else f"would refuse: {preflight['reason']}"
     write(f"  codex auth  {state}\n")
@@ -1255,12 +1226,16 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write(f"  env scrub   {present} (names only; values are never read or printed)\n")
 
     if result.get("explain_only"):
-        write("\nbackends:\n")
-        for row in result["backends"]:
-            mark = "on " if row["enabled"] else "off"
-            write(f"  {mark} {row['name']:<12} {row['lane']:<7} {row['cost']}\n")
-            if not row["enabled"]:
-                write(f"       reason: {row['disabled_reason']}\n")
+        write(f"\nreviewer chain ({result['registry']}):\n")
+        if result["registry_refusal"]:
+            write(f"  {result['registry_refusal']}\n")
+        if result["consent_refusal"]:
+            write(f"  {result['consent_refusal']}\n")
+        for row in result["chain"]:
+            mark = "use" if row["eligible"] else "  -"
+            write(f"  {mark} {row['provider']:<12} {row['vendor']:<10} {row['bill']}\n")
+            if not row["eligible"]:
+                write(f"      passed over: {row['reason']}\n")
         write("\nsd-review: explain only, nothing ran\n")
         return
 
@@ -1298,6 +1273,19 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     remaining = result.get("remaining") or []
     if remaining:
         write(f"\nnot reviewed: {', '.join(remaining)} -- rerun when the quota resets\n")
+    if result["status"] == "unavailable":
+        # The reasons were computed either way and printed only under
+        # `--explain`, so an ordinary run wanting a reviewer and finding none
+        # said the single word "unavailable" and exited 5. The operator whose
+        # repository has no 'reviewers' line is exactly the one who will not
+        # think to re-run with a flag to find that out.
+        write("\nno reviewer was available:\n")
+        for refusal in (result["registry_refusal"], result["consent_refusal"]):
+            if refusal:
+                write(f"  {refusal}\n")
+        for row in result["chain"]:
+            if not row["eligible"]:
+                write(f"  {row['provider']:<12} {row['reason']}\n")
     write(f"\nsd-review: {result['status']}\n")
 
 
@@ -1316,6 +1304,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--scope", choices=SCOPES, default="worktree", help="what to review (default: worktree)")
     parser.add_argument("--challenge", action="store_true", help="add the adversarial design-challenge stance")
+    parser.add_argument(
+        "--provider",
+        default=None,
+        metavar="NAME",
+        help="review with this one registry entry instead of the tier's share of the chain",
+    )
     parser.add_argument("--item", default=None, metavar="NAME", help="planning scope only: review the one active work item whose directory is NAME")
     parser.add_argument("--explain", action="store_true", help="print the routing decision and why, then exit without running anything")
     parser.add_argument("--dry-run", action="store_true", help="print the exact invocations, run nothing")
@@ -1341,7 +1335,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # The seam named at SETUP_GITHUB_SEAM, handed over rather than reached
         # into; it is its own module because it writes a file and this one does not.
-        return sd_setup_github.main(raw[1:], load_policy=load_policy, backends=BACKENDS)
+        return sd_setup_github.main(raw[1:], load_policy=load_policy)
     args = build_parser().parse_args(raw)
     try:
         if args.timeout <= 0:
@@ -1350,7 +1344,7 @@ def main(argv: list[str] | None = None) -> int:
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
         result = review(root, args, subprocess_runner, os.environ)
-    except (UsageError, PolicyError, sd_lib.ConfigError) as error:
+    except (UsageError, PolicyError, sd_lib.ConfigError, sd_registry.RegistryError) as error:
         print(f"sd-review: error: {error}", file=sys.stderr)
         return EXIT_USAGE
     except Refusal as error:

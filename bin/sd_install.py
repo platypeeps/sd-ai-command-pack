@@ -923,6 +923,40 @@ def path_is_tracked(repo: Path, relative: str) -> bool:
 
 # ------------------------------------------------------------- the library
 
+# The provider registry. `bin/sd_registry.py` reads it and states the same two
+# constants; they are restated here rather than imported for the reason
+# `state_home` is -- the installer is loaded by path and must run on a machine
+# where nothing else in `bin/` is importable yet, and importing a sibling would
+# make one of the things it installs a dependency of the installer.
+# `tests/test_sd_install.py` asserts the two agree, which is what a restatement
+# owes.
+REGISTRY_NAME = "providers.yaml"
+REGISTRY_RELATIVE = Path(".local/share/sd") / REGISTRY_NAME
+
+
+def seed_registry(ctx: Context) -> tuple[bool, str]:
+    """Put the checkout's registry in the home, once and never again.
+
+    The file is identity: pins, bills, and the reason an entry ships disabled.
+    It is edited by hand and read by both `sd_db` and the pack, so a reinstall
+    that refreshed it would silently roll back a pin the operator changed this
+    morning. Copied when absent, left alone when present, and the report says
+    which -- an install that quietly did nothing is the same output as one that
+    quietly overwrote.
+    """
+    source = ctx.checkout / REGISTRY_NAME
+    target = ctx.home / REGISTRY_RELATIVE
+    if target.exists():
+        return False, f"provider registry already at {target}, left as it is"
+    if not source.is_file():
+        return False, f"no provider registry at {source}; no reviewer resolves"
+    if ctx.dry_run:
+        return True, f"would seed the provider registry at {target}"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    return True, f"provider registry seeded at {target}"
+
+
 # One installer, one place that knows the path. Item B's settled open question
 # 3 puts `sd_db` into this pack's virtualenv from the system checkout, as a
 # built copy and never editable, so that a branch switch in that checkout
@@ -1177,6 +1211,13 @@ def cmd_user(ctx: Context, out) -> int:
     excludes_changed = ensure_excludes_line(excludes, dry_run=ctx.dry_run)
     set_excludes_config(excludes, dry_run=ctx.dry_run, sandboxed=ctx.sandboxed)
 
+    # Seeded here rather than at `--provision-library`, because the registry is
+    # what a machine with no library still needs: the file-only reader answers
+    # from it, and `sd-db.sh init` seeds its rows from it when the library does
+    # arrive. Not recorded in `owned`: the installer removes what it owns on
+    # uninstall, and this file is the operator's the moment it lands.
+    seeded_registry, registry_report = seed_registry(ctx)
+
     owned = [
         {"path": str(item.path), "sha256": item.sha256, "kind": item.kind}
         for item in written
@@ -1214,6 +1255,13 @@ def cmd_user(ctx: Context, out) -> int:
         print(f"  SessionStart hook registered: {hook}", file=out)
     if excludes_changed:
         print(f"  global excludes: {EXCLUDES_LINE} -> {excludes}", file=out)
+    # Printed whichever way it went. `seed_registry` says its report "says
+    # which -- an install that quietly did nothing is the same output as one
+    # that quietly overwrote", and printing only the seeding case made the
+    # sentence false for the two outcomes it was written for. The one that
+    # cost most was the missing source: no registry, no reviewer resolves, and
+    # nothing on screen to say so.
+    print(f"  {registry_report}", file=out)
     for path, reason in skipped:
         print(f"  left in place ({reason}): {path}", file=out)
     return 0

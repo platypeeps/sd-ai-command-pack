@@ -51,7 +51,6 @@ def install(root: pathlib.Path, **overrides: Any) -> dict:
         root,
         setup_args(**overrides),
         load_policy=sd_review.load_policy,
-        backends=sd_review.BACKENDS,
     )
 
 PIN = "0" * 40
@@ -317,12 +316,16 @@ class CliTests(SetupFixture):
         self.assertTrue(args.explain)
 
     def test_render_names_what_the_lane_will_not_do(self) -> None:
+        """It used to list the GitHub-lane backends it was not going to ask.
+        There is no such list now -- the lane asks nobody at all, which is the
+        stronger sentence and the one it prints."""
+
         root = self.make_repo()
         result = install(root, dry_run=True)
         stream = io.StringIO()
         setup.render(result, stream)
         text = stream.getvalue()
-        self.assertIn("copilot", text)
+        self.assertIn("every provider", text)
         self.assertIn("requests nobody", text)
 
 

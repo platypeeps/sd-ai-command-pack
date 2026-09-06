@@ -15,12 +15,6 @@ import sd_route  # noqa: E402
 
 POLICY: dict[str, Any] = {
     "tier_order": ["skip", "cheap", "standard", "deep"],
-    "tiers": {
-        "skip": [],
-        "cheap": ["codex"],
-        "standard": ["codex", "prism"],
-        "deep": ["codex", "prism", "gito"],
-    },
     "default_tier": "standard",
     "categories": [
         {"name": "docs", "required": False, "paths": ["docs/**", "*.md"], "tier": "cheap"},
@@ -40,20 +34,20 @@ class RouteTests(unittest.TestCase):
         lines: int,
         draft: bool,
         tier: str,
-        providers: tuple[str, ...],
+        depth: int,
         category: str | None,
         policy: dict[str, Any] | None = None,
     ) -> sd_route.Plan:
         plan = sd_route.route(paths, lines, draft, policy or POLICY)
         self.assertEqual(plan.tier, tier, plan.reason)
-        self.assertEqual(plan.providers, providers, plan.reason)
+        self.assertEqual(plan.depth, depth, plan.reason)
         self.assertEqual(plan.category, category, plan.reason)
         self.assertTrue(plan.reason.strip(), "every plan explains itself")
         return plan
 
     def test_documentation_only_change_plans_skip(self) -> None:
         plan = self.assert_plan(
-            ["docs/work/2026-08-29-x/prd.md", "README.md"], 40, False, "skip", (), "docs"
+            ["docs/work/2026-08-29-x/prd.md", "README.md"], 40, False, "skip", 0, "docs"
         )
         self.assertIn("docs-skip allow-list", plan.reason)
 
@@ -63,36 +57,36 @@ class RouteTests(unittest.TestCase):
             40,
             False,
             "cheap",
-            ("codex",),
+            1,
             "docs",
         )
         self.assertIn("never-skip deny-list", plan.reason)
 
     def test_a_change_past_the_line_threshold_escalates(self) -> None:
-        self.assert_plan(["src/app.py"], 801, False, "deep", ("codex", "prism", "gito"), None)
+        self.assert_plan(["src/app.py"], 801, False, "deep", 3, None)
 
     def test_a_change_at_the_line_threshold_does_not_escalate(self) -> None:
-        self.assert_plan(["src/app.py"], 800, False, "standard", ("codex", "prism"), None)
+        self.assert_plan(["src/app.py"], 800, False, "standard", 2, None)
 
     def test_a_sensitive_glob_escalates(self) -> None:
         plan = self.assert_plan(
-            [".github/workflows/ci.yml"], 10, False, "deep", ("codex", "prism", "gito"), None
+            [".github/workflows/ci.yml"], 10, False, "deep", 3, None
         )
         self.assertIn("sensitive path", plan.reason)
 
     def test_sensitive_and_large_escalate_twice_but_stop_at_the_top(self) -> None:
         self.assert_plan(
-            [".github/workflows/ci.yml"], 5000, False, "deep", ("codex", "prism", "gito"), None
+            [".github/workflows/ci.yml"], 5000, False, "deep", 3, None
         )
 
     def test_a_draft_plans_the_cheapest_reviewing_tier(self) -> None:
         plan = self.assert_plan(
-            [".github/workflows/ci.yml"], 5000, True, "cheap", ("codex",), None
+            [".github/workflows/ci.yml"], 5000, True, "cheap", 1, None
         )
         self.assertIn("draft pull request", plan.reason)
 
     def test_a_draft_documentation_change_stays_at_skip(self) -> None:
-        self.assert_plan(["README.md"], 10, True, "skip", (), "docs")
+        self.assert_plan(["README.md"], 10, True, "skip", 0, "docs")
 
     def test_a_lowering_category_needs_every_path_to_be_in_it(self) -> None:
         """One markdown file must not take a reviewer off a source change.
@@ -106,20 +100,20 @@ class RouteTests(unittest.TestCase):
         """
 
         plan = self.assert_plan(
-            ["src/greet.py", "README.md"], 50, False, "standard", ("codex", "prism"), None
+            ["src/greet.py", "README.md"], 50, False, "standard", 2, None
         )
         self.assertIn("no category matched", plan.reason)
         # The same code alone routes identically -- adding documentation to a
         # change is what must not move it.
         alone = sd_route.route(["src/greet.py"], 50, False, POLICY)
         self.assertEqual(alone.tier, plan.tier)
-        self.assertEqual(alone.providers, plan.providers)
+        self.assertEqual(alone.depth, plan.depth)
         # And a work item, the shape this framework produces on every change.
         item = sd_route.route(["src/greet.py", "docs/work/x/prd.md"], 50, False, POLICY)
         self.assertEqual(item.tier, "standard", item.reason)
 
     def test_a_lowering_category_still_matches_when_every_path_is_in_it(self) -> None:
-        self.assert_plan(["docs/a.md", "docs/b.md"], 40, False, "skip", (), "docs")
+        self.assert_plan(["docs/a.md", "docs/b.md"], 40, False, "skip", 0, "docs")
 
     def test_an_escalating_category_matches_on_one_path(self) -> None:
         """The other direction keeps any-match, and that is the whole rule.
@@ -136,7 +130,7 @@ class RouteTests(unittest.TestCase):
             10,
             False,
             "deep",
-            ("codex", "prism", "gito"),
+            3,
             "installer",
             policy=policy,
         )
@@ -148,25 +142,29 @@ class RouteTests(unittest.TestCase):
             10,
             False,
             "deep",
-            ("codex", "prism", "gito"),
+            3,
             "installer",
         )
         self.assertIn("category installer", plan.reason)
 
     def test_an_unmatched_change_falls_back_to_the_default_tier(self) -> None:
-        plan = self.assert_plan(["src/app.py"], 10, False, "standard", ("codex", "prism"), None)
+        plan = self.assert_plan(["src/app.py"], 10, False, "standard", 2, None)
         self.assertIn("no category matched", plan.reason)
 
     def test_a_star_does_not_reach_across_directory_separators(self) -> None:
         policy = dict(POLICY, never_skip=["docs/*"])
         self.assert_plan(
-            ["docs/work/2026-08-29-x/prd.md"], 10, False, "skip", (), "docs", policy=policy
+            ["docs/work/2026-08-29-x/prd.md"], 10, False, "skip", 0, "docs", policy=policy
         )
 
     def test_an_empty_policy_still_produces_a_usable_plan(self) -> None:
         plan = sd_route.route(["src/app.py"], 10, False, {})
         self.assertEqual(plan.tier, "deep")
-        self.assertEqual(plan.providers, ())
+        # A policy that says nothing gets the deepest read, and `deep` is three
+        # reviewers. It used to be nobody, because an empty policy named no tier
+        # chain; a change nothing knows how to route is the last one to review
+        # with a single provider.
+        self.assertEqual(plan.depth, 3)
         self.assertIsNone(plan.category)
 
     def test_an_empty_path_list_is_never_skippable(self) -> None:

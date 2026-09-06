@@ -476,10 +476,18 @@ at C-10.
   `skip` tier and a scope's provider list; a test asserting that
   `scope=planning` yields a non-empty chain at tier `skip` would have refuted
   this in the round it was written. That test now exists:
-  `ScopeProvidersOverASkipTier` (`tests/test_sd_review.py:589-705`), seven
-  tests, killed against four mutations of `plan_providers` — the planning
-  branch deleted, its provider list emptied, the scope appended instead of
-  prepended, and the scope replacing the chain rather than adding to it.
+  `ScopeProvidersOverASkipTier` (`tests/test_sd_review.py:1210-1289`), six
+  tests. It was written against `plan_providers`, killed there by four
+  mutations — the planning branch deleted, its provider list emptied, the scope
+  appended instead of prepended, and the scope replacing the chain rather than
+  adding to it. Item A's PR 6 deleted that function: a tier now says how many
+  reviewers a change earns and the provider registry says who they are. The
+  class moved with the claim rather than with the function, and now asserts the
+  same thing through `review_depth` and `FLOOR_SCOPES` — a `skip` tier still
+  does not silence `--scope planning`. Two of the four mutations no longer have
+  a subject, the floor being a number rather than an order; the two that do —
+  the planning branch deleted, and the floor replacing the tier's depth instead
+  of raising it — are still killed.
 
   Writing it found one more thing worth recording. The ordering assertion first
   went through the live policy, where the `deep` tier begins with codex and
