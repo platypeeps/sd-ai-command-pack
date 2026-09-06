@@ -3483,3 +3483,24 @@ from a number the operator types.
     installer iterates named directories and cannot render a file beside them.
     The rule this leaves: for any change that adds a tracked file, the run
     that counts is the one after `git add`.
+  - C-184, blocking, found by the remote review of PR 5: PR 1 landed the rule
+    that no skill carries a cap of its own, and left a skill carrying one.
+    `.claude/sd-ai-command-pack/planning-adversarial-review.md` §4 read "at
+    most thirty-nine remediation rounds (forty automatic rounds total)". The
+    table PR 1 put in exactly two places gives the Development prd-and-design
+    point a cap of 5. Forty is eight times that, and at that size is not a cap
+    at all -- it is the absence of one, written as a number. Two commits on
+    this branch's own history raised it, thirty then forty, each a reasonable
+    step and neither reconciled against the table that arrived later. §4 now
+    names its point in the table and reads the row. Recorded because PR 1's
+    verification checked that the table appeared in exactly two files and did
+    not check for a third number contradicting it elsewhere -- the check
+    matched what the change added rather than everywhere the thing it governs
+    already appeared.
+  - C-185, minor, from the same review: `directories()` in
+    `tests/test_skill_frontmatter.py` yielded every entry under both roots,
+    not every directory, and `skills/paths.json` is a file at the root of that
+    tree. Every caller in the file re-checked `is_dir()`, so nothing was
+    wrong today; the name described the callers rather than the function, and
+    the next caller is the one that would not check. Filtered at the source,
+    with a test that says so.

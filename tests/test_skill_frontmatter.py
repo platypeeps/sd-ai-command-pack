@@ -89,10 +89,22 @@ def frontmatter(text: str) -> dict[str, str] | None:
 
 
 def directories() -> list[pathlib.Path]:
-    """Every skill directory in the pack, installed or in `contrib/`."""
+    """Every skill directory in the pack, installed or in `contrib/`.
+
+    Directories only. `skills/` holds `paths.json` beside them, and every
+    caller here re-checked `is_dir()` for a while, which made this function's
+    name a description of its callers rather than of itself -- and would have
+    handed the next root file to whichever caller forgot.
+    """
 
     return sorted(
-        (entry for root in ROOTS if root.is_dir() for entry in root.iterdir()),
+        (
+            entry
+            for root in ROOTS
+            if root.is_dir()
+            for entry in root.iterdir()
+            if entry.is_dir()
+        ),
         key=lambda entry: entry.name,
     )
 
@@ -117,6 +129,18 @@ class InventoryTests(unittest.TestCase):
     def test_the_twelve_named_surfaces_are_all_present(self) -> None:
         found = {p.parent.name for p in surfaces()}
         self.assertEqual(set(EXPECTED) - found, set(), "a named surface left the tree")
+
+    def test_directories_returns_directories(self) -> None:
+        """The contract, pinned, because `skills/` holds a file beside them.
+
+        `paths.json` lives at the root of the tree. Every caller in this file
+        happens to re-check `is_dir()`; that is not the same as this function
+        being right, and the next caller is the one that would not.
+        """
+        found = directories()
+        self.assertTrue(found, "no skill directories in either root")
+        self.assertEqual([d for d in found if not d.is_dir()], [])
+        self.assertNotIn("paths.json", [d.name for d in found])
 
     def test_every_directory_holds_a_skill_file(self) -> None:
         if not SKILLS.is_dir():

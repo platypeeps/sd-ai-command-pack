@@ -76,8 +76,18 @@ implementation approval and prevents `task.py start`.
 When addressed concerns change a planning artifact, rerun the host review
 against the updated artifact set, plus a fresh run of any additional lane that
 was available in the initial round. Reconcile each remediation round through
-the same ledger. Run at most thirty-nine remediation rounds
-(forty automatic rounds total); do not start a forty-first automatic round.
+the same ledger.
+
+The cap is not stated here. This contract is the **Development / prd and
+design** point of the table in
+[`../rules/sd-planning-adversarial-review.md`](../rules/sd-planning-adversarial-review.md),
+and that row carries the number; the rule beside the table is that a skill
+running a review names its point there and reads its cap from that row, and
+that no skill carries a cap of its own. This section did carry one -- forty
+automatic rounds -- which was eight times the row it belongs to and, at that
+size, not a cap at all. Read the row.
+
+When the cap is spent no further round starts on its own.
 
 Expect a remediation round to find defects the previous round's own fixes
 introduced. A value corrected in one artifact and left standing in another is
