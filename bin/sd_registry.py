@@ -753,6 +753,7 @@ def reviewer_chain(
     consent: dict[str, Allowance],
     author_vendors: tuple[str, ...] = (),
     capped_bills: tuple[str, ...] = (),
+    readers: tuple[str, ...] = (),
 ) -> list[Candidate]:
     """Every enabled entry holding `reviewer`, in order, each marked.
 
@@ -768,7 +769,20 @@ def reviewer_chain(
     """
     candidates: list[Candidate] = []
     for provider in registry.order("reviewer"):
-        refusal = refuse_allowance(provider, consent.get(provider.name))
+        refusal = None
+        if readers and provider.reader not in readers:
+            # A reader this build does not implement is decided here and not at
+            # the run, because a tier's depth is a count of entries taken off
+            # this list: an entry that cannot run would occupy a slot and the
+            # change would be read by fewer providers than its tier asked for,
+            # while still reporting clean. That is a fact about the build, not
+            # about the machine at this second, so it belongs in the chain.
+            refusal = (
+                f"{provider.name} reads back as {provider.reader!r}, and this "
+                f"build implements no such reader."
+            )
+        if refusal is None:
+            refusal = refuse_allowance(provider, consent.get(provider.name))
         if refusal is None and provider.vendor in author_vendors:
             refusal = (
                 f"{provider.name} is an entry of vendor {provider.vendor}, and "

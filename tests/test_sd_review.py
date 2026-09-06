@@ -709,6 +709,17 @@ class TheExplainRenderTests(ReviewFixture):
         sd_review.render(result, stream)
         return stream.getvalue()
 
+    def test_a_scope_with_no_commits_does_not_claim_human_authorship(self) -> None:
+        """Copilot found this. The fixture repository's only commit says
+        `Authored-with: human`, but a worktree scope never reads a trailer at
+        all, and printing "human-authored" there answers a question the run did
+        not ask. It printed exactly that over a repository whose only commit
+        said `claude/anthropic`."""
+
+        text = self.explain(self.make_repo())
+        self.assertIn("not read: worktree scope", text)
+        self.assertNotIn("human-authored", text)
+
     def test_the_chain_prints_when_nothing_is_refused(self) -> None:
         """The fixture repository consents to both entries and has a registry,
         so there is no refusal to carry the table into view."""
@@ -756,6 +767,84 @@ class TheExplainRenderTests(ReviewFixture):
         text = stream.getvalue()
         self.assertNotIn("explain only", text)
         self.assertNotIn("reviewer chain", text)
+
+
+class DepthCountsProvidersThatCanAnswerTests(ReviewFixture):
+    """A tier's depth is a count of reviewers, not of chain positions.
+
+    Copilot found this. Entries were marked eligible without regard to whether
+    this build can run them, so on the shipped registry a `deep` change --
+    depth 3, chain `codex, claude, minimax, ...` -- spent two of its three
+    slots on readers that do not exist, ran one provider, and reported `clean`
+    with exit 0. The commit that introduced the depth model claimed "a change
+    is read by as many providers as before", which that made false.
+
+    Whether a reader is implemented is a fact about the build, knowable without
+    touching the machine, so unlike preflight it belongs in the chain.
+    """
+
+    def registry_with(self, *readers: str) -> pathlib.Path:
+        entries = "\n".join(
+            f'  p{i}: {{ start: "p{i} exec", vendor: v{i}, bill: first, '
+            f"roles: [reviewer], reader: {reader}, env: [] }}"
+            for i, reader in enumerate(readers)
+        )
+        names = ", ".join(f"p{i}" for i in range(len(readers)))
+        text = (
+            "bills:\n  first: { cost: subscription }\n\n"
+            f"providers:\n{entries}\n  author: {{ start: \"author exec\", vendor: av, "
+            "bill: first, roles: [author], reader: codex-json, env: [] }\n\n"
+            f"roles:\n  author: [author]\n  reviewer: [{names}]\n"
+        )
+        home = self.tmp / f"home-{abs(hash(readers))}"
+        (home / ".local" / "share" / "sd").mkdir(parents=True)
+        (home / ".local" / "share" / "sd" / "providers.yaml").write_text(text, encoding="utf-8")
+        return home
+
+    def consenting_repo(self, count: int) -> pathlib.Path:
+        """A repository consenting to every `pN` entry, so the only thing left
+        to make an entry ineligible is its reader."""
+        root = self.make_repo()
+        self.local_block(root)
+        line = ", ".join(f"p{i}@p{i}" for i in range(count))
+        (root / "CLAUDE.local.md").write_text(
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\n"
+            f"{sd_review.sd_lib.CONSENT_KEY}: {line}\n"
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n",
+            encoding="utf-8",
+        )
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        return root
+
+    def explained(self, home: pathlib.Path, count: int) -> dict[str, Any]:
+        return sd_review.review(
+            self.consenting_repo(count),
+            namespace(explain=True),
+            FakeRunner(),
+            {"HOME": str(home)},
+            self.chatgpt_home(),
+        )
+
+    def test_an_unimplemented_reader_is_ineligible_and_says_why(self) -> None:
+        rows = self.explained(self.registry_with("claude-json", "codex-json"), 2)["chain"]
+        self.assertFalse(rows[0]["eligible"])
+        self.assertIn("claude-json", rows[0]["reason"])
+        self.assertTrue(rows[1]["eligible"], rows[1]["reason"])
+
+    def test_it_does_not_consume_a_depth_slot(self) -> None:
+        """The defect in one assertion: with an unrunnable entry ahead of a
+        runnable one, the run still picks the one that can answer."""
+
+        result = self.explained(self.registry_with("claude-json", "codex-json"), 2)
+        self.assertGreaterEqual(result["route"]["depth"], 1)
+        self.assertEqual(result["providers"][:1], ["p1"], result["chain"])
+
+    def test_every_reader_this_build_names_is_one_a_provider_can_run(self) -> None:
+        """`READERS` is the allow-list the chain filters on. A name in it that
+        `run_provider` does not implement would mark an entry eligible and then
+        refuse it at the run, which is the hole this closes reopened."""
+
+        self.assertEqual(sd_review.READERS, ("codex-json",))
 
 
 class AnEmptyChainThatWantedReviewersTests(ReviewFixture):
@@ -863,6 +952,27 @@ class TheTrailerBlockTests(ReviewFixture):
             sd_review.author_vendors(root, self.subject(root, base))
         self.assertIn("carry no Authored-with:", str(caught.exception))
 
+    def test_a_commits_own_trailer_outranks_a_later_claim_about_it(self) -> None:
+        """Copilot found this, and it inverted the rule the trailers exist for.
+
+        Both dictionaries were merged in one walk with `setdefault`, and the
+        log is newest-first, so a later commit's `Attributes:` won. Relabelling
+        an anthropic-authored commit as an openai one -- and thereby buying it
+        an anthropic reviewer, the exact thing the vendor rule forbids -- took
+        one line in a later commit message.
+        """
+
+        root = self.make_repo()
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+        early = self.commit(root, "real work\n\nAuthored-with: claude/anthropic")
+        self.commit(root, f"later\n\nAuthored-with: human\nAttributes: {early} codex/openai")
+        self.assertEqual(
+            sd_review.sd_lib.attribution(root, base, "HEAD")[early], "claude/anthropic"
+        )
+        self.assertEqual(sd_review.author_vendors(root, self.subject(root, base)), ("anthropic",))
+
     def test_attributes_names_an_earlier_commit_from_a_later_one(self) -> None:
         root = self.make_repo()
         base = subprocess.run(
@@ -961,6 +1071,11 @@ class TheRoutingLaneRunsOnABareRunner(ReviewFixture):
 
 class ScopeProvidersOverASkipTier(unittest.TestCase):
     """A `skip` tier silences the tier, not the scope.
+
+    Kept last in this file on purpose. Its line span is cited from
+    `docs/work/2026-09-02-dashboard-ack-and-mutation-count/design.md`, and it
+    drifted four times in one pull request because every new class landed above
+    it. Last means only its own edits move it.
 
     This exists because its absence let a false concern stand. C-18 in
     `docs/work/2026-09-02-dashboard-ack-and-mutation-count/design.md` claimed

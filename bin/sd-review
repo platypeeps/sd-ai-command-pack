@@ -192,6 +192,11 @@ POLICY_KEYS = frozenset(DEFAULT_POLICY) | {"$schema"}
 #: still carrying one of these is refused by name rather than by "unknown key":
 #: the file is not malformed, it is a version behind, and the remedy is a
 #: deletion rather than a correction.
+#: The readers this build can run an entry with. The chain marks an entry
+#: whose `reader` is not here ineligible, so a tier's depth counts providers
+#: that can actually answer rather than slots an unrunnable entry occupied.
+READERS = ("codex-json",)
+
 RETIRED_POLICY_KEYS = {
     "tiers": "a tier now says how many reviewers a change earns, and the registry's "
     "'reviewer' list says who they are. Delete the key",
@@ -802,59 +807,12 @@ def _failure(backend: str, result: Completed, argv: Sequence[str], scrubbed: Seq
 # --------------------------------------------------------------------------
 # Who wrote this, so the chain can pick somebody else
 # --------------------------------------------------------------------------
-
-#: `Authored-with: <entry>/<vendor>` on the commit that made the change, and
-#: `Attributes: <sha> <entry>/<vendor>` on a later commit for one that was made
-#: before the convention reached it. Both forms are written by `sd-ship` and
-#: `sd attribute`; this file only reads them.
-AUTHORED_TRAILER = "Authored-with:"
-ATTRIBUTES_TRAILER = "Attributes:"
-
-#: What a commit a person wrote says. Spelled out rather than left implicit,
-#: because the absence of a trailer has to keep meaning "nobody said" -- if an
-#: untagged commit read as human-authored, a Claude-written commit would become
-#: reviewable by Claude every time the trailer was forgotten.
-HUMAN_AUTHOR = "human"
-
-
-def _trailers(root: pathlib.Path, base: str, head: str) -> list[tuple[str, str]]:
-    """Each commit in the range as `(sha, message)`, newest first."""
-    raw = _git(root, ["log", "--format=%H%x1f%B%x1e", f"{base}..{head}"])
-    if not raw:
-        return []
-    records = []
-    for chunk in raw.split("\x1e"):
-        if "\x1f" not in chunk:
-            continue
-        sha, _, message = chunk.strip().partition("\x1f")
-        records.append((sha.strip(), message))
-    return records
-
-
-def attribution(root: pathlib.Path, base: str, head: str) -> dict[str, str]:
-    """`<sha> -> <entry>/<vendor>` for every commit in the range that says.
-
-    A commit says either by carrying its own `Authored-with:` or by being named
-    in a later commit's `Attributes:`. The review reads no declaration and takes
-    no flag for this: a branch is a set of commits and each one answers for
-    itself, because a single `--author` for the whole range is a claim about
-    work the person making the claim may not have done.
-    """
-    said: dict[str, str] = {}
-    for sha, message in _trailers(root, base, head):
-        # Git's trailer block -- the last paragraph -- and unindented, which is
-        # what makes a trailer a trailer. Reading the whole message, stripped,
-        # reads a trailer quoted inside a commit that was describing one. This
-        # commit's own first draft did exactly that and refused itself.
-        for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
-            line = line.rstrip()
-            if line.startswith(AUTHORED_TRAILER):
-                said.setdefault(sha, line[len(AUTHORED_TRAILER) :].strip())
-            elif line.startswith(ATTRIBUTES_TRAILER):
-                parts = line[len(ATTRIBUTES_TRAILER) :].split()
-                if len(parts) == 2:
-                    said.setdefault(parts[0], parts[1])
-    return said
+#
+# The trailer vocabulary and its reader live in `bin/sd_lib.py`: `sd attribute`
+# writes what this reads, `sd-ship` writes it on every commit, and a second
+# implementation of "what did this commit say" is how the two would disagree.
+TRAILER_SCOPES = sd_lib.TRAILER_SCOPES
+AUTHORED_TRAILER = sd_lib.AUTHORED_TRAILER
 
 
 def author_vendors(root: pathlib.Path, subject: Subject) -> tuple[str, ...]:
@@ -862,36 +820,15 @@ def author_vendors(root: pathlib.Path, subject: Subject) -> tuple[str, ...]:
 
     Refuses rather than guessing. A commit with no trailer could have been
     written by anyone, and treating it as human -- the convenient default --
-    would let a Claude-written commit be reviewed by Claude whenever the
-    trailer was forgotten, which is the one outcome the vendor rule exists to
-    prevent.
+    would let an anthropic-written commit be reviewed by anthropic whenever the
+    trailer was forgotten, which is the one outcome the vendor rule prevents.
     """
-    if subject.scope not in ("branch", "pr"):
+    if subject.scope not in TRAILER_SCOPES:
         return ()
-    said = attribution(root, subject.base, subject.head)
-    untagged = [sha for sha, _ in _trailers(root, subject.base, subject.head) if sha not in said]
-    if untagged:
-        raise Refusal(
-            f"{len(untagged)} commit(s) in {subject.base}..{subject.head} carry "
-            f"no {AUTHORED_TRAILER} trailer, starting at {untagged[-1][:12]}. A "
-            f"commit that does not say who wrote it cannot be reviewed by "
-            f"somebody else on purpose. Record it with "
-            f"`sd attribute {untagged[-1][:12]} <entry>`."
-        )
-    vendors = []
-    for sha, value in said.items():
-        if value == HUMAN_AUTHOR:
-            continue
-        entry, separator, vendor = value.partition("/")
-        if not separator or not entry.strip() or not vendor.strip():
-            raise Refusal(
-                f"{sha[:12]} says {AUTHORED_TRAILER} {value!r}, which is neither "
-                f"{HUMAN_AUTHOR!r} nor an '<entry>/<vendor>' pair. A trailer that "
-                f"cannot be read is not a weaker claim than one that is missing."
-            )
-        if vendor not in vendors:
-            vendors.append(vendor)
-    return tuple(vendors)
+    try:
+        return sd_lib.author_vendors(root, subject.base, subject.head)
+    except sd_lib.TrailerError as error:
+        raise Refusal(str(error)) from None
 
 
 def run_provider(
@@ -1014,6 +951,19 @@ def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeou
 FLOOR_SCOPES = ("planning",)
 
 
+def _authored_report(scope: str, vendors: tuple[str, ...]) -> str:
+    """What the run may say about who wrote the change.
+
+    A scope with no commits behind it -- `worktree`, `planning` -- is never
+    read for trailers, and saying "human-authored" there is an answer to a
+    question nobody asked. It printed exactly that over a repository whose only
+    commit said `Authored-with: claude/anthropic`.
+    """
+    if scope not in TRAILER_SCOPES:
+        return f"not read: {scope} scope has no commits to carry a trailer"
+    return ", ".join(vendors) or "human (every commit says so)"
+
+
 def review_depth(plan: sd_route.Plan, challenge: bool, scope: str) -> int:
     """How many reviewers this run takes off the chain.
 
@@ -1058,7 +1008,9 @@ def review(
         # running this on a fresh repository actually needs.
         consent, consent_refusal = {}, str(error)
     vendors = author_vendors(root, subject)
-    chain = sd_registry.reviewer_chain(registry, consent=consent, author_vendors=vendors)
+    chain = sd_registry.reviewer_chain(
+        registry, consent=consent, author_vendors=vendors, readers=READERS
+    )
     depth = review_depth(plan, args.challenge, args.scope)
     if getattr(args, "provider", None):
         chosen = [
@@ -1095,6 +1047,7 @@ def review(
         "registry_refusal": registry_refusal,
         "consent_refusal": consent_refusal,
         "authored_with": list(vendors),
+        "authored_with_report": _authored_report(args.scope, vendors),
         "chain": [candidate.row for candidate in chain],
         "codex_preflight": codex_preflight_state(codex_auth_home),
         "scrubbed_env_names": list(scrubbed_names(env)),
@@ -1236,7 +1189,7 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write(f"  route       tier {route['tier']}  category {route['category'] or '-'}\n")
     write(f"  because     {route['reason']}\n")
     write(f"  providers   {', '.join(result['providers']) or '(none)'}\n")
-    write(f"  authored    {', '.join(result['authored_with']) or 'no vendor (human-authored)'}\n")
+    write(f"  authored    {result['authored_with_report']}\n")
     preflight = result["codex_preflight"]
     state = "ok (ChatGPT subscription)" if preflight["ok"] else f"would refuse: {preflight['reason']}"
     write(f"  codex auth  {state}\n")

@@ -582,3 +582,101 @@ def detect_entrypoints(root: pathlib.Path) -> Detection:
 def entrypoints(root: pathlib.Path) -> dict[str, list[str]]:
     """The repo-native check commands, keyed by name, in `CHECK_NAMES` order."""
     return detect_entrypoints(root).commands
+
+
+# --------------------------------------------------------------------------
+# Commit trailers: who wrote a change, said by the change itself
+# --------------------------------------------------------------------------
+
+#: The scopes that resolve to a commit range. Only these carry trailers.
+TRAILER_SCOPES = ("branch", "pr")
+
+#: `Authored-with: <entry>/<vendor>` on the commit that made the change, and
+#: `Attributes: <sha> <entry>/<vendor>` on a later commit for one that was made
+#: before the convention reached it. `sd-ship` and `sd attribute` write them.
+AUTHORED_TRAILER = "Authored-with:"
+ATTRIBUTES_TRAILER = "Attributes:"
+
+#: What a commit a person wrote says. Spelled out rather than left implicit,
+#: because the absence of a trailer has to keep meaning "nobody said" -- if an
+#: untagged commit read as human-authored, an anthropic-written commit would
+#: become reviewable by anthropic every time the trailer was forgotten.
+HUMAN_AUTHOR = "human"
+
+
+class TrailerError(Exception):
+    """A commit that does not say, or says something unreadable."""
+
+
+def commit_messages(root: pathlib.Path, base: str, head: str) -> list[tuple[str, str]]:
+    """Each commit in the range as `(sha, message)`, newest first."""
+    raw = git_output(["log", "--format=%H%x1f%B%x1e", f"{base}..{head}"], root)
+    if not raw:
+        return []
+    records = []
+    for chunk in raw.split("\x1e"):
+        if "\x1f" not in chunk:
+            continue
+        sha, _, message = chunk.strip().partition("\x1f")
+        records.append((sha.strip(), message))
+    return records
+
+
+def attribution(root: pathlib.Path, base: str, head: str) -> dict[str, str]:
+    """`<sha> -> <entry>/<vendor>` for every commit in the range that says.
+
+    A commit says either by carrying its own `Authored-with:` or by being named
+    in a later commit's `Attributes:`. Nothing takes a flag for this: a branch
+    is a set of commits and each one answers for itself, because a single
+    `--author` for the whole range is a claim about work the person making the
+    claim may not have done.
+    """
+    own: dict[str, str] = {}
+    claimed: dict[str, str] = {}
+    for sha, message in commit_messages(root, base, head):
+        # Git's trailer block -- the last paragraph -- and unindented, which is
+        # what makes a trailer a trailer. Reading the whole message, stripped,
+        # reads a trailer quoted inside a commit that was describing one.
+        for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
+            line = line.rstrip()
+            if line.startswith(AUTHORED_TRAILER):
+                own.setdefault(sha, line[len(AUTHORED_TRAILER) :].strip())
+            elif line.startswith(ATTRIBUTES_TRAILER):
+                parts = line[len(ATTRIBUTES_TRAILER) :].split()
+                if len(parts) == 2:
+                    claimed.setdefault(parts[0], parts[1])
+    # A commit's own trailer outranks a later commit's claim about it, and the
+    # two dictionaries exist to make that ordering explicit. Merging in one
+    # walk let a later `Attributes:` overwrite what a commit said about itself,
+    # so relabelling an anthropic-authored commit as an openai one -- and
+    # thereby buying it an anthropic reviewer -- took one line in a later
+    # message. `Attributes:` is for commits that said nothing.
+    return {**claimed, **own}
+
+
+def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
+    """The vendors this range was written with. Raises when a commit is silent."""
+    said = attribution(root, base, head)
+    untagged = [sha for sha, _ in commit_messages(root, base, head) if sha not in said]
+    if untagged:
+        raise TrailerError(
+            f"{len(untagged)} commit(s) in {base}..{head} carry no "
+            f"{AUTHORED_TRAILER} trailer, starting at {untagged[-1][:12]}. A "
+            f"commit that does not say who wrote it cannot be reviewed by "
+            f"somebody else on purpose. Record it with "
+            f"`sd attribute {untagged[-1][:12]} <entry>`."
+        )
+    vendors = []
+    for sha, value in said.items():
+        if value == HUMAN_AUTHOR:
+            continue
+        entry, separator, vendor = value.partition("/")
+        if not separator or not entry.strip() or not vendor.strip():
+            raise TrailerError(
+                f"{sha[:12]} says {AUTHORED_TRAILER} {value!r}, which is neither "
+                f"{HUMAN_AUTHOR!r} nor an '<entry>/<vendor>' pair. A trailer that "
+                f"cannot be read is not a weaker claim than one that is missing."
+            )
+        if vendor not in vendors:
+            vendors.append(vendor)
+    return tuple(vendors)
