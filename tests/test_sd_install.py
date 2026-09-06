@@ -1642,6 +1642,114 @@ class PathsTests(InstallerHarness):
         self.assertEqual(surfaces[0].skill.parent.parent.name, "skills")
 
 
+class ProviderRegistrySeedTests(InstallerHarness):
+    """The registry lands in the home once, and is the operator's after that.
+
+    The two helpers are taken from `PathsTests` rather than inherited from it:
+    subclassing would re-run that class's whole suite under a second name, and
+    copying them would give this file two fixture checkouts that could drift
+    apart. The registry is written into the checkout per test, because "the
+    checkout has no registry" is one of the cases.
+    """
+
+    context = PathsTests.context
+    make_checkout = PathsTests.make_checkout
+
+    REGISTRY = (
+        "bills:\n"
+        "  free: { cost: local }\n"
+        "providers:\n"
+        '  one: { url: "http://localhost:1/v1", vendor: alpha, bill: free, roles: [author] }\n'
+        '  two: { url: "http://localhost:2/v1", vendor: beta, bill: free, roles: [reviewer] }\n'
+        "roles:\n"
+        "  author: [one]\n"
+        "  reviewer: [two]\n"
+    )
+
+    def with_registry(self, checkout: Path) -> Path:
+        source = checkout / sd_install.REGISTRY_NAME
+        source.write_text(self.REGISTRY, encoding="utf-8")
+        return source
+
+    @property
+    def target(self) -> Path:
+        return self.home / sd_install.REGISTRY_RELATIVE
+
+    def test_the_constants_agree_with_the_reader_that_reads_the_file(self):
+        """Restated in two files, so the restatement is asserted.
+
+        `bin/sd_registry.py` reads this file and the installer places it. The
+        installer may not import a sibling -- it runs before anything else in
+        `bin/` is importable -- so the names are stated twice and pinned here.
+        """
+        spec = importlib.util.spec_from_file_location(
+            "sd_registry_for_install_tests", REPO_ROOT / "bin" / "sd_registry.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        self.assertEqual(sd_install.REGISTRY_NAME, module.REGISTRY_NAME)
+        self.assertEqual(sd_install.REGISTRY_RELATIVE, module.REGISTRY_RELATIVE)
+
+    def test_it_is_copied_when_the_home_has_none(self):
+        checkout = self.make_checkout("sd-kept")
+        self.with_registry(checkout)
+        seeded, report = sd_install.seed_registry(self.context(checkout))
+        self.assertTrue(seeded)
+        self.assertIn("seeded", report)
+        self.assertEqual(self.target.read_text(encoding="utf-8"), self.REGISTRY)
+
+    def test_a_registry_already_there_is_left_exactly_as_it_is(self):
+        """A pin changed this morning survives a reinstall this afternoon."""
+        checkout = self.make_checkout("sd-kept")
+        self.with_registry(checkout)
+        self.target.parent.mkdir(parents=True, exist_ok=True)
+        self.target.write_text("bills: {}\n", encoding="utf-8")
+        seeded, report = sd_install.seed_registry(self.context(checkout))
+        self.assertFalse(seeded)
+        self.assertIn("left as it is", report)
+        self.assertEqual(self.target.read_text(encoding="utf-8"), "bills: {}\n")
+
+    def test_a_checkout_with_no_registry_says_so_and_installs_anyway(self):
+        checkout = self.make_checkout("sd-kept")
+        seeded, report = sd_install.seed_registry(self.context(checkout))
+        self.assertFalse(seeded)
+        self.assertIn("no reviewer resolves", report)
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context(checkout), out), 0)
+
+    def test_a_dry_run_writes_nothing(self):
+        checkout = self.make_checkout("sd-kept")
+        self.with_registry(checkout)
+        context = sd_install.Context(
+            checkout=checkout,
+            home=self.home,
+            environ=self.context(checkout).environ,
+            dry_run=True,
+        )
+        seeded, report = sd_install.seed_registry(context)
+        self.assertTrue(seeded)
+        self.assertIn("would seed", report)
+        self.assertFalse(self.target.exists())
+
+    def test_the_install_reports_the_seed_and_the_file_is_readable(self):
+        checkout = self.make_checkout("sd-kept")
+        self.with_registry(checkout)
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context(checkout), out), 0)
+        self.assertIn("provider registry seeded", out.getvalue())
+        self.assertTrue(self.target.is_file())
+
+    def test_it_is_not_recorded_as_a_file_the_installer_owns(self):
+        """Owned files are removed on uninstall. This one is the operator's."""
+        checkout = self.make_checkout("sd-kept")
+        self.with_registry(checkout)
+        out = io.StringIO()
+        sd_install.cmd_user(self.context(checkout), out)
+        owned = {row["path"] for row in self.receipt["owned"]}
+        self.assertNotIn(str(self.target), owned)
+
+
 if __name__ == "__main__":
     unittest.main()
 
