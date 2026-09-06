@@ -609,8 +609,15 @@ class TrailerError(Exception):
 
 
 def commit_messages(root: pathlib.Path, base: str, head: str) -> list[tuple[str, str]]:
-    """Each commit in the range as `(sha, message)`, newest first."""
-    raw = git_output(["log", "--format=%H%x1f%B%x1e", f"{base}..{head}"], root)
+    """Each commit in the range as `(sha, message)`, newest first.
+
+    Merges are not among them. A merge commit introduces no change of its
+    own -- it records that two histories met -- so there is no work for it to
+    say who wrote, and asking cost a real branch its review: merging `main` to
+    catch up produced one untagged commit, and the whole range refused. The
+    commits it brings in are already in the range, each answering for itself.
+    """
+    raw = git_output(["log", "--no-merges", "--format=%H%x1f%B%x1e", f"{base}..{head}"], root)
     if not raw:
         return []
     records = []

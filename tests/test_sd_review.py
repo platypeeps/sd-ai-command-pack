@@ -1078,6 +1078,35 @@ class TheTrailerBlockTests(ReviewFixture):
                     ("anthropic",),
                 )
 
+    def test_a_merge_commit_is_not_work_and_is_not_asked(self) -> None:
+        """Found by merging `main` into this branch to land it. A merge commit
+        introduces no change of its own, so there is nobody for it to name,
+        and asking refused the whole range over a commit that wrote nothing.
+        The commits it brings in are in the range already, each answering for
+        itself."""
+
+        root = self.make_repo()
+        base = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=str(root), check=True, capture_output=True, text=True
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "checkout", "--quiet", "-b", "side"],
+            cwd=str(root), check=True, capture_output=True,
+        )
+        self.commit(root, "side work\n\nAuthored-with: claude/anthropic")
+        subprocess.run(
+            ["git", "checkout", "--quiet", "-"],
+            cwd=str(root), check=True, capture_output=True,
+        )
+        self.commit(root, "main work\n\nAuthored-with: human")
+        subprocess.run(
+            ["git", "merge", "--no-ff", "--no-edit", "side"],
+            cwd=str(root), check=True, capture_output=True,
+        )
+        self.assertEqual(
+            sd_review.author_vendors(root, self.subject(root, base)), ("anthropic",)
+        )
+
     def test_a_short_sha_still_names_its_commit(self) -> None:
         """Git takes a prefix everywhere else, so the range check does too."""
 
