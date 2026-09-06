@@ -569,6 +569,19 @@ def _provider(
             f"would be a number nothing enforces. Give it a 'url', or move it "
             f"to an uncapped bill."
         )
+    if start and str(start).strip():
+        first = executable(str(start))
+        if not first:
+            raise RegistryError(
+                f"{path}: provider {name!r} has start {start!r}, which names "
+                f"no program to run."
+            )
+        if first.startswith("-"):
+            raise RegistryError(
+                f"{path}: provider {name!r} has start {start!r}, whose first "
+                f"word {first!r} is a flag. The runner takes the first word as "
+                f"the program, so this entry would try to execute a flag."
+            )
     if start and not body.get("reader"):
         raise RegistryError(
             f"{path}: provider {name!r} is a 'start' entry with no 'reader'. "
@@ -930,6 +943,13 @@ def reviewer_chain(
     *,
     consent: dict[str, Allowance],
     author_vendors: tuple[str, ...] = (),
+    # Nothing supplies this yet, and saying so here is the point. A cap is
+    # spend against `cap_usd_month`, which lives in the database's `bill` rows
+    # and not in this file, so the file-only reader cannot know it. The
+    # registry also refuses a `start` entry on a capped bill outright, so the
+    # only entries a cap can reach are `url` entries -- which this build has no
+    # client for. The branch below is right and unreachable, and it stays
+    # tested so that wiring it is a change to one call site.
     capped_bills: tuple[str, ...] = (),
     readers: tuple[str, ...] = (),
 ) -> list[Candidate]:

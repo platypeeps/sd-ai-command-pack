@@ -349,6 +349,37 @@ class TheRefusals(unittest.TestCase):
         )
         self.assertIn("'cap_usd_month' of bill 'free'", message)
 
+    def test_a_start_line_whose_first_word_is_a_flag(self) -> None:
+        """Copilot found this. An earlier round refused the empty start line
+        because `shlex.split("")` left the hardened invocation's first flag as
+        the executable. A line that opens with a flag reaches the same place
+        by a shorter road, and passed the guard: `executable('--sandbox exec')`
+        is `'--sandbox'`, which is truthy, so the run tried to execute it."""
+        for line in ('"--sandbox exec"', '"-p review"'):
+            with self.subTest(start=line):
+                message = self.refuse(
+                    self.filled().replace(
+                        '{ url: "http://localhost:2/v1", vendor: beta,',
+                        "{ start: " + line + ", reader: codex-json, vendor: beta,",
+                    )
+                )
+                self.assertIn("is a flag", message)
+
+    def test_a_quoted_path_with_a_space_is_still_a_program(self) -> None:
+        """The refusal above must not catch the case the shlex split exists
+        for."""
+        registry = sd_registry.parse(
+            self.filled().replace(
+                '{ url: "http://localhost:2/v1", vendor: beta,',
+                "{ start: \"'/opt/my tools/codex' exec\", reader: codex-json, vendor: beta,",
+            ),
+            "fixture.yaml",
+        )
+        self.assertEqual(
+            sd_registry.executable(registry.providers["two"].start or ""),
+            "/opt/my tools/codex",
+        )
+
     def test_a_start_entry_that_says_nothing_about_reading_it_back(self) -> None:
         """Running one means parsing what it prints. An entry that does not
         say how could be picked, occupy a slot in a tier's depth, and never
