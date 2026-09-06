@@ -537,6 +537,54 @@ rewritten in PR 8, a pull request that did not claim it.
 
 **Verification.** Criteria 24 and 25 whole, against a temporary database.
 
+### What landed
+
+`skills/paths.json` names three paths — research, "sources to brief to
+handoff"; development, "plan to build to ship"; act, "brief to draft to
+send" — covering thirty-two skills. The other forty-nine moved to `contrib/`,
+in git and not installed, `sd skill try` away. The tight reading, on the
+operator's word: C-180 carries the choice and the warrant.
+
+`bin/sd_install.py` renders the union of what the paths name and what has an
+active trial row, falling back from `skills/<name>` to `contrib/<name>` for a
+trial. A directory on no path, or a path naming a directory that is gone,
+refuses the install and says which. `bin/sd_skill.py` is the `sd skill`
+verb group: `try` writes a thirty-day trial row and prints the date, `list`
+shows what is on the paths and what is not.
+
+Four things this pull request found rather than built, each with a ledger
+entry: the library had no trial readers (C-178); its `record_skill_use`
+stamped `now()` and could not be told when a use happened (C-179); retiring
+a skill became two edits and three tests were written for one (C-181); and
+the `sd_db` installer step had to move here from PR 7 because criteria 24
+and 25 cannot be verified without it (C-177).
+
+**Two defects the suite found in this pull request's own code, both from
+making one thing of two.** `cmd_user` called `provision_library`, so every
+render shelled out to `pip` — which in a parallel test run replaced `sd_db`
+in site-packages underneath a shard importing it, and surfaced as
+`ModuleNotFoundError: No module named 'sd_db.testing.home'` in a file that
+touches neither. Rendering skills must not rebuild the virtualenv it renders
+from; `--provision-library` is the only door, and `make setup` is its one
+caller. Then `--provision-library`'s exit code read its own prose —
+`"installed" in report` — and `"sd_db not installed, trials unavailable"`
+contains it, so the one machine the exit code exists for returned zero. The
+function returns a flag and a line now, and the line is only prose.
+
+Three tests changed their premise rather than their expectation.
+`test_sd_restore.WithoutTheLibrary` held by stripping `local-sd-db` from
+`sys.path`, which stopped meaning anything once the installer put a built
+copy in site-packages; it blocks the import by name now, with a test that
+the block itself works, because both refusals it asserts can be raised for
+other reasons. `test_skill_frontmatter` and `test_sd_skill_adopt` read both
+roots: `paths.json` decides what installs and decides nothing about what is
+well formed, and a `contrib/` skill is one command from a reader's machine.
+`test_selector_contract_drift` scans `contrib/` for the same reason.
+
+**Verified.** `make check`, exit 0: 1267 tests, installer coverage
+`687 statements, 0 missed, 256 branches, 0 partial, 100%`, ruff and mypy
+clean, `sd-docs-lint: clean`.
+
 ## Slice 2, PR 6 — the registry reader, the tiered path, the protection
 
 **Touches:** `bin/sd_lib.py`, `skills/sd-ship/`, the provider registry

@@ -209,7 +209,11 @@ class InstalledTreeTests(unittest.TestCase):
     """The design's own check for step 5b, run against this repository's tree."""
 
     def test_every_shipped_skill_passes_the_lint(self) -> None:
+        # Both roots. Requirement 10 decides what *installs*; it decides
+        # nothing about what is well formed, and `sd skill try` puts any
+        # `contrib/` skill on a reader's machine in one command.
         paths = adopt.skill_files(REPO_ROOT / "skills")
+        paths += adopt.skill_files(REPO_ROOT / "contrib")
         self.assertGreater(len(paths), 60, "the skills tree enumerated to almost nothing")
         offenders = []
         for path in paths:
@@ -218,7 +222,11 @@ class InstalledTreeTests(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_the_shared_directory_is_not_read_as_a_surface(self) -> None:
-        names = {p.parent.name for p in adopt.skill_files(REPO_ROOT / "skills")}
+        names = {
+            p.parent.name
+            for root in ("skills", "contrib")
+            for p in adopt.skill_files(REPO_ROOT / root)
+        }
         self.assertNotIn(adopt.SHARED_DIR, names)
 
 

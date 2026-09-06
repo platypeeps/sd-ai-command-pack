@@ -242,6 +242,16 @@ class RenderTests(unittest.TestCase):
             "---\nname: sd-probe\n---\n\nprobe surface\n", encoding="utf-8"
         )
         self.assertEqual(sd_install.discover_agents(checkout), [])
+        # A path names it, because criterion 24 says the installer renders
+        # what a path names and refuses a checkout that names nothing.
+        (checkout / "skills" / sd_install.PATHS_FILE).write_text(
+            json.dumps({"paths": {
+                "research": {"summary": "sources to brief", "skills": ["sd-probe"]},
+                "development": {"summary": "plan to ship", "skills": []},
+                "act": {"summary": "brief to send", "skills": []},
+            }}),
+            encoding="utf-8",
+        )
         context = sd_install.Context(
             checkout=checkout,
             home=self.home,

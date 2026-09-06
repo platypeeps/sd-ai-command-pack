@@ -78,6 +78,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import sd_lib  # noqa: E402
 import sd_restore  # noqa: E402
+import sd_skill  # noqa: E402
 import sd_sweep  # noqa: E402
 
 MANIFEST_NAME = "sd-plugin.json"
@@ -2925,6 +2926,22 @@ def build_parser() -> argparse.ArgumentParser:
     sweeper.add_argument("--json", action="store_true", help="machine-readable")
     sweeper.set_defaults(handler=sweep)
 
+    skill = groups.add_parser(
+        "skill",
+        help="the trial that decides whether a contrib/ skill stays")
+    trying = skill.add_subparsers(dest="verb", required=True)
+
+    trier = trying.add_parser(
+        "try",
+        help=f"install a contrib/ skill for {sd_skill.TRIAL_DAYS} days and write its trial row")
+    trier.add_argument("name", help="a directory under contrib/")
+    trier.set_defaults(handler=sd_skill.skill_try)
+
+    skill_lister = trying.add_parser(
+        "list",
+        help="what each path names, what is in contrib/, and what is on trial")
+    skill_lister.set_defaults(handler=sd_skill.skill_list)
+
     restore = groups.add_parser(
         "restore",
         help="settle a restored database before dispatch resumes")
@@ -2959,6 +2976,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"sd: {error}", file=sys.stderr)
         return 1
     except sd_restore.RestoreRefusal as refusal:
+        print(f"sd: {refusal}", file=sys.stderr)
+        return 1
+    except sd_skill.SkillRefusal as refusal:
         print(f"sd: {refusal}", file=sys.stderr)
         return 1
     except UsageError as error:

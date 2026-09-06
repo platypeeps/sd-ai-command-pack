@@ -3391,3 +3391,62 @@ from a number the operator types.
     the existing bare marker, a bullet marker, and prose quoting it, the last
     of which fails against the old pattern. The other three findings from that
     round stay unconfirmed.
+  - C-177, blocking, found on starting PR 5: PR 5 cannot verify itself where
+    it is scheduled. Criteria 24 and 25 are both asserted "against a temporary
+    database", and `python3 -c "import sd_db"` in this checkout answers
+    `ModuleNotFoundError`. B's settled open question 3 puts the provisioning in
+    this pack's installer — "One installer, one place that knows the path.
+    Item A's criterion 13 carries it" — and C-124 settled that step onto PR 7,
+    which lands after PR 5 and PR 6. The ordering section's stated
+    prerequisite, that PR 5 "lands with B's slice 1 library", is satisfied in
+    `system` and says nothing about this pack being able to reach it. Resolved
+    on the operator's word: the `sd_db` step moves from PR 7 to PR 5, the
+    first pull request that needs it. PR 7 keeps the rest of criterion 13. The
+    alternative considered and rejected was a test-time install in
+    `make setup` alongside the installer's own, which would have made a second
+    file know the path to the `system` checkout — the thing open question 3
+    settled against. `make setup` does call it, through
+    `bin/sd_install.py --provision-library`, so the path stays in one file.
+  - C-178, material, found in the same run: the library had trial writes and
+    no trial reads. `start_trial` and `record_skill_use` existed; criterion 24
+    renders "the union of the paths plus **active trials**" and criterion 25
+    removes an expired trial "with no `skill_use` rows", and neither could be
+    read. B's plan names `trial` once, as a table in a list. Four functions
+    land in `system` ahead of this pull request, under `Needed-by:` this item:
+    `trials`, `active_trials`, `skill_use_since` and `end_trial`. Recorded
+    because a criterion that reads a table nobody wrote a reader for looks
+    scheduled and is not, and the gap was invisible from either item's page —
+    B's, which owns the table, and this one, which owns the reader's only
+    caller.
+  - C-179, material, found by a boundary test on C-178's own reader:
+    `record_skill_use` always stamped `now()`, and `now()` has one-second
+    resolution. A use written in the same second a trial began cannot be told
+    from one written after it, which made "did this trial earn any use"
+    unanswerable at the boundary. It also made criterion 26's nightly parse of
+    `~/.codex/sessions` wrong in a larger way: that parse reads sessions that
+    ran while it was asleep, and stamping them with the parse time would file a
+    week of Codex use under the morning the parse first ran. The write takes an
+    explicit `timestamp` now. Recorded because the test that found it was
+    written for criterion 25 and the defect it found belongs to criterion 26.
+  - C-180, material, the shape of the split, on the operator's word of
+    2026-09-06. Criterion 24 requires every directory under `skills/` to be on
+    a path, so `contrib/` fills by moving skills out rather than by leaving
+    them behind. Eighty-one directories, and the question the criterion cannot
+    answer is how tight the three paths are. Chosen: tight — thirty-two
+    installed across research, development and act, forty-nine moved to
+    `contrib/`, including all six `sd-rust-*`, which `prd.md:50-55` records as
+    living almost entirely on Codex. Requirement 10's own reasoning is the
+    warrant: usage counts cannot decide, cohesion can, and a path that carries
+    a skill because it is adjacent is not a pipeline. Nothing is lost —
+    `sd skill try` returns any of the forty-nine for thirty days, and use
+    decides from there, which is the mechanism this requirement exists to
+    start.
+  - C-181, material, found while wiring the installer: retiring a skill is two
+    edits now and three tests assumed it was one. `ReconciliationTests` removed
+    a directory from a fixture checkout and expected the render to disappear;
+    with the paths file the run refuses instead, naming a path that points at
+    nothing. The refusal is criterion 24's second half working, so the tests
+    were completed rather than relaxed — they now remove the directory *and*
+    stop the path naming it. Recorded because "the test broke" and "the test
+    was describing the old contract" look identical from the failure line, and
+    only one of them is a reason to change the code.

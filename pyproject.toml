@@ -55,3 +55,13 @@ scripts_are_modules = true
 [[tool.mypy.overrides]]
 module = ["markdown"]
 ignore_missing_imports = true
+
+# `sd_db` is the one database's library. It is not vendored here and not on
+# PyPI: `make setup` builds a copy from the `system` checkout into this
+# virtualenv, so whether mypy can see it depends on whether that ran. Declared
+# here for the same reason `markdown` is -- an inline ignore in bin/sd_restore.py
+# was correct on a machine without the library and, with `warn_unused_ignores`
+# above, a lint failure on every machine with it.
+[[tool.mypy.overrides]]
+module = ["sd_db", "sd_db.*"]
+ignore_missing_imports = true

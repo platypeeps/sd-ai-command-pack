@@ -60,6 +60,30 @@ class InstallerHarness(unittest.TestCase):
         # the same directory and fail.
         self.home = Path(self._scratch.name).resolve()
 
+    def write_paths(self, checkout: Path, *names: str) -> Path:
+        """The paths file a real checkout has, for a checkout a test built.
+
+        The installer renders what a path names, so a fixture checkout without
+        this file is not a smaller version of the real one -- it is a checkout
+        the installer is right to refuse. Three paths because criterion 24 says
+        three; the two empty ones are as legitimate as the full one.
+        """
+        path = checkout / "skills" / sd_install.PATHS_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "paths": {
+                        "research": {"summary": "sources to brief", "skills": list(names)},
+                        "development": {"summary": "plan to ship", "skills": []},
+                        "act": {"summary": "brief to send", "skills": []},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        return path
+
     def run_cli(self, *args: str) -> tuple[int, str]:
         out = io.StringIO()
         rc = sd_install.main([*args, "--home", str(self.home)], out=out)
@@ -233,6 +257,7 @@ class ReconciliationTests(InstallerHarness):
             (folder / sd_install.SKILL_FILE).write_text(
                 f"---\nname: {name}\n---\n\nprobe surface\n", encoding="utf-8"
             )
+        self.write_paths(checkout, *names)
         return checkout
 
     def context(self, checkout: Path) -> "sd_install.Context":
@@ -266,6 +291,11 @@ class ReconciliationTests(InstallerHarness):
         subprocess.run(
             ["rm", "-rf", str(checkout / "skills" / "sd-retired")], check=True
         )
+        # Retiring a skill is two edits now, not one: the directory goes and
+        # the path stops naming it. A path naming a directory that is not
+        # there is its own refusal, which is what criterion 24's second half
+        # is for, so the test performs the whole retirement.
+        self.write_paths(checkout, "sd-kept")
         self.install(checkout)
         for target in targets:
             self.assertFalse(target.exists(), f"{target} survived the removal")
@@ -280,6 +310,11 @@ class ReconciliationTests(InstallerHarness):
         subprocess.run(
             ["rm", "-rf", str(checkout / "skills" / "sd-retired")], check=True
         )
+        # Retiring a skill is two edits now, not one: the directory goes and
+        # the path stops naming it. A path naming a directory that is not
+        # there is its own refusal, which is what criterion 24's second half
+        # is for, so the test performs the whole retirement.
+        self.write_paths(checkout, "sd-kept")
         output = self.install(checkout)
         self.assertTrue(edited.exists(), "an edited file was deleted")
         self.assertIn("modified since it was installed", output)
@@ -297,6 +332,11 @@ class ReconciliationTests(InstallerHarness):
         subprocess.run(
             ["rm", "-rf", str(checkout / "skills" / "sd-retired")], check=True
         )
+        # Retiring a skill is two edits now, not one: the directory goes and
+        # the path stops naming it. A path naming a directory that is not
+        # there is its own refusal, which is what criterion 24's second half
+        # is for, so the test performs the whole retirement.
+        self.write_paths(checkout, "sd-kept")
         self.install(checkout)
         self.assertTrue(
             orphan.exists(),
@@ -961,6 +1001,10 @@ class DiscoveryTests(InstallerHarness):
         (skills / "not-sd").mkdir()
         (skills / "not-sd" / sd_install.SKILL_FILE).write_text("x", encoding="utf-8")
         (skills / "loose.md").write_text("x", encoding="utf-8")
+        # Named by a path and still not a surface: the path says install it,
+        # the directory has no SKILL.md to install. `missing_skills` is what
+        # reports that; the renderer simply has nothing to render.
+        self.write_paths(self.home, "sd-empty")
         self.assertEqual(sd_install.discover_surfaces(self.home), [])
 
     def test_user_refuses_a_checkout_with_no_surfaces(self):
@@ -1010,6 +1054,7 @@ class StatusTests(InstallerHarness):
         (folder / sd_install.SKILL_FILE).write_text(
             "---\nname: sd-probe\n---\n\nprobe\n", encoding="utf-8"
         )
+        self.write_paths(checkout, "sd-probe")
         for argv in (
             ("init", "-q"),
             ("config", "user.email", "t@example.invalid"),
@@ -1482,5 +1527,121 @@ class RemainingBranchTests(InstallerHarness):
         self.assertIn("not main", out.getvalue())
 
 
+class PathsTests(InstallerHarness):
+    """Criterion 24: a path names what installs, and nothing else does.
+
+    The two directions are separate tests on purpose. "On disk and on no
+    path" is the drift a new skill directory creates; "named and not on
+    disk" is the drift a deletion creates. A check that asked only one of
+    them would pass while the other was true.
+    """
+
+    def context(self, checkout: Path) -> "sd_install.Context":
+        return sd_install.Context(
+            checkout=checkout,
+            home=self.home,
+            environ={
+                "XDG_STATE_HOME": str(self.home / ".local" / "state"),
+                "XDG_CONFIG_HOME": str(self.home / ".config"),
+                # No system checkout, so the library is absent and the trials
+                # are unavailable. That is the machine most of these tests are
+                # describing, and the installer still has to render the paths.
+                sd_install.SYSTEM_CHECKOUT_ENV: str(self.home / "absent"),
+            },
+        )
+
+    def make_checkout(self, *names: str) -> Path:
+        checkout = self.home / "checkout"
+        for name in names:
+            folder = checkout / "skills" / name
+            folder.mkdir(parents=True)
+            (folder / sd_install.SKILL_FILE).write_text(
+                f"---\nname: {name}\n---\n\nprobe surface\n", encoding="utf-8"
+            )
+        self.write_paths(checkout, *names)
+        return checkout
+
+    def test_the_real_checkout_has_three_paths_covering_every_directory(self):
+        """The assertion criterion 24 makes about this repository, not a fixture."""
+        self.assertEqual(len(sd_install.read_paths(REPO_ROOT)), 3)
+        self.assertEqual(sd_install.unnamed_directories(REPO_ROOT), [])
+        self.assertEqual(sd_install.missing_skills(REPO_ROOT), [])
+
+    def test_an_unlisted_skill_directory_refuses_the_install(self):
+        """Criterion 24's own test: add a directory no path names, see it fail."""
+        checkout = self.make_checkout("sd-kept")
+        stray = checkout / "skills" / "sd-stray"
+        stray.mkdir()
+        (stray / sd_install.SKILL_FILE).write_text("---\nname: sd-stray\n---\n", "utf-8")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context(checkout), out), 1)
+        self.assertIn("sd-stray", out.getvalue())
+        self.assertIn("on no path", out.getvalue())
+
+    def test_a_path_naming_a_directory_that_is_gone_refuses_the_install(self):
+        checkout = self.make_checkout("sd-kept")
+        self.write_paths(checkout, "sd-kept", "sd-ghost")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context(checkout), out), 1)
+        self.assertIn("sd-ghost", out.getvalue())
+
+    def test_a_missing_paths_file_refuses_rather_than_falling_back_to_disk(self):
+        checkout = self.make_checkout("sd-kept")
+        sd_install.paths_path(checkout).unlink()
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context(checkout), out), 1)
+        self.assertIn("requirement 10", out.getvalue())
+
+    def test_a_file_that_is_not_json_is_refused_with_the_parser_error(self):
+        """Truncated, half-merged, or edited by hand and left broken.
+
+        The refusal names the file and quotes what the parser said, because
+        "requirement 10 says a path names what installs" is the right message
+        for an absent file and the wrong one for a file that is right there
+        with a comma missing.
+        """
+        checkout = self.make_checkout("sd-kept")
+        sd_install.paths_path(checkout).write_text('{"paths": {', encoding="utf-8")
+        with self.assertRaises(sd_install.PathsRefused) as caught:
+            sd_install.read_paths(checkout)
+        self.assertIn("is not readable JSON", str(caught.exception))
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context(checkout), out), 1)
+
+    def test_a_file_naming_two_paths_is_refused_naming_the_count(self):
+        checkout = self.make_checkout("sd-kept")
+        sd_install.paths_path(checkout).write_text(
+            json.dumps({"paths": {"research": {"skills": []}, "act": {"skills": []}}}),
+            encoding="utf-8",
+        )
+        with self.assertRaises(sd_install.PathsRefused) as caught:
+            sd_install.read_paths(checkout)
+        self.assertIn("names 2 paths", str(caught.exception))
+
+    def test_contrib_is_not_rendered_without_a_trial_row(self):
+        """Criterion 24's last clause, both halves in one test."""
+        checkout = self.make_checkout("sd-kept")
+        contrib = checkout / sd_install.CONTRIB_DIR / "sd-trialled"
+        contrib.mkdir(parents=True)
+        (contrib / sd_install.SKILL_FILE).write_text(
+            "---\nname: sd-trialled\n---\n", encoding="utf-8"
+        )
+        without = [s.name for s in sd_install.discover_surfaces(checkout)]
+        self.assertEqual(without, ["sd-kept"])
+        withal = [s.name for s in sd_install.discover_surfaces(checkout, ["sd-trialled"])]
+        self.assertEqual(withal, ["sd-kept", "sd-trialled"])
+
+    def test_a_skill_in_both_places_renders_from_skills(self):
+        """A stale trial row must not keep rendering a promoted skill's old copy."""
+        checkout = self.make_checkout("sd-kept")
+        contrib = checkout / sd_install.CONTRIB_DIR / "sd-kept"
+        contrib.mkdir(parents=True)
+        (contrib / sd_install.SKILL_FILE).write_text("stale copy\n", encoding="utf-8")
+        surfaces = sd_install.discover_surfaces(checkout, ["sd-kept"])
+        self.assertEqual(len(surfaces), 1)
+        self.assertEqual(surfaces[0].skill.parent.parent.name, "skills")
+
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -32,6 +32,7 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -220,19 +221,108 @@ def shared_references(checkout: Path) -> dict[str, Path]:
     return {path.name: path for path in sorted(root.iterdir()) if path.is_file()}
 
 
-def discover_surfaces(checkout: Path) -> list[Surface]:
-    """Enumerate `skills/sd-*/SKILL.md` from disk, never from a list.
+PATHS_FILE = "paths.json"
+CONTRIB_DIR = "contrib"
 
-    A written list is the thing that goes stale when a surface is added, and
-    the whole point of the rebuild is that inventories are derived.
+
+class PathsRefused(Exception):
+    """The paths file is missing, unreadable, or does not name three paths."""
+
+
+def paths_path(checkout: Path) -> Path:
+    return checkout / "skills" / PATHS_FILE
+
+
+def read_paths(checkout: Path) -> dict[str, dict]:
+    """The three paths and the skills on each.
+
+    Refuses rather than defaulting to disk. The whole point of requirement 10
+    is that a skill installs because a path names it; an installer that fell
+    back to enumerating `skills/` when the file was missing would render the
+    old set and report success, which is the one failure this file exists to
+    make impossible.
+    """
+    path = paths_path(checkout)
+    if not path.is_file():
+        raise PathsRefused(f"no {path}; requirement 10 says a path names what installs")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as problem:
+        raise PathsRefused(f"{path} is not readable JSON: {problem}") from problem
+    paths = data.get("paths")
+    if not isinstance(paths, dict) or len(paths) != 3:
+        found = len(paths) if isinstance(paths, dict) else 0
+        raise PathsRefused(f"{path} names {found} paths; criterion 24 wants three")
+    return paths
+
+
+def named_skills(checkout: Path) -> set[str]:
+    """Every skill any path names, as one set. A skill may be on two paths."""
+    return {
+        skill
+        for path in read_paths(checkout).values()
+        for skill in path.get("skills", [])
+    }
+
+
+def unnamed_directories(checkout: Path) -> list[str]:
+    """Directories under `skills/` that no path names. Criterion 24's check.
+
+    The direction matters. This answers "what is on disk that nothing names",
+    which is the drift a new skill directory creates; the reverse question,
+    "what is named that is not on disk", is answered by `missing_skills`. A
+    check that asked only one of them would pass while the other was true.
     """
     root = checkout / "skills"
     if not root.is_dir():
         return []
+    named = named_skills(checkout)
+    return sorted(
+        entry.name
+        for entry in root.iterdir()
+        if entry.is_dir() and entry.name.startswith("sd-") and entry.name not in named
+    )
+
+
+def missing_skills(checkout: Path) -> list[str]:
+    """Skills a path names that are not under `skills/` or `contrib/`."""
+    root = checkout / "skills"
+    contrib = checkout / CONTRIB_DIR
+    return sorted(
+        name
+        for name in named_skills(checkout)
+        if not (root / name / SKILL_FILE).is_file()
+        and not (contrib / name / SKILL_FILE).is_file()
+    )
+
+
+def discover_surfaces(
+    checkout: Path, trials: Iterable[str] | None = None
+) -> list[Surface]:
+    """The union of what the paths name and what is on trial.
+
+    Requirement 10: a skill installs because a path names it, or because it
+    was used. `trials` is the second half -- the skills with an unexpired
+    trial row, read from the library by the caller, because this function
+    knows about files and the database is not one of its concerns.
+
+    A trial's skill lives in `contrib/`, so both directories are searched and
+    `skills/` wins when a name is in both. The order is not arbitrary: a
+    promotion moves the directory from `contrib/` to `skills/` and a stale
+    trial row for the promoted skill would otherwise keep rendering the copy
+    that is no longer the one under review.
+    """
+    root = checkout / "skills"
+    if not root.is_dir():
+        return []
+    wanted = named_skills(checkout) | set(trials or ())
     shared = shared_references(checkout)
     surfaces: list[Surface] = []
-    for entry in sorted(root.iterdir()):
-        if not entry.is_dir() or not entry.name.startswith("sd-"):
+    for name in sorted(wanted):
+        entry = root / name
+        if not entry.is_dir():
+            entry = checkout / CONTRIB_DIR / name
+        if not entry.is_dir():
             continue
         skill = entry / SKILL_FILE
         if not skill.is_file():
@@ -247,11 +337,11 @@ def discover_surfaces(checkout: Path) -> list[Surface]:
             if path.is_file() and path != skill
         ]
         local = {extra.relative for extra in extras}
-        for name in sorted(set(CITATION.findall(skill.read_text(encoding="utf-8")))):
-            relative = f"references/{name}"
-            if relative in local or name not in shared:
+        for cited in sorted(set(CITATION.findall(skill.read_text(encoding="utf-8")))):
+            relative = f"references/{cited}"
+            if relative in local or cited not in shared:
                 continue
-            extras.append(Extra(relative, shared[name]))
+            extras.append(Extra(relative, shared[cited]))
         surfaces.append(Surface(entry.name, skill, sorted(extras, key=lambda e: e.relative)))
     return surfaces
 
@@ -831,6 +921,122 @@ def path_is_tracked(repo: Path, relative: str) -> bool:
     return done.returncode == 0
 
 
+# ------------------------------------------------------------- the library
+
+# One installer, one place that knows the path. Item B's settled open question
+# 3 puts `sd_db` into this pack's virtualenv from the system checkout, as a
+# built copy and never editable, so that a branch switch in that checkout
+# cannot change what this pack imports. This is that place; nothing else in
+# the pack may name the path.
+SYSTEM_CHECKOUT_ENV = "SD_SYSTEM_CHECKOUT"
+SYSTEM_CHECKOUT_DEFAULT = "~/repos/system"
+LIBRARY_RELATIVE = Path("local-sd-db")
+VENV_RELATIVE = Path(".venv") / "bin" / "python"
+
+
+def system_checkout(environ: dict[str, str]) -> Path:
+    """Where the library's source lives. Read from the environment, expanded.
+
+    Expanded whether it came from the environment or the default: a quoted
+    `SD_SYSTEM_CHECKOUT="~/repos/system"` arrives with the tilde intact, and
+    an unexpanded one names a directory that does not exist, which would be
+    reported as "the library is not installable here" rather than as a bad
+    setting.
+    """
+    return Path(os.path.expanduser(environ.get(SYSTEM_CHECKOUT_ENV) or SYSTEM_CHECKOUT_DEFAULT))
+
+
+def library_source(environ: dict[str, str]) -> Path:
+    return system_checkout(environ) / LIBRARY_RELATIVE
+
+
+def provision_library(ctx: Context, out) -> tuple[bool, str]:
+    """Install `sd_db` into this pack's virtualenv, as a copy.
+
+    Returns whether it worked and a one-line report, rather than raising. A
+    machine with no system checkout still gets its skills: the paths render
+    without the library, and only the trials are unavailable, which the caller
+    says out loud. Refusing the whole install because a second repository is
+    absent would make the pack undeployable anywhere the operator has not
+    cloned everything.
+
+    The flag is separate from the line because the line is prose and prose is
+    not a status. The caller read one for a while -- `"installed" in report`
+    -- and `"sd_db not installed, trials unavailable"` contains it, so the one
+    machine the exit code exists for, the one with no library, exited zero.
+    """
+    del out
+    python = ctx.checkout / VENV_RELATIVE
+    source = library_source(ctx.environ)
+    if not python.is_file():
+        return False, f"no virtualenv at {python}; run `make setup` for sd_db"
+    if not (source / "pyproject.toml").is_file():
+        return False, f"no library at {source}; sd_db is absent, trials unavailable"
+    if ctx.dry_run:
+        return True, f"would install sd_db from {source}"
+    try:
+        done = subprocess.run(  # nosec B603 - fixed argv, no shell
+            [str(python), "-m", "pip", "install", "--quiet", "--upgrade", str(source)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=300,
+        )
+    except (OSError, subprocess.SubprocessError) as problem:
+        return False, f"sd_db install failed: {problem}"
+    if done.returncode != 0:
+        last = done.stderr.strip().splitlines()[-1:] or ["no output"]
+        return False, f"sd_db install failed: {last[0]}"
+    return True, f"sd_db installed from {source}"
+
+
+def open_library(ctx: Context):
+    """The pack's connection to the one database, or None with a reason.
+
+    Imported here rather than at module scope. The installer is the thing that
+    provisions `sd_db`, so it has to run on a machine where the import fails,
+    and a top-level import would make the installer unable to fix the problem
+    it exists to fix.
+    """
+    try:
+        import sd_db  # noqa: PLC0415 - see the docstring
+    except ImportError as problem:
+        return None, f"sd_db not importable ({problem}); trials unavailable"
+    path = sd_db.default_path(ctx.home)
+    if not path.exists():
+        return None, f"no database at {path}; run `sd-db.sh init` for trials"
+    try:
+        return sd_db.connect(path), ""
+    except Exception as problem:  # pragma: no cover - a corrupt file
+        return None, f"sd_db could not open {path}: {problem}"
+
+
+def expire_trials(connection, out) -> list[str]:
+    """Remove every expired trial that earned no use, and say which.
+
+    Criterion 25's second half. The window is the trial's own `started`, not
+    all of history: a use from before the trial began is not evidence the
+    trial earned anything, and counting it would keep a skill installed on the
+    strength of the very usage that made somebody trial it in the first place.
+    """
+    import sd_db  # noqa: PLC0415 - only reached when the import already worked
+
+    removed: list[str] = []
+    now = sd_db.writes.now()
+    for row in sd_db.trials(connection):
+        if row["expires"] > now:
+            continue
+        if sd_db.skill_use_since(connection, row["skill"], row["started"]):
+            continue
+        sd_db.end_trial(connection, row["skill"])
+        removed.append(row["skill"])
+        print(
+            f"removed {row['skill']}: trial expired {row['expires'][:10]} with no use",
+            file=out,
+        )
+    return removed
+
+
 # ------------------------------------------------------------------- commands
 
 
@@ -875,8 +1081,61 @@ class Context:
 
 
 def cmd_user(ctx: Context, out) -> int:
-    """Render every surface, converge the machine, write the receipt."""
-    surfaces = discover_surfaces(ctx.checkout)
+    """Render what the paths name plus what is on trial, and converge.
+
+    This reads the library; it does not install it. Provisioning is
+    `--provision-library`, which `make setup` runs, and the two are separate
+    on purpose: an ordinary skill install must not rebuild the virtualenv it
+    is running from. Made them one call first, and the suite found why -- the
+    render happens in every fixture and in parallel, so a `pip install` here
+    replaced `sd_db` in site-packages underneath whichever other shard was
+    importing it, which fails as `No module named 'sd_db.testing.home'` in a
+    test that has nothing to do with either. A machine with no library is
+    told so and gets its skills; `make setup` is the remedy, and the path to
+    the source is still spelled in this file only.
+    """
+    connection, reason = open_library(ctx)
+    if reason:
+        print(f"warning: {reason}", file=out)
+    trials: list[str] = []
+    if connection is not None:
+        expire_trials(connection, out)
+        import sd_db  # noqa: PLC0415 - only reached when the import worked
+
+        trials = [row["skill"] for row in sd_db.active_trials(connection)]
+
+    try:
+        surfaces = discover_surfaces(ctx.checkout, trials)
+        unnamed = unnamed_directories(ctx.checkout)
+        absent = missing_skills(ctx.checkout)
+    except PathsRefused as problem:
+        # One boundary for all three, because they read the same file. Catching
+        # each separately would report the same missing file three times, and a
+        # checkout with no `skills/` at all reaches the surfaces refusal below
+        # without ever needing the paths.
+        if (ctx.checkout / "skills").is_dir():
+            print(f"error: {problem}", file=out)
+            return 1
+        surfaces, unnamed, absent = [], [], []
+    if unnamed:
+        # Refused, not warned. A directory under `skills/` that no path names
+        # is a skill somebody added without deciding it belongs on a path, and
+        # rendering the rest would install a set nobody chose while reporting
+        # success. Criterion 24 asserts this failure from `make check`.
+        print(
+            "error: under skills/ and on no path: "
+            + ", ".join(unnamed)
+            + f" -- add each to {PATHS_FILE} or move it to {CONTRIB_DIR}/",
+            file=out,
+        )
+        return 1
+    if absent:
+        print(
+            f"error: {PATHS_FILE} names skills that are in neither skills/ nor "
+            f"{CONTRIB_DIR}/: " + ", ".join(absent),
+            file=out,
+        )
+        return 1
     if not surfaces:
         print(
             f"error: no skills/sd-*/{SKILL_FILE} under {ctx.checkout}; "
@@ -886,13 +1145,19 @@ def cmd_user(ctx: Context, out) -> int:
         return 1
 
     # Reported, not fatal, on the same reasoning `sd-dashboard` uses for a
-    # tracker it cannot reach: the other seventy skills install correctly, and
-    # refusing all of them because one cites a file nobody shipped would make
-    # the installer withhold what it can still do. CI keeps it at zero --
-    # `tests/test_sd_install.py` fails on any citation this cannot resolve --
-    # so the warning is for a checkout in the middle of an edit, not a licence.
-    for problem in missing_citations(surfaces):
-        print(f"warning: {problem} is cited but not shipped", file=out)
+    # tracker it cannot reach: every other skill on the paths installs
+    # correctly, and refusing all of them because one cites a file nobody
+    # shipped would make the installer withhold what it can still do. CI keeps
+    # it at zero -- `tests/test_sd_install.py` fails on any citation this
+    # cannot resolve -- so the warning is for a checkout in the middle of an
+    # edit, not a licence.
+    #
+    # `uncited` and not `problem`: the paths refusal above binds `problem` in
+    # an `except` clause, and Python unbinds it at the end of that clause, so
+    # reusing the name here is a read of a deleted variable on every path that
+    # took the refusal.
+    for uncited in missing_citations(surfaces):
+        print(f"warning: {uncited} is cited but not shipped", file=out)
 
     agents = discover_agents(ctx.checkout)
     written = render(surfaces, ctx.homes, dry_run=ctx.dry_run)
@@ -1145,12 +1410,15 @@ usage: install.py (--user | --status | --pull | --uninstall | --adopt-legacy
   --uninstall      remove exactly what the receipt records having written
   --adopt-legacy   delete the old fleet installer's successor-less renders (M1)
   --repo [PATH]    write the marked block into PATH/CLAUDE.local.md (default: .)
+  --provision-library
+                   install sd_db into this pack's virtualenv and stop
 
   --dry-run        print what would happen; write nothing
   --home DIR       treat DIR as the home directory (tests and scratch installs)
 """
 
-MODES = ("user", "status", "pull", "uninstall", "adopt-legacy", "repo")
+MODES = ("user", "status", "pull", "uninstall", "adopt-legacy", "repo",
+         "provision-library")
 
 
 def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> int:
@@ -1211,6 +1479,14 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     checkout = Path(__file__).resolve().parent.parent
     ctx = Context(checkout=checkout, home=home, environ=environ, dry_run=dry_run)
 
+    if mode == "provision-library":
+        # `make setup` calls this so the test suite can import `sd_db` without
+        # a second file learning the path to the system checkout. It is the
+        # only door: `--user` reads the library and never installs it, because
+        # rendering skills must not rebuild the virtualenv it renders from.
+        installed, report = provision_library(ctx, out)
+        print(report, file=out)
+        return 0 if installed else 1
     if mode == "user":
         return cmd_user(ctx, out)
     if mode == "status":

@@ -22,9 +22,11 @@ Two verbs clear it:
   dispatch resumes.
 
 `sd_db` is imported inside the handlers, not at module import. The library
-reaches this virtualenv through the pack's installer, which is item A's
-criterion 13 and lands after this; until then `sd` must keep working for
-every other verb and refuse this one with the reason.
+reaches this virtualenv through the pack's installer -- item A's criterion 13,
+whose `sd_db` step landed with PR 5 as `sd-install --provision-library`, which
+`make setup` runs. Before that has run, and on any machine whose `system`
+checkout has moved, `sd` must keep working for every other verb and refuse
+this one with the reason.
 """
 
 from __future__ import annotations
@@ -52,11 +54,14 @@ class RestoreRefusal(Exception):
 def _library():
     """Import `sd_db`, or refuse with the remedy rather than a traceback."""
     try:
-        # Not resolvable at type-check time by design: `sd_db` is installed
+        # May or may not be resolvable at type-check time: `sd_db` is built
         # into this virtualenv by the pack's installer, from the `system`
-        # checkout at its tag, and this repository does not vendor it. The
-        # ImportError below is the supported state, not an edge case.
-        import sd_db  # type: ignore[import-not-found]
+        # checkout, and this repository does not vendor it. `pyproject.toml`
+        # carries the override rather than an inline ignore here, which
+        # `warn_unused_ignores` turns into a failure on any machine that has
+        # run `make setup`. The ImportError below is a supported state, not
+        # an edge case.
+        import sd_db
     except ImportError:
         raise RestoreRefusal(NOT_INSTALLED) from None
     return sd_db

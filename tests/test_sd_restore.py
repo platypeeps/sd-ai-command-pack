@@ -1,11 +1,19 @@
 """`sd restore` — the verb group a restored database is settled through.
 
 The library it reads, `sd_db`, reaches this virtualenv through the pack's
-installer, which lands after this. So two things are tested here and they are
-different things: what the verbs do **when the library is absent**, which is
-the state of every machine until the installer ships, and what they do
-against a real database, which is exercised with `sd_db` put on `sys.path`
+installer. So two things are tested here and they are different things: what
+the verbs do **when the library is absent**, which is every machine before
+`make setup` and any machine whose `system` checkout has moved, and what they
+do against a real database, which is exercised with `sd_db` put on `sys.path`
 from the `system` checkout when that checkout is present beside this one.
+
+Absence is now simulated rather than found. Before PR 5 the first class held
+by stripping `local-sd-db` from `sys.path`, because nothing else could supply
+the module; the installer provisions a built copy into this virtualenv's
+site-packages, so that stripping stopped meaning anything and the refusal
+under test went untested. `NoLibrary` on `sys.meta_path` refuses the import
+by name, which is the state the refusal exists for and does not depend on
+where the module happens to be installed today.
 
 Where the sibling checkout is absent that second class skips, with the reason
 stated -- the only skip in this file, and one that says what it could not
@@ -32,9 +40,9 @@ if str(REPO_ROOT / "bin") not in sys.path:
 
 import sd_restore  # noqa: E402
 
-#: The `system` checkout, if it sits beside this one. `sd_db` is not
-#: installed here yet -- that is item A's criterion 13 -- so the tests that
-#: need it import from the checkout rather than pretending it is installed.
+#: The `system` checkout, if it sits beside this one. These tests import the
+#: library from the checkout rather than relying on the installer having run,
+#: so the file states what it needs instead of inheriting a provisioned venv.
 SIBLING = REPO_ROOT.parent.parent / "system" / "local-sd-db"
 LIBRARY = SIBLING if (SIBLING / "sd_db" / "__init__.py").exists() else None
 
@@ -47,19 +55,42 @@ def run(handler, **arguments):
     return status, out.getvalue(), err.getvalue()
 
 
+class NoLibrary:
+    """A `sys.meta_path` finder that refuses `sd_db` wherever it is installed."""
+
+    def find_module(self, name, path=None):  # pragma: no cover - legacy hook
+        return None
+
+    def find_spec(self, name, path=None, target=None):
+        if name == "sd_db" or name.startswith("sd_db."):
+            raise ImportError("sd_db is not installed (blocked by the test)")
+        return None
+
+
 class WithoutTheLibrary(unittest.TestCase):
-    """Every machine, until the installer provisions `sd_db`."""
+    """Every machine before `make setup`, and any whose checkout has moved."""
 
     def setUp(self) -> None:
         self.saved = dict(sys.modules)
         sys.modules.pop("sd_db", None)
-        self.path = list(sys.path)
-        sys.path = [entry for entry in sys.path if "local-sd-db" not in entry]
+        self.blocker = NoLibrary()
+        sys.meta_path.insert(0, self.blocker)
 
     def tearDown(self) -> None:
-        sys.path = self.path
+        sys.meta_path.remove(self.blocker)
         sys.modules.clear()
         sys.modules.update(self.saved)
+
+    def test_the_block_is_what_it_claims_to_be(self) -> None:
+        """Without this, the two refusals below can pass for the wrong reason.
+
+        Both assert a refusal, and `sd restore` refuses for several reasons --
+        no database, no unresolved row. If the block ever stopped working the
+        library would import, a different refusal would be raised, and only
+        one of the two tests would notice. This one notices directly.
+        """
+        with self.assertRaises(ImportError):
+            importlib.import_module("sd_db")
 
     def test_resume_refuses_with_the_remedy_and_not_a_traceback(self) -> None:
         with self.assertRaises(sd_restore.RestoreRefusal) as raised:
@@ -69,8 +100,9 @@ class WithoutTheLibrary(unittest.TestCase):
         self.assertIn("sd-install", message)
 
     def test_reimport_refuses_the_same_way(self) -> None:
-        with self.assertRaises(sd_restore.RestoreRefusal):
+        with self.assertRaises(sd_restore.RestoreRefusal) as raised:
             sd_restore.reimport(argparse.Namespace(repository="/repos/one"))
+        self.assertIn("sd_db is not installed", str(raised.exception))
 
 
 class TheCommandLine(unittest.TestCase):
@@ -89,8 +121,12 @@ class TheCommandLine(unittest.TestCase):
             capture_output=True, text=True, input="",
             env={**os.environ, "PYTHONPATH": ""},
         )
+        # Not which refusal -- that depends on whether this machine has run
+        # the installer and whether it has a database. That it is a refusal
+        # and not a traceback is the contract, and it holds either way.
         self.assertEqual(completed.returncode, 1)
         self.assertTrue(completed.stderr.startswith("sd: "), completed.stderr)
+        self.assertNotIn("Traceback", completed.stderr)
 
     def test_a_missing_verb_is_a_usage_error(self) -> None:
         completed = subprocess.run(

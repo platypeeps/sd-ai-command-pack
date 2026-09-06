@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import sys
 import tempfile
 import unittest
@@ -57,10 +58,36 @@ class FixtureHarness(unittest.TestCase):
             f"---\nname: {name}\n---\n\n{body}\n",
         )
 
+    def write_paths(self) -> None:
+        """Name every skill this fixture built, on one of the three paths.
+
+        These tests are about companions, not about which skills install,
+        so the paths file follows the fixture rather than the other way
+        round. Written afresh on each render so a skill added mid-test is
+        named without the test having to say so twice.
+        """
+        skills = self.checkout / "skills"
+        named = sorted(
+            entry.name
+            for entry in skills.iterdir()
+            if entry.is_dir() and entry.name != sd_install.SHARED_DIR
+        ) if skills.is_dir() else []
+        skills.mkdir(parents=True, exist_ok=True)
+        (skills / sd_install.PATHS_FILE).write_text(
+            json.dumps({"paths": {
+                "research": {"summary": "sources to brief", "skills": named},
+                "development": {"summary": "plan to ship", "skills": []},
+                "act": {"summary": "brief to send", "skills": []},
+            }}),
+            encoding="utf-8",
+        )
+
     def surfaces(self) -> dict[str, "sd_install.Surface"]:
+        self.write_paths()
         return {s.name: s for s in sd_install.discover_surfaces(self.checkout)}
 
     def install(self) -> str:
+        self.write_paths()
         context = sd_install.Context(
             checkout=self.checkout,
             home=self.home,
@@ -170,8 +197,7 @@ class MissingCitationTests(FixtureHarness):
     def test_a_resolved_citation_is_not_reported(self) -> None:
         self.write("skills/_shared/references/present.md", "here\n")
         self.skill("sd-ok", "Read `references/present.md`.")
-        self.assertEqual(sd_install.missing_citations(
-            sd_install.discover_surfaces(self.checkout)), [])
+        self.assertEqual(sd_install.missing_citations(self.surfaces().values()), [])
 
 
 class ReceiptTests(FixtureHarness):
