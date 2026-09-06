@@ -29,16 +29,33 @@ Every other carries `Item:` and leaves the row open.
 
 **Touches:** `WORKFLOW.md` (new), `skills/sd-help/`, `bin/sd_install.py`,
 `.claude/rules/`, `.claude/sd-ai-command-pack/planning-adversarial-review.md`,
-`skills/sd-receive-review/SKILL.md`, every skill that runs a review, and
-`README.md`.
+`skills/sd-receive-review/SKILL.md`, every skill that runs a review,
+`README.md`; and — for criteria 4 and 20, which an earlier draft scoped from
+a wrong model of where the deleted lane lives —
+`docs/planning-adversarial-review-codex.md` (the lane page itself),
+`AGENTS.md`, `docs/spec/backend/manifest-and-filesystem.md`,
+`skills/sd-research-repo/references/conventions.md` and
+`tests/test_doc_citations.py`, which breaks when the page goes. For
+criterion 5's vendor grep, also `skills/_shared/references/subagent-dispatch.md`,
+`skills/sd-handoff/SKILL.md` and `skills/sd-skill-adopt/SKILL.md`, three
+files the grep returns that run no review and so fell outside "every skill
+that runs a review".
 
 **Why the Touches list reaches across `skills/`.** Criterion 5 asks that
 *every* skill that runs a review name its point in the table and read the
 cap from it, and that a grep of the payload for a vendor name inside a
 skill's instructions return only the registry documentation. Criterion 4
 asks that a grep of the governed tree for the deleted second-model lane
-return nothing outside `CHANGELOG.md`, which means deleting that lane's
-skill and agent files. Criterion 8 asks that the concern-ledger and
+return nothing outside `CHANGELOG.md`. An earlier draft said this "means
+deleting that lane's skill and agent files". It has neither: `ls agents/`
+returns the five `sd-*` agents and none is this lane, and no `skills/`
+directory implements it. The lane is `docs/planning-adversarial-review-codex.md`,
+referenced from `AGENTS.md` at `:11-18`, from
+`docs/spec/backend/manifest-and-filesystem.md:1519` and from
+`skills/sd-research-repo/references/conventions.md:176` — and `AGENTS.md`
+is a file criterion 4 names outright (`prd.md:1217-1218`). The same three
+files carry criterion 20's fourth statement of the planning review rule.
+The grep this criterion turns on would have come back dirty. Criterion 8 asks that the concern-ledger and
 cross-artifact-sweep obligations become conditional on a `sensitive` path
 "in every place they appear", and a governed-tree grep finds exactly two:
 `.claude/sd-ai-command-pack/planning-adversarial-review.md` and
@@ -52,8 +69,18 @@ share, what runs by default, what is opt-in, what is advisory, what never
 touches a shared repository, the review table with its caps, the path for a
 change at each size, and the modes and how they resolve. `sd-help` names
 it. The `CLAUDE.local.md` block the installer writes links to it, and
-carries the keys the pack already reads and no others — `mode:` plus the
-`CHECK_NAMES` entrypoints at `bin/sd_lib.py:36`, consumed at `:391-412`.
+carries five keys: `mode`, `check`, `test`, `lint` and `reviewers`, which
+is the set criterion 1's test compares against what `WORKFLOW.md`
+documents (`prd.md:1205-1209`). An earlier draft said "the keys the pack
+already reads and no others — `mode:` plus the `CHECK_NAMES` entrypoints",
+a four-key block: `grep -n reviewers bin/sd_lib.py` returns nothing, so
+"already reads" excludes the consent key by construction and criterion 1's
+test could not pass. The entrypoints are at `bin/sd_lib.py:36`, consumed at
+`:391-414` — `_local_block_entrypoints` returns at `:409-414`, and both
+this page and `design.md` cited `:391-412`. The `reviewers` line's value is
+written by the installer's consent prompt, which is criterion 6's and so
+PR 6's; PR 1 writes the key, PR 6 fills it, and criterion 1's test reads
+the key set and not the value.
 
 **Why no opt-in key goes in that block.** A key that turns a lane on
 permanently is a default in disguise: it converts a decision about one
@@ -87,9 +114,33 @@ PR 6's, where the registry reader and the fixture harness are.
 
 ## PR 2 — requirement 13's confirmed cuts and bugs
 
-**Touches:** `skills/sd-plan/`, `skills/sd-status/`, `skills/sd-ship/`,
-`skills/sd-plan/templates/work-README.md`, `contrib/` (new), and the rest
-of the line-by-line list.
+**Touches:** enumerated from criterion 31's own symbol list
+(`prd.md:1604-1608`) with `git grep -l`, not from prose. `bin/sd_sweep.py`,
+`bin/sd`, `tests/test_sd_sweep.py` (`sd_sweep`); `bin/sd-handoff-restore`,
+`tests/test_sd_handoff_restore.py` (`record_load`); `bin/sd-status`,
+`tests/test_sd_status.py` (`carrier_branches`, `_protection_gaps`,
+`load_acknowledgements`); the fifty-six `skills/*/SKILL.md` files carrying
+`argument-vocabulary`; the forty files across `bin/`, `skills/`, `tests/`,
+`dashboard/`, `.github/` and `docs/spec/` carrying `R10-D`;
+`skills/sd-spec/SKILL.md` (`five gates`); `skills/sd-handoff/SKILL.md`
+(`cron-jobs.sh`); the five `agents/*.md` and seven `skills/*/SKILL.md`
+carrying `Active item:`; `agents/sd-rust-fill.md`,
+`agents/sd-rust-reviewer.md`, `agents/sd-rust-write.md`,
+`skills/sd-typed-holes/SKILL.md`; `README.md`, `bin/sd-skill-adopt`,
+`skills/sd-deps/SKILL.md`, `tests/test_loc_caps.py`,
+`tests/test_permission_allowlist.py`, `tests/test_skill_frontmatter.py`
+(`sd-deps`). For the named bug fixes: `bin/sd_research_review.py`,
+`bin/sd-research-kit`, `agents/sd-claim-verifier.md`,
+`skills/sd-fact-check/SKILL.md` and the `adversarial-gate` surface. Plus
+`skills/sd-plan/`, `skills/sd-status/`, `skills/sd-ship/`,
+`skills/sd-plan/templates/work-README.md` and `contrib/` (created in PR 5,
+not here).
+
+An earlier draft ended this list with "and the rest of the line-by-line
+list", which is a pointer back to the requirement the list is meant to
+bound, not a file set — and then named `bin/sd_sweep.py` in its prose, a
+file the declared scope excluded. This is the item's largest deletion and
+its boundary has to be readable from this line alone.
 
 Every finding three read-only reviewers confirmed by source reading on
 2026-09-05, seven of them re-checked by hand. `sd-plan`'s step 6 with
@@ -127,9 +178,18 @@ the symbols but not the deletion verbs, and PR 7 — which was given criterion
 
 ## PR 3 — the checks that cannot fail
 
-**Touches:** `Makefile`, `.github/workflows/`,
-`tests/test_selector_contract_drift.py`, `generated/registry-snapshot.json`,
-`plugins/sd`.
+**Touches:** `Makefile`, `.github/workflows/`, `.github/scripts/` — which
+is not `.github/workflows/` and holds `check-installer-coverage.sh`, the
+gate `make test` actually runs at `Makefile:23`, and
+`check-bash32-syntax.sh`, invoked at `Makefile:74` and
+`.github/workflows/tests.yml:101`; `.coveragerc`, whose `[run] include`
+list at `:11-24` carries `bin/sd_install.py` **and** `.github/scripts/*.py`
+and where `fail_under = 100` lives; `tests/test_loc_caps.py`, which holds
+the four ceilings at `:61`, `:62`, `:101`, `:109` and the
+fail-the-suite assertion at `:193-217`, so it and not the `Makefile` is
+what turns a failing cap into a warning; and the three residue paths,
+`tests/test_selector_contract_drift.py`, `generated/registry-snapshot.json`
+and the `plugins/sd` directory.
 
 `sd-docs-lint` rules 1 through 4 move into `make check`, conditional on
 `docs/work/` existing — it runs in no Makefile target and no workflow
@@ -152,7 +212,11 @@ repository spent a whole pull request re-deriving one.
 
 **Touches:** the nineteen governed-tree files that carry the forbidden
 strings, enumerated below; the global settings; `CONTRIBUTING.md`; the
-system repository's guide; and `WORKFLOW.md`.
+system repository's guide; `WORKFLOW.md`; `README.md`, for criterion 12,
+which C-95 said was addressed and was not; `skills/sd-ship/SKILL.md`,
+`skills/sd-handoff/SKILL.md`, `bin/sd-review` and `bin/sd-status`, the four
+payload surfaces criterion 9's grep reads; and the writing repository's
+style override, which criterion 23 deletes and which no Touches list named.
 
 **The Trellis removal is nineteen files, not three.** Criterion 18 demands a
 governed-tree grep for `Trellis`, `.trellis` and `task.py` return nothing.
@@ -219,10 +283,16 @@ half alone is worse than neither.
 **Verification.** Criteria 9, 18, 19, 22 and 23, plus criterion 12.
 Criterion 9 needs `WORKFLOW.md` to state that Copilot review is off on
 repositories the operator pays for personally, so `WORKFLOW.md` is in the
-Touches list above; criterion 12 needs `README.md`'s writes-nothing claim at
-line 21 to name the installer as its subject, and `README.md` is edited in
-PR 1 where criterion 11 already requires it. An earlier draft claimed both
-criteria against a Touches list that excluded both files.
+Touches list above; criterion 12 needs `README.md`, which is now in this pull request's Touches
+above. Two corrections to an earlier draft. The writes-nothing claim is
+`README.md:34`, "**What it writes in a repository:** nothing, ever." —
+quoted at `prd.md:870` — and not line 21, which is a claim about rendered
+copies; an implementer following the old citation would have edited the
+wrong paragraph and left "nothing, ever" unscoped. And criterion 12 has a
+second half that appeared in no pull request at all: `README.md` must also
+**list the skills that write tracked files** (`prd.md:1394-1395`). Both
+halves land here. C-95 recorded this criterion as addressed; it was not,
+and the rewrite documented the split instead of closing it.
 
 ## Slice 2, PR 5 — skills install because a path names them
 
@@ -249,7 +319,18 @@ rewritten in PR 8, a pull request that did not claim it.
 ## Slice 2, PR 6 — the registry reader, the tiered path, the protection
 
 **Touches:** `bin/sd_lib.py`, `skills/sd-ship/`, the provider registry
-reader.
+reader, and the four files criterion 6 and the installer step require that
+an earlier draft omitted when C-90 moved the criterion here without its
+scope: `bin/sd-review`, whose provider table is at `:200-266` with the
+`tiers` dict at `:265`; `.github/sd-review.json`, carrying `tiers` at `:4`,
+`challenge_providers` at `:30` and `planning_providers` at `:31`;
+`bin/sd_install.py`, where `DEFAULT_BLOCK_BODY` at `:766-772` writes the
+block and where the `reviewers` consent line and B's `sd_db` installer step
+both land; and `bin/sd`, for `sd attribute`. For criterion 10, also
+`bin/sd-docs-lint`, which holds rule 5 and is the only file besides
+`skills/sd-ship/SKILL.md` and `tests/test_sd_docs_lint.py` carrying the
+`none - ` form, and `bin/sd_setup_github.py`, the other file naming rule 5.
+And `README.md`, for criterion 11's closing sentence — see below.
 
 The default path becomes: commit enumerated paths, local review, push, open
 the pull request, wait for CI once, merge, close the item on the default
@@ -287,8 +368,16 @@ same reviewer order from the same `providers.yaml`.
 
 ## Slice 2, PR 7 — the `docs/work` retire step
 
-**Touches:** the migration's retire step (B's command), and every
-`prd.md` under `docs/work/` outside the archive.
+**Touches:** the migration's retire step (B's command), every `prd.md`
+under `docs/work/` outside the archive, and — for criterion 13, which the
+closure table filed here while this list reached none of it —
+`bin/sd_lib.py`, `bin/sd-status` and `bin/sd-docs-lint`, which derive an
+item's status from its row (`prd.md:1396-1397`); `skills/sd-ship/` and
+`dashboard/`, for `sd-ship --deliver`, the hand-merge reconciliation, the
+notes on the squash commit and `deliver` on the item screen
+(`prd.md:1435-1449`) and the three kill-and-reconcile tests
+(`prd.md:1470-1479`); and `bin/sd_install.py`, for the `sd_db` step
+(`prd.md:1523-1529`).
 
 B's one sitting for `docs/work`: freeze, import once more, verify, snapshot,
 then remove every item's `status:` line outside the archive in one commit.
@@ -308,14 +397,25 @@ the archive, and an archive rewritten by a migration would be a record
 altered after the fact.
 
 **Verification.** Criteria 13 and 21. Criterion 13 is recorded as waiting
-before this slice, which the landing order says in those words.
+**before the second slice**, not before this one: `prd.md:1194-1195` says
+"Before the second slice, criteria 13 and 32 are recorded as waiting", and
+this is the third. An earlier draft moved the boundary a slice later and
+said the landing order said so "in those words". Criterion 32 is covered by
+the same sentence, and neither this pull request nor PR 6 noted it.
 
 ## Slice 2, PR 8 — rows for trials, uses, suggestions and handoff
 
-**Touches:** `bin/sd`, the `PreToolUse` and `UserPromptSubmit` hooks, the
-nightly parse of `~/.codex/sessions`, `skills/sd-suggest/`,
-`skills/sd-propose-skills/`, `skills/paths.json`, `dashboard/`, and the
-handoff path.
+**Touches:** `bin/sd`, the `PreToolUse`, `UserPromptSubmit`, `PreCompact`,
+`SessionEnd` and `SessionStart` hooks — all five requirement 12 names
+(`prd.md:993-995`) for criterion 29, where an earlier draft named two and
+left the rest to "the handoff path"; the nightly parse of
+`~/.codex/sessions`; `skills/sd-suggest/`; `skills/sd-propose-skills/`;
+`skills/paths.json`; `dashboard/`; `bin/sd-handoff` and
+`bin/sd-handoff-restore`, which are the handoff path named as files; and
+the writing repository's manifest, from which criterion 28 removes the
+`skill-proposal` kind, plus the `sd shadow sync` surface criterion 28's
+shadow rows are asserted against — neither of which any Touches list
+named.
 
 **Four surfaces the criteria name and an earlier Touches list did not.**
 Criterion 26 requires "the Codex nightly parse writes the same shape", with
@@ -364,7 +464,12 @@ merges, not an achievement of one.
 
 ## Order and dependency
 
-PRs 1 through 4 in any order and at any time; they need no database and no
+PRs 1 through 4 in any order and at any time, with one exception: PR 1
+lands before PR 6, because criterion 11's closing sentence — all three
+modes in `README.md` — is PR 1's while the criterion closes on PR 6. An
+earlier draft left them unordered, so PR 6 merging first would have closed
+criterion 11 with its `README.md` clause unlanded. They need no database
+and no
 other item. **PR 5 needs a database** — criteria 24 and 25 both read trial
 rows — so it lands with B's slice 1 library, not before it. PR 6 after B's
 slice 1 lands the library and B's harness. PR 7 after PR 6. PR 8 after PR 6,
@@ -391,7 +496,7 @@ PR 7 or PR 8, whichever merges last, carries `Delivers:`. Then `prd.md`
 goes to `status: done` and drops its `branch:` field in the same edit.
 
 That field was missing when this file was first written, and adding it was
-the fix. This repository's items carry `branch:` by convention — 237
+the fix. This repository's items carry `branch:` by convention — 238 today, 237
 `prd.md` files under `docs/work/` have the line, and the sibling item
 `2026-09-04-the-plan-interview-is-one-sentence` reads `branch:
 skill/sd-grill` — while this item's front matter had `title`, `status` and
@@ -408,6 +513,35 @@ feat/solo-first-workflow-policy` is now in the front matter, `sd sweep`
 reports "nothing over 45 days: 8 active", and `sd-docs-lint` is clean over
 495 items.
 
+## Where the tests land, which no pull request said
+
+Every pull request carries its own criterion's tests in `tests/`, and
+`tests/` appeared in exactly one Touches list above — as a file to delete.
+At least seventeen criteria mandate a test in their own words, and the
+cuts break existing ones: `tests/test_sd_sweep.py`,
+`tests/test_sd_status.py`, `tests/test_sd_handoff_restore.py`,
+`tests/test_doc_citations.py`, `tests/test_loc_caps.py` and
+`tests/test_sd_docs_lint.py` all assert symbols or pages that PR 1, PR 2
+and PR 3 remove. Criterion 30 makes `make check` passing a precondition of
+every merge by this page's own argument, so a pull request that deletes a
+symbol and leaves its test asserting it cannot merge. Each deletion pull
+request updates or removes the tests its cut breaks, named in the Touches
+lists above; each new behaviour ships its test in the pull request that
+builds it.
+
+## One count in the nineteen-file list depends on how the grep is written
+
+The nineteen files enumerated for criterion 18 reproduce under
+`git grep -lE "Trellis|.trellis|task\.py"` with the dot unescaped, or under
+a case-insensitive grep. Under criterion 18's literal strings the count is
+eighteen: `bin/sd_setup_github.py`'s only hit is the comment
+"`bin/migrate-trellis` removed" at `:52`, lower-case and hyphen-preceded,
+matching none of `Trellis`, `.trellis` or `task.py` literally. The file is
+worth editing either way, and the subcounts hold — two test files, seven
+`docs/spec/` pages — but an implementer running the criterion's own grep
+sees eighteen and cannot reconcile it. Recorded rather than silently
+recounted.
+
 ## What closes the criteria
 
 | Criterion | Closed by |
@@ -418,8 +552,8 @@ reports "nothing over 45 days: 8 active", and `sd-docs-lint` is clean over
 | 14, 15, 16, 17, 30 — the checks | PR 3 |
 | 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4 |
 | 24, 25 — `paths.json`, the union with active trials, `sd skill try` and its row | PR 5 |
-| 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | PR 6 |
-| 13 — status from the row | PR 7 |
+| 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | PR 6, with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
+| 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step, with the files now in its Touches) |
 | 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` clause behind B's slice 4 |
 | 7 — the seven `mezmo-world-simulator` passes scored | see below |
 

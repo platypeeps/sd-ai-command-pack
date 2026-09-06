@@ -10,7 +10,7 @@ remove, so the page moves to the root in the commit that makes it true.
 
 The Overrides section carries the keys `sd_lib.py` already reads, `mode:`
 plus `CHECK_NAMES` at `bin/sd_lib.py:36`, consumed together at
-`_local_block_entrypoints` (`:391-412`), and one more, `reviewers:`, added on
+`_local_block_entrypoints` (`:391-414`), and one more, `reviewers:`, added on
 2026-09-05 because consent to disclose a repository's diff is per repository
 and per machine and belongs in the file the operator writes by hand. Three
 further keys were drafted and cut the same day; an opt-in lane is asked for
@@ -200,8 +200,11 @@ Access decides where artifacts go, whichever namespace holds the
 repository. Without a `mode:` line, the pack asks three questions of the
 remote: can you administer it, is it not a fork, can anyone else push. Admin,
 not a fork, nobody else: `full`, in your namespace or an organisation's.
-Anything else, including no answer: `guest`. A root with no remote
-is `full`; there is no one to expose anything to. The questions are asked
+Anything else, including no answer: `guest`. A root with no remote, **or
+no git at all**, is `full`; there is no one to expose anything to. The
+no-git case is named and asserted on its own, because criterion 11 requires
+exactly that (`prd.md:1360-1365`) — it is the case that otherwise gets
+swept into whichever exception branch the remote lookup raises. The questions are asked
 again before every artifact write and every push, and a `no` makes the
 run `guest` whatever the line says: a `mode: full` you wrote is a floor,
 never a ceiling, so a repository that gains a collaborator stops
@@ -237,6 +240,10 @@ never vendors.
                  bill: baseten, roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 } }
       exo:     { url: "http://localhost:52415/v1", model: "<pinned>", vendor: local, bill: local,
                  roles: [author, reviewer], enabled: false, reason: "model not pinned" }
+      # Shipped disabled, faithful to `prd.md:448-451`. Criterion 6's test
+      # adds an `exo` entry and resolves it, and a disabled entry never
+      # resolves — so that test writes its own enabled entry into a fixture
+      # registry rather than reading this one.
     roles:
       author:   [claude, codex]
       reviewer: [codex, claude, minimax, kimi, baseten, exo]

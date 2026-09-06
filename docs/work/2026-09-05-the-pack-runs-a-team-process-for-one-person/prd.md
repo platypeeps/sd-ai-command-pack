@@ -2697,3 +2697,114 @@ from a number the operator types.
     `implement.md` agrees and that every path, line citation and symbol in
     `implement.md` resolves on disk. Recorded because a review that reports
     only what it found, and not what it cleared, cannot be weighed.
+- **2026-09-05** — Adversarial re-review, round two, of the rewritten
+  `implement.md`. Twenty-one findings: six blocking, nine material, six
+  minor — the largest of the four items. Round one's C-90, C-91, C-92,
+  C-93, C-94, C-96 and C-97 hold. **C-95 does not**, and its failure names
+  the shape of the whole round: the rewrite re-derived the
+  criterion-to-pull-request mapping and did not re-derive the Touches lists
+  under it, so five of eight pull requests claimed a criterion their
+  declared file set could not reach. Two Touches entries — "and the rest of
+  the line-by-line list", "the handoff path" — were not file sets at all.
+  - C-98, blocking: criterion 13, the item's largest, was filed on PR 7,
+    whose Touches was the retire step and the `prd.md` files. None of
+    `bin/sd_lib.py`, `bin/sd-status`, `bin/sd-docs-lint`,
+    `bin/sd_install.py`, `skills/sd-ship/` or `dashboard/` was in it, and
+    the criterion asserts all six. The page's own prose said the reader
+    ships in PR 6. Addressed: the row names both, and PR 7's Touches carries
+    the files.
+  - C-99, blocking: PR 2 claimed criterion 31 — roughly a hundred files
+    across six trees — behind a five-item list naming no `bin/`, `agents/`,
+    `tests/`, `.github/` or `docs/spec/` path, and then said in prose that
+    it deletes `bin/sd_sweep.py`. Addressed: the list is enumerated from
+    criterion 31's own symbol list with `git grep -l`.
+  - C-100, blocking: PR 6 took criterion 6 from PR 1 under C-90 and did not
+    take its scope. `bin/sd-review` (the provider table at `:200-266`),
+    `.github/sd-review.json` (`tiers` at `:4`), `bin/sd_install.py` (the
+    block at `:766-772`) and `bin/sd` (for `sd attribute`) were all outside
+    it, as were `bin/sd-docs-lint` and `bin/sd_setup_github.py` for
+    criterion 10's rule 5. Addressed.
+  - C-101, blocking: C-95's own subject. Criterion 12 was still claimed by
+    PR 4, whose Touches still excluded `README.md`, and its second half —
+    `README.md` listing the skills that write tracked files — was scheduled
+    by no pull request at all. The rewrite documented the split instead of
+    closing it. Addressed, with `README.md` in PR 4.
+  - C-102, blocking: criterion 9's first clause, that no pack surface
+    requests a Copilot review, needs `skills/sd-ship/SKILL.md:55`,
+    `skills/sd-handoff/SKILL.md:109`, `bin/sd-review:239` and
+    `bin/sd-status:921,940`. PR 4 claimed the criterion and touched none of
+    them, so the grep would have failed at its merge and the criterion would
+    have closed on its documentation clause alone. Addressed.
+  - C-103, blocking: PR 1 justified criterion 4's scope by "deleting that
+    lane's skill and agent files". The lane has neither. It is
+    `docs/planning-adversarial-review-codex.md`, referenced from
+    `AGENTS.md:11-18`, `docs/spec/backend/manifest-and-filesystem.md:1519`
+    and `skills/sd-research-repo/references/conventions.md:176` — and
+    `AGENTS.md` is a file criterion 4 names outright. The same three files
+    carry criterion 20's fourth statement of the rule, and
+    `tests/test_doc_citations.py` breaks when the page goes. The criterion
+    turns on a grep that would have come back dirty. Addressed.
+  - C-104, material: PR 1 described a four-key `CLAUDE.local.md` block —
+    "the keys the pack already reads and no others". Criterion 1 requires
+    five, `reviewers` among them, and `grep -n reviewers bin/sd_lib.py`
+    returns nothing, so "already reads" excluded it by construction and the
+    test could not pass. Addressed: five keys, with the value written by
+    PR 6's consent prompt and the test reading the key set.
+  - C-105, material: PR 3 claimed criteria 15 and 17 without `.coveragerc`
+    (where `fail_under` lives), `.github/scripts/` (which is not
+    `.github/workflows/` and holds the two gates `make test` runs) or
+    `tests/test_loc_caps.py` (which holds the four ceilings and the
+    fail-the-suite assertion, so it and not the `Makefile` turns a failing
+    cap into a warning). Addressed.
+  - C-106, material: criterion 10's substantive half is rule 5's behaviour
+    in `bin/sd-docs-lint`, in no pull request. Addressed with C-100.
+  - C-107, material: `README.md`'s writes-nothing claim was cited at line
+    21. Line 21 is about rendered copies; the claim is line 34, "What it
+    writes in a repository: nothing, ever", which is what `prd.md:870`
+    quotes. An implementer would have edited the wrong paragraph. Addressed.
+  - C-108, material: criterion 5's vendor grep returns
+    `skills/_shared/references/subagent-dispatch.md`,
+    `skills/sd-handoff/SKILL.md` and `skills/sd-skill-adopt/SKILL.md`, which
+    run no review and so fell outside PR 1's "every skill that runs a
+    review". Addressed.
+  - C-109, material: criterion 23's writing-repository style override and
+    criterion 28's writing manifest and `sd shadow sync` surface were in no
+    Touches list. Addressed.
+  - C-110, material: criterion 11 was whole in the table on PR 6 and split
+    in the prose, its `README.md` clause in PR 1, with the ordering section
+    allowing PR 1 to land at any time. PR 6 first would have closed the
+    criterion with that clause unlanded. Addressed: PR 1 before PR 6, stated
+    in both places.
+  - C-111, material: PR 7 said criterion 13 is recorded as waiting "before
+    this slice, which the landing order says in those words".
+    `prd.md:1194-1195` says before the **second** slice; PR 7 is the third.
+    Criterion 32 is in the same sentence and was mentioned by neither PR 6
+    nor PR 7. Addressed.
+  - C-112, material: `tests/` appeared in one Touches list, as a file to
+    delete, while at least seventeen criteria mandate a test and the cuts
+    break six existing test files. Criterion 30 makes `make check` a
+    precondition of every merge, so a pull request deleting a symbol whose
+    test still asserts it cannot merge. Addressed with a section stating
+    where tests land.
+  - C-113, minor: the nineteen-file list for criterion 18 reproduces only
+    under an unescaped dot or a case-insensitive grep; under the criterion's
+    literal strings it is eighteen, `bin/sd_setup_github.py` being a
+    lower-case hyphenated comment hit at `:52`. Recorded rather than
+    silently recounted.
+  - C-114, minor: "237 `prd.md` files" reads as a present count and is 238
+    today, this item's own having been added. Addressed.
+  - C-115, minor: `_local_block_entrypoints` runs to `bin/sd_lib.py:414`,
+    not `:412`, in both pages. Corrected.
+  - C-116, minor: `design.md`'s mode rule omitted the no-git case criterion
+    11 asserts by name. Addressed.
+  - C-117, minor: `design.md` ships `exo` disabled, faithful to
+    `prd.md:448-451`, while criterion 6's test adds an `exo` entry and
+    resolves it — and a disabled entry never resolves. Noted in the registry
+    block: the test writes its own enabled entry into a fixture.
+  - C-118, minor: `plugins/sd` is a directory, not one of "the three residue
+    files"; PR 2 and PR 5 both marked `contrib/` new; PR 8's hooks list
+    named two of the five requirement 12 requires. All three addressed in
+    the Touches rebuild.
+  - **Not reached in this round:** item B's `prd.md` is in the `system`
+    repository, outside this checkout, so `implement.md`'s "item B's
+    criterion 13" and B's slice numbering are unverified against B's text.
