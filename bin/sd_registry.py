@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -633,14 +634,30 @@ def fingerprint(provider: Provider) -> str:
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:FINGERPRINT_LENGTH]
 
 
+def executable(start: str) -> str:
+    """The program a `start` line runs, split the way the runner splits it.
+
+    `shlex`, not `str.split`. `bin/sd-review` builds its argv with `shlex`, so
+    a quoted path with a space in it -- `"/opt/my tools/codex" exec` -- would
+    otherwise be consented to as `"/opt/my` and run as `/opt/my tools/codex`:
+    consent to a string nobody executes, and an executable nobody consented to.
+    """
+    try:
+        words = shlex.split(start)
+    except ValueError:
+        # An unbalanced quote is not a program name. Raising here would refuse
+        # at read time for every caller, including the ones only listing the
+        # registry; an empty name fails the consent comparison instead, which
+        # is the same answer at the point where it matters.
+        return ""
+    return words[0] if words else ""
+
+
 def recipient(provider: Provider) -> Allowance:
     """What the `reviewers` line must name for this entry, as it stands now."""
     if provider.url:
         return Allowance(provider.name, urlsplit(provider.url).netloc)
-    executable = (provider.start or "").split()
-    return Allowance(
-        provider.name, executable[0] if executable else "", fingerprint(provider)
-    )
+    return Allowance(provider.name, executable(provider.start or ""), fingerprint(provider))
 
 
 def refuse_allowance(provider: Provider, allowed: Allowance | None) -> str | None:

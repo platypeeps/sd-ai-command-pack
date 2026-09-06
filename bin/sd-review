@@ -1245,10 +1245,10 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
 
     if result.get("explain_only"):
         write(f"\nreviewer chain ({result['registry']}):\n")
-    if result["registry_refusal"]:
-        write(f"  {result['registry_refusal']}\n")
-    if result["consent_refusal"]:
-        write(f"  {result['consent_refusal']}\n")
+        if result["registry_refusal"]:
+            write(f"  {result['registry_refusal']}\n")
+        if result["consent_refusal"]:
+            write(f"  {result['consent_refusal']}\n")
         for row in result["chain"]:
             mark = "use" if row["eligible"] else "  -"
             write(f"  {mark} {row['provider']:<12} {row['vendor']:<10} {row['bill']}\n")

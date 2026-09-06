@@ -15,6 +15,7 @@ has happened this file says so and fails.
 from __future__ import annotations
 
 import pathlib
+import shlex
 import sys
 import tempfile
 import unittest
@@ -307,6 +308,31 @@ class TheConsentLine(unittest.TestCase):
         self.assertEqual(
             len(allowance.fingerprint), sd_registry.FINGERPRINT_LENGTH
         )
+
+    def test_the_executable_is_split_the_way_the_runner_splits_it(self) -> None:
+        """Copilot found this on the pull request. `str.split` on a quoted
+        path consents to `"/opt/my` while `bin/sd-review`, which builds its
+        argv with `shlex`, runs `/opt/my tools/codex`: consent to a string
+        nobody executes, and an executable nobody consented to."""
+
+        quoted = sd_registry.Provider(
+            name="wrapped", vendor="v", bill="b", start='"/opt/my tools/codex" exec'
+        )
+        self.assertEqual(
+            sd_registry.recipient(quoted).recipient, "/opt/my tools/codex"
+        )
+        # The property that has to hold, stated as one: whatever the reviewer
+        # is consented to is the program the review lane starts.
+        self.assertEqual(
+            sd_registry.executable(quoted.start or ""),
+            shlex.split(quoted.start or "")[0],
+        )
+
+    def test_an_unbalanced_quote_names_no_executable(self) -> None:
+        """It fails the consent comparison rather than raising, so listing a
+        registry that holds one still works."""
+
+        self.assertEqual(sd_registry.executable('"oops exec'), "")
 
     def test_a_url_entry_carries_its_host(self) -> None:
         registry = sd_registry.read_file(SHIPPED)

@@ -648,6 +648,81 @@ class CliTests(ReviewFixture):
         self.assertIn("not valid JSON", finished.stderr)
 
 
+class TheExplainRenderTests(ReviewFixture):
+    """What `--explain` prints, and what a run that is not explaining must not.
+
+    Copilot found this on the pull request. `render`'s explain block had been
+    edited by text substitution and its nesting was wrong: the chain table sat
+    inside the consent-refusal branch, so it printed only when consent was
+    refused, and a real run that hit a consent refusal printed "explain only,
+    nothing ran" and returned before its outcomes.
+
+    The manual check that passed before this landed had both a missing registry
+    and a missing consent line, which is the one combination under which the
+    broken nesting looks right.
+    """
+
+    def explain(self, root: pathlib.Path, env: Mapping[str, str] | None = None) -> str:
+        result = sd_review.review(
+            root,
+            namespace(explain=True),
+            FakeRunner(),
+            dict(env) if env is not None else self.environment(),
+            self.chatgpt_home(),
+        )
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        return stream.getvalue()
+
+    def test_the_chain_prints_when_nothing_is_refused(self) -> None:
+        """The fixture repository consents to both entries and has a registry,
+        so there is no refusal to carry the table into view."""
+
+        text = self.explain(self.make_repo())
+        self.assertIn("reviewer chain", text)
+        self.assertIn("use codex", " ".join(text.split()))
+        self.assertIn("second", text)
+        self.assertIn("explain only, nothing ran", text)
+
+    def test_a_real_run_does_not_print_the_explain_footer(self) -> None:
+        """A run that reviews must not claim it explained. This is the half of
+        the defect that changed what a real invocation reported."""
+
+        root = self.make_repo()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        runner = FakeRunner(
+            {
+                "sd-check": sd_review.Completed(0, "{}", ""),
+                "codex": sd_review.Completed(0, '{"findings": []}', ""),
+            }
+        )
+        result = sd_review.review(
+            root, namespace(), runner, self.environment(), self.chatgpt_home()
+        )
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        text = stream.getvalue()
+        self.assertNotIn("explain only", text)
+        self.assertIn("outcomes:", text)
+
+    def test_a_consent_refusal_does_not_turn_a_real_run_into_an_explain(self) -> None:
+        """The exact shape of the defect: a repository with no `reviewers`
+        line, reviewed for real."""
+
+        root = self.make_repo()
+        (root / "CLAUDE.local.md").unlink()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        result = sd_review.review(
+            root, namespace(), runner, self.environment(), self.chatgpt_home()
+        )
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        text = stream.getvalue()
+        self.assertNotIn("explain only", text)
+        self.assertNotIn("reviewer chain", text)
+
+
 class TheTrailerBlockTests(ReviewFixture):
     """A trailer is the last paragraph, unindented. Not any matching line.
 
