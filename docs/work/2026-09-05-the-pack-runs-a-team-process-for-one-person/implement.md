@@ -663,6 +663,18 @@ harness provides. Criterion 32 is the one that has to hold in both worlds: befor
 file-only reader and, once it exists, the library resolver must return the
 same reviewer order from the same `providers.yaml`.
 
+**This pull request needs `BIN_CAP` moved, and cannot move it.** No Touches
+list above noticed that `bin/` is capped. It stood at 13,307 on `main` against
+14,000, and this pull request's first half — `bin/sd_registry.py` and the
+installer's registry seed — measures +559, which leaves 134 lines for the
+reviewer chain, `sd attribute`, criterion 11's predicate, the `url` client and
+the consent prompt. `tests/test_loc_caps.py:9-10` forbids raising a cap in the
+pull request that busts it, so the re-derivation is its own change, landing
+first and touching nothing under `bin/`: R11-D31, 14,700, itemised in
+`prd.md`'s log. That change is a precondition of this one in exactly the way
+B's fixture harness is, and belongs in the ordering section below rather than
+being discovered again by whoever runs `make check` next.
+
 ## Slice 2, PR 7 — the `docs/work` retire step
 
 **Touches:** the migration's retire step (B's command), every `prd.md`
@@ -907,6 +919,13 @@ opposite directions. Each constraint below names the file that forces it.
   the file in its Touches only for the criterion's closing sentence, which it
   asserts rather than writes. Four pull requests edit `README.md` and this is
   the only contended clause among them.
+
+- **R11-D31 before PR 6** — `tests/test_loc_caps.py`. `bin/` is capped, no
+  Touches list above said so, and PR 6 is the first pull request in this item
+  large enough to reach the ceiling. The cap may not be raised in the pull
+  request that busts it, so the re-derivation lands first, on its own branch,
+  touching nothing under `bin/`. This is the one constraint here that binds a
+  change that is not in the eight.
 
 Otherwise PR 2 and PR 3 need no database and no other item. **PR 5 needs a
 database** — criteria 24 and 25 both read trial rows — so it lands with B's

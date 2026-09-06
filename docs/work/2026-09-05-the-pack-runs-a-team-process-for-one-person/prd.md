@@ -3560,3 +3560,36 @@ from a number the operator types.
     with them, giving the stub a report whose words contradict its flag, so
     the defect these tests exist for -- an exit code that read `"installed"
     in report` -- cannot come back by wording.
+- **2026-09-06** — **R11-D31, `BIN_CAP` re-derived from 14,000 to 14,700**, in
+  its own change, because PR 6 cannot land under the ceiling it replaced.
+  `bin/` stood at 13,307 on `main`; PR 6's first half -- `bin/sd_registry.py`
+  and the installer's registry seed -- measures +559, leaving 134 lines for
+  the reviewer chain, `sd attribute`, criterion 11's mode predicate, the
+  `url` client and the installer's consent prompt. `tests/test_loc_caps.py`
+  states the rule this obeys: a cap is never raised in the pull request that
+  busts it, and the change that re-derives one touches nothing under the
+  directory it measures. This one touches that file and these planning pages.
+
+  The itemisation is 13,307 measured + 559 measured − 158 measured + 888
+  reserved + 104 unclaimed. The 158 is criterion 6's mandated deletions,
+  counted span by span rather than estimated: the `Backend` tuple with
+  `BACKENDS` and `BACKENDS_BY_NAME` (82), `argv_backend_argv` (29),
+  `backend_rows` (15), `plan_providers` (23) and `DEFAULT_POLICY`'s `tiers`
+  block with the two `_providers` keys (9).
+
+  **The 888 is a reservation and the two earlier re-derivations measured.**
+  R11-D29 and R11-D30 each measured a replacement body their item's
+  `implement.md` pinned verbatim; this item's `implement.md` pins no bodies
+  for PR 6, so there is nothing of that kind to measure. It is derived
+  instead the way R11-D15 derived this cap in the first place, from built
+  code: each remaining unit takes its nearest built analogue in `bin/` --
+  `sd_route.py` (257) for the reviewer chain, `sd_restore.py` (235) for
+  `sd attribute` and the trailer scan, half of `sd_setup_github.py` (165)
+  for the mode predicate, `sd_skill.py` (151) for the `url` client and its
+  reader, and 80 for the consent prompt. An analogue is not a promise, and
+  the difference is recorded rather than blurred: if PR 6's runtime comes in
+  over 888 it busts a ceiling visibly, and that does not license a second
+  re-derivation inside PR 6.
+
+  Nothing else is funded. PRs 7 and 8 are unwritten scope, which R11-D15's
+  clause excludes by name.
