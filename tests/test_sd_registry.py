@@ -330,6 +330,18 @@ class TheRefusals(unittest.TestCase):
         )
         self.assertIn("'cap_usd_month' of bill 'free'", message)
 
+    def test_a_start_entry_that_says_nothing_about_reading_it_back(self) -> None:
+        """Running one means parsing what it prints. An entry that does not
+        say how could be picked, occupy a slot in a tier's depth, and never
+        be read."""
+        message = self.refuse(
+            self.filled().replace(
+                '{ url: "http://localhost:2/v1", vendor: beta,',
+                '{ start: "two review", vendor: beta,',
+            )
+        )
+        self.assertIn("no 'reader'", message)
+
     def test_a_url_that_names_no_host(self) -> None:
         message = self.refuse(
             self.filled().replace('"http://localhost:1/v1"', '"file:///tmp/x"')
@@ -567,6 +579,53 @@ class WhatConsentRefuses(unittest.TestCase):
                 self.registry.providers["codex"], {"OPENAI_API_KEY": "sk-abc"}
             )
         )
+
+
+class WhatAnEntryWaitsOn(unittest.TestCase):
+    """Copilot's seventh pass. Two situations shared one sentence, and the
+    sentence described the rarer one.
+
+    Four of the five entries on the shipped reviewer chain are `url` entries.
+    They declare no reader, and correctly so -- a reader parses what a spawned
+    command prints, and they spawn nothing. Reporting each as reading "back as
+    None, and this build implements no such reader" named a typo nobody had
+    made, on the output whose whole job is to say why an entry was passed
+    over.
+    """
+
+    def chain(self, text: str, line: str) -> dict[str, str]:
+        registry = sd_registry.parse(text, "fixture.yaml")
+        return {
+            candidate.provider.name: candidate.reason
+            for candidate in sd_registry.reviewer_chain(
+                registry,
+                consent=sd_registry.parse_consent(line),
+                readers=("codex-json",),
+            )
+        }
+
+    def test_a_url_entry_waits_on_a_client_and_says_so(self) -> None:
+        reasons = self.chain(
+            MINIMAL.replace("vendor: alpha,", "vendor: alpha, bill: free,").replace(
+                "vendor: beta,", "vendor: beta, bill: free,"
+            ),
+            "two@localhost:2",
+        )
+        self.assertIn("'url' entry", reasons["two"])
+        self.assertNotIn("None", reasons["two"])
+
+    def test_a_start_entry_naming_another_build_s_reader_still_says_that(self) -> None:
+        text = (
+            MINIMAL.replace("vendor: alpha,", "vendor: alpha, bill: free,")
+            .replace(
+                '{ url: "http://localhost:2/v1", vendor: beta,',
+                '{ start: "two review", reader: claude-json, vendor: beta,',
+            )
+            .replace("vendor: beta,", "vendor: beta, bill: free,")
+        )
+        reasons = self.chain(text, "two@two")
+        self.assertIn("claude-json", reasons["two"])
+        self.assertIn("no such reader", reasons["two"])
 
 
 class TheReviewerChain(unittest.TestCase):

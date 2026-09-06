@@ -554,6 +554,12 @@ def _provider(
             f"would be a number nothing enforces. Give it a 'url', or move it "
             f"to an uncapped bill."
         )
+    if start and not body.get("reader"):
+        raise RegistryError(
+            f"{path}: provider {name!r} is a 'start' entry with no 'reader'. "
+            f"Running one means parsing what the command prints, so an entry "
+            f"that does not say how could be selected and never read."
+        )
     if "vendor" not in body:
         raise RegistryError(f"{path}: provider {name!r} has no 'vendor'")
     vendor = str(body["vendor"])
@@ -905,9 +911,18 @@ def reviewer_chain(
             # change would be read by fewer providers than its tier asked for,
             # while still reporting clean. That is a fact about the build, not
             # about the machine at this second, so it belongs in the chain.
+            # Two different situations, and one message for both said the
+            # wrong thing about the commoner one. Four of the five entries on
+            # the shipped chain are `url` entries, which declare no reader at
+            # all because a reader parses a spawned command's output; what
+            # they wait on is a client for `url`. Reporting them as naming a
+            # reader called `None` described a typo nobody made.
             refusal = (
-                f"{provider.name} reads back as {provider.reader!r}, and this "
-                f"build implements no such reader."
+                f"{provider.name} is a 'url' entry, and this build has no "
+                f"client for one yet; it runs 'start' entries."
+                if provider.url
+                else f"{provider.name} reads back as {provider.reader!r}, and "
+                f"this build implements no such reader."
             )
         if refusal is None:
             refusal = refuse_allowance(provider, consent.get(provider.name))
