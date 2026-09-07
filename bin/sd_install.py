@@ -1041,12 +1041,23 @@ def reads_back(line: str, chosen: list) -> bool:
 
     The whole chain, run before anything is written: the body the block will
     carry, through `sd_lib`, through `parse_consent`. Composed by the writer,
-    checked by the reader. `Allowance.__str__` quotes a recipient with
-    `shlex.quote`, whose safe set *includes* the comma `consent_parts` splits
-    on, so an executable holding one renders bare and comes back as two pairs
-    -- `entry@x,y@z` reads as `entry -> x`, a host nobody named, beside a
-    fabricated `y -> z`. That belongs to `bin/sd_registry.py` and cannot be
-    fixed from here; refusing to be the thing that writes it can.
+    checked by the reader.
+
+    The defect that first justified this guard is now fixed at its source:
+    `Allowance.__str__` quoted through `shlex.quote`, whose safe set *includes*
+    the comma `consent_parts` splits on, so an executable holding one rendered
+    bare and came back as two pairs -- `entry@x,y@z` read as `entry -> x`, a
+    host nobody named, beside a fabricated `y -> z`. `sd_registry._one_word`
+    now quotes on that module's own rule and the comma round-trips.
+
+    The guard stays, because quoting cannot separate every shape. A recipient
+    ending in `+` and exactly `FINGERPRINT_LENGTH` hex characters is spelled
+    identically to recipient-plus-fingerprint, and the split happens after the
+    quotes are gone: `host.example+abcdef12` reads back as the bare
+    `host.example`. Only a `url` entry reaches it, a `start` entry having a
+    real fingerprint appended after. Refusing to be the thing that writes such
+    a line is still this function's job, whether the read comes back different
+    or does not come back at all.
     """
     try:
         block = sibling("sd_lib").parse_local_block(

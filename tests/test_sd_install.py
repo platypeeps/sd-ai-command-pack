@@ -586,10 +586,12 @@ providers:
               bill: local, roles: [reviewer], env: [] }
   commaed:  { start: "/opt/a,b/tool run", vendor: v3, bill: local,
               roles: [reviewer], reader: codex-json, env: [] }
+  residue:  { url: "https://host.example+abcdef12/v1", model: m, vendor: v6,
+              bill: local, roles: [reviewer], env: [] }
 
 roles:
   author:   [claude]
-  reviewer: [plain, spaced, hashed, userinfo, commaed]
+  reviewer: [plain, spaced, hashed, userinfo, commaed, residue]
 """
 
 
@@ -659,19 +661,78 @@ class ConsentPromptTests(InstallerHarness):
              "p:pw@host.example"],
         )
 
-    def test_a_pair_that_does_not_read_back_is_never_written(self):
-        """`sd_registry.Allowance.__str__` quotes through `shlex.quote`, whose
-        safe set includes the comma `consent_parts` splits on. `commaed`'s
-        executable holds one, so its pair renders bare and comes back as a
+    def test_a_comma_in_a_recipient_now_reads_back_and_is_written(self):
+        """The comma defect is fixed at its source, so the guard steps aside.
+
+        `Allowance.__str__` used to quote through `shlex.quote` alone, whose
+        safe set includes the comma `consent_parts` splits on: `commaed`'s
+        executable holds one, so its pair rendered bare and came back as a
         different recipient beside a fabricated second grant. The installer
-        cannot fix that where it lives; it can refuse to write it.
+        could not fix that where it lives and refused to write it instead.
+        `sd_registry._one_word` now quotes on this module's own rule, so the
+        pair round-trips and there is nothing left to refuse. Asserted as the
+        round trip rather than as the absence of a warning, so a regression in
+        the quoting fails here and not merely in the registry's own suite.
         """
         self.seed_registry()
         repo = self.make_repo("comma")
         rc, output = self.run_cli("--repo", str(repo), "--reviewers", "commaed")
+        self.assertEqual(rc, 0, output)
+        self.assertNotIn("does not read back", output)
+
+        sd_registry = self.registry()
+        offered = {
+            entry.name: sd_registry.recipient(entry)
+            for entry in sd_registry.read_file(
+                self.home / sd_install.REGISTRY_RELATIVE
+            ).order("reviewer")
+        }
+        parsed = sd_registry.parse_consent(self.consent_line(repo))
+        self.assertEqual(list(parsed), ["commaed"])
+        self.assertEqual(parsed["commaed"].recipient, offered["commaed"].recipient)
+        self.assertIn(",", parsed["commaed"].recipient)
+
+    def test_a_pair_that_does_not_read_back_is_never_written(self):
+        """The guard, on the one shape quoting cannot separate.
+
+        A recipient ending in `+` and exactly `FINGERPRINT_LENGTH` hex
+        characters is spelled identically to recipient-plus-fingerprint, and
+        no quoting distinguishes them: the split happens after the quotes are
+        gone. Only a `url` entry reaches it -- a `start` entry always has a
+        real fingerprint appended after, so it round-trips. `residue`'s netloc
+        is `host.example+abcdef12`, which reads back as the bare
+        `host.example`: a well-formed pair naming a host nobody consented to.
+        The installer cannot fix that where it lives; it can refuse to write
+        it, which is what this asserts.
+        """
+        self.seed_registry()
+        repo = self.make_repo("residue")
+        rc, output = self.run_cli("--repo", str(repo), "--reviewers", "residue")
         self.assertEqual(rc, 0)
         self.assertIn("does not read back", output)
         self.assertIsNone(self.consent_line(repo))
+
+    def test_a_line_that_cannot_be_read_at_all_refuses_by_the_other_arm(self):
+        """`reads_back`'s second arm: the read raises instead of differing.
+
+        `residue` reaches the comparison -- the block parses, the pairs come
+        back, and they are not the pairs offered. A recipient holding a
+        newline never gets that far: the block is line-based, so its second
+        line is not `key: value` and `parse_local_block` raises. Both arms
+        have to refuse, because a writer that let an unreadable line through
+        would be trusting a check that never ran.
+
+        Called directly rather than through the CLI. A newline cannot reach a
+        recipient from the registry -- YAML resolves the escape and `shlex`
+        then drops the backslash, so `"/opt/a\\nb/tool"` arrives as
+        `/opt/anb/tool` -- and building a fixture that pretends otherwise
+        would assert something the parser cannot produce. The arm is real
+        regardless of which caller reaches it: it is what stands between a
+        line the reader chokes on and that line being written anyway.
+        """
+        sd_registry = self.registry()
+        pair = sd_registry.Allowance("entry", "host.example\nrogue: evil")
+        self.assertFalse(sd_install.reads_back(str(pair), [pair]))
 
     # -- refusals grant nothing ----------------------------------------
 
