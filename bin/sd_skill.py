@@ -41,6 +41,7 @@ class SkillRefusal(Exception):
 CONTRIB_DIR = "contrib"
 SKILLS_DIR = "skills"
 SKILL_FILE = "SKILL.md"
+PATHS_FILE = "paths.json"
 
 
 def checkout() -> pathlib.Path:
@@ -114,7 +115,7 @@ def skill_list(args: argparse.Namespace) -> int:
     root = checkout()
     import json  # noqa: PLC0415 - only this verb reads the paths file
 
-    paths_file = root / SKILLS_DIR / "paths.json"
+    paths_file = root / SKILLS_DIR / PATHS_FILE
     if not paths_file.is_file():
         raise SkillRefusal(f"no {paths_file}; requirement 10 says a path names what installs")
     paths = json.loads(paths_file.read_text(encoding="utf-8"))["paths"]
@@ -149,3 +150,157 @@ def skill_list(args: argparse.Namespace) -> int:
         mark = f"  on trial until {trials[skill]}" if skill in trials else ""
         print(f"  {skill}{mark}")
     return 0
+
+
+# --------------------------------------------------------------------------
+# Promotion and demotion: the two moves that change what installs
+# --------------------------------------------------------------------------
+
+
+def _sibling(module_name: str, filename: str):
+    """Import a `bin/` tool that has no `.py` suffix, as `sd-status` does.
+
+    Lazily, and not at module import: `bin/sd` imports this module for every
+    verb it runs, and `sd-pr-state` is only needed by the two that open a
+    pull request.
+    """
+    import importlib.machinery  # noqa: PLC0415 - only these two verbs need it
+    import importlib.util  # noqa: PLC0415
+
+    path = str(pathlib.Path(__file__).resolve().parent / filename)
+    loader = importlib.machinery.SourceFileLoader(module_name, path)
+    spec = importlib.util.spec_from_file_location(module_name, path, loader=loader)
+    if spec is None:  # pragma: no cover - a bin/ layout this broken cannot run
+        raise SkillRefusal(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def paths_edit(root: pathlib.Path, name: str, path_name: str, *, add: bool) -> list[str]:
+    """Add or remove `name` in `skills/paths.json`. Returns the paths changed.
+
+    The whole document is loaded and written back, not `read_paths`'s
+    `data["paths"]`: the file opens with a `$comment` block stating why
+    requirement 10 exists, and a writer that round-tripped only the paths would
+    delete the reasoning its next reader needs. `json.dumps` preserves key
+    order, so the block survives untouched.
+
+    Removal sweeps every path. `paths.json`'s own comment says a skill may ride
+    two, and demoting one that does while leaving the second naming a directory
+    now in `contrib/` fails `make check` after the merge rather than here.
+    """
+    import json  # noqa: PLC0415 - two verbs in this module read the paths file
+
+    document = root / SKILLS_DIR / PATHS_FILE
+    if not document.is_file():
+        raise SkillRefusal(f"no {document}; requirement 10 says a path names what installs")
+    paths = (data := json.loads(document.read_text(encoding="utf-8")))["paths"]
+
+    if add:
+        if path_name not in paths:
+            raise SkillRefusal(f"no path named {path_name}; the three are {', '.join(sorted(paths))}")
+        if name in paths[path_name]["skills"]:
+            raise SkillRefusal(f"the {path_name} path already names {name}")
+        paths[path_name]["skills"] = sorted([*paths[path_name]["skills"], name])
+        changed = [path_name]
+    else:
+        changed = [key for key, path in paths.items() if name in path.get("skills", [])]
+        if not changed:
+            raise SkillRefusal(f"no path names {name}, so there is nothing to demote it from")
+        for key in changed:
+            paths[key]["skills"] = [s for s in paths[key]["skills"] if s != name]
+
+    document.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return changed
+
+
+def move_in_a_pull_request(name: str, path_name: str, *, promoting: bool) -> int:
+    """Branch, move the directory, edit the paths, push, open, say where.
+
+    The half both directions share, which is all of it but the two names. The
+    branch, the staging, the commit, the push and the pull request do not know
+    which way the skill went, so writing them twice would write a copy. What
+    the callers settle first is only that the move is legal.
+
+    Each git step says which one failed. `sd_lib.git_output` answers None for
+    every failure alike, and "the promotion failed" tells an operator nothing
+    about whether to retry or to go fix a remote.
+    """
+    import sd_lib  # noqa: PLC0415 - see the module docstring
+
+    root = checkout()
+    # Before anything is written. A `git commit` on a dirty checkout sweeps
+    # unrelated work into a pull request about one skill directory.
+    if sd_lib.git_output(["--no-optional-locks", "status", "--porcelain"], root):
+        raise SkillRefusal("this checkout has uncommitted changes; commit or stash them first")
+    remote, base = sd_lib._upstream(root)  # noqa: SLF001 - the one reader of this fact
+    if not remote:
+        raise SkillRefusal("this checkout has no remote; a pull request needs somewhere to go")
+
+    source, target = (CONTRIB_DIR, SKILLS_DIR) if promoting else (SKILLS_DIR, CONTRIB_DIR)
+    branch = f"{'promote' if promoting else 'demote'}/{name}"
+    if sd_lib.git_output(["checkout", "-b", branch], root) is None:
+        raise SkillRefusal(f"cannot create branch {branch}; it may already exist")
+    if sd_lib.git_output(["mv", f"{source}/{name}", f"{target}/{name}"], root) is None:
+        raise SkillRefusal(f"git will not move {source}/{name} to {target}/{name}")
+    changed = paths_edit(root, name, path_name, add=promoting)
+
+    title = (
+        f"feat(skill): promote {name} to the {path_name} path" if promoting
+        else f"chore(skill): demote {name} to {CONTRIB_DIR}/"
+    )
+    body = (
+        f"Moves `{source}/{name}/` to `{target}/{name}/` and "
+        + (f"names it on the `{path_name}` path, so the installer renders it without a "
+           "trial row." if promoting else
+           f"drops it from {', '.join(f'`{key}`' for key in changed)}. It stays in git and "
+           f"stops installing; `sd skill try {name}` brings it back for {TRIAL_DAYS} days.")
+    )
+    for argv, failed in (
+        (["add", "--", f"{SKILLS_DIR}/{PATHS_FILE}"], "cannot stage the paths file"),
+        (["commit", "--quiet", "-m", title], "git refused the commit"),
+        (["push", "--set-upstream", remote, branch], f"cannot push {branch} to {remote}"),
+    ):
+        if sd_lib.git_output(argv, root) is None:
+            raise SkillRefusal(failed)
+
+    # The first write to GitHub anywhere in `bin/`. It goes through `gh_json`
+    # unchanged, because `gh api --method POST` is the call shape every reader
+    # there already makes: the timeout, the `OSError` guard and the JSON decode
+    # are built. `gh pr create` would have needed a second runner for a command
+    # that answers with a URL on stdout instead of with JSON.
+    pr_state = _sibling("sd_pr_state", "sd-pr-state")
+    slug = pr_state.remote_slug(root)
+    if not slug:
+        raise SkillRefusal(f"{branch} is pushed, but {remote} is not a GitHub remote")
+    payload, error = pr_state.gh_json(
+        ["api", "--method", "POST", f"repos/{slug}/pulls", "-f", f"title={title}",
+         "-f", f"body={body}", "-f", f"head={branch}", "-f", f"base={base}"],
+        root,
+    )
+    if error:
+        raise SkillRefusal(f"{branch} is pushed, but gh would not open the pull request: {error}")
+    print((payload or {}).get("html_url") or f"pushed {branch}; gh reported no pull request URL")
+    return 0
+
+
+def skill_promote(args: argparse.Namespace) -> int:
+    """Move one `contrib/` skill onto a path, in a pull request."""
+    root = checkout()
+    if not (root / CONTRIB_DIR / args.name / SKILL_FILE).is_file():
+        listing = ", ".join(available(root)) or "nothing"
+        raise SkillRefusal(f"no {CONTRIB_DIR}/{args.name}/{SKILL_FILE}; available: {listing}")
+    if (root / SKILLS_DIR / args.name).exists():
+        raise SkillRefusal(f"{SKILLS_DIR}/{args.name} already exists; promotion would overwrite it")
+    return move_in_a_pull_request(args.name, args.path, promoting=True)
+
+
+def skill_demote(args: argparse.Namespace) -> int:
+    """Move one installed skill back to `contrib/`, in a pull request."""
+    root = checkout()
+    if not (root / SKILLS_DIR / args.name / SKILL_FILE).is_file():
+        raise SkillRefusal(f"no {SKILLS_DIR}/{args.name}/{SKILL_FILE}; it is not on a path")
+    if (root / CONTRIB_DIR / args.name).exists():
+        raise SkillRefusal(f"{CONTRIB_DIR}/{args.name} already exists; demotion would overwrite it")
+    return move_in_a_pull_request(args.name, "", promoting=False)

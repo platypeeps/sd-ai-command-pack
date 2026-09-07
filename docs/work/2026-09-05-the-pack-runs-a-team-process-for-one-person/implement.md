@@ -982,6 +982,39 @@ unrelated work. `demote` carries a real branch for a skill on two paths, which
 whole document rather than `read_paths`'s `data["paths"]`, or the `$comment`
 block is destroyed on write.
 
+**Delivered 172 against 288 funded**, `bin/` 16,723 to 16,895 at `BIN_CAP`
+17,050, all counted from git. `bin/sd_skill.py` goes 151 to 306 with ten
+top-level definitions, and `bin/sd` gains 17 lines of subparser.
+
+| span | priced | delivered |
+|---|---|---|
+| `paths_edit` | 34 | 36 |
+| the shared opener, `move_in_a_pull_request` | 66 | 68 |
+| `skill_promote` | 36 | 9 |
+| `skill_demote` | 34 | 8 |
+| `_sibling`, unpriced | — | 18 |
+| `bin/sd` | 22 | 17 |
+| docstring and banner | 12 | 4 |
+
+**The two ends came in at 9 and 8 against 36 and 34, because the split moved.**
+The derivation put validation in the ends and the rest in the middle, which was
+right, and then left the move and the clean check in the ends where each would
+have been written twice. Passing `promoting` as a parameter pulled both into
+the shared half, which grew by 2 to absorb them. What is left in each end is
+the three questions that differ: does the source exist, does the target already
+exist, and which path names it.
+
+**`_sibling` at 18 is what the 40 of seam actually bought.** The write is ten
+lines, because `gh api --method POST` goes through `gh_json` unchanged exactly
+as R11-D44 predicted. Reaching `gh_json` costs a loader, because
+`bin/sd-pr-state` has no `.py` suffix. `bin/sd-status:97` carries the same
+eighteen lines for the same reason; a third copy is the argument for moving it
+into `sd_lib`, and two copies is not.
+
+**Verification.** `make test` exit 0, 55 `OK` blocks. `make check` exit 0, `No
+findings to report`. Nineteen tests in `tests/test_sd_skill_promotion.py`, and
+seven mutations all caught under `PYTHONDONTWRITEBYTECODE=1`.
+
 ### PR 8d — criterion 28, suggestions that file nothing
 
 **Touches:** `skills/sd-suggest/`, `contrib/sd-propose-skills/`, `bin/sd`,
