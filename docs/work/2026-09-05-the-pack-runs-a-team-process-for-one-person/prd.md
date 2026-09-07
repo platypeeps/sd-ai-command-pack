@@ -4403,3 +4403,140 @@ from a number the operator types.
   showed the correct text throughout; only `dis` showed `COMPARE_OP
   bool(==)` where the source says `!=`. Clear `__pycache__` after a mutation
   loop, or verify with `dis` rather than with the source.
+
+- **2026-09-07** — **R11-D42, `BIN_CAP` re-derived from 15,750 to 16,750, and
+  PR 8 split into four pull requests**, in a change of its own that touches
+  `tests/test_loc_caps.py` and these planning pages and nothing under `bin/`,
+  which is the clause at `tests/test_loc_caps.py:9-10`. On the operator's
+  decision of 2026-09-07, taken against a priced alternative rather than in
+  the abstract.
+
+  **PR 7 is the first delivered total this cap has, and it overran.** Every
+  earlier re-derivation checked itself against per-unit bodies. R11-D38
+  reserved 452 for PR 7 — 299 body, 119 seam, 34 post-report — and PR 7 spent
+  **489** in `bin/`, 15,260 at `edb71875` to 15,749 at the branch head, 8.2%
+  over. The figures are `git log --numstat` over `bin/` across that range:
+
+      unit                                   reserved  actual  commit
+      `sd_lib` resolver, adapter, delivered        125    +378  d9aca2e0, eb7695c7, 83008832
+      `bin/sd-status` row read and stale line       38      -5  d9aca2e0, 2cbf11d3
+      `sd-docs-lint` rules 1, 2 and 7              117     +88  d9aca2e0, d369b6b1
+      the `sd_db` installer step                    19     +28  7b65d196, d369b6b1
+      total                                        452    +489
+
+  **So R11-D38's central claim does not survive its own first total.** It
+  concluded, from four units priced span by span, that "the analogue method
+  holds a fourth time" inside 5%. Against a delivered whole the spans are off
+  by 3.0x one way and past zero the other, and the total is right to 8.2%
+  only because the misses cancelled. The method is unreliable per span and
+  roughly right in aggregate — the reverse of what it said — and it is the
+  aggregate a ceiling gates, so this is a correction to how the numbers are
+  read rather than a reason to abandon them.
+
+  **What the spans missed is the per-file header, and it is measurable.** A
+  new module in `bin/` costs 49 to 72 lines before its first function:
+  `sd_restore.py` 49, `sd_sweep.py` 54, `sd-handoff-restore` 71, `sd-handoff`
+  72. Glue between functions is another 2.9 lines per boundary —
+  `sd-handoff-restore` is 527 lines for 16 top-level defs summing 410 and a
+  71-line header, leaving 46. Neither is visible in a function-level analogue,
+  and PR 7's overrun sits almost entirely in `sd_lib.py`, the file that grew
+  most. Every span below is priced with its header counted.
+
+  **PR 8 priced whole came to 2,592, and that is what split it.** Twelve
+  spans, each at a built analogue, against a base of 15,749: a 1,901-line
+  body, 476 of seam, 215 of post-report. A single raise of that size is a
+  16.5% step funding scope a month out, which is the thing R11-D15's clause
+  exists to refuse. The four criteria are near-independent, so the item lands
+  as four pull requests, each preceded by its own re-derivation, in the order
+  **26, 29, 27, 28**. The order is forced once and only once: the installer's
+  move from one hook event to five is +55 shared by all four new hooks, and
+  criterion 26 pays it so criterion 29 rides free. Criterion 28 goes last
+  because two of its clauses answer to files outside this repository.
+
+  Splitting costs nothing. Four slices priced separately come to 2,593
+  against 2,592 priced together. The bodies and the seams are identical either
+  way — 1,901 and 476, no seam crossed twice — and the one-line difference is
+  the post-report line rounding up four times instead of once:
+
+      slice          body   seam   post   total
+      criterion 26    663    238     75     976
+      criterion 29    644    119     73     836
+      criterion 27    267    119     31     417
+      criterion 28    327      0     37     364
+                                          2,593
+
+  **This change funds criterion 26 only: 976, to 16,750 with 25 unclaimed.**
+  The base is 15,749 and not the 15,743 `main` measures. The six-line
+  difference is `sd_lib.external_id`, committed on PR 7's branch, merging
+  first, and already inside R11-D38's reservation; pricing off `main` would
+  fund the slice six lines short of the tree it builds on.
+
+  The body is 663, three spans:
+
+  - **`bin/sd_codex.py`, the nightly parse of `~/.codex/sessions` — 368.**
+    A new module: 54 for the header at `bin/sd_sweep.py:1-54`, whose 33-line
+    policy docstring is the analogue for stating what counts as a skill use in
+    a transcript and why a nightly does not re-read; 21 for the deferred-`sd_db`
+    frame at `bin/sd_restore.py:50-51`, `:54-67` and `:70-74`; 30 for
+    enumerating a directory of state files at `dashboard/sessions.py:45-74`
+    `read_worktrees`; 46 for the per-line JSONL parse with its damaged-line
+    policy at `bin/sd_ledger.py:143-188` `acked`; 54 for deriving fields at
+    `dashboard/jira.py:229-282` `normalize`, the larger of the two built
+    normalisers because recognising an invocation inside a transcript is a
+    derivation and not a field copy; 49 for `dashboard/github.py:270-318`
+    `collect`, which returns `ok`/`reason` so a partial run does not advance
+    the watermark; 27 for the watermark itself at `dashboard/store.py:190-218`;
+    11 for `bin/sd_ledger.py:46-56` `path`; 35 and 19 for the entry and its
+    render half at `bin/sd:2706-2740` and `bin/sd_sweep.py:144-162`; and 22 of
+    glue. `dashboard/jira.py` is 363 lines and `dashboard/github.py` 366, both
+    this exact shape — a coincidence worth reporting and not a derivation.
+  - **`bin/sd-skill-use`, both events in one file — 240.** One file and not
+    two: the events differ only in how the skill name comes off the payload,
+    and two files would duplicate 132 of the body — header, library open,
+    `resolve_root`, `main` — to save an eight-line branch. 71 for the header at
+    `bin/sd-handoff-restore:1-71`, counted whole because the new hook carries
+    the same obligation over two events, three detection cases and an opt-out;
+    40 for cwd resolution at `:104-128` with `:72-86`; 33 for reading an
+    untrusted nested payload at `:373-405` `context_for`; 10 for `surface` at
+    `:89-98` `canonical_remote`; 12 for a library open that returns `None`
+    rather than refusing aloud, at `bin/sd_registry.py:161-167` with
+    `bin/sd_restore.py:70-74`, because a hook must exit 0 silently; 45 for the
+    orchestration at `:314-350` `claim` plus the two-event dispatch; 9 for
+    `main` at `:515-523`; and 20 of glue at the measured rate.
+  - **The installer, one hook event to five — +55 net.** A delta, not a
+    rewrite: constants to a per-event spec table at +21, against
+    `bin/sd_install.py:148-173` `PlatformHome` and `platform_homes`; `+4` for
+    `hook_stanza_command` becoming `hook_specs`; +10 on `install_hook` and +14
+    on `remove_hook`, at `:471-511` `render` and `:741-797` `prune_stale` with
+    `prune_empty_dirs`, the built loop-a-table-and-act-per-item shapes; and +6
+    across two call sites that assume a single hook entry. About 65 of the
+    existing 123 lines are reshaped in place and 58 are untouched; the pair
+    ends near 147 lines while contributing 55 to the ceiling.
+
+  The 238 is two seams at R11-D38's flat 119, both first crossings:
+  **`skill_use` rows**, which nothing in `bin/` has written, and **a Codex
+  transcript**, a format nothing here has read. R11-D38's item-rows seam is
+  spent — `d9aca2e0` crossed it — and is not reserved again. **No seam is
+  reserved for calling GitHub**, and an earlier draft of this derivation
+  reserved one before the transport was checked: `bin/sd_lib.py:275` runs
+  `["gh", "api", endpoint]` and `bin/sd-pr-state:117-126` `gh_json` takes
+  arbitrary `gh` args behind a timeout, an `OSError` guard and a JSON decode.
+  The mechanism, its failure vocabulary and its timeouts are all settled, so
+  the pull-request opener in criterion 27's slice is priced at 24 lines
+  against `bin/sd-pr-state:225-244` `behind_by` rather than at a first
+  crossing. What is left unrepaired there is authenticated mutation, which is
+  smaller than a seam and is priced as a caller.
+
+  The 75 is post-report discovery at 11.3% of the 663-line body, R11-D38's
+  mean of 14.4% and 8.3%, rounded up. It is still two observations and this
+  entry says so, as R11-D38's did. PR 7 gave no third: its post-report rounds
+  landed inside the 489 above without being separable from the bodies.
+
+  **What is excluded.** `tests/` answers to no line cap and criterion 26's
+  fixtures are most of its volume — there is no recorded-session fixture
+  anywhere today, `tests/fixtures/` holding two provider files and nothing
+  else. The scheduler that runs the nightly is not in `bin/` and is not in
+  this repository at all: `.github/workflows/` holds two files, neither
+  scheduled, and `bin/sd_sweep.py:7` already records that nothing writes on a
+  schedule. A `sd codex sync` verb would add 20 lines to `bin/sd` and is not
+  reserved, because a cron-only nightly does not need one.
