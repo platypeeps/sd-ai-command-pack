@@ -88,12 +88,17 @@ def item_date(item: sd_lib.WorkItem) -> datetime.date | None:
 def branches(root: pathlib.Path) -> frozenset[str] | None:
     """Every branch name this root publishes or holds, or None when git cannot say.
 
-    Two commands, not one per item: the remote is asked for all its heads with
-    no branch argument, because a query filtered by one item's branch can only
-    classify that item and answers `gone` for every other branch it was not
-    asked about. Local heads join them -- a branch created here and not yet
+    Once per root, not once per item. The remote is asked for all its heads
+    with no branch argument, because a query filtered by one item's branch can
+    only classify that item and answers `gone` for every other branch it was
+    not asked about. Local heads join them -- a branch created here and not yet
     pushed is live work, and calling it gone would sweep the item somebody
     just started.
+
+    Seven `git` invocations, of which exactly one leaves the machine: the
+    `ls-remote`. Five of the other six are `upstream` resolving which remote to
+    ask, and they are local reads. What matters for cost is that all seven are
+    per root and none is per item, so the bill is flat as the backlog grows.
 
     A root with no remote is answered, not refused: it holds every branch it
     has, so its local heads are the whole truth. None means git failed or the

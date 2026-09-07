@@ -204,7 +204,7 @@ picking it up here would mean sweeping items the sweep is not for.
 **D5 — no caching.** Criterion 5 says *one fresh remote query per root*. A
 cached observation is what C-7 rejected: remote-tracking refs survive a deleted
 branch until `git fetch -p`, so anything read from the ref store answers about
-the last fetch rather than about the remote. Two subprocesses per root, on
+the last fetch rather than about the remote. One `ls-remote` per root, on
 every run.
 
 ## Risks
@@ -214,7 +214,14 @@ read the filesystem and nothing else, and `sd sweep --fleet` walks every
 checkout under `SD_REPO_ROOT`. Thirteen checkouts is thirteen `ls-remote`
 calls, each a round trip. That is the cost criterion 5 chose over a cache, and
 it is bounded by root count rather than by item count — the shape that stays
-flat as the backlog grows. `git_output` already carries the timeout, so a
+flat as the backlog grows.
+
+Measured rather than assumed: `branches()` is **seven** `git` invocations per
+root, not the two the fact count suggests. Five of them are `upstream`
+resolving which remote to ask — `remote`, `rev-parse --abbrev-ref HEAD`,
+`config --get branch.<head>.remote`, `symbolic-ref` and a `rev-parse --verify`
+fallback — and those are local reads. Exactly one leaves the machine. The
+per-root bound is what the cost argument rests on, and it holds for all seven. `git_output` already carries the timeout, so a
 hanging remote fails to `unknown` rather than to a hung sweep.
 
 **A shared branch name across repositories still misleads a reader, not the

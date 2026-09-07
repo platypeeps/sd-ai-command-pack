@@ -82,6 +82,29 @@ passed the whole suite. `test_sweep_resolves_each_root_against_itself` is that
 test, and the mutation dies on it. This is the case criterion 6 exists to find
 and it found one.
 
+## The code review, and the one finding it made
+
+One pass, per the Development / code row. Copilot recommended approval and
+raised one issue: the `branches()` docstring was inaccurate about subprocess
+counts. Verified before acting on it — a recording `git` on `PATH` shows
+**seven** invocations per root, not the two the docstring implied:
+
+```
+for-each-ref --format=%(refname:short) refs/heads
+remote
+rev-parse --abbrev-ref HEAD
+config --get branch.main.remote
+symbolic-ref --short refs/remotes/origin/HEAD
+rev-parse --verify --quiet main
+ls-remote --heads origin
+```
+
+Five of the seven are `sd_lib.upstream` resolving which remote to ask, and they
+are local reads; exactly one leaves the machine. The docstring and `design.md`'s
+D5 and Risks section now say seven and name the one that is a round trip. The
+claim the cost argument actually rests on — per root, never per item — was
+right and is unchanged.
+
 ## Gates
 
 `make lint`, `make test`, `make check` each exit 0. 28 tests in
