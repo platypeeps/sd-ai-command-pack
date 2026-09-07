@@ -194,9 +194,9 @@ pass.
    against this worktree to produce these, and they are to be re-measured at
    step 6 rather than asserted:
 
-   | reason | on `405a9106` | with this item's two pages staged |
+   | reason | on `405a9106` | with these two pages |
    |---|---|---|
-   | `compared` | 44 | 65 |
+   | `compared` | 44 | 67 |
    | `declared-absent` | 1 | 1 |
    | `target-missing` | 0 | 0 |
    | `escapes-checkout` | 0 | 0 |
@@ -204,19 +204,22 @@ pass.
    | `separator-not-adjacent` | 33 | 33 |
    | `no-adjacent-anchor` | 273 | 277 |
    | `quoted` | 0 | 0 |
-   | **sum** | **358** | **383** |
+   | **sum** | **358** | **385** |
 
    The sum equals the `path:line` tokens in the live documents — 358 in 24,
-   383 in 26 — which is the conservation property, and it held on both runs.
+   385 in 26 — which is the conservation property, and it held on both runs.
    162 of the 273, and 166 of the 277, are the elided-path shape. This is the
    check that answers criterion 6, and it is a reading rather than an assertion
    for the reason `test_the_scan_reaches_the_documents`'s docstring gives.
 
    The second column is the more useful one and is why the table has two: this
-   item's own planning pages add 21 compared citations and four more elided
-   paths. A plan about a citation gate is a substantial fraction of what the
-   gate then checks, and a figure taken before the plan existed would be wrong
-   by the time anyone implemented it.
+   item's own planning pages add 23 compared citations and four more elided
+   paths, taking the gate's live coverage from 44 to 67. A plan about a citation
+   gate is a substantial fraction of what the gate then checks, and a figure
+   taken before the plan existed would be wrong by the time anyone implemented
+   it. The second column moved twice while these pages were being reviewed —
+   65, then 67 — which is the drift `design.md`'s risks describe, observed
+   rather than predicted.
 6. **Conservation survives a hostile corpus.** A fixture document containing
    one citation of each declined shape, run through `classify()` -> every row
    carries a reason and the buckets sum to the tokens. This is the check that

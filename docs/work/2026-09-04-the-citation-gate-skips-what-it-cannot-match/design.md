@@ -367,9 +367,18 @@ correct as far as it goes and stops before the corpus glob, the corpus census
 and the elided path.
 
 Nothing outside `tests/test_doc_citations.py` and `docs/` changes. In
-particular `bin/sd-docs-lint` is not edited: rule 6 reads `.md` targets only
-(`CITATION_RE`, `bin/sd-docs-lint:306`) and rule 7 reads `docs/work/` paths, so
-neither is the home for a rule about citations into code.
+particular `bin/sd-docs-lint` is not edited: rule 6's `CITATION_RE`
+(`bin/sd-docs-lint:306`) reads `.md` targets only, and rule 7 reads
+`docs/work/` paths, so neither is the home for a rule about citations into
+code.
+
+That citation was written `` (`CITATION_RE`, `bin/sd-docs-lint:306`) `` in the
+first draft of this page, and rewriting it is worth recording. In that shape it
+is one of the parenthesised comma citations this design proposes to start
+checking — so today it is silent, tomorrow it is a claim, and it was correct
+either way. The point is that nothing about the page told anyone which. Written
+adjacently it is checked now, by the gate as it stands, which is the whole
+argument in one line.
 
 ## Validation
 
