@@ -84,6 +84,44 @@ class InstallerHarness(unittest.TestCase):
         )
         return path
 
+    def committed_checkout(self, name: str = "serving") -> Path:
+        """A real git checkout in the scratch home, at a known clean commit.
+
+        The installer asks git about the *serving* checkout in two places: the
+        `--status` report, and the `commit`, `branch` and `dirty` fields it
+        writes into the receipt. A test that installs from this repository
+        therefore records whatever the developer's working tree happens to be.
+        That is not a test, it is a reading of the room: locally the tree was
+        dirty and the branch was covered, on a clean CI checkout it was not,
+        and the 100% gate failed with `bin/sd_install.py 519 1 196 1 99% 824`.
+        Anything that asserts on those fields -- including the receipt byte
+        comparison, where an unrelated edit landing between two installs used
+        to flip `dirty` and fail it -- owns its checkout instead.
+        """
+        checkout = self.home / name
+        folder = checkout / "skills" / "sd-probe"
+        folder.mkdir(parents=True)
+        (folder / sd_install.SKILL_FILE).write_text(
+            "---\nname: sd-probe\n---\n\nprobe\n", encoding="utf-8"
+        )
+        self.write_paths(checkout, "sd-probe")
+        for argv in (
+            ("init", "-q"),
+            ("config", "user.email", "t@example.invalid"),
+            ("config", "user.name", "t"),
+            ("add", "-A"),
+            ("commit", "-q", "-m", "probe"),
+        ):
+            subprocess.run(
+                ["git", "-C", str(checkout), *argv], check=True, capture_output=True
+            )
+        return checkout
+
+    def context_for(self, checkout: Path) -> "sd_install.Context":
+        return sd_install.Context(
+            checkout=checkout, home=self.home, environ=dict(os.environ)
+        )
+
     def run_cli(self, *args: str) -> tuple[int, str]:
         out = io.StringIO()
         rc = sd_install.main([*args, "--home", str(self.home)], out=out)
@@ -641,13 +679,32 @@ class ReceiptCanonicalTests(InstallerHarness):
         self.assertEqual(paths, sorted(paths))
 
     def test_two_runs_of_the_same_checkout_write_identical_bytes(self):
+        """Byte equality, against a checkout whose git state cannot move.
+
+        The receipt records the serving checkout's commit, branch and dirty
+        flag, and the CLI's default checkout is this repository. Installing
+        twice from it compared two readings of the developer's working tree,
+        so any edit landing between them flipped `dirty` false to true and
+        failed a test about the installer's own determinism. The fixture is a
+        real repository at a known clean commit, which is what makes "the same
+        checkout" in the test's name true. Every field stays in the
+        comparison, and the three git ones are asserted to be the values the
+        fixture pins so the equality is not passing on empty strings.
+        """
+        checkout = self.committed_checkout()
+        ctx = self.context_for(checkout)
         path = (
             self.home / ".local" / "state" / "sd-ai-command-pack" / "installed.json"
         )
-        self.install()
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
         first = path.read_bytes()
-        self.install()
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
         self.assertEqual(first, path.read_bytes())
+
+        recorded = json.loads(first)
+        self.assertFalse(recorded["dirty"])
+        self.assertTrue(recorded["commit"])
+        self.assertTrue(recorded["branch"])
 
     def test_the_hook_row_takes_its_sorted_position(self):
         """It is appended after the renders, so sorting has to come after that.
@@ -1037,40 +1094,8 @@ class StatusTests(InstallerHarness):
         _, output = self.run_cli("--status")
         self.assertIn("1 missing", output)
 
-    def _committed_checkout(self) -> Path:
-        """A real git checkout in the scratch home, at a known clean commit.
-
-        `--status` reports dirtiness by asking git about the *serving* checkout,
-        so a test that installs from this repository reports whatever the
-        developer's working tree happens to be. That is not a test, it is a
-        reading of the room: locally the tree was dirty and the branch was
-        covered, on a clean CI checkout it was not, and the 100% gate failed
-        with `bin/sd_install.py 519 1 196 1 99% 824`. Both sides of the branch
-        are pinned here against a checkout this test owns.
-        """
-        checkout = self.home / "serving"
-        folder = checkout / "skills" / "sd-probe"
-        folder.mkdir(parents=True)
-        (folder / sd_install.SKILL_FILE).write_text(
-            "---\nname: sd-probe\n---\n\nprobe\n", encoding="utf-8"
-        )
-        self.write_paths(checkout, "sd-probe")
-        for argv in (
-            ("init", "-q"),
-            ("config", "user.email", "t@example.invalid"),
-            ("config", "user.name", "t"),
-            ("add", "-A"),
-            ("commit", "-q", "-m", "probe"),
-        ):
-            subprocess.run(
-                ["git", *argv], cwd=checkout, check=True, capture_output=True
-            )
-        return checkout
-
     def _status_of(self, checkout: Path) -> str:
-        ctx = sd_install.Context(
-            checkout=checkout, home=self.home, environ=dict(os.environ)
-        )
+        ctx = self.context_for(checkout)
         installed = io.StringIO()
         self.assertEqual(sd_install.cmd_user(ctx, installed), 0)
         out = io.StringIO()
@@ -1078,10 +1103,10 @@ class StatusTests(InstallerHarness):
         return out.getvalue()
 
     def test_a_clean_serving_checkout_is_not_reported_dirty(self):
-        self.assertNotIn("checkout is dirty", self._status_of(self._committed_checkout()))
+        self.assertNotIn("checkout is dirty", self._status_of(self.committed_checkout()))
 
     def test_a_dirty_serving_checkout_is_reported(self):
-        checkout = self._committed_checkout()
+        checkout = self.committed_checkout()
         (checkout / "skills" / "sd-probe" / sd_install.SKILL_FILE).write_text(
             "---\nname: sd-probe\n---\n\nedited\n", encoding="utf-8"
         )
