@@ -3593,3 +3593,62 @@ from a number the operator types.
 
   Nothing else is funded. PRs 7 and 8 are unwritten scope, which R11-D15's
   clause excludes by name.
+- **2026-09-06** — **R11-D32, `BIN_CAP` re-derived from 14,700 to 15,050**, in
+  its own change, because the rest of PR 6 cannot land under the ceiling
+  R11-D31 set. R11-D31's 888 was a reservation against a directory measuring
+  13,307; most of it is now built. The registry reader, consent, the reviewer
+  chain and criterion 6's mandated deletions have all landed, `bin/` measures
+  **14,536** — `line_count` over the 26 tracked files `tests/test_loc_caps.py`
+  enumerates, `migrate-*` excluded — and 164 lines are left for four units that
+  have not been written. Carrying the old reservation forward would price the
+  remainder off a directory that no longer exists, so it is re-derived against
+  what `bin/` actually holds. This change touches `tests/test_loc_caps.py` and
+  these planning pages and nothing under `bin/`, which is the clause at
+  `tests/test_loc_caps.py:9-10`.
+
+  The itemisation is **14,536 measured + 452 reserved + 62 unclaimed =
+  15,050**.
+
+  **The 452 is a reservation and not a measurement**, on R11-D31's terms and
+  for its reason: this item's `implement.md` pins no body for any of this, so
+  there is nothing to measure and the only input that is not an opinion is
+  built code. Each remaining unit is priced at its nearest built analogue in
+  `bin/`, counted span by span rather than halved or rounded:
+
+  - `sd attribute`, the write side — **168**. `bin/sd_restore.py` (235) is the
+    verb group of this shape, a module holding the verb's whole body with thin
+    parser wiring in `bin/sd`. R11-D31 priced `sd attribute` *and* the trailer
+    scan at that 235; the scan has since been built, at 82 measured —
+    `sd_lib.attribution` (`:632-665`, 34), `sd_lib._in_range` (`:668-683`, 16)
+    and `sd_lib.author_vendors` (`:686-717`, 32) — so only 235 − 82 = 153 is
+    re-reserved, plus 15 for the parser block, measured off `sd restore`'s at
+    `bin/sd:2945-2959`.
+  - the `url` client and the `<think>`/`reasoning_content` reader — **114**.
+    The codex path in `bin/sd-review` is the same job done against a process
+    instead of an endpoint: `codex_argv` (`:685-718`, 34) builds the call,
+    `subprocess_runner` (`:571-593`, 23) is the transport and `_finding`
+    (`:721-757`, 37) with `parse_findings` (`:760-779`, 20) is the reader. The
+    runner is counted in rather than left out because a `url` entry owns its
+    transport instead of borrowing one. R11-D31 used `sd_skill.py` (151) as a
+    whole-module stand-in; these four spans are the code that does this.
+  - criterion 11's mode predicate — **106**. `bin/sd_setup_github.py`'s
+    remote-facing surface, counted instead of halved: `setup_github`
+    (`:188-260`, 73), which is read-state-then-refuse-with-a-reason, with
+    `resolve_pin` (`:77-95`, 19) and `action_reference` (`:98-111`, 14).
+    R11-D31 took half the file, 165; half a file is an estimate of an
+    estimate, and the three functions that actually do this are 106.
+  - the installer's `reviewers` consent prompt — **64**. Three spans in
+    `bin/sd_install.py`, one per part: `seed_registry` (`:937-957`, 21) for the
+    guarded, idempotent write that reports which branch it took,
+    `provision_library` (`:987-1024`, 38) for an installer step that decides,
+    acts and returns a flag beside a line, and `cmd_repo` (`:1442-1446`, 5) for
+    the flag's dispatch. The `reviewers:` placeholder itself already landed in
+    `DEFAULT_BLOCK_BODY` and is not re-reserved.
+
+  An analogue is still not a promise. If PR 6's remaining runtime comes in over
+  452 that busts a ceiling visibly, which is the behaviour this constant exists
+  to produce, and it does not license a third re-derivation inside PR 6.
+
+  The 62 unclaimed is what a round 15,050 left after the addition, stated as
+  such. Nothing else is funded. PRs 7 and 8 are unwritten scope, which
+  R11-D15's clause excludes by name.

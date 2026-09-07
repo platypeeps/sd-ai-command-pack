@@ -1,10 +1,11 @@
 """The three line-count ceilings, enforced instead of remembered.
 
 The design fixes a ceiling for each part of the replacement world -- `bin/` at
-14,700 lines (R11-D15 set 14,000, re-derived from built code after 8,000 was
+15,050 lines (R11-D15 set 14,000, re-derived from built code after 8,000 was
 busted with six of the eleven commands still unwritten -- `sd-plan`, `sd-ship`,
 `sd-spec`, `sd-deps`, `sd-suggest`, `sd-map`; re-derived again at R11-D31 for
-the registry reader), the temporary `migrate-*` tools at 1,500
+the registry reader and at R11-D32 for what PR 6 has left), the temporary
+`migrate-*` tools at 1,500
 outside it, `dashboard/` at 4,350 with 2,300 of it carrying code (R11-D24, with the total
 re-derived at R11-D29) -- and says in as many words that "caps are
 CI tests; a cap is never raised in the PR that busts it". That rule survives
@@ -15,7 +16,10 @@ change touching this file and one design record and nothing under `dashboard/`,
 while the directory stood at 4,190 against the 4,300 it replaced. 14,700 was
 set the same way at R11-D31, by a change touching this file and one item's
 planning pages and nothing under `bin/`, while the directory stood at 13,307
-against the 14,000 it replaced.
+against the 14,000 it replaced. 15,050 was set the same way at
+R11-D32, by a change touching this file and the same item's planning pages and
+nothing under `bin/`, while the directory stood at 14,536 against the 14,700 it
+replaced.
 
 **Downward-only now attaches to the code cap, not to the dashboard total.**
 R11-D17 said 4,000 could only fall; R11-D24 raised it anyway, and said so in
@@ -27,7 +31,8 @@ branch is what the change is for. So the total may be re-derived with an
 itemisation, and `DASHBOARD_CODE_CAP` is the one that may only move downward.
 `bin/`'s ceiling keeps the original clause and is no longer untouched: it stood
 unmoved from R11-D15 to 2026-09-06, when the registry the review lane reads
-brought the directory within 134 lines of it. It has no code half of its own,
+brought the directory within 134 lines of it, and moved a second time the same
+week when the built half of that work landed and left 164. It has no code half of its own,
 because `bin/` has no equivalent of `dashboard/app.js` -- one file large enough
 that a paragraph and a branch measurably compete -- and inventing one on the
 day the total first bound would be a mechanism chosen to make a number pass.
@@ -68,51 +73,70 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # Each cap names the design decision it enforces, so a failure points at the
 # record rather than at a bare number.
 # R11-D31, re-derived 2026-09-06 for item A's PR 6, the registry reader, which
-# cannot land without it: `bin/` stands at 13,307 on `main` against the 14,000
-# R11-D15 set, and PR 6's first half alone measures +559.
-#
+# could not land without it: `bin/` stood at 13,307 on `main` against the 14,000
+# R11-D15 set, and PR 6's first half alone measured +559. Its itemisation was
 # 13,307 measured + 559 measured - 158 measured + 888 reserved + 104 unclaimed
-# = 14,700.
+# = 14,700, with the 888 reserved from built analogues rather than measured,
+# because this item's `implement.md` pins no bodies for PR 6.
 #
-# The 559 is `bin/sd_registry.py` and the installer's registry seed, measured on
-# `feat/the-registry-reader` rather than described: that half is built.
+# R11-D32, re-derived 2026-09-06 for the rest of that same pull request. The
+# reserved half is now partly built: the registry reader, consent, the reviewer
+# chain and criterion 6's deletions have all landed, `bin/` measures 14,536, and
+# 164 lines are left for four units that have not been written. The reservation
+# is therefore re-derived against what the directory actually holds rather than
+# carried forward, which is the difference between a ceiling and an allowance.
 #
-# The 158 is criterion 6's mandated deletions, measured span by span on `main`
-# -- the `Backend` tuple with `BACKENDS` and `BACKENDS_BY_NAME` at
-# `bin/sd-review:170-251` (82), `argv_backend_argv` at `:812-840` (29),
-# `backend_rows` at `:1036-1050` (15), `plan_providers` at `:1051-1073` (23),
-# and `DEFAULT_POLICY`'s `tiers` block with the two `_providers` keys (9). The
-# criterion requires each by name: no provider table in `bin/sd-review`, and no
-# key ending in `_providers` and no `tiers` key in `sd-review.json`.
+# 14,536 measured + 452 reserved + 62 unclaimed = 15,050.
 #
-# The 888 is a **reservation and not a measurement**, and the difference from
-# R11-D29 and R11-D30 is stated rather than blurred: both of those measured a
-# replacement body their item's `implement.md` pinned verbatim. This item's does
-# not pin bodies for PR 6, so there is nothing to measure. It is derived the way
-# R11-D15 derived this cap in the first place -- from built code -- by taking
-# each remaining unit's nearest built analogue in `bin/`, which is the only
-# input here that is not an opinion:
+# The 14,536 is `line_count` over the 26 tracked files this test enumerates,
+# on this branch, with `migrate-*` excluded as always.
 #
-#   the reviewer chain, a routed decision over a list with refusals   257
-#     -- `bin/sd_route.py`, which is that shape for tiers
-#   `sd attribute` and the trailer scan, a verb group with a reader   235
-#     -- `bin/sd_restore.py`
-#   criterion 11's mode predicate, the three questions of the remote  165
-#     -- half of `bin/sd_setup_github.py`, the GitHub-facing surface
-#   the `url` client and the `<think>`/`reasoning_content` reader     151
-#     -- `bin/sd_skill.py`
-#   the installer's `reviewers` consent prompt                         80
-#     -- `seed_registry` plus the offer, the flag and the rerun path
+# The 452 is a **reservation and not a measurement**, on R11-D31's terms and for
+# R11-D31's reason: no body for this work is pinned anywhere, so there is
+# nothing to measure and the only honest input is built code. Each remaining
+# unit is priced at its nearest built analogue in `bin/`, counted span by span
+# rather than halved or rounded:
 #
-# An analogue is not a promise. If PR 6's runtime comes in over 888, that busts
-# a ceiling visibly, which is the behaviour this constant exists to produce; it
-# does not license a second re-derivation inside that pull request.
+#   `sd attribute`, the write side                                     168
+#     -- `bin/sd_restore.py` (235), the newest verb group of this shape,
+#        less the trailer scan that has since been built and so is no
+#        longer owed: `sd_lib.attribution` (:632-665, 34),
+#        `sd_lib._in_range` (:668-683, 16) and `sd_lib.author_vendors`
+#        (:686-717, 32), which is 82 -- plus 15 for the parser wiring in
+#        `bin/sd`, measured off `sd restore`'s block at `bin/sd:2945-2959`.
+#        R11-D31 priced `sd attribute` and the scan together at 235; the
+#        scan came in at 82, and only the remainder is re-reserved.
+#   the `url` client and the `<think>`/`reasoning_content` reader        114
+#     -- the codex path in `bin/sd-review`, which is the same job done
+#        against a process instead of an endpoint: `codex_argv`
+#        (:685-718, 34) builds the call, `subprocess_runner` (:571-593,
+#        23) is the transport, and `_finding` (:721-757, 37) with
+#        `parse_findings` (:760-779, 20) is the reader. The url client
+#        owns its transport rather than borrowing one, which is why the
+#        runner is counted in and not left out.
+#   criterion 11's mode predicate                                       106
+#     -- `bin/sd_setup_github.py`'s remote-facing surface, counted
+#        instead of halved: `setup_github` (:188-260, 73), the shape of
+#        read-state-then-refuse-with-a-reason, with `resolve_pin`
+#        (:77-95, 19) and `action_reference` (:98-111, 14). R11-D31 took
+#        half the file, 165; the half was an estimate of an estimate, and
+#        the three functions that actually do this are 106.
+#   the installer's `reviewers` consent prompt                           64
+#     -- three spans in `bin/sd_install.py`, one per part: `seed_registry`
+#        (:937-957, 21) for the guarded, idempotent write that reports
+#        which branch it took, `provision_library` (:987-1024, 38) for an
+#        installer step that decides, acts and returns a flag beside a
+#        line, and `cmd_repo` (:1442-1446, 5) for the flag's dispatch.
 #
-# The 104 unclaimed is what a round 14,700 left after the subtraction, stated as
-# such. Nothing else in this item is funded here: PRs 7 and 8 are unwritten
-# scope, and R11-D15's clause is that this cap is derived from built code and
-# not from that.
-BIN_CAP = 14_700           # R11-D31: re-derived from built code for PR 6
+# An analogue is still not a promise. If PR 6's remaining runtime comes in over
+# 452 that busts a ceiling visibly, which is the behaviour this constant exists
+# to produce; it does not license a third re-derivation inside that pull
+# request.
+#
+# The 62 unclaimed is what a round 15,050 left after the addition, stated as
+# such. Nothing else is funded: PRs 7 and 8 are unwritten scope, which R11-D15's
+# clause excludes by name.
+BIN_CAP = 15_050           # R11-D32: re-derived from built code for PR 6's remainder
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
 # R11-D29, re-derived 2026-09-03 with the itemisation R11-D24's clause asks
 # for: 4,190 measured on `main`, 158 measured on the branch that carries the
