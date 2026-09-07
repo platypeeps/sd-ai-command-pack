@@ -344,7 +344,7 @@ PAGE = """<!doctype html>
 <p class="sub" id="work-sub"></p>
 <h2>moving</h2>
 <table><thead><tr>
- <th>repo</th><th>item</th><th>status</th><th>why</th><th>created</th>
+ <th>repo</th><th>item</th><th>status</th><th>why</th><th>created</th><th></th>
 </tr></thead><tbody id="work-moving"></tbody></table>
 <h2>no status</h2>
 <table><thead><tr>
@@ -527,7 +527,7 @@ def make_handler(cache: Cache, script: str, record=_drop,
             # the caller controls one side of it.
             if not hmac.compare_digest(self.headers.get(TOKEN_HEADER, ""), TOKEN):
                 return self.send_error(403, "bad or missing token")
-            if path not in ("/api/run", "/api/ack"):
+            if path not in ("/api/run", "/api/ack", "/api/deliver"):
                 return self.send_error(404)
             # A length is required and `-1` is not one. Both were once read
             # as an empty body, which answers a real POST with "no action
@@ -561,6 +561,27 @@ def make_handler(cache: Cache, script: str, record=_drop,
                 # no explanation. Found in review.
                 if not record("ack", id=identifier):
                     return self.send_error(503, "the ack was not stored")
+                return self.send_body(b'{"ok":true}', "application/json")
+            if path == "/api/deliver":
+                # Two named strings and no path built from either. The label
+                # is resolved by enumerating the fleet, so a client cannot
+                # reach a checkout this page did not already list, and the
+                # item name is one segment by construction.
+                named = sent.get("item") if isinstance(sent, dict) else None
+                where = sent.get("repo") if isinstance(sent, dict) else None
+                if not isinstance(named, str) or not isinstance(where, str) \
+                        or not named or "/" in named:
+                    return self.send_error(400, "deliver needs a repo and an item")
+                checkout = work.checkout_of(cache.root, where)
+                if checkout is None:
+                    return self.send_error(404, "no checkout is named that")
+                # The sentence, not a status alone. A write that did not land
+                # and answered 200 is what put five items in the wrong state
+                # on this very tab, and the operator can act on "no row for
+                # <id>" where they cannot act on 503.
+                refused = work.deliver(checkout, named)
+                if refused:
+                    return self.send_error(503, refused)
                 return self.send_body(b'{"ok":true}', "application/json")
             body, status = actions.run(
                 sent.get("action") if isinstance(sent, dict) else None,

@@ -15,6 +15,7 @@ import ast
 import http.client
 import json
 import os
+import pathlib
 import socket
 import subprocess
 import sys
@@ -27,7 +28,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from dashboard import actions, plugins, server  # noqa: E402 - after the path insert
+from dashboard import (  # noqa: E402 - after the path insert
+    actions,
+    plugins,
+    server,
+    work,
+)
 
 
 def plugin_entry(**overrides) -> dict:
@@ -697,6 +703,72 @@ class TokenDelivery(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(server.TOKEN, page)
         self.assertNotIn(server.TOKEN_SLOT, page)
+
+
+class TheDeliverEndpoint(unittest.TestCase):
+    """The third writable path, and the guards that make it one.
+
+    `dashboard/work.deliver` has its own tests against a real database. What
+    is asserted here is the part that is HTTP's: that the path is reachable
+    only behind the same three guards, that a body it cannot read is a 400
+    rather than a traceback, and -- the one that matters -- that a refusal
+    from the write reaches the caller as a refusal and not as `{"ok":true}`.
+    """
+
+    def post(self, live, body, path="/api/deliver"):
+        return live.request(
+            "POST", path, json.dumps(body).encode(),
+            {server.TOKEN_HEADER: server.TOKEN, "Content-Type": "application/json"})
+
+    def test_it_is_behind_the_token_like_every_other_write(self) -> None:
+        with Live(self) as live:
+            status, _ = live.request(
+                "POST", "/api/deliver", json.dumps({"repo": "a", "item": "b"}).encode())
+        self.assertEqual(status, 403)
+
+    def test_a_body_naming_neither_is_a_400(self) -> None:
+        with Live(self) as live:
+            status, _ = self.post(live, {})
+        self.assertEqual(status, 400)
+
+    def test_an_item_name_with_a_separator_in_it_is_refused(self) -> None:
+        """One segment by construction, so nothing downstream has to strip it."""
+        with Live(self) as live:
+            status, _ = self.post(live, {"repo": "a", "item": "../../etc"})
+        self.assertEqual(status, 400)
+
+    def test_a_checkout_the_fleet_does_not_hold_is_a_404(self) -> None:
+        with Live(self) as live:
+            status, _ = self.post(live, {"repo": "nowhere", "item": "an-item"})
+        self.assertEqual(status, 404)
+
+    def test_a_refused_write_reaches_the_caller_as_the_refusal(self) -> None:
+        """The failure this control exists downstream of.
+
+        A write that did not land answering 200 is what left five items in
+        the wrong state on this tab once already, so the sentence the writer
+        returns is the response, not a swallowed log line.
+        """
+
+        with Live(self) as live, unittest.mock.patch.object(
+            work, "checkout_of", lambda root, where: pathlib.Path("/nowhere")
+        ), unittest.mock.patch.object(
+            work, "deliver", lambda checkout, name: "the database holds no row"
+        ):
+            status, body = self.post(live, {"repo": "a", "item": "an-item"})
+        self.assertEqual(status, 503)
+        self.assertIn(b"the database holds no row", body)
+
+    def test_a_write_that_landed_answers_ok(self) -> None:
+        seen: list[tuple] = []
+        with Live(self) as live, unittest.mock.patch.object(
+            work, "checkout_of", lambda root, where: pathlib.Path("/somewhere")
+        ), unittest.mock.patch.object(
+            work, "deliver", lambda checkout, name: seen.append((checkout, name)) or ""
+        ):
+            status, body = self.post(live, {"repo": "a", "item": "an-item"})
+        self.assertEqual((status, json.loads(body)), (200, {"ok": True}))
+        self.assertEqual(seen, [(pathlib.Path("/somewhere"), "an-item")])
 
 
 if __name__ == "__main__":
