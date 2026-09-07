@@ -181,3 +181,14 @@ it, and step 1 does not bust it — 17,800 is under 18,000 with the tests green.
 The next step to touch `bin/` needs a re-derivation first, and that
 re-derivation now has a measured 26% figure of its own to price adapters and
 helpers against, rather than a shape guess.
+
+**And that re-derivation raises the ceiling; it does not cut the steps.** The
+operator's ruling of 2026-09-07, in their words: *"whatever does not reduce
+existing functionality. We gotta get out of the proposal to remove
+functionality to maintain a cap. I will never agree to that. If functionality
+requires more code, then it requires more code."* So the shortfall above is a
+statement about the ceiling, not about steps 2 through 5. None of them is
+dropped, deferred or trimmed to fit 18,000. The cap exists to make growth
+deliberate and measured, which is why a raise is derived and recorded rather
+than waved through — and why it is never raised in the pull request that busts
+it. It does not exist to decide what the tool does.
