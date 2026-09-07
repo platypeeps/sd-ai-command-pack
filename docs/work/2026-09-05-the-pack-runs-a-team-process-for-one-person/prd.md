@@ -1148,13 +1148,13 @@ log, not here.
   (`bin/sd-review:830-834`) and `except Refusal` (`:1354-1356`); the constant
   `posted` key and its grep test (`bin/sd-review:1110`,
   `tests/test_sd_review_boundary.py:167`); the second BACKENDS table
-  (`bin/sd-status:917`), derived from the registry instead; the residue
-  detectors (`bin/sd-status:960-1018`) after one clean run across the fleet;
+  (`bin/sd-status:903`), derived from the registry instead; the residue
+  detectors (`bin/sd-status:946-1004`) after one clean run across the fleet;
   the history comments in `Makefile`; `--stash-ref` (`bin/sd-handoff:374`) and
-  `carrier_branches` (`bin/sd-status:885-908`); `_git` (`bin/sd-status:123-135`)
-  and the other four git wrappers (`bin/sd_lib.py:107`, `bin/sd-pr-state`,
-  `bin/sd-handoff:80`, `bin/sd-handoff-restore:72`) become one with a timeout
-  argument; `bin/sd-docs-lint:52,72-82,148` imports the vocabulary, the
+  `carrier_branches` (`bin/sd-status:871-894`); `sd-status`'s `_git` is taken --
+  it now calls `sd_lib.git_output`, which already carried the timeout.
+  `bin/sd-pr-state` remains; `bin/sd-handoff` and `bin/sd-handoff-restore` are
+  not cuts, both pinned self-contained by their own suites; `bin/sd-docs-lint:52,72-82,148` imports the vocabulary, the
   directory walk and the in-progress rule from `sd_lib`.
 - Consistency: a configuration error exits 2 everywhere (`bin/sd:2930-2946`,
   `bin/sd-status:1269`, `bin/sd-check`, `bin/sd-review:1329`) and JSON
@@ -4052,9 +4052,9 @@ from a number the operator types.
       re-reserved: it maps authors onto vendors and `delivered` has no
       equivalent of that.
     - `bin/sd-status`'s row read and its stale line — **38**.
-      `residue_section` (`bin/sd-status:1000-1018`, 19) is a section that
+      `residue_section` (`bin/sd-status:986-1004`, 19) is a section that
       enumerates a condition and names it, which is what "report the line by
-      name as stale" is, and `_render_work` (`bin/sd-status:1111-1129`, 19) is
+      name as stale" is, and `_render_work` (`bin/sd-status:1101-1119`, 19) is
       the rendering half that has to say which source answered.
     - `bin/sd-docs-lint` rules 1 and 2 — **44**. `item_directories`
       (`bin/sd-docs-lint:77-87`, 11) has to carry the archived distinction,
