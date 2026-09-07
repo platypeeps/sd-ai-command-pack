@@ -214,7 +214,7 @@ def move_in_a_pull_request(name: str, path_name: str, *, promoting: bool) -> int
     # unrelated work into a pull request about one skill directory.
     if sd_lib.git_output(["--no-optional-locks", "status", "--porcelain"], root):
         raise SkillRefusal("this checkout has uncommitted changes; commit or stash them first")
-    remote, base = sd_lib._upstream(root)  # noqa: SLF001 - the one reader of this fact
+    remote, base = sd_lib.upstream(root)
     if not remote:
         raise SkillRefusal("this checkout has no remote; a pull request needs somewhere to go")
 

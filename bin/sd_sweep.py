@@ -18,6 +18,13 @@ checkouts would reproduce both failures with nobody reading the result. What
 was missing was never the ability to move a directory -- that is one `git mv`
 -- but the ability to notice the backlog refilling, and that is what this does.
 
+**A `branch:` field annotates; it does not exclude.** It used to: the presence
+of the string was the whole test, so an item naming a branch deleted months ago
+was hidden from the sweep permanently -- by exactly the stale metadata the
+sweep exists to notice. The field is now resolved once per root against every
+head the remote publishes and every head held locally, and the answer rides on
+the item as `live`, `gone` or `unknown`. Nothing is hidden by it.
+
 **Undated items are reported, never swept.** An item whose `created:` is absent
 or unparseable and whose directory carries no `YYYY-MM-DD-` prefix has no age
 this module can prove. Reporting it separately is the point: the alternatives
@@ -44,10 +51,14 @@ import sd_lib
 DEFAULT_DAYS = 45
 
 #: The only state a candidate can be in. `in_progress` is somebody's open work
-#: whatever its age, and a `branch:` field claims a branch exists for the item.
-#: The bulk-park honoured both exclusions and so does this, which is what makes
-#: the two passes comparable.
+#: whatever its age. A `branch:` field used to be a second exclusion, on the
+#: strength of the claim alone; it now buys an annotation and hides nothing.
 SWEEPABLE_STATUS = "planning"
+
+#: What a `branch:` field turned out to name. `unknown` is not a third kind of
+#: absence: it says the question was not answered, which is a different thing
+#: from an answer of no, and it never removes an item from the report.
+LIVE, GONE, UNKNOWN = "live", "gone", "unknown"
 
 _DATE_PREFIX_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})-")
 
@@ -74,7 +85,37 @@ def item_date(item: sd_lib.WorkItem) -> datetime.date | None:
     return None
 
 
-def scan(root: pathlib.Path, today: datetime.date, days: int = DEFAULT_DAYS) -> dict:
+def branches(root: pathlib.Path) -> frozenset[str] | None:
+    """Every branch name this root publishes or holds, or None when git cannot say.
+
+    Two commands, not one per item: the remote is asked for all its heads with
+    no branch argument, because a query filtered by one item's branch can only
+    classify that item and answers `gone` for every other branch it was not
+    asked about. Local heads join them -- a branch created here and not yet
+    pushed is live work, and calling it gone would sweep the item somebody
+    just started.
+
+    A root with no remote is answered, not refused: it holds every branch it
+    has, so its local heads are the whole truth. None means git failed or the
+    root is not a checkout, which `sd_lib.git_output` reports the same way and
+    which criterion 4 keeps distinct from an empty answer.
+    """
+    local = sd_lib.git_output(["for-each-ref", "--format=%(refname:short)", "refs/heads"], root)
+    if local is None:
+        return None
+    names = set(local.split())
+    remote, _ = sd_lib.upstream(root)
+    if remote:
+        listed = sd_lib.git_output(["ls-remote", "--heads", remote], root)
+        if listed is None:
+            return None
+        names.update(line.split("refs/heads/", 1)[1] for line in listed.splitlines()
+                     if "refs/heads/" in line)
+    return frozenset(names)
+
+
+def scan(root: pathlib.Path, today: datetime.date, days: int = DEFAULT_DAYS,
+         heads: frozenset[str] | None = None) -> dict:
     """One repository: what is due, what cannot be dated, how much is live.
 
     `today` is a parameter rather than a call to the clock so the caller
@@ -88,7 +129,7 @@ def scan(root: pathlib.Path, today: datetime.date, days: int = DEFAULT_DAYS) -> 
         if item.archived or item.parked:
             continue
         active += 1
-        if item.status != SWEEPABLE_STATUS or item.branch:
+        if item.status != SWEEPABLE_STATUS:
             continue
         # `slug` is what `sd-status` prints and what a person will recognise;
         # `dir` is the directory the date prefix lives on and the thing a
@@ -100,6 +141,15 @@ def scan(root: pathlib.Path, today: datetime.date, days: int = DEFAULT_DAYS) -> 
             "title": item.title,
             "created": item.created,
         }
+        # Only an item that made a claim gets an annotation. Absence of a
+        # `branch:` field is not a claim that could not be checked, and
+        # `unknown` there would put every item in the state reserved for a
+        # root whose git refused.
+        if item.branch:
+            row["branch"] = item.branch
+            row["branch_state"] = (
+                UNKNOWN if heads is None else LIVE if item.branch in heads else GONE
+            )
         when = item_date(item)
         if when is None:
             undated.append(row)
@@ -124,7 +174,9 @@ def sweep(roots: list[tuple[str, pathlib.Path]], today: datetime.date,
     """
     repos: list[dict] = []
     for where, root in roots:
-        result = scan(root, today, days)
+        heads = branches(root)
+        result = scan(root, today, days, heads)
+        result["branches"] = "unknown" if heads is None else "ok"
         if not result["active"] and not result["due"] and not result["undated"]:
             # A checkout with no live items has nothing to say. Listing it
             # anyway would bury the handful that do under the fleet's silence.
@@ -148,8 +200,15 @@ def render(report: dict) -> list[str]:
         if not row["due"] and not row["undated"]:
             continue
         lines.append(f"{row['repo']}  ({row['active']} active)")
+        # Once per root, not once per item: a root whose git refused says so
+        # where its heading is, and every annotation under it reads `unknown`
+        # for that one reason.
+        if row.get("branches") == "unknown":
+            lines.append("        git could not list this repository's branches")
         for item in sorted(row["due"], key=lambda i: (-i["age"], i["slug"])):
-            lines.append(f"  {item['age']:>4}d  {item['slug']}")
+            state = item.get("branch_state")
+            said = f"  ({item['branch']} {state})" if state else ""
+            lines.append(f"  {item['age']:>4}d  {item['slug']}{said}")
         for item in sorted(row["undated"], key=lambda i: i["slug"]):
             lines.append(f"     ?  {item['slug']}  (no date to age it by)")
     if not lines:

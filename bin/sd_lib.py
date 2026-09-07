@@ -1320,7 +1320,7 @@ def _closed_by(root: pathlib.Path, ref: str, item: str) -> bool:
     return any(_closes(c.partition("\x1f")[2], item) for c in raw.split("\x1e"))
 
 
-def _upstream(root: pathlib.Path) -> tuple[str, str]:
+def upstream(root: pathlib.Path) -> tuple[str, str]:
     """The remote this checkout can be behind, and that remote's default branch:
     HEAD's upstream then `origin`, and what the remote publishes then the first
     of `main` and `master` this checkout resolves. A checkout with no remote is
@@ -1362,7 +1362,7 @@ def delivered(root: pathlib.Path, item: str) -> Answer:
     # no git at all, "true" a boundary the trailer may be sitting past.
     if git_output(["rev-parse", "--is-shallow-repository"], root) != "false":
         return Answer(UNKNOWN, "git fetch --unshallow")
-    remote, default = _upstream(root)
+    remote, default = upstream(root)
     if not remote:
         return Answer(YES if any(_closed_by(root, r, item) for r in ("HEAD", default)) else NO)
     if git_output(["fetch", remote, default], root) is None:

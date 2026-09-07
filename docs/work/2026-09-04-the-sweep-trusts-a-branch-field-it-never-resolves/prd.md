@@ -127,3 +127,26 @@ naming.
   classify that item, and a second remote-only branch in the same root was
   annotated gone. Criterion 5 now fetches every remote head once per root
   and matches locally; the fixture has two remote-only branches.
+- **2026-09-07** — **The supersession recorded three times above did not
+  happen, and this item is live work.** Every entry from 2026-09-05 rests on
+  "criterion 21 removes the sweep". It does not. Criterion 21 as merged asks
+  that no *deletion* code path remain, and its own text says `bin/sd_sweep.py`
+  "is in none of the eight" — the eight being the frozen set of `git rm`,
+  `rmtree` and `rmdir` sites the criterion enumerates. C-152 on that item is
+  where the assumption broke: *"Both pages assumed deleting `bin/sd_sweep.py`
+  and the `parked` handling would empty `git grep -nE 'git rm|rmtree|rmdir'
+  -- bin skills`. Run, it returns eight lines and `sd_sweep.py` is in none of
+  them."* The criterion was rewritten to enumerate-and-freeze and no pull
+  request ever deleted the module. Checked on `main` at `76af42c2`:
+  `bin/sd_sweep.py` is 162 lines, `sd sweep` is a live verb at
+  `bin/sd:2710-2744`, and item A's closure table scores criterion 21 against
+  PR 2 and PR 7, both merged. The sweep outlived the item that was going to
+  remove it, which is the case the first entry above wrote its finding down
+  for.
+- **2026-09-07** — `design.md` written. The three open questions are answered
+  by the criteria as they now stand rather than left for the design: question 1
+  by criterion 5's one query per root, question 2 by criterion 5's "every item
+  past the age threshold is in the report with its annotation", and question 3
+  by the status exclusion that runs before the branch field is read. `design.md`
+  records the last two as D3 and D4 so the answers are findable from the design
+  and not only from the criteria.

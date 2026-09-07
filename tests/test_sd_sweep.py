@@ -2,8 +2,10 @@
 
 The fixtures are shaped after the fleet the first real run found: one
 repository holding 34 due items among 48 active, five holding none, and the
-exclusions -- `in_progress`, a `branch:` field, an item already parked -- that
-make this pass comparable to the bulk-park it succeeds.
+exclusions -- `in_progress` and an item already parked -- that make this pass
+comparable to the bulk-park it succeeds. A `branch:` field was a third, until
+it was found to hide an item on the strength of a claim nobody resolved; it now
+annotates and excludes nothing, and the tests below are that difference.
 
 `today` is a literal in every test. The rule under test is an arithmetic one
 and a test that read the clock would pass or fail depending on the day it ran,
@@ -13,10 +15,15 @@ which is the property the module was written to avoid.
 from __future__ import annotations
 
 import datetime
+import json
+import os
 import pathlib
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
@@ -74,17 +81,6 @@ class Scan(unittest.TestCase):
         got = self.scan()
         self.assertEqual(got["due"], [])
         self.assertEqual(got["active"], 1)
-
-    def test_a_branch_field_protects_an_old_planning_item(self) -> None:
-        """A `branch:` line claims a branch exists for the item.
-
-        This is the second half of the park rule -- `status: planning` AND no
-        `branch:` -- and an implementation that checked only the status would
-        pass every other test in this file.
-        """
-        make_item(self.repo, "2020-01-01-claimed", status="planning",
-                  created="2020-01-01", branch="task/thing")
-        self.assertEqual(self.scan()["due"], [])
 
     def test_an_already_parked_item_is_neither_due_nor_active(self) -> None:
         """Otherwise every run reports the same items the last run parked."""
@@ -226,6 +222,225 @@ class Render(unittest.TestCase):
             next(i for i, line in enumerate(lines) if "older" in line),
             next(i for i, line in enumerate(lines) if "younger" in line),
         )
+
+
+GIT_RECORDER = """#!/usr/bin/env python3
+'''A `git` that logs its argv and answers `ls-remote` from a fixture.
+
+Everything else is handed to the real git, so `for-each-ref` reads the real
+local heads of the real fixture checkout and only the network half is canned.
+'''
+import json, os, subprocess, sys
+
+argv = sys.argv[1:]
+with open(os.environ["GIT_CALLS"], "a", encoding="utf-8") as log:
+    log.write(json.dumps(argv) + "\\n")
+if "ls-remote" in argv:
+    if os.environ.get("GIT_LS_REMOTE_FAILS"):
+        sys.stderr.write("fatal: could not read from remote\\n")
+        sys.exit(128)
+    for name in json.loads(os.environ.get("GIT_REMOTE_HEADS", "[]")):
+        print("0" * 40 + "\\trefs/heads/" + name)
+    sys.exit(0)
+sys.exit(subprocess.run([os.environ["GIT_REAL"], *argv]).returncode)
+"""
+
+
+class BranchResolution(unittest.TestCase):
+    """Criteria 1 through 5: the `branch:` field is resolved, not believed.
+
+    The recorder shadows `git` on `PATH` rather than patching `sd_lib`, so the
+    real subprocess policy -- the timeout, the fixed argv, failure-is-None --
+    runs against a process that answers from a fixture. Only `ls-remote` is
+    canned; local heads come from a real `git init` in the fixture directory.
+    """
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = pathlib.Path(tmp.name)
+        self.log = self.tmp / "git-calls.log"
+        real = shutil.which("git")
+        self.assertIsNotNone(real, "git must be installed to run this test")
+        bindir = self.tmp / "bin"
+        bindir.mkdir()
+        (bindir / "git").write_text(GIT_RECORDER, encoding="utf-8")
+        (bindir / "git").chmod(0o755)
+        self.env = {
+            "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
+            "GIT_CALLS": str(self.log),
+            "GIT_REAL": str(real),
+        }
+
+    def repo_with(self, *locals_: str) -> pathlib.Path:
+        """A real checkout holding these local branches and a fake remote."""
+        root = self.tmp / f"repo-{len(list(self.tmp.iterdir()))}"
+        (root / "docs" / "work").mkdir(parents=True)
+        run = lambda *a: subprocess.run(  # noqa: E731 - one shape, six uses
+            ["git", *a], cwd=root, check=True, capture_output=True,
+            env={**os.environ, **self.env})
+        run("init", "--quiet", "--initial-branch=main")
+        run("config", "user.email", "t@example.com")
+        run("config", "user.name", "t")
+        run("config", "commit.gpgsign", "false")
+        run("remote", "add", "origin", "https://example.invalid/r.git")
+        (root / "seed").write_text("seed\n", encoding="utf-8")
+        run("add", "-A")
+        run("commit", "--quiet", "-m", "seed")
+        for name in locals_:
+            run("branch", name)
+        return root
+
+    def calls(self) -> list[list[str]]:
+        if not self.log.exists():
+            return []
+        return [json.loads(line) for line in self.log.read_text("utf-8").splitlines()]
+
+    def heads(self, root: pathlib.Path, *remote: str,
+              fails: bool = False) -> frozenset[str] | None:
+        environ = dict(os.environ)
+        environ.update(self.env)
+        environ["GIT_REMOTE_HEADS"] = json.dumps(list(remote))
+        if fails:
+            environ["GIT_LS_REMOTE_FAILS"] = "1"
+        with unittest.mock.patch.dict(os.environ, environ, clear=True):
+            return sd_sweep.branches(root)
+
+    def due(self, root: pathlib.Path, heads: frozenset[str] | None) -> list[dict]:
+        return sd_sweep.scan(root, TODAY, 45, heads)["due"]
+
+    # --- criterion 1 -----------------------------------------------------
+
+    def test_a_deleted_branch_is_annotated_gone_and_the_item_is_due(self) -> None:
+        """The defect this item exists for: the claim outlived the branch."""
+        root = self.repo_with()
+        make_item(root, "2020-01-01-claimed", status="planning",
+                  created="2020-01-01", branch="task/deleted")
+        due = self.due(root, self.heads(root))
+        self.assertEqual([row["slug"] for row in due], ["claimed"])
+        self.assertEqual(due[0]["branch_state"], sd_sweep.GONE)
+
+    # --- criterion 2 -----------------------------------------------------
+
+    def test_a_live_branch_is_annotated_live_and_the_item_is_still_due(self) -> None:
+        """Liveness is advisory. The annotation changes; the listing does not."""
+        root = self.repo_with("task/live")
+        make_item(root, "2020-01-01-claimed", status="planning",
+                  created="2020-01-01", branch="task/live")
+        due = self.due(root, self.heads(root))
+        self.assertEqual([row["slug"] for row in due], ["claimed"])
+        self.assertEqual(due[0]["branch_state"], sd_sweep.LIVE)
+
+    def test_a_branch_only_on_the_remote_is_live(self) -> None:
+        """Not every live branch has been fetched here."""
+        root = self.repo_with()
+        make_item(root, "2020-01-01-claimed", status="planning",
+                  created="2020-01-01", branch="task/theirs")
+        due = self.due(root, self.heads(root, "task/theirs"))
+        self.assertEqual(due[0]["branch_state"], sd_sweep.LIVE)
+
+    def test_an_item_with_no_branch_field_gets_no_annotation(self) -> None:
+        """Absence of a claim is not a claim that could not be checked."""
+        root = self.repo_with()
+        make_item(root, "2020-01-01-plain", status="planning", created="2020-01-01")
+        due = self.due(root, self.heads(root))
+        self.assertNotIn("branch_state", due[0])
+
+    # --- criterion 3 -----------------------------------------------------
+
+    def test_the_same_branch_name_resolves_per_root(self) -> None:
+        """One name, two repositories, two answers.
+
+        A resolution that reached for the current working directory would give
+        both items the same annotation and pass every test above.
+        """
+        has = self.repo_with("shared/name")
+        lacks = self.repo_with()
+        for root in (has, lacks):
+            make_item(root, "2020-01-01-claimed", status="planning",
+                      created="2020-01-01", branch="shared/name")
+        self.assertEqual(self.due(has, self.heads(has))[0]["branch_state"], sd_sweep.LIVE)
+        self.assertEqual(self.due(lacks, self.heads(lacks))[0]["branch_state"], sd_sweep.GONE)
+
+    def test_sweep_resolves_each_root_against_itself(self) -> None:
+        """Criterion 3 at the level that walks the roots.
+
+        `scan` takes the answer as an argument, so a test that calls it
+        directly proves the annotation and not the resolution. Only `sweep`
+        chooses which root to ask, and a `sweep` that asked the first root
+        about every item would pass every other test in this class.
+        """
+        has = self.repo_with("shared/name")
+        lacks = self.repo_with()
+        for root in (has, lacks):
+            make_item(root, "2020-01-01-claimed", status="planning",
+                      created="2020-01-01", branch="shared/name")
+        environ = {**os.environ, **self.env, "GIT_REMOTE_HEADS": "[]"}
+        with unittest.mock.patch.dict(os.environ, environ, clear=True):
+            report = sd_sweep.sweep([("has", has), ("lacks", lacks)], TODAY, 45)
+        states = {row["repo"]: row["due"][0]["branch_state"] for row in report["repos"]}
+        self.assertEqual(states, {"has": sd_sweep.LIVE, "lacks": sd_sweep.GONE})
+
+    # --- criterion 4 -----------------------------------------------------
+
+    def test_a_root_that_is_not_a_checkout_answers_unknown(self) -> None:
+        """"git cannot answer" is not "the branch is absent"."""
+        root = self.tmp / "not-a-repo"
+        (root / "docs" / "work").mkdir(parents=True)
+        make_item(root, "2020-01-01-claimed", status="planning",
+                  created="2020-01-01", branch="task/whatever")
+        self.assertIsNone(self.heads(root))
+        due = self.due(root, self.heads(root))
+        self.assertEqual([row["slug"] for row in due], ["claimed"])
+        self.assertEqual(due[0]["branch_state"], sd_sweep.UNKNOWN)
+
+    def test_a_failing_remote_query_is_unknown_not_gone(self) -> None:
+        """The local half succeeded; that is not enough to call a branch gone."""
+        root = self.repo_with("task/local")
+        self.assertIsNone(self.heads(root, fails=True))
+
+    def test_the_unknown_root_says_so_once_beside_its_heading(self) -> None:
+        report = {"days": 45, "today": "2026-09-01", "due": 2, "undated": 0, "active": 2,
+                  "repos": [{"repo": "r", "active": 2, "undated": [], "branches": "unknown",
+                             "due": [{"slug": "a", "age": 99, "branch": "x",
+                                      "branch_state": sd_sweep.UNKNOWN},
+                                     {"slug": "b", "age": 98, "branch": "y",
+                                      "branch_state": sd_sweep.UNKNOWN}]}]}
+        lines = sd_sweep.render(report)
+        said = [line for line in lines if "could not list" in line]
+        self.assertEqual(len(said), 1, lines)
+
+    # --- criterion 5 -----------------------------------------------------
+
+    def test_one_remote_query_per_root_classifies_two_remote_only_branches(self) -> None:
+        """C-20's case: a query filtered by one branch could only answer for it."""
+        root = self.repo_with()
+        for name in ("first", "second"):
+            make_item(root, f"2020-01-0{len(name) % 9}-{name}", status="planning",
+                      created="2020-01-01", branch=f"task/{name}")
+        heads = self.heads(root, "task/first", "task/second")
+        states = {row["slug"]: row["branch_state"] for row in self.due(root, heads)}
+        self.assertEqual(set(states.values()), {sd_sweep.LIVE}, states)
+        self.assertEqual(len(states), 2)
+        listings = [c for c in self.calls() if "ls-remote" in c]
+        self.assertEqual(len(listings), 1, listings)
+        self.assertNotIn("task/first", listings[0])
+
+    def test_the_item_count_is_the_same_across_all_three_annotations(self) -> None:
+        """One fixture, three answers from git, one listing.
+
+        Three separate tests each asserting their own count would pass while
+        disagreeing with each other.
+        """
+        counts = set()
+        for heads in (self.heads(self.repo_with()),  # gone
+                      frozenset({"task/x"}),          # live
+                      None):                          # unknown
+            root = self.repo_with()
+            make_item(root, "2020-01-01-claimed", status="planning",
+                      created="2020-01-01", branch="task/x")
+            counts.add(len(self.due(root, heads)))
+        self.assertEqual(counts, {1})
 
 
 if __name__ == "__main__":
