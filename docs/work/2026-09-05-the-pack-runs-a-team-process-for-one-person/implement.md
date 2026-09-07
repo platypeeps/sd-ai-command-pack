@@ -1120,8 +1120,8 @@ sized to 8b's overrun is now the only observation of its kind. The next
 re-derivation should say plainly that three of four slices have come in under
 and consider whether the body prices, not the reserve, are what is high.
 
-**Nineteen tests are the criterion's, and five mutations were run against
-them.** `tests/test_sd_suggest.py` carries 22 in six classes. `TheCriterion`
+**`tests/test_sd_suggest.py` carries 25 tests in seven classes, and six
+mutations were run against them.** `TheCriterion`
 holds the four clauses as four assertions: the row written in each of
 `sd_lib.MODES` with `gh` never asked about an issue, the refusal with no
 `--to`, one list call then exactly one POST, and two open issues in with two
@@ -1144,10 +1144,20 @@ there is nobody to expose anything to — so the `full` third of the every-mode
 test asks `gh` nothing at all, which is what lets the same test assert both
 the row and the silence.
 
-**Five mutations, all caught**: the `--to` guard removed, the dedup comparison
+**Six mutations, all caught**: the `--to` guard removed, the dedup comparison
 forced false, the mode hardcoded to `full`, the failed dedup read falling
-through to a file instead of refusing, and `--strict` ignored on a held
-cursor.
+through to a file instead of refusing, `--strict` ignored on a held cursor,
+and the `RowsRefusal` handler deleted from `bin/sd`.
+
+**One defect found by the code review point, and fixed in the delta.** The
+nine lines of `RowsRefusal` handler this entry named as the overrun had no
+test that would have noticed them going away. Every other reader of that
+class is `bin/sd-handoff-restore`, a hook that swallows everything by design,
+so nothing in the suite exercised the CLI path. `TheRefusalReachesTheOperator`
+now runs `bin/sd` as a subprocess and asserts what an operator sees: exit 1, a
+line beginning `sd: `, and no traceback -- plus one end-to-end write, so the
+group is not a parser with no verb behind it. Deleting the handler fails two
+of the three.
 
 **Verification.** `make lint` exit 0 after one fix — ruff `I001` on the new
 `import sd_shadow` / `import sd_suggest` block in `bin/sd`. `make test` exit

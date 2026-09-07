@@ -430,6 +430,42 @@ class TheShadowSync(SuggestCase):
         self.assertEqual(2, len(self.shadow_rows()))
 
 
+class TheRefusalReachesTheOperator(SuggestCase):
+    """`bin/sd` had never caught `RowsRefusal`, and these two verbs raise it.
+
+    The handler is nine lines and the rest of the file has no test that would
+    notice if it went away: every other `RowsRefusal` reader is
+    `bin/sd-handoff-restore`, a hook that swallows everything by design. So
+    the verb is run as `bin/sd` actually runs it, in a subprocess, and what is
+    asserted is what an operator sees.
+    """
+
+    def run_cli(self, *argv: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(REPO_ROOT / "bin" / "sd"), *argv],
+            cwd=self.root, capture_output=True, text=True, check=False,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+
+    def test_a_bad_item_is_one_sentence_and_not_a_traceback(self):
+        done = self.run_cli("suggest", "add", "a thing", "--item", "no-such-item")
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertTrue(done.stderr.startswith("sd: "), done.stderr)
+        self.assertNotIn("Traceback", done.stderr)
+
+    def test_publish_with_no_destination_refuses_through_the_same_handler(self):
+        note = self.note_id()
+        done = self.run_cli("suggest", "publish", "--note", str(note))
+        self.assertEqual(1, done.returncode, done.stderr)
+        self.assertIn("--to owner/repo", done.stderr)
+        self.assertNotIn("Traceback", done.stderr)
+
+    def test_the_row_the_group_writes_is_the_row_the_library_writes(self):
+        """The wiring end to end, so the group is not a parser with no verb."""
+        done = self.run_cli("suggest", "add", "a thing", "--item", "an-item")
+        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(["[full] a thing"], self.proposals())
+
+
 class WhatIsNotAPaletteEntry(unittest.TestCase):
     """Criterion 28 says filing must not be an installed entrypoint."""
 
