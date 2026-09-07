@@ -129,7 +129,10 @@ commits; step 6 is what makes them one pull request.
       planning pages exist because the approach stopped being obvious the day
       the ruling was made.
 - [ ] **6. Close it.** One pull request carrying the amendments, with
-      `Closes: 2026-09-04-the-plan-interview-is-one-sentence` on the merge and
+      `Item: 2026-09-04-the-plan-interview-is-one-sentence` — which
+      `skills/sd-ship/SKILL.md:82-84` puts on every merge it makes, and which
+      step 6 had omitted — and
+      `Closes: 2026-09-04-the-plan-interview-is-one-sentence` on the merge, and
       **not** `Delivers:`. `skills/sd-ship/SKILL.md:84-89` gives `Delivers:` to
       the one merge that delivers, closing the item "on that merge and on no
       other", and makes `Closes:` the remedy for a delivery whose merge went out
@@ -223,8 +226,12 @@ Filled in as each check runs, so a claim here is a transcript and not a plan.
   `make check` → exit `0`, `grep -cE '^OK' unittest-output.log` = `56`,
   `grep -c FAILED unittest-output.log` = `0`. That `56` is the baseline
   verification 2 compares against.
-- 2026-09-07, the two planning pages as written, `wc -l`: `design.md` **599**,
-  `implement.md` **228**, measured on the committed tree rather than mid-edit.
+- 2026-09-07, the two planning pages at `7cd1f5c1`, `wc -l`: `design.md`
+  **599**, `implement.md` **228**. Both figures are pinned to that commit and
+  are already stale at HEAD, which is the property rather than a defect to fix:
+  a line count of the file it is written in cannot be kept true by the file
+  that reports it, and rounds 4 and 5 changed both pages. Read them as the
+  measurement at the commit named, not as a current figure.
   Outside the 42-line budget above, which prices the
   `prd.md` amendment only. 599 is long for a design and 210 of it is the
   `## Review` ledger, which starts at line 390 — what three rounds against one

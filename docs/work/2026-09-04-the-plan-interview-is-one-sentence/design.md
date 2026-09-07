@@ -23,7 +23,14 @@ already been relocated.
 (2026-09-04, #741) added the question-form rule under its `## Lineage`.
 `05eb8ddf` (2026-09-06) moved the directory to `contrib/sd-grill/`, a pure
 rename — `git show --stat` prints
-`{skills => contrib}/sd-grill/SKILL.md | 0`, no content change.
+`{skills => contrib}/sd-grill/SKILL.md | 0`, no content change. That commit is
+`feat(pack): skills install because a path names them`: 70 files and 57
+`{skills => contrib}/…` renames, introducing `skills/paths.json` and
+`bin/sd_skill.py`. `grep -n 'sd-grill' skills/paths.json` returns nothing, so
+what the commit shows is `sd-grill` landing in `contrib/` as the default for a
+directory no path names. The operator's ruling and that mechanism agree and the
+file is in `contrib/` either way; but the commit executed the mechanism, and
+calling it the ruling's execution claims more than `git show` supports.
 
 Every content criterion in `prd.md` passes today against that file. Run on
 `origin/main` at `405a9106`, with `contrib/sd-grill/SKILL.md` substituted for
@@ -206,22 +213,40 @@ did not happen.
 ### What this breaks in the existing suite
 
 **Nothing.** The change is confined to
-`docs/work/2026-09-04-the-plan-interview-is-one-sentence/`, and the checks that
-read that directory — `bin/sd-docs-lint` rules 1, 2, 6 and 7 — pass over the
-amended shapes: the frontmatter keeps `title`, `created` and `branch` and gains
-no `status:`; `## Acceptance criteria` stays a heading rule 2 can match; the
-citation manifest stays empty because no criterion cites a `docs/work` markdown
-line number; and every `docs/work/` path the amended text names resolves.
+`docs/work/2026-09-04-the-plan-interview-is-one-sentence/`. The rules that
+actually bear on it are **1 and 7**: the frontmatter keeps `title`, `created`
+and `branch` and gains no `status:`, and every `docs/work/` path the amended
+text names resolves.
 
-That is a claim worth stating as its negation, because the approach that was
-rejected does break something. Promoting `sd-grill` to `skills/` without
-editing `skills/paths.json` in the same commit fails
+Rules 2 and 6 are named here only to say they do not apply.
+`bin/sd-docs-lint:58` sets `WORKABLE_STATUSES = ("ready", "in_progress")` and
+`check_ready` returns immediately when the status is outside it. This item's
+row reads `planning` and step 6 moves it to `done`, so rule 2 is inert in every
+state this plan passes through — `## Acceptance criteria` staying a matchable
+heading is true and buys nothing. Rule 6 reads existing manifest rows and never
+regenerates them, and this item's `.citations.tsv` is 0 bytes. Listing four
+rules where two are dead was coverage by enumeration.
+
+That is a claim worth stating as its negation, and the negation is weaker than
+this section first said. A **hand-rolled** `git mv` of `sd-grill` into
+`skills/` without editing `skills/paths.json` in the same commit fails
 `tests/test_sd_install.py::…::test_the_real_checkout_has_three_paths_covering_every_directory`,
 which asserts `sd_install.unnamed_directories(REPO_ROOT) == []` against this
-repository rather than a fixture. The rejected approach is therefore not merely
-against a ruling; it is a red build unless a second file moves with it. That
-the correct approach breaks no test and the rejected one breaks a named test is
-the sharpest evidence available here that the direction is right.
+repository rather than a fixture. But that is not the approach D1 rejects.
+D1 rejects `sd skill promote sd-grill --path development`, and that command
+edits the paths file in the same commit: `bin/sd_skill.py:224-243` runs
+`git mv`, then `paths_edit(root, name, path_name, add=promoting)`, then
+`git add -- skills/paths.json`, then one `git commit`. `development` is a real
+path — `skills/paths.json` names `research`, `development`, `act`. So the
+rejected approach leaves `unnamed_directories(REPO_ROOT) == []` and breaks no
+test.
+
+The sentence that stood here claimed the opposite as "the sharpest evidence
+available here that the direction is right", and its own concession — "unless
+a second file moves with it" — already said so. **The direction rests on the
+operator's ruling and on nothing mechanical.** No test distinguishes the two
+approaches, and a design that claimed one did was borrowing authority it did
+not have.
 
 The one test that changes meaning without changing text is criterion 4's
 `grep`, and it changes meaning in a later item's pull request, not in this one.
@@ -398,7 +423,8 @@ Planning adversarial review, 2026-09-07. Trigger:
 design**, cap **5**, read from that table and not invented here. Baseline
 recorded before the first planning write: `prd.md` present and unmodified,
 `design.md` absent, `implement.md` absent. Two of the three are new, so the
-trigger applies. Four rounds ran of the five permitted.
+trigger applies. Five rounds ran, which is the whole cap. No further pass
+starts on its own.
 
 **Path sensitivity, and what it switches off.** The changed artifact set is this
 item's `design.md` and `implement.md`. `.github/sd-review.json`'s `sensitive`
@@ -427,11 +453,14 @@ two pages share a dozen measured values. Kept by choice, not owed.
   the host lane held itself to the standard two lanes would have met; that it
   needed three rounds to reach C-19 and C-28 says how far short of two lanes one
   lane is.
-- Two independent readers were spawned to stand in for the missing lane and
-  **neither reported inside its budget**. Nothing in this ledger comes from
-  them. Recorded because a reader who sees three host rounds should know a
-  second opinion was attempted and did not arrive, rather than assume none was
-  tried.
+- Two independent readers were spawned to stand in for the missing lane. The
+  sentence that stood here said **neither reported inside its budget**, and it
+  was written while both were still running and committed at `7cd1f5c1` before
+  either had finished. Both then reported, and round 4 and round 5 are theirs:
+  C-31 to C-33 from one, C-34 to C-38 from the other and from the two agreeing.
+  Two of their findings blocked. The claim was not merely premature; it was the
+  same defect as C-28 — an outcome recorded before the thing it describes
+  happened — in the paragraph most obliged to be exact about lane coverage.
 
 | ID | Round | Severity | Blocking | Disposition |
 |---|---|---|---|---|
@@ -455,6 +484,13 @@ two pages share a dozen measured values. Kept by choice, not owed.
 | C-31 | 4 | high | yes | addressed |
 | C-32 | 4 | medium | yes | addressed |
 | C-33 | 4 | medium | no | addressed |
+| C-34 | 5 | high | yes | addressed |
+| C-35 | 5 | high | no | addressed |
+| C-36 | 5 | medium | no | addressed |
+| C-37 | 5 | medium | no | addressed |
+| C-38 | 5 | medium | no | addressed |
+| C-39 | 5 | low | no | addressed |
+| C-40 | 5 | low | no | addressed |
 
 **C-14 — the design's first approach was a promotion the operator had already
 ruled against.** Round 1 read `prd.md`'s closing "**Promotion is unblocked.**"
@@ -537,13 +573,18 @@ amendments, which D6 prevents.
 is checkable rather than atmospheric.
 
 **C-25 — a line-number citation was written in the one form the lint records.**
-Validation ended with a backticked `prd.md:1023` as an example of what not to
-write. `bin/sd-docs-lint`'s `CITATION_RE` matches exactly that shape, and
+Validation ended with a backticked citation to prd.md line 1023 as an example
+of what not to write — written unbackticked here, which is the whole of the
+repair. `bin/sd-docs-lint`'s `CITATION_RE` matches exactly that shape, and
 `resolve_citation` looks beside the citing page first, where `prd.md` is this
 item's own 291-line file. It fails nothing today — this item's `.citations.tsv`
 is empty and `write_citation_manifest` drops an out-of-range start — but an
 example of a bad citation written in the citation syntax is a trap left for
-`--record-citations`. Addressed: the number is prose now.
+`--record-citations`. Addressed: the number is prose now — and it was still
+*not* prose after the first repair, because this concern's own description
+quoted the bad form in the bad syntax. `CITATION_RE`
+(`bin/sd-docs-lint:306`) does not care that the match sits inside the
+paragraph explaining why it must not appear. Corrected in round 5 as C-36.
 
 **C-26 — an unbounded claim from one checkout's refs.** "No head anywhere has
 that name" was read off a branch listing in this worktree. Addressed: the
@@ -636,6 +677,59 @@ repository before being acted on — the `--json` counts and both skill passages
 were read, not recalled. Round 3's ledger closed with "no blocking concern is
 open"; two of these blocked, so that line was wrong when written and is
 corrected here rather than quietly replaced.
+
+**C-34 — the lane paragraph asserted an outcome that had not happened.** It
+said both stand-in readers "neither reported inside its budget", written while
+both were still running and committed at `7cd1f5c1` before either finished.
+Both reported. Rounds 4 and 5 are entirely theirs, and two of their findings
+blocked. This is C-28's defect — a result recorded before the event — in the
+paragraph whose subject is how much review actually happened.
+
+**C-35 — the design claimed a test distinguishes the two approaches, and none
+does.** "The rejected one breaks a named test" named a hand-rolled `git mv`
+without the paths edit. D1's rejected approach is
+`sd skill promote sd-grill --path development`, which edits the paths file in
+the same commit: `bin/sd_skill.py:224-243` is `git mv`, `paths_edit(...)`,
+`git add -- skills/paths.json`, one `git commit`; `development` is one of the
+three real paths. So the rejected approach leaves
+`unnamed_directories(REPO_ROOT) == []` and breaks nothing. The paragraph's own
+"unless a second file moves with it" conceded it while the conclusion ignored
+it. The direction rests on the operator's ruling and nothing mechanical, and
+the design now says that instead of borrowing a test's authority.
+
+**C-36 — C-25's repair was undone by C-25's own wording.** The concern says the
+bad citation "is prose now", while its description quoted the bad form in the
+backticked syntax that `CITATION_RE` (`bin/sd-docs-lint:306`) matches — the
+trap re-laid inside the paragraph explaining it.
+
+**C-37 — a transcript bullet measured the file it is written in.** `wc -l` of
+`implement.md` recorded in `implement.md` is stale the moment anything edits
+it, and rounds 4 and 5 did. The figures are now pinned to `7cd1f5c1` and say
+so, rather than being re-measured into the next round's staleness.
+
+**C-38 — four lint rules were named as coverage where two are dead.**
+`bin/sd-docs-lint:58` sets `WORKABLE_STATUSES = ("ready", "in_progress")` and
+`check_ready` returns outside it; this item is `planning` and goes to `done`,
+so rule 2 never runs on it. Rule 6 reads existing manifest rows and this item's
+`.citations.tsv` is 0 bytes. Rules 1 and 7 are the coverage.
+
+**C-39 — `05eb8ddf` was presented as the ruling's execution.** It is
+`feat(pack): skills install because a path names them` — 70 files, 57 renames,
+introducing `skills/paths.json`, which names no `sd-grill`. The commit executed
+a mechanism whose default put the file in `contrib/`. Ruling and mechanism
+agree, so the direction is unaffected; the attribution was more than `git show`
+supports.
+
+**C-40 — step 6 omitted `Item:`.** `sd-ship` puts it on every merge it makes.
+
+**Rounds 4 and 5 came from outside, and that is the finding about this ledger.**
+Round 3 ended "no blocking concern is open" and three blockers followed.
+The lane that wrote these pages reviewed them three times and cleared them; two
+readers that had not written them found C-31, C-32 and C-34 within one pass
+each. C-28 (a ledger written before its review) and C-34 (a lane outcome
+written before the lane finished) are the same error twice, and both were found
+by someone else. The single-lane standard this item argued for in section 2 is
+the thing its own history argues against.
 
 **Every concern is addressed or parked, and no parked concern blocks.** C-30 is
 the only parked one and is non-blocking by its own terms. Implementation is
