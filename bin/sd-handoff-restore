@@ -40,6 +40,15 @@ commit or a rebase. It is context, not a check.
 A win is marked consumed by renaming the packet away and writing it back, so
 two sessions racing in one directory cannot both claim it. Injected exactly
 once, then inert.
+
+**There are two sources, and only one of them is claimed.** The packet exists
+only if somebody ran `sd-handoff` by hand, and a session killed mid-task ran
+nothing -- so open followup rows are read as well, through
+`bin/sd_handoff_rows.py`, and injected whether or not a packet is here. Rows
+are not claimed: three sessions restarting in one directory all deserve the
+same open work, and a followup closes when it is resolved rather than when
+somebody read it. The packet keeps its exactly-once rename, because it
+describes one moment and consuming it twice would restore a stale one.
 """
 
 from __future__ import annotations
@@ -405,6 +414,24 @@ def context_for(packet: dict, warnings: list[str]) -> str:
     return "\n".join(lines)
 
 
+def followup_lines(root: str) -> list[str]:
+    """Open followups for this checkout, or nothing at all if anything fails.
+
+    Every failure is silent by design. `sd_db` absent is the supported
+    pre-install state, a database this cannot open is the operator's problem
+    and not the starting session's, and a hook that printed either would break
+    the silence this file's whole contract rests on.
+    """
+    try:
+        import sd_handoff_rows
+    except ImportError:
+        return []
+    try:
+        return sd_handoff_rows.followups_for(root)
+    except BaseException:  # noqa: BLE001 - a hook never breaks session startup
+        return []
+
+
 def emit(context: str, out) -> None:
     payload = {
         "hookSpecificOutput": {
@@ -431,68 +458,60 @@ def expired(packet: dict) -> bool:
     return dt.datetime.now(dt.timezone.utc) >= moment
 
 
-def run(stdin_text: str, environ: dict[str, str], out) -> int:
-    # Cheapest check first: a cron job that opted out must cost nothing.
-    if environ.get("SD_HANDOFF_RESTORE") == "0":
-        return 0
+def packet_section(root: str, cwd: str, environ: dict[str, str]) -> str:
+    """The packet half of the injection: its context, a refusal, or nothing.
 
-    try:
-        payload = json.loads(stdin_text) if stdin_text.strip() else {}
-    except ValueError:
-        payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
+    Split out of `run` so there is exactly one place that emits. Every refusal
+    below used to return straight from `run`, which meant a bad packet also
+    silently dropped the followup rows read beside it -- the rows have nothing
+    to do with the packet, and a packet written for a different project is no
+    reason to lose them.
 
-    root, cwd = resolve_root(payload, environ)
+    Claims the packet on the winning path, and only there.
+    """
     path = packet_path(root, environ)
     if not path.is_file():
-        return 0
+        return ""
 
     try:
         packet = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         # A corrupt packet is not the session's problem. Say nothing.
-        return 0
+        return ""
     if not isinstance(packet, dict) or packet.get("consumed") or expired(packet):
-        return 0
+        return ""
 
     repo = packet.get("repo")
     if not isinstance(repo, dict):
-        return 0
+        return ""
 
     recorded_root = repo.get("root")
     if not isinstance(recorded_root, str) or not os.path.isdir(recorded_root):
-        emit(
+        return (
             "A handoff packet exists for this directory but was not restored: "
             f"the directory it names ({recorded_root!r}) no longer exists. "
-            "Run `sd-handoff --show` to read and clear it.",
-            out,
+            "Run `sd-handoff --show` to read and clear it."
         )
-        return 0
     if not contains(recorded_root, cwd):
-        emit(
+        return (
             "A handoff packet exists for this directory but was not restored: "
             f"it was written for {recorded_root}, which does not contain the "
             f"current directory {cwd}. Run `sd-handoff --show` to read and "
-            "clear it.",
-            out,
+            "clear it."
         )
-        return 0
 
     # The reused-path check. A different project now sitting at a path some
     # earlier project wrote a packet for will not have that project's history.
     head = repo.get("head_sha")
     if isinstance(head, str) and head:
         if git(root, "cat-file", "-e", f"{head}^{{object}}") is None:
-            emit(
+            return (
                 "A handoff packet exists for this directory but was not "
                 f"restored: the commit it was written against ({head[:12]}) is "
                 "not an object in the repository now at this path, so the "
                 "packet belongs to a different project. Run `sd-handoff "
-                "--show` to read and clear it.",
-                out,
+                "--show` to read and clear it."
             )
-            return 0
 
     warnings: list[str] = []
     recorded_remote = repo.get("remote")
@@ -506,9 +525,28 @@ def run(stdin_text: str, environ: dict[str, str], out) -> int:
         )
 
     if not claim(path, packet):
-        # Another session in this directory won the race. Exactly one restores.
+        # Another session in this directory won the race for the packet.
+        return ""
+    return context_for(packet, warnings)
+
+
+def run(stdin_text: str, environ: dict[str, str], out) -> int:
+    # Cheapest check first: a cron job that opted out must cost nothing.
+    if environ.get("SD_HANDOFF_RESTORE") == "0":
         return 0
-    emit(context_for(packet, warnings), out)
+
+    try:
+        payload = json.loads(stdin_text) if stdin_text.strip() else {}
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    root, cwd = resolve_root(payload, environ)
+    sections = [section for section in (packet_section(root, cwd, environ),) if section]
+    sections.extend(followup_lines(root))
+    if sections:
+        emit("\n".join(sections), out)
     return 0
 
 

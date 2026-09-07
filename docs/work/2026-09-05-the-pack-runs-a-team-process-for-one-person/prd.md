@@ -4727,3 +4727,53 @@ from a number the operator types.
   documentation is thin evidence for a rate, which is why it is averaged in
   rather than adopted. 16,399 plus 573 is 16,972; the cap is **17,000**, and
   the 28 unclaimed is what rounding left.
+
+- **2026-09-07** — **Criterion 29 is delivered by rows alone; the two hook
+  events R11-D43 priced a seam for cannot carry a prompt, and a shipped rule
+  already forbade one.** PR 8b builds `bin/sd_handoff_rows.py`, `bin/sd-note`
+  and a delta to `bin/sd-handoff-restore`. It does not build
+  `bin/sd-handoff-prompt`, and it registers no hook.
+
+  **`skills/sd-handoff/SKILL.md:102` says so in as many words**: "Never write a
+  packet automatically. No SessionEnd hook, no PreCompact hook, no 'I'll
+  snapshot this just in case'. Writing stays an explicit act, because
+  auto-writing every session is exactly how the journals started." The PR 8b
+  plan was written without reading it.
+
+  **And the events could not have carried it.** Measured against Claude Code
+  2.1.263 rather than assumed: the `hookSpecificOutput` union names
+  `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`,
+  `SubagentStart`, `SubagentStop` and fourteen more, and neither `PreCompact`
+  nor `SessionEnd` appears in it. `PreCompact`'s only lever is refusal —
+  "compaction blocked by PreCompact hook; continuing uncompacted" — and
+  `SessionEnd` carries a `reason` and no output path. A hook emitting
+  `additionalContext` on either would have been discarded in silence, which is
+  precisely the failure the 119 was reserved against. It arrived before a line
+  of the hook was written, which is the best outcome a seam charge can have.
+
+  **The criterion never needed the packet.** Its own clause ends the session
+  *without* calling `sd-handoff`. Rows are the source: `sd_db.add_note` with
+  `kind='followup'` was already the write, and until now had no caller in this
+  pack. `bin/sd-note add` is that caller and is an explicit act, so it is not
+  what SKILL.md:102 forbids; `bin/sd-handoff-restore` reads the rows back on the
+  next `SessionStart`, where it is already registered. No new registration
+  means `bin/sd_install.py` is untouched and this slice crosses no `sensitive`
+  path.
+
+  **A defect in the delta, found by reading it rather than by a test.** Putting
+  the row read before the packet's `if not path.is_file(): return 0` covered
+  the criterion's own case and left six others: every later refusal in `run` —
+  corrupt packet, consumed, expired, a `repo` that is not an object, a recorded
+  root that no longer exists, a root that does not contain the cwd — returned
+  straight out and took the followups with it, though the rows have nothing to
+  do with the packet. The packet half is now `packet_section`, returning its
+  context or its refusal, and `run` emits once with the rows appended.
+
+  **Delivered 324 against 573 funded**; `bin/` is 16,723 against `BIN_CAP`
+  17,000. The three body spans overran their line prices by 66 together —
+  `sd_handoff_rows.py` 170 against 120, `sd-note` 116 against 106, the delta
+  +38 against +32 — and the cut returned 281. Seven mutations were run against
+  the reader and the delta and all seven were caught: the resolved-at filter,
+  the active-status filter, the repository filter, the kind filter inverted,
+  the ordering reversed, the rows dropped from the hook, and the packet section
+  emptied.

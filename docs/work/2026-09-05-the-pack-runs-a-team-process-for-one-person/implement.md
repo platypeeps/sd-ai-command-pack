@@ -841,8 +841,9 @@ this criterion needs are new, and `tests/` answers to no line cap.
 ### PR 8b — criterion 29, continuity that survives a kill
 
 **Touches:** `bin/sd-handoff-restore`, `bin/sd_handoff_rows.py` (new),
-`bin/sd-handoff-prompt` (new), `bin/sd-note` (new), `bin/sd_install.py` for the
-`PreCompact` and `SessionEnd` matchers, which 8a has already made plural.
+`bin/sd-note` (new). **No `bin/sd_install.py`, no `bin/sd-handoff-prompt`, no
+new hook registration** — see the cut below. Nothing under `sensitive` in
+`.github/sd-review.json` is touched.
 
 **Priced 573 and funded by R11-D43, which raised `BIN_CAP` to 17,000 off a
 measured 16,399 base.** 422 of body, 119 of seam for the `PreCompact` and
@@ -871,11 +872,50 @@ instead of a reimplementation. `tests/test_sd_handoff.py:334-339` bans
 there is no equivalent assertion on the restore hook, which may therefore
 import both `sd_lib` and the new module.
 
-**`PreCompact` must never claim.** `bin/sd-handoff-restore:8-12` excluded a
-`compact` matcher on SessionStart because restoring into a dying session strands
-the packet for the `/clear` that follows. The prompt direction is the mirror
-image and is safe only if the hook never reads-and-claims: it reads the packet
-to ask whether one is already fresh, and nothing else.
+**`bin/sd-handoff-prompt` is cut, and its 119-line seam with it, for two
+independent reasons found while building.**
+
+1. **A shipped skill rule already forbids it.** `skills/sd-handoff/SKILL.md:102`
+   reads "Never write a packet automatically. **No SessionEnd hook, no
+   PreCompact hook**, no 'I'll snapshot this just in case'. Writing stays an
+   explicit act, because auto-writing every session is exactly how the journals
+   started." The plan above was written without reading it.
+2. **Neither event can inject context, so the prompt could not arrive.**
+   Measured against Claude Code 2.1.263: the `hookSpecificOutput` union carries
+   `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`,
+   `SubagentStart`, `SubagentStop` and fourteen more, and `PreCompact` and
+   `SessionEnd` are in **none** of them. `PreCompact`'s only lever is refusal
+   ("compaction blocked by PreCompact hook; continuing uncompacted") and
+   `SessionEnd` carries a `reason` and no output path at all. A hook printing
+   `additionalContext` on either would be silently discarded — which is the
+   failure mode the 119 was reserved against, arriving before a line was
+   written.
+
+**The criterion does not need it.** Clause 29 says the session "ends without
+calling `sd-handoff`" and asserts the followups arrive. Rows are the source;
+the packet is not involved. `bin/sd-handoff-restore` is already registered on
+`SessionStart`, so the read needs no new registration — which is why
+`bin/sd_install.py` drops out of the Touches list and this slice touches no
+sensitive path.
+
+**What replaces the automatic write is an explicit one.** `bin/sd-note add`
+writes a followup row as it is named, which is an explicit act and so is not
+what SKILL.md:102 forbids. A row survives a kill because it was never in the
+session.
+
+**Delivered: 324 against 573 funded**, `bin/` 16,399 to 16,723 at `BIN_CAP`
+17,000, all three figures counted from git. `bin/sd_handoff_rows.py` 170
+against 120, `bin/sd-note` 116 against 106, the `sd-handoff-restore` delta +38
+against +32; `bin/sd-handoff-prompt` 162 and the 119 seam unspent. The three
+body spans overran by 66 together and the cut returned 281.
+
+**One defect found and fixed in the delta itself.** Reading the rows before the
+packet's `if not path.is_file(): return 0` was not enough: six further refusal
+paths in `run` returned straight out, so a corrupt packet, or one written for a
+different project, silently dropped followups that had nothing to do with it.
+The packet half is now `packet_section`, which returns its context or its
+refusal as a string, and `run` emits once with the rows appended. Asserted by
+`test_a_bad_packet_does_not_take_the_rows_with_it`.
 
 ### PR 8c — criterion 27, promotion and demotion
 
