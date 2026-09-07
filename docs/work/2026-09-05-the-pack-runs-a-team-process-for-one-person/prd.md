@@ -4053,7 +4053,7 @@ from a number the operator types.
     - `bin/sd-status`'s row read and its stale line — **38**.
       `residue_section` (`bin/sd-status:986-1004`, 19) is a section that
       enumerates a condition and names it, which is what "report the line by
-      name as stale" is, and `_render_work` (`bin/sd-status:1101-1119`, 19) is
+      name as stale" is, and `_render_work` (`bin/sd-status:1685-1703`, 19) is
       the rendering half that has to say which source answered.
     - `bin/sd-docs-lint` rules 1 and 2 — **44**. `item_directories`
       (`bin/sd-docs-lint:77-87`, 11) has to carry the archived distinction,

@@ -12,6 +12,8 @@ The fake `gh`, the fixture repository and the read-only digest come from
 
 from __future__ import annotations
 
+import datetime
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -1011,6 +1013,399 @@ class ReadOnlyTests(StatusFixture):
             self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(tree_digest(tools), before)
         self.assertFalse((tools / "__pycache__").exists())
+
+
+class InventoryFixture(StatusFixture):
+    """The inventory producer, exercised in process against a fixture repo.
+
+    In process rather than through the executable, because nothing renders the
+    inventory yet: step 1 of this item lands the producer and the report is
+    unchanged, so a subprocess assertion would have nothing to look at. The
+    subprocess tests above still bracket the report, which is what says the
+    producer stayed invisible.
+    """
+
+    def pull(self, **overrides: Any) -> dict[str, Any]:
+        """A row shaped exactly as `sd-pr-state`'s `describe` returns one."""
+        row = {
+            "number": 7,
+            "title": "One",
+            "url": "https://github.com/acme/widget/pull/7",
+            "head": "main",
+            "base": "main",
+            "draft": False,
+            "mergeable": "MERGEABLE",
+            "merge_state": "BLOCKED",
+            "review_decision": "NONE",
+            "checks": {"failure": 1},
+            "checks_total": 1,
+            "failing": ["lint"],
+            "behind_by": 0,
+        }
+        row.update(overrides)
+        return row
+
+    def sections(self, **overrides: Any) -> dict[str, Any]:
+        base: dict[str, Any] = {
+            "work": status.work_section(self.repo),
+            "pull_requests": {"repo": "acme/widget", "pull_requests": []},
+            "protection": {"default_branch": "main", "gaps": [], "detail": {}},
+            "issues": {"available": False, "needs_you": [], "other": []},
+        }
+        base.update(overrides)
+        return base
+
+    def rows(self, **overrides: Any) -> list[dict[str, Any]]:
+        return status.actionable_inventory(self.repo, self.sections(**overrides))
+
+    def by_check(self, rows: list[dict[str, Any]], check: str) -> list[dict[str, Any]]:
+        return [row for row in rows if row["check"] == check]
+
+
+class ClassTableTests(unittest.TestCase):
+    """`CLASSES` is the enumeration, so the enumeration is what gets asserted."""
+
+    def test_every_check_name_appears_exactly_once(self) -> None:
+        names = [kind.check for kind in status.CLASSES]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual(len(names), len(status.BY_CHECK))
+
+    def test_the_table_carries_the_twenty_one_checks_the_design_enumerates(self) -> None:
+        # Pinned as a set, not a count: a count passes when a check is renamed
+        # into a duplicate of another, which is the drift this table exists to
+        # make impossible.
+        self.assertEqual(
+            {kind.check for kind in status.CLASSES},
+            {
+                "branch-already-merged", "in-progress-without-branch",
+                "branch-unresolvable", "status-unreadable", "unresolved-concern",
+                "pr-check-failing", "pr-check-missing", "dirty-tree-with-open-pr",
+                "protection-gap", "accepted-gap-standing", "issue-needs-you",
+                "pr-needs-action", "open-step", "unmerged-branch",
+                "parked-concern", "idle-planning", "undated-planning",
+                "issue-open", "source-marker", "unreadable-concern-row",
+                "undisclosed-tool",
+            },
+        )
+
+    def test_a_class_letter_is_one_lowercase_character(self) -> None:
+        for kind in status.CLASSES:
+            self.assertRegex(kind.letter, r"^[a-z]$")
+            self.assertGreater(kind.rank, 0)
+            self.assertTrue(kind.source and kind.what)
+
+    def test_the_exclusions_are_stated_in_words_and_not_only_in_the_design(self) -> None:
+        """`design.md:310` requires the report to print what it skipped."""
+        self.assertTrue(status.EXCLUDED)
+        for sentence in status.EXCLUDED:
+            self.assertIsInstance(sentence, str)
+            self.assertGreater(len(sentence.split()), 5)
+        joined = " ".join(status.EXCLUDED)
+        for skipped in ("archive", "parked", "Jira", "CHANGELOG.md"):
+            self.assertIn(skipped, joined)
+
+
+class ActionIdTests(unittest.TestCase):
+    def test_two_checks_on_one_object_get_two_ids(self) -> None:
+        """C-11's regression, at the level of the formula.
+
+        A pull request can be `pr-check-failing` and `dirty-tree-with-open-pr`
+        at once. Both are class `p`, so the rejected letter-keyed formula gives
+        them one hash -- at four digits and at eight, which is why widening was
+        no answer to it. Keyed on the check name they differ.
+        """
+        key = "acme/widget!7"
+        pair = ("pr-check-failing", "dirty-tree-with-open-pr")
+        rejected = {
+            hashlib.sha1(f"p\0{key}".encode(), usedforsecurity=False).hexdigest()[:4]
+            for _ in pair
+        }
+        self.assertEqual(len(rejected), 1, "the rejected formula collides, as C-11 says")
+        self.assertEqual(len({status.action_id(check, key) for check in pair}), 2)
+
+    def test_the_letter_is_a_display_prefix_and_the_hash_is_hex(self) -> None:
+        for check, kind in status.BY_CHECK.items():
+            found = status.action_id(check, "some/key")
+            self.assertRegex(found, r"^[a-z][0-9a-f]{4}$")
+            self.assertEqual(found[0], kind.letter)
+
+    def test_the_same_data_gives_the_same_id_every_time(self) -> None:
+        first = status.action_id("open-step", "alpha/prd.md#Steps#do it#0")
+        second = status.action_id("open-step", "alpha/prd.md#Steps#do it#0")
+        self.assertEqual(first, second)
+        self.assertNotEqual(
+            first, status.action_id("open-step", "alpha/prd.md#Steps#do it#1")
+        )
+
+    def test_a_check_the_table_does_not_carry_is_an_error_not_an_id(self) -> None:
+        with self.assertRaises(KeyError):
+            status.action_id("invented-check", "k")
+
+    def test_colliding_rows_both_widen_to_eight_digits_and_say_so(self) -> None:
+        rows = [
+            status._row("open-step", "a", "a", "", ""),
+            status._row("open-step", "b", "b", "", ""),
+        ]
+        rows[1]["id"] = rows[0]["id"]
+        status._widen_collisions(rows)
+        self.assertEqual(len({row["id"] for row in rows}), 2)
+        for row in rows:
+            self.assertRegex(row["id"], r"^[a-z][0-9a-f]{8}$")
+            self.assertTrue(row["widened"])
+
+
+class InventoryShapeTests(InventoryFixture):
+    def test_every_row_carries_the_fields_the_three_sections_read(self) -> None:
+        self.item("2026-08-01-alpha", status="in_progress")
+        for row in self.rows():
+            self.assertEqual(set(row), {
+                "id", "check", "letter", "key", "title", "detail", "suggest",
+                "rank", "abnormal", "source", "age_days", "widened",
+            })
+            kind = status.BY_CHECK[row["check"]]
+            self.assertEqual((row["rank"], row["abnormal"], row["source"]),
+                             (kind.rank, kind.abnormal, kind.source))
+
+    def test_the_ids_are_a_pure_function_of_the_data(self) -> None:
+        """`implement.md`'s verification 5, run twice against one tree."""
+        self.item("2026-08-01-alpha", status="in_progress")
+        self.item("2026-08-02-beta")
+        sections = self.sections()
+        first = status.actionable_inventory(self.repo, sections)
+        second = status.actionable_inventory(self.repo, sections)
+        self.assertTrue(first)
+        self.assertEqual([row["id"] for row in first], [row["id"] for row in second])
+        self.assertEqual(len({row["id"] for row in first}), len(first))
+
+    def test_rows_come_out_ranked_by_class_then_age_then_id(self) -> None:
+        self.item("2026-08-01-alpha", status="in_progress")
+        rows = self.rows()
+        ordered = sorted(rows, key=lambda r: (r["rank"], -r["age_days"], r["id"]))
+        self.assertEqual(rows, ordered)
+
+    def test_nothing_renders_it_yet(self) -> None:
+        """Step 1 is landable and invisible: the report is unchanged."""
+        self.with_github(pulls=[])
+        self.item("2026-08-01-alpha", status="in_progress")
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        for absent in ("abnormalities", "pending", "open threads"):
+            self.assertNotIn(f"\n{absent}\n", completed.stdout)
+        self.assertNotIn("actions", self.report())
+
+
+class WorkItemInventoryTests(InventoryFixture):
+    def test_in_progress_with_no_branch_is_a_finding(self) -> None:
+        self.item("2026-08-01-alpha", status="in_progress")
+        found = self.by_check(self.rows(), "in-progress-without-branch")
+        self.assertEqual(len(found), 1)
+        self.assertTrue(found[0]["abnormal"])
+        self.assertIn("2026-08-01-alpha", found[0]["detail"])
+
+    def test_a_branch_no_ref_carries_is_a_finding_and_a_live_one_is_not(self) -> None:
+        self.item("2026-08-01-alpha", status="in_progress", extra="branch: gone/away\n")
+        self.item("2026-08-02-beta", status="in_progress", extra="branch: here/now\n")
+        self.git("branch", "here/now")
+        found = self.by_check(self.rows(), "branch-unresolvable")
+        self.assertEqual([row["title"] for row in found], ["alpha"])
+        self.assertEqual(found[0]["key"], "2026-08-01-alpha")
+
+    def test_a_planning_item_past_the_threshold_ages_into_a_finding(self) -> None:
+        """`created:` is what ages an item, so the fixture writes its own."""
+        ancient = self.repo / "docs" / "work" / "2026-01-01-ancient"
+        ancient.mkdir(parents=True)
+        (ancient / "prd.md").write_text(
+            "---\ntitle: ancient\nstatus: planning\ncreated: 2026-01-01\n---\n",
+            encoding="utf-8",
+        )
+        self.item("2026-08-01-alpha")
+        today = datetime.date(2026, 9, 7)
+        rows = status.actionable_inventory(self.repo, self.sections(), today)
+        idle = self.by_check(rows, "idle-planning")
+        self.assertEqual([row["key"] for row in idle], ["2026-01-01-ancient"])
+        self.assertGreater(idle[0]["age_days"], status.IDLE_DAYS)
+
+    def test_a_planning_item_with_no_date_anywhere_is_its_own_finding(self) -> None:
+        directory = self.repo / "docs" / "work" / "undated-thing"
+        directory.mkdir(parents=True)
+        (directory / "prd.md").write_text(
+            "---\ntitle: undated\nstatus: planning\n---\n\n# undated\n",
+            encoding="utf-8",
+        )
+        rows = status.actionable_inventory(
+            self.repo, self.sections(), datetime.date(2026, 9, 7)
+        )
+        self.assertEqual(
+            [row["title"] for row in self.by_check(rows, "undated-planning")],
+            ["undated-thing"],
+        )
+
+    def test_parked_and_archived_items_contribute_no_rows(self) -> None:
+        self.item("2026-01-01-parked", extra="parked: 2026-08-01 age-sweep\n")
+        archived = self.repo / "docs" / "work" / "archive" / "2026-08"
+        archived.mkdir(parents=True)
+        (archived / "2026-01-01-old").mkdir()
+        (archived / "2026-01-01-old" / "prd.md").write_text(
+            PRD.format(title="old", status="planning", extra=""), encoding="utf-8"
+        )
+        rows = status.actionable_inventory(
+            self.repo, self.sections(), datetime.date(2026, 9, 7)
+        )
+        self.assertEqual([], [row for row in rows if "old" in row["key"]])
+        self.assertEqual([], [row for row in rows if "parked" in row["key"]])
+
+
+class OpenStepTests(InventoryFixture):
+    def test_two_identical_boxes_under_one_heading_get_two_ids(self) -> None:
+        """C-13: the ordinal is what stops one id naming two tasks."""
+        directory = self.item("2026-08-01-alpha", status="in_progress")
+        (directory / "implement.md").write_text(
+            "# Steps\n\n- [ ] Run the check\n- [ ] Run the check\n- [x] Done\n",
+            encoding="utf-8",
+        )
+        found = self.by_check(self.rows(), "open-step")
+        self.assertEqual(len(found), 2)
+        self.assertEqual(len({row["id"] for row in found}), 2)
+        self.assertEqual({row["title"] for row in found}, {"Run the check"})
+
+    def test_the_key_is_the_heading_and_not_the_line_number(self) -> None:
+        directory = self.item("2026-08-01-alpha", status="in_progress")
+        page = directory / "implement.md"
+        page.write_text("# Steps\n\n- [ ] Run the check\n", encoding="utf-8")
+        before = self.by_check(self.rows(), "open-step")[0]["id"]
+        page.write_text(
+            "# Steps\n\nA paragraph inserted above.\n\n- [ ] Run the check\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(before, self.by_check(self.rows(), "open-step")[0]["id"])
+
+    def test_boxes_on_a_done_item_are_read_as_history(self) -> None:
+        directory = self.item("2026-08-01-alpha", status="done")
+        (directory / "implement.md").write_text(
+            "# Steps\n\n- [ ] Run the check\n", encoding="utf-8"
+        )
+        self.assertEqual([], self.by_check(self.rows(), "open-step"))
+
+
+class PullRequestInventoryTests(InventoryFixture):
+    def test_two_checks_firing_on_one_pull_request_are_two_rows(self) -> None:
+        """C-11's regression at the level of the inventory, not the formula."""
+        (self.repo / "scratch.txt").write_text("dirty\n", encoding="utf-8")
+        pulls = {"repo": "acme/widget", "pull_requests": [self.pull()]}
+        rows = self.by_check(self.rows(pull_requests=pulls), "pr-check-failing")
+        rows += self.by_check(
+            self.rows(pull_requests=pulls), "dirty-tree-with-open-pr"
+        )
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(len({row["id"] for row in rows}), 2)
+        self.assertEqual({row["key"] for row in rows}, {"acme/widget!7"})
+
+    def test_a_pull_request_with_no_check_against_a_branch_that_requires_one(self) -> None:
+        pulls = {
+            "repo": "acme/widget",
+            "pull_requests": [self.pull(failing=[], checks_total=0, checks={})],
+        }
+        protection = {
+            "default_branch": "main", "gaps": [],
+            "detail": {"required_contexts": ["Tests"]},
+        }
+        rows = self.rows(pull_requests=pulls, protection=protection)
+        self.assertEqual(len(self.by_check(rows, "pr-check-missing")), 1)
+        self.assertEqual(
+            [], self.by_check(self.rows(pull_requests=pulls), "pr-check-missing")
+        )
+
+    def test_a_draft_is_not_waiting_on_anybody(self) -> None:
+        pulls = {
+            "repo": "acme/widget",
+            "pull_requests": [self.pull(draft=True, failing=[])],
+        }
+        self.assertEqual([], self.by_check(self.rows(pull_requests=pulls),
+                                           "pr-needs-action"))
+
+
+class AdapterInventoryTests(InventoryFixture):
+    def test_a_protection_gap_becomes_an_addressable_row(self) -> None:
+        protection = {
+            "default_branch": "main",
+            "gaps": [{"id": "enforce_admins", "gap": "enforce_admins is off"}],
+            "detail": {},
+        }
+        found = self.by_check(self.rows(protection=protection), "protection-gap")
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["key"], "main#enforce_admins")
+        self.assertIn(".github/sd-status.json", found[0]["suggest"])
+
+    def test_an_indexed_issue_becomes_a_row_keyed_on_its_permanent_number(self) -> None:
+        issues = {
+            "available": True,
+            "needs_you": [{
+                "repo": "acme/widget", "number": 4, "title": "Fix it",
+                "state": "open", "updated_at": "2026-09-01", "why": ["assigned"],
+                "url": "https://github.com/acme/widget/issues/4",
+            }],
+            "other": [],
+        }
+        found = self.by_check(self.rows(issues=issues), "issue-needs-you")
+        self.assertEqual([row["key"] for row in found], ["acme/widget#4"])
+
+    def test_a_branch_on_origin_with_no_pull_request_is_an_open_thread(self) -> None:
+        remote = self.base / "origin.git"
+        self.git("init", "-q", "--bare", str(remote))
+        self.set_origin(str(remote))
+        self.git("branch", "task/one")
+        self.git("push", "-q", "origin", "main", "task/one")
+        self.git("fetch", "-q", "origin")
+        found = self.by_check(self.rows(), "unmerged-branch")
+        self.assertEqual([row["key"] for row in found], ["origin/task/one"])
+        carried = {
+            "repo": "acme/widget",
+            "pull_requests": [self.pull(head="task/one")],
+        }
+        self.assertEqual(
+            [], self.by_check(self.rows(pull_requests=carried), "unmerged-branch")
+        )
+
+
+class LowYieldProducerTests(InventoryFixture):
+    def test_a_marker_in_tracked_source_is_found_and_one_in_docs_is_not(self) -> None:
+        # Spelled in halves so this repository's own scan stays at zero, which
+        # is the number `design.md` records for it.
+        marker = "TO" + "DO"
+        (self.repo / "bin").mkdir()
+        (self.repo / "bin" / "thing.py").write_text(
+            f"# {marker}: finish this\n", encoding="utf-8"
+        )
+        (self.repo / "docs").mkdir(exist_ok=True)
+        (self.repo / "docs" / "note.md").write_text(
+            f"the {marker} convention\n", encoding="utf-8"
+        )
+        self.git("add", "bin/thing.py", "docs/note.md")
+        self.git("commit", "-q", "-m", "markers")
+        found = self.by_check(self.rows(), "source-marker")
+        self.assertEqual(len(found), 1)
+        self.assertIn("bin/thing.py", found[0]["detail"])
+
+    def test_an_untracked_marker_is_not_a_finding(self) -> None:
+        marker = "FIX" + "ME"
+        (self.repo / "bin").mkdir()
+        (self.repo / "bin" / "loose.py").write_text(
+            f"# {marker}\n", encoding="utf-8"
+        )
+        self.assertEqual([], self.by_check(self.rows(), "source-marker"))
+
+    def test_a_skill_naming_a_tool_that_is_not_built_is_a_row(self) -> None:
+        skill = self.repo / "skills" / "sd-thing"
+        skill.mkdir(parents=True)
+        skill.parent.joinpath("sd-thing", "SKILL.md").write_text(
+            "Run `bin/sd-thing`, which reads `bin/sd-built`.\n", encoding="utf-8"
+        )
+        (self.repo / "bin").mkdir(exist_ok=True)
+        (self.repo / "bin" / "sd-built").write_text("#!/bin/sh\n", encoding="utf-8")
+        found = self.by_check(self.rows(), "undisclosed-tool")
+        self.assertEqual([row["title"] for row in found], ["bin/sd-thing"])
+        self.assertFalse(found[0]["abnormal"])
+        self.assertEqual(found[0]["key"], "skills/sd-thing/SKILL.md#bin/sd-thing")
 
 
 if __name__ == "__main__":
