@@ -490,6 +490,305 @@ class LocalBlockTests(InstallerHarness):
         self.assertIn("half-open", str(caught.exception))
 
 
+class TheSeamToTheReader(InstallerHarness):
+    """The installer writes the block; `sd_lib` reads it. Cross the seam.
+
+    This is the test whose absence let the two drift. The installer wrote
+    `<!-- sd-ai-command-pack:begin -->` and `sd_lib.parse_local_block` looks
+    for `<!-- SD-AI-COMMAND-PACK:LOCAL:START -->`, so it took the `start == -1`
+    branch and returned `{}` for every block the installer had ever written --
+    `mode`, `check`, `test`, `lint` and `reviewers` all unread. Nothing caught
+    it because `mode`'s unread value and its fallback are both `full`, and
+    because the reader's own tests (`tests/test_sd_review.py:140`, `:850`)
+    hand-write the reader's markers rather than producing a block with the
+    installer. Neither side was wrong on its own; only the seam was.
+    """
+
+    def make_repo(self, name: str = "seam") -> Path:
+        repo = self.home / name
+        repo.mkdir(parents=True)
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+        return repo
+
+    def read_back(self, repo: Path) -> dict:
+        sys.path.insert(0, str(REPO_ROOT / "bin"))
+        import sd_lib
+
+        return sd_lib.local_block(repo)
+
+    def test_the_reader_reads_the_keys_the_installer_wrote(self):
+        repo = self.make_repo()
+        sd_install.write_local_block(repo, consent="codex@codex")
+        block = self.read_back(repo)
+        self.assertNotEqual(block, {}, "the reader found no block the installer wrote")
+        self.assertEqual(block.get("mode"), "full")
+        self.assertEqual(block.get(sd_install.CONSENT_KEY), "codex@codex")
+
+    def test_a_block_written_under_the_old_markers_is_migrated_in_place(self):
+        """Not appended beside. The operator's answers are in the old one.
+
+        There is no machine-scope migration that could do this instead:
+        `--adopt-legacy` enumerates the old fleet installer's renders from its
+        own receipt, and no receipt anywhere lists the repositories that carry
+        a block. The next `--repo` run inside the repository is the only
+        moment the correction can happen.
+        """
+        repo = self.make_repo("old")
+        target = repo / sd_install.LOCAL_BLOCK_FILE
+        old_begin, old_end = (old for old, _ in sd_install.LEGACY_BLOCK_MARKERS)
+        target.write_text(
+            f"# notes\n\n{old_begin}\nbody\n\n    mode: guest\n"
+            f"    {sd_install.CONSENT_KEY}: codex@codex\n{old_end}\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(sd_install.write_local_block(repo, consent="codex@codex"),
+                         "refreshed")
+        text = target.read_text(encoding="utf-8")
+        self.assertNotIn(old_begin, text, "the unreadable markers survived")
+        self.assertEqual(text.count(sd_install.BLOCK_BEGIN), 1, "a second block")
+        self.assertIn("# notes", text)
+        self.assertEqual(self.read_back(repo).get(sd_install.CONSENT_KEY), "codex@codex")
+
+    def test_only_the_markers_changing_is_still_written(self):
+        """The one way a migration silently does nothing.
+
+        The refresh compares against what was read; had it compared against
+        the migrated copy, a file whose sole difference is the marker pair
+        would be byte-identical to it, no write would happen, and the
+        repository would stay on the markers nothing reads.
+        """
+        repo = self.make_repo("same")
+        target = repo / sd_install.LOCAL_BLOCK_FILE
+        sd_install.write_local_block(repo)
+        current = target.read_text(encoding="utf-8")
+        for old, new in sd_install.LEGACY_BLOCK_MARKERS:
+            current = current.replace(new, old)
+        target.write_text(current, encoding="utf-8")
+        sd_install.write_local_block(repo)
+        self.assertIn(sd_install.BLOCK_BEGIN, target.read_text(encoding="utf-8"))
+
+
+REGISTRY_FIXTURE = """\
+bills:
+  anthropic: { cost: subscription }
+  local:     { cost: local }
+
+providers:
+  claude:   { start: "claude -p", vendor: anthropic, bill: anthropic,
+              roles: [author], reader: claude-json, env: [] }
+  plain:    { url: "https://inference.baseten.co/v1", model: m, vendor: v1,
+              bill: local, roles: [reviewer], env: [] }
+  spaced:   { start: "'/opt/my tools/codex' exec", vendor: v2, bill: local,
+              roles: [reviewer], reader: codex-json, env: [] }
+  hashed:   { start: "/opt/x#y/tool run", vendor: v4, bill: local,
+              roles: [reviewer], reader: codex-json, env: [] }
+  userinfo: { url: "https://p:pw@host.example/v1", model: m, vendor: v5,
+              bill: local, roles: [reviewer], env: [] }
+  commaed:  { start: "/opt/a,b/tool run", vendor: v3, bill: local,
+              roles: [reviewer], reader: codex-json, env: [] }
+
+roles:
+  author:   [claude]
+  reviewer: [plain, spaced, hashed, userinfo, commaed]
+"""
+
+
+class ConsentPromptTests(InstallerHarness):
+    """`--repo` asks once who may receive this repository's diff.
+
+    Capability is the registry; permission is the `reviewers` line. The
+    installer offers the enabled reviewer entries with the recipients they
+    reach and writes the pairs for the ones it is told, taking none as an
+    answer and filling in no default.
+    """
+
+    def make_repo(self, name: str = "consented") -> Path:
+        repo = self.home / name
+        repo.mkdir(parents=True)
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+        return repo
+
+    def seed_registry(self, text: str = REGISTRY_FIXTURE) -> None:
+        path = self.home / sd_install.REGISTRY_RELATIVE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def registry(self):
+        sys.path.insert(0, str(REPO_ROOT / "bin"))
+        import sd_registry
+
+        return sd_registry
+
+    def consent_line(self, repo: Path) -> str | None:
+        sys.path.insert(0, str(REPO_ROOT / "bin"))
+        import sd_lib
+
+        return sd_lib.local_block(repo).get(sd_install.CONSENT_KEY)
+
+    # -- the round trip, end to end ------------------------------------
+
+    def test_every_recipient_shape_survives_write_then_read_then_parse(self):
+        """The requirement: what is written parses back as what was offered.
+
+        Four shapes the parser is explicitly built for -- a plain host, an
+        executable holding a space, one holding a `#` (not a comment on this
+        line), and a url whose netloc carries userinfo (`p:pw@host`, split on
+        the *first* `@` only). The path is the real one: the installer writes
+        the block, `sd_lib` reads the key out of it, `parse_consent` reads the
+        pairs out of the value. A recipient that came back different would be
+        this repository's diff going somewhere nobody agreed to.
+        """
+        self.seed_registry()
+        repo = self.make_repo()
+        names = "plain spaced hashed userinfo"
+        rc, output = self.run_cli("--repo", str(repo), "--reviewers", names)
+        self.assertEqual(rc, 0, output)
+
+        sd_registry = self.registry()
+        offered = {
+            entry.name: sd_registry.recipient(entry)
+            for entry in sd_registry.read_file(
+                self.home / sd_install.REGISTRY_RELATIVE
+            ).order("reviewer")
+        }
+        parsed = sd_registry.parse_consent(self.consent_line(repo))
+        self.assertEqual(parsed, {name: offered[name] for name in names.split()})
+        self.assertEqual(
+            [parsed[n].recipient for n in ("plain", "spaced", "hashed", "userinfo")],
+            ["inference.baseten.co", "/opt/my tools/codex", "/opt/x#y/tool",
+             "p:pw@host.example"],
+        )
+
+    def test_a_pair_that_does_not_read_back_is_never_written(self):
+        """`sd_registry.Allowance.__str__` quotes through `shlex.quote`, whose
+        safe set includes the comma `consent_parts` splits on. `commaed`'s
+        executable holds one, so its pair renders bare and comes back as a
+        different recipient beside a fabricated second grant. The installer
+        cannot fix that where it lives; it can refuse to write it.
+        """
+        self.seed_registry()
+        repo = self.make_repo("comma")
+        rc, output = self.run_cli("--repo", str(repo), "--reviewers", "commaed")
+        self.assertEqual(rc, 0)
+        self.assertIn("does not read back", output)
+        self.assertIsNone(self.consent_line(repo))
+
+    # -- refusals grant nothing ----------------------------------------
+
+    def test_a_name_nobody_offered_writes_no_line_and_says_so(self):
+        self.seed_registry()
+        repo = self.make_repo("unknown")
+        rc, output = self.run_cli("--repo", str(repo), "--reviewers", "plain nosuch")
+        self.assertEqual(rc, 0)
+        self.assertIn("no entry named nosuch", output)
+        self.assertIsNone(self.consent_line(repo), "a partial answer granted something")
+
+    def test_an_empty_answer_writes_no_line(self):
+        self.seed_registry()
+        repo = self.make_repo("nobody")
+        rc, output = self.run_cli("--repo", str(repo), "--reviewers", "")
+        self.assertEqual(rc, 0)
+        self.assertIn("consents to nobody", output)
+        self.assertIsNone(self.consent_line(repo))
+
+    def test_no_line_refuses_the_first_review_naming_the_key(self):
+        """What "grants nothing" means at the other end of the seam."""
+        self.seed_registry()
+        repo = self.make_repo("refused")
+        self.run_cli("--repo", str(repo), "--reviewers", "")
+        with self.assertRaises(self.registry().ConsentRefusal) as caught:
+            self.registry().parse_consent(self.consent_line(repo))
+        self.assertIn(sd_install.CONSENT_KEY, str(caught.exception))
+
+    def test_a_registry_with_nothing_enabled_offers_nothing(self):
+        repo = self.make_repo("bare")
+        rc, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(rc, 0)
+        self.assertIn("no enabled reviewer entry", output)
+        self.assertIsNone(self.consent_line(repo))
+
+    # -- asked once, kept ever after -----------------------------------
+
+    def test_a_rerun_keeps_the_answer_and_asks_nothing(self):
+        self.seed_registry()
+        repo = self.make_repo("kept")
+        self.run_cli("--repo", str(repo), "--reviewers", "plain")
+        first = self.consent_line(repo)
+        rc, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(rc, 0)
+        self.assertIn("already answered", output)
+        self.assertNotIn("which of these", output, "a rerun re-asked")
+        self.assertEqual(self.consent_line(repo), first)
+
+    def test_the_shipped_placeholder_is_not_an_answer(self):
+        """A line nobody wrote grants nothing, so the prompt still runs."""
+        self.seed_registry()
+        repo = self.make_repo("placeholder")
+        (repo / sd_install.LOCAL_BLOCK_FILE).write_text(
+            f"{sd_install.BLOCK_BEGIN}\n{sd_install.DEFAULT_BLOCK_BODY}"
+            f"{sd_install.BLOCK_END}\n",
+            encoding="utf-8",
+        )
+        self.assertIsNone(sd_install.standing_consent(repo))
+        rc, output = self.run_cli("--repo", str(repo), "--reviewers", "plain")
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.consent_line(repo), "plain@inference.baseten.co")
+
+    def test_a_file_with_no_block_at_all_has_no_standing_answer(self):
+        repo = self.make_repo("noblock")
+        (repo / sd_install.LOCAL_BLOCK_FILE).write_text(
+            f"    {sd_install.CONSENT_KEY}: plain@elsewhere\n", encoding="utf-8"
+        )
+        self.assertIsNone(
+            sd_install.standing_consent(repo),
+            "a line outside the block was read as consent",
+        )
+
+    def test_a_block_with_the_key_deleted_has_no_standing_answer(self):
+        repo = self.make_repo("nokey")
+        sd_install.write_local_block(repo)
+        self.assertIsNone(sd_install.standing_consent(repo))
+
+    # -- interactive and not -------------------------------------------
+
+    def test_a_terminal_is_offered_the_entries_and_its_answer_is_written(self):
+        self.seed_registry()
+        repo = self.make_repo("tty")
+        stdin = unittest.mock.Mock()
+        stdin.isatty.return_value = True
+        stdin.readline.return_value = "plain, userinfo\n"
+        with unittest.mock.patch.object(sys, "stdin", stdin):
+            rc, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(rc, 0)
+        self.assertIn("which of these may receive", output)
+        self.assertIn("plain@inference.baseten.co", output)
+        self.assertEqual(
+            self.consent_line(repo),
+            "plain@inference.baseten.co, userinfo@p:pw@host.example",
+        )
+
+    def test_a_non_interactive_run_without_the_flag_writes_no_line(self):
+        """The plan's clause: `--reviewers` or nothing. Never a default."""
+        self.seed_registry()
+        repo = self.make_repo("piped")
+        stdin = unittest.mock.Mock()
+        stdin.isatty.return_value = False
+        with unittest.mock.patch.object(sys, "stdin", stdin):
+            rc, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(rc, 0)
+        self.assertIn("consents to nobody", output)
+        self.assertIsNone(self.consent_line(repo))
+        stdin.readline.assert_not_called()
+
+    def test_the_flag_needs_a_value(self):
+        """`main` directly: `run_cli` appends `--home`, which the flag would
+        swallow as its value, and the refusal under test would never fire."""
+        out = io.StringIO()
+        rc = sd_install.main(["--repo", "--reviewers"], out=out)
+        self.assertEqual(rc, 2)
+        self.assertIn("needs the entry names", out.getvalue())
+
+
 class LegacyReceiptTests(InstallerHarness):
     def write_legacy_receipt(self, rows: list[dict]) -> None:
         path = (
