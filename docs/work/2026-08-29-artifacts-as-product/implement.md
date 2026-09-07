@@ -4291,8 +4291,8 @@ correctly. The only field still protected is the one whose empty value is
 *meaningful*, so absent now means the right thing rather than the wrong one.
 
 `floor` had already found and fixed this exact bug inside the same function.
-`refuse_protected` (`bin/sd:2339`) loops over the fields the *caller supplied*.
-`refuse_below_floor` (`bin/sd:2361`) loops over the fields the *kind declares*,
+`refuse_protected` (`bin/sd:2340`) loops over the fields the *caller supplied*.
+`refuse_below_floor` (`bin/sd:2362`) loops over the fields the *kind declares*,
 twenty-two lines below it, under a comment saying in as many words why the
 first shape is wrong -- iterating the supplied values let a floor be skipped by
 omitting the field.
