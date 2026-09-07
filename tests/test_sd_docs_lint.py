@@ -272,21 +272,41 @@ class Rule5PullRequestLinkTests(LintFixture):
         report = self.run_lint("Work: docs/work/2026-08-29-a-workable-item\n")
         self.assertEqual(report.failures, [])
 
-    def test_green_declared_absence_with_a_reason(self) -> None:
-        report = self.run_lint("Work: none - typo fix in a comment\n")
-        self.assertEqual(report.failures, [])
+    def test_green_no_work_line_claims_no_item(self) -> None:
+        """A change with no item carries no line, and is not asked for one.
 
-    def test_red_no_work_line(self) -> None:
-        self.assert_fails("needs a Work: line", pr_body="Fixes a typo.\n")
+        Criterion 10 removes the `none - <reason>` form rather than replacing
+        it, so the absence of a `Work:` line is the whole of how a change says
+        it advances no item. There is no placeholder to write and none to
+        forget, and a body that says nothing cannot say it wrongly.
+        """
+        report = self.run_lint("Fixes a typo.\n")
+        self.assertEqual(report.failures, [])
 
     def test_red_two_work_lines(self) -> None:
         self.assert_fails(
             "exactly one is allowed",
-            pr_body="Work: docs/work/2026-08-29-a-workable-item\nWork: none - other\n",
+            pr_body=(
+                "Work: docs/work/2026-08-29-a-workable-item\n"
+                "Work: docs/work/2026-08-29-another-item\n"
+            ),
         )
 
-    def test_red_none_without_a_reason(self) -> None:
-        self.assert_fails("needs a reason", pr_body="Work: none\n")
+    def test_red_the_none_form_is_no_longer_an_escape(self) -> None:
+        """`none - <reason>` is now a path that does not resolve, and fails.
+
+        The form used to pass rule 5 by naming no item. A body still carrying
+        it is stale rather than exempt, so it has to fail rather than quietly
+        keep working -- otherwise the form survives in every body written
+        before this change and criterion 10 is met only in the lint's source.
+        """
+        self.assert_fails(
+            "is not a path under",
+            pr_body="Work: none - typo fix in a comment\n",
+        )
+
+    def test_red_a_bare_none_is_a_path_that_does_not_resolve(self) -> None:
+        self.assert_fails("is not a path under", pr_body="Work: none\n")
 
     def test_red_item_does_not_exist(self) -> None:
         self.assert_fails(
