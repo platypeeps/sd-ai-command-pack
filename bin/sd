@@ -2959,6 +2959,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="what each path names, what is in contrib/, and what is on trial")
     skill_lister.set_defaults(handler=sd_skill.skill_list)
 
+    # Promotion and demotion open a pull request; neither moves anything on
+    # `main`. Criterion 27: the library opens it, never the dashboard.
+    promoter = trying.add_parser(
+        "promote",
+        help="move a contrib/ skill onto a path, in a pull request")
+    promoter.add_argument("name", help="a directory under contrib/")
+    promoter.add_argument(
+        "--path", required=True,
+        help="which path names it once installed: research, development or act")
+    promoter.set_defaults(handler=sd_skill.skill_promote)
+
+    demoter = trying.add_parser(
+        "demote",
+        help="move an installed skill back to contrib/, in a pull request")
+    demoter.add_argument("name", help="a directory under skills/")
+    demoter.set_defaults(handler=sd_skill.skill_demote)
+
     # The nightly. It lives under `skill` and not at the top level because
     # what it produces is the trial's evidence, and an operator looking for
     # where use gets counted looks where the trial is.

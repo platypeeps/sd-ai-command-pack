@@ -4892,3 +4892,63 @@ from a number the operator types.
   correction lands in documentation and costs no `bin/` line, which is the
   third and fourth such round in a row and is why the post-report rate above is
   falling.
+
+- **2026-09-07** — **Criterion 27 is delivered by one shared opener with the
+  direction as a parameter; promotion and demotion are nine lines and eight.**
+  PR 8c grows `bin/sd_skill.py` from 151 to 306 and adds two subparsers to
+  `bin/sd`. **Delivered 172 against 288 funded**; `bin/` is 16,895 against
+  `BIN_CAP` 17,050, all counted from git.
+
+  | span | priced | delivered |
+  |---|---|---|
+  | `paths_edit` | 34 | 36 |
+  | the shared opener | 66 | 68 |
+  | `promote` | 36 | 9 |
+  | `demote` | 34 | 8 |
+  | `_sibling`, unpriced | — | 18 |
+  | `bin/sd` | 22 | 17 |
+  | docstring and banner | 12 | 4 |
+
+  **R11-D44 priced the two ends at 36 and 34 and they came in at 9 and 8,
+  because the split moved.** The derivation put the validation in the ends and
+  everything else in the middle, which was right, but it also left the *move*
+  and the *clean check* in the ends where they would have been written twice.
+  Passing `promoting` as a parameter pulled both into the shared half, and what
+  is left in each end is only the three questions that differ: does the source
+  exist, does the target already, and which path names it. The shared half grew
+  by 2 to absorb them. That is the same lesson R11-D43 drew about seams, in the
+  other direction: what costs is the boundary you do not repair, and the cheap
+  way to not repair one is to leave a decision on both sides of it.
+
+  **`_sibling` at 18 was unpriced and is what the seam actually bought.**
+  R11-D44 reserved 40 for the first `gh` write. The write itself is ten lines,
+  because `gh api --method POST` goes through `gh_json` unchanged exactly as
+  predicted — but reaching `gh_json` at all costs a loader, since `bin/sd-pr-state`
+  has no `.py` suffix and cannot be imported. `bin/sd-status:97` already carries
+  the same eighteen lines for the same reason, and a third copy will be the
+  argument for moving it into `sd_lib`. Not this slice: two copies is a
+  coincidence, three is a policy.
+
+  **Two harness defects, both found by the tests failing rather than by
+  reading.** The loader writes a `.pyc` into the temporary checkout's `bin/`,
+  which the dirty-tree refusal correctly reported as uncommitted work — fixed by
+  giving the fixture the `__pycache__/` line the real pack has at
+  `.gitignore:7`, rather than by weakening the refusal. And `git config
+  url.<path>.insteadOf` rewrites `git remote get-url` as well as the push, so
+  `remote_slug` read the temporary path back and refused; `pushInsteadOf`
+  rewrites only the push, which lets origin *look* like GitHub for a reader
+  while every push still lands in a bare repository on disk.
+
+  **One test was too broad and is narrowed on evidence.** "Never by the
+  dashboard directly" was first asserted as no `gh` anywhere under `dashboard/`,
+  which fails: `dashboard/github.py` runs `gh api graphql` to search pull requests.
+  Criterion 27 forbids the dashboard *opening* one, which is a write, so the
+  test now looks for `--method`, `git push` and `pr create`. A companion test
+  asserts that exactly one file in all of `bin/` contains `"--method"`, and that
+  it is `sd_skill.py`.
+
+  **Nineteen tests, and seven mutations all caught** under
+  `PYTHONDONTWRITEBYTECODE=1`: the direction inverted, the dirty-tree check
+  removed, the sort dropped, removal sweeping only the first path, the
+  `$comment` block destroyed on write, the POST downgraded to a read, and
+  `head` confused with `base`. Baseline 19 passed after restore.
