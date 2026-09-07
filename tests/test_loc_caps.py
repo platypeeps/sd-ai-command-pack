@@ -458,7 +458,108 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # which busts a round 17,000 by eleven. Rounding to the next fifty leaves 39
 # unclaimed against R11-D43's 28, and the extra slack is bought by the
 # body-variance line being new and two observations deep.
-BIN_CAP = 17_050           # R11-D44: criteria 26, 29 and 27; 28 unfunded
+#
+# R11-D45, 2026-09-07, funds **criterion 28 alone** -- PR 8d, the last of the
+# four R11-D42 split PR 8 into. The base is 16,895, measured on `main` by
+# `git ls-files bin` after PR 8c merged at `17d80480`.
+#
+# **The body-variance line changes statistic, and the reason is that the loss
+# is not symmetric.** R11-D44 introduced it as the mean of two observations and
+# gave it no theory of what it was for. Three now: PR 8a's -2%, PR 8b's +26%,
+# PR 8c's -19% (172 delivered against 204 of body plus 8 of glue). Their mean
+# is +1.7%, which is very nearly nothing, and a reserve sized to it would be
+# too small half the time. An underrun costs unspent budget and nothing else.
+# An overrun busts the cap, and the clause above forbids raising it in the pull
+# request that busts it, so an overrun costs a re-derivation and a second pull
+# request. A reserve is protection against the bad tail, not an estimate of the
+# middle, so it is sized at the largest overrun yet observed: **26%**, PR 8b's.
+#
+# 8c's -19% is worth naming, because it is not noise. R11-D44 put validation in
+# the two ends and the shared work in the middle, and left the directory move
+# and the clean-checkout check in the ends, where each would have been written
+# twice. Making the direction a parameter pulled both into the middle and the
+# ends collapsed from 36 and 34 to 9 and 8. The correction was found by writing
+# the code, which is where that class of error is always found.
+#
+# **The seam is 0, as R11-D42 had it, and PR 8c is why it stays 0.** Every
+# boundary this criterion touches now has a built crossing on the other side:
+# `gh api --method POST` at `bin/sd_skill.py:278` for filing an issue, the
+# `gh_json` transport it goes through at `bin/sd-pr-state:117`, the suffixless
+# import at `bin/sd_skill.py:160`, and `sd_db.sync_shadow` -- `sync` at
+# `shadow_sync.py:391` in the installed library -- which is complete and whose
+# own docstring settles the split: the module is the collector, the verb lives
+# in the pack.
+#
+# **The 244 of body is two new modules and two edits, priced against named
+# built files rather than against a range.**
+#
+#   `bin/sd_suggest.py`                                          128
+#     header                    45   `bin/sd_skill.py:1-46`. The obligations
+#                                    match: a policy about when a verb may
+#                                    reach a remote, and why one gate is
+#                                    explicit. `bin/sd-note:1-42` is the other
+#                                    candidate at 42 and states less
+#     deferred sd_db frame      18   `bin/sd_handoff_rows.py` `library` at 13
+#                                    plus `connect` at 5, measured; the same
+#                                    frame in `bin/sd_restore.py` is 19
+#     the row, in every mode    30   `bin/sd-note` `cmd_write` at 26, which is
+#                                    already "resolve the item, write the row,
+#                                    print the id" exactly. Plus 4 for reading
+#                                    the mode: "every mode" is
+#                                    `bin/sd_lib.py:33` `MODES`, three of them,
+#                                    and the row carries which
+#     `publish`                 35   4 to refuse without `--to`, 16 for the
+#                                    dedup read the skill already requires at
+#                                    `skills/sd-suggest/SKILL.md:36` ("not 'I
+#                                    searched my memory' -- the list API call,
+#                                    actually made"), 12 for the POST measured
+#                                    against `bin/sd_skill.py:277-284`, 3 to
+#                                    print what was filed
+#
+#   `bin/sd_shadow.py`                                            84
+#     header                    32   Smaller than either analogue on purpose:
+#                                    `shadow_sync.py`'s own docstring states
+#                                    the collector/verb split, so this one
+#                                    cites it instead of restating it
+#     deferred sd_db frame      18   the same 18, and not shared -- two modules
+#                                    carrying their own is the measured
+#                                    precedent, `sd_restore` and
+#                                    `sd_handoff_rows` each having one
+#     the wrapper               34   open, call `sd_db.sync_shadow`, render
+#                                    `Synced`'s six fields into operator
+#                                    English, close. `bin/sd_restore.py`
+#                                    `resume` is 36 and `reimport` 47 for
+#                                    comparable render-a-result work
+#
+#   `bin/sd`                                                      28
+#     Two new groups and three verbs. PR 8c delivered 17 for two verbs under a
+#     group that already existed; a group costs the difference
+#
+#   `_sibling` moves to `sd_lib`                                   4
+#     The third copy. `bin/sd-status:97` and `bin/sd_skill.py:160` are the two,
+#     and PR 8c's own log says two is a coincidence and three is a policy.
+#     +18 in `sd_lib.py`, -18 in `sd_skill.py`, and an import line at each of
+#     three call sites
+#
+# **Glue is 12.** `sd_suggest.py` has four definitions and `sd_shadow.py`
+# three, both far under fifteen, so R11-D43's 2.10 applies to their three and
+# two boundaries. `sd_lib.py` gains one definition at 3.70 and `sd_skill.py`
+# loses one at 2.10.
+#
+# **Post-report discovery is 4.5%**, the mean of five: R11-D38's 14.4% and
+# 8.3%, and 0% from each of PR 8a, 8b and 8c. Three consecutive zeroes is the
+# point at which averaging a dead rate starts to look like ignoring evidence,
+# so it is worth saying what the zeroes are: every review round since 8a has
+# found real defects -- ten stale citations, a six-path row drop, a too-broad
+# dashboard assertion, two harness defects -- and every one of them was fixed
+# in documentation or in tests, neither of which answers to this cap. The rate
+# is not measuring whether review finds things. It measures whether what review
+# finds costs `bin/` lines, and lately it has not.
+#
+# 244 plus 12 plus 0 plus 63 plus 11 is **330**. 16,895 plus 330 is 17,225;
+# the cap is **17,250** and the 25 unclaimed is what rounding left. This is the
+# last of the four, so the next re-derivation in this item is a new item's.
+BIN_CAP = 17_250           # R11-D45: criteria 26, 29, 27 and 28, all four
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
 # R11-D29, re-derived 2026-09-03 with the itemisation R11-D24's clause asks
 # for: 4,190 measured on `main`, 158 measured on the branch that carries the
@@ -605,6 +706,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
         ("2026-09-07", 16_750),
         ("2026-09-07", 17_000),
         ("2026-09-07", 17_050),
+        ("2026-09-07", 17_250),
     ),
     "DASHBOARD_CAP": (
         ("2026-08-30", 2_500),

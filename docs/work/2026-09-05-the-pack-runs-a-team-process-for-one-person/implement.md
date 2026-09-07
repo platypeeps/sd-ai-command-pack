@@ -1021,7 +1021,36 @@ seven mutations all caught under `PYTHONDONTWRITEBYTECODE=1`.
 `bin/sd_suggest.py` (new), `bin/sd_shadow.py` (new), and the writing
 repository's manifest, which is not in this checkout.
 
-**Priced 364. Not funded by R11-D42. Last, because two clauses answer elsewhere.**
+**Priced 330 and funded by R11-D45, which raised `BIN_CAP` to 17,250 off a
+base of 16,895 measured on `main` after PR 8c merged at `17d80480`.** 244 of
+body, 12 of glue, 0 of seam, 63 of variance, 11 of post-report at 4.5%. Last,
+because two clauses answer elsewhere.
+
+R11-D42's 364 and this 330 are close, which hides that almost nothing in them
+agrees: it carried 327 of body and 37 of post-report at R11-D38's rate, and
+this carries 244 of body, a variance reserve it had no line for, and a
+post-report rate a fifth of the size.
+
+**The seam stays 0, and PR 8c is why.** Every boundary here now has a built
+crossing on the other side: `gh api --method POST` at `bin/sd_skill.py:278`,
+the `gh_json` transport at `bin/sd-pr-state:117`, the suffixless import at
+`bin/sd_skill.py:160`, and `sd_db.sync_shadow`.
+
+| span | lines |
+|---|---|
+| `bin/sd_suggest.py` — header 45, `sd_db` frame 18, the row 30, `publish` 35 | 128 |
+| `bin/sd_shadow.py` — header 32, `sd_db` frame 18, the wrapper 34 | 84 |
+| `bin/sd`, two new groups and three verbs | 28 |
+| `_sibling` into `sd_lib`, the third copy | 4 |
+| glue, five boundaries | 12 |
+| variance reserve at 26% | 63 |
+| post-report at 4.5% | 11 |
+
+**The variance reserve is sized to the worst overrun, not to the mean.** Three
+observations now — 8a −2%, 8b +26%, 8c −19% — mean +1.7%, and a reserve at the
+mean of a symmetric spread is too small half the time. The costs are not
+symmetric: an underrun leaves budget unspent, an overrun busts the cap and the
+clause forbids raising it in the pull request that busts it. So 26%.
 
 **A correction to every earlier Touches list: the skill is at
 `contrib/sd-propose-skills/`, not `skills/sd-propose-skills/`.** That directory
