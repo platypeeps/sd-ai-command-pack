@@ -30,7 +30,44 @@ thing this file measures: 46% of `dashboard/` is comments, docstrings and
 blanks, which is house style, and one ceiling over both halves means a branch
 and a paragraph bid for the same line -- the paragraph loses, because the
 branch is what the change is for. So the total may be re-derived with an
-itemisation, and `DASHBOARD_CODE_CAP` is the one that may only move downward.
+itemisation, and `DASHBOARD_CODE_CAP` was the one that could only move
+downward -- until R11-D41 gave it a way to say yes that does not cost working
+code.
+
+**R11-D41, 2026-09-06: the code cap is payable in kind, and the ceilings
+record their own history.** Two changes, from one reading of what these
+constants have actually done. `CEILING_HISTORY` below holds every value each
+one has held, read from this file's own git log: nine upward moves across the
+three of them, **not one downward move and not one refusal**, `bin/` going
+8,000 to 15,750 in seven days and four of those raises inside three days. That
+is the shape the paragraph below warns about -- 95,000 lines one defensible
+commit at a time -- arriving inside the mechanism built to prevent it, because
+each raise is priced in isolation and nothing ever looks at nine of them
+together.
+
+*The code cap is payable in kind.* R11-D24's downward-only clause is
+superseded. `DASHBOARD_CODE_CAP` may rise when the same change removes or
+factors at least as many code lines from `dashboard/` as it adds, so net code
+does not grow. R11-D24's intent survives whole -- prose still cannot buy code,
+because prose is not what the payment is made in. What goes is the endgame,
+which was delete something that works or do not build the thing, and which is
+documented once already: R11-D24 exists *because* 6b-7 was spent deleting
+rationale to fit a write path. `DASHBOARD_CODE_SLACK` is the mechanical half.
+The gap between the cap and what `dashboard/` measures may not widen, so a
+raise nobody paid for surfaces as a number rather than as a paragraph a
+reviewer has to weigh. Editing both constants together is still possible and
+is still a claim of unpaid capacity; the rule binds at the same strength as "a
+cap is never raised in the PR that busts it", which is to say by review, but
+now against a figure instead of against a belief.
+
+*Considered and not done: making the totals report rather than gate.* The
+per-raise derivation is expensive -- R11-D38 cost an agent twenty-two minutes
+and serialised four units of work behind it -- and in nine raises it has never
+once returned "no". But a ceiling that only reports is exactly what the
+retired stack had, and the paragraph below says what that produced. The gate
+stays. What is new is that the trend is data, so "should this still be rising"
+has somewhere to be asked other than inside the next raise.
+
 `bin/`'s ceiling keeps the original clause and is no longer untouched: it stood
 unmoved from R11-D15 to 2026-09-06, then moved four times in that one day --
 for the registry reader, for what PR 6 had left, for two units whose
@@ -254,7 +291,50 @@ DASHBOARD_CAP = 4_600
 # for the same line, and 6b-7 was spent deleting rationale to fit a write path
 # -- which is the cap working against the comment convention it was explicitly
 # widened to hold. This one bounds what the other cannot: code.
-DASHBOARD_CODE_CAP = 2_300 # R11-D24: the half a docstring cannot buy back
+DASHBOARD_CODE_CAP = 2_300 # R11-D24, amended by R11-D41: payable in kind
+
+# The gap between that cap and what `dashboard/` measures, recorded when
+# R11-D41 wrote the rule: 2,300 against 2,271. It is what makes "payable in
+# kind" checkable rather than remembered. Raising the cap by twenty-six lines
+# and deleting twenty-six elsewhere leaves this untouched and passes; raising
+# the cap alone widens it and fails. It may fall freely -- code added under an
+# unmoved ceiling is the ordinary case and needs no permission.
+DASHBOARD_CODE_SLACK = 29
+
+
+# Every value each ceiling has held, oldest first, read from this file's own
+# history with `git log -- tests/test_loc_caps.py` on 2026-09-06. Data, not
+# prose: the docstring above records each raise where it happened, and no
+# reader of nine separate paragraphs can see the shape the nine make together.
+# `bin/` nearly doubled in a week. Nothing here has ever fallen, and nothing
+# here has ever refused. That is the finding R11-D41 was written from, and it
+# is only visible in one place because this list exists.
+#
+# The dates are the day the value landed on `main`, not the day its record was
+# written. A new value goes on the end in the same change that moves the
+# constant, which the test below enforces -- a history that may be left behind
+# is a history nobody can cite.
+CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
+    "BIN_CAP": (
+        ("2026-08-30", 8_000),
+        ("2026-08-31", 14_000),
+        ("2026-09-06", 14_700),
+        ("2026-09-06", 15_050),
+        ("2026-09-06", 15_400),
+        ("2026-09-06", 15_750),
+    ),
+    "DASHBOARD_CAP": (
+        ("2026-08-30", 2_500),
+        ("2026-08-31", 4_000),
+        ("2026-09-01", 4_300),
+        ("2026-09-04", 4_350),
+        ("2026-09-04", 4_375),
+        ("2026-09-06", 4_600),
+    ),
+    "DASHBOARD_CODE_CAP": (
+        ("2026-09-01", 2_300),
+    ),
+}
 
 
 def tracked(*pathspecs: str) -> list[pathlib.Path]:
@@ -412,6 +492,62 @@ class LineCountCaps(unittest.TestCase):
             f"raised only in its own record and never in the pull request that "
             f"crossed it.",
         )
+
+    def test_the_code_ceiling_is_paid_for_in_kind(self) -> None:
+        """R11-D41: the cap may rise, but not by more than it is paid for.
+
+        The test above bounds the code. This one bounds the *permission* --
+        the distance between the ceiling and the tree. Adding code narrows
+        that distance and is the ordinary case; raising the ceiling widens it
+        and is the case that has to be paid for, by removing or factoring at
+        least as many code lines as the raise claims. R11-D24 said this half
+        could only fall, which left one answer when it bound: delete something
+        that works, or do not build the thing. This is the way to say yes.
+
+        A change may still edit both constants at once. That is a visible
+        claim of unpaid capacity rather than a hidden one, which is the whole
+        of what this test buys and is the same strength as the clause at the
+        top of this file.
+        """
+
+        paths = tracked("dashboard")
+        self.assertTrue(paths, "dashboard/ enumeration matched no tracked files")
+        slack = DASHBOARD_CODE_CAP - code_line_count(paths)
+        self.assertLessEqual(
+            slack,
+            DASHBOARD_CODE_SLACK,
+            f"DASHBOARD_CODE_CAP now stands {slack} lines above what "
+            f"dashboard/ measures, against {DASHBOARD_CODE_SLACK} when "
+            f"R11-D41 recorded the rule. A raise is payable in kind: remove "
+            f"or factor as many code lines as it claims, or lower "
+            f"DASHBOARD_CODE_SLACK in its own record and say what bought it.",
+        )
+
+    def test_each_ceiling_is_the_last_value_its_history_records(self) -> None:
+        """A history that may be left behind is a history nobody can cite.
+
+        `CEILING_HISTORY` exists so the trend is checkable in one place, and a
+        list that drifts from the constants it describes is worse than no list
+        -- it is the "number in a design document" this file was written to
+        replace, wearing the clothes of the thing that replaced it. So the
+        next raise updates both or fails here.
+        """
+
+        for name, value in (
+            ("BIN_CAP", BIN_CAP),
+            ("DASHBOARD_CAP", DASHBOARD_CAP),
+            ("DASHBOARD_CODE_CAP", DASHBOARD_CODE_CAP),
+        ):
+            with self.subTest(ceiling=name):
+                history = CEILING_HISTORY[name]
+                self.assertEqual(
+                    history[-1][1],
+                    value,
+                    f"{name} is {value} and CEILING_HISTORY ends at "
+                    f"{history[-1][1]}, set {history[-1][0]}. A change that "
+                    f"moves a ceiling appends to its history in the same "
+                    f"commit; R11-D41 is why the list is there at all.",
+                )
 
     def test_the_code_measure_does_not_count_prose_as_code(self) -> None:
         """The measure is the cap, so a measure that drifts is a cap that lies.
