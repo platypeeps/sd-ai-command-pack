@@ -198,10 +198,10 @@ def work_section(root: pathlib.Path) -> dict[str, Any]:
 
 def setup_section(root: pathlib.Path) -> dict[str, Any]:
     try:
-        declared = sd_lib.mode(root)
+        resolved = sd_lib.mode(root)
         mode_error = ""
     except sd_lib.ConfigError as error:
-        declared, mode_error = sd_lib.DEFAULT_MODE, str(error)
+        resolved, mode_error = sd_lib.DEFAULT_MODE, str(error)
     try:
         detection = sd_lib.detect_entrypoints(root)
         detect_error = ""
@@ -209,7 +209,7 @@ def setup_section(root: pathlib.Path) -> dict[str, Any]:
         detection = sd_lib.Detection(None, None, {}, str(error))
         detect_error = str(error)
     return {
-        "mode": declared,
+        "mode": resolved,
         "mode_error": mode_error,
         "source": detection.source,
         "origin": str(detection.origin) if detection.origin else None,

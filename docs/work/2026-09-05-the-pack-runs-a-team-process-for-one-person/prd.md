@@ -3838,3 +3838,86 @@ from a number the operator types.
   then had to repoint. Those four are the entire reason — the file is not this
   change's to edit, and rewriting the rationale inside its existing envelope
   costs one round of arithmetic and no cross-item churn.
+
+- **2026-09-06** — **R11-D35, criterion 11's six cases never say what a
+  *malformed* answer is, and the omission produced a live fail-open**, recorded
+  because the criterion's shape is what invited the defect rather than an
+  inattentive reading of it. The criterion states the three questions and then
+  enumerates six cases, and every one of them varies *who may push*: a personal
+  remote, an organisation remote, a remote the operator cannot administer, a
+  personal fork of a shared upstream, an owned remote with a second
+  collaborator, and a root with no remote or no git at all. Not one of them
+  varies whether the remote's answer can be *read*. A guard written to that
+  criterion checks the collaborator list and nothing in it, and that is exactly
+  the guard that was written.
+
+  **The failure is specific to this predicate rather than a general robustness
+  point.** `remote_permits_full` (`bin/sd_lib.py:293`) returns `full` from three
+  places, and one of them is an empty `others` — nobody else may push. Parsing
+  an entry and filtering it in the same pass makes an unreadable entry
+  indistinguishable from an absent one, so dropping every entry empties `others`
+  and "nobody I could parse" arrives as "nobody else may push". A repository
+  with a dozen unparseable pushers resolved to the most permissive mode, which
+  is the one direction `mode` (`bin/sd_lib.py:352`) is forbidden to move in.
+  Fixed in code at `bin/sd_lib.py:332-344`, where every entry is read first and
+  the first one that cannot be read returns `answered` false rather than a
+  permission; the comment there carries the reasoning.
+
+  What this entry records is the gap and not the fix. The criterion needs a
+  seventh case — a collaborator list the remote answers with an entry this
+  cannot read resolves to `guest` — carrying the clause case 6 already carries,
+  that it is named and asserted as its own case rather than left to whichever
+  branch an exception reaches. Applied to the answer this time, not to the
+  question. Until it is written down, the only thing holding the two-pass shape
+  is a comment in the file that would be a defensible thing to simplify away.
+
+- **2026-09-06** — **R11-D36, `minimal`'s exemption from detection is enforced
+  only in code**, recorded because the criterion's rule, read as written,
+  contradicts it. Criterion 11 says an explicit `mode:` line "wins over
+  detection downward and never upward", and the test it names installs
+  `mode: full` and watches it fall to `guest`. `minimal` is not mentioned
+  anywhere in the criterion, so the rule reads as covering it: `minimal` is not
+  `guest`, therefore it is above `guest`, therefore detection may lower it.
+
+  It may not, and the reason is not a special case. `minimal` already writes no
+  artifacts anywhere, so there is nothing detection could withhold from it;
+  `guest` does write, placing a triad on a fork's branch. Lowering `minimal` to
+  `guest` would therefore *raise* exposure, the one thing detection is
+  forbidden to do. `minimal` is also set by hand and detection's six cases never
+  produce it, so no run reaches the question by accident. Together those make
+  the answer forced rather than chosen, which is why `mode`
+  (`bin/sd_lib.py:352`) returns a written `minimal` unchanged and never asks the
+  remote at all.
+
+  **The general fact the criterion is missing is that "downward" is an ordering
+  on exposure, not on permissiveness**, and `minimal` is the one mode where the
+  two come apart. `MODES` (`bin/sd_lib.py:33`) is a validation set and its order
+  carries no such meaning. The reasoning currently lives in the docstring of
+  `mode` and nowhere in the criterion, which means the acceptance test for
+  criterion 11 could be satisfied in full by an implementation that demotes
+  `minimal`.
+
+- **2026-09-06** — **R11-D37, the tie-break between "no git" and "git that
+  cannot run" is unnamed**, recorded because case 6 reads as one case and is
+  three. It says "a root with no remote or no git at all", resolving to `full`
+  on the stated ground that a local scratch repository has no one to expose
+  anything to. The three it covers are a root with no `.git`, a root with a
+  `.git` that git itself cannot read, and a working repository with no `origin`.
+  The first and third are `full` for that reason. The second is not.
+
+  A `.git` git cannot read is not the absence of a repository; it is the absence
+  of an answer. Treating it as case 6 means a machine with no usable git binary
+  reads `full` for a repository that has a remote, an owner it does not
+  administer and collaborators it has never heard of — the same inversion
+  R11-D35 records one layer down, an unanswerable question arriving as a granted
+  permission, and reached here without any answer being misread because none was
+  obtained. `remote_permits_full` (`bin/sd_lib.py:293`) already separates them
+  at `bin/sd_lib.py:303-310`: the `.git` test first and decided on its own, then
+  the `rev-parse` test returning `guest` with `answered` false, then the remote
+  lookup.
+
+  So the order of those three tests is load-bearing and the criterion does not
+  contain it. Case 6 should name the unreadable `.git` as its own outcome, the
+  way it already insists the no-remote case be named rather than caught out of
+  an exception, since the criterion as written is silent on which of the two the
+  code should reach first and either order passes its six cases.
