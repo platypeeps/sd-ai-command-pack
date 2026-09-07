@@ -559,7 +559,159 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # 244 plus 12 plus 0 plus 63 plus 11 is **330**. 16,895 plus 330 is 17,225;
 # the cap is **17,250** and the 25 unclaimed is what rounding left. This is the
 # last of the four, so the next re-derivation in this item is a new item's.
-BIN_CAP = 17_250           # R11-D45: criteria 26, 29, 27 and 28, all four
+# R11-D46, 2026-09-07, funds the **sd-status-answers-is-anything-wrong-first**
+# item whole. The base is **17,189**, measured on `main` at `6f9b96ad` by
+# `git ls-tree -r --name-only main bin` with `migrate-*` excluded as always.
+# This is the first re-derivation in this file that is not PR 8's, which
+# R11-D45's last sentence anticipated.
+#
+# **PR 8d came in at 228 against 256, and the four-slice split is now closed.**
+# 16,895 before it, 17,123 after, both counted from git. The 66 lines between
+# 17,123 and the 17,189 base are the sweep item's branch resolution, which
+# answered to no reservation and fitted in R11-D45's 25 unclaimed plus what 8d
+# left -- which is the ordinary case a ceiling is supposed to permit.
+#
+# **The body-variance line keeps R11-D45's statistic and its number.** Four
+# observations now: 8a -2%, 8b +26%, 8c -19%, 8d -11%. Their mean is -1.5% and
+# three of the four are underruns, which is exactly why the mean is the wrong
+# statistic here: an underrun costs unspent budget, an overrun costs a
+# re-derivation and a second pull request. Sized to the largest overrun yet
+# observed, still 8b's: **26%**.
+#
+# **The item's own `implement.md` budgeted 600 against a measurement that is now
+# ten times stale** -- 12,416 lines and a 14,000 ceiling, read on `8cf99431` on
+# 2026-09-04, when 1,584 lines of headroom made the figure a formality. Today
+# `bin/` stands 61 lines under its ceiling, so the number has to be derived
+# rather than claimed. That is the whole of why this record exists, and the
+# item's budget section is corrected in the same change.
+#
+# **The 524 of body is nineteen spans at named built files.** The item lands in
+# `bin/sd-status` alone, which is why every analogue below is drawn from that
+# file where one exists there:
+#
+#   `Class` and `CLASSES`, 21 rows        79   `RESIDUE` at `bin/sd-status:946`
+#                                              is 40 for six rows of four
+#                                              fields at ~6 lines each. This
+#                                              table is 21 rows of six written
+#                                              three to a row, plus 8 for the
+#                                              NamedTuple and the same comment
+#                                              head. `ACKNOWLEDGED_FACTS` at
+#                                              `:442` is the other candidate at
+#                                              4.25 lines a row, and is rejected:
+#                                              its rows carry a prose sentence
+#                                              each and these carry a rank
+#   `EXCLUDED` and its printed line       14   `BACKENDS` at `:903`, 10 for a
+#                                              flat tuple, plus 4 for the
+#                                              sentence `design.md:310` requires
+#                                              so the section never implies it
+#                                              swept what it skipped
+#   `action_id()`                         14   No smaller analogue exists in the
+#                                              file: `_always_listed` at `:1097`
+#                                              is 4 and states no policy. C-11
+#                                              makes the key a check-and-subject
+#                                              pair, and the stability rule that
+#                                              verification 5 diffs has to be
+#                                              written down beside it
+#   `actionable_inventory()`              21   `residue_section` at `:986`,
+#                                              which is already "run the
+#                                              producers, tag each row, return
+#                                              the list"
+#   the work-item producer                33   `backends_section` at `:913`.
+#                                              Four checks, one pass over the
+#                                              items
+#   the `open-step` producer              33   the same
+#   the `source-marker` producer          21   `residue_section`; one `git grep`
+#                                              and a row per hit
+#   the `undisclosed-tool` producer       21   `residue_section`; a glob, a
+#                                              `test -e`, a row per miss
+#   four adapters over built sources      24   `protection-gap`,
+#                                              `issue-needs-you`/`issue-open`,
+#                                              `unmerged-branch` and the three
+#                                              `pr-*` checks already have
+#                                              producers -- `_protection_gaps`,
+#                                              `issues_section`,
+#                                              `carrier_branches` and
+#                                              `bin/sd-pr-state`. Each costs a
+#                                              six-line row shaper, not a
+#                                              producer. This is where the
+#                                              21-check table stops being
+#                                              alarming
+#   `branch_landed()`                     41   `sd_lib.delivered` at
+#                                              `bin/sd_lib.py:1342`, the built
+#                                              three-state git answer with the
+#                                              same never-a-bare-boolean
+#                                              contract. Three tiers rather than
+#                                              two, and one fewer network call
+#   the ledger scanner, `DISPOSITIONS`    96   `load_acknowledgements` at
+#                                              `:484` is 87 for one file parsed
+#                                              against a vocabulary, emitting a
+#                                              row per line it cannot read --
+#                                              which is `unreadable-concern-row`
+#                                              exactly. Plus 9 for the four
+#                                              rules the prototype earned
+#   `accepted-gap-standing` rows          12   `_apply_acknowledgements` at
+#                                              `:571` reads that same file, so
+#                                              this is a second loop over
+#                                              `accepted_gaps[]` and not a
+#                                              second reader
+#   `_render_banner`                      22   `pack_banner` at `:129`, the
+#                                              built summary line
+#   `_render_pending`                     26   `_render_work` at `:1101`, a
+#                                              capped sorted list that states
+#                                              its own suppressed count
+#   `_render_next`                        15   `_render_issues` at `:1214`
+#   `_render_threads`                     16   `_render_handoff` at `:1165`
+#   eight empty-state sentences           16   2 each, at the `if not X:` pairs
+#                                              already in the renderers
+#   `--actions`, `collect`, the bump      20   `build_parser` at `:1240` is 24
+#                                              for the whole parser, so one flag
+#                                              is 4; `collect` at `:1063` gains
+#                                              three keys and their calls at 16
+#
+# **Glue is 89, and it is `bin/sd-status`'s own rate rather than its class's.**
+# Seventeen new top-level definitions. R11-D43 measured 3.70 for the eleven
+# modules with fifteen or more definitions, and measured `bin/sd-status` itself
+# at **5.21**, the highest of them. The file has 42 definitions and every line
+# of this item lands in it, so the file's own figure is the one that applies;
+# using the class mean would price this change against ten modules it does not
+# touch. 17 x 5.21 = 89.
+#
+# **The seam is 0, and the reason is that the discovery has already been made.**
+# Two boundaries look new and neither is. Nothing in `bin/` shells out to
+# `git grep` -- checked, `grep -rn '"grep"' bin/` returns nothing -- and nothing
+# passes `--no-renames`. But both go through `sd_lib.git_output`, the fixed-argv
+# transport with 30 call sites, so the *transport* is repaired; what a seam
+# charge actually buys is the discovery behind an unrepaired boundary, which is
+# R11-D44's correction and R11-D45's reason for its own 0. Here that discovery
+# is already written down: the item's `implement.md` step 3 records a prototype
+# run with four rules it earned the hard way -- including that keying on
+# `split("/")[2]` collapses 487 archived items into one bucket -- and its
+# expected counts on today's corpus, 245 concerns, 206 closed, 23 open, 16
+# unclassifiable. Step 2 records the tier-1/tier-2 split verified against this
+# checkout's five squash-merged branches. A crossing whose findings are in the
+# plan is paid for in the body, not in a contingency.
+#
+# **Post-report discovery is 5.5%, and the run of zeroes is over.** Six
+# observations: R11-D38's 14.4% and 8.3%, 0% from each of PR 8a, 8b and 8c, and
+# **10.6%** from the sweep item -- two review rounds costing a net +7 lines in
+# `bin/` (`e2d12b09` +9/-4, `83e2e2dd` +6/-4) against a 66-line delivered body.
+# R11-D45 said three consecutive zeroes were measuring whether review's findings
+# cost `bin/` lines rather than whether review finds things; the sweep item is
+# the case where they did, because what its reviewer found was a docstring
+# making a false claim about cost, and a docstring in `bin/` charges this cap.
+# Mean of six is 5.5%; 5.5% of the 524 body is 29.
+#
+# 524 plus 89 plus 0 plus 159 plus 29 is **801**. 17,189 plus 801 is 17,990 and
+# the cap is **18,000**; the 10 unclaimed is what rounding to the next fifty
+# left, and it is smaller than any predecessor's because 801 is a 4.7% raise and
+# a wider margin on top of a reserve this size would be asking twice.
+#
+# The item is funded **whole** rather than sliced. R11-D42 split PR 8 because
+# 2,592 in one step was 16.5% for scope a month out; this is a third of that
+# against a body specified span by span in a design that already ran a prototype.
+# Step 1 of its checklist is still landable alone, which is a property of the
+# work and not of the funding.
+BIN_CAP = 18_000           # R11-D46: sd-status answers "is anything wrong" first
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
 # R11-D29, re-derived 2026-09-03 with the itemisation R11-D24's clause asks
 # for: 4,190 measured on `main`, 158 measured on the branch that carries the
@@ -707,6 +859,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
         ("2026-09-07", 17_000),
         ("2026-09-07", 17_050),
         ("2026-09-07", 17_250),
+        ("2026-09-07", 18_000),
     ),
     "DASHBOARD_CAP": (
         ("2026-08-30", 2_500),
