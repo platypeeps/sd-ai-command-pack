@@ -30,7 +30,20 @@ Eight steps. Before the first of them every acceptance criterion in the item's
 `prd.md` is checked, with the actual check run and its output seen. A partial
 pass is not a pass.
 
-1. **Commit enumerated paths only** — the exact paths you can name.
+1. **Commit enumerated paths only** — the exact paths you can name. In the
+   pack, the system repository and the writing repository, the message also
+   names what needed the work: `Needed-by: <item id>`, or `Needed-by: cost`,
+   `Needed-by: efficiency`, `Needed-by: visibility` where no item did.
+   `WORKFLOW.md` is where that rule lives and these are its forms, not a
+   second definition of them. A message carrying one of them commits with
+   nothing said. A message carrying none of them gets a warning naming the
+   commit and the trailer it lacks, and the sequence continues to step 2 with
+   the commit made: the trailer is a record of why the work happened, read
+   later as a weekly count, so a missing one is a gap in that record and not
+   a fault in the change, and the warning is the whole of what happens. In
+   any other repository the trailer is not expected and nothing is said about
+   it. `WORKFLOW.md` names those three and nothing here recognises one from
+   its remote or its path; which repository you are in is yours to know.
 2. **Local review.** `sd-review --scope branch --challenge` on the commits,
    before anything leaves the machine, and `sd-docs-lint` with all five rules
    enforced locally regardless of repo mode: shape · ready · decision shape ·
@@ -40,9 +53,16 @@ pass is not a pass.
    finding here: fix it, or record the decision and the reason it stands. A fix
    is not dispositioned until it is committed and the lane has run again — the
    head that gets pushed must be the head the lane passed, not the one it
-   failed.
-3. **Push** the PR branch. This is the first irreversible act in the sequence
-   and the thing that wakes every remote reader.
+   failed. That further pass reads the diff since the head the lane passed
+   and nothing else: the fix is its whole subject, the branch behind it having
+   been read once already.
+3. **Push** the PR branch — the head step 2 passed, and no other. This is the
+   first irreversible act in the sequence and the thing that wakes every
+   remote reader. A head the lane has not passed refuses here, and the
+   refusal names both shas: the head the lane passed, and the head standing
+   in the checkout. Take the difference back to step 2. `--match-head-commit`
+   refuses such a head at GitHub anyway; refusing it here is the same answer,
+   arriving while the sha it names is still cheap to act on.
 4. **Open the pull request** with a `Work:` line resolving to the item, 0
    unchecked boxes. The line is there when the item is, and absent when the
    change has none. There is no placeholder form of it.
