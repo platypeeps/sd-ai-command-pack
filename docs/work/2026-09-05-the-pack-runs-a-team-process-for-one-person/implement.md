@@ -1319,6 +1319,56 @@ written here; its git history records at least the fourth and the seventh
 last clause of criterion 28 becomes checkable. Then, and not before, the
 delivery commit.
 
+### The three landings that are no pull request of this repository's
+
+PR 4 said criteria 19 and 23 are recorded against their landings rather than
+against this repository's diff, and left no place to record them. This is that
+place, and two of the three have now happened.
+
+**Criterion 19 and criterion 23's first half — the global settings and the
+global guide — landed on 2026-09-07 as an operator edit.** They are under
+`~/.claude/` and in no git repository, so there is no commit to cite; what
+follows is the measurement, taken before and after, with
+`~/.claude/settings.json.bak-2026-09-07` and `CLAUDE.md.bak-2026-09-07` beside
+the originals so the edit is reversible by hand.
+
+| clause | before | after |
+|---|---|---|
+| no `Read()` deny rule | 14 | 0 |
+| no `.trellis` allow rule | 2 | 0 |
+| the four MCP pull-request tools | 1 of 5 | 5 |
+| the guide's `cd` prohibition | 30 lines | absent |
+| the caveman plugin | enabled | absent |
+
+**The item never names which four MCP tools, so the four are chosen here and
+recorded rather than left to the next reader.** `create_pull_request`,
+`pull_request_read`, `merge_pull_request` and `list_pull_requests` — the
+`mcp__github__` mirror of the `gh pr create`, `view`, `merge` and `list`
+already on the allowlist, which is where requirement 8's nine blocked merges
+came from. `update_pull_request` was already there and is the fifth.
+
+**The `cd` prohibition and the deny globs were one change, not two, and the
+guide said so itself.** Its own paragraph gave the deny rules as the reason
+the rule existed — a `cd` makes the working directory statically
+unresolvable, so the harness cannot prove the target matches no deny rule, so
+an auto-approvable command escalates — and added that narrowing the globs does
+not help, because the trigger is that *any* `Read()` deny rule exists.
+Removing the globs removes the reason, which is why requirement 8 drops the
+two together and why removing only one of them would have been worse than
+removing neither.
+
+**Criterion 23's second half is open.** The writing repository's style
+override is that repository's one-line pull request and is not this
+repository's or `system`'s.
+
+**The system repository's guide landed as its own pull request there.**
+`CLAUDE.md` 341 lines to 278, five narrative sections rewritten as
+present-tense rules: the drift markers, TCC under launchd, the 02:xx wake, the
+GitHub token facts and the Slack digest. Forty-one load-bearing tokens were
+enumerated from the old text before the edit and all forty-one survive it.
+Dates that fix a state change inside a present-tense rule are left alone;
+what left is the account of the night each rule was learned.
+
 That field was missing when this file was first written, and adding it was
 the fix. This repository's items carry `branch:` by convention — 238 `prd.md` files
 under `docs/work/` have the line, and the sibling item
