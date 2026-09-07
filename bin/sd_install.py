@@ -28,10 +28,12 @@ asserts the Antigravity count is zero or twelve, never partial.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +48,20 @@ HOOK_EVENT_NAME = "SessionStart"
 HOOK_MATCHERS = ("startup", "clear")
 
 EXCLUDES_LINE = "CLAUDE.local.md"
+
+
+def sibling(name: str):
+    """A module out of this file's own `bin/`, which is not a package.
+
+    The installer is loaded by path as often as it is run as a script, so a
+    plain `import` finds a neighbour only when the process happened to start
+    in `bin/`. Reserved for the case that earns it: a rule somebody else owns.
+    `sd_lib` owns the local block's markers and its grammar, and the installer
+    used to keep its own copy of both -- which is why it spent its life
+    writing a block the reader parsed as `{}`.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    return importlib.import_module(name)
 
 
 # ------------------------------------------------------------------- location
@@ -850,13 +866,34 @@ def legacy_targets(home: Path, environ: dict[str, str]) -> list[tuple[Path, str]
 # ------------------------------------------------------- the per-repo block
 
 LOCAL_BLOCK_FILE = "CLAUDE.local.md"
-BLOCK_BEGIN = "<!-- sd-ai-command-pack:begin -->"
-BLOCK_END = "<!-- sd-ai-command-pack:end -->"
 
+# Taken from the reader, not retyped beside it. The installer kept its own
+# lower-case pair, so `parse_local_block` found no start marker and returned
+# `{}` for every block this file has ever written -- `mode`, `check`, `test`,
+# `lint`, and now `reviewers`, which is consent, all unread. It stayed
+# invisible because `mode`'s fallback is the value it failed to read, and
+# because the reader's own tests hand-write the reader's markers rather than
+# producing a block with the installer. Two hand-maintained copies of one
+# format is the whole cause, so there is now one copy and `sd_lib` holds it.
+BLOCK_BEGIN = sibling("sd_lib").LOCAL_BLOCK_START
+BLOCK_END = sibling("sd_lib").LOCAL_BLOCK_END
+
+#: What this installer wrote until 2026-09-06, and what a repository set up
+#: before then still carries.
+LEGACY_BLOCK_MARKERS = (
+    ("<!-- sd-ai-command-pack:begin -->", BLOCK_BEGIN),
+    ("<!-- sd-ai-command-pack:end -->", BLOCK_END),
+)
+
+# Commented, because the body is the reader's grammar and not prose with keys
+# in it: `parse_scalars` refuses a line that is neither blank, a comment, nor
+# `key: value`. Unmarked, these three lines raised `ConfigError` on every read
+# -- a second way the same block was unreadable, and one the marker fix alone
+# would have left standing.
 DEFAULT_BLOCK_BODY = """\
-sd-ai-command-pack, machine-scope. Work items live under `docs/work/`; nothing
-else in this repo belongs to the framework. The workflow these keys override is
-`WORKFLOW.md` in the pack checkout; it is the one page that states the policy.
+# sd-ai-command-pack, machine-scope. Work items live under `docs/work/`; nothing
+# else in this repo belongs to the framework. The workflow these keys override
+# is `WORKFLOW.md` in the pack checkout; the one page that states the policy.
 
     mode: full
     check: <the command that verifies this repo, e.g. `make check`>
@@ -866,7 +903,25 @@ else in this repo belongs to the framework. The workflow these keys override is
 """
 
 
-def write_local_block(repo: Path, *, dry_run: bool = False) -> str:
+def migrated(text: str) -> str:
+    """`text` with an unreadable block's markers rewritten to the reader's.
+
+    In place, and not beside it. Switching the pair without this would find no
+    block, append a second one, and leave the operator's answers -- the
+    `reviewers` line among them -- in the copy nothing reads. Nothing else can
+    do this instead: `--adopt-legacy` enumerates the old fleet installer's
+    renders from its own receipt, and no receipt anywhere lists the
+    repositories that have a block, so the only moment a repository's markers
+    can be corrected is the next `--repo` run inside it.
+    """
+    for old, new in LEGACY_BLOCK_MARKERS:
+        text = text.replace(old, new)
+    return text
+
+
+def write_local_block(
+    repo: Path, *, dry_run: bool = False, consent: str | None = None
+) -> str:
     """Create or refresh the marked block in the repo's `CLAUDE.local.md`.
 
     The file is untracked by construction -- `CLAUDE.local.md` is the one line
@@ -885,11 +940,11 @@ def write_local_block(repo: Path, *, dry_run: bool = False) -> str:
             "tracked file. Untrack it (git rm --cached) and re-run."
         )
     try:
-        existing = target.read_text(encoding="utf-8")
+        original = target.read_text(encoding="utf-8")
     except OSError:
-        existing = ""
-
-    block = f"{BLOCK_BEGIN}\n{DEFAULT_BLOCK_BODY}{BLOCK_END}\n"
+        original = ""
+    existing = migrated(original)
+    block = f"{BLOCK_BEGIN}\n{consent_body(consent)}{BLOCK_END}\n"
     start = existing.find(BLOCK_BEGIN)
     end = existing.find(BLOCK_END)
     if start != -1 and end > start:
@@ -904,7 +959,10 @@ def write_local_block(repo: Path, *, dry_run: bool = False) -> str:
         separator = "" if not existing or existing.endswith("\n\n") else "\n"
         updated = f"{existing}{separator}{block}"
         action = "added"
-    if not dry_run and updated != existing:
+    # Against `original`, not against the migrated copy: a file whose only
+    # change is the marker pair is byte-identical to `existing` and would not
+    # be written, leaving the repository on the markers nothing reads.
+    if not dry_run and updated != original:
         target.write_text(updated, encoding="utf-8")
     return action
 
@@ -919,6 +977,136 @@ def path_is_tracked(repo: Path, relative: str) -> bool:
     except OSError:
         return False
     return done.returncode == 0
+
+
+# ----------------------------------------------------------------- consent
+
+# The registry says who *can* review; this line says who may receive *this*
+# repository's diff. `bin/sd_registry.py` parses a pair, so it renders every
+# pair written here: one composed by hand could name a recipient the parser
+# reads as a different one, and the diff would leave for somewhere nobody
+# agreed to. Nothing defaults -- an answer that is not wholly understood
+# writes no line, and a repository with no line refuses naming the key.
+CONSENT_KEY = "reviewers"
+CONSENT_LINE = re.compile(rf"^[ \t]*{CONSENT_KEY}:(?P<value>.*)\n?", re.MULTILINE)
+
+
+def consent_body(consent: str | None) -> str:
+    """`DEFAULT_BLOCK_BODY` with the key answered, or with the key removed.
+
+    Quoted, and escaped the way `sd_lib._unquote` unescapes. An unquoted value
+    ends at the reader's first `#`, and `#` is legal in a recipient -- it is
+    why `consent_parts` sets `commenters` to `""` -- so an unquoted
+    `hashed@/opt/x#y/tool` reaches the reader as `/opt/x`, a destination
+    nobody named. `sub` takes a function and never a string, because a
+    backslash in a recipient would otherwise be read as a group reference.
+
+    No answer removes the line rather than leaving the placeholder: an absent
+    key refuses naming the key and this flag, where the placeholder would be
+    refused as a bare name and send the operator to the pair's grammar.
+    """
+    if consent is None:
+        return CONSENT_LINE.sub(lambda _: "", DEFAULT_BLOCK_BODY)
+    quoted = consent.replace("\\", "\\\\").replace('"', '\\"')
+    return CONSENT_LINE.sub(lambda _: f'    {CONSENT_KEY}: "{quoted}"\n', DEFAULT_BLOCK_BODY)
+
+
+def standing_consent(repo: Path) -> str | None:
+    """The answer already in this repo's block, read by the reader itself.
+
+    Through `sd_lib` rather than a regex here: comments, quoting and a `#`
+    inside quotes are the reader's rules, and a second implementation of them
+    is exactly how the markers drifted. A block it cannot parse and a block
+    carrying only the shipped placeholder are both no answer, and the prompt
+    runs again -- fail-closed, since consent is what is being decided.
+    """
+    lib = sibling("sd_lib")
+    try:
+        text = migrated((repo / LOCAL_BLOCK_FILE).read_text(encoding="utf-8"))
+        value = lib.parse_local_block(text).get(CONSENT_KEY, "").strip()
+    except (OSError, lib.ConfigError):
+        return None
+    return value if value and not value.startswith("<") else None
+
+
+def consent_offers(ctx: Context) -> list:
+    """Every enabled reviewer entry beside the recipient it reaches today."""
+    sd_registry = sibling("sd_registry")
+    found, _ = sd_registry.read_or_report(sd_registry.registry_path(ctx.home))
+    return [sd_registry.recipient(entry) for entry in found.order("reviewer")]
+
+
+def reads_back(line: str, chosen: list) -> bool:
+    """Whether the block this line goes into reads back as exactly `chosen`.
+
+    The whole chain, run before anything is written: the body the block will
+    carry, through `sd_lib`, through `parse_consent`. Composed by the writer,
+    checked by the reader. `Allowance.__str__` quotes a recipient with
+    `shlex.quote`, whose safe set *includes* the comma `consent_parts` splits
+    on, so an executable holding one renders bare and comes back as two pairs
+    -- `entry@x,y@z` reads as `entry -> x`, a host nobody named, beside a
+    fabricated `y -> z`. That belongs to `bin/sd_registry.py` and cannot be
+    fixed from here; refusing to be the thing that writes it can.
+    """
+    try:
+        block = sibling("sd_lib").parse_local_block(
+            f"{BLOCK_BEGIN}\n{consent_body(line)}{BLOCK_END}"
+        )
+        found = sibling("sd_registry").parse_consent(block.get(CONSENT_KEY))
+        return found == {pair.entry: pair for pair in chosen}
+    except Exception:
+        return False
+
+
+def chosen_consent(offers: list, answer: str, out) -> str | None:
+    """The line allowing the offered entries `answer` names, or None.
+
+    Names only, in the prompt and in `--reviewers` alike: a recipient comes
+    off the registry and never off a keyboard, so what lands parses back as
+    the pair that was offered. A name nobody offered is refused whole rather
+    than guessed at, because the guess would be at where the diff may go.
+    """
+    wanted = set(re.split(r"[\s,]+", answer.strip())) - {""}
+    unknown = sorted(wanted - {pair.entry for pair in offers})
+    if unknown:
+        print(f"no {CONSENT_KEY} line written: this registry offers no entry named "
+              f"{', '.join(unknown)}, and half an answer consents to nothing", file=out)
+        return None
+    if not wanted:
+        print(f"no {CONSENT_KEY} line written: this repository consents to nobody",
+              file=out)
+        return None
+    chosen = [pair for pair in offers if pair.entry in wanted]
+    line = ", ".join(str(pair) for pair in chosen)
+    if not reads_back(line, chosen):
+        print(f"no {CONSENT_KEY} line written: {line!r} does not read back as the "
+              f"entries it was built from, so it consents to nobody it names", file=out)
+        return None
+    return line
+
+
+def repo_consent(ctx: Context, repo: Path, answer: str | None, out) -> str | None:
+    """Asked once per repository and kept ever after.
+
+    A rerun keeps the line it finds and asks nothing; re-asking on every
+    install is how a default gets in. With nothing to offer, or on a
+    non-interactive run with no `--reviewers`, no line is written.
+    """
+    standing = standing_consent(repo)
+    if standing:
+        print(f"{CONSENT_KEY} already answered here, kept as it stands", file=out)
+        return standing
+    offers = consent_offers(ctx)
+    if not offers:
+        print(f"no enabled reviewer entry to offer; no {CONSENT_KEY} line", file=out)
+        return None
+    if answer is None:
+        print("which of these may receive this repository's diff?", file=out)
+        for pair in offers:
+            print(f"  {pair}", file=out)
+        print("names, space- or comma-separated; empty for none:", file=out)
+        answer = sys.stdin.readline() if sys.stdin.isatty() else ""
+    return chosen_consent(offers, answer, out)
 
 
 # ------------------------------------------------------------- the library
@@ -1439,8 +1627,9 @@ def cmd_adopt_legacy(ctx: Context, out) -> int:
     return 0
 
 
-def cmd_repo(ctx: Context, repo: Path, out) -> int:
-    action = write_local_block(repo, dry_run=ctx.dry_run)
+def cmd_repo(ctx: Context, repo: Path, out, reviewers: str | None = None) -> int:
+    consent = repo_consent(ctx, repo, reviewers, out)
+    action = write_local_block(repo, dry_run=ctx.dry_run, consent=consent)
     prefix = "would have " if ctx.dry_run else ""
     print(f"{prefix}{action} the sd block in {repo / LOCAL_BLOCK_FILE}", file=out)
     return 0
@@ -1461,6 +1650,10 @@ usage: install.py (--user | --status | --pull | --uninstall | --adopt-legacy
   --provision-library
                    install sd_db into this pack's virtualenv and stop
 
+  --reviewers NAMES
+                   with --repo, the registry entries this repo consents to
+                   receive its diff; the answer a prompt would have asked for
+
   --dry-run        print what would happen; write nothing
   --home DIR       treat DIR as the home directory (tests and scratch installs)
 """
@@ -1470,13 +1663,12 @@ MODES = ("user", "status", "pull", "uninstall", "adopt-legacy", "repo",
 
 
 def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> int:
-    import sys
-
     out = sys.stdout if out is None else out
     environ = dict(os.environ if environ is None else environ)
 
     mode = None
     repo_arg = None
+    reviewers = None
     dry_run = False
     home_arg = None
     index = 0
@@ -1499,6 +1691,13 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
                 print("error: --home needs a directory", file=out)
                 return 2
             home_arg = argv[index]
+        elif token == "--reviewers":
+            # Taken positionally: an empty string is a real answer, nobody.
+            index += 1
+            if index >= len(argv):
+                print("error: --reviewers needs the entry names to allow", file=out)
+                return 2
+            reviewers = argv[index]
         elif token in ("-h", "--help"):
             print(USAGE, file=out, end="")
             return 0
@@ -1545,7 +1744,7 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
         return cmd_uninstall(ctx, out)
     if mode == "adopt-legacy":
         return cmd_adopt_legacy(ctx, out)
-    return cmd_repo(ctx, Path(repo_arg or ".").resolve(), out)
+    return cmd_repo(ctx, Path(repo_arg or ".").resolve(), out, reviewers)
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised via install.py
