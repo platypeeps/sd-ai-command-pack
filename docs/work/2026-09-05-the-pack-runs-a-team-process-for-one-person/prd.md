@@ -4134,7 +4134,7 @@ from a number the operator types.
     mutates and can fail has to say what its failure looks like, and `deliver`
     has exactly that problem in a sharper form.
   - the hand-merge reconciliation display — **28**, at `whereCell`
-    (`dashboard/app.js:549-566`, 18), the built cell that renders a derived
+    (`dashboard/app.js:573-590`, 18), the built cell that renders a derived
     state with its reason, and `split_status` (`dashboard/work.py:102-109`,
     10), where the two new states have to be spelled: a row `in_progress` with
     the squash commit on a note, and a row `done` but unmarked.
@@ -4404,6 +4404,78 @@ from a number the operator types.
   bool(==)` where the source says `!=`. Clear `__pycache__` after a mutation
   loop, or verify with `dis` rather than with the source.
 
+- **2026-09-07, PR 7's two prose-and-history clauses, and what each was
+  missing.** Criterion 13's kill list has three clauses and the skill covered
+  one. `## What a rerun reconciles` described the window *after* the merge —
+  merged, and the row does not know it — and said nothing about the window
+  before it: a run killed after the push, and a merge the remote refused. The
+  two differ in why they stopped and in nothing that follows, so the section
+  now states them once, and the three consequences criterion 13 names sit in
+  one sentence: the row is not `done`, the item's directory is untouched, and
+  `sd-plan` and `sd-review` go on picking the item. Two tests, both caught by
+  deleting the paragraph.
+
+  **Criterion 21's archive half is two readings, because either alone fails
+  open.** The criterion's own words are a diff: the branch that landed the
+  retire names no path under `docs/work/archive/`. That reading needs the
+  history, and `actions/checkout` defaults to depth one — where the query does
+  not answer "no commit added the marker" but returns the grafted root, which
+  adds every tracked file, so the archive check fails with a message about a
+  rewrite that never happened. So `tests.yml`'s unittest job now fetches the
+  whole history (22 MiB packed, 3,336 commits), the test asks
+  `git rev-parse --is-shallow-repository` first and says what is actually
+  wrong, and the second reading is a tree property that survives a rewritten
+  history: 491 archived `prd.md` all carry `status:`, 5 active ones carry
+  none. Verified both ways — `d369b6b1` names 0 archive paths, and stripping
+  one archived line fails the tree test.
+
+- **2026-09-07, the Work tab's `deliver`, and the first raise R11-D41 allowed.**
+  Criterion 13's last clause: after a hand merge that carried no `Delivers:`
+  trailer the row stays `in_progress` and `sd-plan` goes on picking the item,
+  correctly, because reading a delivery out of the bare fact that a branch
+  merged is how an item gets closed by a slice. The claim is missing, not the
+  merge, and the operator supplies it here.
+
+  **Where it lives, against what the pages say.** The prd names "the item
+  screen" in four places and the dashboard has no item screen — it has a Work
+  tab listing rows. Building one is a surface of its own and is in no pull
+  request's Touches, so the control went on the row, which is the smallest
+  place that satisfies what criterion 13 asserts. Recorded as a deviation, not
+  as a reading of the requirement.
+
+  **The write.** `dashboard/work.deliver` goes to `sd_db` directly, as
+  `bin/sd_install.py` already does, and not through `sd_lib.Rows` — that opens
+  read-only and exists so sixty-four rows cost one connection, which is not
+  this. The row's *key* still comes from `sd_lib`, now as a module-level
+  `external_id` a writer can call without a read connection, so the format has
+  one definition. Two defects the tests caught: an outer `transaction()` around
+  `transition`, which already opens one — `cannot start a transaction within a
+  transaction` — and `shipped_at` moving on a second press, fixed by reading
+  `transition`'s return, which hands back the target when the row was already
+  there.
+
+  **The cap.** 67 code lines built, 18 returned by factoring `post()` (the same
+  five lines of headers and token in two writers) and `payloadFor()` (the same
+  seven lines of fetch-and-catch in five views). Net +49 against 21 of
+  headroom, so `DASHBOARD_CODE_CAP` moved 2,300 to 2,328 and slack fell 21 to
+  0. Ten of the 28 are unpaid and `tests/test_loc_caps.py` says so in as many
+  words: the remaining reclaimable duplication in `dashboard/` is the two
+  trackers' `window_start`, which `jira.py` documents as deliberately
+  unshared, so taking it would reverse a recorded decision to buy ten lines.
+  The raise also sits in the change that needs it, against the older paragraph
+  saying a cap is never raised in the PR that busts it — that paragraph reports
+  how the two ceilings with no slack test were moved, and `DASHBOARD_CODE_SLACK`
+  makes a standalone raise of this one impossible. Both halves recorded in the
+  cap file rather than settled quietly.
+
+  **A test that passed for the wrong reason.** The verification pass ran four
+  mutations against the slice and one survived: deleting the `was != "done"`
+  gate broke nothing. `sd_db.writes.now()` keeps whole seconds, so two presses
+  one call apart write the same text, and
+  `test_the_second_press_does_not_move_the_moment_it_shipped` was comparing a
+  value to itself. The test now plants `2001-01-01T00:00:00+00:00` between the
+  presses — a moment no clock here produces — and the mutation fails it. The
+  code was right; the test was not, and only the mutation said so.
 - **2026-09-07** — **R11-D42, `BIN_CAP` re-derived from 15,750 to 16,750, and
   PR 8 split into four pull requests**, in a change of its own that touches
   `tests/test_loc_caps.py` and these planning pages and nothing under `bin/`,

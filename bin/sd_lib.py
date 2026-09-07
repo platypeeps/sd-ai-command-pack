@@ -446,6 +446,12 @@ def status_marker(root: pathlib.Path, work_dir: str = WORK_DIR) -> tuple[str, st
     return "", f"{path} says {said!r}, which is neither {FROM_FILE!r} nor {FROM_ROW!r}"
 
 
+def external_id(root: pathlib.Path | str, item_dir: pathlib.Path) -> str:
+    """One item's row key. A writer needs it and no read connection to get it."""
+    return (f"{main_worktree_root(pathlib.Path(root).resolve())}::"
+            f"{WORK_DIR}/{item_dir.name}/prd.md")
+
+
 class Rows:
     """This checkout's item rows, read through `sd_db` and through nothing else.
 
@@ -484,7 +490,7 @@ class Rows:
         self.opened = True
 
     def external_id(self, item_dir: pathlib.Path) -> str:
-        """The row's key: `<registered checkout>::docs/work/<item>/prd.md`."""
+        """The row's key, off the base this instance already resolved."""
         return f"{self.base}::{WORK_DIR}/{item_dir.name}/prd.md"
 
     def status(self, item_dir: pathlib.Path) -> tuple[str, str]:

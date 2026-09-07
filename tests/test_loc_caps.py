@@ -336,7 +336,7 @@ DASHBOARD_CAP = 4_600
 # for the same line, and 6b-7 was spent deleting rationale to fit a write path
 # -- which is the cap working against the comment convention it was explicitly
 # widened to hold. This one bounds what the other cannot: code.
-DASHBOARD_CODE_CAP = 2_300 # R11-D24, amended by R11-D41: payable in kind
+DASHBOARD_CODE_CAP = 2_328 # R11-D41's first exercise; see the note below
 
 # The gap between that cap and what `dashboard/` measures, recorded when
 # R11-D41 wrote the rule: 2,300 against 2,271. It is what makes "payable in
@@ -345,6 +345,36 @@ DASHBOARD_CODE_CAP = 2_300 # R11-D24, amended by R11-D41: payable in kind
 # the cap alone widens it and fails. It may fall freely -- code added under an
 # unmoved ceiling is the ordinary case and needs no permission.
 DASHBOARD_CODE_SLACK = 29
+
+# **2026-09-07, the first raise R11-D41 permitted, and what it actually cost.**
+# The Work tab's `deliver` control -- the operator's claim after a hand merge
+# that carried no `Delivers:` trailer -- measured 67 code lines: 27 for the
+# writer in `work.py`, 6 for the label that resolves a row back to its
+# checkout, 20 for the endpoint, 14 for the button. Against that, two
+# factorings returned 18: `post()`, which was the same five lines of headers
+# and token in each of two writers, and `payloadFor()`, which was the same
+# seven lines of fetch-and-catch in each of five views. Net +49 against 21 of
+# headroom, so the ceiling moved 28.
+#
+# **Ten of those 28 lines are unpaid, and that is the point of saying so here.**
+# R11-D41 permits editing both constants at once precisely because "a visible
+# claim of unpaid capacity" is better than a hidden one. `dashboard/` was
+# searched for the remaining ten first: the duplication that looks reclaimable
+# -- `window_start` in both trackers, their `OVERLAP` and `FIRST_RUN_WINDOW`
+# constants -- is documented in `jira.py` as deliberately unshared, so taking
+# it would be reversing a recorded decision to buy ten lines. Slack falls from
+# 21 to 0, which is the honest consequence: the next code line under
+# `dashboard/` fails this cap and asks the question again.
+#
+# **This raise sits in the change that needs it, against the paragraph at the
+# top of this file.** That paragraph -- "a cap is never raised in the PR that
+# busts it" -- reports how `BIN_CAP` and `DASHBOARD_CAP` were each moved, and
+# those two have no slack test. `DASHBOARD_CODE_SLACK` makes a standalone
+# raise of *this* cap impossible: a raise with no code beside it widens the
+# distance and fails on the spot. The two rules cannot both be met, and
+# R11-D41 is the later one and was written for this cap by name, so it wins
+# here. Recorded rather than resolved quietly, because the older paragraph
+# still governs the other two ceilings and should not be read as retired.
 
 
 # Every value each ceiling has held, oldest first, read from this file's own
@@ -379,6 +409,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
     ),
     "DASHBOARD_CODE_CAP": (
         ("2026-09-01", 2_300),
+        ("2026-09-07", 2_328),
     ),
 }
 

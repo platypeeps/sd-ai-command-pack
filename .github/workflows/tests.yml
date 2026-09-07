@@ -39,6 +39,14 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The whole history, not the default depth of one. Criterion 21 is
+          # asserted against the commit that landed the `docs/work` retire --
+          # tests/test_archive_untouched.py resolves it by asking which commit
+          # added `docs/work/.status-source` -- and in a shallow clone that
+          # commit is unreachable. The test fails there rather than skipping,
+          # which is the right direction to fail and the reason this is set.
+          # The other three checkouts in this file run no unittest shard.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python

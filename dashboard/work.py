@@ -135,6 +135,26 @@ def read_item(path: Path, statuses: "sd_lib.Statuses | None" = None) -> dict:
     }
 
 
+def label(group: str, repo: Path) -> str:
+    """How a row names its checkout. The one spelling, because `deliver`
+    resolves it back and a second copy would send a write to the wrong row."""
+    return repo.name if group == "." else f"{group}/{repo.name}"
+
+
+def checkout_of(root: Path, where: str) -> Path | None:
+    """The checkout a row's `repo` label names, or None when none does.
+
+    Enumerated rather than joined onto the root: a label is two path segments
+    at most and a client sends it back, so building a path out of it is a
+    traversal waiting to be written. Nothing here reaches a directory that
+    `collect_work` did not already list.
+    """
+    for group, repo in discover_checkouts(root):
+        if label(group, repo) == where:
+            return repo
+    return None
+
+
 def collect_work(root: Path) -> dict:
     """Every work item under the fleet: the moving ones listed, all of them counted.
 
@@ -156,7 +176,7 @@ def collect_work(root: Path) -> dict:
         if not work.is_dir():
             continue
         repos += 1
-        where = repo.name if group == "." else f"{group}/{repo.name}"
+        where = label(group, repo)
         # Once per repository, not once per item: the marker is a property of
         # the checkout, and opening its database sixty-four times to ask the
         # same question would be the cost of asking it in the wrong place.
@@ -199,3 +219,59 @@ def collect_work(root: Path) -> dict:
         "archived": archived,
         "active": sum(counts.values()) + len(unstated),
     }
+
+
+#: Who the `status_change` note names, and why. The operator pressed a button
+#: on this page; the note says so rather than naming a program, because the
+#: claim being recorded is theirs and not the dashboard's.
+DELIVERED_BY = "dashboard"
+DELIVERED_WHY = "delivered from the dashboard after a merge that carried no trailer"
+
+
+def deliver(repo: Path, name: str) -> str:
+    """One item's row to `done` with `shipped_at`; `""` when the write landed.
+
+    The control for the case `skills/sd-ship/SKILL.md` calls a hand merge: the
+    branch merged, the message carried no `Delivers:`, so nothing on the
+    default branch claims the item and the row stays `in_progress`. The
+    operator is the claim, after the fact, and this is where they make it.
+
+    The write goes to `sd_db` directly, as `bin/sd_install.py` does, and not
+    through `sd_lib.Rows` -- that opens read-only and exists so that reading
+    sixty-four rows costs one connection, which is not this. The row's *key*
+    still comes from `sd_lib`, so the format both sides agree on has exactly
+    one definition.
+
+    A sentence back rather than a raise. The caller is an HTTP handler whose
+    one job is to say what happened, and answering 200 to a write that never
+    landed is the failure this whole tab was fixed for once already.
+    """
+    try:
+        import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
+    except ImportError as error:
+        return f"sd_db is not installed here: {error}"
+    identity = sd_lib.external_id(repo, repo / name)
+    try:
+        connection = sd_db.connect(write=True)
+    except Exception as error:
+        return f"sd_db could not open the database: {error}"
+    try:
+        row = sd_db.writes.item_by_external(
+            connection, sd_lib.ITEM_ROW_SOURCE, identity)
+        if row is None:
+            return f"the database holds no row for {identity}"
+        # No transaction of our own: `transition` opens one, and writes the
+        # status and its single note inside it. `shipped_at` is when the item
+        # shipped and not when the button was last pressed, so a row already
+        # `done` -- which `transition` reports by returning the target back --
+        # keeps the moment it has, exactly as a second merge does.
+        was = sd_db.writes.transition(connection, row["id"], "done",
+                                      who=DELIVERED_BY, reason=DELIVERED_WHY)
+        if was != "done":
+            sd_db.writes.set_item_fields(
+                connection, row["id"], shipped_at=sd_db.writes.now())
+    except Exception as error:
+        return f"the row for {identity} was not written: {error}"
+    finally:
+        connection.close()
+    return ""

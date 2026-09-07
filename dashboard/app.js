@@ -46,14 +46,27 @@ const num = (value, cls) =>
   // dash keeps the page from inventing a divergence the repo never reported.
   cell(value === null || value === undefined ? "–" : String(value), value ? `n ${cls}` : "n");
 
-async function draw() {
-  let state;
+// One GET, or the sub-line saying it did not happen. Five views wrote this
+// same seven lines, and the copy is not the cost -- the cost is that a view
+// which forgets the `catch` paints an empty table for a server it could not
+// reach, saying "there is nothing" where the truth is "I could not ask".
+//
+// `null` is that answer and every caller returns on it. It is `=== null`
+// rather than falsy: a body of `0` or `""` is a server that answered, and
+// these endpoints all return objects anyway, so the strict test costs nothing
+// and does not quietly claim a reachable server was unreachable.
+async function payloadFor(route, subLine) {
   try {
-    state = await (await fetch("/api/state")).json();
+    return await (await fetch(route)).json();
   } catch (err) {
-    sub.textContent = `cannot reach the server (${err})`;
-    return;
+    subLine.textContent = `cannot reach the server (${err})`;
+    return null;
   }
+}
+
+async function draw() {
+  const state = await payloadFor("/api/state", sub);
+  if (state === null) return;
   sub.textContent = state.rootExists
     ? `${state.counts.repos} repos under ${state.root} · ${state.counts.dirty} dirty · ${state.counts.ahead} ahead`
     : `no such directory: ${state.root} — check SD_REPO_ROOT`;
@@ -156,13 +169,8 @@ function fillIssues(tbody, list, emphasise) {
 // whichever tracker produced them, so the disclosure needs no link scheme at
 // all -- which is also why it is a disclosure and not a link.
 async function drawTracker(route, into, more, subLine, noun) {
-  let payload;
-  try {
-    payload = await (await fetch(route)).json();
-  } catch (err) {
-    subLine.textContent = `cannot reach the server (${err})`;
-    return;
-  }
+  const payload = await payloadFor(route, subLine);
+  if (payload === null) return;
   if (!payload.available) {
     subLine.textContent = payload.reason;
     // The summary too, not just the tables. These redraw on a 30s timer, so
@@ -221,14 +229,39 @@ function emptyRow(tbody, span, text) {
   tbody.append(tr);
 }
 
+// The hand-merge case, said out loud on the row it applies to. `sd-ship`
+// leaves an item `in_progress` when the merge that shipped it carried no
+// `Delivers:` trailer -- correctly, because reading a delivery out of the bare
+// fact that a branch merged is how an item gets closed by a slice. The
+// operator is the missing claim, and this is where they make it.
+//
+// Not optimistic like `dismiss`. That one removes an alert the operator has
+// read; this one writes `done` and `shipped_at` to a row, and a row that
+// looked written and was not is the failure this tab was already fixed for.
+// So the button waits, says what the server said, and redraws either way.
+function deliverCell(item) {
+  const button = document.createElement("button");
+  button.className = "ghost";
+  button.textContent = "deliver";
+  button.title = "the merge that shipped this carried no trailer; say so";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const reply = await post("/api/deliver", { repo: item.repo, item: item.name });
+      if (!reply.ok) workSub.textContent = `deliver refused (${reply.status})`;
+    } catch (err) {
+      workSub.textContent = `deliver did not reach the server (${err})`;
+    }
+    drawWork();
+  });
+  const td = document.createElement("td");
+  td.append(button);
+  return td;
+}
+
 async function drawWork() {
-  let payload;
-  try {
-    payload = await (await fetch("/api/work")).json();
-  } catch (err) {
-    workSub.textContent = `cannot reach the server (${err})`;
-    return;
-  }
+  const payload = await payloadFor("/api/work", workSub);
+  if (payload === null) return;
   // Every status, not just the ones missing from the table below. Showing six
   // rows without saying that 300 more exist would read as the whole set, and
   // a breakdown that omitted the six would not add up to `active`.
@@ -253,6 +286,7 @@ async function drawWork() {
         cell(item.status),
         cell(item.detail),
         cell(item.created),
+        deliverCell(item),
       );
       workMoving.append(tr);
     }
@@ -281,13 +315,8 @@ async function drawWork() {
 // the view, not a fault to hide.
 
 async function drawSkills() {
-  let payload;
-  try {
-    payload = await (await fetch("/api/skills")).json();
-  } catch (err) {
-    skillSub.textContent = `cannot reach the server (${err})`;
-    return;
-  }
+  const payload = await payloadFor("/api/skills", skillSub);
+  if (payload === null) return;
   const seen = payload.counts;
   skillSub.textContent = payload.installedExists
     ? `${seen.shipped} ship here \u00b7 ${seen.installed} installed in ` +
@@ -320,13 +349,8 @@ async function drawSkills() {
 // already true without anything having written them down.
 
 async function drawSessions() {
-  let payload;
-  try {
-    payload = await (await fetch("/api/sessions")).json();
-  } catch (err) {
-    sessionSub.textContent = `cannot reach the server (${err})`;
-    return;
-  }
+  const payload = await payloadFor("/api/sessions", sessionSub);
+  if (payload === null) return;
   sessionSub.textContent =
     `${payload.counts.worktrees} worktree${payload.counts.worktrees === 1 ? "" : "s"}` +
     ` \u00b7 ${payload.abandoned} abandoned \u00b7 ` +
@@ -608,11 +632,7 @@ function dismissCell(id, tr) {
       // `fetch` resolves for it. Unchecked, the row vanished and stayed gone
       // until the next poll with nothing said, which is the one outcome worse
       // than a control that looks broken: one that looks like it worked.
-      const reply = await fetch("/api/ack", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Dashboard-Token": RUN_TOKEN },
-        body: JSON.stringify({ id }),
-      });
+      const reply = await post("/api/ack", { id });
       if (!reply.ok) nowSub.textContent = `dismiss refused (${reply.status})`;
     } catch (err) {
       nowSub.textContent = `dismiss did not reach the server (${err})`;
@@ -776,15 +796,24 @@ const runSub = document.getElementById("run-sub");
 const RUN_TOKEN =
   (document.querySelector('meta[name="dashboard-token"]') || {}).content || "";
 
+// Every POST this page makes, in one place. The three writers send the same
+// headers and the same token, and a second copy of that object is a second
+// place to forget the token in -- a request without it is refused by the
+// server's own guard, which reads as the control being broken rather than as
+// the page being wrong.
+async function post(path, body) {
+  return fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Dashboard-Token": RUN_TOKEN },
+    body: JSON.stringify(body),
+  });
+}
+
 async function press(button, id) {
   button.disabled = true;
   runSub.textContent = `running ${id}…`;
   try {
-    const reply = await fetch("/api/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Dashboard-Token": RUN_TOKEN },
-      body: JSON.stringify({ action: id }),
-    });
+    const reply = await post("/api/run", { action: id });
     const body = await reply.json().catch(() => ({}));
     // The last line of output: the summary is printed last, and the strip is
     // one line tall.
