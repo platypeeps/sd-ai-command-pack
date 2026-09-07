@@ -34,6 +34,19 @@ The reviewer-order comparison at the end overlaps `tests/test_sd_registry.py`
 on purpose. That file keeps the two readers honest for the registry's own
 reasons; criterion 32 names the same comparison as one of its four tests, and
 both must pass.
+
+The later classes read the same file for the row the merge writes: criterion
+13's `sd-ship` half, and item B's clauses 7.18, 7.21 and 15.25. There is still
+no runner, so these too are claims about the text -- but three of them have a
+mechanical form that survives a rewrite, and those are the ones that carry the
+weight. A row written by hand rather than through `sd_db` is a pattern, not a
+sentence. A reconciliation that calls a merge is a `gh pr merge` span in a
+section that must hold none, checked with the same command parser that finds
+the real merge in step 6. A cancel that opens a pull request is a `gh pr
+create` where there must be none. The wordier assertions beside them -- that
+`shipped_at` does not move on a second merge, that a slice merge writes no
+status -- are anchored on the field and the status name rather than on the
+prose around them, because those two tokens are what a rewrite has to keep.
 """
 
 from __future__ import annotations
@@ -76,6 +89,14 @@ DELETION = re.compile(
 #: A settle step that re-asks. `--watch` is one wait; these are a loop.
 POLLING = re.compile(r"\bsleep\b|\bwhile\b|\buntil\b|\bdone\b|\bwatch\s+-n\b")
 
+#: A row reached past the library. `sd_db` owns every write to it, so a skill
+#: that opens the file or spells the statement is describing a second writer,
+#: which is the whole defect the single-writer rule exists to prevent.
+RAW_WRITE = re.compile(
+    r"\bsqlite3?\b|\bUPDATE\s+\w*item\b|\bINSERT\s+INTO\b|\.execute\(",
+    re.IGNORECASE,
+)
+
 #: Words that would turn criterion 3's warning into a gate. The criterion is
 #: explicit that `sd-ship` warns *and ships*, and a warning that holds the
 #: commit is a different command from the specified one.
@@ -99,6 +120,10 @@ def sequence_section() -> str:
 
 def autonomous_section() -> str:
     return section(SKILL_TEXT, "## The autonomous lane (R10-D1)")
+
+
+def reconcile_section() -> str:
+    return section(SKILL_TEXT, "## What a rerun reconciles")
 
 
 def steps() -> dict[int, str]:
@@ -175,6 +200,22 @@ def bullet_containing(text: str, needle: str) -> str:
     while end < len(lines) and lines[end].startswith(" ") and lines[end].strip():
         end += 1
     return "\n".join(lines[start:end])
+
+
+def sentences_with(text: str, *needles: str) -> list[str]:
+    """The sentences holding all of `needles`.
+
+    One sentence rather than one step, for the reason the push test already
+    gives: three tokens scattered over a paragraph can each belong to some
+    other claim, and a check that collects them anyway passes on a file that
+    makes none of the claim at hand.
+    """
+
+    return [
+        line
+        for line in sentences(text)
+        if all(needle in line for needle in needles)
+    ]
 
 
 def repositories_named(block: str) -> set[str]:
@@ -552,6 +593,255 @@ class TheTwoRegistryReadersAgree(unittest.TestCase):
         self.assertNotEqual(order, [], "the registry named no reviewer")
         self.assertEqual(
             order, [provider.name for provider in by_library.order("reviewer")]
+        )
+
+
+class TheRowTheMergeWrites(unittest.TestCase):
+    """Item B's clauses 7.21 and 15.25, as `sd-ship` states them.
+
+    The row is written after the remote has confirmed the merge, through the
+    library and through nothing else, once. Everything here reads step 7,
+    which is where the closure already lived.
+    """
+
+    def setUp(self) -> None:
+        self.step = steps()[7]
+
+    def test_the_step_still_owns_the_closure(self) -> None:
+        """The control. A step 7 that stopped naming the trailers would make
+        every check below vacuous rather than failing."""
+
+        self.assertIn("Delivers:", self.step)
+        self.assertIn("Item:", self.step)
+
+    def test_the_write_goes_through_the_library_and_names_both_writers(
+        self,
+    ) -> None:
+        for token in ("sd_db", "transition", "set_item_fields"):
+            self.assertIn(token, self.step, f"step 7 never names {token}")
+
+    def test_the_row_waits_for_the_remote_to_confirm_the_merge(self) -> None:
+        """A row written before the remote answered is a row that can outlive
+        a merge that never happened, which is the failure reconciliation
+        exists to clean up after."""
+
+        self.assertTrue(
+            sentences_with(self.step, "row", "confirmed", "not before"),
+            "step 7 does not condition the row on a confirmed merge",
+        )
+
+    def test_the_status_write_is_one_transition_and_one_note(self) -> None:
+        carried = sentences_with(self.step, "status_change", "same transaction")
+        self.assertTrue(carried, "the single status_change note is not stated")
+        self.assertTrue(
+            any("transition" in line and "single" in line for line in carried),
+            "the note is not tied to `transition` as the only status writer",
+        )
+
+    def test_shipped_at_does_not_move_on_a_second_merge(self) -> None:
+        """Clause 15.25. Anchored on the field name and on `done`, which a
+        rewrite has to keep, rather than on the sentence around them."""
+
+        carried = sentences_with(self.step, "second", "`done`", "no further note")
+        self.assertTrue(
+            carried, "step 7 does not say what a second delivering merge does"
+        )
+        self.assertTrue(
+            any("where it was" in line for line in carried),
+            "the second merge is not said to leave the field alone",
+        )
+
+    def test_shipped_at_is_defined_as_when_the_item_shipped(self) -> None:
+        self.assertTrue(
+            sentences_with(self.step, "shipped_at", "not the moment"),
+            "`shipped_at` is not distinguished from the last merge's time",
+        )
+
+    def test_a_slice_merge_writes_no_status_and_leaves_the_item_open(
+        self,
+    ) -> None:
+        carried = sentences_with(self.step, "slice merge", "no status")
+        self.assertTrue(carried, "a non-delivering merge's row write is unstated")
+        for line in carried:
+            self.assertIn("stays open", line)
+
+    def test_a_checkout_with_no_database_still_merges(self) -> None:
+        """The other half of clause 7.21: the row is a record of the merge,
+        never a precondition for it."""
+
+        self.assertTrue(
+            sentences_with(self.step, "no database", "no-op"),
+            "step 7 does not say what happens without a database",
+        )
+        self.assertTrue(
+            sentences_with(self.step, "refuses no merge"),
+            "a missing row is not stated to be harmless",
+        )
+
+    def test_the_skill_never_reaches_past_the_library(self) -> None:
+        found = RAW_WRITE.findall(SKILL_TEXT)
+        self.assertEqual(found, [], f"the skill writes the row itself: {found}")
+
+    def test_the_raw_write_pattern_recognises_the_forms(self) -> None:
+        """A dead pattern would clear the check above on any file."""
+
+        for form in (
+            "sqlite3.connect(path)",
+            "UPDATE item SET status = 'done'",
+            "INSERT INTO note (item, kind) VALUES (?, ?)",
+            "connection.execute(sql)",
+        ):
+            self.assertTrue(RAW_WRITE.search(form), form)
+        for kept in ("sd_db.transition", "set_item_fields", "the item's row"):
+            self.assertIsNone(RAW_WRITE.search(kept), kept)
+
+
+class TheCancelPath(unittest.TestCase):
+    """Item B's clause 7.18. The cancel is the item screen's; what `sd-ship`
+    owes it is a `Closes:` on the next merge and nothing else at all."""
+
+    def setUp(self) -> None:
+        self.step = steps()[7]
+
+    def test_the_cancel_writes_done_with_a_cancelled_note(self) -> None:
+        self.assertTrue(
+            sentences_with(self.step, "cancel", "`done`", "`cancelled`"),
+            "the cancel's row write is not stated",
+        )
+
+    def test_the_cancel_touches_no_file_and_opens_no_pull_request(self) -> None:
+        carried = sentences_with(self.step, "cancel", "no pull request")
+        self.assertTrue(carried, "the cancel is not said to open no pull request")
+        for line in carried:
+            self.assertIn("touches no file", line)
+
+    def test_the_next_merge_carries_closes_for_it(self) -> None:
+        self.assertTrue(
+            sentences_with(self.step, "cancel", "`Closes: <item>`"),
+            "no merge is said to carry `Closes:` for a cancelled item",
+        )
+
+    def test_no_sentence_gives_a_cancel_a_delivers_trailer(self) -> None:
+        """The mechanical half. Every sentence that mentions both a cancel
+        and `Delivers:` must negate the pairing; one that does not is a file
+        that hands a cancelled item a delivery."""
+
+        for line in sentences_with(self.step, "cancel", "Delivers:"):
+            self.assertTrue(
+                re.search(r"\bno\b|\bnever\b|\bnot\b", line),
+                f"a cancel is given `Delivers:` unqualified: {line}",
+            )
+
+    def test_the_two_trailers_are_distinguished(self) -> None:
+        """`Closes:` on its own would otherwise read as a quieter spelling of
+        `Delivers:`, and a cancelled item would look shipped."""
+
+        carried = sentences_with(self.step, "`Delivers:`", "`Closes:`", "never")
+        self.assertTrue(
+            carried, "the file does not say why a cancel gets only one trailer"
+        )
+
+
+class AKilledRunIsReconciledByTheNext(unittest.TestCase):
+    """Criterion 13's kill clauses.
+
+    The merge and the row's write are two acts, and a run can die between
+    them. The next run repairs the row *from the pull request*, and the check
+    that carries the most weight is an absence: no merge command anywhere in
+    the section, read with the same parser that finds the real merge in step
+    6.
+    """
+
+    def setUp(self) -> None:
+        self.reconcile = reconcile_section()
+
+    def test_the_section_exists_and_has_a_body(self) -> None:
+        """The control. `section()` returning nothing would pass every
+        absence check below over any file at all."""
+
+        self.assertGreater(len(self.reconcile), 400, "the section is a stub")
+
+    def test_the_command_parser_would_see_a_merge_if_one_were_there(
+        self,
+    ) -> None:
+        """The other control, and the one that matters: the absence below is
+        worth nothing unless this parser finds a merge where there is one."""
+
+        self.assertTrue(
+            any(c.startswith("gh pr merge") for c in commands(steps()[6])),
+            "the parser finds no merge in step 6, so finding none elsewhere "
+            "says nothing",
+        )
+
+    def test_reconciliation_issues_no_merge(self) -> None:
+        for command in commands(self.reconcile):
+            self.assertNotIn("pr merge", command, command)
+
+    def test_it_says_so_in_words_as_well(self) -> None:
+        """The absence above survives a rewrite; it does not survive a reader
+        who does not know the rule, which is who this file is for."""
+
+        self.assertTrue(
+            sentences_with(self.reconcile, "no merge is called"),
+            "the no-merge rule is nowhere in the prose",
+        )
+
+    def test_the_kill_window_leaves_the_row_in_progress(self) -> None:
+        self.assertTrue(
+            sentences_with(self.reconcile, "killed", "`in_progress`"),
+            "the section never says what a killed run leaves behind",
+        )
+
+    def test_the_repair_is_the_next_run_and_not_the_dying_one(self) -> None:
+        carried = sentences_with(self.reconcile, "next `sd-ship` run")
+        self.assertTrue(carried, "nothing names the run that repairs the row")
+        for line in carried:
+            self.assertIn("runs no handler", line)
+
+    def test_the_repair_reads_the_pull_request_the_row_names(self) -> None:
+        self.assertTrue(
+            sentences_with(self.reconcile, "pull request the row names"),
+            "the source of the reconciled answer is unstated",
+        )
+
+    def test_a_delivering_kill_reconciles_to_done_with_shipped_at(self) -> None:
+        self.assertTrue(
+            sentences_with(self.reconcile, "`Delivers:`", "`done`", "`shipped_at`"),
+            "the delivering case does not reach `done` with the field",
+        )
+
+    def test_a_slice_kill_notes_the_squash_and_leaves_the_row_open(self) -> None:
+        carried = sentences_with(self.reconcile, "`Item:`", "squash commit")
+        self.assertTrue(carried, "the slice case is unstated")
+        for line in carried:
+            self.assertIn("stays open", line)
+
+    def test_an_open_pull_request_is_not_a_kill(self) -> None:
+        self.assertTrue(
+            sentences_with(self.reconcile, "not merged yet"),
+            "an unmerged pull request is not distinguished from a kill",
+        )
+
+    def test_a_run_after_the_reconciling_one_changes_nothing(self) -> None:
+        carried = sentences_with(self.reconcile, "writes nothing")
+        self.assertTrue(carried, "the second rerun's no-op is unstated")
+        for line in carried:
+            for token in ("status_change", "shipped_at", "no merge call"):
+                self.assertIn(token, line, f"the no-op omits {token}")
+
+    def test_a_hand_merge_leaves_the_row_open_and_the_item_picked(self) -> None:
+        """The reconciliation's boundary: a trailerless merge is not a
+        delivery, however merged the branch is."""
+
+        carried = sentences_with(self.reconcile, "no trailer", "`in_progress`")
+        self.assertTrue(carried, "the hand merge's row is unstated")
+        for line in carried:
+            self.assertIn("picking the item", line)
+
+    def test_the_guess_is_named_as_the_thing_not_to_do(self) -> None:
+        self.assertTrue(
+            sentences_with(self.reconcile, "closed", "by a slice"),
+            "the failure mode the boundary prevents is not named",
         )
 
 
