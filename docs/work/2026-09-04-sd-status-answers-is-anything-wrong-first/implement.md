@@ -3,11 +3,42 @@
 ## Budget
 
 The whole change lands in `bin/sd-status`, `skills/sd-status/SKILL.md` and
-`tests/test_sd_status.py`. `bin/` measured **12,416** lines on `8cf99431`
-against the 14,000 ceiling in `tests/test_loc_caps.py`, so there are 1,584
-lines of headroom; this item claims at most **600** of them and the ceiling is
-what checks it, not this sentence. `dashboard/` is not touched at all, so
-neither `DASHBOARD_CAP` nor `DASHBOARD_CODE_CAP` moves.
+`tests/test_sd_status.py`. `dashboard/` is not touched at all, so neither
+`DASHBOARD_CAP` nor `DASHBOARD_CODE_CAP` moves.
+
+**Re-derived 2026-09-07 as R11-D46, because the first figure here had gone ten
+times stale.** This section originally read 12,416 lines on `8cf99431` against
+a 14,000 ceiling, 1,584 of headroom, and claimed at most 600 of them. Every one
+of those numbers is now wrong in the same direction. `bin/` measures **17,189**
+on `main` at `6f9b96ad` — `line_count` over the files `tracked("bin")`
+enumerates with `migrate-*` filtered out, which is exactly what
+`test_bin_stays_under_its_ceiling` does — against the 17,250 R11-D45 left.
+The headroom is **61 lines**, not 1,584. A claim of 600 against 61 is not a
+budget; it is a sentence that stopped being checked. The clause at the top of `tests/test_loc_caps.py` is why
+that mattered: a cap is never raised in the pull request that busts it, so
+discovering this while implementing would have cost a re-derivation and a
+second pull request before a line of the item could land.
+
+The derivation is in `tests/test_loc_caps.py` at R11-D46 and is not repeated
+here — one copy, in the file the test reads. Its result: **801** reserved,
+`BIN_CAP` moved 17,250 to **18,000**, and the item is funded whole rather than
+sliced. 524 of that is body, priced span by span at named built analogues in
+`bin/sd-status` itself; 89 is glue at that file's own measured 5.21 lines per
+definition boundary rather than at its class mean; 0 is seam, because both
+boundaries that look new — `git grep` over the ledger corpus and
+`git diff --no-renames` — go through the built `sd_lib.git_output` and have had
+their discovery made already, in step 3's prototype run and step 2's
+five-branch verification below; 159 is body variance at the 26% R11-D45 sized
+to the worst overrun yet seen; 29 is post-report discovery at 5.5%.
+
+**801 is a real increase on the 600 this section used to claim, and the reason
+is not scope creep.** 600 was never derived — it was a round number chosen when
+1,584 lines of headroom made the choice free. 613 of body and glue against 600
+guessed is the estimate landing almost exactly where the guess did; the other
+188 is the two contingency lines the method did not have in September's first
+week and earned across PR 8's four slices.
+
+The ceiling is what checks this, not this paragraph.
 
 ## Step checklist
 
@@ -57,7 +88,7 @@ neither `DASHBOARD_CAP` nor `DASHBOARD_CODE_CAP` moves.
       table, the id scheme, and the `AskUserQuestion` contract with its
       4-option/4-question limit and the resolution.
 - [ ] **7. Tests.** Every new behaviour in `tests/test_sd_status.py` — no new
-      module, so `make check`'s `OK` count stays at 40. Named cases, in order of
+      module, so `make check`'s `OK` count does not change. Named cases, in order of
       what they protect: **(a)** two checks firing on one pull request produce
       two rows with two different ids — C-11's regression, which fails under the
       rejected letter-keyed formula; **(b)** a squash-merged branch is detected
@@ -77,12 +108,17 @@ neither `DASHBOARD_CAP` nor `DASHBOARD_CODE_CAP` moves.
 Named before the work, and each names its own result.
 
 1. `python3 -m unittest tests.test_sd_status -v` → `OK`, 0 failures, 0 errors.
-2. `make -C <worktree> VENV=<shared venv> check` → the tail prints no `FAILED`;
-   `grep -cE '^OK' unittest-output.log` prints `40` and
-   `grep -c FAILED unittest-output.log` prints `0`. Baseline on `8cf99431` was
-   measured, not assumed: 40 and 0.
+2. `make -C <worktree> VENV=<shared venv> check` → the tail prints no `FAILED`
+   and `grep -c FAILED unittest-output.log` prints `0`. The `OK` count is one
+   per test module and is **not** pinned to a number here: the baseline measured
+   on `8cf99431` was 40 modules and `tests/` now tracks 56, so a pinned figure
+   ages into a false check rather than a failing one. The count before and after
+   this item's own change must match, and step 7 adds no module.
 3. `python3 -m unittest tests.test_loc_caps` → `OK`. This is the check that
-   enforces the 600-line budget above; the budget is not separately asserted.
+   enforces the budget above; the budget is not separately asserted. R11-D46
+   moved `BIN_CAP` to 18,000 in its own pull request touching nothing under
+   `bin/`, so this test is green before the item's first line of code and stays
+   the only thing standing between the item and its reservation.
 4. `./bin/sd-status --json | python3 -c "..."` counting
    `check == 'branch-already-merged'` findings → `1`, naming
    `the-plan-interview-is-one-sentence`. This is the criterion that would have

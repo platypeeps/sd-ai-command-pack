@@ -469,3 +469,34 @@ addressed. Implementation has not started.
   five blocking findings, every one of them a defect the host lane had missed.
 - 2026-09-04 planning complete; implementation not started. `bin/sd-status`,
   `skills/sd-status/SKILL.md` and `tests/test_sd_status.py` are untouched.
+- 2026-09-07 budget re-derived as R11-D46, and the old figure is worth naming
+  rather than quietly replacing. `implement.md` claimed 600 lines against
+  12,416 under a 14,000 ceiling — 1,584 of headroom, measured on `8cf99431`.
+  `bin/` now measures 17,189 under 17,250, which is **61**. The claim was not
+  wrong when it was written; it stopped being checked, and a budget nothing
+  checks is the thing this item exists to find elsewhere. `BIN_CAP` moves to
+  18,000 in its own change touching nothing under `bin/`, and 801 is reserved.
+- 2026-09-07 **a twenty-second check class, recorded and not scheduled.**
+  `~/.local/share/sd/providers.yaml` was absent on the operator's machine on
+  2026-09-07 and `sd attribute` refused because of it. `sd_install.seed_registry`
+  is not at fault: it is wired at `bin/sd_install.py:1479`, copies when absent,
+  leaves alone when present, and prints its outcome either way. What is at fault
+  is that nothing compares the installed receipt to the checkout. The receipt at
+  `~/.local/state/sd-ai-command-pack/installed.json` records commit `47d41245`
+  and was written 2026-09-03; `seed_registry` landed 2026-09-06 in `76fb9d75`.
+  Four days and several hundred commits of drift, and the first signal was a
+  verb refusing.
+
+  The check is `install-stale`: the receipt's `commit` is not an ancestor of the
+  checkout's `HEAD`, or the pack has commits touching `bin/sd_install.py` or the
+  surfaces it renders since that commit. Source: the receipt plus git. Not
+  abnormal — a stale install is normal between reinstalls — so it ranks with the
+  informational classes rather than with the four `w` checks.
+
+  Recorded and not scheduled, deliberately. `design.md`'s table is the one
+  answer to "which checks exist" and R11-D46 priced it at 21 rows; adding a
+  twenty-second here would put the design and the funding out of step in the
+  same hour they were reconciled. The 159 of body variance covers a row and a
+  producer several times over, so this costs nothing to defer to the change that
+  implements the table. The operator's own remedy meanwhile is one command:
+  re-run `sd install`.
