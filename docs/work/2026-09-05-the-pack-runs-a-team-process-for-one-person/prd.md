@@ -4467,6 +4467,15 @@ from a number the operator types.
   how the two ceilings with no slack test were moved, and `DASHBOARD_CODE_SLACK`
   makes a standalone raise of this one impossible. Both halves recorded in the
   cap file rather than settled quietly.
+
+  **A test that passed for the wrong reason.** The verification pass ran four
+  mutations against the slice and one survived: deleting the `was != "done"`
+  gate broke nothing. `sd_db.writes.now()` keeps whole seconds, so two presses
+  one call apart write the same text, and
+  `test_the_second_press_does_not_move_the_moment_it_shipped` was comparing a
+  value to itself. The test now plants `2001-01-01T00:00:00+00:00` between the
+  presses — a moment no clock here produces — and the mutation fails it. The
+  code was right; the test was not, and only the mutation said so.
 - **2026-09-07** — **R11-D42, `BIN_CAP` re-derived from 15,750 to 16,750, and
   PR 8 split into four pull requests**, in a change of its own that touches
   `tests/test_loc_caps.py` and these planning pages and nothing under `bin/`,

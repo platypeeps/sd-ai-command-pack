@@ -119,13 +119,24 @@ class TheWrite(Fixture):
 
     def test_the_second_press_does_not_move_the_moment_it_shipped(self) -> None:
         """`shipped_at` is when the item shipped, not when a button was last
-        pressed. `skills/sd-ship/SKILL.md` says the same of a second merge."""
+        pressed. `skills/sd-ship/SKILL.md` says the same of a second merge.
+
+        The moment is planted rather than read back off the first press.
+        `sd_db.writes.now()` keeps whole seconds, so two presses one call
+        apart carry the same text and this passes whether the gate on
+        `shipped_at` is there or not -- which is what the first version of
+        this test did, and a mutation that deleted the gate walked past it.
+        A sentinel no clock produces makes the assertion mean what it says.
+        """
 
         connection = self.seed()
         self.assertEqual(work.deliver(self.root, ITEM), "")
-        first = self.row(connection)["shipped_at"]
-        work.deliver(self.root, ITEM)
-        self.assertEqual(self.row(connection)["shipped_at"], first)
+        planted = "2001-01-01T00:00:00+00:00"
+        sd_db.writes.set_item_fields(
+            connection, self.row(connection)["id"], shipped_at=planted
+        )
+        self.assertEqual(work.deliver(self.root, ITEM), "")
+        self.assertEqual(self.row(connection)["shipped_at"], planted)
 
 
 class TheLabelResolves(Fixture):
