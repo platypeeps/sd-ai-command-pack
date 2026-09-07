@@ -281,9 +281,16 @@ class ProvisioningIsItsOwnRun(unittest.TestCase):
 
         # A library source the provisioner would accept, so a call would get
         # past the "nothing to install" guard rather than being turned back.
-        source = sd_install.library_source({"SD_SYSTEM_CHECKOUT": str(self.home / "system")})
+        # A git repository, because the provisioner installs from a ref.
+        system = self.home / "system"
+        source = sd_install.library_source({"SD_SYSTEM_CHECKOUT": str(system)})
         source.mkdir(parents=True)
         (source / "pyproject.toml").write_text("[project]\nname = 'sd-db'\n", encoding="utf-8")
+        for args in (("init",), ("add", "-A"), ("commit", "-m", "fixture")):
+            subprocess.run(
+                ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+                cwd=system, capture_output=True, text=True, check=False,
+            )
 
     def context(self) -> "sd_install.Context":
         return sd_install.Context(
@@ -360,11 +367,30 @@ class TheLibraryDoor(unittest.TestCase):
         path.chmod(0o755)
         return path
 
-    def library(self) -> Path:
+    def library(self, *, committed: bool = True, tag: str = "") -> Path:
+        """A fixture system checkout, as a git repository.
+
+        A repository and not a bare directory, because `provision_library`
+        installs from an immutable ref now and a directory has none. The
+        `committed=False` case is the machine that cloned nothing yet.
+        """
         source = sd_install.library_source({"SD_SYSTEM_CHECKOUT": str(self.system)})
         source.mkdir(parents=True, exist_ok=True)
         (source / "pyproject.toml").write_text("[project]\nname = 'sd-db'\n", encoding="utf-8")
+        if committed:
+            self.git("init")
+            self.git("add", "-A")
+            self.git("commit", "-m", "fixture")
+            if tag:
+                self.git("tag", tag)
         return source
+
+    def git(self, *args: str) -> str:
+        done = subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
+            cwd=self.system, capture_output=True, text=True, check=False,
+        )
+        return done.stdout.strip()
 
     def test_no_virtualenv_names_the_remedy(self) -> None:
         installed, report = sd_install.provision_library(self.context(), io.StringIO())
@@ -378,6 +404,61 @@ class TheLibraryDoor(unittest.TestCase):
         self.assertFalse(installed)
         self.assertIn("no library at", report)
         self.assertIn("trials unavailable", report)
+
+    def test_the_install_names_the_tag_the_checkout_stands_on(self) -> None:
+        self.interpreter("#!/bin/sh\nexit 0\n")
+        self.library(tag="sd-db-v9.9.9")
+        installed, report = sd_install.provision_library(self.context(), io.StringIO())
+        self.assertTrue(installed, report)
+        self.assertIn("sd-db-v9.9.9", report)
+
+    def test_a_tag_for_another_project_in_the_monorepo_is_not_the_library_version(
+        self,
+    ) -> None:
+        """`system` holds four projects. A `local-ha-mcp` tag is not a version."""
+        self.interpreter("#!/bin/sh\nexit 0\n")
+        self.library(tag="ha-mcp-v2")
+        head = self.git("rev-parse", "HEAD")
+        installed, report = sd_install.provision_library(self.context(), io.StringIO())
+        self.assertTrue(installed, report)
+        self.assertNotIn("ha-mcp-v2", report)
+        self.assertIn(head, report)
+
+    def test_an_untagged_checkout_pins_to_its_commit_and_is_not_refused(self) -> None:
+        """`system` carries no tags. Refusing here uninstalls sd_db everywhere."""
+        self.interpreter("#!/bin/sh\nexit 0\n")
+        self.library()
+        head = self.git("rev-parse", "HEAD")
+        installed, report = sd_install.provision_library(self.context(), io.StringIO())
+        self.assertTrue(installed, report)
+        self.assertIn(head, report)
+
+    def test_the_working_tree_is_never_what_pip_is_pointed_at(self) -> None:
+        """The whole point of the ref: an edit on disk is not a version."""
+        seen = self.home / "argv"
+        self.interpreter(f'#!/bin/sh\nprintf "%s\\n" "$@" >> "{seen}"\n')
+        source = self.library()
+        (source / "pyproject.toml").write_text("[project]\nname = 'edited'\n", encoding="utf-8")
+        installed, report = sd_install.provision_library(self.context(), io.StringIO())
+        self.assertTrue(installed, report)
+        argv = seen.read_text(encoding="utf-8")
+        self.assertIn("git+file://", argv)
+        self.assertNotIn(f"\n{source}\n", argv)
+
+    def test_uncommitted_work_is_said_out_loud_and_not_refused(self) -> None:
+        self.interpreter("#!/bin/sh\nexit 0\n")
+        source = self.library()
+        (source / "pyproject.toml").write_text("[project]\nname = 'edited'\n", encoding="utf-8")
+        installed, report = sd_install.provision_library(self.context(), io.StringIO())
+        self.assertTrue(installed, report)
+        self.assertIn("uncommitted work", report)
+
+    def test_a_system_directory_that_is_no_repository_is_refused_with_a_reason(self) -> None:
+        self.interpreter("#!/bin/sh\nexit 0\n")
+        self.library(committed=False)
+        installed, report = sd_install.provision_library(self.context(), io.StringIO())
+        self.assertFalse(installed)
+        self.assertIn("nothing to pin to", report)
 
     def test_a_dry_run_says_what_it_would_do_and_does_not(self) -> None:
         marker = self.home / "ran"

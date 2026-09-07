@@ -1164,6 +1164,9 @@ def seed_registry(ctx: Context) -> tuple[bool, str]:
 SYSTEM_CHECKOUT_ENV = "SD_SYSTEM_CHECKOUT"
 SYSTEM_CHECKOUT_DEFAULT = "~/repos/system"
 LIBRARY_RELATIVE = Path("local-sd-db")
+#: Tags that name a release *of the library*, not of some other project
+#: sharing the monorepo. The pin uses one only when it matches this.
+LIBRARY_TAGS = "sd-db-v*"
 VENV_RELATIVE = Path(".venv") / "bin" / "python"
 
 
@@ -1181,6 +1184,35 @@ def system_checkout(environ: dict[str, str]) -> Path:
 
 def library_source(environ: dict[str, str]) -> Path:
     return system_checkout(environ) / LIBRARY_RELATIVE
+
+
+def library_pin(checkout: Path) -> tuple[str, str]:
+    """The immutable ref to install `sd_db` from, or a reason there is none.
+
+    A path install takes the *working tree*, so two machines standing on the
+    same commit with different uncommitted edits install different libraries
+    and call them one version. The ref is what makes the copy reproducible.
+
+    An `sd-db-v*` tag when the checkout stands on one, else the commit.
+    Matched by pattern and not by "any tag here", because `system` is a
+    monorepo: a bare `--exact-match` would return a tag cut for
+    `local-ha-mcp` and record it as the version of `sd_db`, which names a
+    release that is not about the thing installed. There are no tags at all
+    today, and a rule that refuses without one makes `sd_db` uninstallable
+    on the only machine that has it. Both refs are immutable, which is the
+    property requirement 13 is about; the tag is only the nicer name, and
+    cutting a first `sd-db-v0.1` starts working with no change here.
+
+    Uncommitted work is *not* installed, and the caller says so rather than
+    refusing, because refusing would strand an operator mid-edit.
+    """
+    git = sibling("sd_lib").git_output
+    ref = git(
+        ["describe", "--tags", "--exact-match", "--match", LIBRARY_TAGS], checkout
+    ) or git(["rev-parse", "HEAD"], checkout)
+    if not ref:
+        return "", f"{checkout} is not a git checkout, so there is nothing to pin to"
+    return ref, ""
 
 
 def provision_library(ctx: Context, out) -> tuple[bool, str]:
@@ -1205,11 +1237,19 @@ def provision_library(ctx: Context, out) -> tuple[bool, str]:
         return False, f"no virtualenv at {python}; run `make setup` for sd_db"
     if not (source / "pyproject.toml").is_file():
         return False, f"no library at {source}; sd_db is absent, trials unavailable"
+    checkout = system_checkout(ctx.environ)
+    ref, why = library_pin(checkout)
+    if not ref:
+        return False, f"sd_db not installed, trials unavailable: {why}"
+    target = f"git+file://{checkout}@{ref}#subdirectory={LIBRARY_RELATIVE}"
+    dirty = " (uncommitted work in that checkout is not installed)" if sibling(
+        "sd_lib"
+    ).git_output(["status", "--porcelain"], checkout) else ""
     if ctx.dry_run:
-        return True, f"would install sd_db from {source}"
+        return True, f"would install sd_db from {source} at {ref}{dirty}"
     try:
         done = subprocess.run(  # nosec B603 - fixed argv, no shell
-            [str(python), "-m", "pip", "install", "--quiet", "--upgrade", str(source)],
+            [str(python), "-m", "pip", "install", "--quiet", "--upgrade", target],
             capture_output=True,
             text=True,
             check=False,
@@ -1220,7 +1260,7 @@ def provision_library(ctx: Context, out) -> tuple[bool, str]:
     if done.returncode != 0:
         last = done.stderr.strip().splitlines()[-1:] or ["no output"]
         return False, f"sd_db install failed: {last[0]}"
-    return True, f"sd_db installed from {source}"
+    return True, f"sd_db installed from {source} at {ref}{dirty}"
 
 
 def open_library(ctx: Context):

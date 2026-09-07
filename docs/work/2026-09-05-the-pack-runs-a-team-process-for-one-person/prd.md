@@ -1540,12 +1540,12 @@ confirmed by the next `sd-ship` run alone.
     merge. Every merge test above merges with an actual squash merge and
     asserts that no test pushed to the default branch and no test wrote a
     status into a file. Tests cover all five. The
-    pack's installer installs B's
-    `sd_db` into the pack's virtualenv as a built copy at the system
-    checkout's tag and never editable, from B's round forty-five,
-    asserted by a test that runs the
-    installer against a fixture system checkout, imports it, and checks
-    the imported file is not under that checkout. Before B
+    pack's installer installs B's `sd_db` into the pack's virtualenv as a
+    built copy at an immutable ref and never editable, from B's round
+    forty-five, asserted by a test that runs the installer against a fixture
+    system checkout, imports it, and checks the imported file is not under
+    that checkout. The ref is the checkout's `sd-db-v*` tag, else its commit,
+    never the working tree: `system` is a monorepo with no tags. Before B
     exists, this criterion is recorded as waiting, not as met.
 14. `make check` runs the documentation-lint rules that need no database when
     `docs/work/` exists, and skips them cleanly when it does not. The set is
