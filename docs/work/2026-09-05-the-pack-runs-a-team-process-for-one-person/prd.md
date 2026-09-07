@@ -4067,10 +4067,10 @@ from a number the operator types.
       return that switches three checks off is its spine
       (`bin/sd-docs-lint:146`) and replacing it is not an edit at the edge.
     - rule 7, criterion 33's dangling-reference scan — **73**.
-      `check_citations` (`bin/sd-docs-lint:371-422`, 52) with
-      `resolve_citation` (`bin/sd-docs-lint:282-299`, 18) is the built rule of
+      `check_citations` (`bin/sd-docs-lint:404-455`, 52) with
+      `resolve_citation` (`bin/sd-docs-lint:315-332`, 18) is the built rule of
       this shape — enumerate references, resolve each, report the ones that do
-      not — plus 3 for the call in `run` (`bin/sd-docs-lint:425-446`).
+      not — plus 3 for the call in `run` (`bin/sd-docs-lint:458-479`).
     - the `sd_db` installer step — **19**, and not the 38 it looks like.
       `prd.md:1538-1544` reads as unbuilt scope and is not: `system_checkout`
       (`bin/sd_install.py:1170-1179`, 10), `library_source` (`:1182-1183`, 2),

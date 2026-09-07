@@ -209,12 +209,12 @@ not a fork, nobody else: `full`, in your namespace or an organisation's.
 Anything else, including no answer: `guest`. A root with no remote, **or
 no git at all**, is `full`; there is no one to expose anything to. The
 no-git case is named and asserted on its own, because criterion 11 requires
-exactly that (`prd.md:1375-1380`) — it is the case that otherwise gets
+exactly that (`prd.md:1374-1379`) — it is the case that otherwise gets
 swept into whichever exception branch the remote lookup raises. The questions are asked
 again before every artifact write and every push, and a `no` makes the
 run `guest` whatever the line says: a `mode: full` you wrote is a ceiling,
 never a floor — detection lowers it and never raises it, which is
-`prd.md:1380-1381`'s "wins over detection downward and never upward" — so a repository that gains a collaborator stops
+`prd.md:1379-1380`'s "wins over detection downward and never upward" — so a repository that gains a collaborator stops
 receiving your planning artifacts before the next push, not after the
 next merge. The push check is of the destination: your fork's integration
 branch is your own remote, and the guest push there proceeds while the
@@ -247,7 +247,7 @@ never vendors.
                  bill: baseten, roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 } }
       exo:     { url: "http://localhost:52415/v1", model: "<pinned>", vendor: local, bill: local,
                  roles: [author, reviewer], enabled: false, reason: "model not pinned" }
-      # Shipped disabled, faithful to `prd.md:448-451`. Criterion 6's test
+      # Shipped disabled, faithful to `prd.md:447-450`. Criterion 6's test
       # adds an `exo` entry and resolves it, and a disabled entry never
       # resolves — so that test writes its own enabled entry into a fixture
       # registry rather than reading this one.

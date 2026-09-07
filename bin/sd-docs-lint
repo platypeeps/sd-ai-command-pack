@@ -88,8 +88,11 @@ def item_directories(work_root: pathlib.Path) -> list[pathlib.Path]:
     return sorted(found)
 
 
-def check_shape(work_root: pathlib.Path, report: Report) -> None:
-    """Rule 1."""
+def check_shape(
+    work_root: pathlib.Path, report: Report, source: str = sd_lib.FROM_FILE
+) -> None:
+    """Rule 1. `source` is where an *active* item's status comes from."""
+    archived_status_is_authoritative = source == sd_lib.FROM_FILE
     archive = work_root / "archive"
     if archive.is_dir():
         for month in sorted(archive.iterdir()):
@@ -123,9 +126,20 @@ def check_shape(work_root: pathlib.Path, report: Report) -> None:
             continue
         if not fields.get("title"):
             report.fail(str(prd), "frontmatter needs a non-empty title")
+        # The sign inverts outside the archive and holds inside it. Once the
+        # marker says `row`, an active item's status lives in the database
+        # and a `status:` line left in the file is a second answer that will
+        # drift. The archive is the opposite: its 491 files are records of
+        # what was, they keep their lines, and a naive inversion fails on
+        # every one of them.
         status = fields.get("status", "")
-        if status not in ITEM_STATUSES:
-            report.fail(str(prd), f"status {status!r} is not one of {', '.join(ITEM_STATUSES)}")
+        if archived_status_is_authoritative or sd_lib.ARCHIVE_DIR in item.parts:
+            if status not in ITEM_STATUSES:
+                report.fail(
+                    str(prd), f"status {status!r} is not one of {', '.join(ITEM_STATUSES)}"
+                )
+        elif "status" in fields:
+            report.fail(str(prd), "the row is the status; prd.md carries no status: line")
         created = fields.get("created", "")
         if not DATE_RE.match(created):
             report.fail(str(prd), f"created {created!r} is not a YYYY-MM-DD date")
@@ -455,9 +469,9 @@ def run(
         report.fail(str(work_root), "the work directory does not exist")
         return report
 
-    check_shape(work_root, report)
     statuses = sd_lib.Statuses.of(repo, work_dir)
     try:
+        check_shape(work_root, report, statuses.source)
         check_ready(work_root, report, statuses)
     finally:
         statuses.close()
