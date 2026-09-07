@@ -4265,3 +4265,69 @@ from a number the operator types.
   be asserted against the skill, it is met and the wording should stop
   implying a runner. Either answer is fine; leaving it unanswered means a
   reader cannot tell whether #758 closed the criterion or approximated it.
+
+- **2026-09-06** — **R11-D41, the code cap becomes payable in kind, and the
+  ceilings record their own history.** On the operator's word, after R11-D38
+  recorded that PR 7's dashboard slice stands roughly 26 lines of code over a
+  ceiling R11-D24 made downward-only, and named "a decision that supersedes
+  R11-D24" as one of the three ways out.
+
+  **The evidence is the whole argument, and it was not visible until somebody
+  listed it.** Every value the three ceilings have held, read from
+  `tests/test_loc_caps.py`'s own git log: `BIN_CAP` 8,000 → 14,000 → 14,700 →
+  15,050 → 15,400 → 15,750; `DASHBOARD_CAP` 2,500 → 4,000 → 4,300 → 4,350 →
+  4,375 → 4,600; `DASHBOARD_CODE_CAP` 2,300, once, never moved. **Nine upward
+  moves, no downward move, and no refusal.** `bin/` nearly doubled inside
+  seven days, four of those raises inside three days. Each one was derived,
+  itemised and defensible on its own, which is precisely the failure the
+  file's own docstring says it exists to prevent — "95,000 lines one
+  defensible commit at a time, and no single one of those commits looked like
+  the problem" — arriving inside the mechanism built to prevent it, because
+  nothing in the design ever looks at nine raises together.
+
+  **The code cap is payable in kind.** `DASHBOARD_CODE_CAP` may rise when the
+  same change removes or factors at least as many code lines from `dashboard/`
+  as it adds, so that net code does not grow. R11-D24's intent is untouched:
+  prose still cannot buy code, because prose is not what the payment is made
+  in. What is removed is the endgame — delete something that works, or do not
+  build the thing — which is not hypothetical, since R11-D24 exists *because*
+  6b-7 was spent deleting rationale to fit a write path. A downward-only cap
+  with no relief valve reproduces that outcome one level down, and
+  `DASHBOARD_CODE_CAP` bound for the first time on PR 7.
+
+  **`DASHBOARD_CODE_SLACK` is the mechanical half**, and it is what makes the
+  rule checkable rather than remembered. It records the gap between the cap
+  and what `dashboard/` measures — 2,300 against 2,271, so 29 — and
+  `test_the_code_ceiling_is_paid_for_in_kind` refuses a gap that widens.
+  Adding code narrows it and needs no permission; raising the ceiling widens
+  it and must be paid for. A change may still edit both constants together,
+  and that is deliberate: the rule binds at the same strength as "a cap is
+  never raised in the PR that busts it", by review — but review now weighs a
+  figure instead of a belief. Verified by three probes: a 26-line raise with
+  nothing deleted fails with `55 not less than or equal to 29`; the same raise
+  with 26 code lines added elsewhere passes the in-kind test; and the file is
+  byte-identical after each.
+
+  **`CEILING_HISTORY` puts the trend in one place**, with
+  `test_each_ceiling_is_the_last_value_its_history_records` refusing a
+  constant that has moved without its history following. A list that drifts
+  from what it describes is the "number in a design document, checked by
+  whoever remembers to check it" that this file was written to replace,
+  wearing the clothes of its replacement.
+
+  **Considered and rejected: making the totals report rather than gate.** The
+  per-raise derivation is expensive — R11-D38 cost an agent twenty-two minutes
+  and serialised four units of work behind it — and in nine raises it has
+  never returned "no", which is a fair case that it is a toll rather than a
+  ceiling. It stays anyway. A ceiling that only reports is exactly what the
+  retired 95,000-line stack had. The cheaper thing that was actually missing
+  was not a weaker gate but a visible trend, and that is what
+  `CEILING_HISTORY` is.
+
+  **What this does not do.** It does not move any ceiling, and PR 7's
+  dashboard slice is still 26 lines of code over. It gives that slice a second
+  way out — factor `deliver` against the `/api/ack` branch, `store` write and
+  `dismissCell` it was priced as *copying*, and pay the raise in kind — which
+  R11-D24 forbade outright. Measuring the factored version before moving
+  anything is the next step, and if it lands under 29 lines no cap moves at
+  all.
