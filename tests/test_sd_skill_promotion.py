@@ -274,8 +274,13 @@ class WhereThePullRequestIsOpened(unittest.TestCase):
                     offenders.append(f"{path.relative_to(REPO_ROOT)}: {verb}")
         self.assertEqual([], offenders)
 
-    def test_the_library_is_the_only_place_that_posts(self):
-        """One `--method` anywhere in `bin/`, and it is the promotion opener."""
+    def test_only_the_library_modules_that_should_post_do(self):
+        """An inventory, so a new writer to GitHub has to be added deliberately.
+
+        `sd_skill.py` opens the promotion pull request and `sd_suggest.py`
+        files a suggestion. Nothing else in `bin/` sends a non-GET method, and
+        a third name appearing here without a criterion behind it is the
+        finding this test exists to make."""
         writers = []
         for path in sorted((REPO_ROOT / "bin").iterdir()):
             if path.is_dir():
@@ -286,7 +291,7 @@ class WhereThePullRequestIsOpened(unittest.TestCase):
                 continue
             if '"--method"' in text:
                 writers.append(path.name)
-        self.assertEqual(["sd_skill.py"], writers)
+        self.assertEqual(["sd_skill.py", "sd_suggest.py"], writers)
 
     def test_the_opener_shares_one_body_with_both_directions(self):
         """The direction is a parameter, so the git half cannot drift apart."""

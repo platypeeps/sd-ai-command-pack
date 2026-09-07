@@ -1,15 +1,19 @@
 ---
 name: sd-propose-skills
-description: Use when the user wants the current session reviewed for recurring friction, repeated steps, and hard-won gotchas, and high-bar skill proposals drafted into a configurable Obsidian Skill Proposals destination for later accept or decline.
+description: Use when the user wants the current session reviewed for recurring friction, repeated steps, and hard-won gotchas, and high-bar skill proposals drafted into the report for the user to decide.
 ---
 
 # sd-propose-skills
 
 Turn what the current session actually taught into reviewable skill proposals, so
 a lesson learned the hard way is not lost when the session ends. Do the judgement
-and the drafting; the user decides each proposal by flipping a dropdown in the
-written note. Nothing is filed automatically, and nothing is written unless a
-destination is resolved.
+and the drafting; the user decides each proposal by reading the report. Nothing is
+filed automatically, and **nothing is written to a vault at all** -- item A's
+criterion 28 removed that, because a proposal in somebody's vault is a record
+with no reader and no expiry. What survives review becomes a row instead:
+`sd suggest add "<the proposal>" --item <work item>` writes one, and
+`sd suggest publish --to owner/repo --note <id>` files it where it can be
+argued with.
 
 A proposal is expensive to read and cheap to skip, so the bar is high on purpose:
 most sessions should yield zero or one, not a list.
@@ -22,9 +26,8 @@ skills", "propose skills from what we learned", or "what should we build from
 this". Use it only for the session in context; it does not read past sessions or
 external transcripts.
 
-Do not use it to improve an existing skill (that is editing, not proposing), to
-file tasks, or to write anything when no destination is configured — in that case
-it reports inline instead.
+Do not use it to improve an existing skill (that is editing, not proposing), or
+to file tasks. It writes no file anywhere; the report is the whole output.
 
 ## Arguments
 
@@ -33,115 +36,68 @@ Argument names and value sets follow the shared vocabulary in `references/argume
 Arguments arrive as free text. Unknown argument names are an error — stop and
 identify them before reviewing the session or writing anything.
 
-- `target=` — destination root. Notes are written under
-  `<target>/System/Databases/Skill Proposals/`. An explicit `target` overrides
-  profile resolution.
-- `profile=auto|off|<locator>` — default `auto`. `auto` resolves only an
-  attached, authorized, host-configured locator for the destination and never
-  guesses a path; `off` forces inline-only and writes nothing; `<locator>` names
-  a specific configured destination. Locator details stay private to the host and
-  never appear in this skill.
-- `context=` — the workspace or project label recorded in each note's `contexts`
-  field. Defaults to the current project or repository name; the user may adjust
-  it.
+- `target=` — retired. It named a vault this skill no longer writes to. Passing
+  it is an error rather than a no-op, so a caller learns the output moved
+  instead of watching for a file that never appears.
+- `profile=` — retired with `target=`, and an error for the same reason. It
+  resolved a destination, and there is no longer one to resolve.
+- `context=` — the workspace or project label named in the report. Defaults to
+  the current project or repository name; the user may adjust it.
 
-If neither an explicit `target` nor a resolvable locator is available, the skill
-is destination-neutral: it drafts the proposals into its report and states how to
-set a destination, rather than writing files.
+There is no destination to resolve. The skill drafts its proposals into its
+report, always, and the report is where the user reads them.
 
 ## Workflow
 
-1. Establish the write destination first, before drafting, so the run knows
-   whether it will write or report inline. Resolve in order: `profile=off` means
-   inline-only; an explicit `target=` wins next; `profile=auto` resolves an
-   authorized host-configured locator; if nothing resolves, stay inline-only.
-2. Review the current session for candidate skills — a step repeated across
+1. Review the current session for candidate skills — a step repeated across
    turns, the same friction hit more than once, a defect class that recurred, a
    workaround discovered mid-task, a precondition or ordering that bit and had to
    be re-derived.
-3. Hold every candidate to the strict bar. A candidate qualifies only when all
+2. Hold every candidate to the strict bar. A candidate qualifies only when all
    three hold: it recurred at least twice (or is a clearly recurring pattern); its
    repeatable core is mechanical (an enumeration, a check, a comparison, a fixed
    procedure) while the judgement is written once in the skill header; and there
    is a real cost of getting it wrong, where under-reporting fails silently. Drop
    everything else. Zero survivors is a valid, expected result — never invent a
    proposal to have something to show.
-4. Give each survivor a kebab-case, filesystem-safe `<skill-name>`. Deduplicate
-   before writing: skip, and report, any name that already exists as a note in
-   the destination's `System/Databases/Skill Proposals/` folder (any status) or
-   as an installed skill in the environment. Never overwrite an existing file.
-5. Render each surviving proposal as a note using the exact template below. Copy
-   the status-control line character for character — it is an inline-select
-   control and only renders when verbatim. Write `status: proposed` and nothing
-   else; the accept, decline, and filed states belong to the user and the
-   destination's own filing routine.
-6. Write one file per survivor to
-   `<destination>/System/Databases/Skill Proposals/<skill-name>.md`, only when a
-   destination resolved in step 1. Otherwise place the fully rendered notes in the
-   report.
-7. Report what was written, what was skipped and why, and — when nothing cleared
-   the bar or no destination resolved — say so plainly.
+3. Give each survivor a kebab-case, filesystem-safe `<skill-name>`. Deduplicate
+   first: skip, and report, any name that is already an installed skill or
+   already sits in `contrib/`.
+4. Render each survivor into the report using the sections below. There is no
+   status field, because there is no note to carry one: the user's decision is
+   made in the conversation the report is part of.
+5. Report every survivor in full, what was skipped and why, and — when nothing
+   cleared the bar — say so plainly. Zero is the common answer.
+6. For a survivor the user accepts, write the row: `sd suggest add "<one line>"
+   --item <work-item directory>`. That is what makes it outlive the session.
 
-The note template, reproduced exactly:
+The report section per survivor:
 
-````markdown
----
-contexts:
-  - <context label>
-area: Software Engineering
-category:
-  - Knowledge Management
-content-type: skill-proposal
-status: proposed
-dateCreated: <YYYY-MM-DD today, unquoted>
-description: <skill-name>
-tags:
-  - ai-generated
-  - claude
-  - sd-propose-skills
-skill-name: <skill-name>
----
-
+```markdown
 # <skill-name>
 
-**Status:** `INPUT[inlineSelect(option(proposed), option(accepted), option(declined), option(filed)):status]`
+**What recurred.** <The specific thing, twice or more, with what it cost.>
 
-**What it would do.** <The mechanical behavior in a few sentences: what it
-enumerates, checks, compares, or produces, and the one hard rule that keeps it
-honest.>
+**The mechanical core.** <The enumeration, check, comparison or fixed procedure
+a skill would carry.>
 
-**Evidence.** <The concrete instances from this session — what recurred, how
-often, what it cost. Describe the pattern, never paste raw command output,
-secrets, tokens, or file contents.>
+**The judgement, written once.** <What the skill's header would settle so the
+body does not have to re-decide it.>
 
-**Why a skill and not a note.** <The split: the mechanical part that repeats
-versus the one-time judgement written in the header. Why a passive note would go
-unread by the person who needs it at the moment it matters.>
+**Cost of getting it wrong.** <Over-reporting: cheap and visible.
+Under-reporting: invisible and the real failure. Name the silent-failure case.>
+```
 
-**Cost of getting it wrong.** <Over-reporting: cheap and visible. Under-reporting:
-invisible and the real failure. Name the silent-failure case.>
-
----
-
-*This is a native note in this vault — the note itself is the record; there is no external ledger. Use the dropdown above rather than the frontmatter field — an off-vocabulary value is reported, not guessed at, so a typo reads as silence. Pick `accepted` to have `skill-proposal-accept` file it as a work item in `sd-ai-command-pack`, or `declined` to close it. `filed` is set by the routine, not by you.*
-````
-
-The note's `# <skill-name>` and `skill-name:` are the proposed skill's name, not
-this skill's. The `dateCreated` is an unquoted ISO date so the collection's
-age formula parses it.
+The `# <skill-name>` is the proposed skill's name, not this skill's.
 
 ## Safety rules
 
-- Write only when a destination resolved. With `profile=off`, or no `target` and
-  no resolvable locator, write nothing and report inline.
-- Only ever write `status: proposed`. The accept, decline, and filed states are
-  the user's, set through the dropdown; this skill never advances them and never
-  files a task.
-- Never overwrite an existing note. A name collision is a skip, not a rewrite.
-- The note is the record. Do not write an external ledger or add ledger fields.
+- **Write no file.** Not to a vault, not to `contrib/`, not to `docs/`. The
+  report is the output, and `sd suggest add` is how the user makes one durable.
+- Never advance a proposal's state and never file a task. The decision is the
+  user's, made in the conversation.
 - Never copy raw session output, secrets, credentials, or file contents into a
-  note. Evidence describes the pattern.
-- Never ship or embed a private destination path. The locator stays host-side.
+  proposal. Evidence describes the pattern.
 - Prefer zero proposals over a weak one. Do not manufacture recurrence, evidence,
   or cost to clear the bar.
 - If the session was shortened or summarized, work from the context that remains
@@ -149,13 +105,10 @@ age formula parses it.
 
 ## Final report
 
-- **Destination** — resolved target and how it resolved (`target`, locator, or
-  inline-only), or the reason nothing resolved;
-- **Proposals written** — each `<skill-name>` with its file path and a one-line
-  summary;
-- **Skipped candidates** — each with its reason (dedup against an existing note or
-  installed skill, or below the strict bar);
-- **Inline drafts** — the full rendered notes when no destination resolved, ready
-  to paste once a target is set; and
+- **Proposals** — each `<skill-name>` rendered in full, in the shape above;
+- **Skipped candidates** — each with its reason (already installed, already in
+  `contrib/`, or below the strict bar);
+- **How to keep one** — the `sd suggest add` line for each proposal, ready to
+  run; and
 - **Nothing-to-propose** — an explicit statement when no candidate cleared the
   bar, rather than a padded list.
