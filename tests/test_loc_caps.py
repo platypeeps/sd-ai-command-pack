@@ -560,13 +560,22 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # the cap is **17,250** and the 25 unclaimed is what rounding left. This is the
 # last of the four, so the next re-derivation in this item is a new item's.
 # R11-D46, 2026-09-07, funds the **sd-status-answers-is-anything-wrong-first**
-# item whole. The base is **17,189**, measured on `main` at `6f9b96ad` by
-# `git ls-tree -r --name-only main bin` with `migrate-*` excluded as always.
+# item whole. The base is **17,189**: `line_count` over the files
+# `tracked("bin")` enumerates, `migrate-*` excluded as always -- which is to
+# say the same two functions `test_bin_stays_under_its_ceiling` calls, run on
+# `main` at `6f9b96ad`. The enumerating command is named separately from the
+# counting one on purpose, because every predecessor record here named only
+# the first: `git ls-files bin` and `git ls-tree -r --name-only main bin` list
+# paths and cannot produce a total, so a reader following those sentences
+# literally gets a file list and no number. Found in review. For a historical
+# commit the same measure is `git ls-tree -r --name-only <sha> bin`, then
+# `git show <sha>:<path> | wc -l` summed, since the files are not in the tree.
 # This is the first re-derivation in this file that is not PR 8's, which
 # R11-D45's last sentence anticipated.
 #
 # **PR 8d came in at 228 against 256, and the four-slice split is now closed.**
-# 16,895 before it, 17,123 after, both counted from git. The 66 lines between
+# 16,895 before it, 17,123 after, both by that same measure at `17d80480` and
+# `fe0712ae`. The 66 lines between
 # 17,123 and the 17,189 base are the sweep item's branch resolution, which
 # answered to no reservation and fitted in R11-D45's 25 unclaimed plus what 8d
 # left -- which is the ordinary case a ceiling is supposed to permit.

@@ -10,7 +10,9 @@ The whole change lands in `bin/sd-status`, `skills/sd-status/SKILL.md` and
 times stale.** This section originally read 12,416 lines on `8cf99431` against
 a 14,000 ceiling, 1,584 of headroom, and claimed at most 600 of them. Every one
 of those numbers is now wrong in the same direction. `bin/` measures **17,189**
-on `main` at `6f9b96ad`, and the ceiling R11-D45 left is 17,250 — **61 lines**,
+on `main` at `6f9b96ad` — `line_count` over what `tracked("bin")` enumerates,
+which is what the cap test itself calls — and the ceiling R11-D45 left is
+17,250, so the headroom is **61 lines**,
 not 1,584. A claim of 600 against 61 is not a budget; it is a sentence that
 stopped being checked. The clause at the top of `tests/test_loc_caps.py` is why
 that mattered: a cap is never raised in the pull request that busts it, so
