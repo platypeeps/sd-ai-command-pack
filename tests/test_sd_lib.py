@@ -177,8 +177,23 @@ class LocalBlockTests(Fixture):
 
 
 class ModeTests(Fixture):
-    def test_default_and_declared_modes(self) -> None:
+    def test_declared_modes_and_the_no_line_case_this_fixture_actually_is(self) -> None:
+        """No `mode:` line is not a default of `full`; it is a question asked.
+
+        This test used to read `mode(make_repo()) == "full"` and call that the
+        default, which is what `bin/sd_lib.py` did and what criterion 11 says is
+        wrong: `full` is the most permissive mode, and returning it for every
+        repository with no line inverted detection in exactly the cases it
+        exists for -- a fork, or a remote you cannot administer. `full` is still
+        the right answer *here*, but for a stated reason rather than by default:
+        `make_repo` adds no remote, so this is criterion 11's sixth case, where
+        there is nobody to expose anything to. `tests/test_mode_detection.py`
+        holds the other five and the composition rule; a repository with a
+        remote is asked, and every answer but three yeses resolves to `guest`.
+        """
+
         root = self.make_repo()
+        self.assertIsNone(sd_lib.git_output(["remote", "get-url", "origin"], root))
         self.assertEqual(sd_lib.mode(root), "full")
         for value in sd_lib.MODES:
             with self.subTest(value):

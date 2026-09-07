@@ -18,7 +18,7 @@ import re
 import shlex
 import subprocess
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
 LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
@@ -43,6 +43,17 @@ CHECK_NAMES = ("check", "test", "lint")
 CONSENT_KEY = "reviewers"
 
 GIT_TIMEOUT_SECONDS = 15
+GH_TIMEOUT_SECONDS = 20
+
+#: `WORKFLOW.md`'s three questions as the endpoints that ask them; `gh` fills
+#: `{owner}` and `{repo}` from the checkout's origin, so no URL parser is needed
+#: here. The last is *the* collaborator query criterion 11 asks `bin/` to hold
+#: once: both gates reach it through `remote_permits_full` and neither restates.
+VIEWER_QUERY = "user"
+REPOSITORY_QUERY = "repos/{owner}/{repo}"
+COLLABORATOR_QUERY = "repos/{owner}/{repo}/collaborators"
+#: How one of those questions is put. Injected, so a test never asks the network.
+Asker = Callable[[str, pathlib.Path], tuple[Any, str]]
 
 _DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 _MAKE_TARGET_RE = re.compile(r"^(?P<names>[^\t#=:]+):(?!=)")
@@ -240,14 +251,121 @@ def machine_config(path: pathlib.Path | None = None) -> dict[str, object]:
     return loaded
 
 
-def mode(root: pathlib.Path) -> str:
-    """`full` (default), `minimal` or `guest`, from the local block's `mode:`."""
+@dataclass(frozen=True)
+class RemoteAnswer:
+    """What the remote said when asked whether this run may be `full`. Not a
+    bool: the demotion note, the merge suspension and the dashboard each show
+    *which* answer said no, and a bool throws that away at that moment."""
+
+    #: Three yeses, or the no-remote / no-git case. Never reached from an error.
+    full: bool
+    #: False when the question could not be put at all -- no `gh`, no network, a
+    #: refusing remote. It changes the sentence, never the outcome.
+    answered: bool
+    #: Empty when `full`; otherwise the sentence naming what said no.
+    reason: str = ""
+
+
+def gh_api(endpoint: str, root: pathlib.Path) -> tuple[Any, str]:
+    """One read-only `gh api` call: `(payload, error-sentence)`, never raising.
+    `gh` is a process and not an import, so stdlib-only holds; it is also the
+    seam tests replace, so no test in this repository touches the network."""
+    try:
+        completed = subprocess.run(  # fixed argv, no shell
+            ["gh", "api", endpoint],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=GH_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return None, f"gh could not be run: {error}"
+    if completed.returncode != 0:
+        said = (completed.stderr or completed.stdout).strip().splitlines()
+        return None, said[0] if said else f"gh api {endpoint} exited {completed.returncode}"
+    try:
+        return json.loads(completed.stdout or "null"), ""
+    except json.JSONDecodeError as error:
+        return None, f"gh api {endpoint} did not answer in JSON: {error}"
+
+
+def remote_permits_full(root: pathlib.Path, *, ask: Asker = gh_api) -> RemoteAnswer:
+    """Ask the remote the three questions of `WORKFLOW.md`, fresh, every call.
+
+    `full` comes back on three yeses -- you administer it, it is not a fork,
+    nobody else may push -- and for a root with no remote or no git at all,
+    where there is no one to expose anything to. Never from an error path: a
+    question that could not be put is not a permission that was granted, so an
+    unanswerable query is `guest` with `answered` false. Nothing is cached; the
+    questions are asked again before every artifact write and every push.
+    """
+    # Case 6, decided on its own rather than caught out of the remote lookup.
+    if not (root / ".git").exists():
+        return RemoteAnswer(full=True, answered=True)
+    # A `.git` git itself cannot read is not the no-git case: it is no answer.
+    if git_output(["rev-parse", "--is-inside-work-tree"], root) != "true":
+        return RemoteAnswer(False, False, f"git could not be asked about {root}")
+    if not git_output(["remote", "get-url", "origin"], root):
+        return RemoteAnswer(full=True, answered=True)
+
+    viewer, error = ask(VIEWER_QUERY, root)
+    login = viewer.get("login") if isinstance(viewer, dict) else None
+    if not login:
+        return RemoteAnswer(False, False, f"the remote did not say who you are: {error or 'no login'}")
+
+    repo, error = ask(REPOSITORY_QUERY, root)
+    rights = repo.get("permissions") if isinstance(repo, dict) else None
+    if not isinstance(repo, dict) or not isinstance(rights, dict):
+        return RemoteAnswer(False, False, f"the remote did not say what you may do: {error or 'no permissions'}")
+    name = str(repo.get("full_name") or "the remote")
+    if not rights.get("admin"):
+        return RemoteAnswer(False, True, f"you do not administer {name}")
+    if repo.get("fork"):
+        parent = repo.get("parent")
+        upstream = parent.get("full_name") if isinstance(parent, dict) else None
+        return RemoteAnswer(False, True, f"{name} is a fork of {upstream or 'another repository'}")
+
+    people, error = ask(COLLABORATOR_QUERY, root)
+    if not isinstance(people, list):
+        return RemoteAnswer(False, False, f"the remote did not list who may push to {name}: {error or 'no list'}")
+    # Parsing and filtering are separate questions, and doing them in one pass
+    # fails open: an entry dropped for being unreadable leaves `others` empty,
+    # and an empty `others` is one of only three places `full` is returned. So
+    # "nobody I could parse" would arrive as "nobody else may push". Every entry
+    # is read first, and the first one that cannot be read is no answer.
+    others: list[str] = []
+    for index, person in enumerate(people):
+        rights = person.get("permissions") if isinstance(person, dict) else None
+        who = str(person.get("login") or "") if isinstance(person, dict) else ""
+        if not who or not isinstance(rights, dict):
+            return RemoteAnswer(
+                False, False, f"the list of who may push to {name} has an entry ({index}) this cannot read"
+            )
+        if who != login and rights.get("push"):
+            others.append(who)
+    if others:
+        return RemoteAnswer(False, True, f"{name} lets {', '.join(sorted(others))} push too")
+    return RemoteAnswer(full=True, answered=True)
+
+
+def mode(root: pathlib.Path, *, ask: Asker = gh_api) -> str:
+    """The resolved mode: the local block's `mode:` line, lowered by detection.
+
+    Detection is a ceiling and never a floor. A written `full`, and no line at
+    all, are both offered to `remote_permits_full` and come back `guest` unless
+    the remote says yes three times. A written `guest` stays `guest`. A written
+    `minimal` stays `minimal`: it is set by hand, detection's six cases never
+    produce it, and it already writes no artifacts anywhere -- so rewriting it
+    to `guest`, which puts a triad on a fork's branch, would raise exposure
+    rather than lower it, the one thing detection is forbidden to do.
+    """
     value = local_block(root).get("mode", "").strip()
-    if not value:
-        return DEFAULT_MODE
-    if value not in MODES:
+    if value and value not in MODES:
         raise ConfigError(f"mode {value!r} is not one of {', '.join(MODES)}")
-    return value
+    if value in ("minimal", "guest"):
+        return value
+    return DEFAULT_MODE if remote_permits_full(root, ask=ask).full else "guest"
 
 
 # --------------------------------------------------------------------------
