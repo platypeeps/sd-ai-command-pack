@@ -202,13 +202,27 @@ class RendererParityTests(InstallerHarness):
 
 class IdempotencyTests(InstallerHarness):
     def test_second_run_does_not_double_register_the_hook(self):
+        """Every row of the table, not just the first one.
+
+        Two rows share `bin/sd-skill-use`, so a second run that keyed on the
+        command rather than on the command-and-event pair would find the file
+        already present and skip a registration it had never made.
+        """
         self.install()
         self.install()
-        groups = self.settings["hooks"]["SessionStart"]
-        matchers = {group["matcher"]: group["hooks"] for group in groups}
-        self.assertEqual(set(matchers), set(sd_install.HOOK_MATCHERS))
-        for matcher, entries in matchers.items():
-            self.assertEqual(len(entries), 1, f"{matcher} registered {len(entries)}x")
+        hooks = self.settings["hooks"]
+        for command, event, matchers in sd_install.HOOK_SPECS:
+            groups = {group["matcher"]: group["hooks"] for group in hooks[event]}
+            self.assertLessEqual(set(matchers), set(groups), event)
+            for matcher in matchers:
+                ours = [
+                    entry
+                    for entry in groups[matcher]
+                    if entry["command"].endswith(command)
+                ]
+                self.assertEqual(
+                    len(ours), 1, f"{event}/{matcher} has {len(ours)} of {command}"
+                )
 
     def test_second_run_does_not_duplicate_the_excludes_line(self):
         self.install()
@@ -221,13 +235,26 @@ class IdempotencyTests(InstallerHarness):
         ]
         self.assertEqual(lines, [sd_install.EXCLUDES_LINE])
 
-    def test_the_hook_matchers_are_exactly_startup_and_clear(self):
-        """R10-D3 names the two omissions as design, so they are pinned here.
+    def test_the_hook_table_is_exactly_these_three_registrations(self):
+        """R10-D3 names the two SessionStart omissions as design.
 
         `compact` would consume the packet into the dying session and the
         `/clear` that follows -- the entire gesture -- would find nothing.
+
+        The other two rows are one file on two events, and that is also
+        design: `PreToolUse` sees a skill invoked or its `SKILL.md` read,
+        `UserPromptSubmit` sees the bare slash form, which reaches no tool
+        call at all. Pinned whole, because what the pack registers in
+        somebody else's settings file is not a detail to drift.
         """
-        self.assertEqual(sd_install.HOOK_MATCHERS, ("startup", "clear"))
+        self.assertEqual(
+            sd_install.HOOK_SPECS,
+            (
+                ("bin/sd-handoff-restore", "SessionStart", ("startup", "clear")),
+                ("bin/sd-skill-use", "PreToolUse", ("Skill|Read",)),
+                ("bin/sd-skill-use", "UserPromptSubmit", ("",)),
+            ),
+        )
 
 
 class OtherPeoplesFilesTests(InstallerHarness):
@@ -1298,6 +1325,17 @@ class PruneTests(InstallerHarness):
 
 
 class HookEdgeCaseTests(InstallerHarness):
+    # A real `HOOK_SPECS` command, carrying the checkout prefix a real run
+    # gives it. `remove_hook` matches the receipt's held commands against the
+    # table by suffix, so a made-up name matches no row, clears nothing, and
+    # every removal test below would pass by removing nothing at all.
+    RESTORE = "/x/bin/sd-handoff-restore"
+
+    def spec(self, command=RESTORE, event="SessionStart",
+             matchers=("startup", "clear")):
+        """One row shaped like `hook_specs` output."""
+        return [(command, event, matchers)]
+
     def settings_path(self) -> Path:
         path = self.home / ".claude" / "settings.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -1307,21 +1345,21 @@ class HookEdgeCaseTests(InstallerHarness):
         path = self.settings_path()
         path.write_text("[]", encoding="utf-8")
         with self.assertRaises(SystemExit) as caught:
-            sd_install.install_hook(path, "cmd")
+            sd_install.install_hook(path, self.spec())
         self.assertIn("not a JSON object", str(caught.exception))
 
     def test_a_non_object_hooks_key_is_refused(self):
         path = self.settings_path()
         path.write_text(json.dumps({"hooks": []}), encoding="utf-8")
         with self.assertRaises(SystemExit) as caught:
-            sd_install.install_hook(path, "cmd")
+            sd_install.install_hook(path, self.spec())
         self.assertIn("non-object 'hooks'", str(caught.exception))
 
     def test_a_non_list_session_start_is_refused(self):
         path = self.settings_path()
         path.write_text(json.dumps({"hooks": {"SessionStart": {}}}), encoding="utf-8")
         with self.assertRaises(SystemExit) as caught:
-            sd_install.install_hook(path, "cmd")
+            sd_install.install_hook(path, self.spec())
         self.assertIn("non-list", str(caught.exception))
 
     def test_a_matcher_group_with_a_non_list_hooks_key_is_refused(self):
@@ -1333,48 +1371,48 @@ class HookEdgeCaseTests(InstallerHarness):
             encoding="utf-8",
         )
         with self.assertRaises(SystemExit) as caught:
-            sd_install.install_hook(path, "cmd")
+            sd_install.install_hook(path, self.spec())
         self.assertIn("non-list 'hooks'", str(caught.exception))
 
     def test_a_dry_run_registers_nothing(self):
         path = self.settings_path()
-        self.assertTrue(sd_install.install_hook(path, "cmd", dry_run=True))
+        self.assertTrue(sd_install.install_hook(path, self.spec(), dry_run=True))
         self.assertFalse(path.exists())
 
     def test_removing_from_a_file_that_never_had_the_hook_changes_nothing(self):
         path = self.settings_path()
-        self.assertFalse(sd_install.remove_hook(path, "cmd"))
+        self.assertFalse(sd_install.remove_hook(path, [self.RESTORE]))
         path.write_text("{ broken", encoding="utf-8")
-        self.assertFalse(sd_install.remove_hook(path, "cmd"))
+        self.assertFalse(sd_install.remove_hook(path, [self.RESTORE]))
         path.write_text("[]", encoding="utf-8")
-        self.assertFalse(sd_install.remove_hook(path, "cmd"))
+        self.assertFalse(sd_install.remove_hook(path, [self.RESTORE]))
         path.write_text(json.dumps({"hooks": []}), encoding="utf-8")
-        self.assertFalse(sd_install.remove_hook(path, "cmd"))
+        self.assertFalse(sd_install.remove_hook(path, [self.RESTORE]))
         path.write_text(json.dumps({"hooks": {"SessionStart": {}}}), encoding="utf-8")
-        self.assertFalse(sd_install.remove_hook(path, "cmd"))
+        self.assertFalse(sd_install.remove_hook(path, [self.RESTORE]))
         path.write_text(
             json.dumps({"hooks": {"SessionStart": [{"matcher": "startup"}]}}),
             encoding="utf-8",
         )
-        self.assertFalse(sd_install.remove_hook(path, "cmd"))
+        self.assertFalse(sd_install.remove_hook(path, [self.RESTORE]))
 
     def test_groups_for_other_matchers_are_left_untouched(self):
         path = self.settings_path()
-        other = {"matcher": "resume", "hooks": [{"command": "cmd"}]}
+        other = {"matcher": "resume", "hooks": [{"command": self.RESTORE}]}
         path.write_text(
             json.dumps(
                 {
                     "hooks": {
                         "SessionStart": [
                             other,
-                            {"matcher": "startup", "hooks": [{"command": "cmd"}]},
+                            {"matcher": "startup", "hooks": [{"command": self.RESTORE}]},
                         ]
                     }
                 }
             ),
             encoding="utf-8",
         )
-        self.assertTrue(sd_install.remove_hook(path, "cmd"))
+        self.assertTrue(sd_install.remove_hook(path, [self.RESTORE]))
         groups = json.loads(path.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
         self.assertEqual(groups, [other], "a matcher we never register on was changed")
 
@@ -1387,24 +1425,32 @@ class HookEdgeCaseTests(InstallerHarness):
                     "hooks": {
                         "SessionStart": [
                             {"matcher": "startup", "hooks": []},
-                            {"matcher": "clear", "hooks": [{"command": "cmd"}]},
+                            {"matcher": "clear", "hooks": [{"command": self.RESTORE}]},
                         ]
                     }
                 }
             ),
             encoding="utf-8",
         )
-        self.assertTrue(sd_install.remove_hook(path, "cmd"))
+        self.assertTrue(sd_install.remove_hook(path, [self.RESTORE]))
         groups = json.loads(path.read_text(encoding="utf-8"))["hooks"]["SessionStart"]
         self.assertEqual(groups, [{"matcher": "startup", "hooks": []}])
 
     def test_a_dry_run_removal_writes_nothing(self):
         path = self.settings_path()
         original = json.dumps(
-            {"hooks": {"SessionStart": [{"matcher": "clear", "hooks": [{"command": "c"}]}]}}
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {"matcher": "clear", "hooks": [{"command": self.RESTORE}]}
+                    ]
+                }
+            }
         )
         path.write_text(original, encoding="utf-8")
-        self.assertTrue(sd_install.remove_hook(path, "c", dry_run=True))
+        self.assertTrue(
+            sd_install.remove_hook(path, [self.RESTORE], dry_run=True)
+        )
         self.assertEqual(path.read_text(encoding="utf-8"), original)
 
 
@@ -1831,14 +1877,21 @@ class RemainingBranchTests(InstallerHarness):
                     "hooks": {
                         "PreToolUse": [{"matcher": "Bash", "hooks": []}],
                         "SessionStart": [
-                            {"matcher": "clear", "hooks": [{"command": "ours"}]}
+                            {
+                                "matcher": "clear",
+                                "hooks": [
+                                    {"command": "/x/bin/sd-handoff-restore"}
+                                ],
+                            }
                         ],
                     }
                 }
             ),
             encoding="utf-8",
         )
-        self.assertTrue(sd_install.remove_hook(path, "ours"))
+        self.assertTrue(
+            sd_install.remove_hook(path, ["/x/bin/sd-handoff-restore"])
+        )
         hooks = json.loads(path.read_text(encoding="utf-8"))["hooks"]
         self.assertEqual(list(hooks), ["PreToolUse"])
 
