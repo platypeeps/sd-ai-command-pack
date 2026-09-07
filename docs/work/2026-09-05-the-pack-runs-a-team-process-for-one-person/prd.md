@@ -4952,3 +4952,79 @@ from a number the operator types.
   removed, the sort dropped, removal sweeping only the first path, the
   `$comment` block destroyed on write, the POST downgraded to a read, and
   `head` confused with `base`. Baseline 19 passed after restore.
+
+- **2026-09-07** — **R11-D45, `BIN_CAP` re-derived from 17,050 to 17,250,
+  funding criterion 28 and PR 8d**, in a change of its own that touches
+  `tests/test_loc_caps.py` and these planning pages and nothing under `bin/`,
+  the clause at `tests/test_loc_caps.py:11-12`. This is the last of the four
+  R11-D42 split PR 8 into.
+
+  **The base is 16,895**, measured on `main` by `git ls-files bin` after PR 8c
+  merged at `17d80480`.
+
+  **The body-variance line changes statistic, and the reason is that the loss
+  is not symmetric.** R11-D44 introduced it as the mean of two observations and
+  gave it no theory of what it was for. There are three now: PR 8a's −2%, PR
+  8b's +26%, and PR 8c's −19%, 172 delivered against 204 of body plus 8 of
+  glue. Their mean is +1.7%, which is very nearly nothing, and a reserve sized
+  to the mean of a roughly symmetric spread is too small half the time. The
+  costs are not symmetric: an underrun leaves budget unspent and nothing else,
+  while an overrun busts the cap, and the clause forbids raising it in the pull
+  request that busts it — so an overrun costs a re-derivation *and* a second
+  pull request. A reserve is protection against the bad tail, not an estimate
+  of the middle. It is sized at the largest overrun yet observed, **26%**,
+  which is PR 8b's.
+
+  8c's −19% is worth naming because it is not noise. R11-D44 put the validation
+  in the two ends and the shared work in the middle, which was right, and left
+  the directory move and the clean-checkout check in the ends where each would
+  have been written twice. Making the direction a parameter pulled both into
+  the middle, and the ends collapsed from 36 and 34 to 9 and 8. That correction
+  was found by writing the code, which is where its whole class is always
+  found.
+
+  **The seam is 0, as R11-D42 had it, and PR 8c is why it stays 0.** Every
+  boundary this criterion touches now has a built crossing on the other side:
+  `gh api --method POST` at `bin/sd_skill.py:278` for filing an issue, the
+  `gh_json` transport it goes through at `bin/sd-pr-state:117`, the suffixless
+  import at `bin/sd_skill.py:160`, and `sd_db.sync_shadow` — `sync` at
+  `shadow_sync.py:391` in the installed library — which is complete and whose
+  own docstring settles the split: the module is the collector, the verb lives
+  in the pack.
+
+  **Criterion 28 is priced at 330** — 244 of body, 12 of glue, 0 of seam, 63 of
+  variance, 11 of post-report — against R11-D42's 364, and the two numbers
+  being close hides that almost nothing in them agrees. R11-D42 carried 327 of
+  body and 37 of post-report at R11-D38's rate; this carries 244 of body, a
+  reserve R11-D42 had no line for, and a post-report rate a fifth of the size.
+
+  | span | lines | measured against |
+  |---|---|---|
+  | `bin/sd_suggest.py` header | 45 | `bin/sd_skill.py:1-46`; `bin/sd-note:1-42` states less |
+  | its deferred `sd_db` frame | 18 | `bin/sd_handoff_rows.py` `library` 13 plus `connect` 5 |
+  | the row, in every mode | 30 | `bin/sd-note` `cmd_write` at 26, plus 4 to read `bin/sd_lib.py:33` `MODES` |
+  | `publish` | 35 | 4 to refuse without `--to`, 16 for the dedup read `skills/sd-suggest/SKILL.md:36` already requires, 12 for the POST at `bin/sd_skill.py:277-284`, 3 to print |
+  | `bin/sd_shadow.py` header | 32 | smaller than either analogue: `shadow_sync.py`'s docstring states the split, so this cites it |
+  | its deferred `sd_db` frame | 18 | not shared; `sd_restore` and `sd_handoff_rows` each carry their own |
+  | the wrapper | 34 | `bin/sd_restore.py` `resume` 36 and `reimport` 47 |
+  | `bin/sd` | 28 | PR 8c delivered 17 for two verbs under an existing group; two new groups cost the difference |
+  | `_sibling` into `sd_lib` | 4 | the third copy, which PR 8c's own log named as the trigger |
+
+  **Glue is 12.** `sd_suggest.py` has four definitions and `sd_shadow.py` three,
+  both far under fifteen, so R11-D43's 2.10 covers their three and two
+  boundaries; `sd_lib.py` gains one at 3.70 and `sd_skill.py` loses one at 2.10.
+
+  **Post-report discovery is 4.5%**, the mean of five: R11-D38's 14.4% and 8.3%,
+  and 0% from each of 8a, 8b and 8c. Three consecutive zeroes is the point where
+  averaging a dead rate starts to look like ignoring evidence, so it is worth
+  saying what the zeroes are. Every review round since 8a found real defects —
+  ten stale citations, a six-path row drop, a too-broad dashboard assertion, two
+  harness defects — and every one was fixed in documentation or in tests,
+  neither of which answers to this cap. The rate does not measure whether review
+  finds things. It measures whether what review finds costs `bin/` lines, and
+  lately it has not.
+
+  16,895 plus 330 is 17,225; the cap is **17,250** and the 25 unclaimed is what
+  rounding left. Two of criterion 28's clauses still cannot close from this
+  checkout — `commands.yaml` is item B's and the writing manifest is another
+  repository's — and PR 8d claims neither.
