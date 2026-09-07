@@ -124,3 +124,47 @@ Unknown argument names are an error — stop and report them before starting.
   results;
 - **Handoffs** — units delegated to `sd-rust-write`, `sd-rust-fill`, or
   `sd-rust-reviewer`, and reviews routed to the `sd-review` lane.
+
+## Lineage
+
+Re-authored from the `typed-holes` skill in
+`github.com/Shearerbeard/claude-skills` (`plugins/rust/skills/typed-holes/`,
+revision `c79fe3a`). That repository ships **no licence file** — `LICENSE`,
+`LICENSE.md`, `LICENSE.txt` and `COPYING` are all absent as of that revision —
+so its terms are unstated rather than permissive. Nothing here is copied
+verbatim: the ideas were rewritten in this pack's conventions, which is what
+the absence of stated terms permits and is why this section says so plainly
+instead of naming a licence it cannot cite.
+
+It reached this pack by two hops. It was written as `se-typed-holes` in
+`platypeeps/se-ai-command-pack` commit `9de85c3` (2026-08-27), one of the
+thirteen `se-*` skills of that pack's Engineer family, and folded here as
+`sd-typed-holes` in `56ba92eb` (2026-08-31, #640) alongside sixty-three
+siblings.
+
+**What was left upstream, and why it matters here.** Upstream is a *two-layer*
+practice. Layer 1 is the type-checked skeleton this skill kept. Layer 2 —
+whole-frame golden tests written from the spec so that they fail on arrival —
+was not carried over. Layer 2 is test-first under another name, so dropping it
+is worth knowing: what reads as a skill opposing test-first is a skill missing
+the half that supplied it, not a practice that rejected it.
+
+**How this skill relates to `sd-tdd` is not settled here.** The obvious answer —
+that the type surface and the `todo!()` bodies are exempt from test-first while
+the bodies that get filled are not — does not survive contact with step 2,
+which also lands derives, `From`/`Into` impls, and trivial accessors
+implemented rather than held open. Each of those has a real body and real
+runtime semantics, and a getter returning the wrong same-typed field compiles
+and passes clippy. This skill's safety rules already say a green skeleton shows
+the design composes and not that behavior is correct. Writing the boundary
+precisely enough to be followed was tried and failed review three times, so it
+is named as an open question rather than stated wrongly a fourth.
+
+Four of the rules above look arbitrary and are each a corrected error, from the
+review rounds that followed the original: `419f9131`, `10b32167`, `78f3dc2b`
+and `037d6137`. They fixed a skeleton gate that demanded every body still be a
+hole while also demanding trivial accessors be implemented; two cases where
+`#[expect(unused_variables)]` is unfulfillable the moment it is written,
+because the lint fires on neither a receiver nor an underscore-prefixed
+parameter; and the standing of `grep -rn 'todo!('`, which is a lower bound
+rather than a census and sits behind the clippy lint for that reason.
