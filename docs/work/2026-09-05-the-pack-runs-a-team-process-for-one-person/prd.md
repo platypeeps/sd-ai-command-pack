@@ -1,6 +1,5 @@
 ---
 title: the pack runs a team process for a repository with one person in it
-status: in_progress
 created: 2026-09-05
 branch: feat/solo-first-workflow-policy
 ---

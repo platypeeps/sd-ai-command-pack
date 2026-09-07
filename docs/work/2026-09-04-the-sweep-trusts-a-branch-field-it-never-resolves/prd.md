@@ -1,6 +1,5 @@
 ---
 title: the staleness sweep is silenced by a branch field that nothing resolves
-status: planning
 created: 2026-09-04
 ---
 

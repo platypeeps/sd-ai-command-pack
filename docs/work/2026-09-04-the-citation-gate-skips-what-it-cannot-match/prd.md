@@ -1,6 +1,5 @@
 ---
 title: the citation gate has four silencers and none of them say anything
-status: planning
 created: 2026-09-04
 ---
 

@@ -1,6 +1,5 @@
 ---
 title: the interview that decides every downstream artifact is one sentence long
-status: planning
 created: 2026-09-04
 branch: skill/sd-grill
 ---
