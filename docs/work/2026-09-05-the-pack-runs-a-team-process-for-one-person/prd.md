@@ -4643,3 +4643,87 @@ from a number the operator types.
   for reaching a module, and because the operator reading a trial's evidence
   needs a way to run and inspect the thing that produces it. The scheduler is
   still outside this repository, and still nothing runs it.
+
+- **2026-09-07** — **R11-D43, `BIN_CAP` re-derived from 16,750 to 17,000,
+  funding criterion 29 and PR 8b**, in a change of its own that touches
+  `tests/test_loc_caps.py` and these planning pages and nothing under `bin/`,
+  the clause at `tests/test_loc_caps.py:9-10`. Criteria 27 and 28 stay
+  unfunded, each to be preceded by its own re-derivation, which is what
+  R11-D42's split committed to.
+
+  **The base is measured rather than estimated, for the first time in this
+  sequence.** Criterion 26 is merged at `6b36e3ec`, so `bin/` is **16,399** by
+  `git ls-files`-driven count on `main`, not a projection off a branch. Every
+  earlier re-derivation in this item priced a slice against a tree that did
+  not yet contain the slice before it.
+
+  **Criterion 26 delivered 650 against 976 reserved, and the body was right to
+  2%.** 15,749 before PR 8a, 16,399 after. Reserved 663 for the body, spent
+  650: `bin/sd-skill-use` 243 against 240, `bin/sd_codex.py` with its verb 368
+  against 368, `bin/sd_install.py` +39 against +55. R11-D42's correction — price
+  the header explicitly, then the aggregate holds — is now carried by an
+  outcome rather than by argument.
+
+  **The 238 of seam went unspent, and the reason generalises.** Two first
+  crossings were reserved at R11-D38's flat 119 each. Writing `skill_use` rows
+  cost six lines, because `sd_db.writes.record_skill_use` already took the
+  `timestamp` a nightly must supply. Reading a Codex transcript cost the 46
+  already priced against `bin/sd_ledger.py:143-188`, because a JSONL parse with
+  a damaged-line policy was built. A flat 119 charges for novelty; what costs
+  is an **unrepaired** boundary, and both of these had a repaired one waiting
+  on the other side. The 75 of post-report went unspent too: PR 8a's review
+  round found ten stale line citations, seven of its own making and three older
+  than the branch, and corrected every one of them in documentation for no net
+  `bin/` line.
+
+  **Two method corrections, each measured over every module that qualifies
+  rather than off one file.** Glue is **2.10** lines per function boundary for
+  a module with fewer than fifteen top-level definitions — all fourteen such
+  modules in `bin/`, from `sd_ledger` at 1.33 to `sd_research_checklinks` at
+  3.00 — and **3.70** for the eleven with fifteen or more, from `sd-handoff` at
+  2.85 to `sd-status` at 5.21. R11-D42 used a flat 2.9 taken from a single
+  527-line file. That the larger modules cost *more* per boundary, not less, is
+  why the split is by definition count and not by an average over all of
+  `bin/`. Two modules are excluded, both on a measured reason and neither on
+  assumption: `bin/sd-dashboard` at 10.14 carries a 57-line embedded `plist`
+  template at `:48-100`, and `bin/sd_research_review.py` at 12.17 a 59-line
+  `CHECKLIST` string at `:210-268`. A data blob between definitions is not glue
+  between them, and the test is that the gap is one literal — not that the
+  number looks large.
+
+  Headers over those same fourteen run **21** (`sd_research_checklinks.py`,
+  two definitions) to **86** (`sd_codex.py`, twelve), mean 52.4, against the
+  49–72 R11-D42 recorded; across all of `bin/` the top is 156
+  (`sd-skill-adopt`). A header states the module's policy, and its size tracks
+  how much policy there is rather than how much code follows it — which is why
+  no header below is taken from the mean. Each is taken from a named built file
+  whose obligations match the one being priced.
+
+  **Criterion 29 is priced at 573** — 422 of body, 119 of seam, 32 of
+  post-report — against the 836 R11-D42 carried for it, and the difference is
+  entirely the two corrections plus what PR 8a bought. The body is five spans:
+  `bin/sd_handoff_rows.py` at 120, new, holding the item resolver and the row
+  reader both hooks need, because a suffixless file cannot be imported and the
+  two cannot share code any other way; `bin/sd-handoff-prompt` at 162, new,
+  carrying `PreCompact` and `SessionEnd` in one file for the reason
+  `bin/sd-skill-use` carries two events in one file; `bin/sd-note` at 106, new,
+  the first caller `sd_db.add_note` has ever had in this pack;
+  `bin/sd-handoff-restore` at +32, for rows read before the
+  `if not path.is_file(): return 0` at `:448` that the criterion's own test
+  reaches first; and `bin/sd_install.py` at **+2**, which is what PR 8a bought
+  — the hook table went plural there, so two more events are two tuples and an
+  updated expectation in a test that answers to no cap.
+
+  **The one seam is the `PreCompact` and `SessionEnd` payload contract**, not
+  the note rows. Reading notes is priced as a caller: `add_note` and
+  `resolve_note` are built and the vocabulary is a SQL `CHECK`, which is the
+  same reasoning R11-D42 used to drop its GitHub seam. What is genuinely
+  uncrossed is a pair of events nothing here has registered, whose payloads
+  nothing here has read, and whose failure mode is a packet silently lost
+  rather than an error anybody sees.
+
+  Post-report discovery is **7.6%**, the mean of three observations rather than
+  two: R11-D38's 14.4% and 8.3%, and PR 8a's 0%. One round landing entirely in
+  documentation is thin evidence for a rate, which is why it is averaged in
+  rather than adopted. 16,399 plus 573 is 16,972; the cap is **17,000**, and
+  the 28 unclaimed is what rounding left.

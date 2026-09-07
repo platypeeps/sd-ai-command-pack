@@ -806,12 +806,14 @@ answer to files outside this repository.
 that runs the nightly, which is in neither `bin/` nor this repository —
 `.github/workflows/` holds two files and neither is scheduled.
 
-**Funded: 976, `BIN_CAP` 15,750 to 16,750 (R11-D42). Body delivered: 368
-against 663 reserved, in three commits.** `bin/sd-skill-use` came in at 243
-against 240; the installer's move to a plural hook table at +39 against +55;
-`bin/sd_codex.py` at 349 plus 19 for the verb, against 368. `bin/` stands at
-16,399. What is left of the criterion is the scheduler, which this repository
-cannot hold, and the OpenCode plugin, which waits on that surface being in
+**Funded: 976, `BIN_CAP` 15,750 to 16,750 (R11-D42). Body delivered: 650
+against 663 reserved, measured across the merge at `6b36e3ec`.**
+`bin/sd-skill-use` came in at 243 against 240; the installer's move to a
+plural hook table at +39 against +55; `bin/sd_codex.py` at 349 plus 19 for
+the verb, against 368. `bin/` went 15,749 to 16,399. Neither reserve was
+touched: 238 of seam and 75 of post-report went unspent, which is what
+R11-D43 re-derives from. What is left of the criterion is the scheduler,
+which this repository cannot hold, and the OpenCode plugin, which waits on that surface being in
 use.
 
 `skill_use` is not new. The table is declared at `sd_db/schema/001_initial.sql:126-133`
@@ -842,7 +844,12 @@ this criterion needs are new, and `tests/` answers to no line cap.
 `bin/sd-handoff-prompt` (new), `bin/sd-note` (new), `bin/sd_install.py` for the
 `PreCompact` and `SessionEnd` matchers, which 8a has already made plural.
 
-**Priced 836. Not funded by R11-D42; its own re-derivation precedes it.**
+**Priced 573 and funded by R11-D43, which raised `BIN_CAP` to 17,000 off a
+measured 16,399 base.** 422 of body, 119 of seam for the `PreCompact` and
+`SessionEnd` payload contract, 32 of post-report at 7.6%. Down from R11-D42's
+836: glue is 2.10 lines per boundary at this module size rather than a flat
+2.9, the note rows are priced as a caller of built writes rather than as a
+seam, and `bin/sd_install.py` costs +2 because 8a made the hook table plural.
 
 **This is a rewrite of where continuity comes from, not a wiring job.** Today
 `bin/sd-handoff-restore` injects a JSON packet that exists only if someone ran
