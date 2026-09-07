@@ -77,6 +77,7 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import sd_lib  # noqa: E402
+import sd_registry  # noqa: E402
 import sd_restore  # noqa: E402
 import sd_skill  # noqa: E402
 import sd_sweep  # noqa: E402
@@ -2772,6 +2773,21 @@ class Pair(argparse.Action):
         entries.append((bool(self.const), str(values)))
 
 
+def cmd_attribute(args: argparse.Namespace) -> int:
+    """`sd attribute` -- the write side of the trailer the review lane reads."""
+    root = sd_lib.repo_root()
+    if root is None:
+        raise Refusal("not inside a git repository")
+    registry, reason = sd_registry.read_or_report()
+    if reason and args.entry.strip() != sd_lib.HUMAN_AUTHOR:
+        raise Refusal(f"{reason}; an attribution names an entry the registry has")
+    sha, value, covered = sd_lib.attribute(root, args.commits, args.entry, registry)
+    print(f"{sha[:12]} attributes {len(covered)} commit(s) to {value}")
+    for target in covered:
+        print(f"  {target[:12]}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sd", description=__doc__.splitlines()[0])
     groups = parser.add_subparsers(dest="group", required=True)
@@ -2958,6 +2974,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="mark the restore reconciled, naming what was blocked and what is frozen")
     resumer.set_defaults(handler=sd_restore.resume)
 
+    attributer = groups.add_parser(
+        "attribute",
+        help="record who wrote commits that did not say, as one empty commit")
+    attributer.add_argument("commits", help="a commit, or a `<from>..<to>` range, on this branch")
+    attributer.add_argument(
+        "entry", help=f"a registry entry, or `{sd_lib.HUMAN_AUTHOR}` for the operator")
+    attributer.set_defaults(handler=cmd_attribute)
+
     return parser
 
 
@@ -2972,7 +2996,7 @@ def main(argv: list[str] | None = None) -> int:
     except Refusal as refusal:
         print(f"sd: {refusal}", file=sys.stderr)
         return 1
-    except sd_lib.ConfigError as error:
+    except (sd_lib.ConfigError, sd_lib.TrailerError) as error:
         print(f"sd: {error}", file=sys.stderr)
         return 1
     except sd_restore.RestoreRefusal as refusal:

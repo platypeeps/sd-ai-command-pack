@@ -18,6 +18,7 @@ import re
 import shlex
 import subprocess
 from dataclasses import dataclass, field
+from typing import Any
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
 LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
@@ -715,3 +716,146 @@ def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
         if vendor not in vendors:
             vendors.append(vendor)
     return tuple(vendors)
+
+
+def attribution_value(name: str, registry: Any) -> str:
+    """What a trailer says when it names `name`: `<entry>/<vendor>`, or `human`.
+
+    The inverse of the parse in `author_vendors`, so the two cannot drift, and
+    folding the vendor to lower case on the way out as well as on the way in,
+    so the line `git log` shows is the string the independence check compares.
+
+    Everything else refuses, because a value that does not survive the round
+    trip is not read as a weaker claim -- it is read as *no* claim.
+    `attribution` drops an `Attributes:` line that does not split into two
+    fields, a commit with no claim keeps its vendor out of the author set, and
+    the author's own vendor stays on the reviewer chain, open and in silence.
+    """
+    entry = name.strip()
+    provider = registry.providers.get(entry)
+    if entry == HUMAN_AUTHOR:
+        if provider is not None:
+            raise TrailerError(
+                f"{HUMAN_AUTHOR!r} is what a commit a person wrote says, so it is "
+                f"not a name a registry entry may take, and {registry.path} has "
+                f"one. Its trailer would read as the operator and hide its vendor."
+            )
+        return HUMAN_AUTHOR
+    if provider is None:
+        known = ", ".join(sorted(registry.providers)) or "nothing"
+        raise TrailerError(
+            f"no registry entry named {entry!r} in {registry.path}, which holds "
+            f"{known}. Name an entry the registry has, or {HUMAN_AUTHOR!r} bare: a "
+            f"trailer nothing resolves records no vendor, and a range with no "
+            f"vendor is one its own author may review."
+        )
+    vendor = provider.vendor.strip().lower()
+    value = f"{entry}/{vendor}"
+    if value.split() != [value] or "/" in entry or "/" in vendor or not vendor:
+        raise TrailerError(
+            f"entry {entry!r} carries vendor {provider.vendor!r} in {registry.path}, "
+            f"and {value!r} is no '<entry>/<vendor>' pair a trailer can carry: a "
+            f"space or a second slash makes the line unreadable, and an unreadable "
+            f"claim is dropped rather than questioned. Fix the registry."
+        )
+    return value
+
+
+def _own_trailer(root: pathlib.Path, sha: str) -> str:
+    """Its own `Authored-with:` value, or "" -- last paragraph, unindented,
+    `attribution`'s rule, so a commit that quotes a trailer stays repairable.
+    """
+    message = git_output(["log", "-1", "--format=%B", sha], root) or ""
+    for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
+        if line.rstrip().startswith(AUTHORED_TRAILER):
+            return line.rstrip()[len(AUTHORED_TRAILER) :].strip()
+    return ""
+
+
+def _on_this_branch(root: pathlib.Path, ref: str) -> str:
+    """`ref` as a full sha when it names one commit reachable from `HEAD`.
+
+    A claim about a commit off this branch is a line its review never reads:
+    written, reported as done, and dropped by `_in_range` just as quietly.
+    """
+    full = git_output(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], root)
+    if not full:
+        return ""
+    return full if git_output(["merge-base", "--is-ancestor", full, "HEAD"], root) is not None else ""
+
+
+def _covered(root: pathlib.Path, target: str) -> list[str]:
+    """The commits `target` names that still need an author, newest first.
+
+    Commits that already say are left alone rather than restated. After a
+    rebase -- the one case that loses an attribution, since neither integration
+    path rewrites a branch -- a range holds both the commits whose own trailer
+    survived and the one whose claim named a hash that is gone, and a range
+    form refusing that mixture could not repair it. A single commit that says
+    is refused instead: its own trailer outranks any later claim about it.
+    """
+    if ".." not in target:
+        full = _on_this_branch(root, target)
+        if not full:
+            raise TrailerError(f"{target!r} names no commit reachable from HEAD")
+        if len((git_output(["rev-list", "--parents", "-n", "1", full], root) or "").split()) > 2:
+            raise TrailerError(
+                f"{full[:12]} is a merge, which wrote nothing to answer for; the "
+                f"review skips merges and would skip this claim with them.")
+        said = _own_trailer(root, full)
+        if said:
+            raise TrailerError(
+                f"{full[:12]} already says {AUTHORED_TRAILER} {said!r}, which "
+                f"outranks any later {ATTRIBUTES_TRAILER} claim about it."
+            )
+        return [full]
+    base, _, head = target.partition("..")
+    if not base or not head or ".." in head or not _on_this_branch(root, head):
+        raise TrailerError(f"{target!r} is no `<from>..<to>` range ending on this branch")
+    commits = [sha for sha, _ in commit_messages(root, base, head)]
+    if not commits:
+        raise TrailerError(
+            f"no commit in {target} carries work to attribute: a merge introduces "
+            f"no change of its own, and what it brought in answers for itself."
+        )
+    covered = [sha for sha in commits if not _own_trailer(root, sha)]
+    if not covered:
+        raise TrailerError(f"every commit in {target} already names its author")
+    return covered
+
+
+def attribute(
+    root: pathlib.Path, target: str, name: str, registry: Any
+) -> tuple[str, str, list[str]]:
+    """Record `name` as the author of `target`, as one empty commit on `HEAD`.
+
+    `target` is one commit or a `<from>..<to>` range. What lands is a single
+    empty commit carrying an `Attributes:` line per repaired commit and its own
+    `Authored-with: human`, because the operator made it and a repair that
+    needs repairing is not one (C-40). Returns the new sha, the value written
+    and the commits covered.
+
+    A commit rather than a note: a notes ref is one mutable ref a repository
+    shares, and two clones attributing different commits of one branch diverge
+    on it. A commit is branch-local, pushes with the branch, and squashes away
+    at the merge with everything else.
+    """
+    value = attribution_value(name, registry)
+    covered = _covered(root, target)
+    trailers = [f"{ATTRIBUTES_TRAILER} {sha} {value}" for sha in covered]
+    trailers.append(f"{AUTHORED_TRAILER} {HUMAN_AUTHOR}")
+    written = subprocess.run(  # fixed argv, no shell
+        ["git", "commit", "--allow-empty", "--quiet",
+         "-m", f"chore(attribution): {len(covered)} commit(s) written with {value}",
+         "-m", "Recorded by the operator, after the fact, for commits that predate "
+               "the trailer or lost it to a rewrite.",
+         "-m", "\n".join(trailers)],
+        cwd=str(root), capture_output=True, text=True,
+        timeout=GIT_TIMEOUT_SECONDS, check=False,
+    )
+    if written.returncode != 0:
+        raise TrailerError(
+            f"git refused the attributing commit: "
+            f"{(written.stderr or written.stdout).strip() or 'no reason given'}"
+        )
+    return git_output(["rev-parse", "HEAD"], root) or "", value, covered
