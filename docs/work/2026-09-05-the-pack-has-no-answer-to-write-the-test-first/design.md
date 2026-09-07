@@ -2,8 +2,8 @@
 
 ## Approach
 
-One new folded skill, `skills/sd-tdd/SKILL.md`, and a `## Lineage` section
-added to `skills/sd-typed-holes/SKILL.md`. No Python, no `bin/` tool, no test
+One new folded skill, `contrib/sd-tdd/SKILL.md`, and a `## Lineage` section
+added to `contrib/sd-typed-holes/SKILL.md`. No Python, no `bin/` tool, no test
 changes beyond what the frontmatter suite already enumerates from disk, and no
 edit to any other skill.
 

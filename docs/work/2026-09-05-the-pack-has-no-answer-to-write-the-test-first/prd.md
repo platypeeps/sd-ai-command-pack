@@ -1,6 +1,5 @@
 ---
 title: the pack has no answer to "write the test first", and one skill contradicts it
-status: in_progress
 branch: feat/sd-tdd-test-first
 created: 2026-09-05
 ---
@@ -154,13 +153,13 @@ the content checks.
       git diff --no-renames --name-status origin/main...HEAD -- skills/ tests/ \
         | awk '$1=="D"'
       ```
-      Expected addition, exactly: `skills/sd-tdd/SKILL.md`.
+      Expected addition, exactly: `contrib/sd-tdd/SKILL.md`.
       `--no-renames` is load-bearing: without it git reports a sufficiently
       similar delete/add pair as `R`, which neither `A` nor `D` matches
 - [ ] **exactly two skill files change**, which the addition check alone does
       not show. The scope cut means `sd-debug` must be untouched; run exactly
-      this and it prints two paths, `skills/sd-tdd/SKILL.md` and
-      `skills/sd-typed-holes/SKILL.md`, and nothing else:
+      this and it prints two paths, `contrib/sd-tdd/SKILL.md` and
+      `contrib/sd-typed-holes/SKILL.md`, and nothing else:
       ```
       git diff --name-only origin/main...HEAD -- skills/
       ```
@@ -171,7 +170,7 @@ the content checks.
       ```
       for h in 'When to use' 'Arguments' 'The gate' 'Workflow' \
                'Red flags' 'Safety rules' 'Final report'; do
-        grep -cE -- "^## ${h}$" skills/sd-tdd/SKILL.md
+        grep -cE -- "^## ${h}$" contrib/sd-tdd/SKILL.md
       done
       ```
 - [ ] requirements 1 through 5 and 8 are each pinned to a phrase in the file.
@@ -180,7 +179,7 @@ the content checks.
       not a content defect. Run exactly this; every line prints at least `1`:
       ```
       flat() { tr '\n' ' ' | tr -s ' '; }
-      T=$(flat < skills/sd-tdd/SKILL.md)
+      T=$(flat < contrib/sd-tdd/SKILL.md)
       for s in 'seen to fail' 'passes on its first run' \
                'the failure is the expected one' \
                'never deletes' 'waits for consent' \
@@ -193,13 +192,13 @@ the content checks.
       done
       ```
 - [ ] requirement 8's section exists as a heading, not only as prose:
-      `grep -cE -- '^## What this skill does not settle$' skills/sd-tdd/SKILL.md`
+      `grep -cE -- '^## What this skill does not settle$' contrib/sd-tdd/SKILL.md`
       prints `1`
 - [ ] the seams of requirement 6 are named in the skill itself; run exactly
       this and all four lines print at least `1`:
       ```
       for s in sd-debug sd-check sd-review sd-typed-holes; do
-        grep -cF -- "$s" skills/sd-tdd/SKILL.md
+        grep -cF -- "$s" contrib/sd-tdd/SKILL.md
       done
       ```
 - [ ] requirement 7's lineage is present and actually cites licence and
@@ -207,20 +206,20 @@ the content checks.
       tokens that wrap; the heading prints `1` and all three needles print at
       least `1`:
       ```
-      grep -cE -- '^## Lineage$' skills/sd-tdd/SKILL.md
+      grep -cE -- '^## Lineage$' contrib/sd-tdd/SKILL.md
       flat() { tr '\n' ' ' | tr -s ' '; }
-      L=$(flat < skills/sd-tdd/SKILL.md)
+      L=$(flat < contrib/sd-tdd/SKILL.md)
       for s in 'obra/superpowers' 'MIT' 'b36e082'; do
         printf '%s' "$L" | grep -oF -- "$s" | wc -l
       done
       ```
 - [ ] requirement 9's lineage exists and names its own upstream, that
       upstream's licence status, and the revision:
-      `grep -cE -- '^## Lineage$' skills/sd-typed-holes/SKILL.md` prints `1`,
+      `grep -cE -- '^## Lineage$' contrib/sd-typed-holes/SKILL.md` prints `1`,
       and run exactly this, all three printing at least `1`:
       ```
       flat() { tr '\n' ' ' | tr -s ' '; }
-      H=$(flat < skills/sd-typed-holes/SKILL.md)
+      H=$(flat < contrib/sd-typed-holes/SKILL.md)
       for s in 'Shearerbeard/claude-skills' 'c79fe3a' 'no licence file'; do
         printf '%s' "$H" | grep -oiF -- "$s" | wc -l
       done
@@ -287,10 +286,10 @@ skill standing behind it**.
   than permissive. Upstream is a *two-layer* practice whose layer 2 — golden
   tests written from the spec "so they fail on arrival" — this pack did not
   carry over.
-- `skills/sd-typed-holes/SKILL.md` — reached this pack in `56ba92eb`
+- `contrib/sd-typed-holes/SKILL.md` — reached this pack in `56ba92eb`
   (2026-08-31, #640) from `se-ai-command-pack`, where it was written as
   `se-typed-holes` in `9de85c3` (2026-08-27).
-- `docs/work/2026-09-04-two-unwritten-disciplines-and-one-contradicted-rule/prd.md`
+- `docs/work/archive/2026-09/2026-09-04-two-unwritten-disciplines-and-one-contradicted-rule/prd.md`
   — the immediately prior adoption from the same upstream, and the source of
   the acceptance-criteria shapes reused above: flattened fixed-string greps,
   `--no-renames` path identity, and the budget pathspec that includes the file
