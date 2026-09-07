@@ -107,7 +107,7 @@ directory implements it. The lane is `docs/planning-adversarial-review-codex.md`
 referenced from `AGENTS.md` at `:11-18`, from
 `docs/spec/backend/manifest-and-filesystem.md:1519` and from
 `skills/sd-research-repo/references/conventions.md:176` — and `AGENTS.md`
-is a file criterion 4 names outright (`prd.md:1223-1224`). The same three
+is a file criterion 4 names outright (`prd.md:1222-1223`). The same three
 files carry criterion 20's fourth statement of the planning review rule.
 The grep this criterion turns on would have come back dirty. Criterion 8 asks that the concern-ledger and
 cross-artifact-sweep obligations become conditional on a `sensitive` path
@@ -125,7 +125,7 @@ change at each size, and the modes and how they resolve. `sd-help` names
 it. The `CLAUDE.local.md` block the installer writes links to it, and
 carries five keys: `mode`, `check`, `test`, `lint` and `reviewers`, which
 is the set criterion 1's test compares against what `WORKFLOW.md`
-documents (`prd.md:1211-1215`). An earlier draft said "the keys the pack
+documents (`prd.md:1210-1214`). An earlier draft said "the keys the pack
 already reads and no others — `mode:` plus the `CHECK_NAMES` entrypoints",
 a four-key block: `grep -n reviewers bin/sd_lib.py` returns nothing, so
 "already reads" excludes the consent key by construction and criterion 1's
@@ -185,9 +185,9 @@ PR 6's, where the registry reader and the fixture harness are.
 ## PR 2 — requirement 13's confirmed cuts and bugs
 
 **Touches:** enumerated from **requirement 13's own removal list**
-(`prd.md:1117-1165`), which gives a file and a line range for every cut, and
+(`prd.md:1116-1164`), which gives a file and a line range for every cut, and
 then widened by `git grep -l` over criterion 31's symbol list
-(`prd.md:1634-1638`) to catch the readers requirement 13 does not name. An
+(`prd.md:1633-1637`) to catch the readers requirement 13 does not name. An
 earlier draft claimed the second derivation alone and did not run it: seven
 of the nineteen symbols — `parked`, `archived`, `--stash-ref`, `--push`,
 `--park`, `authors` and `Standing rule` — had no enumeration at all, and
@@ -240,7 +240,7 @@ for the reason Verification gives below.
 **`authors` is two different things and criterion 31's grep cannot tell them
 apart.** Requirement 13 removes the `authors` *policy key* at the five sites
 above. Criterion 6 **introduces** `authors` as a row field —
-`prd.md:1292`, "the row's `authors` naming both" — and PR 6 lands it in
+`prd.md:1291`, "the row's `authors` naming both" — and PR 6 lands it in
 `bin/sd_lib.py`, inside the governed tree, after this pull request. A bare
 governed-tree grep for `authors` therefore passes here and fails again at
 PR 6's merge, breaking criterion 30, which this page calls a precondition of
@@ -491,11 +491,11 @@ repositories the operator pays for personally, so `WORKFLOW.md` is in the
 Touches list above; criterion 12 needs `README.md`, which is now in this pull request's Touches
 above. Two corrections to an earlier draft. The writes-nothing claim is
 `README.md:34`, "**What it writes in a repository:** nothing, ever." —
-quoted at `prd.md:874` — and not line 21, which is a claim about rendered
+quoted at `prd.md:873` — and not line 21, which is a claim about rendered
 copies; an implementer following the old citation would have edited the
 wrong paragraph and left "nothing, ever" unscoped. And criterion 12 has a
 second half that appeared in no pull request at all: `README.md` must also
-**list the skills that write tracked files** (`prd.md:1409-1410`). Both
+**list the skills that write tracked files** (`prd.md:1408-1409`). Both
 halves land here. C-95 recorded this criterion as addressed; it was not,
 and the rewrite documented the split instead of closing it.
 
@@ -592,7 +592,7 @@ reader, and the four files criterion 6 and the installer step require that
 an earlier draft omitted when C-90 moved the criterion here without its
 scope: **`WORKFLOW.md`**, because criterion 6's *first* clause is that the provider
 registry format "is documented in `WORKFLOW.md` with the role vocabulary
-`author` and `reviewer`" (`prd.md:1238-1240`) — a documentation obligation an
+`author` and `reviewer`" (`prd.md:1237-1239`) — a documentation obligation an
 earlier rebuild skipped while deriving this list from the criterion's runtime
 clauses, and the reason PR 1 lands first; `bin/sd-review`, whose `BACKENDS`
 table is at **`:193-248`** with `DEFAULT_POLICY` at `:260` and its `tiers`
@@ -681,7 +681,7 @@ being discovered again by whoever runs `make check` next.
 under `docs/work/` outside the archive, and — for criterion 13, which the
 closure table filed here while this list reached none of it —
 `bin/sd_lib.py`, `bin/sd-status` and `bin/sd-docs-lint`, which derive an
-item's status from its row (`prd.md:1411-1412`) — and, in `bin/sd-docs-lint`
+item's status from its row (`prd.md:1410-1411`) — and, in `bin/sd-docs-lint`
 alone, `item_directories`, `check_shape` and **`check_ready`**, for rule 1's
 archive predicate below and for rule 2, which stops matching anything when
 the `status:` lines go — `check_ready` returns early on
@@ -695,9 +695,9 @@ scan, which lands here because this pull request creates
 the tree that does not resolve until it does; `skills/sd-ship/` and
 `dashboard/`, for `sd-ship --deliver`, the hand-merge reconciliation, the
 notes on the squash commit and `deliver` on the item screen
-(`prd.md:1450-1464`) and the three kill-and-reconcile tests
-(`prd.md:1485-1494`); and `bin/sd_install.py`, for the `sd_db` step
-(`prd.md:1538-1544`).
+(`prd.md:1449-1463`) and the three kill-and-reconcile tests
+(`prd.md:1484-1493`); and `bin/sd_install.py`, for the `sd_db` step
+(`prd.md:1537-1543`).
 
 B's one sitting for `docs/work`: freeze, import once more, verify, snapshot,
 then remove every item's `status:` line outside the archive in one commit.
@@ -707,7 +707,7 @@ draft of this page named nowhere.** All three come from item B's criterion 7,
 enumerated clause by clause in B's round five, and each is a pack file no
 `system` pull request can reach.
 
-*The tracked marker.* `prd.md:585` and `prd.md:2576` both say the retire
+*The tracked marker.* `prd.md:584` and `prd.md:2575` both say the retire
 commit adds `docs/work/.status-source`, one line, `row`. This page named
 `status_source` — the column — and never the file. It is what a checkout
 without a database reads, so it lands in the same commit as the removal, not
@@ -716,7 +716,7 @@ after it.
 *The lint's sign changes outside the archive, and rule 1 gains a signature to
 tell the two apart.* `bin/sd-docs-lint` rule 1 fails today when a `status:`
 line is **missing** (`bin/sd-docs-lint:121-123`,
-`if status not in ITEM_STATUSES`). `B/prd.md:1252-1253` requires it to fail
+`if status not in ITEM_STATUSES`). `B/prd.md:1251-1252` requires it to fail
 when one is **present** in a `prd.md` under `docs/work/` outside the archive,
 asserted with one seeded. **Both signs must hold at once**, and an earlier
 draft of this paragraph said they could not: rule 1 iterates
@@ -737,7 +737,7 @@ still lands in the commit that removes the lines, since the window between
 two merges is what the ordering exists to avoid.
 
 *`sd-ship` writes `shipped_at` and a `Closes:` trailer on a merge.*
-`B/prd.md:911-913` names three writers of `shipped_at` and gives the merge to
+`B/prd.md:910-912` names three writers of `shipped_at` and gives the merge to
 `sd-ship`; B's clause 7.18 asserts a cancel writes `done` with a `cancelled`
 note and that the next `sd-ship` merge carries `Closes:` with no `Delivers:`
 and no extra pull request; clause 7.21 asserts a merge confirmed through the
@@ -770,12 +770,12 @@ kill-and-rerun points (7.8), and `sd-ship`'s `Closes:` and `shipped_at` on a
 merge (7.18, 7.21, and B's clause 15.25's `shipped_at` half). B records these
 as hand-offs 11 and 12 with the note that this plan did not schedule them;
 it does now. Criterion 13 is recorded as waiting
-**before the second slice**, not before this one: `prd.md:1200-1201` says
+**before the second slice**, not before this one: `prd.md:1199-1200` says
 "Before the second slice, criteria 13 and 32 are recorded as waiting" — and
 "before the second slice" means before slice 2 opens, not before every pull
 request inside it. This pull request is **in** slice 2, as its heading says:
-this item's landing order defers to B's (`prd.md:1184-1188`), and B's slice 2
-at `B/prd.md:1145-1148` is where "`docs/work` and the register retire … in
+this item's landing order defers to B's (`prd.md:1183-1187`), and B's slice 2
+at `B/prd.md:1144-1147` is where "`docs/work` and the register retire … in
 the run that lands their writers". An earlier draft moved the boundary a
 slice later and said the landing order said so "in those words"; a later one
 argued the point by calling this the third slice, which contradicted the
@@ -786,20 +786,20 @@ the same sentence, and neither this pull request nor PR 6 noted it.
 
 **Touches:** `bin/sd`, the `PreToolUse`, `UserPromptSubmit`, `PreCompact`,
 `SessionEnd` and `SessionStart` hooks — **five hooks from two criteria, not
-five from one requirement**. Requirement 12 (`prd.md:989-1003`) names three:
+five from one requirement**. Requirement 12 (`prd.md:988-1002`) names three:
 `PreCompact` and `SessionEnd` prompt the packet, `SessionStart` loads the
-item's open rows. The other two come from criterion 26 (`prd.md:1601-1603`),
+item's open rows. The other two come from criterion 26 (`prd.md:1600-1602`),
 "The `PreToolUse` and `UserPromptSubmit` hooks write `skill_use` rows". Both
 criteria are this pull request's, so the file set was right and the
 justification was not: an earlier draft called all five "requirement 12
-names" and cited `prd.md:998-1000`, three lines carrying three of them; the nightly parse of
+names" and cited `prd.md:997-999`, three lines carrying three of them; the nightly parse of
 `~/.codex/sessions`; `skills/sd-suggest/`; `skills/sd-propose-skills/`;
 `skills/paths.json`; `dashboard/`; `bin/sd-handoff` and
 `bin/sd-handoff-restore`, which are the handoff path named as files; and
 the writing repository's manifest, from which criterion 28 removes the
 `skill-proposal` kind, plus **`sd shadow sync` (new)**, the surface
 criterion 28's shadow rows are asserted against — neither of which any
-Touches list named. `sd shadow sync` does not exist: `prd.md:960` introduces
+Touches list named. `sd shadow sync` does not exist: `prd.md:959` introduces
 it ("They are shadowed, not imported: `sd shadow sync` keeps their state"),
 criterion 28 says only "appear as `shadow` rows after a sync", and no `shadow
 sync` string appears anywhere in the pack. An earlier draft listed it as an
@@ -811,7 +811,7 @@ found both items building `sd shadow sync` as new greenfield work in two
 repositories, neither naming the other. Settled 2026-09-05 with B's wider
 `sd` verb question: the verbs are the pack's, so this pull request keeps the
 command and B's PR 3 keeps only the `watermark` state kind it resumes from
-(`B/prd.md:212`) and the cron entry that invokes it. B records it as that
+(`B/prd.md:211`) and the cron entry that invokes it. B records it as that
 item's hand-off 10, and B's shadow migration cannot run end to end until
 this pull request merges.
 
@@ -941,7 +941,7 @@ cases plus a collaborator added and removed. So PRs 5 through 8 sit behind
 that harness whatever else is true.
 
 **The `sd_db` installer step is this item's criterion 13, and it rides with
-PR 7.** B's settled open question 3 (`B/prd.md:1666-1671`) puts the pack's
+PR 7.** B's settled open question 3 (`B/prd.md:1665-1670`) puts the pack's
 installer provisioning `sd_db` into the pack's virtualenv from B's checkout,
 as a built copy at a tag and never editable, and says "Item A's criterion 13
 carries it". Without it B's library lands and nothing installs it, and the
@@ -949,12 +949,12 @@ first `sd today` after B's PR 2 fails on import.
 
 **Two earlier drafts got this wrong in two different ways at once.** They
 called it "item B's criterion 13", which is a dashboard criterion in B's
-slice 4 (`B/prd.md:1420-1430`: "Status change, assign, promote, demote and
+slice 4 (`B/prd.md:1419-1429`: "Status change, assign, promote, demote and
 `merge_policy` each round-trip from the dashboard to a row") and has nothing
 to do with an installer. And they filed the step on two pull requests: this
 section and PR 6's Verification put it on PR 6, while PR 7's Touches and the
 closure table put it on PR 7. The clause is A's own criterion 13, at
-`prd.md:1538-1544`, whose files (`bin/sd_install.py`) are in PR 7's Touches,
+`prd.md:1537-1543`, whose files (`bin/sd_install.py`) are in PR 7's Touches,
 so PR 7 carries it and PR 6 does not. B's dependency is on the merge, not on
 which of the two pull requests holds it, and PR 7 lands after PR 6.
 
@@ -1030,7 +1030,7 @@ recounted.
 | 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4 |
 | 24, 25 — `paths.json`, the union with active trials, `sd skill try` and its row | PR 5 |
 | 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | PR 6, which also carries criterion 5's vendor clause; with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
-| 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1538-1544`, whose files are in its Touches and in no other pull request's claim) |
+| 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1537-1543`, whose files are in its Touches and in no other pull request's claim) |
 | 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` clause behind B's slice 4 |
 | 7 — the seven `mezmo-world-simulator` passes scored | see below |
 

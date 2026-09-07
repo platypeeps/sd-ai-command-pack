@@ -36,7 +36,7 @@ that annotated them had already returned a `delete` verdict for both, and
 keeping an unread 4,859-line registry to preserve a record it shares with the
 triage table is paying storage for a second copy. What they were is recorded
 above and, in more detail, in the triage table under step 7 of
-`docs/work/2026-08-29-artifacts-as-product/implement.md`. Their contents remain
+`docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`. Their contents remain
 in git history.
 
 `docs/FLEET_ROLLOUT.md`, the procedure that read `consumers.json`, was deleted

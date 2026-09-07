@@ -6,6 +6,7 @@ import contextlib
 import importlib.util
 import os
 import pathlib
+import subprocess
 import tempfile
 import unittest
 from types import ModuleType
@@ -73,6 +74,10 @@ class LintFixture(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.repo = pathlib.Path(self._tmp.name)
+        # A git repository, because rule 7 enumerates tracked markdown rather
+        # than walking the tree: an untracked scratch file is not a document
+        # this repository publishes, and the rule declines to read one.
+        self.git("init", "-q")
         self.work = self.repo / "docs" / "work"
         self.spec = self.repo / "docs" / "spec"
         self.write_item("2026-08-29-a-workable-item", GOOD_PRD)
@@ -96,7 +101,15 @@ class LintFixture(unittest.TestCase):
             body = f"# {area}\n\n{links}\n"
         (directory / "index.md").write_text(body, encoding="utf-8")
 
+    def git(self, *args: str) -> None:
+        subprocess.run(
+            ["git", "-C", str(self.repo), *args], check=True, capture_output=True
+        )
+
     def run_lint(self, pr_body: str | None = None) -> lint.Report:
+        # Staged, not committed: `ls-files` reads the index, and every test
+        # here writes its fixture immediately before asking for a verdict.
+        self.git("add", "-A")
         return lint.run(self.repo, "docs/work", "docs/spec", "docs/decisions", pr_body)
 
     def assert_clean(self) -> None:
@@ -455,6 +468,72 @@ class Rule6CitationTests(LintFixture):
         lint.write_citation_manifest(item, self.work)
         recorded = (item / lint.CITATION_MANIFEST).read_text(encoding="utf-8").split("\t")
         self.assertNotEqual(recorded[4].strip(), "")
+
+
+class Rule7WorkReferenceTests(LintFixture):
+    """A `docs/work/` path a document names has to resolve.
+
+    No deletion is needed to break one. This repository's own case is a move:
+    `2026-08-29-artifacts-as-product` went into the archive after fourteen
+    tracked lines had already linked to it where it used to be, and until this
+    rule nothing said the links had stopped resolving.
+    """
+
+    def name_it(self, reference: str, page: str = "NOTES.md") -> None:
+        (self.repo / page).write_text(
+            f"# notes\n\nThe shape is described in `{reference}`.\n", encoding="utf-8"
+        )
+
+    def test_red_a_page_naming_an_item_directory_that_is_not_there(self) -> None:
+        self.name_it("docs/work/2026-08-29-an-item-that-was-never-created/prd.md")
+        joined = "\n".join(self.assert_fails("names nothing in the checkout"))
+        self.assertIn("NOTES.md", joined)
+        self.assertIn("2026-08-29-an-item-that-was-never-created/prd.md", joined)
+
+    def test_green_a_metavariable_is_a_pattern_and_not_a_path(self) -> None:
+        self.name_it("docs/work/<YYYY-MM-DD>-<slug>/prd.md")
+        self.assert_clean()
+
+    def test_green_a_reference_that_resolves(self) -> None:
+        self.name_it("docs/work/2026-08-29-a-workable-item/prd.md")
+        self.assert_clean()
+
+    def test_the_archive_is_read_past(self) -> None:
+        """Its items are records, and its own links point inside itself."""
+        self.write_item("2026-08-29-an-archived-item", GOOD_PRD, month="2026-08")
+        archived = self.work / "archive" / "2026-08" / "2026-08-29-an-archived-item"
+        (archived / "design.md").write_text(
+            "# design\n\nSee `docs/work/2026-01-01-long-gone/prd.md`.\n", encoding="utf-8"
+        )
+        self.assert_clean()
+
+    def test_the_changelog_is_read_past(self) -> None:
+        """It names paths as they were, which is where a stale one is correct."""
+        self.name_it("docs/work/2026-01-01-long-gone/prd.md", page="CHANGELOG.md")
+        self.assert_clean()
+
+    def test_an_untracked_page_is_not_a_document_this_repository_publishes(self) -> None:
+        self.assert_clean()
+        self.name_it("docs/work/2026-01-01-long-gone/prd.md")
+        # No `git add` here, so `ls-files` does not see the page and the rule
+        # does not read it. Deliberate: a scratch file beside a checkout is not
+        # something the repository says.
+        report = lint.run(self.repo, "docs/work", "docs/spec", "docs/decisions", None)
+        self.assertEqual(report.failures, [])
+
+    def test_a_directory_git_cannot_enumerate_fails_rather_than_passes(self) -> None:
+        """The pass-on-nothing failure this whole rule set exists to close.
+
+        `ls-files` outside a repository answers nothing, and a rule that reads
+        nothing has checked nothing. Reporting that as clean is the shape of
+        every silent fail-open, so the rule says so instead.
+        """
+        with tempfile.TemporaryDirectory() as scratch:
+            outside = pathlib.Path(scratch)
+            (outside / "docs" / "work").mkdir(parents=True)
+            report = lint.run(outside, "docs/work", "docs/spec", "docs/decisions", None)
+        joined = "\n".join(report.failures)
+        self.assertIn("rule 7 read nothing", joined)
 
 
 if __name__ == "__main__":

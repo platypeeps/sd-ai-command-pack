@@ -88,8 +88,11 @@ def item_directories(work_root: pathlib.Path) -> list[pathlib.Path]:
     return sorted(found)
 
 
-def check_shape(work_root: pathlib.Path, report: Report) -> None:
-    """Rule 1."""
+def check_shape(
+    work_root: pathlib.Path, report: Report, source: str = sd_lib.FROM_FILE
+) -> None:
+    """Rule 1. `source` is where an *active* item's status comes from."""
+    archived_status_is_authoritative = source == sd_lib.FROM_FILE
     archive = work_root / "archive"
     if archive.is_dir():
         for month in sorted(archive.iterdir()):
@@ -123,9 +126,20 @@ def check_shape(work_root: pathlib.Path, report: Report) -> None:
             continue
         if not fields.get("title"):
             report.fail(str(prd), "frontmatter needs a non-empty title")
+        # The sign inverts outside the archive and holds inside it. Once the
+        # marker says `row`, an active item's status lives in the database
+        # and a `status:` line left in the file is a second answer that will
+        # drift. The archive is the opposite: its 491 files are records of
+        # what was, they keep their lines, and a naive inversion fails on
+        # every one of them.
         status = fields.get("status", "")
-        if status not in ITEM_STATUSES:
-            report.fail(str(prd), f"status {status!r} is not one of {', '.join(ITEM_STATUSES)}")
+        if archived_status_is_authoritative or sd_lib.ARCHIVE_DIR in item.parts:
+            if status not in ITEM_STATUSES:
+                report.fail(
+                    str(prd), f"status {status!r} is not one of {', '.join(ITEM_STATUSES)}"
+                )
+        elif "status" in fields:
+            report.fail(str(prd), "the row is the status; prd.md carries no status: line")
         created = fields.get("created", "")
         if not DATE_RE.match(created):
             report.fail(str(prd), f"created {created!r} is not a YYYY-MM-DD date")
@@ -441,6 +455,56 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
     )
 
 
+# A metavariable makes a token a pattern rather than a path. Skipping on the
+# metavariable itself, and not on a list of known template strings, is what
+# keeps the escape a property of the rule: a new template invents no new
+# exception, and a real path can never contain one.
+METAVARIABLE_RE = re.compile(r"YYYY|MM|DD|<")
+
+
+def check_work_references(repo: pathlib.Path, work_dir: str, report: Report) -> None:
+    """Rule 7. A `docs/work/` path a document names has to resolve.
+
+    No deletion is needed for one of these to break: a rename, a slug typed
+    from memory, an item that was never created. Nothing in this repository
+    said so before this rule.
+
+    The archive and `CHANGELOG.md` are read past. The archive's items are
+    records of what was and its own links point inside itself; the changelog
+    names paths as they were at the time, which is the one place a reference
+    that no longer resolves is still correct.
+    """
+    tracked = sd_lib.git_output(["ls-files", "-z", "--", "*.md"], repo)
+    if tracked is None:
+        # Not a skip. An unanswerable enumeration checks nothing, and a rule
+        # that reports a pass on nothing is the failure mode this whole item
+        # exists to close.
+        report.fail(str(repo), "git could not list tracked markdown, so rule 7 read nothing")
+        return
+    reference_re = re.compile(
+        rf"(?<![\w/.-]){re.escape(work_dir)}/(?P<path>[A-Za-z0-9_./<>-]*[A-Za-z0-9_/<>-])"
+    )
+    archive = f"{work_dir}/{sd_lib.ARCHIVE_DIR}/"
+    files = seen = 0
+    for name in tracked.split("\0"):
+        if not name or name.startswith(archive) or name.endswith("CHANGELOG.md"):
+            continue
+        try:
+            text = (repo / name).read_text(encoding="utf-8")
+        except OSError as error:
+            report.fail(name, f"tracked, but cannot be read: {error}")
+            continue
+        files += 1
+        for match in reference_re.finditer(text):
+            reference = match.group(0)
+            if METAVARIABLE_RE.search(reference):
+                continue
+            seen += 1
+            if not (repo / reference).exists():
+                report.fail(name, f"{reference} names nothing in the checkout")
+    report.note(f"rule 7 work references: read {seen} reference(s) across {files} file(s)")
+
+
 def run(
     repo: pathlib.Path,
     work_dir: str,
@@ -455,9 +519,9 @@ def run(
         report.fail(str(work_root), "the work directory does not exist")
         return report
 
-    check_shape(work_root, report)
     statuses = sd_lib.Statuses.of(repo, work_dir)
     try:
+        check_shape(work_root, report, statuses.source)
         check_ready(work_root, report, statuses)
     finally:
         statuses.close()
@@ -466,6 +530,7 @@ def run(
     check_spec_index(repo / spec_dir, report)
     check_pr_link(repo, work_root, pr_body, report)
     check_citations(work_root, report)
+    check_work_references(repo, work_dir, report)
     return report
 
 

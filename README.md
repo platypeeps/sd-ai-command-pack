@@ -227,7 +227,7 @@ macOS CI job actually reports — that, not a promise, is what ends it.
 ### Where the work happens
 
 This repository dogfoods its own artifacts. The rebuild is designed at
-`docs/work/2026-08-29-artifacts-as-product/`, and every step of it lands as one
+`docs/work/archive/2026-09/2026-08-29-artifacts-as-product/`, and every step of it lands as one
 pull request that deletes what it replaces.
 
 ## License

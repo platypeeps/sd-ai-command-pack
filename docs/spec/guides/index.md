@@ -15,7 +15,7 @@
 > The text below is unedited. It is the record of what that machinery
 > specified, not guidance for the repository as it stands. The triage that
 > produced this notice is recorded under step 7 in
-> `docs/work/2026-08-29-artifacts-as-product/implement.md`.
+> `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
 
 > **Purpose**: Expand your thinking to catch things you might not have considered.
 

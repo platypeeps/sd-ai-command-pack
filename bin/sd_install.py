@@ -450,23 +450,11 @@ def git_context(checkout: Path) -> dict:
     command that cares whether the checkout is clean and on main, and it checks
     at the moment it matters rather than trusting a field written earlier.
     """
-
-    def git(*args: str) -> str:
-        try:
-            done = subprocess.run(  # nosec B603 - fixed argv, no shell
-                ["git", "-C", str(checkout), *args],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except OSError:
-            return ""
-        return done.stdout.strip() if done.returncode == 0 else ""
-
+    git = sibling("sd_lib").git_output
     return {
-        "commit": git("rev-parse", "HEAD"),
-        "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
-        "dirty": bool(git("status", "--porcelain")),
+        "commit": git(["rev-parse", "HEAD"], checkout) or "",
+        "branch": git(["rev-parse", "--abbrev-ref", "HEAD"], checkout) or "",
+        "dirty": bool(git(["status", "--porcelain"], checkout)),
     }
 
 
@@ -660,6 +648,25 @@ def remove_hook(settings: Path, command: str, *, dry_run: bool = False) -> bool:
 # ------------------------------------------------------------ global excludes
 
 
+def configured_excludes() -> str | None:
+    """`core.excludesFile` from the global config; `None` when git cannot answer.
+
+    `""` says nothing is set, and invites writing the config -- `--get` exits 1
+    on an unset key, so a non-zero exit is that answer, not a failure. `None`
+    says a machine with no usable git, whose global config we may not guess at.
+    """
+    try:
+        done = subprocess.run(  # nosec B603 - fixed argv, no shell
+            ["git", "config", "--global", "--get", "core.excludesFile"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
 def excludes_file(
     home: Path, environ: dict[str, str], *, sandboxed: bool = False
 ) -> Path:
@@ -679,19 +686,9 @@ def excludes_file(
     """
     if sandboxed:
         return config_home(home, environ) / "git" / "ignore"
-    try:
-        done = subprocess.run(  # nosec B603 - fixed argv, no shell
-            ["git", "config", "--global", "--get", "core.excludesFile"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        done = None
-    if done is not None and done.returncode == 0:
-        configured = done.stdout.strip()
-        if configured:
-            return Path(os.path.expanduser(configured))
+    configured = configured_excludes()
+    if configured:
+        return Path(os.path.expanduser(configured))
     return config_home(home, environ) / "git" / "ignore"
 
 
@@ -727,16 +724,7 @@ def set_excludes_config(
     """
     if sandboxed:
         return
-    try:
-        done = subprocess.run(  # nosec B603 - fixed argv, no shell
-            ["git", "config", "--global", "--get", "core.excludesFile"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return
-    if done.returncode == 0 and done.stdout.strip():
+    if configured_excludes() != "":  # `None` is git unavailable, not "unset"
         return
     if dry_run:
         return

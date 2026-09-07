@@ -20,7 +20,7 @@
 > The three guides below are unedited and each carries its own dated notice.
 > They are the record of what the machinery specified, not guidance for the
 > repository as it stands. The triage that reached this verdict is recorded
-> under step 7 in `docs/work/2026-08-29-artifacts-as-product/implement.md`;
+> under step 7 in `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`;
 > the pass that executed it is recorded in the same file.
 >
 > The H1 was `Installer CLI Guidelines` until this page stopped carrying

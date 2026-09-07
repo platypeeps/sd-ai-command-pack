@@ -1,6 +1,5 @@
 ---
 title: sd-status answers "is anything wrong" before it answers anything else
-status: planning
 created: 2026-09-04
 branch:
 ---
