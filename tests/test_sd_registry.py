@@ -14,11 +14,17 @@ has happened this file says so and fails.
 
 from __future__ import annotations
 
+import ast
+import io
+import json
 import pathlib
 import shlex
 import sys
 import tempfile
 import unittest
+import unittest.mock
+import urllib.error
+from typing import Any
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
@@ -662,15 +668,18 @@ class WhatAnEntryWaitsOn(unittest.TestCase):
             )
         }
 
-    def test_a_url_entry_waits_on_a_client_and_says_so(self) -> None:
+    def test_a_url_entry_names_no_reader_and_is_refused_for_none(self) -> None:
+        """The client landed, so the sentence this class was written about is
+        gone. What must not come back is the other half of the same defect: a
+        `url` entry declares no reader, and asking `readers` about `None` would
+        refuse every one of them for a name nobody wrote."""
         reasons = self.chain(
             MINIMAL.replace("vendor: alpha,", "vendor: alpha, bill: free,").replace(
                 "vendor: beta,", "vendor: beta, bill: free,"
             ),
             "two@localhost:2",
         )
-        self.assertIn("'url' entry", reasons["two"])
-        self.assertNotIn("None", reasons["two"])
+        self.assertEqual(reasons["two"], "")
 
     def test_a_start_entry_naming_another_build_s_reader_still_says_that(self) -> None:
         text = (
@@ -790,16 +799,23 @@ class ThePick(unittest.TestCase):
             sd_registry.pick(registry, "kimi", consent=self.all)
         self.assertIn("on no reviewer list", str(caught.exception))
 
-    def test_a_url_entry_refuses_the_direct_pick_for_the_chain_s_reason(self) -> None:
+    def test_the_direct_pick_asks_readers_the_same_question_the_chain_does(self) -> None:
         """`pick` says it "is refused for the same reasons a fallthrough
         skips", and it took no `readers`, so `--provider` reached an entry the
         chain had already marked unrunnable -- the one path where the promise
-        was written down and not kept."""
-        with self.assertRaises(sd_registry.RegistryError) as caught:
+        was written down and not kept. `claude` carries the case now that a
+        `url` entry has a client and runs."""
+        with self.assertRaises(sd_registry.ConsentRefusal) as caught:
             sd_registry.pick(
-                self.registry, "kimi", consent=self.all, readers=("codex-json",)
+                self.registry, "claude", consent=self.all, readers=("codex-json",)
             )
-        self.assertIn("'url' entry", str(caught.exception))
+        self.assertIn("claude-json", str(caught.exception))
+
+    def test_a_url_entry_is_picked_now_that_a_client_calls_it(self) -> None:
+        picked = sd_registry.pick(
+            self.registry, "kimi", consent=self.all, readers=("codex-json",)
+        )
+        self.assertEqual(picked.name, "kimi")
 
     def test_a_bill_at_its_cap_refuses_the_direct_pick_too(self) -> None:
         with self.assertRaises(sd_registry.ConsentRefusal) as caught:
@@ -812,6 +828,346 @@ class ThePick(unittest.TestCase):
         self.assertEqual(
             sd_registry.pick(self.registry, "kimi", consent=self.all).name, "kimi"
         )
+
+
+class TheRoundTrip(unittest.TestCase):
+    """What `Allowance.__str__` writes, `parse_consent` must read back whole.
+
+    The bug this pins: `__str__` quoted a recipient with `shlex.quote`, whose
+    safe set *includes* the comma, and `consent_parts` splits on the comma. So
+    the one call that looked like protection was a no-op on the one character
+    that needed it, and `Allowance("entry", "x,y@z")` rendered as
+    `entry@x,y@z` -- two allowances on the way back in, granting `entry` a
+    host nobody wrote and inventing an entry called `y`.
+
+    Written as a round trip over the awkward set rather than as an assertion
+    about the quoting's output, because the output string is an implementation
+    and this is the property.
+    """
+
+    AWKWARD = (
+        "x,y@z",
+        "host.example",
+        "user:pw@host.example",
+        "localhost:52415",
+        "/opt/my tools/codex",
+        "tab\tseparated",
+        "line\nbreak",
+        "hash#mark",
+        'double"quote',
+        "single'quote",
+        "both'\"quotes",
+        "g++",
+        "codex+notahash",
+        "trailing,",
+        ",leading",
+    )
+
+    def test_every_recipient_survives_the_line_it_is_written_on(self) -> None:
+        for recipient in self.AWKWARD:
+            for fingerprint in (None, "0123abcd"):
+                allowance = sd_registry.Allowance("entry", recipient, fingerprint)
+                read = sd_registry.parse_consent(str(allowance))
+                self.assertEqual(
+                    list(read), ["entry"], f"{allowance} split into {list(read)}"
+                )
+                self.assertEqual(read["entry"], allowance, str(allowance))
+
+    def test_a_pair_beside_others_still_reads_as_one(self) -> None:
+        """One allowance rendered into a real line, not alone on it: the split
+        that invented an entry needed a neighbour to hide among."""
+        pairs = [sd_registry.Allowance("entry", "x,y@z"), sd_registry.Allowance("b", "two")]
+        read = sd_registry.parse_consent(", ".join(str(pair) for pair in pairs))
+        self.assertEqual(sorted(read), ["b", "entry"])
+        self.assertEqual(read["entry"].recipient, "x,y@z")
+
+    def test_the_reader_and_the_writer_share_one_separator_list(self) -> None:
+        """The drift itself. Two lists, and the writer's was missing what the
+        reader split on."""
+        lexer = shlex.shlex("a", posix=True)
+        lexer.whitespace = sd_registry.CONSENT_WHITESPACE
+        for character in sd_registry.CONSENT_WHITESPACE:
+            rendered = str(sd_registry.Allowance("entry", f"a{character}b"))
+            self.assertEqual(len(sd_registry.consent_parts(rendered)), 1, rendered)
+
+    def test_a_recipient_holding_a_plus_keeps_all_of_it(self) -> None:
+        """`partition` took the first `+`, so `g++` consented to `g`."""
+        read = sd_registry.parse_consent(str(sd_registry.Allowance("entry", "g++")))
+        self.assertEqual(read["entry"].recipient, "g++")
+        self.assertIsNone(read["entry"].fingerprint)
+
+    def test_a_fingerprint_is_still_read_off_a_hand_written_line(self) -> None:
+        allowed = sd_registry.parse_consent("codex@codex+00000000")["codex"]
+        self.assertEqual((allowed.recipient, allowed.fingerprint), ("codex", "00000000"))
+
+    def test_a_start_entry_is_immune_to_its_own_plus(self) -> None:
+        """The fingerprint is appended last and taken from the right, so an
+        executable that ends the way a fingerprint does still round-trips."""
+        provider = sd_registry.Provider(
+            name="odd", vendor="v", bill="b", start="/opt/build+0123abcd exec"
+        )
+        allowance = sd_registry.recipient(provider)
+        self.assertEqual(sd_registry.parse_consent(str(allowance))["odd"], allowance)
+        self.assertIsNone(sd_registry.refuse_allowance(provider, allowance))
+
+    def test_the_one_recipient_the_grammar_cannot_hold_fails_closed(self) -> None:
+        """The residue, stated rather than hidden. A recipient that ends in
+        `+` and exactly eight hex characters, carrying no fingerprint of its
+        own, is spelled the same way as a recipient plus its fingerprint, and
+        no quoting separates them -- the split happens after the quotes are
+        gone. Only a `url` entry can reach this, its host being the one
+        recipient with no fingerprint appended after it.
+
+        What matters is the direction it fails in: the pair reads back as
+        something the comparison refuses, never as consent to a destination
+        nobody wrote."""
+        allowance = sd_registry.Allowance("odd", "host+0123abcd")
+        read = sd_registry.parse_consent(str(allowance))["odd"]
+        self.assertNotEqual(read, allowance)
+        provider = sd_registry.Provider(
+            name="odd", vendor="v", bill="b", url="https://host+0123abcd/v1"
+        )
+        self.assertIsNotNone(sd_registry.refuse_allowance(provider, read))
+
+
+class _Answer:
+    """The two methods `chat_completion` uses of an opened response."""
+
+    def __init__(self, body: str) -> None:
+        self.body = body.encode("utf-8")
+
+    def read(self) -> bytes:
+        return self.body
+
+    def __enter__(self) -> "_Answer":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        return None
+
+
+class Wire(unittest.TestCase):
+    """The one client, with the socket replaced by a recorder.
+
+    Every test here asserts on `self.sent`, and the ones about a refusal assert
+    that it is empty. An outbound request this repository never consented to is
+    the failure this whole file exists to prevent, and the only way to see it
+    is to watch the place the request would have left from.
+    """
+
+    def setUp(self) -> None:
+        self.sent: list[Any] = []
+        self.answer: Any = _Answer('{"choices": [{"message": {"content": "{}"}}]}')
+
+        def opened(request: Any, timeout: int = 0) -> Any:
+            self.sent.append(request)
+            if isinstance(self.answer, Exception):
+                raise self.answer
+            return self.answer
+
+        patched = unittest.mock.patch.object(sd_registry._OPENER, "open", opened)
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def entry(self, url: str = "https://api.example.test/v1") -> sd_registry.Provider:
+        return sd_registry.Provider(
+            name="entry",
+            vendor="somevendor",
+            bill="free",
+            url=url,
+            model="a-model",
+            max_tokens=16384,
+            env=("ENTRY_KEY",),
+        )
+
+    def call(self, provider: Any, **env: str) -> tuple[int, str, str, bool]:
+        return sd_registry.chat_completion(provider, "prompt", env, 30)
+
+    def test_the_request_is_the_one_the_entry_describes(self) -> None:
+        code, stdout, stderr, launched = self.call(self.entry(), ENTRY_KEY="secret")
+        self.assertEqual((code, stderr, launched), (0, "", True))
+        self.assertIn("choices", stdout)
+        request = self.sent[0]
+        self.assertEqual(request.full_url, "https://api.example.test/v1/chat/completions")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.get_header("Authorization"), "Bearer secret")
+        body = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(body["model"], "a-model")
+        self.assertEqual(body["max_tokens"], 16384)
+        self.assertEqual(body["messages"], [{"role": "user", "content": "prompt"}])
+        # `price` and `bill` are the ledger's business, not the endpoint's.
+        self.assertNotIn("price", body)
+
+    def test_an_https_entry_edited_to_http_refuses_and_sends_nothing(self) -> None:
+        """The hole this closes. `recipient()` compares `netloc`, which carries
+        no scheme, so this edit passes `refuse_allowance` in silence -- and
+        would put the diff on the wire in the clear."""
+        code, _, stderr, launched = self.call(
+            self.entry("http://api.example.test/v1"), ENTRY_KEY="secret"
+        )
+        self.assertEqual((code, launched), (1, False))
+        self.assertIn("in the clear", stderr)
+        self.assertIn("api.example.test", stderr)
+        self.assertEqual(self.sent, [], "a cleartext entry sends nothing")
+
+    def test_loopback_is_the_exception_because_exo_is_one(self) -> None:
+        for url in ("http://localhost:52415/v1", "http://127.0.0.1:8080/v1", "http://[::1]/v1"):
+            self.assertIsNone(sd_registry.refuse_cleartext(self.entry(url)), url)
+
+    def test_a_missing_key_sends_nothing_and_never_reads_as_a_quota_stop(self) -> None:
+        code, _, stderr, launched = self.call(self.entry())
+        self.assertEqual((code, launched), (1, False))
+        self.assertIn("ENTRY_KEY", stderr)
+        self.assertEqual(self.sent, [])
+
+    def test_a_429_carries_the_status_into_the_rate_limit_vocabulary(self) -> None:
+        self.answer = urllib.error.HTTPError(
+            "https://api.example.test/v1/chat/completions", 429, "Too Many Requests",
+            {}, io.BytesIO(b"slow down"),
+        )
+        code, _, stderr, launched = self.call(self.entry(), ENTRY_KEY="secret")
+        self.assertEqual((code, launched), (429, True))
+        self.assertIn("HTTP 429", stderr)
+        markers = [m for m in sd_review_markers() if m in stderr.lower()]
+        self.assertTrue(markers, f"no rate-limit marker in {stderr!r}")
+
+    def test_a_connection_error_never_launched(self) -> None:
+        # The message says 429 on purpose: `launched=False` is read first, so a
+        # connection that never happened cannot be reported as a quota stop.
+        self.answer = urllib.error.URLError("connection refused after 429 tries")
+        code, _, stderr, launched = self.call(self.entry(), ENTRY_KEY="secret")
+        self.assertEqual((code, launched), (1, False))
+        self.assertIn("connection refused", stderr)
+
+    def test_a_redirect_is_not_followed(self) -> None:
+        """A 3xx names a host the `reviewers` line never did, and urllib would
+        carry the `Authorization` header to it."""
+        self.assertIsNone(
+            sd_registry._NoRedirect().redirect_request(None, None, 302, "Found", {}, "http://elsewhere.test")
+        )
+
+
+def sd_review_markers() -> tuple[str, ...]:
+    """The rate-limit markers `bin/sd-review` already carries, read from it so
+    this file cannot drift from the vocabulary it is asserting against."""
+    source = (REPO_ROOT / "bin" / "sd-review").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "RATE_LIMIT_MARKERS"
+            for target in node.targets
+        ):
+            return tuple(ast.literal_eval(node.value))
+    raise AssertionError("bin/sd-review no longer defines RATE_LIMIT_MARKERS")
+
+
+class TheOneReader(unittest.TestCase):
+    """`url_answer`, and the one distinction the whole lane rests on.
+
+    `""` and a findings list are different answers. `""` becomes `None` from
+    `parse_findings` and then an unavailable review; a findings list, empty or
+    not, is a review that happened. A response this build could not read must
+    never come back as the second.
+    """
+
+    def body(self, content: Any, **extra: Any) -> str:
+        message: dict[str, Any] = {"content": content, **extra}
+        return json.dumps({"choices": [{"message": message}], "id": "x"})
+
+    def test_a_think_block_and_reasoning_content_still_read_clean(self) -> None:
+        """Criterion 6's test. `<think>` is stripped and `reasoning_content` is
+        ignored rather than concatenated -- concatenating it is what turns an
+        entry that answered correctly into an unavailable one."""
+        answer = self.body(
+            '<think>The diff renames a symbol. Let me check every caller.</think>\n'
+            '{"findings": [{"path": "bin/sd", "line": 4, "severity": "high",'
+            ' "summary": "the old name is still read", "family": "correctness"}]}',
+            reasoning_content="The diff renames a symbol. Let me check every caller.",
+        )
+        text = sd_registry.url_answer(answer)
+        self.assertTrue(text.startswith("{"), text)
+        self.assertNotIn("Let me check", text)
+        self.assertEqual(json.loads(text)["findings"][0]["path"], "bin/sd")
+
+    def test_every_block_goes_whatever_its_case_or_attributes(self) -> None:
+        text = sd_registry.url_answer(
+            self.body('<think>one</think>{"findings"<THINK reason="x">two</think>: []}')
+        )
+        self.assertEqual(json.loads(text), {"findings": []})
+
+    def test_an_unclosed_block_runs_to_the_end_and_leaves_nothing(self) -> None:
+        # Reachable by construction: `max_tokens` is 16,384 on every enabled
+        # `url` entry, so a model that spends it reasoning stops mid-tag. Cut
+        # inside the opening block there is nothing left; cut after a partial
+        # answer, what survives is a truncated one, which does not parse and so
+        # is unavailable rather than clean.
+        self.assertEqual(sd_registry.url_answer(self.body("<think>oh")), "")
+        truncated = sd_registry.url_answer(self.body('{"findings"<think>oh'))
+        self.assertEqual(truncated, '{"findings"')
+        with self.assertRaises(json.JSONDecodeError):
+            json.loads(truncated)
+
+    def test_content_that_is_only_reasoning_is_not_a_clean_review(self) -> None:
+        for content in ("<think>all of it</think>", "  <think>x</think>\n\t ", "   "):
+            self.assertEqual(sd_registry.url_answer(self.body(content)), "", content)
+
+    def test_a_nested_pair_leaves_a_stray_close_and_does_not_parse(self) -> None:
+        text = sd_registry.url_answer(self.body("<think>a<think>b</think>c</think>{}"))
+        self.assertEqual(text, "c</think>{}")
+
+    def test_what_is_not_an_answer_at_all(self) -> None:
+        for body in (
+            "not json",
+            "",
+            json.dumps({"error": {"message": "no"}}),
+            json.dumps({"choices": []}),
+            json.dumps({"choices": [{"message": {}}]}),
+            json.dumps({"choices": [{"message": {"content": None}}]}),
+            json.dumps({"choices": [{"message": {"reasoning_content": "only this"}}]}),
+            json.dumps(["not", "a", "mapping"]),
+        ):
+            self.assertEqual(sd_registry.url_answer(body), "", body)
+
+
+class TheSchemeIsAConsentQuestion(unittest.TestCase):
+    """Where the cleartext refusal lives, and why it is not two other places.
+
+    Not in `_provider`: `_adapt` builds providers from `sd_db`'s rows without
+    passing through it, so a check there fires only on machines with no
+    database, and one mistake would have two behaviours. Not only in the
+    client either: the chain, the dry run and the run have to give the same
+    answer, and `refuse_allowance` is where the other consent refusal -- the
+    host that moved -- already is. The client keeps its own copy as the last
+    thing before the socket, for callers that never asked the chain.
+    """
+
+    def entry(self, url: str) -> sd_registry.Provider:
+        return sd_registry.Provider(name="two", vendor="beta", bill="free", url=url)
+
+    def allowance(self, url: str) -> str | None:
+        provider = self.entry(url)
+        return sd_registry.refuse_allowance(provider, sd_registry.recipient(provider))
+
+    def test_the_scheme_alone_decides_it(self) -> None:
+        self.assertIsNone(self.allowance("https://api.example.test/v1"))
+        refusal = self.allowance("http://api.example.test/v1")
+        self.assertIn("in the clear", str(refusal))
+        self.assertIn("api.example.test", str(refusal))
+
+    def test_consent_to_the_host_does_not_cover_the_scheme(self) -> None:
+        """The hole itself: `netloc` is identical either way, so the consented
+        recipient of the https entry consents to the http one."""
+        self.assertEqual(
+            sd_registry.recipient(self.entry("https://api.example.test/v1")).recipient,
+            sd_registry.recipient(self.entry("http://api.example.test/v1")).recipient,
+        )
+
+    def test_the_shipped_registry_still_resolves_exo_over_http(self) -> None:
+        # `exo` ships on `http://localhost:52415/v1`, which is what the
+        # loopback exception is for. If this fails, the exception is wrong.
+        registry = sd_registry.read_file(SHIPPED)
+        exo = registry.providers["exo"]
+        self.assertIsNone(sd_registry.refuse_allowance(exo, sd_registry.recipient(exo)))
 
 
 if __name__ == "__main__":

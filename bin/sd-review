@@ -13,15 +13,15 @@ The pipeline is four steps and no more:
   4. Findings are dispositioned here, against this repository's severity floor,
      and printed. They are never posted.
 
-**Nothing here writes to a network.** There is no pull-request comment, no review
-submission, no label, no check-run update, and no HTTP client of any kind: the
-only outbound calls are `git`, `sd-check`, and the provider CLIs, each through
-one injectable runner. `tests/test_sd_review_boundary.py` asserts the absence
-rather than trusting this paragraph. Publishing findings to GitHub is the CI
-lane's business, and the CI lane is installed by `sd-review setup-github`,
-which lands in a separate module for exactly that reason: it writes a workflow
-file, and the proof above is a structural read of *this* file. What lives here
-is three lines of dispatch at the seam named `SETUP_GITHUB_SEAM` below.
+**Nothing here posts, and nothing here reaches out.** No pull-request comment,
+no review submission, no label, no check-run update. This file imports no
+network module and starts no process: `git`, `sd-check` and the provider CLIs
+go through the injectable `runner`, and a `url` entry's one request through the
+injectable client, which lives in `sd_registry` and is watched by the same kind
+of fake. `tests/test_sd_review_boundary.py` asserts both absences structurally
+rather than trusting this paragraph. Publishing to GitHub is the CI lane's
+business, installed by `sd-review setup-github`, which lands in its own module
+because it writes a file: three lines of dispatch here, at `SETUP_GITHUB_SEAM`.
 
 **The repository comes from the current directory (R10-D6).** There is no
 `--repo` argument and there will not be one: a session that can be pointed at
@@ -792,6 +792,19 @@ def _outcome(backend: str, status: str, detail: str, argv: Sequence[str] = (), s
     return Outcome(backend, status, (), detail, tuple(argv), tuple(scrubbed))
 
 
+def _answer(
+    backend: str, result: Completed, findings: list[dict[str, Any]] | None,
+    argv: Sequence[str] = (), scrubbed: Sequence[str] = ()
+) -> Outcome:
+    """One provider's answer, whichever transport carried it. `findings is
+    None` means nothing readable came back and must never soften into `[]`,
+    which would report a clean review of a change nobody read."""
+    if result.exit_code != 0 or findings is None:
+        return _failure(backend, result, argv, scrubbed)
+    status, detail = FINDINGS if findings else CLEAN, f"{len(findings)} finding(s)"
+    return Outcome(backend, status, tuple(findings), detail, tuple(argv), tuple(scrubbed))
+
+
 def _failure(backend: str, result: Completed, argv: Sequence[str], scrubbed: Sequence[str]) -> Outcome:
     status = classify_failure(result)
     if status == RATE_LIMITED:
@@ -840,6 +853,7 @@ def run_provider(
     env: Mapping[str, str],
     timeout: int,
     codex_auth_home: pathlib.Path | None = None,
+    client: sd_registry.Client = sd_registry.chat_completion,
 ) -> Outcome:
     """Run one registry entry on the resolved subject, and report an outcome.
 
@@ -863,6 +877,13 @@ def run_provider(
     refusal = sd_registry.refuse_environment(provider, env)
     if refusal is not None:
         return _outcome(provider.name, REFUSED, refusal)
+
+    if provider.url:
+        # Keyed on the url, not on a reader: a `url` entry names none. `argv`
+        # and `scrubbed` stay empty; both are start-entry vocabulary.
+        result = Completed(*client(provider, prompt, env, timeout))
+        text = sd_registry.url_answer(result.stdout)
+        return _answer(provider.name, result, parse_findings(text))
 
     if provider.reader in READERS:
         # Refused before it becomes argv: an entry whose start line names no
@@ -888,17 +909,7 @@ def run_provider(
             result = runner(argv, child, root, timeout)
             answer = workdir / CODEX_ANSWER_FILE
             text = answer.read_text(encoding="utf-8") if answer.is_file() else result.stdout
-        findings = parse_findings(text)
-        if result.exit_code != 0 or findings is None:
-            return _failure(provider.name, result, argv, removed)
-        return Outcome(
-            provider.name,
-            FINDINGS if findings else CLEAN,
-            tuple(findings),
-            f"{len(findings)} finding(s)",
-            tuple(argv),
-            removed,
-        )
+        return _answer(provider.name, result, parse_findings(text), argv, removed)
 
     # Unreachable while `READERS` holds one name: `refuse_reader` above has
     # already sent every other entry back. Kept as the honest answer if a
@@ -996,6 +1007,7 @@ def review(
     runner: Runner,
     env: Mapping[str, str],
     codex_auth_home: pathlib.Path | None = None,
+    client: sd_registry.Client = sd_registry.chat_completion,
 ) -> dict[str, Any]:
     """The pipeline. Returns one result object; prints nothing."""
 
@@ -1122,6 +1134,7 @@ def review(
             env,
             args.timeout,
             codex_auth_home,
+            client,
         )
         outcomes.append(outcome)
         if outcome.status == RATE_LIMITED:
@@ -1159,21 +1172,17 @@ def _planned(
 ) -> list[dict[str, Any]]:
     planned: list[dict[str, Any]] = []
     for provider in chosen:
+        # `READERS`, not a spelled-out name: this list and the chain's have to
+        # be the same list, or the dry run and the real run disagree about what
+        # would happen. A `url` entry would run and has no argv to preview: its
+        # invocation is a request, and a request is not a command line.
         start = provider.start or ""
-        if sd_registry.refuse_reader(provider, READERS) or not sd_registry.executable(start):
-            # `READERS`, not a spelled-out name: this list and the chain's have
-            # to be the same list, or the dry run and the real run disagree
-            # about what would happen. The wording splits the same two cases
-            # the chain splits, for the same reason -- a `url` entry names no
-            # reader because it spawns nothing, and saying it named `None` was
-            # a typo nobody made.
-            reason = sd_registry.refuse_reader(provider, READERS) or (
-                f"{provider.name} names no program to start ({start!r})"
-            )
-            planned.append({"backend": provider.name, "argv": [], "would_run": False, "reason": reason})
-            continue
-        argv = codex_argv(root, pathlib.Path("<attempt-dir>"), prompt, start)
-        planned.append({"backend": provider.name, "argv": argv, "would_run": True, "reason": ""})
+        reason = sd_registry.refuse_reader(provider, READERS)
+        if reason is None and not (provider.url or sd_registry.executable(start)):
+            reason = f"{provider.name} names no program to start ({start!r})"
+        argv = [] if reason or provider.url else codex_argv(root, pathlib.Path("<attempt-dir>"), prompt, start)
+        target = f"POST {sd_registry.endpoint(provider)}" if provider.url else ""
+        planned.append({"backend": provider.name, "argv": argv, "endpoint": target, "would_run": not reason, "reason": reason or ""})
     return planned
 
 
@@ -1245,7 +1254,7 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
             if not planned["would_run"]:
                 write(f"  {planned['backend']}: not run -- {planned['reason']}\n")
                 continue
-            write(f"  {planned['backend']}: {' '.join(planned['argv'])}\n")
+            write(f"  {planned['backend']}: {' '.join(planned['argv']) or planned['endpoint']}\n")
         write("\nsd-review: dry run, nothing executed\n")
         return
 
