@@ -86,6 +86,17 @@ use for it). It exits silently when `SD_HANDOFF_RESTORE=0` is set — which
 packet as `additionalContext` stamped with its age, and marks it consumed by
 atomic rename, so two sessions racing in one directory cannot both claim it.
 
+**The packet is no longer the only source.** The same hook also injects every
+open `followup` note on an active item of this checkout, read through
+`bin/sd_handoff_rows.py`. Rows go in whether or not a packet is here, which is
+the point: a session killed mid-task ran no `sd-handoff`, so the packet does not
+exist and the followups are all there is. Rows are **not** claimed — three
+sessions restarting in one directory all deserve the same open work, and a
+followup stops being handed over when somebody resolves it with `sd-note
+resolve <id>`, not when a session read it. Write one with `sd-note add "..."
+--item <dir>`, which is an explicit act and so is not what the rule below
+forbids.
+
 ## Never
 
 - **Never write a packet automatically.** No SessionEnd hook, no PreCompact

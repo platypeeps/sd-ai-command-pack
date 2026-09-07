@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""Write a followup to the row, so a session that dies does not take it with it.
+
+A followup named in conversation lives in the conversation. Compact it, kill
+the session, and the work is gone -- which is item A's criterion 29: a session
+restarted in the same directory should begin from the followups it had named,
+with none lost. `bin/sd-handoff` already writes such things into a packet, but
+only when somebody runs it, and a session killed mid-task ran nothing.
+
+So this writes one row per followup, as it is named, and
+`bin/sd-handoff-restore` reads them back on the next start. A row survives a
+kill because it was never in the session.
+
+`sd_db.add_note(kind='followup')` is the write and it is not new; the
+vocabulary is the `CHECK` on `note.kind` in the schema. What is new is that
+anything in this pack calls it. `--resolve` closes one with `resolve_note`,
+which is how a followup stops being handed to the next session: when the work
+is done, not when somebody read it.
+
+Two things this deliberately does not do:
+
+  * **It does not guess the item.** `--item` names a directory under
+    `docs/work/`, the way `bin/sd-handoff --item` does. A note filed against
+    the wrong item is worse than a refusal, and "the most recently touched
+    item" is a guess dressed as a default.
+  * **It does not print the whole list.** Reading followups back is the
+    restore hook's job, and a second reader is a second place for the
+    ordering and the active-status filter to drift.
+"""
+
+from __future__ import annotations
+
+import argparse
+import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import sd_handoff_rows  # noqa: E402 - after the path insert that finds it
+import sd_lib  # noqa: E402 - same
+
+
+def cmd_write(args, out, err) -> int:
+    root = args.root
+    if root is None:
+        print("not inside a git repository", file=err)
+        return 1
+    item_dir = pathlib.Path(root) / sd_lib.WORK_DIR / args.item
+    if not item_dir.is_dir():
+        print(f"no work item at {item_dir}", file=err)
+        return 1
+
+    sd_db = sd_handoff_rows.library()
+    connection = sd_handoff_rows.connect(sd_db, write=True)
+    try:
+        row = sd_handoff_rows.item_for(connection, sd_db, root, item_dir)
+        if row is None:
+            print(
+                f"the database holds no {sd_lib.ITEM_ROW_SOURCE} row for "
+                f"{item_dir.name}. Run `sd-status` in this checkout first.",
+                file=err,
+            )
+            return 1
+        note = sd_db.add_note(connection, row["id"], args.kind, args.body)
+    finally:
+        connection.close()
+    print(f"{args.kind} [{note}] on {item_dir.name}", file=out)
+    return 0
+
+
+def cmd_resolve(args, out, err) -> int:
+    sd_db = sd_handoff_rows.library()
+    connection = sd_handoff_rows.connect(sd_db, write=True)
+    try:
+        sd_db.resolve_note(connection, args.note)
+    finally:
+        connection.close()
+    # `resolve_note` is a no-op on an id that is absent or already closed, and
+    # says which. Reporting "resolved" either way would be a lie only in the
+    # case nobody can act on, so the line names the id and not an outcome.
+    print(f"resolved note {args.note}", file=out)
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="sd-note", description=__doc__)
+    verbs = parser.add_subparsers(dest="verb", required=True)
+    add = verbs.add_parser("add", help="write a followup against a work item")
+    add.add_argument("body", help="what is left to do, in one line")
+    add.add_argument("--item", required=True, help="work-item directory name")
+    add.add_argument("--kind", default=sd_handoff_rows.FOLLOWUP,
+                     help="note kind (default: followup)")
+    add.set_defaults(handler=cmd_write)
+    close = verbs.add_parser("resolve", help="close a followup by its id")
+    close.add_argument("note", type=int, help="the id the write printed")
+    close.set_defaults(handler=cmd_resolve)
+    return parser
+
+
+def main(argv: list[str] | None = None, out=sys.stdout, err=sys.stderr,
+         cwd: str | None = None) -> int:
+    # The root comes from the working directory and from nothing else, which is
+    # R10-D6 and `tests/test_verb_inventory.py`. `cwd` is the test seam every
+    # other command here has, not a way to point the command at another repo:
+    # there is no flag that reaches it.
+    args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
+    args.root = sd_lib.repo_root(cwd or pathlib.Path.cwd())
+    try:
+        return int(args.handler(args, out, err))
+    except sd_handoff_rows.RowsRefusal as refusal:
+        print(str(refusal), file=err)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

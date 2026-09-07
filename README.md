@@ -41,8 +41,10 @@ say. A skill in `contrib/` is one command away, and use is what moves it.
 - `~/.codex/skills/sd-*/SKILL.md`
 - `~/.config/opencode/commands/sd-*.md`
 - `~/.claude/agents/sd-*.md`
-- one `SessionStart` hook entry in `~/.claude/settings.json`, for
-  `sd-handoff-restore`
+- three hook entries in `~/.claude/settings.json` — `SessionStart` for
+  `sd-handoff-restore`, and `PreToolUse` and `UserPromptSubmit` for
+  `sd-skill-use`. `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
+  line describes it and does not govern it.
 - one line — `CLAUDE.local.md` — in the global git excludes
 
 **What it writes in a repository:** nothing, ever. Work items live under
