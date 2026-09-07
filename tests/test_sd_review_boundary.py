@@ -143,10 +143,21 @@ class NeverPostsTests(unittest.TestCase):
             "typing",
             "sd_lib",
             "sd_route",
-            # The registry reader. It opens one file in the operator's home and
-            # has no client of any kind, so it widens the allow-list without
-            # widening the boundary -- the same standing as `sd_setup_github`
-            # below, and it is held to the never-posts assertions too.
+            # The registry reader, and since #754 a network client as well.
+            # `bin/sd_registry.py` holds the `url` client -- a stdlib-HTTP POST
+            # that carries the diff to a review provider and reads the answer
+            # back -- and `bin/sd-review` reaches it by default, as the
+            # `chat_completion` fallback of its `client` parameter. So this
+            # name does not have `sd_setup_github`'s standing below: nothing
+            # holds `sd_registry` to a never-posts assertion, and it would not
+            # pass the import check above if anything did. The client landed
+            # in that file because the sub-cap below left it nowhere else to
+            # go; R11-D34 records that, and this file does not re-argue it.
+            #
+            # What still holds the boundary this file is for: the client posts
+            # to a model endpoint, never a finding to GitHub, and the argv,
+            # `gh` and posting-fragment assertions above cover the entry point
+            # that would have to do the posting.
             "sd_registry",
             # The installer, imported inside the one dispatch branch. It is in
             # this repository and is itself held to the never-posts assertions
