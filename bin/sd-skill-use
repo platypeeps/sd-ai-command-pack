@@ -9,7 +9,7 @@ library open, `resolve_root` and `main` to save an eight-line branch.
 
 What it records is `skill_use`: which skill, on which surface, in which mode,
 in which directory. The row is the evidence `sd_install` reads when it decides
-whether a skill installed by a path is actually used (`bin/sd_install.py:1290`
+whether a skill installed by a path is actually used (`bin/sd_install.py:1323`
 calls `sd_db.writes.skill_use_since`). Until this hook existed nothing wrote
 those rows in production -- the table, its writer and its reader were all
 built and only tests ever filled it.
@@ -26,7 +26,7 @@ The distinction is the whole point of the table. A skill that is only ever
 read because a path lists it is a skill nobody chose, and `sd skill try`'s
 trial verdict turns on which of the two a use was.
 
-`surface` is the platform key, from the three `bin/sd_install.py:171-173`
+`surface` is the platform key, from the three `bin/sd_install.py:183-185`
 already names: `claude` here, `codex` for the nightly parse of
 `~/.codex/sessions` that writes this same shape, `opencode` when that surface
 grows a hook. Not a new vocabulary.
@@ -55,7 +55,7 @@ import sys
 
 HOOK_EVENTS = ("PreToolUse", "UserPromptSubmit")
 
-# The platform this hook runs on. `bin/sd_install.py:171-173` names the three;
+# The platform this hook runs on. `bin/sd_install.py:183-185` names the three;
 # this file is registered only into `~/.claude/settings.json`, so it is always
 # the first of them. It is a constant rather than a probe because a hook that
 # guessed its own surface from the environment would write a wrong answer

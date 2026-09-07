@@ -9,7 +9,7 @@ back afterwards out of the rollout transcripts Codex keeps under
 **What the criterion asked for is not what Codex records.** The clause reads
 "a nightly parse of `~/.codex/sessions` for the same", where "the same" is a
 typed `/sd-*` command. Codex has no slash-command surface for this pack:
-`bin/sd_install.py:171-173` renders the Codex home as `~/.codex/skills/<name>/
+`bin/sd_install.py:183-185` renders the Codex home as `~/.codex/skills/<name>/
 SKILL.md`, a directory form, and there is no `~/.codex/prompts`. Across the
 826 rollouts on the machine this was written against, no user turn begins
 with `/` at all, while `~/.codex/skills/<name>/SKILL.md` is read by name over
@@ -63,7 +63,7 @@ NOT_INSTALLED = (
     "run this again."
 )
 
-#: The platform key, from the three `bin/sd_install.py:171-173` names.
+#: The platform key, from the three `bin/sd_install.py:183-185` names.
 SURFACE = "codex"
 
 #: The `state` row this cursor lives in. `kind` is the schema's, `key` is ours.

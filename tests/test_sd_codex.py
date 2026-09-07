@@ -167,7 +167,7 @@ class WhatCountsAsAUse(CodexCase):
     def test_a_typed_slash_command_is_a_direct_use(self):
         """Codex has no such surface today; the branch is here for when it does.
 
-        `bin/sd_install.py:171-173` renders the Codex home as a directory of
+        `bin/sd_install.py:183-185` renders the Codex home as a directory of
         `SKILL.md` files and there is no `~/.codex/prompts`, so nothing on
         this surface produces a `/sd-*` turn. The criterion names one, and it
         costs a branch rather than a module to be ready for it.

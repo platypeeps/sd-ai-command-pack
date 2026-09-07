@@ -1,6 +1,6 @@
 """The `skill_use` hook, which is the pack finding out what is actually used.
 
-`bin/sd_install.py:1290` already asks `sd_db.writes.skill_use_since` whether a
+`bin/sd_install.py:1323` already asks `sd_db.writes.skill_use_since` whether a
 skill has been used before it keeps one an operator did not choose. Until this
 hook existed nothing answered: the table, its writer and its reader were all
 built, and the only rows anywhere came from `tests/test_sd_skill.py`.

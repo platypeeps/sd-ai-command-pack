@@ -1134,7 +1134,7 @@ log, not here.
 - Cuts: protection gap analysis, acknowledgement loading, both schema files
   and `.github/sd-status.json` (`bin/sd-status:226-836`) become one
   `protected: yes/no` line; `bin/sd_sweep.py`, the `sweep` verb
-  (`bin/sd:2703-2737,2916-2925`) and `tests/test_sd_sweep.py`; the archive
+  (`bin/sd:2704-2738,2916-2925`) and `tests/test_sd_sweep.py`; the archive
   walk and the `archived` and `parked` fields (`bin/sd_lib.py:355-368`,
   `:271-282`, `:302-303`, `:350`) and every reader (`bin/sd-status:183,190,
   1122-1129,1234-1242,1254-1287`), so
@@ -1155,7 +1155,7 @@ log, not here.
   `bin/sd-pr-state` remains; `bin/sd-handoff` and `bin/sd-handoff-restore` are
   not cuts, both pinned self-contained by their own suites; `bin/sd-docs-lint:52,72-82,148` imports the vocabulary, the
   directory walk and the in-progress rule from `sd_lib`.
-- Consistency: a configuration error exits 2 everywhere (`bin/sd:2930-2946`,
+- Consistency: a configuration error exits 2 everywhere (`bin/sd:2931-2947`,
   `bin/sd-status:1269`, `bin/sd-check`, `bin/sd-review:1329`) and JSON
   envelopes carry one version key; one ACTIVE status set in `sd_lib` serves
   `bin/sd-status:1107-1108`, `dashboard/work.py:50` and `bin/sd-review:514`;
@@ -1576,15 +1576,15 @@ confirmed by the next `sd-ship` run alone.
     `skills/` for `git rm`, `rmtree` and `rmdir` names nothing outside a
     frozen set the implementation page enumerates. That set is eight lines on
     2026-09-05 and none of them is a sweep or park code path: `sd_install.py`
-    pruning its own empty parents at `:693` and `:700`, its untrack-and-re-run
-    error string at `:791`, and the five uninstall commands in `sd-status`'s
+    pruning its own empty parents at `:820` and `:827`, its untrack-and-re-run
+    error string at `:961`, and the five uninstall commands in `sd-status`'s
     `RESIDUE` tuple. Requirement 13 cuts that tuple with the residue detectors
     at `bin/sd-status:960-1018`, which takes five of the eight — but that cut
     is gated on "one clean run across the fleet", the run is scheduled
     nowhere, and no pull request names the detectors, so the frozen set is
     eight until it happens and three after. The test asserts the set has not
     grown, not that the grep is empty: "names nothing" is unreachable in
-    either state, since `bin/sd_install.py:791` is an error message rather
+    either state, since `bin/sd_install.py:961` is an error message rather
     than a temporary path, and `bin/sd_sweep.py` is in none of the eight. A test ships a `done` item and runs
     `sd-plan` and `sd-ship` again in that repository, and asserts the
     directory is untouched.
@@ -2889,7 +2889,7 @@ from a number the operator types.
   - C-121, blocking: criteria 24 and 25 both have "**the installer** renders"
     as their operative verb, and PR 5's three-file Touches — the data file,
     the trial directory and the `sd skill try` subcommand — held none of the
-    code they assert. `bin/sd_install.py:224-229` is the enumeration the
+    code they assert. `bin/sd_install.py:237-242` is the enumeration the
     paths file replaces. This is round two's headline defect verbatim, on the
     one pull request round two changed the character of. Addressed.
   - C-122, blocking: C-110 ordered PR 1 before PR 6 for `WORKFLOW.md` and, in
@@ -3002,7 +3002,7 @@ from a number the operator types.
     applied.** PR 5's Touches was still the identical three-file list C-121
     declared insufficient — `skills/paths.json`, `contrib/`, `bin/sd` — with
     `bin/sd_install.py` absent from the whole section. C-121 named the fix
-    target verbatim, `bin/sd_install.py:224-229`, and that range is real. The
+    target verbatim, `bin/sd_install.py:237-242`, and that range is real. The
     prose beneath PR 5 was rewritten to answer a different half of the
     finding while the list the finding actually named was left alone. This
     one is the writer's own: the edit script that carried the fix aborted on
@@ -3144,7 +3144,7 @@ from a number the operator types.
     would empty `git grep -nE 'git rm|rmtree|rmdir' -- bin skills`. Run, it
     returns eight lines and `sd_sweep.py` is in none of them: five are
     `RESIDUE` uninstall command **strings** in `bin/sd-status`, and
-    `bin/sd_install.py:693`, `:700` and `:791` are the installer's own
+    `bin/sd_install.py:820`, `:827` and `:961` are the installer's own
     `rmdir` loop and an untrack error message. A criterion phrased "names
     nothing" was therefore unsatisfiable, and this page makes a green suite a
     precondition of all eight merges. Addressed: the criterion becomes an
@@ -3211,7 +3211,7 @@ from a number the operator types.
     present in gh 2.98.0; the `design.md` now names it.
   - C-161, minor: the ordering section said PR 1 writes the `mode` and
     `check` keys into `DEFAULT_BLOCK_BODY`. Both already stand there
-    (`bin/sd_install.py:766-772`). PR 1's block work is `test` and `lint`;
+    (`bin/sd_install.py:799-805`). PR 1's block work is `test` and `lint`;
     `reviewers` is PR 6's. As written, PR 1's edit was a no-op and criterion
     1's five-key set stayed two keys short.
   - C-162, minor: `bin/sd-docs-lint:87-91` was listed among the readers of the
@@ -3269,7 +3269,7 @@ from a number the operator types.
     Found while correcting C-152, which enumerated criterion 21's eight grep
     hits without noticing that five of them sit inside a range requirement 13
     already claims. C-152's fix stands — the criterion is still unreachable as
-    "names nothing", since `bin/sd_install.py:791` survives every cut — but
+    "names nothing", since `bin/sd_install.py:961` survives every cut — but
     its account of the frozen set was wrong twice over: the set is eight now
     and three after a cut that may never happen, and PR 4's criterion-18
     removal is not what governs it. Addressed: the frozen set is stated for
@@ -3621,7 +3621,7 @@ from a number the operator types.
     `sd_lib.attribution` (`:632-665`, 34), `sd_lib._in_range` (`:668-683`, 16)
     and `sd_lib.author_vendors` (`:686-717`, 32) — so only 235 − 82 = 153 is
     re-reserved, plus 15 for the parser block, measured off `sd restore`'s at
-    `bin/sd:2945-2959`.
+    `bin/sd:2946-2960`.
   - the `url` client and the `<think>`/`reasoning_content` reader — **114**.
     The codex path in `bin/sd-review` is the same job done against a process
     instead of an endpoint: `codex_argv` (`:685-718`, 34) builds the call,
@@ -4559,7 +4559,7 @@ from a number the operator types.
     `collect`, which returns `ok`/`reason` so a partial run does not advance
     the watermark; 27 for the watermark itself at `dashboard/store.py:190-218`;
     11 for `bin/sd_ledger.py:46-56` `path`; 35 and 19 for the entry and its
-    render half at `bin/sd:2706-2740` and `bin/sd_sweep.py:144-162`; and 22 of
+    render half at `bin/sd:2707-2741` and `bin/sd_sweep.py:144-162`; and 22 of
     glue. `dashboard/jira.py` is 363 lines and `dashboard/github.py` 366, both
     this exact shape — a coincidence worth reporting and not a derivation.
   - **`bin/sd-skill-use`, both events in one file — 240.** One file and not
@@ -4577,7 +4577,7 @@ from a number the operator types.
     `main` at `:515-523`; and 20 of glue at the measured rate.
   - **The installer, one hook event to five — +55 net.** A delta, not a
     rewrite: constants to a per-event spec table at +21, against
-    `bin/sd_install.py:148-173` `PlatformHome` and `platform_homes`; `+4` for
+    `bin/sd_install.py:161-186` `PlatformHome` and `platform_homes`; `+4` for
     `hook_stanza_command` becoming `hook_specs`; +10 on `install_hook` and +14
     on `remove_hook`, at `:471-511` `render` and `:741-797` `prune_stale` with
     `prune_empty_dirs`, the built loop-a-table-and-act-per-item shapes; and +6
@@ -4616,7 +4616,7 @@ from a number the operator types.
 - **2026-09-07** — **Criterion 26's Codex clause asked for a signal Codex does
   not produce, and the built module reads the one it does.** The clause reads
   "a nightly parse of `~/.codex/sessions` for the same", where "the same" is a
-  typed `/sd-*` command. There is no such surface: `bin/sd_install.py:171-173`
+  typed `/sd-*` command. There is no such surface: `bin/sd_install.py:183-185`
   renders the Codex home as `~/.codex/skills/<name>/SKILL.md`, a directory of
   files, and there is no `~/.codex/prompts`. Measured against the 826 rollouts
   on this machine, **no user turn in any of them begins with `/`**, while
@@ -4638,7 +4638,7 @@ from a number the operator types.
   **The entry cost 19 of the 20 this cap said it was not reserving.** The
   derivation above priced `sd_codex.py` at 368 and named a verb as an extra 20
   a cron-only nightly does not need. The module came in at 349, so `sd skill
-  scan` fits inside the 368 with nothing claimed: `bin/` is 16,393 against the
+  scan` fits inside the 368 with nothing claimed: `bin/` is 16,399 against the
   16,750 R11-D42 set. The verb exists because `bin/` has no other convention
   for reaching a module, and because the operator reading a trial's evidence
   needs a way to run and inspect the thing that produces it. The scheduler is
