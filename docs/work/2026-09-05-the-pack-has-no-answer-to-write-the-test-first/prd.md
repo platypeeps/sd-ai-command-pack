@@ -148,9 +148,9 @@ the content checks.
       exactly this; the first prints the one name and nothing else, the second
       prints nothing:
       ```
-      git diff --no-renames --name-status origin/main...HEAD -- skills/ \
+      git diff --no-renames --name-status origin/main...HEAD -- skills/ contrib/ \
         | awk '$1=="A"{print $2}'
-      git diff --no-renames --name-status origin/main...HEAD -- skills/ tests/ \
+      git diff --no-renames --name-status origin/main...HEAD -- skills/ contrib/ tests/ \
         | awk '$1=="D"'
       ```
       Expected addition, exactly: `contrib/sd-tdd/SKILL.md`.
@@ -161,7 +161,7 @@ the content checks.
       this and it prints two paths, `contrib/sd-tdd/SKILL.md` and
       `contrib/sd-typed-holes/SKILL.md`, and nothing else:
       ```
-      git diff --name-only origin/main...HEAD -- skills/
+      git diff --name-only origin/main...HEAD -- skills/ contrib/
       ```
 - [ ] `sd-tdd` carries the pack's section skeleton, anchored to whole lines so
       that prose *mentioning* a heading cannot satisfy it; run exactly this and
