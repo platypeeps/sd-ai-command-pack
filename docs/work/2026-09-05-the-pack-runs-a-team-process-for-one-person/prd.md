@@ -3699,3 +3699,142 @@ from a number the operator types.
   authoritative for it. The prose that names who reviews takes the role
   vocabulary instead, and the two artifact sentences name the publishing
   surface rather than the vendor whose product it is.
+- **2026-09-06** — **R11-D34, `BIN_CAP` re-derived from 15,050 to 15,400**, in
+  its own change, because PR 6's last two units do not fit under the ceiling
+  R11-D32 set and one of them is already built. `bin/` measures **14,895** on
+  `main` at `26501c3e` — `line_count` over the 26 tracked files
+  `tests/test_loc_caps.py` enumerates, `migrate-*` excluded as always — which
+  leaves 155. The `url` client alone measures **+236**, so the ceiling is
+  already crossed before criterion 11's mode predicate adds a line. This
+  change touches `tests/test_loc_caps.py` and these planning pages and nothing
+  under `bin/`, which is the clause at `tests/test_loc_caps.py:9-10`.
+
+  The itemisation is **14,895 measured + 236 measured + 106 reserved + 119
+  reserved + 20 reserved + 24 unclaimed = 15,400**.
+
+  **This is not R11-D32 topped up, because R11-D32's method was not what
+  failed.** It reserved 452 for four units; three have landed, and every one
+  of them priced its *specified shape* correctly:
+
+      unit                              reserved  total  overrun  in-flight  post-report
+      `sd attribute`, the write side         168    168        0          0            -
+      the installer's consent prompt          64    199      135        135            -
+      the `url` client and its reader        114    236      122        102           20
+
+  `sd attribute` landed on 168 exactly. The consent prompt's own body came in
+  at ~65 against 64 reserved and the `url` client's at ~120 against 114 —
+  three analogues, all inside 5%. What overran them was work no specification
+  contained. The installer had been writing a `CLAUDE.local.md` block with
+  markers `bin/sd_lib.py` could not read, so every key it wrote was silently
+  unread; the `url` client found the scheme consent and the `Allowance`
+  (`bin/sd_registry.py:693-713`) round trip that nobody had assigned; and a
+  loopback exemption spelled as a string prefix admitted
+  `http://127.evil.com/v1`, a name RFC 1123 permits anyone to register.
+
+  **`sd attribute` is the control, and it is what makes this a mechanism
+  rather than an anecdote.** It extended a read side that already existed —
+  `attribution`, `_in_range` and `author_vendors` had landed with the registry
+  reader — so it crossed into no half it did not own, and it discovered
+  nothing. The other two each crossed one seam and each found a defect behind
+  it. Discovery is a property of the *seam crossed*, not of the size of
+  whatever crosses it.
+
+  The measurements say the same thing. As a multiple of its reservation the
+  overrun is 0.00, 2.11 and 1.07; in absolute lines it is 0, 135 and 122. The
+  two non-zero absolutes sit within 10% of each other while their multiples
+  differ twofold, so a contingency expressed as a percentage is ruled out by
+  the data rather than by taste: it would have funded the 168-line unit that
+  discovered nothing at more than twice the 64-line unit that discovered most.
+  So the contingency is a flat line, reserved once per seam crossed and not at
+  all where nothing is crossed.
+
+  **And it is two lines, not one, because they close at different moments.**
+  The scheme consent and the `Allowance` round trip were found while the `url`
+  client was being written. The loopback fix was found in review an hour after
+  that unit had been measured, reported and called done — it moved a total
+  that had already been called final. A reservation is therefore overrun by
+  two distinguishable things, and only the first of them is finished when the
+  writer says so. Collapsing them into one figure would hide that a *measured
+  actual* is not yet a settled number.
+
+  So, line by line:
+
+  - **236, measured.** The `url` client on its branch, `bin/sd-review` +9 and
+    `bin/sd_registry.py` +227. It transplants exactly onto `main`: nothing
+    that landed after that branch left touched either file.
+  - **106, reserved.** Criterion 11's mode predicate at R11-D32's analogue,
+    re-measured with `ast` rather than carried forward. It still measures what
+    R11-D32 said it did, at the same lines: `setup_github`
+    (`bin/sd_setup_github.py:188-260`, 73) with `resolve_pin`
+    (`bin/sd_setup_github.py:77-95`, 19) and `action_reference`
+    (`bin/sd_setup_github.py:98-111`, 14). So does the `url` client's
+    now-spent analogue: `codex_argv` (`bin/sd-review:685-718`, 34),
+    `subprocess_runner` (`bin/sd-review:571-593`, 23), `_finding`
+    (`bin/sd-review:721-757`, 37) and `parse_findings`
+    (`bin/sd-review:760-779`, 20) still total 114. Its transport line was if
+    anything generous — the one built stdlib-HTTP transport in `bin/`,
+    `read_source` (`bin/sd-skill-adopt:347-365`), is 19.
+  - **119, reserved, in-flight discovery.** The predicate crosses one seam:
+    `mode` out of the `CLAUDE.local.md` block, whose value was unread and
+    indistinguishable from its own `full` fallback until the marker fix
+    landed, so this is the first code for which those two differ. The figure
+    is the mean of the two measured in-flight overruns, (135 + 102) / 2,
+    rounded up because rounding a reservation down is the direction that busts
+    a cap. The mean and not the worse of them: with two observations and no
+    reason to call either an outlier, taking the max ratchets the ceiling on
+    whichever unit happened to go worst.
+  - **20, reserved, post-report discovery.** The one observation there is, on
+    the one unit that has been read a second time. This is the weakest number
+    in the derivation and is marked as such. The two merged units are recorded
+    as `-` rather than `0` because no second reading of either is on record,
+    and an absence of findings is not a finding of zero. If they were in fact
+    read and found clean, the honest figure is nearer 7 and this over-reserves
+    by 13; 13 lines is not worth the weaker guarantee.
+
+  **A second ceiling binds at the same time, and R11-D32 never says so.**
+  `test_the_review_lane_stays_under_its_sub_cap`
+  (`tests/test_sd_review_boundary.py:286-296`) caps the review lane at 1700,
+  where the lane is `bin/sd-review` plus every `bin/` module it imports except
+  `SHARED_CORE` (`tests/test_sd_review_boundary.py:46`). Today that is
+  `bin/sd-review` (1,364) plus `bin/sd_setup_github.py` (326) = **1,690**, and
+  the `url` client takes it to **1,699**. One line. Two consequences this
+  entry has to state rather than leave to be discovered:
+
+  - **The 225 reserved for the predicate is spendable only outside that
+    lane**, and the predicate's own analogue, `bin/sd_setup_github.py`, is
+    inside it. A reservation under `BIN_CAP` that cannot be spent where the
+    work belongs is not a reservation. If criterion 11 has to land in
+    `bin/sd-review` or `bin/sd_setup_github.py`, that needs its own decision
+    and 1700 is not this change's to move.
+  - **The sub-cap has already relocated code rather than bounded it.** The
+    `url` client's 227 lines went into `bin/sd_registry.py` because the lane
+    had ten lines spare and `bin/` had none — and `sd_registry` is exactly
+    what `SHARED_CORE` exempts, on the stated ground that "the registry reader
+    answers *who may review*; the lane's budget is for the code that runs a
+    review." An HTTP client that carries the diff to an endpoint and reads the
+    answer back is code that runs a review. The exemption's own justification
+    no longer describes what is in the file. Recorded here because `BIN_CAP`
+    is where the pressure came from; routed rather than fixed, because
+    `tests/test_sd_review_boundary.py` belongs to that lane's owner.
+
+  **The 24 unclaimed** is what a round 15,400 left after the addition, stated
+  as such rather than attributed to a unit that did not ask for it. If the
+  predicate comes in over 245 that busts a ceiling visibly, which is the
+  behaviour `BIN_CAP` exists to produce, and it licenses no fifth
+  re-derivation inside PR 6.
+
+  Nothing else is funded. PRs 7 and 8 are unwritten scope, which R11-D15's
+  clause excludes by name and R11-D32 restates. One note rather than a
+  reservation: PR 7 will need its own re-derivation, and the two discovery
+  lines should be re-priced there off four delivered units rather than two —
+  in particular the post-report line, which has one observation behind it
+  today and will have three or four by then.
+
+  One mechanical note. This change is deliberately **line-neutral** in
+  `tests/test_loc_caps.py`: 407 lines before and after, so every line number
+  below the constant is unmoved. R11-D32 shifted that file by 24 and broke
+  four anchored citations in
+  `docs/work/2026-09-02-dashboard-ack-and-mutation-count/prd.md`, which it
+  then had to repoint. Those four are the entire reason — the file is not this
+  change's to edit, and rewriting the rationale inside its existing envelope
+  costs one round of arithmetic and no cross-item churn.
