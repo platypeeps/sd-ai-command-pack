@@ -208,7 +208,52 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # The 38 unclaimed is what a round 15,750 left, and funds nothing. Over 452
 # for PR 7 busts a ceiling visibly, which is what this constant is for. PR 8
 # stays unfunded under R11-D15's clause. The item's `prd.md` carries the rest.
-BIN_CAP = 15_750           # R11-D38: PR 7's body, one unrepaired seam, review
+#
+# R11-D42, 2026-09-07, funds **criterion 26 alone** and leaves the rest of PR 8
+# unfunded exactly as R11-D15's clause requires. PR 8 is not one pull request
+# any more: priced whole it came to 2,592 lines, a 16.5% raise in one step for
+# scope a month out, and this ceiling exists to make that visible rather than
+# to wave it through. It lands in four slices, one per criterion, each preceded
+# by its own re-derivation. Splitting costs nothing -- 2,593 across four against
+# 2,592 in one -- because the seams do not double.
+#
+# The base is **15,749**, not the 15,743 this branch measures. The six-line
+# difference is `sd_lib.external_id`, committed on PR 7's branch and merging
+# first, and already inside R11-D38's reservation. Pricing off 15,743 would
+# fund criterion 26 six lines short of the tree it will actually build on.
+#
+# Criterion 26 is **976**: a 663-line body, 238 of seam, 75 of post-report.
+# The body is three spans at built analogues -- `bin/sd_codex.py` at 368,
+# `bin/sd-skill-use` at 240, and the installer going from one hook event to
+# five at +55 net. The +55 is shared: the two hooks criterion 29 needs ride on
+# it free, which is why 26 lands before 29.
+#
+# The 238 is two seams at R11-D38's flat 119, both genuinely uncrossed:
+# writing `skill_use` rows, which nothing in `bin/` has done, and parsing a
+# Codex transcript, a format nothing here has read. R11-D38's own item-rows
+# seam is spent -- `d9aca2e0` crossed it -- so it is not reserved again. No
+# seam is reserved for calling GitHub: `sd_lib.gh_api` and
+# `bin/sd-pr-state`'s `gh_json` repair that transport twice over.
+#
+# **PR 7 is the first delivered total, and it overran.** R11-D38 reserved 452
+# and PR 7 spent 489 in `bin/` -- 8.2% over, 15,260 to 15,749, which is the
+# 1 line of headroom this branch measures. Per span it was far worse than
+# that: `sd_lib.py` took 378 against 125 reserved, three times over, while
+# `bin/sd-status` came in at -5 against 38. The misses cancelled. So
+# R11-D38's claim that the analogue method holds "inside 5%" does not survive
+# its own first total -- the method is unreliable per span and roughly right
+# in aggregate, which is the reverse of what it concluded from four units, and
+# it is the aggregate that a ceiling actually gates.
+#
+# What that costs here is the per-file header. A new module in `bin/` is 49 to
+# 72 lines before its first function -- measured, `sd_restore.py` 49,
+# `sd_sweep.py` 54, `sd-handoff-restore` 71, `sd-handoff` 72 -- plus 2.9 lines
+# of glue per function boundary, which is `sd-handoff-restore`'s 46 remainder
+# over 16 defs. Criterion 26 adds two new files, so 125 of its 663 is header
+# that no function-level analogue would have shown.
+#
+# The 25 unclaimed is what a round 16,750 left.
+BIN_CAP = 16_750           # R11-D42: criterion 26 only; 27, 28 and 29 unfunded
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
 # R11-D29, re-derived 2026-09-03 with the itemisation R11-D24's clause asks
 # for: 4,190 measured on `main`, 158 measured on the branch that carries the
@@ -322,6 +367,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
         ("2026-09-06", 15_050),
         ("2026-09-06", 15_400),
         ("2026-09-06", 15_750),
+        ("2026-09-07", 16_750),
     ),
     "DASHBOARD_CAP": (
         ("2026-08-30", 2_500),

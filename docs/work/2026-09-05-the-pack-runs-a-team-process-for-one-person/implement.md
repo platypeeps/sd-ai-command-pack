@@ -782,66 +782,150 @@ argued the point by calling this the third slice, which contradicted the
 heading above it and B's numbering both. Criterion 32 is covered by
 the same sentence, and neither this pull request nor PR 6 noted it.
 
-## Slice 2, PR 8 — rows for trials, uses, suggestions and handoff
+## Slice 2, PRs 8a to 8d — rows for uses, suggestions, promotion and handoff
 
-**Touches:** `bin/sd`, the `PreToolUse`, `UserPromptSubmit`, `PreCompact`,
-`SessionEnd` and `SessionStart` hooks — **five hooks from two criteria, not
-five from one requirement**. Requirement 12 (`prd.md:988-1002`) names three:
-`PreCompact` and `SessionEnd` prompt the packet, `SessionStart` loads the
-item's open rows. The other two come from criterion 26 (`prd.md:1600-1602`),
-"The `PreToolUse` and `UserPromptSubmit` hooks write `skill_use` rows". Both
-criteria are this pull request's, so the file set was right and the
-justification was not: an earlier draft called all five "requirement 12
-names" and cited `prd.md:997-999`, three lines carrying three of them; the nightly parse of
-`~/.codex/sessions`; `skills/sd-suggest/`; `skills/sd-propose-skills/`;
-`skills/paths.json`; `dashboard/`; `bin/sd-handoff` and
-`bin/sd-handoff-restore`, which are the handoff path named as files; and
-the writing repository's manifest, from which criterion 28 removes the
-`skill-proposal` kind, plus **`sd shadow sync` (new)**, the surface
-criterion 28's shadow rows are asserted against — neither of which any
-Touches list named. `sd shadow sync` does not exist: `prd.md:959` introduces
-it ("They are shadowed, not imported: `sd shadow sync` keeps their state"),
-criterion 28 says only "appear as `shadow` rows after a sync", and no `shadow
-sync` string appears anywhere in the pack. An earlier draft listed it as an
-existing surface; it is built here, and marked new like `WORKFLOW.md` and
-`skills/paths.json` are.
+**PR 8 is four pull requests, not one, from R11-D42 on 2026-09-07.** Priced
+whole against built analogues it came to 2,592 lines of `bin/`, a 16.5% raise
+in one step for scope a month out, which is what R11-D15's clause exists to
+refuse. The four criteria are near-independent and the split costs nothing —
+2,593 across four against 2,592 together, because no seam is crossed twice.
+Each slice is preceded by its own `BIN_CAP` re-derivation, and only the slice
+about to be written is funded. The earlier single-PR heading, its combined
+Touches list and its "Verification: criteria 26, 27, 28 and 29" are superseded
+by the four below; what that draft got right is preserved in each.
 
-**Item B's PR 3 scheduled the same command, and no longer does.** Round four
-found both items building `sd shadow sync` as new greenfield work in two
-repositories, neither naming the other. Settled 2026-09-05 with B's wider
-`sd` verb question: the verbs are the pack's, so this pull request keeps the
-command and B's PR 3 keeps only the `watermark` state kind it resumes from
-(`B/prd.md:211`) and the cron entry that invokes it. B records it as that
-item's hand-off 10, and B's shadow migration cannot run end to end until
-this pull request merges.
+**Order: 8a (26), 8b (29), 8c (27), 8d (28).** Forced once and only once: the
+installer's move from one hook event to five is +55 shared by all four new
+hooks, and 8a pays it so 8b rides free. 8d is last because two of its clauses
+answer to files outside this repository.
 
-**Four surfaces the criteria name and an earlier Touches list did not.**
-Criterion 26 requires "the Codex nightly parse writes the same shape", with
-a test feeding one recorded session of each kind — so the parse is in scope,
-and the OpenCode plugin is named by requirement 10 for when that surface is
-in use. Criterion 27 requires the promotion and demotion pull request to
-move the directory **and edit `paths.json`**, opened by the library and
-never by the dashboard directly, which puts both `skills/paths.json` and
-`dashboard/` in scope. Criterion 28 requires the `skill-proposal` kind to be
-absent from the writing manifest and `sd-propose-skills` to write no vault
-note.
+### PR 8a — criterion 26, the two hooks and the Codex nightly
 
-`sd skill try` writing a trial row; the two hooks writing `skill_use` rows;
-promotion and demotion each producing one pull request that moves the
-skill; `sd-suggest` writing a row in every mode and filing nothing; and
-handoff losing nothing because nothing lives only in context — a session
-killed mid-task and restarted in the same directory begins from the row and
-not from a re-read.
+**Touches:** `bin/sd-skill-use` (new), `bin/sd_codex.py` (new),
+`bin/sd_install.py`, and the scheduler that runs the nightly, which is in
+neither `bin/` nor this repository — `.github/workflows/` holds two files and
+neither is scheduled.
 
-**Verification.** Criteria 26, 27, 28 and 29.
+**Funded: 976, `BIN_CAP` 15,750 to 16,750 (R11-D42).**
 
-**Criterion 28 asserts against a file this repository does not have.** It
-requires `sd suggest publish` to be no palette entry, "asserted by
-enumerating `commands.yaml`"; `git ls-files` finds no `commands.yaml`
-anywhere here, because it is item B's, written by B's dashboard. The
-assertion is real but it runs against B's file, so this pull request sits
-behind B's slice 4 for that clause alone. Flagged rather than quietly
-dropped.
+`skill_use` is not new. The table is declared at `sd_db/schema/001_initial.sql:126-133`
+with exactly the columns the criterion names — `timestamp`, `skill`, `surface`,
+`mode` under a `CHECK (mode IN ('direct','path'))`, `cwd` — and the writer is
+`sd_db/writes.py:530` `record_skill_use`, whose own docstring at `:541-545`
+already names both producers this criterion asks for. Nothing in the pack calls
+it: the only callers are `tests/test_sd_skill.py:171` and `:184`, and both pass
+`skill` and `timestamp` alone. **What is built here is the two producers, not
+the row.**
+
+**One hook file and not two.** `PreToolUse` and `UserPromptSubmit` differ only
+in how the skill name comes off the payload. Two files would duplicate the
+header, the library open, `resolve_root` and `main` — 132 of the body — to save
+an eight-line branch. The hook must exit 0 silently on every internal error,
+which is why its library open takes the `return None` form of
+`bin/sd_registry.py:161-167` and not `bin/sd_restore.py:54-67`, whose refusal
+prose a hook may not print.
+
+**There is no recorded-session fixture anywhere.** `tests/fixtures/` holds two
+provider files. The closest built thing is `tests/test_sd_handoff_restore.py:123`,
+which constructs a hook payload inline rather than replaying one. Both fixtures
+this criterion needs are new, and `tests/` answers to no line cap.
+
+### PR 8b — criterion 29, continuity that survives a kill
+
+**Touches:** `bin/sd-handoff-restore`, `bin/sd_handoff_rows.py` (new),
+`bin/sd-handoff-prompt` (new), `bin/sd-note` (new), `bin/sd_install.py` for the
+`PreCompact` and `SessionEnd` matchers, which 8a has already made plural.
+
+**Priced 836. Not funded by R11-D42; its own re-derivation precedes it.**
+
+**This is a rewrite of where continuity comes from, not a wiring job.** Today
+`bin/sd-handoff-restore` injects a JSON packet that exists only if someone ran
+`bin/sd-handoff` by hand, and nothing calls that automatically. The criterion's
+test writes three followups *through the library*, ends the session without
+calling `sd-handoff`, and asserts all three arrive — so the row has to become a
+source the hook reads, beside the packet. `run` returns 0 at `if not
+path.is_file()`, which is the line the test hits first.
+
+`add_note` with `kind='followup'` already exists (`sd_db/writes.py:335`; the
+vocabulary is the SQL `CHECK` at `001_initial.sql:66-69`) and **has no caller
+anywhere in this pack.**
+
+**A suffixless file cannot be imported.** `bin/sd-handoff-restore` and a
+followup writer cannot share code directly, so the item resolver and the row
+reader go in `bin/sd_handoff_rows.py`, which both import — one header paid once
+instead of a reimplementation. `tests/test_sd_handoff.py:334-339` bans
+`sd_lib`, `import requests` and `from installer` from `bin/sd-handoff` **only**;
+there is no equivalent assertion on the restore hook, which may therefore
+import both `sd_lib` and the new module.
+
+**`PreCompact` must never claim.** `bin/sd-handoff-restore:8-12` excluded a
+`compact` matcher on SessionStart because restoring into a dying session strands
+the packet for the `/clear` that follows. The prompt direction is the mirror
+image and is safe only if the hook never reads-and-claims: it reads the packet
+to ask whether one is already fresh, and nothing else.
+
+### PR 8c — criterion 27, promotion and demotion
+
+**Touches:** `skills/paths.json`, `contrib/`, `skills/`, `bin/sd_lib.py`,
+`bin/sd_skill.py`, and `dashboard/` only in that the dashboard must **not** be
+where the pull request is opened.
+
+**Priced 417. Not funded by R11-D42.**
+
+`skills/paths.json` exists and has readers only — `bin/sd_install.py:240` and
+`bin/sd_skill.py:117`. **Nothing writes it programmatically**, and the pack's
+own precedent for a read-modify-write of a JSON file it does not own is a pair,
+`install_hook` and `remove_hook`, so promotion and demotion are priced as two
+functions and not one directioned writer.
+
+**There is no way to open a pull request, and no way to push.** `bin/sd_lib.py:269`
+`gh_api` runs `["gh", "api", endpoint]` with no method and no body and never
+raises. No `git push` exists anywhere in `bin/` — every match is prose or
+`sd_lib`'s reading of who *may* push. But the transport is not new: `gh_json`
+at `bin/sd-pr-state:117-126` already takes arbitrary `gh` args behind a timeout,
+an `OSError` guard and a JSON decode, so the opener is a caller at 24 lines and
+not a seam. `git push` **is** a first crossing and carries the flat 119.
+
+### PR 8d — criterion 28, suggestions that file nothing
+
+**Touches:** `skills/sd-suggest/`, `contrib/sd-propose-skills/`, `bin/sd`,
+`bin/sd_suggest.py` (new), `bin/sd_shadow.py` (new), and the writing
+repository's manifest, which is not in this checkout.
+
+**Priced 364. Not funded by R11-D42. Last, because two clauses answer elsewhere.**
+
+**A correction to every earlier Touches list: the skill is at
+`contrib/sd-propose-skills/`, not `skills/sd-propose-skills/`.** That directory
+does not exist; PR 2 moved the skill into `contrib/`, and the lists were written
+against the old path. The work is real — `contrib/sd-propose-skills/SKILL.md:94`
+still carries `content-type: skill-proposal` and `:126` still names the retired
+`skill-proposal-accept` routine — only its location was wrong.
+
+**A correction to how `sd shadow sync` was scoped: only the verb is new.**
+Earlier text called the whole command greenfield. `sd_db/shadow_sync.py:391`
+`sync(connection, *, now, runner, tracker)` is complete and installed, exported
+as `sd_db.sync_shadow`, and its module docstring settles the split in as many
+words — "This module is the collector, not the command. `sd shadow sync` is a
+verb and verbs live in the pack." The pack builds a wrapper, priced at 155 for
+the group and the module together. `sync` calls only `collect`, `store` and
+`write_watermark`, so the criterion's "the fixture saw no close call" is
+**structurally satisfiable** rather than something the slice must enforce.
+
+`sd suggest` is a verb group under `bin/sd` and not a `bin/sd-suggest`
+executable, which the criterion decides for us: it must be no palette entry,
+and a verb under `sd` is not an installed entrypoint while a standalone binary
+is. `skills/sd-suggest/SKILL.md:50` states the gap — "There is no `bin/sd-suggest`
+yet" — and `:28` still files to a tracker, which this slice reverses. "Every
+mode" is `bin/sd_lib.py:33` `MODES = ("full", "minimal", "guest")`: the row is
+written in all three, and only `publish` is gated.
+
+**Two clauses cannot close from this checkout, and this slice does not claim
+them.** `commands.yaml` does not exist here — it is item B's, written by B's
+dashboard — so the "no palette entry" assertion sits behind B's slice 4, as an
+earlier draft already flagged. The writing manifest is another repository's, so
+the `skill-proposal` removal reaches only the `contrib/sd-propose-skills/` half
+from here. Flagged rather than quietly dropped, and the second of the two was
+not flagged before.
 
 ## Two things about the criteria list itself
 
