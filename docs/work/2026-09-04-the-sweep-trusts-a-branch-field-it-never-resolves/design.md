@@ -216,12 +216,19 @@ calls, each a round trip. That is the cost criterion 5 chose over a cache, and
 it is bounded by root count rather than by item count — the shape that stays
 flat as the backlog grows.
 
-Measured rather than assumed: `branches()` is **seven** `git` invocations per
-root, not the two the fact count suggests. Five of them are `upstream`
-resolving which remote to ask — `remote`, `rev-parse --abbrev-ref HEAD`,
-`config --get branch.<head>.remote`, `symbolic-ref` and a `rev-parse --verify`
-fallback — and those are local reads. Exactly one leaves the machine. The
-per-root bound is what the cost argument rests on, and it holds for all seven. `git_output` already carries the timeout, so a
+Measured rather than assumed, and stated as an invariant rather than a number.
+**The invariant: at most one `ls-remote` per root, and only when a remote
+exists; every other call is a local read, and none of them is per item.** That
+is what the cost argument rests on and it does not move.
+
+The count itself does move, between five and eight, because `upstream` has two
+paths: it returns early when the remote publishes a `HEAD`, and falls back to
+trying `main` then `master` when it does not. A fixture run — no
+`refs/remotes/origin/HEAD`, `main` present — measured seven: `for-each-ref`,
+then `remote`, `rev-parse --abbrev-ref HEAD`, `config --get
+branch.<head>.remote`, `symbolic-ref` and one `rev-parse --verify`, then
+`ls-remote`. A checkout that publishes `origin/HEAD` measures six, and one with
+no remote at all measures five and reaches no network. `git_output` already carries the timeout, so a
 hanging remote fails to `unknown` rather than to a hung sweep.
 
 **A shared branch name across repositories still misleads a reader, not the

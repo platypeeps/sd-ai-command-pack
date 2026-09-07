@@ -87,7 +87,7 @@ and it found one.
 One pass, per the Development / code row. Copilot recommended approval and
 raised one issue: the `branches()` docstring was inaccurate about subprocess
 counts. Verified before acting on it — a recording `git` on `PATH` shows
-**seven** invocations per root, not the two the docstring implied:
+**seven** invocations in that fixture, not the two the docstring implied:
 
 ```
 for-each-ref --format=%(refname:short) refs/heads
@@ -100,10 +100,20 @@ ls-remote --heads origin
 ```
 
 Five of the seven are `sd_lib.upstream` resolving which remote to ask, and they
-are local reads; exactly one leaves the machine. The docstring and `design.md`'s
-D5 and Risks section now say seven and name the one that is a round trip. The
-claim the cost argument actually rests on — per root, never per item — was
-right and is unchanged.
+are local reads; one leaves the machine.
+
+**The verification pass caught the fix.** Seven is that fixture's count, not an
+invariant: `upstream` returns early when the remote publishes a `HEAD` and
+falls back to `main` then `master` when it does not, so the real range is five
+to eight — five when there is no remote and nothing reaches the network. The
+docstring and `design.md` now lead with the invariant, *at most one `ls-remote`
+per root and none of it per item*, and give the measured seven as one path's
+figure. That invariant was right in the first fix and is what the cost argument
+always rested on; the number attached to it was not.
+
+Both review points are spent: one code review, one verification of its fix.
+The verification's own finding is documentation accuracy, non-blocking, and
+fixed here rather than carried.
 
 ## Gates
 

@@ -95,10 +95,12 @@ def branches(root: pathlib.Path) -> frozenset[str] | None:
     pushed is live work, and calling it gone would sweep the item somebody
     just started.
 
-    Seven `git` invocations, of which exactly one leaves the machine: the
-    `ls-remote`. Five of the other six are `upstream` resolving which remote to
-    ask, and they are local reads. What matters for cost is that all seven are
-    per root and none is per item, so the bill is flat as the backlog grows.
+    Five to eight `git` invocations, of which at most one leaves the machine:
+    the `ls-remote`, and only when a remote exists. The rest are local reads,
+    most of them `upstream` deciding which remote to ask -- the spread is its
+    early return when the remote publishes a `HEAD` against its `main`-then-
+    `master` fallback when it does not. The invariant, and the whole of the
+    cost argument, is that every one of them is per root and none is per item.
 
     A root with no remote is answered, not refused: it holds every branch it
     has, so its local heads are the whole truth. None means git failed or the
