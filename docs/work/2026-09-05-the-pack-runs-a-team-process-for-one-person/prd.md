@@ -4404,6 +4404,30 @@ from a number the operator types.
   bool(==)` where the source says `!=`. Clear `__pycache__` after a mutation
   loop, or verify with `dis` rather than with the source.
 
+- **2026-09-07, PR 7's two prose-and-history clauses, and what each was
+  missing.** Criterion 13's kill list has three clauses and the skill covered
+  one. `## What a rerun reconciles` described the window *after* the merge —
+  merged, and the row does not know it — and said nothing about the window
+  before it: a run killed after the push, and a merge the remote refused. The
+  two differ in why they stopped and in nothing that follows, so the section
+  now states them once, and the three consequences criterion 13 names sit in
+  one sentence: the row is not `done`, the item's directory is untouched, and
+  `sd-plan` and `sd-review` go on picking the item. Two tests, both caught by
+  deleting the paragraph.
+
+  **Criterion 21's archive half is two readings, because either alone fails
+  open.** The criterion's own words are a diff: the branch that landed the
+  retire names no path under `docs/work/archive/`. That reading needs the
+  history, and `actions/checkout` defaults to depth one — where the query does
+  not answer "no commit added the marker" but returns the grafted root, which
+  adds every tracked file, so the archive check fails with a message about a
+  rewrite that never happened. So `tests.yml`'s unittest job now fetches the
+  whole history (22 MiB packed, 3,336 commits), the test asks
+  `git rev-parse --is-shallow-repository` first and says what is actually
+  wrong, and the second reading is a tree property that survives a rewritten
+  history: 491 archived `prd.md` all carry `status:`, 5 active ones carry
+  none. Verified both ways — `d369b6b1` names 0 archive paths, and stripping
+  one archived line fails the tree test.
 - **2026-09-07** — **R11-D42, `BIN_CAP` re-derived from 15,750 to 16,750, and
   PR 8 split into four pull requests**, in a change of its own that touches
   `tests/test_loc_caps.py` and these planning pages and nothing under `bin/`,

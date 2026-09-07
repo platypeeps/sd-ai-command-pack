@@ -157,6 +157,15 @@ go on picking the item until some merge carries the trailer for it. Reading a
 delivery out of the bare fact that a branch merged is how an item gets closed
 by a slice, and this command would rather leave an item open than guess.
 
+The window *before* the merge is not that window, and nothing reconciles it. A
+run killed after the push and before the merge, and a merge the remote refused
+— a head that moved under the review, or a check that came back red — both
+leave the default branch exactly as it was. No trailer reached it, so no claim
+was made about any item: the row is not `done`, the item's directory is
+untouched, and `sd-plan` and `sd-review` go on picking the item. The next run
+re-enters at step 1 rather than repairing anything, a pushed branch with no
+merge behind it being a branch and not a half-finished delivery.
+
 ## Flags
 
 | Flag | Effect |

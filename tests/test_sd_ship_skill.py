@@ -838,6 +838,36 @@ class AKilledRunIsReconciledByTheNext(unittest.TestCase):
         for line in carried:
             self.assertIn("picking the item", line)
 
+    def test_the_two_ways_the_merge_never_happens_are_named_together(self) -> None:
+        """Criterion 13's first two kill clauses, which are one window.
+
+        A run killed after the push and a merge the remote refused differ in
+        why they stopped and in nothing that follows, so the section states
+        them once. Naming only one would leave the other reading as a case the
+        page forgot, which is how a reader talks themselves into reconciling
+        it.
+        """
+
+        self.assertTrue(
+            sentences_with(self.reconcile, "killed after the push", "refused"),
+            "the section names neither the kill before the merge nor the "
+            "refused merge, or names them in separate sentences",
+        )
+
+    def test_neither_of_them_closes_anything(self) -> None:
+        """The three things criterion 13 asserts, in one sentence.
+
+        Scattered they say much less: "untouched" belongs to half the page.
+        Together they are the claim that a branch reaching the remote is not
+        a delivery, which is the only reason this paragraph exists.
+        """
+
+        carried = sentences_with(self.reconcile, "not `done`")
+        self.assertTrue(carried, "no sentence says the row stays open")
+        for line in carried:
+            for token in ("untouched", "picking the item"):
+                self.assertIn(token, line, f"the consequence omits {token}")
+
     def test_the_guess_is_named_as_the_thing_not_to_do(self) -> None:
         self.assertTrue(
             sentences_with(self.reconcile, "closed", "by a slice"),
