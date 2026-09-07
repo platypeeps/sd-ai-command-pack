@@ -58,7 +58,6 @@ import os
 import pathlib
 import re
 import shutil
-import subprocess  # nosec B404 - fixed argv git reads, never a shell
 import sys
 from typing import Any, TextIO
 
@@ -93,7 +92,6 @@ except ImportError:  # pragma: no cover - exercised by the copied-tools test
 #: but it is a semantic change to an existing key, which is what a version is
 #: for.
 SCHEMA_VERSION = 2
-GIT_TIMEOUT_SECONDS = 15
 
 
 def _sibling(name: str, module_name: str) -> Any:
@@ -123,21 +121,6 @@ class UsageError(Exception):
     """An invocation fault: exit 2, one sentence, never a traceback."""
 
 
-def _git(args: list[str], cwd: pathlib.Path) -> str | None:
-    try:
-        completed = subprocess.run(  # nosec B603 - fixed argv, shell=False
-            ["git", *args],
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            timeout=GIT_TIMEOUT_SECONDS,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return completed.stdout.strip() if completed.returncode == 0 else None
-
-
 # --------------------------------------------------------------------------
 # 1. Pack banner
 # --------------------------------------------------------------------------
@@ -152,11 +135,11 @@ def pack_banner() -> dict[str, Any]:
     root = _BIN.parent
     return {
         "root": str(root),
-        "branch": _git(["rev-parse", "--abbrev-ref", "HEAD"], root),
-        "head": _git(["rev-parse", "--short", "HEAD"], root),
+        "branch": sd_lib.git_output(["rev-parse", "--abbrev-ref", "HEAD"], root),
+        "head": sd_lib.git_output(["rev-parse", "--short", "HEAD"], root),
         # `--no-optional-locks` because a plain `git status` refreshes the
         # index on disk, and a read-only tool does not get to write the index.
-        "dirty": bool(_git(["--no-optional-locks", "status", "--porcelain"], root)),
+        "dirty": bool(sd_lib.git_output(["--no-optional-locks", "status", "--porcelain"], root)),
     }
 
 
@@ -892,7 +875,7 @@ def carrier_branches(root: pathlib.Path) -> list[dict[str, str]]:
     `git fetch` first if you want them newer. There is no list of carrier
     branches anywhere, and there must not be: the commit subject is the record.
     """
-    listing = _git(
+    listing = sd_lib.git_output(
         [
             "for-each-ref",
             "--format=%(refname:short)%09%(objectname:short)%09%(committerdate:relative)%09%(contents:subject)",
@@ -1008,7 +991,7 @@ def residue_section(root: pathlib.Path) -> list[dict[str, Any]]:
             found.append(
                 {"id": name, "paths": matches, "why": why, "remove": command}
             )
-    hooks_path = _git(["config", "--get", "core.hooksPath"], root)
+    hooks_path = sd_lib.git_output(["config", "--get", "core.hooksPath"], root)
     if hooks_path:
         found.append(
             {
