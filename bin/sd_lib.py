@@ -329,14 +329,23 @@ def remote_permits_full(root: pathlib.Path, *, ask: Asker = gh_api) -> RemoteAns
     people, error = ask(COLLABORATOR_QUERY, root)
     if not isinstance(people, list):
         return RemoteAnswer(False, False, f"the remote did not list who may push to {name}: {error or 'no list'}")
-    others = sorted(
-        str(person.get("login"))
-        for person in people
-        if isinstance(person, dict) and str(person.get("login")) != login
-        and isinstance(person.get("permissions"), dict) and person["permissions"].get("push")
-    )
+    # Parsing and filtering are separate questions, and doing them in one pass
+    # fails open: an entry dropped for being unreadable leaves `others` empty,
+    # and an empty `others` is one of only three places `full` is returned. So
+    # "nobody I could parse" would arrive as "nobody else may push". Every entry
+    # is read first, and the first one that cannot be read is no answer.
+    others: list[str] = []
+    for index, person in enumerate(people):
+        rights = person.get("permissions") if isinstance(person, dict) else None
+        who = str(person.get("login") or "") if isinstance(person, dict) else ""
+        if not who or not isinstance(rights, dict):
+            return RemoteAnswer(
+                False, False, f"the list of who may push to {name} has an entry ({index}) this cannot read"
+            )
+        if who != login and rights.get("push"):
+            others.append(who)
     if others:
-        return RemoteAnswer(False, True, f"{name} lets {', '.join(others)} push too")
+        return RemoteAnswer(False, True, f"{name} lets {', '.join(sorted(others))} push too")
     return RemoteAnswer(full=True, answered=True)
 
 

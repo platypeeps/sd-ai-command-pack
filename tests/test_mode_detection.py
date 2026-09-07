@@ -197,6 +197,28 @@ class SixCases(Fixture):
         self.assertEqual(ask.asked, [])
 
 
+class GenuineYeses(Fixture):
+    """The two collaborator answers that really are yeses, kept from the fix.
+
+    Refusing an unreadable entry must not slide into refusing a readable one
+    that simply says no other pusher. These are the controls for that.
+    """
+
+    def test_an_empty_collaborator_list_is_a_real_yes(self) -> None:
+        root = self.make_repo(origin="https://github.com/sven/thing.git")
+        answer = sd_lib.remote_permits_full(root, ask=Asker(table(people=[])))
+        self.assertEqual(answer, sd_lib.RemoteAnswer(True, True, ""))
+
+    def test_a_pull_only_collaborator_is_not_a_pusher(self) -> None:
+        root = self.make_repo(origin="https://github.com/sven/thing.git")
+        people = [
+            {"login": "sven", "permissions": {"push": True, "admin": True}},
+            {"login": "mallory", "permissions": {"push": False, "pull": True}},
+        ]
+        answer = sd_lib.remote_permits_full(root, ask=Asker(table(people=people)))
+        self.assertEqual(answer, sd_lib.RemoteAnswer(True, True, ""))
+
+
 class UnanswerableQueries(Fixture):
     """No answer is `guest`, never `full`. One test per way of not answering."""
 
@@ -248,6 +270,58 @@ class UnanswerableQueries(Fixture):
             answer = sd_lib.remote_permits_full(root)
         self.assertEqual((answer.full, answer.answered), (False, False))
         self.assertIn("git could not be asked", answer.reason)
+
+    def test_a_collaborator_entry_that_cannot_be_read_is_guest_and_unanswered(self) -> None:
+        """Found in review: the filter that fails open, one case per shape.
+
+        The first version of this predicate parsed and filtered in one pass, so
+        an entry it could not read was dropped instead of reported. Drop them
+        all and `others` is empty -- and an empty `others` is one of only three
+        places `full` is returned, so a repository with a dozen pushers whose
+        list arrived in an unexpected shape resolved to the most permissive
+        mode. It is the same fail-open the top-level `isinstance(people, list)`
+        guard correctly refuses, one level down, and the guard reads as though
+        it covered this. It did not.
+        """
+
+        root = self.remote_repo()
+        shapes = {
+            "no permissions key": [{"login": "sven"}, {"login": "mallory"}],
+            "permissions not a dict": [
+                {"login": "sven", "permissions": {"push": True}},
+                {"login": "mallory", "permissions": "write"},
+            ],
+            "bare login strings": ["sven", "mallory"],
+            "no login": [{"login": "sven", "permissions": {"push": True}}, {"permissions": {"push": True}}],
+            "an entry that is null": [{"login": "sven", "permissions": {"push": True}}, None],
+        }
+        for label, people in shapes.items():
+            with self.subTest(label):
+                answer = sd_lib.remote_permits_full(root, ask=Asker(table(people=people)))
+                self.assertFalse(answer.full, f"{label} resolved to full")
+                self.assertFalse(answer.answered)
+                self.assertIn("who may push", answer.reason)
+
+    def test_corrupting_any_single_entry_of_a_good_list_never_resolves_to_full(self) -> None:
+        """The mutation the first round of tests did not carry.
+
+        Emptying or corrupting one entry of an otherwise sound list is the
+        mutation that bites here, and it is the one the earlier suite missed:
+        the defect never reached an error return, it reached the success return
+        with an empty list. Held as a test rather than as a thing I remember to
+        run, over each position in the list so the loop cannot stop early.
+        """
+
+        root = self.remote_repo()
+        sound = collaborators("sven", "mallory", "robin")
+        for position in range(len(sound)):
+            for corruption in ({}, None, "mallory", {"login": "x"}, {"permissions": {}}, 0):
+                with self.subTest(position=position, corruption=corruption):
+                    people: list[Any] = [dict(entry) for entry in sound]
+                    people[position] = corruption
+                    answer = sd_lib.remote_permits_full(root, ask=Asker(table(people=people)))
+                    self.assertFalse(answer.full)
+                    self.assertFalse(answer.answered)
 
     def test_no_unanswerable_condition_anywhere_resolves_to_full(self) -> None:
         """The sweep, so a new failure mode cannot land as `full` unnoticed.
