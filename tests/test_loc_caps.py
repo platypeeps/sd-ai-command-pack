@@ -1,13 +1,14 @@
 """The three line-count ceilings, enforced instead of remembered.
 
 The design fixes a ceiling for each part of the replacement world -- `bin/` at
-15,400 lines (R11-D15 set 14,000, re-derived from built code after 8,000 was
+15,750 lines (R11-D15 set 14,000, re-derived from built code after 8,000 was
 busted with six of the eleven commands still unwritten -- `sd-plan`, `sd-ship`,
 `sd-spec`, `sd-deps`, `sd-suggest`, `sd-map`; re-derived again at R11-D31 for
-the registry reader, at R11-D32 for what PR 6 had left and at R11-D34 for
-what it has left now), the temporary `migrate-*` tools at 1,500
-outside it, `dashboard/` at 4,350 with 2,300 of it carrying code (R11-D24, with the total
-re-derived at R11-D29) -- and says in as many words that "caps are
+the registry reader, at R11-D32 for what PR 6 had left, at R11-D34 for its
+last two units and at R11-D38 for PR 7), the temporary `migrate-*` tools at
+1,500 outside it, `dashboard/` at 4,600 with 2,300 of it carrying code
+(R11-D24, with the total re-derived at R11-D29, at R11-D30 and at R11-D38)
+-- and says in as many words that "caps are
 CI tests; a cap is never raised in the PR that busts it". That rule survives
 every re-derivation: 14,000, 4,000 and 4,300 were each set in their own
 decision record by a change that fit under the ceiling it replaced, not in a
@@ -16,10 +17,11 @@ change touching this file and one design record and nothing under `dashboard/`,
 while the directory stood at 4,190 against the 4,300 it replaced. 14,700 was
 set the same way at R11-D31, by a change touching this file and one item's
 planning pages and nothing under `bin/`, while the directory stood at 13,307
-against the 14,000 it replaced. 15,050 was set the same way at R11-D32 and
-15,400 at R11-D34, each by a change touching this file and the same item's
-planning pages and nothing under `bin/`, while the directory stood at 14,536
-and then at 14,895 against the ceiling each replaced.
+against the 14,000 it replaced. 15,050 was set the same way at R11-D32,
+15,400 at R11-D34 and 15,750 at R11-D38, each by a change touching this file
+and the same item's planning pages and nothing under `bin/`, while the
+directory stood at 14,536, then at 14,895, then at 15,260 against the ceiling
+each replaced.
 
 **Downward-only now attaches to the code cap, not to the dashboard total.**
 R11-D17 said 4,000 could only fall; R11-D24 raised it anyway, and said so in
@@ -30,9 +32,10 @@ and a paragraph bid for the same line -- the paragraph loses, because the
 branch is what the change is for. So the total may be re-derived with an
 itemisation, and `DASHBOARD_CODE_CAP` is the one that may only move downward.
 `bin/`'s ceiling keeps the original clause and is no longer untouched: it stood
-unmoved from R11-D15 to 2026-09-06, then moved three times in that one week --
-for the registry reader, for what PR 6 had left, and for two units whose
-specified bodies were priced right and overran anyway. It has no code half of
+unmoved from R11-D15 to 2026-09-06, then moved four times in that one day --
+for the registry reader, for what PR 6 had left, for two units whose
+specified bodies were priced right and overran anyway, and for PR 7's retire
+step and the reader that has to precede it. It has no code half of
 its own, because `bin/` has no equivalent of `dashboard/app.js` -- one file
 large enough that a paragraph and a branch measurably compete -- and inventing
 one the day the total first bound would be a mechanism chosen to pass a number.
@@ -73,70 +76,102 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # Each cap names the design decision it enforces, so a failure points at the
 # record rather than at a bare number.
 #
-# R11-D31 re-derived `bin/` from 14,000 to 14,700 on 2026-09-06 for PR 6's
-# registry reader -- 13,307 + 559 - 158 measured, 888 reserved, 104 unclaimed
-# -- and R11-D32 from 14,700 to 15,050 the same day for the rest of PR 6:
-# 14,536 measured + 452 reserved + 62 unclaimed. Both priced unwritten units
-# off built analogues, because this item's `implement.md` pins no body for any
-# of them and built code is the only input that is not an opinion. Three of
-# R11-D32's four have landed since, and they are why R11-D34 adds two lines
-# rather than a bigger number:
+# `bin/` has been re-derived four times, each in its own change, each pricing
+# unwritten units off built analogues measured span by span -- because this
+# item's `implement.md` pins no body for any of them, and built code is the
+# only input that is not an opinion. R11-D31 took it to 14,700 for PR 6's
+# registry reader (13,307 + 559 - 158 measured, 888 reserved, 104 unclaimed),
+# R11-D32 to 15,050 for the rest of PR 6 (14,536 + 452 + 62), R11-D34 to
+# 15,400 for its last two units (14,895 + 236 + 106 + 119 + 20 + 24), and
+# R11-D38 to 15,750 for PR 7.
 #
-#                                reserved  total  overrun  in-flight  post-report
-#   `sd attribute`, write side        168    168        0          0            -
-#   the installer's consent prompt     64    199      135        135            -
-#   the `url` client and its reader   114    236      122        102           20
+# PR 6 is closed, so R11-D38 is the first of them that can check the others
+# against outcomes instead of against each other:
 #
-# The analogue method is not what failed: 168 against 168, ~65 against 64 and
-# ~120 against 114, every specified body inside 5%. What overran was work no
-# specification held -- a `CLAUDE.local.md` block the installer wrote with
-# markers `sd_lib` could not read, then the scheme consent and the `Allowance`
-# round trip nobody had assigned, then a loopback check matching `127.` as a
-# spelling rather than an address. `sd attribute` is the control: it extended
-# a read side that already existed, crossed into nothing, and found nothing.
+#                                reserved  body  in-flight  post-report  total
+#   `sd attribute`, write side        168   168          0            -    168
+#   the installer's consent prompt     64   ~65        135            -    199
+#   the `url` client and its reader   114   216*       102           31    247
+#   criterion 11's mode predicate     106   109          3            9    118
+#   `sd-ship`, criteria 2, 3, 32        -     0          0            0      0
 #
-# Two things follow, kept apart because they close at different moments. The
-# overrun does not scale with the unit -- as a multiple of its reservation
-# 0.00, 2.11 and 1.07, in lines 0, 135 and 122, the two non-zero absolutes
-# within 10% of each other while their multiples differ twofold. It is a
-# property of the seam crossed, not of the size of what crosses it, so it is
-# reserved flat, once per crossing. And a measured total is not settled when
-# its writer says so: the loopback fix arrived in review an hour after the
-# `url` client had been measured and called done.
+#   * body and in-flight are one commit for the `url` client (50387d01): 114
+#     priced, 216 landed. Every other row separates them.
 #
-# R11-D34, re-derived 2026-09-06: 14,895 measured + 236 measured + 106
-# reserved + 119 reserved + 20 reserved + 24 unclaimed = 15,400.
+# The analogue method holds a fourth time -- 106 priced against 109 built,
+# every specified body so far inside 5%. Two of R11-D34's three findings do
+# not, and one of its own figures does not either.
 #
-# The 14,895 is `line_count` over the 26 tracked files this test enumerates,
-# on `main` at 26501c3e, `migrate-*` excluded. The 236 is measured on the
-# `url` branch, +9 in `bin/sd-review` and +227 in `bin/sd_registry.py`.
+# **A seam pays out once.** R11-D34 read overruns of 0, 135 and 122 and
+# concluded that discovery is a property of the seam crossed rather than of
+# the size of what crosses it, so the contingency is flat per crossing. The
+# magnitude survives; the trigger does not. Criterion 11 crossed the seam
+# R11-D34 named -- `mode` out of the `CLAUDE.local.md` block -- and found 3
+# lines rather than 119, because the consent prompt had crossed it first: the
+# 135 that overran the consent prompt *was* the marker fix, as R11-D34's own
+# sentence says ("until the marker fix landed"). Discovery belongs to the
+# first crossing of a seam and does not renew. So the flat line is reserved
+# once per seam no landed unit has crossed, and not at all for a re-crossing.
+# Under that rule the estimator is unchanged at (135 + 102) / 2 = 119: the two
+# first crossings are still the only two first crossings, and 3 is not a third
+# observation of the same thing.
 #
-# The 106 is criterion 11's mode predicate at R11-D32's analogue, re-measured
-# with `ast` and unchanged at the same lines: `bin/sd_setup_github.py`'s
-# remote-facing surface, `setup_github` (:188-260, 73) with `resolve_pin`
-# (:77-95, 19) and `action_reference` (:98-111, 14).
+# **Post-report discovery scales; in-flight discovery does not.** That is the
+# opposite of R11-D34's finding for the other line, and it follows from what
+# each one measures. In-flight discovery is whatever was already sitting
+# behind the seam, and it is that size whatever crosses it. Post-report
+# discovery is a second reader working over a body, and a longer body holds
+# more to find. The two observations are 31 lines on a 216-line body and 9 on
+# a 109-line one: as absolutes they differ 3.4x, as fractions of the body
+# 14.4% and 8.3%, differing 1.7x. The ratio is the steadier statistic on this
+# line, so this line is a percentage where the other one is ruled out as one.
 #
-# The 119 is in-flight discovery for the one seam the predicate crosses --
-# `mode` out of the `CLAUDE.local.md` block, unread and indistinguishable from
-# its `full` fallback until the marker fix landed. It is the mean of the two
-# measured in-flight overruns, (135 + 102) / 2, rounded up because rounding a
-# reservation down is the direction that busts a cap; the mean and not the
-# worse of them, since taking the max ratchets on whichever unit went worst.
+# **A measured actual is still not a settled number, and R11-D34's own figure
+# is the proof.** It recorded the `url` client at "236, measured" and the
+# client landed at 247: a second review round (4aaef4c6) put 11 more lines
+# into `bin/sd_install.py` after the total had been measured, reported, and
+# used to derive a ceiling. Two rounds, not one. The 20 R11-D34 called
+# post-report was only the first of them.
 #
-# The 20 is post-report discovery and the weakest figure here: one
-# observation. The dashes above are "no second reading recorded", not zero.
+# R11-D38, re-derived 2026-09-06: 15,260 measured + 299 reserved + 119
+# reserved + 34 reserved + 38 unclaimed = 15,750.
 #
-# A second ceiling binds at the same time and R11-D32 never says so.
-# `test_sd_review_boundary` caps `bin/sd-review` plus its non-core imports at
-# 1700; that lane is 1690 today and 1699 once the `url` client lands, so this
-# reservation is spendable only *outside* it, and the predicate's own analogue
-# lives inside it. The item's `prd.md` carries the rest.
+# The 15,260 is `line_count` over the 26 tracked files this test enumerates,
+# on `main` at f5b30c00, `migrate-*` excluded as always.
 #
-# The 24 unclaimed is what a round 15,400 left, and funds nothing. Over 245
-# for the predicate busts a ceiling visibly, which is what this constant is
-# for, and licenses no fifth re-derivation inside PR 6. PRs 7 and 8 stay
-# unfunded under R11-D15's clause, and PR 7 will need its own.
-BIN_CAP = 15_400           # R11-D34: body, in-flight discovery, post-report
+# The 299 is PR 7's body in `bin/` and nowhere else, seven spans priced at
+# seven built analogues: the file-or-row resolver at `sd_registry.library`
+# and `sd_registry.read` (37), the row-to-dataclass adapter at
+# `sd_registry._adapt` (38), `sd_lib.delivered` at the built trailer scan
+# `attribution` with `_in_range` (50), `bin/sd-status`'s row read and stale
+# line at `residue_section` with `_render_work` (38), `bin/sd-docs-lint`
+# rules 1 and 2 (44), rule 7 for criterion 33 at `check_citations` with
+# `resolve_citation` (73), and the `sd_db` step's tag pin at `resolve_pin`
+# (19). What is *not* in it matters as much: the retire step is B's command
+# in another repository, `skills/sd-ship/` carries `--deliver` and there is
+# no `bin/sd-ship` at all, `tests/` is outside every cap here, and
+# `dashboard/`'s `deliver` screen answers to `DASHBOARD_CAP`, re-derived
+# below in the same change and on the same three lines.
+#
+# The 119 is in-flight discovery for the one seam PR 7 crosses that no landed
+# unit has: `sd_db`'s item rows, read from the pack. The library boundary
+# itself is repaired -- `sd_registry.library` and `sd_install.open_library`
+# already cross it -- but nothing in `bin/` has read an item row.
+#
+# The 34 is post-report discovery at the mean of the two measured ratios,
+# 11.3% of the 299-line body. Two observations, and the entry says so.
+#
+# The review lane is not in the way this time. `test_sd_review_boundary` caps
+# `bin/sd-review` plus its non-`SHARED_CORE` imports at 1700 and that lane is
+# 1699 today, with no headroom at all -- but PR 7's four `bin/` files are
+# `sd_lib` (shared core), `sd-status`, `sd-docs-lint` and `sd_install.py`,
+# none of which the lane contains. R11-D34's reservation could not be spent
+# where its work belonged; this one can.
+#
+# The 38 unclaimed is what a round 15,750 left, and funds nothing. Over 452
+# for PR 7 busts a ceiling visibly, which is what this constant is for. PR 8
+# stays unfunded under R11-D15's clause. The item's `prd.md` carries the rest.
+BIN_CAP = 15_750           # R11-D38: PR 7's body, one unrepaired seam, review
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
 # R11-D29, re-derived 2026-09-03 with the itemisation R11-D24's clause asks
 # for: 4,190 measured on `main`, 158 measured on the branch that carries the
@@ -176,7 +211,42 @@ MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at s
 # what this cap is mostly made of. If this item's review rounds cost more than
 # 9 lines, that busts a ceiling visibly rather than quietly, which is the
 # behaviour this constant exists to produce.
-DASHBOARD_CAP = 4_375
+#
+# R11-D38, re-derived 2026-09-06 for PR 7's `sd-ship --deliver` slice, on the
+# same three lines as `BIN_CAP` above and with the same evidence behind them:
+# 4,366 measured + 98 reserved + 119 reserved + 12 reserved + 5 unclaimed =
+# 4,600. Nine lines of headroom did not hold a new control on the item screen.
+#
+# The 98 is four spans at four built analogues: the `/api/deliver` branch of
+# `do_POST` at the `/api/ack` branch it copies (`dashboard/server.py:548-564`,
+# 17, plus its line in the path tuple at `:530`), the row write behind it at
+# `store.set_watermark` (`dashboard/store.py:198-218`, 21), the control itself
+# at `dismissCell` with the comment head house style requires of a control
+# whose failure mode has to be explained (`dashboard/app.js:594-624`, 31), and
+# the hand-merge reconciliation display at `whereCell`
+# (`dashboard/app.js:549-566`, 18) with `work.split_status`
+# (`dashboard/work.py:86-95`, 10), which is where the two new states -- a row
+# `in_progress` with the squash commit on a note, and `done` but unmarked --
+# have to be spelled.
+#
+# The 119 is the second unrepaired seam PR 7 crosses, and it is a different
+# one from `bin/`'s. `deliver` is the first control to carry an item's
+# identity to a write that is not an ack, which is exactly the boundary
+# R11-D25 drew when it ruled that an ack "is not a parameterised action" -- an
+# id written to a store and compared against on render, never reaching an
+# argv. Nothing has crossed from that side to a write that names a work item.
+#
+# The 12 is post-report discovery at the same 11.3% of the body.
+#
+# **`DASHBOARD_CODE_CAP` does not fit and is not being moved.** Measured with
+# `code_line_count` over the same four analogue spans, PR 7's dashboard body
+# carries 55 lines of code against 29 lines of headroom -- 7 + 1 for the
+# server branch, 8 for the store write, 22 for the control, 14 + 3 for the
+# display -- and that is before either discovery line spends anything. The
+# code half may only move downward (R11-D24, and the paragraph above), so this
+# is recorded as a finding about PR 7's dashboard scope rather than resolved
+# with a number. Prose is not what busts it and prose cannot buy it back.
+DASHBOARD_CAP = 4_600
 
 
 # The half that cannot be paid for with prose. R11-D24 split the dashboard
