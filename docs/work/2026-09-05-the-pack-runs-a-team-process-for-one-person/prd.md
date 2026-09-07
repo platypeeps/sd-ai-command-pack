@@ -4135,7 +4135,7 @@ from a number the operator types.
     has exactly that problem in a sharper form.
   - the hand-merge reconciliation display — **28**, at `whereCell`
     (`dashboard/app.js:549-566`, 18), the built cell that renders a derived
-    state with its reason, and `split_status` (`dashboard/work.py:86-95`,
+    state with its reason, and `split_status` (`dashboard/work.py:102-109`,
     10), where the two new states have to be spelled: a row `in_progress` with
     the squash commit on a note, and a row `done` but unmarked.
 
@@ -4373,3 +4373,33 @@ from a number the operator types.
   a section of a page that still exists is green here whether or not the
   section does. That is the citation rule's shape, and rule 6 covers it only
   for the five items that carry a manifest.
+
+- **2026-09-07, the Work tab was reading a line the retire had removed.**
+  The retire that landed with criterion 33 strips every active item's
+  `status:` line and writes `docs/work/.status-source`. `sd_lib`,
+  `bin/sd-docs-lint` and `bin/sd-status` all read the marker; the dashboard
+  did not, because it had never imported `sd_lib` at all. It went on reading
+  the absent line and reported all five of this checkout's active items as
+  `unstated` — templated and then edited — which is the fail-open shape this
+  item keeps finding: no error, a plausible answer, and it is wrong.
+
+  **What was fixed, and what deliberately was not.** `dashboard/work.py` now
+  asks `sd_lib.Statuses.of(repo)` once per checkout, and reads the row when
+  the marker says `row`. It asks the library only *where* a status comes
+  from. Routing the whole read through `sd_lib.work_items` was built first
+  and reverted: the library judges a value against `ITEM_STATUSES` and maps
+  anything else to `unknown`, and this tab shows a fleet that does not follow
+  those four words — `marinating` and `blocked | phase: check` are things to
+  display, not to normalise away. Two tests caught that on the way past. The
+  cost was +8 code lines against 29 of headroom; `DASHBOARD_CODE_CAP` is
+  untouched, which is the ordinary case the slack rule permits.
+
+  **A trap worth naming: mutation testing can poison `__pycache__`.** The
+  sign-inversion mutation wrote a `.pyc` under the venv's 3.13, and the
+  `cp` that restored the source gave it the same size and the same
+  second-granularity mtime. The mtime-and-size check therefore passed and
+  `make check` ran the mutant, failing six tests that passed under a 3.14
+  run whose bytecode tag differed. `inspect.getsource` reads the `.py` and
+  showed the correct text throughout; only `dis` showed `COMPARE_OP
+  bool(==)` where the source says `!=`. Clear `__pycache__` after a mutation
+  loop, or verify with `dis` rather than with the source.

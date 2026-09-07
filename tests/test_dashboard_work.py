@@ -212,5 +212,45 @@ class Frontmatter(unittest.TestCase):
         self.assertEqual(work.frontmatter(self.root / "absent.md"), {})
 
 
+class TheStatusSource(unittest.TestCase):
+    """Where a status comes from is the checkout's answer, not this module's.
+
+    The `docs/work` retire removes every active item's `status:` line and
+    writes `docs/work/.status-source`. A reader that did not know the marker
+    existed went on reading the line that is no longer there, and reported
+    five items as templated-and-then-edited. This tab was that reader.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = make_repo(self.root, "one")
+        make_item(self.repo, "2026-09-01-an-item", "planning", title="t")
+
+    def mark(self, word: str) -> None:
+        (self.repo / "docs" / "work" / ".status-source").write_text(
+            f"{word}\n", encoding="utf-8"
+        )
+
+    def test_with_no_marker_the_line_is_the_answer(self) -> None:
+        self.assertEqual(work.collect_work(self.root)["counts"], {"planning": 1})
+
+    def test_with_the_marker_the_line_is_not_read_at_all(self) -> None:
+        """`planning` is right there in the file, and it must not be believed.
+
+        No database is reachable from this fixture, so the row cannot answer
+        either and the item is `unknown`. That is the point: the failure is
+        loud, where reading the stale line would have been silent and wrong.
+        """
+        self.mark("row")
+        self.assertEqual(work.collect_work(self.root)["counts"], {"unknown": 1})
+
+    def test_a_marker_saying_something_unreadable_does_not_fall_back(self) -> None:
+        """Falling back would answer from a line the retire may have removed."""
+        self.mark("whatever")
+        self.assertEqual(work.collect_work(self.root)["counts"], {"unknown": 1})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -36,9 +36,25 @@ is not frozen anywhere that would have to be kept in step.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from .collect import discover_checkouts
+
+# `bin/` is not a package, and where a status comes from is the one rule this
+# module may not keep its own copy of. `sd_lib` owns the `.status-source`
+# marker and the database behind it; between the `docs/work` retire and this
+# change nothing here knew the marker existed, so every active item in the
+# retired checkout read as one whose `prd.md` was templated and then edited.
+#
+# Only *where*. The value itself is still read the permissive way below: the
+# library judges a status against the four words `docs/work` lints for, and
+# this tab reads a fleet that does not follow them -- `blocked | phase: check`
+# and a status nobody has seen before are things to show, not to normalise
+# into `unknown`. Routing the whole read through `sd_lib.work_items` was tried
+# and dropped for exactly that.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+import sd_lib  # noqa: E402
 
 # Read far enough to clear the frontmatter and no further. These files are
 # whole PRDs and there are hundreds of them; the state is in the first handful
@@ -95,11 +111,16 @@ def split_status(raw: str) -> tuple[str, str]:
     return head.strip(), rest.strip()
 
 
-def read_item(path: Path) -> dict:
+def read_item(path: Path, statuses: "sd_lib.Statuses | None" = None) -> dict:
     """One work item, whether or not it can say what it is."""
     prd = path / "prd.md"
     fields = frontmatter(prd) if prd.is_file() else {}
-    status, detail = split_status(fields.get("status", ""))
+    raw = fields.get("status", "")
+    if statuses is not None and statuses.source != sd_lib.FROM_FILE:
+        # The line is gone from this checkout, or says nothing that can be
+        # trusted against the row. Either way the file is not the answer here.
+        raw = sd_lib.status_report(path, statuses=statuses).status
+    status, detail = split_status(raw)
     return {
         "name": path.name,
         "title": fields.get("title", ""),
@@ -136,6 +157,10 @@ def collect_work(root: Path) -> dict:
             continue
         repos += 1
         where = repo.name if group == "." else f"{group}/{repo.name}"
+        # Once per repository, not once per item: the marker is a property of
+        # the checkout, and opening its database sixty-four times to ask the
+        # same question would be the cost of asking it in the wrong place.
+        statuses = sd_lib.Statuses.of(repo)
         for item in sorted(work.iterdir()):
             if not item.is_dir():
                 continue
@@ -151,7 +176,7 @@ def collect_work(root: Path) -> dict:
                     if old.is_dir()
                 )
                 continue
-            row = {"repo": where, **read_item(item)}
+            row = {"repo": where, **read_item(item, statuses)}
             if not row["status"]:
                 unstated.append(row)
                 continue
@@ -162,6 +187,7 @@ def collect_work(root: Path) -> dict:
             counts[row["status"]] = counts.get(row["status"], 0) + 1
             if row["status"] not in SETTLED:
                 moving.append(row)
+        statuses.close()
 
     moving.sort(key=lambda row: (row["status"], row["repo"], row["name"]))
     unstated.sort(key=lambda row: (row["repo"], row["name"]))
