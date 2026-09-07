@@ -3921,3 +3921,347 @@ from a number the operator types.
   way it already insists the no-remote case be named rather than caught out of
   an exception, since the criterion as written is silent on which of the two the
   code should reach first and either order passes its six cases.
+
+- **2026-09-06** — **R11-D38, `BIN_CAP` re-derived from 15,400 to 15,750 and
+  `DASHBOARD_CAP` from 4,375 to 4,600**, in one change of their own, because
+  PR 7 lands on both sides of that line and cannot fit under either ceiling.
+  R11-D34 declined to price PR 7 at all, and no earlier re-derivation noticed
+  that PR 7 has a dashboard slice. `bin/` measures **15,260** and `dashboard/`
+  **4,366** on `main` — `line_count` over the files `tests/test_loc_caps.py`
+  enumerates, `migrate-*` excluded as always — leaving 140 and 9. This change
+  touches `tests/test_loc_caps.py` and these planning pages and nothing under
+  either directory, which is the clause at `tests/test_loc_caps.py:9-10`.
+
+  The `bin/` itemisation is **15,260 measured + 299 reserved + 119 reserved +
+  34 reserved + 38 unclaimed = 15,750**; the dashboard's is **4,366 measured +
+  98 reserved + 119 reserved + 12 reserved + 5 unclaimed = 4,600**. Both are
+  derived on the same three lines and from the same evidence, so the argument
+  is made once below and applied twice.
+
+  **PR 6 is closed, so this is the first re-derivation that can be checked
+  against outcomes rather than against its predecessors.** R11-D34 priced five
+  figures. Reserved against actual, every actual measured off the commits that
+  landed:
+
+      unit                              reserved  body  in-flight  post-report  total
+      `sd attribute`, the write side         168   168          0            -    168
+      the installer's consent prompt          64   ~65        135            -    199
+      the `url` client and its reader        114   216*       102           31    247
+      criterion 11's mode predicate          106   109          3            9    118
+      `sd-ship`, criteria 2, 3 and 32          -     0          0            0      0
+
+  \* the `url` client's body and its in-flight discovery are one commit
+  (`50387d01`), 114 priced and 216 landed; every other row separates them.
+  The rows are `git log --numstat` over `bin/` on each unit's own branch:
+  `50387d01` +216, `6456ac88` +20, `4aaef4c6` +11 for the `url` client;
+  `75986614` +109 and `209babf7` +9 for the predicate.
+
+  **The analogue method holds a fourth time.** 106 priced against 109 built,
+  which is the fourth consecutive specified body inside 5%. Nothing here
+  argues against how R11-D34 priced a body. Two of its three findings about
+  what a body *does not* cover do not survive, and one of its own measured
+  figures does not either.
+
+  **A seam pays out once, and R11-D34 charged a second crossing at the first
+  crossing's rate.** It read overruns of 0, 135 and 122, observed that the two
+  non-zero absolutes sat within 10% of each other while their multiples
+  differed twofold, and concluded that discovery is a property of the seam
+  crossed rather than of the size of what crosses it — so a flat line,
+  reserved once per crossing. The magnitude survives. The trigger does not.
+  Criterion 11 crossed the one seam R11-D34 named for it, `mode` out of the
+  `CLAUDE.local.md` block, and found **3** lines against 119 reserved. The
+  reason is in R11-D34's own sentence: the block's value was unread "until the
+  marker fix landed", and the marker fix *was* the consent prompt's 135. The
+  consent prompt crossed that seam first and paid for it; the predicate
+  crossed a seam that had already been repaired. So discovery belongs to the
+  **first** crossing of a seam and does not renew, and the flat line is
+  reserved once per seam no landed unit has crossed and not at all for a
+  re-crossing.
+
+  Under that corrected rule the estimator is unchanged: (135 + 102) / 2 = 119,
+  rounded up, because the two first crossings are still the only two first
+  crossings on record and 3 is not a third observation of the same thing —
+  averaging it in would fund the next unrepaired seam at 80 on the strength of
+  a unit that crossed nothing new. The mean and not the worse of them, for
+  R11-D34's reason.
+
+  **Post-report discovery scales with the body; in-flight discovery does not.**
+  That is the opposite of R11-D34's finding for the other line, and it is not
+  a reversal so much as a consequence of what each line measures. In-flight
+  discovery is whatever was already sitting behind the seam — a `CLAUDE.local.md`
+  block nothing could read, an `Allowance` round trip nobody had assigned — and
+  it is that size regardless of what crosses. Post-report discovery is a second
+  reader working over a delivered body, and a longer body holds more to find.
+  The two observations are 31 lines against a 216-line body and 9 against a
+  109-line one: as absolutes they differ by 3.4x, as fractions of the body
+  they are 14.4% and 8.3% and differ by 1.7x. On this line the ratio is the
+  steadier statistic, so this line is expressed as a percentage where R11-D34
+  correctly ruled one out for the other. With two observations that is a weak
+  claim and it is marked as one; it is stated in the direction it is because
+  the alternative — a flat 20 — would fund a 299-line body at what a 109-line
+  body cost.
+
+  **`sd-ship` is a second control, not a second seam.** Criteria 2, 3 and 32
+  merged as #758 and spent **zero** lines in `bin/`: the whole change is
+  `skills/sd-ship/SKILL.md` (+24/−4) and `tests/test_sd_ship_skill.py` (+559),
+  and there is no `bin/sd-ship` for it to have spent them in. It crossed no
+  seam this cap can see and it overran nothing this cap can see, which is what
+  `sd attribute` established and not a new fact. What it did find — the two
+  entries below — is specification discovery, and it costs `prd.md` lines
+  rather than `bin/` lines. So the delivered set is four units and two of them
+  are controls, which is worth saying plainly: the flat contingency still
+  rests on exactly two positive observations, the same two R11-D34 had.
+
+  **Post-report discovery now has two observations, and R11-D34 had recorded
+  its one wrong.** R11-D34 called the `url` client "236, measured". It landed
+  at **247**. A second review round, `4aaef4c6`, put 11 more lines into
+  `bin/sd_install.py` after the total had been measured, reported, called done,
+  *and* used to derive a ceiling — the same failure R11-D34 was writing that
+  paragraph to describe, happening to the paragraph. So the `url` client's
+  post-report figure is 31 over two rounds, not 20 over one, and criterion 11's
+  is 9 over one round (`209babf7`, the collaborator fail-open R11-D35 records).
+  Two units, three rounds. The 20 R11-D34 reserved was the first round of the
+  first of them.
+
+  So, line by line:
+
+  - **299, reserved: PR 7's body in `bin/` and nowhere else.** Seven spans at
+    seven built analogues, counted span by span with `ast` rather than halved
+    or estimated, on R11-D32's terms and for its reason — this item's
+    `implement.md` pins no body for any of it.
+
+    - the file-or-row resolver in `bin/sd_lib.py` — **37**. `library`
+      (`bin/sd_registry.py:161-167`, 7) and `read`
+      (`bin/sd_registry.py:170-199`, 30) are this exact decision one level
+      down: an optional `sd_db`, a file target, and a refusal when a caller
+      holds a connection the library cannot serve. `status_source` asks the
+      same question of `docs/work/.status-source` and a row.
+    - the row-to-`StatusReport` adapter — **38**. `_adapt`
+      (`bin/sd_registry.py:232-269`, 38) is the one built instance of turning
+      `sd_db` rows into this pack's frozen dataclasses. The file side it must
+      parallel is `_status_report` (`bin/sd_lib.py:422-438`, 17) with
+      `status_report` (`:441-453`, 13), and the row side has to answer one
+      question more than either — whether a line found beside the row is
+      stale — so the larger analogue is the honest one.
+    - `sd_lib.delivered`, from git alone — **50**. Criterion 13 requires that
+      in a database-free checkout every reader that picks an item asks
+      `sd_lib.delivered` and nothing else, and that it answers from a merge
+      commit's `Item:` and `Delivers:` trailers. The built trailer scan is
+      `attribution` (`bin/sd_lib.py:751-784`, 34) with `_in_range`
+      (`bin/sd_lib.py:787-802`, 16). `author_vendors` (32) is *not*
+      re-reserved: it maps authors onto vendors and `delivered` has no
+      equivalent of that.
+    - `bin/sd-status`'s row read and its stale line — **38**.
+      `residue_section` (`bin/sd-status:1000-1018`, 19) is a section that
+      enumerates a condition and names it, which is what "report the line by
+      name as stale" is, and `_render_work` (`bin/sd-status:1111-1129`, 19) is
+      the rendering half that has to say which source answered.
+    - `bin/sd-docs-lint` rules 1 and 2 — **44**. `item_directories`
+      (`bin/sd-docs-lint:77-87`, 11) has to carry the archived distinction,
+      and it is a reshape of every line of it rather than an added argument;
+      `check_shape`'s two-sign block costs a `local_block`-sized read and
+      decision (`bin/sd_lib.py:213-224`, 12), because the sign inverts outside
+      the archive and holds inside it, and the paragraph explaining that is
+      load-bearing — 487 archived `prd.md` files keep their `status:` line and
+      a naive inversion fails on every one; and `check_ready`
+      (`bin/sd-docs-lint:135-155`, 21) is re-reserved whole, because the early
+      return that switches three checks off is its spine
+      (`bin/sd-docs-lint:146`) and replacing it is not an edit at the edge.
+    - rule 7, criterion 33's dangling-reference scan — **73**.
+      `check_citations` (`bin/sd-docs-lint:371-422`, 52) with
+      `resolve_citation` (`bin/sd-docs-lint:282-299`, 18) is the built rule of
+      this shape — enumerate references, resolve each, report the ones that do
+      not — plus 3 for the call in `run` (`bin/sd-docs-lint:425-446`).
+    - the `sd_db` installer step — **19**, and not the 38 it looks like.
+      `prd.md:1538-1544` reads as unbuilt scope and is not: `system_checkout`
+      (`bin/sd_install.py:1170-1179`, 10), `library_source` (`:1182-1183`, 2),
+      `provision_library` (`:1186-1223`, 38) and `open_library`
+      (`:1226-1244`, 19) all landed with PR 6's consent work, and B's library
+      is present at `~/repos/system/local-sd-db`, so the criterion's "Once B's
+      library exists" is satisfied and it is the built branch that gets
+      priced. What is left of the clause is the tag — the copy is installed
+      from a path today and the criterion wants it at the system checkout's
+      tag — which is `resolve_pin` (`bin/sd_setup_github.py:77-95`, 19), the
+      built resolve-a-ref-then-use-it span. Its assertion is a test and tests
+      are outside this cap.
+
+  - **119, reserved, in-flight discovery for the one unrepaired seam `bin/`
+    crosses.** That seam is `sd_db`'s **item rows**, which nothing in `bin/`
+    has read. The library boundary itself is repaired three times over —
+    `sd_registry.library`, `sd_install.provision_library` and
+    `sd_install.open_library` all cross it, with a settled import guard, a
+    settled connection and a settled refusal vocabulary — so no line is
+    reserved for it. The trailer surface `delivered` reads is repaired too:
+    `sd attribute` was the control that crossed it and found nothing. That
+    leaves one here, and one more on the dashboard side, priced below.
+  - **34, reserved, post-report discovery.** 11.3% — the mean of 14.4% and
+    8.3% — of the 299-line body, rounded up because rounding a reservation
+    down is the direction that busts a cap. Two observations, and this is
+    still the weakest figure in the derivation.
+  - **38 unclaimed**, which is what a round 15,750 left after the addition,
+    stated as such rather than attributed to a unit that did not ask for it.
+    If PR 7 comes in over 452 that busts a ceiling visibly, which is what this
+    constant exists to produce.
+
+  **What is excluded, and why it is not being smuggled in elsewhere.** PR 7's
+  Touches list is much larger than its `bin/` footprint and this reservation
+  covers only the footprint. The migration's retire step is B's command in
+  another repository. Every `prd.md` under `docs/work/` outside the archive
+  loses a line rather than gaining one. `skills/sd-ship/` carries
+  `--deliver`, the hand-merge reconciliation and the squash-commit notes, and
+  `skills/` answers to no line cap. `tests/` likewise, which is most of the
+  volume of criterion 13 — its twenty-odd sub-assertions are overwhelmingly
+  test text. What is left is `dashboard/`, which is not excluded but priced
+  separately below, because R11-D24 split that ceiling deliberately and lines
+  that count against it are not lines that count against `bin/`.
+
+  **The dashboard slice, on the same three lines.** `dashboard/` stands at
+  **4,366** against 4,375 — nine lines — and `deliver` on the item screen
+  (`prd.md:1450-1464`) with the hand-merge reconciliation display does not fit
+  in nine lines. The body is **98**, four spans at four built analogues:
+
+  - the `/api/deliver` branch of `do_POST` — **18**, at the `/api/ack` branch
+    it copies (`dashboard/server.py:548-564`, 17) plus its line in the path
+    tuple (`dashboard/server.py:530`). `/api/ack` is the right analogue and
+    not `/api/run`: R11-D25 ruled that an ack "is not a parameterised action"
+    because its id is written to a store and compared against on render rather
+    than reaching an argv, and `deliver` is the same shape — an item id, a row
+    write, no interpolation site.
+  - the row write behind it — **21**, at `set_watermark`
+    (`dashboard/store.py:198-218`), the built guarded single-row write.
+  - the control itself — **31**, at `dismissCell` (`dashboard/app.js:599-624`,
+    26) with the five-line comment head above it (`:594-598`). The comment is
+    counted in rather than trimmed off: it is there because a control that
+    mutates and can fail has to say what its failure looks like, and `deliver`
+    has exactly that problem in a sharper form.
+  - the hand-merge reconciliation display — **28**, at `whereCell`
+    (`dashboard/app.js:549-566`, 18), the built cell that renders a derived
+    state with its reason, and `split_status` (`dashboard/work.py:86-95`,
+    10), where the two new states have to be spelled: a row `in_progress` with
+    the squash commit on a note, and a row `done` but unmarked.
+
+  **119 for a second unrepaired seam, and it is a different seam from `bin/`'s.**
+  A contingency reserved once per seam cannot be spent twice, so this is not
+  `bin/`'s 119 counted again. `bin/` crosses `sd_db`'s item rows; the dashboard
+  crosses R11-D25's own boundary — `deliver` is the first control that carries
+  an item's identity through the write path to something that is not an ack.
+  Nothing has crossed from that side before, which is the definition this
+  entry has just been at pains to fix. **12** for post-report discovery, at the
+  same 11.3% of the body. 4,366 + 98 + 119 + 12 = 4,595, so **4,600**, and the
+  5 unclaimed is what the round number left — thin, and in keeping with the 2
+  R11-D29 left and the 9 R11-D30 left on the same constant.
+
+  **`DASHBOARD_CODE_CAP` does not fit, and this entry does not move it.**
+  Measured with `code_line_count` over those same four spans, PR 7's dashboard
+  body carries **55 lines of code against 29 lines of headroom** — 7 + 1 for
+  the server branch, 8 for the store write, 22 for the control, 14 + 3 for the
+  display — and that is before either discovery line spends a thing. The code
+  half may only move downward (R11-D24, `tests/test_loc_caps.py:31`), and
+  prose is not what busts it, so prose cannot buy it back. Recorded as what it
+  is: **PR 7's dashboard slice is roughly 26 lines of code over a ceiling that
+  is not raisable**, which is a scope question for whoever routes PR 7 — fewer
+  code lines in the slice, or a plugin, or a decision that supersedes R11-D24
+  — and not a number this change may pick.
+
+  **The review lane is not in the way this time, and that is worth recording
+  because last time it was.** `test_the_review_lane_stays_under_its_sub_cap`
+  (`tests/test_sd_review_boundary.py:286-296`) caps `bin/sd-review` plus every
+  `bin/` module it imports outside `SHARED_CORE` at 1700; that lane is
+  `bin/sd-review` (1,373) plus `bin/sd_setup_github.py` (326) = **1,699**, one
+  line of headroom, unchanged since the `url` client landed. R11-D34 had to
+  record that its 225 was unspendable where the work belonged, because the
+  predicate's analogue lived inside the lane. PR 7's four `bin/` files are
+  `bin/sd_lib.py` (shared core, exempt by name), `bin/sd-status`,
+  `bin/sd-docs-lint` and `bin/sd_install.py`, and `bin/sd-review` imports none
+  of the last three. Every line reserved here is spendable where the work
+  goes. The sub-cap's own problem — that `sd_registry` now holds an HTTP
+  client the exemption's justification does not describe — is untouched by
+  this entry and still belongs to that lane's owner.
+
+  **This ceiling cannot be raised in stages, which is a cap fact and not only
+  a sequencing one.** The retire commit removes the `status:` line from every
+  active `prd.md` outside the archive, and `bin/sd-docs-lint`'s rule 2 returns
+  early on `if status not in WORKABLE_STATUSES` (`bin/sd-docs-lint:146`), so
+  the moment those lines go, three checks switch off silently for every active
+  item in every registered repository — and rule 1 fails on all of them
+  besides. The row-derived reader, rule 1's archive predicate and rule 2's row
+  read therefore land in the same pull request as the removal or the removal
+  cannot land at all. That means the 299 is not four independent reservations
+  that could be taken one ceiling at a time; it is one indivisible body that
+  has to fit under one number at one moment. A staged raise would look
+  cheaper and would be unspendable.
+
+  One mechanical note, and it is the opposite of R11-D34's. That entry kept
+  `tests/test_loc_caps.py` **line-neutral** at 407 lines so that four anchored
+  citations in `docs/work/2026-09-02-dashboard-ack-and-mutation-count/` would
+  not have to be repointed, after R11-D32 shifted the file by 24 and had to
+  repoint them. This change does not: the file goes from 407 to 442 lines, and
+  the rewritten rationale is longer because the derivation now has four
+  outcomes to check rather than three estimates to state. The constraint has
+  dissolved rather than been overridden — that item is being archived, and
+  `tests/test_doc_citations.py:30-32` excludes `archive/` outright and says
+  why: "An archived record cites the code as it stood… Those citations are
+  supposed to be stale; that is what an archive is." **The fact worth carrying
+  forward is that two consecutive re-derivations shaped their edits around a
+  constraint with a shelf life.** R11-D32 paid for it in repointing, R11-D34
+  paid for it by writing to an envelope; neither was wrong at the time, and a
+  routine archive sweep nobody had got round to dissolved it. The next
+  re-derivation should check whether the citations it is protecting are still
+  live before it trims a paragraph to fit around them.
+
+  Nothing else is funded. PR 8 is unwritten scope, which R11-D15's clause
+  excludes by name and R11-D32 and R11-D34 both restate.
+
+- **2026-09-06** — **R11-D39, criterion 3's scope cannot be resolved in code,
+  and #758 resolved it by saying so**, recorded because the criterion reads as though a
+  program could decide it and no program in this repository can. Criterion 3
+  says `sd-ship` warns on a commit to "the pack, system or writing
+  repository". A grep of `bin/`, `skills/` and `dashboard/` for that
+  vocabulary returns exactly one hit — `WORKFLOW.md:52-55`, the line stating
+  the rule. There is no repo-kind concept anywhere: nothing maps a remote, a
+  path or a checkout onto one of those three names, and nothing could without
+  inventing a registry the design does not have.
+
+  #758 resolved it by making the omission explicit rather than by adding that
+  registry. `skills/sd-ship/SKILL.md:44-46` states that which repository you
+  are in is the operator's to know, and the skill derives both the trailer
+  forms and the three repository words from `WORKFLOW.md` at run time rather
+  than restating them, so a fourth lane added to `WORKFLOW.md` and not to the
+  skill fails rather than passing silently.
+
+  **The consequence worth recording is downstream of that.** The same clause
+  puts a weekly count of missing trailers on the dashboard. That count is only
+  as complete as the operator judgement it rests on: a commit to one of the
+  three repositories made by someone who did not realise it was one of the
+  three produces no warning, and therefore no entry in the count, and the
+  count itself cannot tell that from a clean week. The number is a floor, not
+  a measurement, and anything that reads it — a trend, a target — is reading a
+  floor. Recorded rather than fixed, because fixing it means deciding what
+  makes a repository one of the three, which is a design question this
+  criterion does not answer and #758 was right not to invent.
+
+- **2026-09-06** — **R11-D40, criterion 32 words four tests as behaviour
+  against a surface with no runner**, recorded because the gap is in the criterion and
+  not in what #758 built. `sd-ship` is a skill: eight steps of prose an agent
+  follows. There is no `bin/sd-ship`, and `tests/test_sd_ship_skill.py:3` says
+  so in its own first paragraph. A criterion that says "`sd-ship` refuses X"
+  is therefore not, as written, executable — there is nothing to invoke.
+
+  #758 split the four tests on that line rather than pretending otherwise. The
+  third is genuinely executable, because its subject is not the skill but
+  GitHub's documented contract: a `sha=` merge that does not match the head
+  returns 405, and the test drives a model of that contract with controls
+  proving the refusal belongs to `--match-head-commit` and not to the fixture
+  — swap the flag out and the merge succeeds. Tests 1 and 2 have no such
+  external subject. They are assertions that the skill *prescribes* the
+  sequence, checked against `skills/sd-ship/SKILL.md`, which is the strongest
+  thing available and is not an execution of it.
+
+  **The open question is about the criterion, not about the code.** If
+  criterion 32 intends executed behaviour, it is waiting on a `bin/sd-ship`
+  that does not exist and is in no Touches list, and it should say that
+  explicitly the way criterion 13 says "Before B exists, this criterion is
+  recorded as waiting, not as met". If it intends the prescribed sequence to
+  be asserted against the skill, it is met and the wording should stop
+  implying a runner. Either answer is fine; leaving it unanswered means a
+  reader cannot tell whether #758 closed the criterion or approximated it.
