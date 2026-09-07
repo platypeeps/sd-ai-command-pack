@@ -668,7 +668,7 @@ list above noticed that `bin/` is capped. It stood at 13,307 on `main` against
 14,000, and this pull request's first half — `bin/sd_registry.py` and the
 installer's registry seed — measures +559, which leaves 134 lines for the
 reviewer chain, `sd attribute`, criterion 11's predicate, the `url` client and
-the consent prompt. `tests/test_loc_caps.py:9-10` forbids raising a cap in the
+the consent prompt. `tests/test_loc_caps.py:11-12` forbids raising a cap in the
 pull request that busts it, so the re-derivation is its own change, landing
 first and touching nothing under `bin/`: R11-D31, 14,700, itemised in
 `prd.md`'s log. That change is a precondition of this one in exactly the way
@@ -919,25 +919,68 @@ refusal as a string, and `run` emits once with the rows appended. Asserted by
 
 ### PR 8c — criterion 27, promotion and demotion
 
-**Touches:** `skills/paths.json`, `contrib/`, `skills/`, `bin/sd_lib.py`,
-`bin/sd_skill.py`, and `dashboard/` only in that the dashboard must **not** be
-where the pull request is opened.
+**Touches:** `skills/paths.json`, `contrib/`, `skills/`, `bin/sd_skill.py`,
+`bin/sd` for the two subparsers, and `dashboard/` only in that the dashboard
+must **not** be where the pull request is opened. R11-D44 removes
+`bin/sd_lib.py` from this list: the git runner the openers need is
+`sd_lib.git_output`, and it is already public at `bin/sd_lib.py:143`. Nothing
+under `.github/sd-review.json`'s `sensitive` list is crossed.
 
-**Priced 417. Not funded by R11-D42.**
+**Priced 288 and funded by R11-D44, which raised `BIN_CAP` to 17,050 off a
+base of 16,723 measured on `main` after PR 8b merged at `05adec9e`.** 204 of
+body, 8 of glue, 40 of seam, 24 of body variance, 12 of post-report at 5.7%.
+Down from R11-D42's 417, and the difference is two corrections.
 
 `skills/paths.json` exists and has readers only — `bin/sd_install.py:253` and
-`bin/sd_skill.py:117`. **Nothing writes it programmatically**, and the pack's
-own precedent for a read-modify-write of a JSON file it does not own is a pair,
-`install_hook` and `remove_hook`, so promotion and demotion are priced as two
-functions and not one directioned writer.
+`bin/sd_skill.py:117`. **Nothing writes it programmatically.**
 
-**There is no way to open a pull request, and no way to push.** `bin/sd_lib.py:269`
-`gh_api` runs `["gh", "api", endpoint]` with no method and no body and never
-raises. No `git push` exists anywhere in `bin/` — every match is prose or
-`sd_lib`'s reading of who *may* push. But the transport is not new: `gh_json`
-at `bin/sd-pr-state:117-126` already takes arbitrary `gh` args behind a timeout,
-an `OSError` guard and a JSON decode, so the opener is a caller at 24 lines and
-not a seam. `git push` **is** a first crossing and carries the flat 119.
+**R11-D42 priced promotion and demotion as two functions on the
+`install_hook` / `remove_hook` precedent, and R11-D44 does not.** That pair at
+`bin/sd_install.py:536` and `:608` is 72 and 76 lines, and reading it shows the
+cost is not the two directions. It is that `~/.claude/settings.json` is
+somebody else's file: idempotence against a second `--user` run, interleaving
+against another installer, refusing rather than overwriting a file that will
+not parse. `skills/paths.json` is this repository's own tracked file with a
+validating reader already at `bin/sd_install.py:265`, so none of the three
+transfer. What differs between the directions is the move and the edit; the
+branch, the commit, the push and the pull request are identical.
+
+**The seam is 40, not the flat 119 R11-D42 charged for `git push`.** Write-side
+git is already built — `git commit` at `bin/sd_lib.py:1227` — and so is
+network git, `git fetch` at `bin/sd_lib.py:1343` and `:1349`, both through
+`sd_lib.git_output` at `:143`, which takes arbitrary argv behind a timeout, no
+shell and a failure-is-None contract across 30 call sites. What is genuinely
+uncrossed is narrower and is not the push: **no `gh` call in `bin/` has ever
+sent a non-GET method or a request body.** `gh_api` at `bin/sd_lib.py:269` is
+read-only and every `gh_json` caller at `bin/sd-pr-state:117` reads. Opening a
+pull request is the pack's first write to GitHub from `bin/`, and needs a
+refusal vocabulary a read does not have — a rejected push, a pull request that
+already exists, an unauthorised `gh`, the last already written at
+`bin/sd-pr-state:166`.
+
+**Built in `bin/sd_skill.py`, not a new module**, because `sd skill promote`
+and `sd skill demote` join `try`, `list` and the nightly under one verb group
+and reuse `SkillRefusal`, `checkout()`, `available()`, `CONTRIB_DIR` and
+`SKILLS_DIR`.
+
+| span | priced |
+|---|---|
+| `paths_edit`, both directions | 34 |
+| `branch_and_open`, the shared half | 66 |
+| `promote` | 36 |
+| `demote` | 34 |
+| `bin/sd`, two subparsers | 22 |
+| docstring and banner | 12 |
+| glue, four boundaries at 2.10 | 8 |
+| seam, the first `gh` write | 40 |
+| body variance at 12% | 24 |
+| post-report at 5.7% | 12 |
+
+`branch_and_open` carries a dirty-tree refusal, so the commit sweeps in no
+unrelated work. `demote` carries a real branch for a skill on two paths, which
+`skills/paths.json`'s own `$comment` says is allowed. `paths_edit` loads the
+whole document rather than `read_paths`'s `data["paths"]`, or the `$comment`
+block is destroyed on write.
 
 ### PR 8d — criterion 28, suggestions that file nothing
 
