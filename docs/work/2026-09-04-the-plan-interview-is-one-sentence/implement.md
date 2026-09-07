@@ -129,11 +129,15 @@ commits; step 6 is what makes them one pull request.
       planning pages exist because the approach stopped being obvious the day
       the ruling was made.
 - [ ] **6. Close it.** One pull request carrying the amendments, with
-      `Delivers: 2026-09-04-the-plan-interview-is-one-sentence` and
-      `Closes: 2026-09-04-the-plan-interview-is-one-sentence` on the merge —
-      `Delivers:` because the work shipped and #740 carried no trailer,
-      `Closes:` because `skills/sd-ship/SKILL.md` puts that on the next merge in
-      this repository for an item delivered without one. Then, and only once the
+      `Closes: 2026-09-04-the-plan-interview-is-one-sentence` on the merge and
+      **not** `Delivers:`. `skills/sd-ship/SKILL.md:84-89` gives `Delivers:` to
+      the one merge that delivers, closing the item "on that merge and on no
+      other", and makes `Closes:` the remedy for a delivery whose merge went out
+      without the trailer. The delivering merge was #740. `Delivers:` cannot be
+      issued retroactively onto a later merge without making two merges each
+      claim to be the delivering one, which is the thing the skill's "on no
+      other" forbids; `Closes:` is the line the skill provides for exactly this
+      case, and carrying both would make it redundant against its own rule. Then, and only once the
       remote has confirmed the merge, the row goes to `done` through `sd_db`'s
       `transition`, with `shipped_at`. No `status:` line is written into
       `prd.md`: `docs/work/.status-source` says `row`, and `bin/sd-docs-lint`
@@ -181,7 +185,13 @@ Named before the work, and each names its own result.
    → `0`, after step 6's row transition. The row is the status; a `status:` line
    would be a second answer, and rule 1 fails it.
 7. After the merge, `.venv/bin/python bin/sd-status` → the item prints under
-   `work items` as `done` and the active count falls from 6 to 5. It must be the
+   `work items` as `done`. The active count is **not** asserted and does not
+   move: `bin/sd-status:170` counts non-archived *directories*, and
+   `skills/sd-ship/SKILL.md:86` says closure writes nothing into a file and the
+   directory stays. Measured today, `active` is 6 over 497 items with
+   `counts {done: 493, in_progress: 2, planning: 2}` — 493 closed items sit
+   inside that 6 already. A closure that moved the number would mean step 6 had
+   archived something, which it does not do. It must be the
    virtualenv interpreter: `sd_db` lives there, and the system `python3` cannot
    import it, falls back to git and reports this item `in_progress` today where
    the row says `planning`. Both were run at `405a9106` and disagree, which is

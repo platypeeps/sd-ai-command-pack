@@ -150,7 +150,8 @@ Three things follow, and the third is the one that is easy to get wrong.
    something decided to stop asserting it.
 3. **This item does not touch `skills/sd-plan/SKILL.md`.** The deletion belongs
    to `docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person`'s
-   requirement 13, which enumerates it as one of seven cuts to that file — step
+   requirement 13, which enumerates it as one of seven cuts that must land
+   together, five of them in that file — step
    6's archive and park, the `sd-status --parked` line, the sweep sentence in
    `skills/sd-plan/templates/work-README.md`, the flags table for a `bin/sd-plan`
    that does not exist, `--from-suggestion`/`--from-proposal`, the work-item
@@ -329,9 +330,12 @@ invariant — unchanged across this item's own change, `FAILED` zero — is the
 thing the criterion was always trying to say.
 
 **D6 — the amendments and the closure ride one pull request, and it carries
-both trailers.** `Delivers:` because the work shipped, and it shipped in #740
-without a trailer; `sd-ship`'s rule is that the next merge in this repository
-carries `Closes:` for such an item. Splitting the amendment and the closure
+`Closes:` alone.** The work shipped in #740, and that merge carried no trailer.
+`skills/sd-ship/SKILL.md:84-89` closes an item on the delivering merge "and on
+no other", and provides `Closes:` on the next merge here as the remedy for a
+delivery that went out without `Delivers:`. So `Closes:` is what this merge
+carries: `Delivers:` belongs to #740 and cannot be issued retroactively, and
+carrying both would put the delivering claim on two merges at once. Splitting the amendment and the closure
 across two pull requests would leave a window in which the criteria name
 `contrib/` and the row still says `planning`, which is a state nobody needs to
 exist.
@@ -394,7 +398,7 @@ Planning adversarial review, 2026-09-07. Trigger:
 design**, cap **5**, read from that table and not invented here. Baseline
 recorded before the first planning write: `prd.md` present and unmodified,
 `design.md` absent, `implement.md` absent. Two of the three are new, so the
-trigger applies. Three rounds ran of the five permitted.
+trigger applies. Four rounds ran of the five permitted.
 
 **Path sensitivity, and what it switches off.** The changed artifact set is this
 item's `design.md` and `implement.md`. `.github/sd-review.json`'s `sensitive`
@@ -448,6 +452,9 @@ two pages share a dozen measured values. Kept by choice, not owed.
 | C-28 | 3 | high | yes | addressed |
 | C-29 | 3 | medium | yes | addressed |
 | C-30 | 3 | low | no | parked |
+| C-31 | 4 | high | yes | addressed |
+| C-32 | 4 | medium | yes | addressed |
+| C-33 | 4 | medium | no | addressed |
 
 **C-14 — the design's first approach was a promotion the operator had already
 ruled against.** Round 1 read `prd.md`'s closing "**Promotion is unblocked.**"
@@ -591,6 +598,44 @@ what found C-19's second copy — the same non-existent check named in
 is the "corrected in one artifact, left standing in the other" shape the
 contract's sweep is written about, and the reason fixing the sentence you were
 reading is not enough.
+
+**C-31 — verification 7 asserted a count that cannot move.** `implement.md`
+read "the active count falls from 6 to 5". `bin/sd-status:170` computes
+`active` over non-archived *directories*, and `skills/sd-ship/SKILL.md:86` says
+closure writes nothing into a file and the directory stays. The repository
+already disproves the claim: `active` is 6 over 497 items whose counts are
+`{done: 493, in_progress: 2, planning: 2}`, and
+`2026-09-04-the-sweep-trusts-a-branch-field-it-never-resolves` is `done` with
+`archived: false` — inside the 6. Half of the item's own closure check was
+written to fail. The count clause is gone; the check now asserts only that the
+item prints `done`.
+
+**C-32 — step 6 put `Delivers:` on a merge that delivers nothing.**
+`skills/sd-ship/SKILL.md:84-89` gives `Delivers:` to the one merge that
+delivers, closes the item "on that merge and on no other", and makes `Closes:`
+the remedy for a delivery whose merge went out without the trailer. `Closes:`
+is therefore the alternative to `Delivers:`, not its companion; carrying both
+would make two merges each claim to be the delivering one. D6 had cited the
+skill for the `Closes:` half and cited nothing for the other. Now `Closes:`
+alone, with the reason stated: the delivering merge was #740 and the trailer
+cannot be issued retroactively.
+
+**C-33 — "seven cuts to that file", where two of the seven cut other files.**
+Requirement 13's enumeration
+(`2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md:1014-1023`)
+attributes `sd-status --parked` to `skills/sd-status/SKILL.md:79` and the sweep
+sentence to `skills/sd-plan/templates/work-README.md:11`. Five of the seven cut
+`skills/sd-plan/SKILL.md`. The design's own list named the work-README one, so
+the sentence contradicted the enumeration directly under it. D4's argument is
+untouched; the sentence now reads "seven cuts that must land together, five of
+them in that file".
+
+**Round 4 was not run by the author.** C-31 to C-33 came from an independent
+reader reviewing the committed `7cd1f5c1`, and each was verified against the
+repository before being acted on — the `--json` counts and both skill passages
+were read, not recalled. Round 3's ledger closed with "no blocking concern is
+open"; two of these blocked, so that line was wrong when written and is
+corrected here rather than quietly replaced.
 
 **Every concern is addressed or parked, and no parked concern blocks.** C-30 is
 the only parked one and is non-blocking by its own terms. Implementation is
