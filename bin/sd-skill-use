@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+"""PreToolUse and UserPromptSubmit hook: record that a skill was used.
+
+Register on both events and on nothing else. One file serves both because
+they differ in exactly one thing -- how the skill's name comes off the
+payload -- and everything after that is identical: resolve the directory,
+open the library, write one row. Two files would duplicate this header, the
+library open, `resolve_root` and `main` to save an eight-line branch.
+
+What it records is `skill_use`: which skill, on which surface, in which mode,
+in which directory. The row is the evidence `sd_install` reads when it decides
+whether a skill installed by a path is actually used (`bin/sd_install.py:1323`
+calls `sd_db.writes.skill_use_since`). Until this hook existed nothing wrote
+those rows in production -- the table, its writer and its reader were all
+built and only tests ever filled it.
+
+`mode` is the column's own vocabulary and the SQL constrains it to two values
+(`sd_db/schema/001_initial.sql:131`):
+
+  * `direct` -- the operator reached for the skill by name. The `Skill` tool
+    firing, or a prompt that opens with `/<name>`.
+  * `path` -- the skill was read because a path named it. A `Read` of a
+    `skills/<name>/SKILL.md` under any platform home.
+
+The distinction is the whole point of the table. A skill that is only ever
+read because a path lists it is a skill nobody chose, and `sd skill try`'s
+trial verdict turns on which of the two a use was.
+
+`surface` is the platform key, from the three `bin/sd_install.py:183-185`
+already names: `claude` here, `codex` for the nightly parse of
+`~/.codex/sessions` that writes this same shape, `opencode` when that surface
+grows a hook. Not a new vocabulary.
+
+This hook gates nothing and blocks nothing. It never prints, on any path: a
+`PreToolUse` hook that writes to stdout is injecting text into the session
+before a tool runs, and nothing here has anything to say to the model. It is
+fast and silent when there is nothing to do -- `SD_SKILL_USE=0` in the
+environment, a payload naming no skill, no database -- and any internal error
+exits 0 rather than break a tool call or a prompt.
+
+**A missing database is not an error here.** `sd_db` is provisioned by
+`make setup` and a checkout without it is a state, not a fault: the operator
+gets no rows and no message, because the alternative is a stack trace between
+them and every tool call they make. The row is a measurement, and a lost
+measurement costs less than a broken session. That is the same trade
+`bin/sd-handoff-restore` makes and for the same reason.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess  # nosec B404 - fixed argv git reads, never a shell
+import sys
+
+HOOK_EVENTS = ("PreToolUse", "UserPromptSubmit")
+
+# The platform this hook runs on. `bin/sd_install.py:183-185` names the three;
+# this file is registered only into `~/.claude/settings.json`, so it is always
+# the first of them. It is a constant rather than a probe because a hook that
+# guessed its own surface from the environment would write a wrong answer
+# silently, and a wrong `surface` is worse than no row.
+SURFACE = "claude"
+
+SKILL_FILE = "SKILL.md"
+SKILLS_DIR = "skills"
+
+
+def git(root: str, *args: str) -> str | None:
+    """`git` in `root`, its stdout, or None when it could not answer."""
+    try:
+        completed = subprocess.run(  # nosec B603 - fixed argv, shell=False
+            ["git", *args],
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return completed.stdout
+
+
+def resolve_root(payload: dict, environ: dict[str, str]) -> str:
+    """The worktree root this use happened in, or the cwd when there is none.
+
+    Payload `.cwd` first, then `$PWD`, then `CLAUDE_PROJECT_DIR` last, which
+    is `bin/sd-handoff-restore:104-128`'s order and for its reason: the env
+    var is the session's launch directory and is fixed for the session, so
+    preferring it inside a linked worktree would record the wrong checkout.
+
+    The worktree root and not the raw directory, because `cwd` is what a
+    reader joins against the `repo` table, and two rows written from two
+    subdirectories of one checkout are two rows about the same repository.
+    """
+    candidates = [
+        payload.get("cwd") if isinstance(payload.get("cwd"), str) else None,
+        environ.get("PWD"),
+        environ.get("CLAUDE_PROJECT_DIR"),
+    ]
+    raw = ""
+    for candidate in candidates:
+        if candidate and os.path.isdir(candidate):
+            raw = candidate
+            break
+    if not raw:
+        raw = os.getcwd()
+    raw = os.path.realpath(raw)
+    toplevel = git(raw, "rev-parse", "--show-toplevel")
+    if toplevel and toplevel.strip():
+        return os.path.realpath(toplevel.strip())
+    return raw
+
+
+def skill_from_path(candidate: str) -> str | None:
+    """The skill a `skills/<name>/SKILL.md` path names, or None.
+
+    Matched on the two segments above the file rather than against a list of
+    platform homes: the homes differ per platform and per operator, the shape
+    does not, and a hook that had to know where skills live would be wrong on
+    the first machine that moved them.
+    """
+    parts = os.path.normpath(candidate).split(os.sep)
+    if len(parts) < 3 or parts[-1] != SKILL_FILE:
+        return None
+    if parts[-3] != SKILLS_DIR:
+        return None
+    name = parts[-2]
+    return name or None
+
+
+def skill_and_mode(payload: dict) -> tuple[str, str] | None:
+    """Which skill this payload is about and how it was reached, or None.
+
+    Three cases, and the order matters only in that each returns on a shape
+    the others cannot match:
+
+      * the `Skill` tool firing -- the operator named it, so `direct`;
+      * a `Read` of a `skills/<name>/SKILL.md` -- a path named it, so `path`;
+      * a prompt opening `/<name>` -- the operator named it, so `direct`.
+
+    Everything else is None, which is the common case: almost every tool call
+    and almost every prompt has nothing to do with a skill, and this function
+    is on the path of all of them.
+    """
+    event = payload.get("hook_event_name")
+    if event == "UserPromptSubmit":
+        prompt = payload.get("prompt")
+        if not isinstance(prompt, str):
+            return None
+        first = prompt.strip().split(maxsplit=1)[:1]
+        if not first or not first[0].startswith("/") or len(first[0]) < 2:
+            return None
+        return first[0][1:], "direct"
+    if event != "PreToolUse":
+        return None
+    tool = payload.get("tool_name")
+    sent = payload.get("tool_input")
+    if not isinstance(sent, dict):
+        return None
+    if tool == "Skill":
+        named = sent.get("skill")
+        return (named, "direct") if isinstance(named, str) and named else None
+    if tool == "Read":
+        where = sent.get("file_path")
+        if not isinstance(where, str):
+            return None
+        name = skill_from_path(where)
+        return (name, "path") if name else None
+    return None
+
+
+def library():
+    """`sd_db`, or None when this checkout has none.
+
+    The `return None` form and not `bin/sd_restore.py:54-67`'s, which raises a
+    refusal carrying remedy prose. A hook has nobody to say it to.
+    """
+    try:
+        import sd_db  # noqa: PLC0415 - deferred: absent is a state, not a fault
+    except ImportError:
+        return None
+    return sd_db
+
+
+def run(stdin_text: str, environ: dict[str, str]) -> int:
+    """Record one use, or decline to, and return 0 either way."""
+    # Cheapest check first: an operator who turned this off pays nothing.
+    if environ.get("SD_SKILL_USE") == "0":
+        return 0
+
+    try:
+        payload = json.loads(stdin_text) if stdin_text.strip() else {}
+    except ValueError:
+        return 0
+    if not isinstance(payload, dict):
+        return 0
+    if payload.get("hook_event_name") not in HOOK_EVENTS:
+        return 0
+
+    found = skill_and_mode(payload)
+    if found is None:
+        return 0
+    skill, mode = found
+
+    sd_db = library()
+    if sd_db is None:
+        return 0
+
+    connection = None
+    try:
+        connection = sd_db.connect(write=True)
+        sd_db.writes.record_skill_use(
+            connection, skill, surface=SURFACE, mode=mode,
+            cwd=resolve_root(payload, environ),
+        )
+    except Exception:  # noqa: BLE001 - a lost measurement, never a broken call
+        return 0
+    finally:
+        if connection is not None:
+            try:
+                connection.close()
+            except Exception:  # noqa: BLE001 - closing a broken handle
+                pass
+    return 0
+
+
+def main() -> int:
+    try:
+        try:
+            stdin_text = sys.stdin.read()
+        except (OSError, ValueError):
+            stdin_text = ""
+        return run(stdin_text, dict(os.environ))
+    except BaseException:  # noqa: BLE001 - a hook never breaks a tool call
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

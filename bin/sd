@@ -76,6 +76,7 @@ import tempfile
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
+import sd_codex  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_registry  # noqa: E402
 import sd_restore  # noqa: E402
@@ -2958,6 +2959,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="what each path names, what is in contrib/, and what is on trial")
     skill_lister.set_defaults(handler=sd_skill.skill_list)
 
+    # The nightly. It lives under `skill` and not at the top level because
+    # what it produces is the trial's evidence, and an operator looking for
+    # where use gets counted looks where the trial is.
+    scanner = trying.add_parser(
+        "scan",
+        help="read ~/.codex/sessions and write the Codex surface's skill_use rows")
+    scanner.add_argument(
+        "--all", action="store_true",
+        help="ignore the cursor and re-read every transcript")
+    scanner.add_argument(
+        "--dry-run", action="store_true",
+        help="write the rows but leave the cursor where it is")
+    scanner.add_argument("--json", action="store_true", help="machine-readable")
+    scanner.set_defaults(handler=sd_codex.skill_scan)
+
     restore = groups.add_parser(
         "restore",
         help="settle a restored database before dispatch resumes")
@@ -3003,6 +3019,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"sd: {refusal}", file=sys.stderr)
         return 1
     except sd_skill.SkillRefusal as refusal:
+        print(f"sd: {refusal}", file=sys.stderr)
+        return 1
+    except sd_codex.CodexRefusal as refusal:
         print(f"sd: {refusal}", file=sys.stderr)
         return 1
     except UsageError as error:

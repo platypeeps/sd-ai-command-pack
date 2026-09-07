@@ -233,8 +233,8 @@ line deletion; an earlier draft cited `:287` and `:1092`, which are a
 And, for criterion 21's deletion-verb grep, two sites no other clause of this
 pull request reaches: `bin/sd-status`'s `RESIDUE` tuple at `:960-996` — the
 file is already above for the `sd_lib` field readers, named again because the
-grep lands on a different block of it — and `bin/sd_install.py:693`, `:700`
-and `:791`. Neither is a deletion here. Both are enumerate-and-freeze sites,
+grep lands on a different block of it — and `bin/sd_install.py:820`, `:827`
+and `:961`. Neither is a deletion here. Both are enumerate-and-freeze sites,
 for the reason Verification gives below.
 
 **`authors` is two different things and criterion 31's grep cannot tell them
@@ -311,9 +311,9 @@ draft assumed deleting `bin/sd_sweep.py` would do it. It does not. Run on
 2026-09-05, `git grep -nE 'git rm|rmtree|rmdir' -- bin skills` returns eight
 lines and `bin/sd_sweep.py` is in none of them: five are removal-suggestion
 **strings** in `bin/sd-status`'s `RESIDUE` tuple at `:965-995`, telling an
-operator how to uninstall a Trellis or legacy footprint; `bin/sd_install.py:693`
-and `:700` are the installer pruning its own empty parents, which the
-criterion's own words allow; and `bin/sd_install.py:791` is an error message
+operator how to uninstall a Trellis or legacy footprint; `bin/sd_install.py:820`
+and `:827` are the installer pruning its own empty parents, which the
+criterion's own words allow; and `bin/sd_install.py:961` is an error message
 reading "Untrack it (git rm --cached) and re-run", which is neither a code
 path nor a temporary path. So deleting `sd_sweep.py` and the `parked`
 handling clears **zero** of the eight, and a criterion phrased "names
@@ -335,7 +335,7 @@ PR 2's merge until a fleet run that may never come.
 So the grep becomes an enumerate-and-freeze over both states: the eight lines
 today, the three that remain if the detectors go, and an assertion that the
 set has not grown and that no hit is a sweep or park code path. Even at three
-the grep is not empty — `bin/sd_install.py:791` is an error message, not a
+the grep is not empty — `bin/sd_install.py:961` is an error message, not a
 temporary path — so "names nothing" is unreachable in either state.
 `bin/sd-status`'s `RESIDUE` tuple and `bin/sd_install.py` join this pull
 request's Touches for that reason, and the residue detectors are carried here
@@ -802,11 +802,17 @@ answer to files outside this repository.
 ### PR 8a — criterion 26, the two hooks and the Codex nightly
 
 **Touches:** `bin/sd-skill-use` (new), `bin/sd_codex.py` (new),
-`bin/sd_install.py`, and the scheduler that runs the nightly, which is in
-neither `bin/` nor this repository — `.github/workflows/` holds two files and
-neither is scheduled.
+`bin/sd_install.py`, `bin/sd` for the `sd skill scan` entry, and the scheduler
+that runs the nightly, which is in neither `bin/` nor this repository —
+`.github/workflows/` holds two files and neither is scheduled.
 
-**Funded: 976, `BIN_CAP` 15,750 to 16,750 (R11-D42).**
+**Funded: 976, `BIN_CAP` 15,750 to 16,750 (R11-D42). Body delivered: 368
+against 663 reserved, in three commits.** `bin/sd-skill-use` came in at 243
+against 240; the installer's move to a plural hook table at +39 against +55;
+`bin/sd_codex.py` at 349 plus 19 for the verb, against 368. `bin/` stands at
+16,399. What is left of the criterion is the scheduler, which this repository
+cannot hold, and the OpenCode plugin, which waits on that surface being in
+use.
 
 `skill_use` is not new. The table is declared at `sd_db/schema/001_initial.sql:126-133`
 with exactly the columns the criterion names — `timestamp`, `skill`, `surface`,
@@ -872,7 +878,7 @@ where the pull request is opened.
 
 **Priced 417. Not funded by R11-D42.**
 
-`skills/paths.json` exists and has readers only — `bin/sd_install.py:240` and
+`skills/paths.json` exists and has readers only — `bin/sd_install.py:253` and
 `bin/sd_skill.py:117`. **Nothing writes it programmatically**, and the pack's
 own precedent for a read-modify-write of a JSON file it does not own is a pair,
 `install_hook` and `remove_hook`, so promotion and demotion are priced as two

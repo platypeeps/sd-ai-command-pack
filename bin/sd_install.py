@@ -43,9 +43,22 @@ STATE_DIR = "sd-ai-command-pack"
 RECEIPT_NAME = "installed.json"
 RECEIPT_SCHEMA = 1
 
-HOOK_COMMAND = "bin/sd-handoff-restore"
-HOOK_EVENT_NAME = "SessionStart"
-HOOK_MATCHERS = ("startup", "clear")
+# Every hook the pack registers, as data. It was three constants naming one
+# hook until 2026-09-07, which was right while there was one; `skill_use` needs
+# two more on two more events, and criterion 29 adds two after that. A table is
+# the difference between adding a row and editing four functions.
+#
+# `matchers` is per event and its meaning is the event's, not ours. SessionStart
+# matches a start reason. PreToolUse matches a tool name, so the pattern names
+# the only two tools `bin/sd-skill-use` can act on rather than `*`: a hook that
+# fires on every tool call to decide it has nothing to do is a cost paid on
+# every tool call. UserPromptSubmit has nothing to match on, and the empty
+# matcher is how that is spelled.
+HOOK_SPECS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("bin/sd-handoff-restore", "SessionStart", ("startup", "clear")),
+    ("bin/sd-skill-use", "PreToolUse", ("Skill|Read",)),
+    ("bin/sd-skill-use", "UserPromptSubmit", ("",)),
+)
 
 EXCLUDES_LINE = "CLAUDE.local.md"
 
@@ -514,19 +527,25 @@ def render(
 # ------------------------------------------------------- the one settings edit
 
 
-def hook_stanza_command(checkout: Path) -> str:
-    return str(checkout / HOOK_COMMAND)
+def hook_specs(checkout: Path) -> list[tuple[str, str, tuple[str, ...]]]:
+    """`HOOK_SPECS` with each command resolved against this checkout."""
+    return [(str(checkout / command), event, matchers)
+            for command, event, matchers in HOOK_SPECS]
 
 
-def install_hook(settings: Path, command: str, *, dry_run: bool = False) -> bool:
-    """Register `sd-handoff-restore` on SessionStart `startup` and `clear`.
+def install_hook(settings: Path, specs, *, dry_run: bool = False) -> bool:
+    """Register every spec in `specs` on its own event and matchers.
 
     This is the only file outside a platform home the installer ever writes,
     and it is somebody else's file: `~/.claude/settings.json` holds hooks from
     the machine's other installers. So the edit is surgical -- the settings are
-    loaded, this one command is added under exactly two matchers, everything
+    loaded, each command is added under exactly its own matchers, everything
     else is written back untouched -- and it is idempotent, because a second
-    `--user` run must not leave the hook registered twice.
+    `--user` run must not leave a hook registered twice.
+
+    One read and one write for the whole table, not one per spec. Three
+    sequential read-modify-writes of a file we do not own is three chances to
+    interleave with another installer doing the same.
 
     Returns True when the file changed.
     """
@@ -547,35 +566,36 @@ def install_hook(settings: Path, command: str, *, dry_run: bool = False) -> bool
     hooks = data.setdefault("hooks", {})
     if not isinstance(hooks, dict):
         raise SystemExit(f"error: {settings} has a non-object 'hooks' key.")
-    groups = hooks.setdefault(HOOK_EVENT_NAME, [])
-    if not isinstance(groups, list):
-        raise SystemExit(
-            f"error: {settings} has a non-list '{HOOK_EVENT_NAME}' hook list."
-        )
 
     changed = False
-    for matcher in HOOK_MATCHERS:
-        group = None
-        for candidate in groups:
-            if isinstance(candidate, dict) and candidate.get("matcher") == matcher:
-                group = candidate
-                break
-        if group is None:
-            group = {"matcher": matcher, "hooks": []}
-            groups.append(group)
-            changed = True
-        entries = group.setdefault("hooks", [])
-        if not isinstance(entries, list):
+    for command, event, matchers in specs:
+        groups = hooks.setdefault(event, [])
+        if not isinstance(groups, list):
             raise SystemExit(
-                f"error: {settings} SessionStart/{matcher} has a non-list 'hooks'."
+                f"error: {settings} has a non-list '{event}' hook list."
             )
-        if any(
-            isinstance(entry, dict) and entry.get("command") == command
-            for entry in entries
-        ):
-            continue
-        entries.append({"type": "command", "command": command})
-        changed = True
+        for matcher in matchers:
+            group = None
+            for candidate in groups:
+                if isinstance(candidate, dict) and candidate.get("matcher") == matcher:
+                    group = candidate
+                    break
+            if group is None:
+                group = {"matcher": matcher, "hooks": []}
+                groups.append(group)
+                changed = True
+            entries = group.setdefault("hooks", [])
+            if not isinstance(entries, list):
+                raise SystemExit(
+                    f"error: {settings} {event}/{matcher} has a non-list 'hooks'."
+                )
+            if any(
+                isinstance(entry, dict) and entry.get("command") == command
+                for entry in entries
+            ):
+                continue
+            entries.append({"type": "command", "command": command})
+            changed = True
 
     if changed and not dry_run:
         settings.parent.mkdir(parents=True, exist_ok=True)
@@ -585,12 +605,16 @@ def install_hook(settings: Path, command: str, *, dry_run: bool = False) -> bool
     return changed
 
 
-def remove_hook(settings: Path, command: str, *, dry_run: bool = False) -> bool:
-    """Drop our hook entry, and any matcher group we thereby emptied.
+def remove_hook(settings: Path, commands, *, dry_run: bool = False) -> bool:
+    """Drop our hook entries, and any matcher group we thereby emptied.
 
-    Only entries whose command is exactly ours are removed; another
-    installer's hook under the same matcher survives, which is why the group
-    is deleted only when it ends up empty.
+    `commands` comes off the receipt, so an uninstall run by a newer pack
+    against an older receipt removes exactly what that older run registered
+    and leaves alone what it never wrote.
+
+    Only entries whose command is one of ours are removed; another installer's
+    hook under the same matcher survives, which is why a group is deleted only
+    when it ends up empty.
     """
     try:
         data = json.loads(settings.read_text(encoding="utf-8"))
@@ -601,43 +625,52 @@ def remove_hook(settings: Path, command: str, *, dry_run: bool = False) -> bool:
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):
         return False
-    groups = hooks.get(HOOK_EVENT_NAME)
-    if not isinstance(groups, list):
-        return False
+
+    wanted = set(commands)
+    ours = {
+        (event, matcher)
+        for command, event, matchers in HOOK_SPECS
+        for matcher in matchers
+        if any(held.endswith(command) for held in wanted)
+    }
 
     changed = False
-    surviving = []
-    for group in groups:
-        if not isinstance(group, dict) or group.get("matcher") not in HOOK_MATCHERS:
-            surviving.append(group)
+    for event in {event for event, _ in ours}:
+        groups = hooks.get(event)
+        if not isinstance(groups, list):
             continue
-        entries = group.get("hooks")
-        if not isinstance(entries, list):
-            surviving.append(group)
-            continue
-        kept = [
-            entry
-            for entry in entries
-            if not (isinstance(entry, dict) and entry.get("command") == command)
-        ]
-        if len(kept) != len(entries):
-            changed = True
-        if kept:
-            group["hooks"] = kept
-            surviving.append(group)
-        elif not entries:
-            surviving.append(group)
+        surviving = []
+        for group in groups:
+            if not isinstance(group, dict) or (event, group.get("matcher")) not in ours:
+                surviving.append(group)
+                continue
+            entries = group.get("hooks")
+            if not isinstance(entries, list):
+                surviving.append(group)
+                continue
+            kept = [
+                entry
+                for entry in entries
+                if not (isinstance(entry, dict) and entry.get("command") in wanted)
+            ]
+            if len(kept) != len(entries):
+                changed = True
+            if kept:
+                group["hooks"] = kept
+                surviving.append(group)
+            elif not entries:
+                surviving.append(group)
+        if surviving:
+            hooks[event] = surviving
+        else:
+            # Leaving `"SessionStart": []` behind would be residue of exactly
+            # the kind uninstall exists to remove: an empty key in someone
+            # else's file that only we ever put there.
+            hooks.pop(event, None)
     if not changed:
         return False
-    if surviving:
-        hooks[HOOK_EVENT_NAME] = surviving
-    else:
-        # Leaving `"SessionStart": []` behind would be residue of exactly the
-        # kind uninstall exists to remove: an empty key in someone else's file
-        # that only we ever put there.
-        hooks.pop(HOOK_EVENT_NAME, None)
-        if not hooks:
-            data.pop("hooks", None)
+    if not hooks:
+        data.pop("hooks", None)
     if not dry_run:
         scratch = settings.with_name(settings.name + ".sd-tmp")
         scratch.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -1431,8 +1464,8 @@ def cmd_user(ctx: Context, out) -> int:
     previous = owned_entries(read_receipt(ctx.receipt))
     skipped = prune_stale(previous, current, dry_run=ctx.dry_run)
 
-    hook = hook_stanza_command(ctx.checkout)
-    hook_changed = install_hook(ctx.settings, hook, dry_run=ctx.dry_run)
+    specs = hook_specs(ctx.checkout)
+    hook_changed = install_hook(ctx.settings, specs, dry_run=ctx.dry_run)
 
     excludes = excludes_file(ctx.home, ctx.environ, sandboxed=ctx.sandboxed)
     excludes_changed = ensure_excludes_line(excludes, dry_run=ctx.dry_run)
@@ -1449,7 +1482,12 @@ def cmd_user(ctx: Context, out) -> int:
         {"path": str(item.path), "sha256": item.sha256, "kind": item.kind}
         for item in written
     ]
-    owned.append({"path": str(ctx.settings), "kind": "hook", "command": hook})
+    # One receipt entry per command and not per spec: two events share
+    # `bin/sd-skill-use`, and an uninstall that saw it twice would report a
+    # file count one higher than the number of files it touched.
+    for command in sorted({command for command, _, _ in specs}):
+        owned.append(
+            {"path": str(ctx.settings), "kind": "hook", "command": command})
     # Sorted, so the receipt is canonical rather than merely repeatable. Render
     # order is platform-major and stable today, which makes two runs agree by
     # accident; reordering `platform_homes` or nesting the render loop the other
@@ -1479,7 +1517,8 @@ def cmd_user(ctx: Context, out) -> int:
         for home in ctx.agents:
             print(f"  {home.key}: {home.root}", file=out)
     if hook_changed:
-        print(f"  SessionStart hook registered: {hook}", file=out)
+        events = sorted({event for _, event, _ in specs})
+        print(f"  hooks registered: {', '.join(events)}", file=out)
     if excludes_changed:
         print(f"  global excludes: {EXCLUDES_LINE} -> {excludes}", file=out)
     # Printed whichever way it went. `seed_registry` says its report "says
@@ -1586,12 +1625,12 @@ def cmd_uninstall(ctx: Context, out) -> int:
         print(f"nothing to remove (no receipt at {ctx.receipt})", file=out)
         return 0
     skipped = prune_stale(previous, set(), dry_run=ctx.dry_run)
-    hook = next(
-        (entry.get("command") for entry in previous if entry.get("kind") == "hook"), None
-    )
-    if hook:
-        remove_hook(ctx.settings, hook, dry_run=ctx.dry_run)
-    removed = len(previous) - len(skipped) - (1 if hook else 0)
+    held = [
+        entry.get("command") for entry in previous if entry.get("kind") == "hook"
+    ]
+    if held:
+        remove_hook(ctx.settings, held, dry_run=ctx.dry_run)
+    removed = len(previous) - len(skipped) - len(held)
     prefix = "would remove" if ctx.dry_run else "removed"
     print(f"{prefix} {removed} file(s)", file=out)
     for path, reason in skipped:
