@@ -253,7 +253,115 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # that no function-level analogue would have shown.
 #
 # The 25 unclaimed is what a round 16,750 left.
-BIN_CAP = 16_750           # R11-D42: criterion 26 only; 27, 28 and 29 unfunded
+#
+# R11-D43, 2026-09-07, funds **criterion 29 alone** -- PR 8b, the second of the
+# four slices -- and leaves 27 and 28 unfunded, as R11-D15's clause requires.
+# The base is **16,399**, measured on `main` at `6b36e3ec` rather than
+# estimated: criterion 26 is merged, so for the first time a slice is priced
+# off the tree it actually builds on.
+#
+# **Criterion 26 came in at 650 against 976, and the body was right to 2%.**
+# 15,749 before 8a, 16,399 after, both counted from git. The body reserved 663
+# and delivered 650: `bin/sd-skill-use` 243 against 240, `bin/sd_codex.py` plus
+# its verb 368 against 368, the installer +39 against +55. That is the first
+# time this method has predicted a delivered total closely, and it is what
+# R11-D42's own correction asked for -- price the header, then the aggregate
+# holds.
+#
+# **What did not get spent is the seam charge.** 238 was reserved for two
+# first crossings at R11-D38's flat 119, and both cost nothing beyond their
+# spans. Writing `skill_use` rows cost six lines, because
+# `sd_db.writes.record_skill_use` already carried the `timestamp` parameter a
+# nightly needs. Reading a Codex transcript cost the 46 already priced against
+# `bin/sd_ledger.py:143-188`, because a JSONL parse with a damaged-line policy
+# was built. A flat 119 for "nothing here has done this" charges for novelty;
+# what actually costs is an *unrepaired* boundary, and both of these had a
+# repaired one on the other side.
+#
+# Criterion 29 is **573**: a 422-line body, 119 of seam, 32 of post-report.
+# The spans below sum to 422; 7.6% of that is 32.
+#
+# The body is five spans, each at a built analogue with its header counted:
+#
+#   * `bin/sd_handoff_rows.py`, new, **120**. The item resolver and the row
+#     reader both hooks need; a suffixless file cannot be imported, so
+#     `bin/sd-handoff-restore` and `bin/sd-note` cannot share code any other
+#     way. 49 for the header at `bin/sd_restore.py:1-49`, the built
+#     small-library-touching-module header; 21 for the deferred `sd_db` frame
+#     at `:54-74`; 10 for resolving the item at `dashboard/work.py:253-262`
+#     inside `deliver`, which is `sd_lib.external_id` and
+#     `sd_db.writes.item_by_external`; 10 for the open-rows read, which is
+#     the eight-line `unresolved_state` at `sd_db/writes.py:409-416` -- the
+#     built select-a-kind-and-filter-unresolved shape -- plus its call; 19 for
+#     rendering rows to lines at `bin/sd_sweep.py:144-162` `render`; and 11 of
+#     glue, five boundaries at 2.10.
+#   * `bin/sd-handoff-prompt`, new, **162**. `PreCompact` and `SessionEnd` in
+#     one file, for `bin/sd-skill-use`'s reason: the events differ in what they
+#     read off the payload and in nothing else. 68 for the header at
+#     `bin/sd-skill-use:1-68`, counted whole because this hook carries the same
+#     obligation over two events plus an opt-out plus the never-claim rule;
+#     25 for the payload read and event dispatch, the body of
+#     `skill_and_mode` at `:149-173`; 12 for asking whether a packet is already
+#     fresh, which is a call into the built `load_age_seconds` and `expired`;
+#     16 for building the prompt and emitting it, twice the eight-line `emit`
+#     at `bin/sd-handoff-restore:408-415`; 30 for `run` and `main` at
+#     `bin/sd-skill-use:189-243` less the library half; 11 of glue.
+#   * `bin/sd-note`, new, **106**. The followup writer, and the first caller
+#     `sd_db.add_note` has ever had in this pack. Priced against
+#     `bin/sd-trackers` whole, 147 lines of parse-resolve-print: 48 for its
+#     header at `:1-48`, 7 for `build_parser` at `:118-124`, 17 for `main` at
+#     `:127-143`, 20 for the write and its refusal, 6 for the confirming line,
+#     8 of glue, four boundaries at 2.10. Less than `sd-trackers` because the
+#     resolving half lives in
+#     `sd_handoff_rows.py` and is paid once.
+#   * `bin/sd-handoff-restore`, **+32**. Rows beside the packet, read before
+#     the `if not path.is_file(): return 0` at `:448` that the criterion's test
+#     hits first. 11 for a rows-first block shaped like `run`'s own prologue at
+#     `:435-445`, 8 for the emit and the reshaped early return, 11 for one more
+#     section in `context_for` at `:373-405`, 2 of glue.
+#   * `bin/sd_install.py`, **+2**. Two rows in `HOOK_SPECS`. This is what 8a
+#     bought: the table went plural there, so two more events are two tuples
+#     and an updated expectation in a test that answers to no cap.
+#
+# **Glue is 2.10 lines per boundary for a module this size, not 2.9.** R11-D42
+# took 2.9 from one file. Measured over **every** tracked `bin/` module with
+# fewer than fifteen top-level definitions -- fourteen of them, `sd_ledger`
+# 1.33 through `sd_research_checklinks` 3.00 -- the mean is 2.10. The eleven
+# with fifteen or more average 3.70, from `sd-handoff` 2.85 to `sd-status`
+# 5.21, which is the opposite of what a per-boundary rate would predict and is
+# why the split is by definition count rather than by an average over all of
+# `bin/`. Two modules are excluded, both for the same measured reason and
+# neither on assumption: `bin/sd-dashboard` at 10.14 carries a 57-line embedded
+# `plist` template at `:48-100`, and `bin/sd_research_review.py` at 12.17 a
+# 59-line `CHECKLIST` string at `:210-268`. A data blob between definitions is
+# not glue between them; the check is that the gap is one literal, not that the
+# number is large.
+#
+# Headers over those same fourteen run **21** (`sd_research_checklinks.py`,
+# two definitions) to **86** (`sd_codex.py`, twelve), mean 52.4, against the
+# 49-72 R11-D42 recorded. Across all of `bin/` the top is 156
+# (`sd-skill-adopt`): a header states the module's policy, and its size tracks
+# how much policy there is rather than how much code follows. So no header
+# below is taken from the mean. Each is taken from a named built file whose
+# obligations match the one being priced.
+#
+# The 119 is **one** seam and it is not the `note` rows. Reading notes is
+# priced above as a caller, because `add_note` and `resolve_note` are built and
+# the vocabulary is a SQL `CHECK` -- the same reasoning R11-D42 used to drop
+# its GitHub seam. What is genuinely uncrossed is the `PreCompact` and
+# `SessionEnd` payload contract: nothing here has ever registered either
+# event, nothing has read either payload, and the failure mode of getting it
+# wrong is a packet silently lost rather than an error anybody sees.
+#
+# The 32 is post-report discovery at **7.6%**, the mean of three observations
+# and no longer two: R11-D38's 14.4% and 8.3%, and PR 8a's 0%. 8a's review
+# round found ten stale line citations, seven of its own making and three
+# older than the branch, and every one of them was corrected in place for no
+# net `bin/` line at all. One round landing entirely in documentation is thin
+# evidence for a rate, which is why it is averaged rather than adopted.
+#
+# 16,399 plus 573 is 16,972; the 28 unclaimed is what a round 17,000 left.
+BIN_CAP = 17_000           # R11-D43: criteria 26 and 29; 27 and 28 unfunded
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
 # R11-D29, re-derived 2026-09-03 with the itemisation R11-D24's clause asks
 # for: 4,190 measured on `main`, 158 measured on the branch that carries the
@@ -398,6 +506,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
         ("2026-09-06", 15_400),
         ("2026-09-06", 15_750),
         ("2026-09-07", 16_750),
+        ("2026-09-07", 17_000),
     ),
     "DASHBOARD_CAP": (
         ("2026-08-30", 2_500),
