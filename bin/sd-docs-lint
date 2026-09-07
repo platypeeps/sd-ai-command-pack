@@ -35,6 +35,7 @@ _BIN = str(pathlib.Path(__file__).resolve().parent)
 if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
+import sd_lib  # noqa: E402
 from sd_lib import parse_frontmatter, repo_root  # noqa: E402
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -132,8 +133,24 @@ def check_shape(work_root: pathlib.Path, report: Report) -> None:
             report.fail(str(prd), f"created {created} disagrees with the directory date")
 
 
-def check_ready(work_root: pathlib.Path, report: Report) -> None:
-    """Rule 2."""
+def check_ready(
+    work_root: pathlib.Path, report: Report, statuses: sd_lib.Statuses
+) -> None:
+    """Rule 2.
+
+    The status is read wherever `docs/work/.status-source` says, because the
+    early return below is a switch: once the retire commit removes the
+    `status:` lines, a rule 2 still reading them finds no workable item
+    anywhere and its three checks -- acceptance criteria, no open BLOCKING
+    line, an `in_progress` item naming its branch -- stop running for every
+    active item in every registered repository, silently and all at once.
+
+    With no marker this stays the line, and stays it exactly: `status_report`
+    also answers `done` for anything under `archive/` by virtue of where it
+    lives, and there is one archived item here whose line still says
+    `in_progress`. Reading that as `done` would quietly stop checking it,
+    which is the same switch in miniature.
+    """
     for item in item_directories(work_root):
         prd = item / "prd.md"
         if not prd.is_file():
@@ -143,6 +160,8 @@ def check_ready(work_root: pathlib.Path, report: Report) -> None:
         if fields is None:
             continue
         status = fields.get("status", "")
+        if statuses.source != sd_lib.FROM_FILE:
+            status = sd_lib.status_report(item, statuses=statuses).status
         if status not in WORKABLE_STATUSES:
             continue
 
@@ -437,7 +456,11 @@ def run(
         return report
 
     check_shape(work_root, report)
-    check_ready(work_root, report)
+    statuses = sd_lib.Statuses.of(repo, work_dir)
+    try:
+        check_ready(work_root, report, statuses)
+    finally:
+        statuses.close()
     report.note(f"rules 1-2 work items: checked {len(item_directories(work_root))} item(s)")
     check_decisions(repo / decisions_dir, report)
     check_spec_index(repo / spec_dir, report)
