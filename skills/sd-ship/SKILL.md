@@ -87,7 +87,27 @@ pass is not a pass.
    and its directory stays. A delivery whose merge went out without the
    trailer is marked by the next merge message `sd-ship` writes in this
    repository, which carries `Closes: <item>` for it; nothing here pushes to
-   the default branch to say so.
+   the default branch to say so. A cancelled item rides that same line: the
+   cancel writes the row `done` with a `cancelled` note and touches no file,
+   and the next merge `sd-ship` writes here carries `Closes: <item>` for it,
+   with no `Delivers:` for it anywhere and no pull request opened to say the
+   cancel happened. `Delivers:` says the item shipped and `Closes:` says only
+   that it is over, which is why a cancel never earns the first one.
+
+   **Then the row, once the remote has confirmed the merge and not before.**
+   That write goes through `sd_db` and through nothing else: `transition` to
+   `done`, the one function that writes an item's status and that writes the
+   single `status_change` note in the same transaction, and `set_item_fields`
+   for `shipped_at`. One merge, one status write, one note; no hand-rolled
+   SQL and no second connection to the database. `shipped_at` is the moment
+   the item shipped and not the moment a merge last ran, so a second
+   delivering merge on an item whose row already reads `done` leaves the
+   field exactly where it was and adds no further note. A non-delivering
+   slice merge writes no status at all: its squash commit goes onto a note
+   and the item stays open, a slice having delivered nothing. Where the
+   checkout has no database this paragraph is a no-op and the trailer on the
+   merge is the whole of the record; `sd-ship` refuses no merge for want of
+   a row.
 8. **`git fetch -p`, then report the local.** The remote branch is the
    repository's to remove: `delete_branch_on_merge` is on here, so the branch
    is already gone and this step deletes nothing. Fetching prunes its tracking
@@ -107,6 +127,35 @@ pass is not a pass.
 `sd-spec` is not in that sequence. It refreshes `docs/spec/**` on the PR
 branch, and it runs when a change alters behaviour `docs/spec/` documents and
 the operator asks for it.
+
+## What a rerun reconciles
+
+The merge and the row are two acts with the remote's answer between them, so
+there is a window in which the merge has happened and the row does not know
+it. A run killed there leaves the row `in_progress`, still naming the pull
+request it opened. Nothing repairs that at the moment of death — a killed run
+runs no handler — so the next `sd-ship` run in that repository does it, before
+it starts a sequence of its own.
+
+Reconciliation reads the pull request the row names and takes that remote's
+answer for it. Merged and carrying `Delivers:`, the row goes to `done` with
+`shipped_at`, **and no merge is called**: the merge already happened, and
+calling one against a settled pull request either errors or lands a second
+squash on a branch nobody is watching. Merged carrying `Item:` alone, the
+squash commit goes onto a note and the row stays open. Still open is not a
+kill at all but a run that has not merged yet, and it is left standing.
+
+It converges because it writes only what the remote already says. The run
+after the reconciling one reads the same pull request, finds the row already
+saying it, and writes nothing: no second `status_change` note, `shipped_at`
+unmoved, and again no merge call.
+
+A merge someone made by hand is that window seen from the other side. It
+carries no trailer, so it makes no claim about any item: the row stays
+`in_progress` with the squash commit on a note, and `sd-plan` and `sd-review`
+go on picking the item until some merge carries the trailer for it. Reading a
+delivery out of the bare fact that a branch merged is how an item gets closed
+by a slice, and this command would rather leave an item open than guess.
 
 ## Flags
 
