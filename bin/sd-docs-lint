@@ -13,9 +13,9 @@ Five rules, no more (adding a sixth is a decision record, not a patch):
                     actually states a decision.
 4. Spec index    -- every spec directory has an `index.md` that links each of
                     its siblings, so no page can be reached only by guessing.
-5. PR link       -- a pull request names the item it advances, that item exists,
-                    and nothing in it is still unchecked; or it says
-                    `Work: none - <reason>` and means it.
+5. PR link       -- when a pull request names the item it advances, that item
+                    exists and nothing in it is still unchecked. A change with
+                    no item carries no `Work:` line and is not asked for one.
 
 Rules 1 through 4 read the tree. Rule 5 needs the pull request body, so it runs
 only when `--pr-body` supplies one and reports itself as not run otherwise.
@@ -52,7 +52,6 @@ UNCHECKED_BOX_RE = re.compile(r"^\s*[-*]\s+\[ \]")
 BLOCKING_RE = re.compile(r"^\s*(?:[-*]\s+)?BLOCKING\b")
 MARKDOWN_LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
 WORK_LINE_RE = re.compile(r"^Work:[ \t]*(?P<value>.*?)[ \t]*$", re.MULTILINE)
-WORK_NONE_RE = re.compile(r"^none\s+-\s+(?P<reason>\S.*)$")
 
 ITEM_STATUSES = ("planning", "ready", "in_progress", "done")
 WORKABLE_STATUSES = ("ready", "in_progress")
@@ -235,20 +234,13 @@ def check_pr_link(
 
     matches = WORK_LINE_RE.findall(body)
     if not matches:
-        report.fail("pull request body", "needs a Work: line naming the item it advances")
+        report.note("rule 5 PR link: no Work: line, so no item is claimed")
         return
     if len(matches) > 1:
         report.fail("pull request body", f"has {len(matches)} Work: lines; exactly one is allowed")
         return
 
     value = matches[0]
-    none_match = WORK_NONE_RE.match(value)
-    if none_match:
-        report.note(f"rule 5 PR link: no work item, reason {none_match.group('reason')!r}")
-        return
-    if value.startswith("none"):
-        report.fail("pull request body", "Work: none needs a reason, written `none - <reason>`")
-        return
     if not value:
         report.fail("pull request body", "Work: line is empty")
         return
