@@ -83,18 +83,22 @@ This pass is the research flow's review point *after the brief and decisions*; t
 the final product before the send box is the second point. Both caps live in the pack's
 `.claude/rules/sd-planning-adversarial-review.md`, and this page states neither.
 
-The second reader is Codex, **run through the CLI, not a plugin**. The `codex@openai-codex`
-plugin is not a dependency of this kit and may not be installed, so `/codex:*` slash commands
-must not be reached for. `codex` itself is the supported path:
+The second reader is an independent CLI reviewer, **run through its own CLI, not a plugin**.
+The invocation is not retyped here — `sd-research-kit review` prints it under *The second
+reader*, with the exact flags and the availability check that says whether the CLI is
+installed and logged in. Run that and take the command from there. The plugin that supplies
+the `/codex:*` slash commands is not a dependency of this kit and may not be installed, so
+those slash commands must not be reached for.
 
-```bash
-codex exec -s read-only "This is a markdown research repository, not code. Review the
-  uncommitted working-tree changes (git status, git diff, plus untracked new files) as an
-  adversarial reader. Attack the argument, not the syntax: which load-bearing claims does the
-  cited source not actually support; which numbers are missing a unit, a date or a
-  denominator; what does the conclusion depend on that the document never states; where does
-  a document assert something as verified that the repo shows was not checked. Cite file and
-  line. Do not modify any files."
+The focus text that invocation carries:
+
+```
+This is a markdown research repository, not code. Review the uncommitted working-tree
+changes (git status, git diff, plus untracked new files) as an adversarial reader. Attack
+the argument, not the syntax: which load-bearing claims does the cited source not actually
+support; which numbers are missing a unit, a date or a denominator; what does the conclusion
+depend on that the document never states; where does a document assert something as verified
+that the repo shows was not checked. Cite file and line. Do not modify any files.
 ```
 
 `-s read-only` is not optional — it is what keeps an adversarial reader from editing the work
@@ -110,13 +114,15 @@ so. For committed work on a branch, name the comparison in the prompt: *"review
 the repo, not the sources, so step 2 — reopening the citation — stays yours.
 
 Record the outcome in the Status section: what was verified and how, what was not, what was
-cut, and the Codex pass — date, what it raised, what changed, what was rejected and why. A
-review that found nothing says what it checked. If `codex` is missing or not logged in
-(`codex doctor` reports it), say that in Status: "no independent pass" is a stated gap.
+cut, and the second reader's pass — which reader, date, what it raised, what changed, what
+was rejected and why. A review that found nothing says what it checked. If that CLI is
+missing or not logged in (the availability check in the printed checklist reports it), say
+that in Status: "no independent pass" is a stated gap.
 
 ## Publishing — Notion, not artifacts
 
-**Do not publish research as a Claude artifact.** Notion is the publishing surface.
+**Do not publish research as an artifact** — the hosted single-page surface `build/artifact/`
+was written for. Notion is the publishing surface.
 
 Every overview, map, brief, report, and survey in this repo has a Notion page under
 the repo's own Notion folder — put its URL here when the repo is set up — kept in sync when the source

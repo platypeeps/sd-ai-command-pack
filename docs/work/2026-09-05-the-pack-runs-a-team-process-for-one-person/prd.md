@@ -3652,3 +3652,50 @@ from a number the operator types.
   The 62 unclaimed is what a round 15,050 left after the addition, stated as
   such. Nothing else is funded. PRs 7 and 8 are unwritten scope, which
   R11-D15's clause excludes by name.
+
+- **2026-09-06** — **R11-D33, criterion 5's own measurement is wrong, and the
+  residue in `sd-research-repo` is a passage rewrite rather than a rename**,
+  recorded because that parenthetical is the number a reader would size the
+  work from, and it is wrong in the direction that makes the work look
+  smaller and flatter than it is. The criterion reads "fifty-two
+  case-insensitive hits on the four names across twelve files, of which
+  thirty-two are bare tokens across eight files". Measured at `74627ab7` with
+  the shape the criterion itself defines:
+
+      rg -n --pcre2 -i '(?<![/._~-])(codex|claude|openai|anthropic)(?![/._~-])' \
+        skills/ | grep -viE 'Claude Code'
+
+  `skills/` holds **34 bare tokens on 29 lines across 5 files**:
+  `sd-research-repo/references/conventions.md` (13 tokens),
+  `sd-research-repo/templates/CLAUDE.md` (8), `sd-ship/SKILL.md` (7),
+  `sd-review/SKILL.md` (5) and `sd-handoff/SKILL.md` (1). The unfiltered
+  sweep the "fifty-two" refers to -- `rg -o -i
+  '(codex|claude|openai|anthropic)' skills/` -- is 64 tokens on 51 lines
+  across 10 files. Neither half of the row matches, and the file counts are
+  the half that misleads: eight files named against five that actually carry
+  a bare token, so the estimate was neither a ceiling nor a floor and could
+  not be used to plan the sweep. The criterion's operative sentence stands as
+  written; the acceptance test is the grep, and the parenthetical is not.
+
+  **The shape test admits no exemption for a runnable command.** That is what
+  changes the size of the work rather than the count. Of the twenty-one bare
+  tokens in the two `sd-research-repo` files, seven sit inside a command the
+  reader is told to run -- `codex doctor`, `codex exec -s read-only
+  "<focus>"`, the backgrounded `codex exec ... > pass.txt 2>&1 &` -- and two
+  are the marketplace identifier `codex@openai-codex`, bare because `@` is
+  not in the exclusion set. Substituting a role name into any of those
+  produces a command that does not run, so the criterion cannot be discharged
+  there by rename. It is discharged by rewriting the passages.
+
+  Deferring to the registry is not available to this kit either.
+  `skills/sd-research-repo/` is a template for a markdown research
+  repository, and `providers.yaml` lives beside the pack's database with no
+  verb a research repo calls to resolve a role from it. What the kit does
+  have is `bin/sd_research_review.py`, which is not under `skills/` and is
+  therefore outside the test: the checklist `sd-research-kit review` prints
+  already carries the invocation verbatim, under *The second reader*. Both
+  files point there rather than retyping it, which keeps every instruction
+  runnable and leaves the command in the one place that was already
+  authoritative for it. The prose that names who reviews takes the role
+  vocabulary instead, and the two artifact sentences name the publishing
+  surface rather than the vendor whose product it is.
