@@ -13,7 +13,10 @@ from GitHub, because committed derived state is permanent staleness.
 Eight sections, in the order a human wants them:
 
   pack        the checkout these tools came from
-  work        derived item status from `docs/work`, counted; `--parked` lists
+  work        derived item status from `docs/work` -- the `status:` line, or
+              the item's row where `docs/work/.status-source` says `row`, with
+              a surviving line named as stale and a `done` row no commit
+              closed named as unmarked -- counted; `--parked` lists
               every parked item, read from their own frontmatter -- the age
               sweep and the D2 bulk-park both write the field
   prs         open pull requests, via the same code path as `sd-pr-state`
@@ -1108,6 +1111,10 @@ LISTED_ITEMS = 20
 _ACTIVE_FIRST = ("in_progress", "ready", "unknown")
 
 
+def _always_listed(entry: dict[str, Any]) -> bool:
+    return entry["status"] in _ACTIVE_FIRST or bool(entry["inconsistencies"])
+
+
 def _render_work(work: dict[str, Any], write: Any) -> None:
     write("\nwork items\n")
     if not work["total"]:
@@ -1116,8 +1123,13 @@ def _render_work(work: dict[str, Any], write: Any) -> None:
     counts = ", ".join(f"{name} {count}" for name, count in sorted(work["counts"].items()))
     write(f"  {work['total']} items ({work['active']} active): {counts}\n")
     live = [entry for entry in work["items"] if not entry["archived"]]
-    shown = [entry for entry in live if entry["status"] in _ACTIVE_FIRST]
-    rest = [entry for entry in live if entry["status"] not in _ACTIVE_FIRST]
+    # An item with a finding is always listed, whatever its status. A stale
+    # `status:` line and a `done` row nothing marked are both reported on
+    # items the elision below would otherwise drop past the twentieth, and a
+    # finding printed nowhere a human looks is the failure this section exists
+    # to avoid -- the same reasoning the protection section states at length.
+    shown = [entry for entry in live if _always_listed(entry)]
+    rest = [entry for entry in live if not _always_listed(entry)]
     for entry in shown + rest[:LISTED_ITEMS]:
         mark = "  parked" if entry["parked"] else ""
         write(f"  {entry['status']:<12} {entry['slug']}{mark}\n")

@@ -373,6 +373,27 @@ def mode(root: pathlib.Path, *, ask: Asker = gh_api) -> str:
 # --------------------------------------------------------------------------
 
 
+#: The tracked marker the retire commit writes beside the lines it removes:
+#: `docs/work/.status-source`, one word. It travels in git, so a checkout with
+#: no database still knows which question to ask. **No marker is `file`**, and
+#: `file` is the path every reader took before rows existed -- the same path,
+#: not a new one that happens to agree with it.
+STATUS_MARKER = ".status-source"
+FROM_FILE, FROM_ROW = "file", "row"
+
+#: How `sd_db` keys an item row. Both halves are read out of
+#: `sd_db/sources/docs_work.py` rather than guessed: `source` is the string
+#: below and `external_id` is `<registered checkout>::docs/work/<item>/prd.md`.
+#: The pair is that table's unique index.
+ITEM_ROW_SOURCE = "docs/work"
+
+#: The six words a row may carry, two more than a `status:` line ever said.
+#: `ready_to_send` and `blocked` are states the file vocabulary had no word
+#: for; they pass through rather than being folded into one of the four,
+#: because folding is how `blocked` would become workable.
+ROW_STATUSES = ("planning", "ready", "in_progress", "ready_to_send", "blocked", "done")
+
+
 @dataclass(frozen=True)
 class StatusReport:
     """A derived status plus every inconsistency found while deriving it."""
@@ -403,6 +424,130 @@ class WorkItem:
     inconsistencies: tuple[str, ...] = ()
 
 
+def status_marker(root: pathlib.Path, work_dir: str = WORK_DIR) -> tuple[str, str]:
+    """Where this checkout's item statuses come from: `(word, problem)`.
+
+    No marker at all is `file`. A marker that is present and says something
+    this cannot read comes back as no word and a sentence, and deliberately
+    *not* as `file`: the marker exists only on a checkout whose `status:`
+    lines have been removed, so falling back to the line there is answering
+    from a line that is not in the file. Every item is then `unknown` with
+    the marker named, which is the loud form of the same finding.
+    """
+    path = pathlib.Path(root) / work_dir / STATUS_MARKER
+    try:
+        said = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return FROM_FILE, ""
+    except (OSError, UnicodeDecodeError) as error:
+        return "", f"{path} cannot be read: {error}"
+    if said in (FROM_FILE, FROM_ROW):
+        return said, ""
+    return "", f"{path} says {said!r}, which is neither {FROM_FILE!r} nor {FROM_ROW!r}"
+
+
+class Rows:
+    """This checkout's item rows, read through `sd_db` and through nothing else.
+
+    Opened once for an enumeration rather than once per item: sixty-four
+    items would otherwise open the database sixty-four times to draw one
+    `sd-status`. `sqlite3` is not imported here and never will be -- item B's
+    requirement 2 is that the library owns every connection.
+
+    `opened` is the distinction this class exists to keep. A machine with no
+    database is the designed database-free case and asks git instead; a
+    machine that *has* one and holds no row for an item has lost that item,
+    and reading "no row" as "so the item is open" is how delivered work gets
+    picked up and done a second time.
+    """
+
+    def __init__(self, root: pathlib.Path) -> None:
+        # Rows are keyed by the registered checkout, which for a linked
+        # worktree is the main one: the migration enumerates the `repo` table
+        # and a worktree was never added to it.
+        self.base = str(main_worktree_root(pathlib.Path(root).resolve()))
+        self.opened = False
+        self.problem = ""
+        self._connection: Any = None
+        self._read: Any = None
+        try:
+            import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
+        except ImportError as error:
+            self.problem = f"sd_db is not installed here: {error}"
+            return
+        try:
+            self._connection = sd_db.connect(write=False)
+        except Exception as error:  # no file, or a schema this cannot read
+            self.problem = f"sd_db could not open the database: {error}"
+            return
+        self._read = sd_db.writes.item_by_external
+        self.opened = True
+
+    def external_id(self, item_dir: pathlib.Path) -> str:
+        """The row's key: `<registered checkout>::docs/work/<item>/prd.md`."""
+        return f"{self.base}::{WORK_DIR}/{item_dir.name}/prd.md"
+
+    def status(self, item_dir: pathlib.Path) -> tuple[str, str]:
+        """`(word, problem)` for one item; both empty means no database."""
+        if not self.opened:
+            return "", ""
+        identity = self.external_id(item_dir)
+        try:
+            row = self._read(self._connection, ITEM_ROW_SOURCE, identity)
+        except Exception as error:
+            return "", f"the row for {identity} could not be read: {error}"
+        if row is None:
+            return "", f"the database holds no {ITEM_ROW_SOURCE} row for {identity}"
+        said = str(row["status"] or "").strip()
+        if said not in ROW_STATUSES:
+            return "", (f"the row for {identity} says status {said!r}, which is not "
+                        f"one of {', '.join(ROW_STATUSES)}")
+        return said, ""
+
+    def close(self) -> None:
+        if self._connection is not None:
+            self._connection.close()
+        self._connection, self._read, self.opened = None, None, False
+
+
+@dataclass
+class Statuses:
+    """One checkout's answer to "where does a status come from", resolved once.
+
+    The marker is a property of the checkout and not of the item, so reading
+    it per item puts the same question sixty-four times; the database is
+    opened once too, and closed by whoever opened it.
+    """
+
+    root: pathlib.Path
+    source: str
+    problem: str = ""
+    rows: Rows | None = None
+
+    @classmethod
+    def of(cls, root: pathlib.Path | str, work_dir: str = WORK_DIR) -> "Statuses":
+        root = pathlib.Path(root)
+        source, problem = status_marker(root, work_dir)
+        return cls(root, source, problem, Rows(root) if source == FROM_ROW else None)
+
+    def close(self) -> None:
+        if self.rows is not None:
+            self.rows.close()
+
+
+def _root_of(item_dir: pathlib.Path) -> pathlib.Path:
+    """The repository root an item sits in, from its own path and no git call.
+
+    `<root>/docs/work/<item>`, or `<root>/docs/work/archive/<month>/<item>`
+    two levels deeper. Derived rather than asked, so reading one directory
+    stays as cheap as it was before there was a marker to find.
+    """
+    root = item_dir.resolve()
+    for _ in range(5 if root.parent.parent.name == ARCHIVE_DIR else 3):
+        root = root.parent
+    return root
+
+
 def _is_archived(item_dir: pathlib.Path) -> bool:
     return ARCHIVE_DIR in item_dir.resolve().parts
 
@@ -419,13 +564,90 @@ def _read_prd(item_dir: pathlib.Path) -> tuple[dict[str, str], list[str]]:
     return parsed, []
 
 
+def _from_git(
+    root: pathlib.Path,
+    item_dir: pathlib.Path,
+    prd: pathlib.Path,
+    fields: dict[str, str],
+    problems: list[str],
+) -> StatusReport:
+    """What a checkout with no database derives once the marker is present.
+
+    `yes` is `done`. `unknown` is emphatically not `no`: a shallow clone and
+    an unreachable remote cannot see the trailer, and reading either as "not
+    delivered" hands finished work back to the next reader that picks it.
+    What the retire left behind says which kind of open the rest are -- an
+    item recording the branch it lives on is being worked, one that records
+    none is still being planned.
+    """
+    answer = delivered(root, item_dir.name)
+    if answer == YES:
+        return StatusReport("done", False, tuple(problems))
+    if answer == UNKNOWN:
+        problems.append(
+            f"{prd}: this checkout cannot see whether {item_dir.name} was "
+            f"delivered; run `{answer.repair}`"
+        )
+        return StatusReport("unknown", False, tuple(problems))
+    branch = fields.get("branch", "").strip()
+    return StatusReport("in_progress" if branch else "planning", False, tuple(problems))
+
+
+def _from_row(
+    item_dir: pathlib.Path,
+    prd: pathlib.Path,
+    fields: dict[str, str],
+    problems: list[str],
+    statuses: "Statuses",
+) -> StatusReport:
+    """The status the row says, and the two things it says about the tree.
+
+    *Stale*: the item's `status:` line survived the retire -- on a worktree
+    kept across it, on a branch that still carries the line -- and says
+    something the row does not. What is checked is what the line says, not
+    that there is one: a line that agrees is a leftover for the lint to fail
+    on, and calling it stale would report a disagreement that is not there.
+
+    *Unmarked*: the row is `done` and no commit carries a closing trailer for
+    the item, so every database-free checkout goes on picking it. `delivered`
+    is the one question asked about that, here as everywhere else.
+    """
+    said, trouble = statuses.rows.status(item_dir) if statuses.rows else ("", "")
+    if trouble:
+        problems.append(f"{prd}: {trouble}")
+        return StatusReport("unknown", False, tuple(problems))
+    if not said:
+        return _from_git(statuses.root, item_dir, prd, fields, problems)
+    line = fields.get("status", "").strip()
+    if line and line != said:
+        problems.append(
+            f"{prd}: its `status:` line says {line!r} where the row says {said!r}; "
+            f"the line is stale"
+        )
+    if said == "done" and delivered(statuses.root, item_dir.name) != YES:
+        problems.append(
+            f"{prd}: the row is done and no commit carries {DELIVERS_TRAILER} or "
+            f"{CLOSES_TRAILER} for {item_dir.name}; the item is unmarked"
+        )
+    return StatusReport(said, False, tuple(problems))
+
+
 def _status_report(
-    item_dir: pathlib.Path, fields: dict[str, str], problems: list[str]
+    item_dir: pathlib.Path,
+    fields: dict[str, str],
+    problems: list[str],
+    statuses: "Statuses",
 ) -> StatusReport:
     archived = _is_archived(item_dir)
     prd = item_dir / "prd.md"
     if archived:
         return StatusReport("done", True, tuple(problems))
+
+    if not statuses.source:
+        problems.append(f"{prd}: {statuses.problem}")
+        return StatusReport("unknown", False, tuple(problems))
+    if statuses.source == FROM_ROW:
+        return _from_row(item_dir, prd, fields, problems, statuses)
 
     declared = fields.get("status", "").strip()
     if declared not in ITEM_STATUSES:
@@ -438,11 +660,31 @@ def _status_report(
     return StatusReport(declared, False, tuple(problems))
 
 
-def status_report(item_dir: pathlib.Path) -> StatusReport:
-    """Derive a work item's status from its own artifacts.
+def _reported(
+    item_dir: pathlib.Path,
+    fields: dict[str, str],
+    problems: list[str],
+    statuses: "Statuses | None",
+) -> StatusReport:
+    """`_status_report`, resolving and closing its own `Statuses` when given none."""
+    if statuses is not None:
+        return _status_report(item_dir, fields, problems, statuses)
+    own = Statuses.of(_root_of(item_dir))
+    try:
+        return _status_report(item_dir, fields, problems, own)
+    finally:
+        own.close()
+
+
+def status_report(
+    item_dir: pathlib.Path, *, statuses: "Statuses | None" = None
+) -> StatusReport:
+    """Derive a work item's status from its artifacts, or from its row.
 
     An item under `archive/` is `done` by virtue of where it lives -- the move
-    is the record. Anything else states its status in `prd.md` frontmatter. A
+    is the record. Anything else answers wherever `docs/work/.status-source`
+    says: with no marker, from the `status:` line in `prd.md` frontmatter, and
+    with the marker saying `row`, from the item's row in the one database. A
     status that is missing, unknown, or contradicted by the rest of the
     frontmatter is reported as an inconsistency rather than raised: a lint rule
     is the place to fail, and this function is also called by tools that only
@@ -450,7 +692,7 @@ def status_report(item_dir: pathlib.Path) -> StatusReport:
     """
     item_dir = pathlib.Path(item_dir)
     fields, problems = _read_prd(item_dir)
-    return _status_report(item_dir, fields, problems)
+    return _reported(item_dir, fields, problems, statuses)
 
 
 def derive_status(item_dir: pathlib.Path) -> str:
@@ -458,11 +700,11 @@ def derive_status(item_dir: pathlib.Path) -> str:
     return status_report(item_dir).status
 
 
-def work_item(item_dir: pathlib.Path) -> WorkItem:
+def work_item(item_dir: pathlib.Path, *, statuses: "Statuses | None" = None) -> WorkItem:
     """Read one work item directory into a `WorkItem`, reading the prd once."""
     item_dir = pathlib.Path(item_dir)
     fields, problems = _read_prd(item_dir)
-    report = _status_report(item_dir, fields, problems)
+    report = _reported(item_dir, fields, problems, statuses)
     name = item_dir.name
     return WorkItem(
         path=item_dir,
@@ -494,8 +736,21 @@ def work_item_dirs(root: pathlib.Path, work_dir: str = WORK_DIR) -> list[pathlib
 
 
 def work_items(root: pathlib.Path, work_dir: str = WORK_DIR) -> list[WorkItem]:
-    """Every work item, enumerated from the tree rather than from an index."""
-    return [work_item(path) for path in work_item_dirs(root, work_dir)]
+    """Every work item, enumerated from the tree rather than from an index.
+
+    The one place the marker is read and the one place the database is
+    opened, so every reader that picks an item -- `sd-review`, `sd-plan`,
+    `sd-status`, the sweep -- comes through here and none of them restates
+    where a status comes from.
+    """
+    statuses = Statuses.of(root, work_dir)
+    try:
+        return [
+            work_item(path, statuses=statuses)
+            for path in work_item_dirs(root, work_dir)
+        ]
+    finally:
+        statuses.close()
 
 
 # --------------------------------------------------------------------------
