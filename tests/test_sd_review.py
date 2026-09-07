@@ -77,6 +77,45 @@ class FakeRunner:
         return answer
 
 
+def chat_answer(content: str, **extra: Any) -> tuple[int, str, str, bool]:
+    """One OpenAI-compatible response, as the client hands it back."""
+    message: dict[str, Any] = {"content": content, **extra}
+    return (0, json.dumps({"choices": [{"message": message}]}), "", True)
+
+
+class FakeClient:
+    """The second seam, recording what left.
+
+    `sent` is the assertion that carries the weight. For an entry this
+    repository has not consented to -- a host that moved, a scheme edited down
+    to cleartext -- it must stay empty, and no other kind of test can show
+    that: a mocked-out refusal proves only that the mock refused.
+    """
+
+    def __init__(
+        self,
+        answers: Mapping[str, Any] | None = None,
+        default: Any = None,
+    ) -> None:
+        self.answers = dict(answers or {})
+        self.default = default or chat_answer('{"findings": []}')
+        self.sent: list[dict[str, Any]] = []
+
+    def __call__(
+        self,
+        provider: Any,
+        prompt: str,
+        env: Mapping[str, str],
+        timeout: int,
+    ) -> tuple[int, str, str, bool]:
+        self.sent.append(
+            {"provider": provider.name, "url": provider.url, "prompt": prompt,
+             "env": dict(env), "timeout": timeout}
+        )
+        answer = self.answers.get(provider.name, self.default)
+        return answer(provider) if callable(answer) else answer
+
+
 def namespace(**overrides: Any) -> argparse.Namespace:
     values: dict[str, Any] = {
         "scope": "worktree",
@@ -263,19 +302,18 @@ class ReaderTests(ReviewFixture):
         self.assertIn("claude-json", outcome.detail)
         self.assertEqual(runner.calls, [], "an unreadable provider is not started")
 
-    def test_a_url_entry_is_not_run_and_does_not_borrow_a_start_entry_s_words(
-        self,
-    ) -> None:
-        """Copilot found this. `refuse_environment` ran first and unconditionally
-        -- it speaks of what a spawned session inherits and ends "No session was
-        started" -- so a `url` entry, which spawns nothing, was answered in the
-        language of a mechanism it does not use, and then fell through to the
-        message claiming it named a reader called `None`.
+    def test_a_url_entry_does_not_borrow_a_start_entry_s_words(self) -> None:
+        """Copilot found this. `refuse_environment` ran first and
+        unconditionally -- it speaks of what a spawned session inherits and
+        ends "No session was started" -- so a `url` entry, which spawns
+        nothing, was answered in the language of a mechanism it does not use.
 
-        The environment here holds a URL on purpose: that is what used to
-        trigger the start-session refusal on an entry that starts nothing.
+        The entry runs now, and the environment here still holds a URL on
+        purpose: that is what used to trigger the start-session refusal on an
+        entry that starts nothing.
         """
         runner = FakeRunner()
+        client = FakeClient()
         outcome = sd_review.run_provider(
             self.provider(start=None, url="https://api.example/v1", reader=None),
             pathlib.Path("/nonexistent"),
@@ -284,23 +322,37 @@ class ReaderTests(ReviewFixture):
             runner,
             {"SOMEVENDOR_KEY": "https://elsewhere.example"},
             60,
+            client=client,
         )
-        self.assertEqual(outcome.status, sd_review.NOT_RUN)
-        self.assertIn("'url' entry", outcome.detail)
-        self.assertNotIn("None", outcome.detail)
+        self.assertEqual(outcome.status, sd_review.CLEAN)
         self.assertNotIn("No session was started", outcome.detail)
-        self.assertEqual(runner.calls, [])
+        self.assertEqual(runner.calls, [], "a url entry spawns nothing")
+        self.assertEqual(len(client.sent), 1)
+        self.assertEqual(outcome.argv, ())
+        self.assertEqual(outcome.scrubbed, (), "nothing inherits an environment")
 
     def test_the_three_places_that_ask_give_one_answer(self) -> None:
         """The chain marks it, the dry run plans it, the run reports it. Each
         had its own sentence, and two of the three were wrong about the same
         case, so fixing one left the others saying the old thing."""
-        provider = self.provider(start=None, url="https://api.example/v1", reader=None)
+        provider = self.provider(reader="claude-json")
         expected = sd_review.sd_registry.refuse_reader(provider, sd_review.READERS)
         self.assertIsNotNone(expected)
         planned = sd_review._planned([provider], pathlib.Path("/nonexistent"), "prompt")
         self.assertEqual(planned[0]["reason"], expected)
         self.assertFalse(planned[0]["would_run"])
+
+    def test_the_dry_run_offers_a_url_entry_s_endpoint_where_an_argv_would_be(
+        self,
+    ) -> None:
+        """The same three places, for the entry kind that has no argv. Marking
+        it `would_run: False` would be the dry run and the real run disagreeing
+        again, now in the other direction."""
+        provider = self.provider(start=None, url="https://api.example/v1", reader=None)
+        row = sd_review._planned([provider], pathlib.Path("/nonexistent"), "prompt")[0]
+        self.assertTrue(row["would_run"])
+        self.assertEqual(row["argv"], [])
+        self.assertEqual(row["endpoint"], "POST https://api.example/v1/chat/completions")
 
     def test_an_entry_whose_start_line_names_no_program_is_refused(self) -> None:
         """Copilot found this. `shlex.split("")` is empty, so the hardened
@@ -1205,6 +1257,198 @@ class TheRoutingLaneRunsOnABareRunner(ReviewFixture):
         )
         self.assertEqual(finished.returncode, 0, finished.stderr)
         self.assertIn("no provider registry", finished.stdout)
+
+
+#: A registry whose first reviewer is a `url` entry and whose second is a
+#: `start` one, so a run can be watched at both seams at once: what the client
+#: sent, and what the runner spawned.
+URL_REGISTRY = """
+bills:
+  free: {{ cost: subscription }}
+
+providers:
+  remote: {{ url: "{url}", model: a-model, vendor: somevendor, bill: free,
+            roles: [reviewer], max_tokens: 16384, env: [REMOTE_KEY] }}
+  second: {{ start: "second exec", vendor: secondvendor, bill: free,
+            roles: [author, reviewer], reader: codex-json, env: [] }}
+
+roles:
+  author: [second]
+  reviewer: [remote, second]
+"""
+
+
+class TheUrlEntryRunsTests(ReviewFixture):
+    """Criterion 6's `url` client, end to end through `review`.
+
+    Every test here injects both seams and asserts on both. The consent cases
+    assert `client.sent == []`: a refusal that is only a message is a refusal
+    nobody has shown to prevent the request.
+    """
+
+    def home_with(self, url: str = "https://api.example.test/v1") -> pathlib.Path:
+        self.homes = getattr(self, "homes", 0) + 1
+        home = self.tmp / f"url-home-{self.homes}"
+        (home / ".local" / "share" / "sd").mkdir(parents=True)
+        (home / ".local" / "share" / "sd" / "providers.yaml").write_text(
+            URL_REGISTRY.format(url=url), encoding="utf-8"
+        )
+        return home
+
+    def repo_allowing(self, *allowed: str) -> pathlib.Path:
+        self.made = getattr(self, "made", 0) + 1
+        root = self.make_repo(f"repo-{self.made}")
+        (root / "CLAUDE.local.md").write_text(
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\n"
+            f"{sd_review.sd_lib.CONSENT_KEY}: {', '.join(allowed)}\n"
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n",
+            encoding="utf-8",
+        )
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        return root
+
+    def run_review(
+        self,
+        client: FakeClient,
+        *,
+        url: str = "https://api.example.test/v1",
+        allowed: Sequence[str] = ("remote@api.example.test", "second@second"),
+        runner: FakeRunner | None = None,
+        **overrides: Any,
+    ) -> dict[str, Any]:
+        return sd_review.review(
+            self.repo_allowing(*allowed),
+            namespace(**overrides),
+            runner
+            or FakeRunner(
+                {
+                    "sd-check": sd_review.Completed(0, "{}", ""),
+                    "second": sd_review.Completed(0, '{"findings": []}', ""),
+                }
+            ),
+            {"HOME": str(self.home_with(url)), "REMOTE_KEY": "secret"},
+            self.chatgpt_home(),
+            client,
+        )
+
+    def test_a_think_block_and_reasoning_content_yield_a_clean_finding_list(self) -> None:
+        """Criterion 6, against a fixture response carrying both."""
+        client = FakeClient(
+            {
+                "remote": chat_answer(
+                    "<think>Reading the diff. Nothing here is wrong.</think>\n"
+                    '{"findings": []}',
+                    reasoning_content="Reading the diff. Nothing here is wrong.",
+                )
+            }
+        )
+        result = self.run_review(client)
+        statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
+        self.assertEqual(statuses["remote"], sd_review.CLEAN)
+        self.assertEqual(result["status"], "clean")
+        self.assertEqual(result["findings"], [])
+        self.assertEqual(len(client.sent), 1)
+        self.assertIn("Review", client.sent[0]["prompt"])
+
+    def test_findings_come_back_through_the_same_reader(self) -> None:
+        client = FakeClient(
+            {
+                "remote": chat_answer(
+                    '<think>a</think>{"findings": [{"path": "src.py", "line": 1, '
+                    '"severity": "high", "summary": "wrong", "family": "correctness"}]}'
+                )
+            }
+        )
+        result = self.run_review(client)
+        self.assertEqual(result["status"], "blocking")
+        self.assertEqual(result["findings"][0]["path"], "src.py")
+        self.assertEqual(result["findings"][0]["backend"], "remote")
+
+    def test_a_body_this_build_cannot_read_is_unavailable_and_never_clean(self) -> None:
+        """The one property the whole unit rests on. `None` from the reader is
+        a review that did not happen; `[]` is a review that found nothing. A
+        body with no answer in it must never take the second road."""
+        for body in ("<think>only reasoning</think>", "I could not comply.", ""):
+            client = FakeClient({"remote": chat_answer(body)})
+            result = self.run_review(client)
+            statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
+            self.assertEqual(statuses["remote"], sd_review.UNAVAILABLE, body)
+            self.assertEqual(len(client.sent), 1, body)
+
+    def test_an_empty_findings_array_is_clean_and_the_two_are_not_confused(self) -> None:
+        client = FakeClient({"remote": chat_answer('{"findings": []}')})
+        statuses = {
+            row["backend"]: row["status"] for row in self.run_review(client)["outcomes"]
+        }
+        self.assertEqual(statuses["remote"], sd_review.CLEAN)
+
+    def test_a_429_is_a_rate_limit_and_stops_the_chain(self) -> None:
+        client = FakeClient({"remote": (429, "", "HTTP 429 from remote: slow down", True)})
+        result = self.run_review(client)
+        statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
+        self.assertEqual(statuses["remote"], sd_review.RATE_LIMITED)
+        self.assertEqual(statuses["second"], sd_review.NOT_RUN)
+        self.assertEqual(result["status"], "rate_limited")
+
+    def test_a_connection_error_is_unavailable_and_the_chain_continues(self) -> None:
+        # `launched=False` even though the text says 429: an answer that never
+        # arrived is not a quota stop, and reading it as one would halt the
+        # chain on a typo in somebody's error string.
+        client = FakeClient({"remote": (1, "", "remote: refused after 429 tries", False)})
+        result = self.run_review(client)
+        statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
+        self.assertEqual(statuses["remote"], sd_review.UNAVAILABLE)
+        self.assertEqual(statuses["second"], sd_review.CLEAN)
+        self.assertEqual(result["status"], "clean")
+
+    def test_a_host_that_moved_refuses_naming_both_and_sends_nothing(self) -> None:
+        client = FakeClient()
+        result = self.run_review(client, allowed=("remote@elsewhere.test", "second@second"))
+        rows = {row["provider"]: row for row in result["chain"]}
+        self.assertFalse(rows["remote"]["eligible"])
+        self.assertIn("elsewhere.test", rows["remote"]["reason"])
+        self.assertIn("api.example.test", rows["remote"]["reason"])
+        self.assertEqual(client.sent, [], "no request leaves for a host that moved")
+        self.assertNotIn("remote", result["providers"])
+
+    def test_https_edited_to_http_refuses_in_print_and_sends_nothing(self) -> None:
+        """`netloc` carries no scheme, so consent to the host is satisfied by
+        both and this edit used to pass `refuse_allowance` in silence -- and
+        this repository's diff would have left in the clear."""
+        client = FakeClient()
+        result = self.run_review(client, url="http://api.example.test/v1")
+        rows = {row["provider"]: row for row in result["chain"]}
+        self.assertFalse(rows["remote"]["eligible"])
+        self.assertIn("in the clear", rows["remote"]["reason"])
+        self.assertEqual(client.sent, [], "no request leaves in the clear")
+        self.assertNotIn("remote", result["providers"])
+        # Printed where every other passed-over entry is printed. A real run's
+        # render names only the providers it used, which is where the refusal
+        # for a host that moved goes too; `--explain` is the page that says why.
+        printed = io.StringIO()
+        sd_review.render(self.run_review(FakeClient(), url="http://api.example.test/v1",
+                                         explain=True), printed)
+        self.assertIn("in the clear", printed.getvalue())
+
+    def test_a_loopback_entry_still_runs_over_http(self) -> None:
+        client = FakeClient()
+        result = self.run_review(
+            client,
+            url="http://localhost:52415/v1",
+            allowed=("remote@localhost:52415", "second@second"),
+        )
+        self.assertEqual(result["registry_refusal"], "")
+        self.assertEqual(len(client.sent), 1)
+
+    def test_the_dry_run_names_the_endpoint_and_sends_nothing(self) -> None:
+        client = FakeClient()
+        result = self.run_review(client, dry_run=True)
+        rows = {row["backend"]: row for row in result["planned_invocations"]}
+        self.assertTrue(rows["remote"]["would_run"])
+        self.assertEqual(
+            rows["remote"]["endpoint"], "POST https://api.example.test/v1/chat/completions"
+        )
+        self.assertEqual(client.sent, [])
 
 
 class ScopeProvidersOverASkipTier(unittest.TestCase):

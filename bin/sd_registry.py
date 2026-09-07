@@ -32,11 +32,16 @@ one document either reader parses.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
+import json
 import os
+import re
 import shlex
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from urllib.parse import urlsplit
 
 #: Beside the database, in `~/.local/share/sd/`. The same path `sd_db` uses;
@@ -52,6 +57,14 @@ ROLES = ("author", "reviewer")
 #: A bill with one of these bases has a spend limit something enforces, so
 #: every provider on it must be callable by the library rather than spawned.
 CAPPED_BASES = ("company", "plan", "prepaid")
+
+#: What the one client assumes about every `url` entry, and the registry does
+#: not say: no field names an endpoint path, an auth scheme or a deadline.
+#: OpenAI-compatible is the shape the design pins for all of them, so an
+#: endpoint wanting another path or another scheme is a different client, not a
+#: different entry.
+CHAT_COMPLETIONS = "/chat/completions"
+AUTH_SCHEME = "Bearer"
 
 _CONSTANTS = {"true": True, "false": False, "null": None, "~": None}
 
@@ -553,6 +566,11 @@ def _provider(
             f"A url entry's recipient is its host, and consent is granted to "
             f"that host, so an entry without one could never be consented to."
         )
+    # A cleartext scheme is refused by `refuse_allowance`, not here. It is a
+    # consent question rather than a shape question, and the two readers must
+    # answer it identically: `_adapt` builds providers from `sd_db`'s rows
+    # without ever passing through this function, so a check here would fire
+    # only on the machines with no database.
     if "bill" not in body:
         raise RegistryError(f"{path}: provider {name!r} has no 'bill'")
     bill_name = str(body["bill"])
@@ -684,9 +702,47 @@ CONSENT_SEPARATOR = "@"
 FINGERPRINT_JOIN = "+"
 FINGERPRINT_LENGTH = 8
 
+#: What ends a pair on the line. One definition, read by the lexer in
+#: `consent_parts` and by the quoting in `Allowance.__str__`: the two held
+#: separate lists once, and the writer's list was missing the comma the
+#: reader's list split on.
+CONSENT_WHITESPACE = " \t\n\r,"
+
+_HEX = re.compile(r"[0-9a-f]+")
+
 
 class ConsentRefusal(RegistryError):
     """This repository has not allowed this entry to receive its diff."""
+
+
+def _one_word(recipient: str) -> str:
+    """`recipient` rendered so `consent_parts` reads it back as one word.
+
+    Not `shlex.quote` alone. Its safe set contains the comma -- exactly the
+    character `consent_parts` splits on -- so the guarded call that looked
+    like protection was a no-op on the one character that needed it:
+    `Allowance("entry", "x,y@z")` rendered unchanged, and read back as consent
+    for `entry` to reach a host nobody wrote plus a second entry, `y`, that
+    does not exist. Anything the reader separates on is quoted here by this
+    module's own rule; everything else defers to `shlex`, which still has to
+    handle the quotes and the `#` a recipient may hold.
+    """
+    if any(character in recipient for character in CONSENT_WHITESPACE):
+        return "'" + recipient.replace("'", "'\"'\"'") + "'"
+    return shlex.quote(recipient)
+
+
+def _split_fingerprint(tail: str) -> tuple[str, str]:
+    """`<recipient>+<hash>` as its two halves, or the whole of it as one.
+
+    From the right, and only for a hash shaped like one: `partition` took the
+    *first* `+`, so a recipient holding one -- `g++`, a versioned path -- lost
+    everything after it and consented to a program with a different name.
+    """
+    head, join, digest = tail.rpartition(FINGERPRINT_JOIN)
+    if join and len(digest) == FINGERPRINT_LENGTH and _HEX.fullmatch(digest):
+        return head, digest
+    return tail, ""
 
 
 @dataclass(frozen=True)
@@ -700,17 +756,14 @@ class Allowance:
     def __str__(self) -> str:
         """The pair as it is written on the line, and readable back off it.
 
-        A recipient holding a space or a comma is quoted, because that is what
-        `consent_parts` needs to see one word where the operator meant one. A
-        pair that renders unquoted here and cannot be parsed there would put
-        the two halves of consent out of step in the direction that matters:
-        a line the installer wrote, refused by the reader.
+        The invariant, which `TheRoundTrip` states as a test: for any
+        recipient, `parse_consent(str(allowance))` returns exactly this
+        allowance and nothing else. A pair that renders here and reads back as
+        something else puts the two halves of consent out of step in the
+        direction that matters -- a destination nobody wrote, consented to.
         """
         tail = f"{FINGERPRINT_JOIN}{self.fingerprint}" if self.fingerprint else ""
-        recipient = self.recipient
-        if any(character in recipient for character in ' \t,"\''):
-            recipient = shlex.quote(recipient)
-        return f"{self.entry}{CONSENT_SEPARATOR}{recipient}{tail}"
+        return f"{self.entry}{CONSENT_SEPARATOR}{_one_word(self.recipient)}{tail}"
 
 
 def parse_consent(line: str | None) -> dict[str, Allowance]:
@@ -742,7 +795,7 @@ def parse_consent(line: str | None) -> dict[str, Allowance]:
         # recipient is its netloc, which carries any userinfo the url had, so
         # `p@user:pw@host` is one well-defined pair and not an ambiguous one.
         entry, _, recipient = part.partition(CONSENT_SEPARATOR)
-        recipient, _, fingerprint = recipient.partition(FINGERPRINT_JOIN)
+        recipient, fingerprint = _split_fingerprint(recipient)
         if not entry or not recipient:
             raise ConsentRefusal(
                 f"{part!r} on the 'reviewers' line has an empty "
@@ -772,7 +825,7 @@ def consent_parts(line: str) -> list[str]:
     ends.
     """
     lexer = shlex.shlex(line, posix=True)
-    lexer.whitespace = " \t\n\r,"
+    lexer.whitespace = CONSENT_WHITESPACE
     lexer.whitespace_split = True
     # `shlex` treats `#` as a comment by default, which quietly truncated a
     # recipient that held one: `codex@codex#x` consented to `codex`. Nothing
@@ -832,6 +885,13 @@ def refuse_allowance(provider: Provider, allowed: Allowance | None) -> str | Non
     Returns rather than raises: the chain reports every entry it passed over
     and why, and an exception would let it report only the first.
     """
+    cleartext = refuse_cleartext(provider)
+    if cleartext is not None:
+        # First, and here rather than at the run: this is a consent question --
+        # the line names a host and cannot name a scheme -- so the chain, the
+        # dry run and the run have to give the same answer, and an entry the
+        # chain refuses never reaches the code that could send to it.
+        return cleartext
     if allowed is None:
         return (
             f"{provider.name} is not on the repository's 'reviewers' line. A "
@@ -875,10 +935,11 @@ def refuse_reader(provider: Provider, readers: tuple[str, ...]) -> str | None:
     if not readers:
         return None
     if provider.url:
-        return (
-            f"{provider.name} is a 'url' entry, and this build has no client "
-            f"for one yet; it runs 'start' entries."
-        )
+        # Nothing to check, so nothing to refuse: a `url` entry names no reader
+        # because one client and one reader serve all of them, and `readers`
+        # lists what parses a spawned command's output. Falling through instead
+        # would test `None not in readers` and refuse every one of them.
+        return None
     if provider.reader not in readers:
         return (
             f"{provider.name} reads back as {provider.reader!r}, and this "
@@ -895,7 +956,13 @@ def refuse_environment(provider: Provider, environ: Mapping[str, str]) -> str | 
     that inherits one can send the diff somewhere this repository did not agree
     to. Named without its value, because printing it would put the destination
     in the log that reports the refusal.
+
+    A `url` entry is exempt: nothing inherits this environment, and answering
+    "No session was started" to an entry that starts none is the same wrong
+    sentence `refuse_reader` used to carry.
     """
+    if provider.url:
+        return None
     for name in provider.env:
         value = environ.get(name, "")
         if value.startswith(("http://", "https://")):
@@ -906,6 +973,166 @@ def refuse_environment(provider: Provider, environ: Mapping[str, str]) -> str | 
                 f"destination nobody consented to. No session was started."
             )
     return None
+
+
+def refuse_cleartext(provider: Provider) -> str | None:
+    """Why this entry's url may not carry the diff, or `None` when it may.
+
+    `recipient()` compares `netloc`, which excludes the scheme, so consent to
+    `baseten@inference.baseten.co` is satisfied by `https://` and `http://`
+    alike and an edit from one to the other passes `refuse_allowance` in
+    silence, on the wire in the clear. Refused here and never upgraded: a
+    client that quietly rewrote the scheme would be deciding, for the
+    operator, that the registry does not mean what it says. Loopback is the
+    exception, and `exo` is why -- cleartext over a socket that never leaves
+    the machine.
+
+    Loopback is decided by `ipaddress`, not by how the host is spelled. The
+    first version of this asked `host.startswith("127.")`, and RFC 1123 lets a
+    DNS label begin with a digit, so `127.evil.com` and `127.0.0.1.evil.com`
+    are registrable public domains that took the exemption and got cleartext
+    -- this refusal's own defect class, one level down. `localhost` is the one
+    name, matched whole.
+
+    `127.1` is refused. curl reads the shortened form as loopback and
+    `ipaddress` does not parse it at all, and that is the direction to fail
+    in: a shortened-form parser here would be a second opinion about what an
+    address means, on the path that decides whether a diff goes out in the
+    clear. Write it in full.
+    """
+    if not provider.url:
+        return None
+    parts = urlsplit(provider.url)
+    host = (parts.hostname or "").lower()
+    try:
+        # `hostname` has already stripped the brackets from `[::1]` and
+        # lowercased, so a literal address arrives here ready to parse.
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host == "localhost"
+    if parts.scheme == "https" or loopback:
+        return None
+    return (
+        f"{provider.name} points at {provider.url!r}, which reaches "
+        f"{parts.netloc!r} in the clear. Consent names a host and not a "
+        f"scheme, so this edit would pass the 'reviewers' line and send this "
+        f"repository's diff unencrypted. Give it 'https', or a loopback host."
+    )
+
+
+# --------------------------------------------------------------------------
+# The one client for `url` entries, and the one reader for their answers
+# --------------------------------------------------------------------------
+
+#: The second seam `bin/sd-review` injects, beside its runner. A test hands in
+#: a recorder and asserts on what left -- including, for a refused entry, that
+#: nothing did.
+Client = Callable[[Provider, str, Mapping[str, str], int], tuple[int, str, str, bool]]
+
+
+def endpoint(provider: Provider) -> str:
+    """Where `chat_completion` will POST. One definition, so a dry run cannot
+    print an endpoint the client does not use."""
+    return f"{str(provider.url).rstrip('/')}{CHAT_COMPLETIONS}"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is a second recipient the `reviewers` line never named, and
+    urllib follows one by default, carrying `Authorization` to whichever host
+    the answer points at. `None` turns the 3xx into a reported `HTTPError`."""
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+def chat_completion(
+    provider: Provider,
+    prompt: str,
+    environ: Mapping[str, str],
+    timeout: int,
+) -> tuple[int, str, str, bool]:
+    """POST one review to an OpenAI-compatible endpoint.
+
+    Returns `bin/sd-review`'s `Completed` as a tuple this module can build
+    without importing it: body in `stdout`, status and error body in `stderr`,
+    `launched=False` for an answer that never arrived. That last is what keeps
+    a refused connection out of the rate-limit vocabulary -- `classify_failure`
+    reads `launched` before any marker -- while `HTTP 429` in `stderr` lands on
+    the markers already there.
+    """
+    refusal = refuse_cleartext(provider)
+    if refusal is not None:
+        return (1, "", refusal, False)
+    name = provider.env[0] if provider.env else ""
+    key = environ.get(name, "")
+    if not key:
+        return (1, "", f"{provider.name} has no value for {name or 'any key'}", False)
+    payload = json.dumps(
+        {"model": provider.model, "max_tokens": provider.max_tokens,
+         "messages": [{"role": "user", "content": prompt}]}
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        endpoint(provider),
+        data=payload,
+        headers={"Authorization": f"{AUTH_SCHEME} {key}",
+                 "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with _OPENER.open(request, timeout=timeout) as answer:
+            return (0, answer.read().decode("utf-8", "replace"), "", True)
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", "replace")
+        return (error.code, "", f"HTTP {error.code} from {provider.name}: {body}", True)
+    except OSError as error:
+        # `URLError` and a timeout are both `OSError`; neither is an answer, so
+        # neither may read as a quota stop however the message is worded.
+        return (1, "", f"{provider.name}: {error}", False)
+
+
+# Five decisions the plan left open -- `prd.md:503-504` says only "strips a
+# `<think>` block", singular, with no delimiters:
+#
+#   * Every block, not the first: a model that reasons twice is still reasoning.
+#   * Case-insensitive, and any attributes on the open tag. Leaving the trace
+#     inline fails `json.loads` and reports an entry that answered as unavailable.
+#   * Not nested. `.*?` stops at the first close, so a nested pair leaves a stray
+#     `</think>` and the remainder does not parse -- unavailable, the safe
+#     direction, and no parser written for a shape these models do not emit.
+#   * An unclosed span runs to the end of the string. `max_tokens` is 16,384 on
+#     every enabled `url` entry, so a model that spends its budget reasoning is
+#     cut off mid-tag, and what follows an unclosed `<think>` is not an answer.
+#   * A whitespace-only remainder is nothing: reasoning with no answer is
+#     unusable, not clean.
+_THINK = re.compile(r"<think\b[^>]*>.*?(?:</think\s*>|\Z)", re.DOTALL | re.IGNORECASE)
+
+
+def url_answer(body: str) -> str:
+    """The answer in an OpenAI-compatible response body, or `""` for none.
+
+    `""` is the whole vocabulary for "this build could not read it": the caller
+    hands it to `parse_findings`, which answers `None` for an empty string, and
+    `None` is a review that did not happen. It must never become an empty
+    finding list -- that reports a clean review of a change nobody read.
+
+    `reasoning_content` is never read. It is a sibling key holding what
+    `<think>` holds inline, and concatenating it breaks the `json.loads` that
+    follows, reporting an entry that answered correctly as unavailable.
+    """
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return ""
+    choices = payload.get("choices") if isinstance(payload, dict) else None
+    first = choices[0] if isinstance(choices, list) and choices else None
+    message = first.get("message") if isinstance(first, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, str):
+        return ""
+    return _THINK.sub("", content).strip()
 
 
 # --------------------------------------------------------------------------
@@ -947,8 +1174,8 @@ def reviewer_chain(
     # spend against `cap_usd_month`, which lives in the database's `bill` rows
     # and not in this file, so the file-only reader cannot know it. The
     # registry also refuses a `start` entry on a capped bill outright, so the
-    # only entries a cap can reach are `url` entries -- which this build has no
-    # client for. The branch below is right and unreachable, and it stays
+    # only entries a cap can reach are `url` entries, which this build now
+    # calls. The branch below is right and unreached, and it stays
     # tested so that wiring it is a change to one call site.
     capped_bills: tuple[str, ...] = (),
     readers: tuple[str, ...] = (),
