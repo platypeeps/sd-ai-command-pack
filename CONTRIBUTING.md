@@ -268,7 +268,7 @@ exist. Those pages are stale by construction — step 3e deleted what they descr
 steps 4 and 7) rather than rewritten speculatively here. Deleting them in 3e was
 considered and rejected: a deletion widened because the tree is already open is
 how a reviewable pull request stops being one. Read
-`docs/work/2026-08-29-artifacts-as-product/` for what is actually true now.
+`docs/work/archive/2026-09/2026-08-29-artifacts-as-product/` for what is actually true now.
 
 That deferral did not hold, and the paragraph above is left standing as the
 record of the plan rather than rewritten to match what happened. Steps 4 and 7
@@ -284,7 +284,7 @@ Deletion was **not** part of that pass. 7,839 lines of specification is a
 content decision for the maintainer, so the pass produced a per-file
 disposition with evidence — keep, stale-notice, or delete — and left the delete
 column as a recommendation. It is in the step 7 entry of
-`docs/work/2026-08-29-artifacts-as-product/implement.md`.
+`docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
 
 One thing to know before acting on that recommendation: `docs/spec/**` is not
 orphan text, even where its content is. `bin/sd-docs-lint` rule 4 enumerates

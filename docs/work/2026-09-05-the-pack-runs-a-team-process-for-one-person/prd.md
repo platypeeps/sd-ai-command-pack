@@ -788,12 +788,12 @@ rule that deleted it took seven fixes in sixteen rounds, a reader scan by
 literal path, a second by resolved link, a lint rule on the merged tree,
 an up-to-date protection setting, a re-cut path and a single-caller
 guard, and the reviewer said three times that keeping the directory
-was the simpler design. It is. A `done` directory costs a
-line in a listing, every reader that picks an item already excludes a
-delivered item, and the pack has the case today: `2026-08-29-artifacts-as-product`
-is `done` and fourteen lines in twelve tracked files link into it, which
-a deletion would have had to detect and a kept directory serves. No pack
-surface deletes an item directory. When the operator wants the listing
+was the simpler design. It is. A `done` directory costs a line in a listing, every
+reader that picks an item already excludes a delivered item, and the pack has the
+case today: `2026-08-29-artifacts-as-product` is `done` and fourteen lines in twelve
+tracked files link into it, which a deletion would have had to detect. Keeping it
+did not save them: the archive move broke all fourteen -- criterion 33's own case.
+No pack surface deletes an item directory. When the operator wants the listing
 short, once a quarter or never, they delete with `git rm -r` in a change
 of their own, and a link that breaks then is theirs to see — which is only
 true if something says the link broke, so C-27's lint rule **is** built, as
@@ -1666,11 +1666,11 @@ confirmed by the next `sd-ship` run alone.
     exceptions. Two tests cover the rule: one seeds a markdown file naming a
     missing item directory and asserts the failure names the file and the
     path, and one seeds a metavariable and asserts it passes. Run over this
-    repository on 2026-09-05 the rule reads 62 references across 138 files and
-    reports **none** unresolved, so it is green on the day it lands; run again
-    with the four directories pull request 743 would have moved treated as
-    gone, it reports **15 unresolved across 11 files**, which is the case it
-    exists for. The rule is C-27's, from round fourteen, which was written for
+    repository on 2026-09-07 the rule reads 49 references across 129 files and
+    reports **17 unresolved across 12 files** — not the green this criterion
+    predicted: two items moved into the archive after those links were
+    written, and this change repoints them. The rule is C-27's, from round
+    fourteen, which was written for
     requirement 5's deletion and dropped with it; the deletion is gone and the
     need is not. It joins the no-database set criterion 14 wires into
     `make check`, and because criterion 14 enumerates that set from the lint,
@@ -3833,7 +3833,7 @@ from a number the operator types.
   `tests/test_loc_caps.py`: 407 lines before and after, so every line number
   below the constant is unmoved. R11-D32 shifted that file by 24 and broke
   four anchored citations in
-  `docs/work/2026-09-02-dashboard-ack-and-mutation-count/prd.md`, which it
+  `docs/work/archive/2026-09/2026-09-02-dashboard-ack-and-mutation-count/prd.md`, which it
   then had to repoint. Those four are the entire reason — the file is not this
   change's to edit, and rewriting the rationale inside its existing envelope
   costs one round of arithmetic and no cross-item churn.
@@ -4070,7 +4070,7 @@ from a number the operator types.
       `check_citations` (`bin/sd-docs-lint:404-455`, 52) with
       `resolve_citation` (`bin/sd-docs-lint:315-332`, 18) is the built rule of
       this shape — enumerate references, resolve each, report the ones that do
-      not — plus 3 for the call in `run` (`bin/sd-docs-lint:458-479`).
+      not — plus 3 for the call in `run` (`bin/sd-docs-lint:508-530`).
     - the `sd_db` installer step — **19**, and not the 38 it looks like.
       `prd.md:1538-1544` reads as unbuilt scope and is not: `system_checkout`
       (`bin/sd_install.py:1170-1179`, 10), `library_source` (`:1182-1183`, 2),
@@ -4192,7 +4192,7 @@ from a number the operator types.
 
   One mechanical note, and it is the opposite of R11-D34's. That entry kept
   `tests/test_loc_caps.py` **line-neutral** at 407 lines so that four anchored
-  citations in `docs/work/2026-09-02-dashboard-ack-and-mutation-count/` would
+  citations in `docs/work/archive/2026-09/2026-09-02-dashboard-ack-and-mutation-count/` would
   not have to be repointed, after R11-D32 shifted the file by 24 and had to
   repoint them. This change does not: the file goes from 407 to 442 lines, and
   the rewritten rationale is longer because the derivation now has four
@@ -4330,3 +4330,46 @@ from a number the operator types.
   R11-D24 forbade outright. Measuring the factored version before moving
   anything is the next step, and if it lands under 29 lines no cap moves at
   all.
+
+- **2026-09-07** — Criterion 33 built, and three cap facts recorded against it.
+
+  **The reserve was not the cost.** Rule 7 was priced at **73** against
+  `check_citations` (52) plus `resolve_citation` (18) plus 3 for the call in
+  `run`. It built at **51**. Enumerating references and resolving each against
+  the filesystem is a smaller job than the citation rule's, which parses a line
+  number and compares recorded text; the analogue was the right shape and the
+  wrong size. The 22 unspent stay unspent.
+
+  **It did not land green.** The criterion predicted 62 references across 138
+  files and none unresolved. The rule reads 49 across 129 and found **17
+  unresolved across 12 files** — every one a link into
+  `2026-08-29-artifacts-as-product` or
+  `2026-09-02-dashboard-ack-and-mutation-count`, both of which moved into
+  `docs/work/archive/2026-09/` after those links were written. This falsifies
+  the sentence two paragraphs above criterion 33, which argued that keeping a
+  `done` directory serves the fourteen lines that link into it. Keeping it did
+  not: the archive move broke all fourteen, and for two days nothing said so.
+  The references are repointed at the archive in this change, so the rule is
+  green from here.
+
+  **The `bin/` cap was paid in kind, not raised.** Headroom was 46 with 73
+  priced. `sd_install.py` was carrying a fourth private `git` wrapper in
+  `git_context`, byte-identical in policy to `sd_lib.git_output` and without
+  its timeout, in a file that already reaches for `sibling("sd_lib")` in
+  `library_pin`; and `excludes_file` and `set_excludes_config` each spelled out
+  the same `git config --global --get core.excludesFile` read. Folding both
+  returned 12 lines. Rule 7 then cost 51 of the 58 available. No ceiling moved.
+
+  **Two overruns from 2026-09-07 recorded here rather than left implicit.**
+  The `sd_db` installer step was priced at 19, against `resolve_pin`, and built
+  at 31: the price named the resolve-a-ref span and not the `--match` clause
+  that keeps a monorepo's other tags out of the library's version, which was
+  found by review after the first commit and is the reason the step is correct.
+  Requirement 13's reword replaced "tag" with "immutable ref" — a commit is the
+  pin when no `sd-db-v*` tag is exact — which is a change to the requirement's
+  text and not to its intent, made line-neutrally at 7 lines in and 7 out.
+
+  **One thing the rule cannot see.** It resolves paths, not anchors. A link to
+  a section of a page that still exists is green here whether or not the
+  section does. That is the citation rule's shape, and rule 6 covers it only
+  for the five items that carry a manifest.

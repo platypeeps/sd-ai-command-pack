@@ -22,7 +22,7 @@ Instructions for AI assistants working in this repository.
 
 - Read [CONTRIBUTING.md](CONTRIBUTING.md), then run `make check` before
   publishing a change.
-- Read [docs/work/2026-08-29-artifacts-as-product/design.md](docs/work/2026-08-29-artifacts-as-product/design.md)
+- Read [docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md](docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md)
   before changing the installer or the command set. The `docs/spec/**` pages on
   adapters, manifests, and provenance describe the pre-3e model and are stale
   until later steps reach them.
@@ -32,7 +32,7 @@ Instructions for AI assistants working in this repository.
     says "partly stale" it names which sections still hold. The pages that
     describe only deleted machinery are still on disk pending a deletion
     decision, listed with evidence under step 7 in
-    [docs/work/2026-08-29-artifacts-as-product/implement.md](docs/work/2026-08-29-artifacts-as-product/implement.md).
+    [docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md](docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md).
 - Planning artifacts live in [docs/work](docs/work/README.md): one directory per
   item, `prd.md` plus `design.md`/`implement.md` when warranted. That directory
   is the whole tracked footprint of the workflow.
