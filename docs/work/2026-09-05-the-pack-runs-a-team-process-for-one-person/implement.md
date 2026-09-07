@@ -1284,6 +1284,41 @@ which of the two pull requests holds it, and PR 7 lands after PR 6.
 PR 7 or PR 8, whichever merges last, carries `Delivers:`. Then `prd.md`
 goes to `status: done` and drops its `branch:` field in the same edit.
 
+**That instruction is wrong, and PR 8d merging last is what showed it.** All
+eight pull requests have merged — PR 7 at `b0873ec1`, PR 8d at `fe0712ae` —
+and the item still cannot go `done`, because two criteria are open and
+neither is a pull request in this list:
+
+*Criterion 7 is unscored.* The seven `mezmo-world-simulator` passes have no
+scores anywhere on this item; `git grep` over `prd.md` and this file returns
+the three sentences that *describe* the criterion and no table of accepted
+against rejected. The criterion's own wording is stronger than "unscored": the
+scores are due **"before the code review point runs on any new pull request"**,
+and the point has since run on every pull request from `#758` to `#777`. The
+closure table's "see below" row was right that criterion 7 has no pull request
+beside it and wrong to leave the reader to infer that the pull requests could
+therefore finish without it.
+
+*Criterion 28's `commands.yaml` clause waits on item B's slice 4.* PR 8d says
+so in its own text and the closure table says so in its own row, and this
+section was written before either.
+
+**So `Delivers:` is deliberately not on `fe0712ae`.** `git log --grep
+'^Delivers:'` on `main` returns nothing, which is the state this paragraph
+wants: a `Delivers:` here would mark the item shipped with two criteria open,
+and `WORKFLOW.md:153` makes that commit the answer a database-free reader
+gets. `WORKFLOW.md:149-152` already provides the remedy for a delivery that
+happened without its trailer — the next `sd-ship` merge here, or one empty
+commit on the branch — so nothing is lost by waiting, and the item stays
+`in_progress` until the two close.
+
+**What is left, in the order it can be done.** Score the seven passes, which
+is evidence gathered from `answerbook/mezmo-world-simulator` rather than code
+written here; its git history records at least the fourth and the seventh
+(`0c39c78`, `426a405`). Then item B's slice 4 lands `commands.yaml` and the
+last clause of criterion 28 becomes checkable. Then, and not before, the
+delivery commit.
+
 That field was missing when this file was first written, and adding it was
 the fix. This repository's items carry `branch:` by convention — 238 `prd.md` files
 under `docs/work/` have the line, and the sibling item
