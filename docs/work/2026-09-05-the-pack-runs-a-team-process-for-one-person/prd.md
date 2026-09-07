@@ -4612,3 +4612,34 @@ from a number the operator types.
   scheduled, and `bin/sd_sweep.py:7` already records that nothing writes on a
   schedule. A `sd codex sync` verb would add 20 lines to `bin/sd` and is not
   reserved, because a cron-only nightly does not need one.
+
+- **2026-09-07** — **Criterion 26's Codex clause asked for a signal Codex does
+  not produce, and the built module reads the one it does.** The clause reads
+  "a nightly parse of `~/.codex/sessions` for the same", where "the same" is a
+  typed `/sd-*` command. There is no such surface: `bin/sd_install.py:171-173`
+  renders the Codex home as `~/.codex/skills/<name>/SKILL.md`, a directory of
+  files, and there is no `~/.codex/prompts`. Measured against the 826 rollouts
+  on this machine, **no user turn in any of them begins with `/`**, while
+  `~/.codex/skills/<name>/SKILL.md` is named over a thousand times — 1,139 for
+  `sd-red-team` alone — inside the shell commands Codex uses to open a skill.
+
+  So `bin/sd_codex.py` writes `path` rows, which is the mode the `PreToolUse`
+  half of the same criterion already writes on Claude, and keeps the `direct`
+  branch for the day Codex grows a prompt surface. It costs one branch and no
+  new vocabulary: the SQL constrains `mode` to the two values and this writes
+  those two. Nothing here changes the criterion's price or its verification;
+  what changes is which of the two modes its Codex row carries.
+
+  **A use is a session and not a mention.** A skill read once is echoed by the
+  tool call, its output and every later turn quoting either, which is where
+  four figures of textual hits come from. One `(session, skill, mode)` triple
+  writes one row, stamped at its first occurrence.
+
+  **The entry cost 19 of the 20 this cap said it was not reserving.** The
+  derivation above priced `sd_codex.py` at 368 and named a verb as an extra 20
+  a cron-only nightly does not need. The module came in at 349, so `sd skill
+  scan` fits inside the 368 with nothing claimed: `bin/` is 16,393 against the
+  16,750 R11-D42 set. The verb exists because `bin/` has no other convention
+  for reaching a module, and because the operator reading a trial's evidence
+  needs a way to run and inspect the thing that produces it. The scheduler is
+  still outside this repository, and still nothing runs it.
