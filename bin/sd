@@ -77,10 +77,13 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import sd_codex  # noqa: E402
+import sd_handoff_rows  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_registry  # noqa: E402
 import sd_restore  # noqa: E402
+import sd_shadow  # noqa: E402
 import sd_skill  # noqa: E402
+import sd_suggest  # noqa: E402
 import sd_sweep  # noqa: E402
 
 MANIFEST_NAME = "sd-plugin.json"
@@ -2943,6 +2946,37 @@ def build_parser() -> argparse.ArgumentParser:
     sweeper.add_argument("--json", action="store_true", help="machine-readable")
     sweeper.set_defaults(handler=sweep)
 
+    # A suggestion is a row first. `publish` is the separate, explicit act, and
+    # it lives under a group rather than as a `bin/sd-suggest` executable
+    # because criterion 28 says filing must be no palette entry.
+    suggest = groups.add_parser(
+        "suggest",
+        help="record a framework suggestion as a row; file it only on request")
+    suggesting = suggest.add_subparsers(dest="verb", required=True)
+
+    adder = suggesting.add_parser(
+        "add", help="write a proposal row against a work item, and file nothing")
+    adder.add_argument("body", help="what went wrong and the smallest fix, in one line")
+    adder.add_argument("--item", required=True, help="work-item directory name")
+    adder.set_defaults(handler=sd_suggest.suggest_add)
+
+    publisher = suggesting.add_parser(
+        "publish", help="file one recorded proposal as an issue, after a dedup read")
+    publisher.add_argument("--note", type=int, required=True, help="the id the write printed")
+    publisher.add_argument("--to", default="", help="owner/repo the issue is filed at")
+    publisher.set_defaults(handler=sd_suggest.suggest_publish)
+
+    shadow = groups.add_parser(
+        "shadow",
+        help="the tracker's open work, mirrored as rows this machine can read")
+    shadowing = shadow.add_subparsers(dest="verb", required=True)
+    syncer = shadowing.add_parser(
+        "sync", help="collect the tracker's open issues and write shadow rows")
+    syncer.add_argument(
+        "--strict", action="store_true",
+        help="exit non-zero when the cursor could not move")
+    syncer.set_defaults(handler=sd_shadow.shadow_sync)
+
     skill = groups.add_parser(
         "skill",
         help="the trial that decides whether a contrib/ skill stays")
@@ -3039,6 +3073,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"sd: {refusal}", file=sys.stderr)
         return 1
     except sd_codex.CodexRefusal as refusal:
+        print(f"sd: {refusal}", file=sys.stderr)
+        return 1
+    except sd_handoff_rows.RowsRefusal as refusal:
         print(f"sd: {refusal}", file=sys.stderr)
         return 1
     except UsageError as error:

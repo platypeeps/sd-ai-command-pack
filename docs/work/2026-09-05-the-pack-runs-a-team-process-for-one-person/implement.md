@@ -1085,6 +1085,75 @@ the `skill-proposal` removal reaches only the `contrib/sd-propose-skills/` half
 from here. Flagged rather than quietly dropped, and the second of the two was
 not flagged before.
 
+**Delivered 228 against 330 funded**, `bin/` 16,895 to 17,123 at `BIN_CAP`
+17,250, all three counted from git. 127 of headroom left standing.
+
+| span | priced | delivered |
+|---|---|---|
+| `bin/sd_suggest.py` | 128 | 133 |
+| `bin/sd_shadow.py` | 84 | 53 |
+| `bin/sd`, two groups and three verbs | 28 | 37 |
+| `sibling` into `sd_lib`, the third copy | 4 | +25 −20 = 5 |
+| glue, five boundaries | 12 | — |
+| variance reserve at 26% | 63 | — |
+| post-report at 4.5% | 11 | 0 |
+
+**`bin/sd_shadow.py` came in at 53 against 84 because the header priced a
+module and the module is a wrapper.** The derivation charged 32 of header and
+18 of `sd_db` frame on the analogues, and both were right for a module that
+owns something. This one owns nothing: `_rows()` is five lines because
+`bin/sd_handoff_rows.py` already carries the import refusal and the connect,
+and `shadow_sync` is 22 because `sd_db.sync_shadow` returns a `Synced` whose
+six fields are the report. What is left is a header of 24 that says which of
+the two halves is which, and the rendering of one dataclass.
+
+**`bin/sd` at 37 against 28 is the one overrun, and it is the `RowsRefusal`
+handler.** Two groups and three subparsers were priced; what the price omitted
+is that `sd_suggest` and `sd_shadow` raise a refusal class `bin/sd` had never
+caught, because `sd_handoff_rows` was until now only read by a hook that
+swallows everything. Nine lines, and they are the reason a bad `--item` prints
+one sentence rather than a traceback.
+
+**The variance reserve went unspent for the third time in four.** 8a −2%,
+8b +26%, 8c −19%, 8d −31%. The mean over four is −6.5%, and the 26% reserve
+sized to 8b's overrun is now the only observation of its kind. The next
+re-derivation should say plainly that three of four slices have come in under
+and consider whether the body prices, not the reserve, are what is high.
+
+**Nineteen tests are the criterion's, and five mutations were run against
+them.** `tests/test_sd_suggest.py` carries 22 in six classes. `TheCriterion`
+holds the four clauses as four assertions: the row written in each of
+`sd_lib.MODES` with `gh` never asked about an issue, the refusal with no
+`--to`, one list call then exactly one POST, and two open issues in with two
+`shadow` rows out and no argv carrying `--method` or `close`. The fifth test
+in that class is the `skill-proposal` removal, checked across the whole
+`contrib/sd-propose-skills/` directory rather than `SKILL.md` alone — a
+template moved to a sibling file would pass a one-file check and would still
+be the writing path the row replaced.
+
+**The `gh` here is a recorder on `PATH`, not `sd_db.testing`'s
+`GitHubDouble`.** The double routes `/repos`, `/branches`, `/collaborators`
+and `/pulls`; this criterion is about issues, which it does not serve. The
+recorder logs one argv per line, which is what makes "it filed exactly one"
+and "the fixture saw no close call" assertions about a list rather than about
+a mock's call count.
+
+**The `full` case needs no remote and no credential.**
+`sd_lib.remote_permits_full` answers yes for a repository with no origin —
+there is nobody to expose anything to — so the `full` third of the every-mode
+test asks `gh` nothing at all, which is what lets the same test assert both
+the row and the silence.
+
+**Five mutations, all caught**: the `--to` guard removed, the dedup comparison
+forced false, the mode hardcoded to `full`, the failed dedup read falling
+through to a file instead of refusing, and `--strict` ignored on a held
+cursor.
+
+**Verification.** `make lint` exit 0 after one fix — ruff `I001` on the new
+`import sd_shadow` / `import sd_suggest` block in `bin/sd`. `make test` exit
+0, 56 `OK` blocks. `tests/test_loc_caps.py` passes with `bin/` at 17,123
+against 17,250.
+
 ## Two things about the criteria list itself
 
 **Criteria 31 and 32 are out of order in the `prd.md`.** 30 is at line

@@ -157,26 +157,6 @@ def skill_list(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------
 
 
-def _sibling(module_name: str, filename: str):
-    """Import a `bin/` tool that has no `.py` suffix, as `sd-status` does.
-
-    Lazily, and not at module import: `bin/sd` imports this module for every
-    verb it runs, and `sd-pr-state` is only needed by the two that open a
-    pull request.
-    """
-    import importlib.machinery  # noqa: PLC0415 - only these two verbs need it
-    import importlib.util  # noqa: PLC0415
-
-    path = str(pathlib.Path(__file__).resolve().parent / filename)
-    loader = importlib.machinery.SourceFileLoader(module_name, path)
-    spec = importlib.util.spec_from_file_location(module_name, path, loader=loader)
-    if spec is None:  # pragma: no cover - a bin/ layout this broken cannot run
-        raise SkillRefusal(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
-
-
 def paths_edit(root: pathlib.Path, name: str, path_name: str, *, add: bool) -> list[str]:
     """Add or remove `name` in `skills/paths.json`. Returns the paths changed.
 
@@ -270,7 +250,7 @@ def move_in_a_pull_request(name: str, path_name: str, *, promoting: bool) -> int
     # there already makes: the timeout, the `OSError` guard and the JSON decode
     # are built. `gh pr create` would have needed a second runner for a command
     # that answers with a URL on stdout instead of with JSON.
-    pr_state = _sibling("sd_pr_state", "sd-pr-state")
+    pr_state = sd_lib.sibling("sd_pr_state", "sd-pr-state")
     slug = pr_state.remote_slug(root)
     if not slug:
         raise SkillRefusal(f"{branch} is pushed, but {remote} is not a GitHub remote")

@@ -3851,13 +3851,13 @@ from a number the operator types.
   the guard that was written.
 
   **The failure is specific to this predicate rather than a general robustness
-  point.** `remote_permits_full` (`bin/sd_lib.py:293`) returns `full` from three
+  point.** `remote_permits_full` (`bin/sd_lib.py:318`) returns `full` from three
   places, and one of them is an empty `others` — nobody else may push. Parsing
   an entry and filtering it in the same pass makes an unreadable entry
   indistinguishable from an absent one, so dropping every entry empties `others`
   and "nobody I could parse" arrives as "nobody else may push". A repository
   with a dozen unparseable pushers resolved to the most permissive mode, which
-  is the one direction `mode` (`bin/sd_lib.py:352`) is forbidden to move in.
+  is the one direction `mode` (`bin/sd_lib.py:377`) is forbidden to move in.
   Fixed in code at `bin/sd_lib.py:332-344`, where every entry is read first and
   the first one that cannot be read returns `answered` false rather than a
   permission; the comment there carries the reasoning.
@@ -3885,7 +3885,7 @@ from a number the operator types.
   forbidden to do. `minimal` is also set by hand and detection's six cases never
   produce it, so no run reaches the question by accident. Together those make
   the answer forced rather than chosen, which is why `mode`
-  (`bin/sd_lib.py:352`) returns a written `minimal` unchanged and never asks the
+  (`bin/sd_lib.py:377`) returns a written `minimal` unchanged and never asks the
   remote at all.
 
   **The general fact the criterion is missing is that "downward" is an ordering
@@ -3910,7 +3910,7 @@ from a number the operator types.
   administer and collaborators it has never heard of — the same inversion
   R11-D35 records one layer down, an unanswerable question arriving as a granted
   permission, and reached here without any answer being misread because none was
-  obtained. `remote_permits_full` (`bin/sd_lib.py:293`) already separates them
+  obtained. `remote_permits_full` (`bin/sd_lib.py:318`) already separates them
   at `bin/sd_lib.py:303-310`: the `.git` test first and decided on its own, then
   the `rev-parse` test returning `guest` with `answered` false, then the remote
   lookup.
@@ -4038,16 +4038,16 @@ from a number the operator types.
     - the row-to-`StatusReport` adapter — **38**. `_adapt`
       (`bin/sd_registry.py:232-269`, 38) is the one built instance of turning
       `sd_db` rows into this pack's frozen dataclasses. The file side it must
-      parallel is `_status_report` (`bin/sd_lib.py:635-651`, 17) with
-      `status_report` (`:441-453`, 13), and the row side has to answer one
+      parallel is `_status_report` (`bin/sd_lib.py:666-691`, 26) with
+      `status_report` (`bin/sd_lib.py:710-726`, 17), and the row side has to answer one
       question more than either — whether a line found beside the row is
       stale — so the larger analogue is the honest one.
     - `sd_lib.delivered`, from git alone — **50**. Criterion 13 requires that
       in a database-free checkout every reader that picks an item asks
       `sd_lib.delivered` and nothing else, and that it answers from a merge
       commit's `Item:` and `Delivers:` trailers. The built trailer scan is
-      `attribution` (`bin/sd_lib.py:1006-1039`, 34) with `_in_range`
-      (`bin/sd_lib.py:1042-1057`, 16). `author_vendors` (32) is *not*
+      `attribution` (`bin/sd_lib.py:1037-1070`, 34) with `_in_range`
+      (`bin/sd_lib.py:1073-1088`, 16). `author_vendors` (32) is *not*
       re-reserved: it maps authors onto vendors and `delivered` has no
       equivalent of that.
     - `bin/sd-status`'s row read and its stale line — **38**.

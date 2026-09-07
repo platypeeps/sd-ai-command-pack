@@ -140,6 +140,31 @@ def _git(args: list[str], cwd: pathlib.Path) -> str | None:
     return completed.stdout.strip()
 
 
+def sibling(module_name: str, filename: str):
+    """Import a `bin/` tool that has no `.py` suffix, so callers can share it.
+
+    Three callers is what moved it here: `bin/sd-status:97` had one copy and
+    `bin/sd_skill.py` a second, and a third would have made copying the policy
+    the policy. `spec_from_file_location` infers no loader for a suffixless
+    file, so the `SourceFileLoader` is named explicitly.
+
+    Deferred by every caller rather than imported at module load: `bin/sd`
+    imports its verb modules for every verb it runs, and a sibling is only
+    needed by the ones that talk to GitHub.
+    """
+    import importlib.machinery  # noqa: PLC0415 - only siblings need it
+    import importlib.util  # noqa: PLC0415
+
+    path = str(pathlib.Path(__file__).resolve().parent / filename)
+    loader = importlib.machinery.SourceFileLoader(module_name, path)
+    spec = importlib.util.spec_from_file_location(module_name, path, loader=loader)
+    if spec is None:  # pragma: no cover - a bin/ layout this broken cannot run
+        raise ConfigError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
 def git_output(args: list[str], root: pathlib.Path) -> str | None:
     """`git <args>` in `root`: stripped stdout, or None when git cannot answer.
 
