@@ -1011,8 +1011,34 @@ class Wire(unittest.TestCase):
         self.assertEqual(self.sent, [], "a cleartext entry sends nothing")
 
     def test_loopback_is_the_exception_because_exo_is_one(self) -> None:
-        for url in ("http://localhost:52415/v1", "http://127.0.0.1:8080/v1", "http://[::1]/v1"):
+        for url in ("http://localhost:52415/v1", "http://127.0.0.1:8080/v1",
+                    "http://[::1]/v1", "http://127.0.0.2/v1"):
             self.assertIsNone(sd_registry.refuse_cleartext(self.entry(url)), url)
+
+    def test_a_host_that_only_looks_like_loopback_is_not_one(self) -> None:
+        """The exemption's own defect class, one level down. `startswith`
+        answered a question about spelling; RFC 1123 lets a DNS label begin
+        with a digit, so each of these is a registrable public domain that
+        took the loopback exemption and got cleartext."""
+        for host in ("127.evil.com", "127.0.0.1.evil.com", "localhost.evil.com",
+                     "0127.0.0.1", "notlocalhost"):
+            refusal = sd_registry.refuse_cleartext(self.entry(f"http://{host}/v1"))
+            self.assertIsNotNone(refusal, host)
+            self.assertIn("in the clear", str(refusal))
+            self.assertIsNone(
+                sd_registry.refuse_cleartext(self.entry(f"https://{host}/v1")), host
+            )
+
+    def test_the_shortened_form_is_refused_rather_than_parsed(self) -> None:
+        """Deliberate. curl reads `127.1` as loopback and `ipaddress` does not
+        parse it, so this refuses -- a second opinion about what an address
+        means does not belong on the path that decides whether a diff leaves
+        in the clear."""
+        self.assertIsNotNone(sd_registry.refuse_cleartext(self.entry("http://127.1/v1")))
+
+    def test_the_scheme_is_read_and_not_spelled(self) -> None:
+        self.assertIsNone(sd_registry.refuse_cleartext(self.entry("HTTPS://api.example.test/v1")))
+        self.assertIsNotNone(sd_registry.refuse_cleartext(self.entry("ftp://api.example.test/v1")))
 
     def test_a_missing_key_sends_nothing_and_never_reads_as_a_quota_stop(self) -> None:
         code, _, stderr, launched = self.call(self.entry())

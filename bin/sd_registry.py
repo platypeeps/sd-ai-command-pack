@@ -32,6 +32,7 @@ one document either reader parses.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -985,12 +986,31 @@ def refuse_cleartext(provider: Provider) -> str | None:
     operator, that the registry does not mean what it says. Loopback is the
     exception, and `exo` is why -- cleartext over a socket that never leaves
     the machine.
+
+    Loopback is decided by `ipaddress`, not by how the host is spelled. The
+    first version of this asked `host.startswith("127.")`, and RFC 1123 lets a
+    DNS label begin with a digit, so `127.evil.com` and `127.0.0.1.evil.com`
+    are registrable public domains that took the exemption and got cleartext
+    -- this refusal's own defect class, one level down. `localhost` is the one
+    name, matched whole.
+
+    `127.1` is refused. curl reads the shortened form as loopback and
+    `ipaddress` does not parse it at all, and that is the direction to fail
+    in: a shortened-form parser here would be a second opinion about what an
+    address means, on the path that decides whether a diff goes out in the
+    clear. Write it in full.
     """
     if not provider.url:
         return None
     parts = urlsplit(provider.url)
     host = (parts.hostname or "").lower()
-    if parts.scheme == "https" or host in ("localhost", "::1") or host.startswith("127."):
+    try:
+        # `hostname` has already stripped the brackets from `[::1]` and
+        # lowercased, so a literal address arrives here ready to parse.
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host == "localhost"
+    if parts.scheme == "https" or loopback:
         return None
     return (
         f"{provider.name} points at {provider.url!r}, which reaches "
