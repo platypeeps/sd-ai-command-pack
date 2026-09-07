@@ -490,6 +490,14 @@ class Rows:
     machine that *has* one and holds no row for an item has lost that item,
     and reading "no row" as "so the item is open" is how delivered work gets
     picked up and done a second time.
+
+    `installed` is the third state, and it was kept and then thrown away.
+    `sd_db` lives in this pack's virtualenv, so one machine has two answers:
+    under `.venv/bin/python` the row decides, under the system `python3` the
+    import fails and git decides, and until this attribute was read the two
+    printed different words for the same item with nothing to say which had
+    run. That is how an item whose row has said `planning` since it was opened
+    got reported `in_progress`.
     """
 
     def __init__(self, root: pathlib.Path) -> None:
@@ -498,6 +506,13 @@ class Rows:
         # and a worktree was never added to it.
         self.base = str(main_worktree_root(pathlib.Path(root).resolve()))
         self.opened = False
+        # Two absences, and they are not the same absence. `installed` is
+        # whether this interpreter can import the library at all; `opened` is
+        # whether it found a database to read. A library that says there is no
+        # database is the designed database-free case. A library that is not
+        # here has said nothing, and the answer that follows came from a
+        # different source than the marker named.
+        self.installed = False
         self.problem = ""
         self._connection: Any = None
         self._read: Any = None
@@ -506,6 +521,7 @@ class Rows:
         except ImportError as error:
             self.problem = f"sd_db is not installed here: {error}"
             return
+        self.installed = True
         try:
             self._connection = sd_db.connect(write=False)
         except Exception as error:  # no file, or a schema this cannot read
@@ -648,6 +664,17 @@ def _from_row(
         problems.append(f"{prd}: {trouble}")
         return StatusReport("unknown", False, tuple(problems))
     if not said:
+        # Git answers, as it does for any checkout with no database -- but the
+        # marker said the row was the authority, so a fall-through has to be
+        # audible. Only the not-installed case is named: a library that opened
+        # and found no database has answered the question, and saying so on
+        # every item of a database-free checkout would be noise about the
+        # designed path.
+        if statuses.rows is not None and not statuses.rows.installed:
+            problems.append(
+                f"{prd}: {statuses.rows.problem}, so this status came from git "
+                f"and not from the row this checkout's marker names"
+            )
         return _from_git(statuses.root, item_dir, prd, fields, problems)
     line = fields.get("status", "").strip()
     if line and line != said:
