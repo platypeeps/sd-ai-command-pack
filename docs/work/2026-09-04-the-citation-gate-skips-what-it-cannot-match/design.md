@@ -21,9 +21,16 @@ non-entry, and none of them counts what it dropped:
 | 4 | `is_symbol(anchor)` | 45 | 7 |
 | 5 | `is_inside_repo(target)` | 44 | 1 |
 
-Filter 3's 306 split two ways under the vocabulary below: 33 have a backticked
-token before them separated by punctuation only, and 273 have prose or nothing.
-`implement.md`'s check 5 carries the whole partition and it sums to 358.
+Filter 3's 306 is counted against `PAIR`'s own path class, which requires at
+least one character before the colon. The classification below does **not**
+adopt that class, and the difference is the largest single finding on this
+page: an elided-path citation such as `` `:391-414` `` is a `path:line` token
+that `PAIR` cannot see, so counting the corpus with `PAIR`'s class hides the
+very population the census exists to reveal. The enumerator the census uses is
+written down in the next section, and under it the live corpus holds **520**
+tokens at `405a9106`, not 358. The 358 is the right denominator for the
+sentence "what does today's gate walk past"; 520 is the right denominator for
+"how many citations are there". Both appear below and each is labelled.
 
 **Forty-four.** The checkout holds 3,313 backticked `path:line` tokens across
 1,089 tracked markdown files, and the gate compares 44 of them — 1.3%. Zero of
@@ -72,12 +79,58 @@ closed vocabulary:
   can itself go stale; see criterion 2.
 - `anchor-not-a-symbol` — the token before the citation is a path or a phrase,
   so there is nothing to check a line against.
-- `separator-not-adjacent` — there *is* a backticked token before the citation
-  and something stands between them. This is question 4's whole subject and it
-  needs its own bucket: folded into the one below, the comma population would
-  be uncountable, which is how it stayed at "0" for three days.
+- `elided-path` — the citation names a line and no file, because the prose
+  named the file already. It is a token, it is not anchorable, and it is the
+  largest bucket after `no-adjacent-anchor`; see question 4 below.
+- `separator-not-adjacent` — the citation is preceded by a backticked token
+  with exactly one comma or semicolon between them, matched by `SEPARATED_PAIR`
+  and by nothing looser. This is question 4's whole subject and it needs its
+  own bucket: folded into the one below, the comma population would be
+  uncountable, which is how it stayed at "0" for three days. The definition is
+  a named regex rather than a character distance on purpose — a distance bound
+  was tried first, and sweeping the bound from one character to ten moved the
+  bucket from 0 to 132 with no principled stopping point, which is not a
+  classification, it is a dial.
 - `no-adjacent-anchor` — the citation matched no anchoring shape at all.
 - `quoted` — the citation carries `[quoted: <reason>]`; see criterion 3.
+
+### The enumerator, written down
+
+Three things the first draft of this page left to the reader's imagination, each
+of which a reviewer found by trying to implement it:
+
+**`TOKEN` is `` `([A-Za-z0-9_./-]*):(\d+)(?:-(\d+))?` ``** — `PAIR`'s path
+class with `+` relaxed to `*`, so the elided form is enumerated. `tokens_found`
+in the conservation assertion means the matches of exactly this pattern and
+nothing else. The relaxation is what admits a non-citation, so it was measured:
+across the live corpus it adds 166 matches, **all 166** of them the elided
+form, and it introduces zero matches whose path is neither a file name nor
+empty. The nearest thing to a false positive in the tree is a backticked ISO
+timestamp, and `` `2026-09-06T19:11:39Z` `` does not match either form, because
+the seconds field puts a colon where the pattern needs a closing backtick. A
+timestamp written to minute precision would match; there is none in the
+checkout, and the census would show it as a `no-adjacent-anchor` row rather
+than as a silent drop, which is the point of counting rather than filtering.
+
+**One row per token, keyed by offset.** A citation's anchor can itself be a
+`path:line` token: `` (`bin/sd-review:514`, `skills/sd-review/SKILL.md:39`) ``
+is one `PAREN_PAIR` match containing two `TOKEN` matches. 4 of the 7 live
+`PAREN_PAIR` matches are this shape. The rule is that classification iterates
+over `TOKEN` occurrences, not over anchor-citation pairs: the subject token
+gets `compared`, the anchor token gets its own row on its own terms, and no
+token is consumed by being another token's anchor. Without that rule the
+buckets under-count against the corpus and conservation fails on the real tree
+rather than on a fixture.
+
+**The marker read is line-aware, and the flattening does not prevent it.**
+`anchored_citations` flattens with `.replace("\n", " ")`
+(`tests/test_doc_citations.py:88`), which a reviewer read as making 0.71.34's
+"same line" rule unimplementable. It does not: the substitution is one
+character for one character, so offsets in the flattened text are offsets in
+the original. `marker_after()` matches against the flattened text and then
+asserts `"\n" not in raw[citation_end:marker_end]`. The grammar keeps its
+line-terminator clause and the negative fixture "a marker on the next line does
+not exempt" can fail, which under a genuinely lossy flatten it could not.
 
 **`classify()` takes its corpus as a parameter.** `anchored_citations()` is
 nullary today: it reaches for `REPO_ROOT.glob` itself, so nothing in the module
@@ -114,7 +167,8 @@ its coverage is the absence of a failure.
 second conjunct is the security refusal the PRD defends and it must stay
 exactly as it is. The first is a staleness test wearing the refusal's clothes.
 
-They separate into `is_under_repo(target)` — containment only, and the sole
+They separate into `is_under_repo(target)` — containment only, **keeping the
+`resolve()`**, and the sole
 subject of `test_a_citation_cannot_send_this_test_outside_the_checkout`
 (`tests/test_doc_citations.py:133`) — and a plain `target.is_file()` at the
 call site. A path that is not under the checkout is dropped as
@@ -322,14 +376,21 @@ name it. A citation whose path is **elided** — written `` `:391-414` `` becaus
 the previous sentence already named the file — cannot match, because the class
 requires at least one character before the colon. There are **162** of them in
 the live corpus as it stood at `405a9106`, 166 once this item's own two pages
-are counted, and 2,180 under `archive/`. That is 45% of the live corpus's
+are counted, and 2,180 under `archive/`. That is 31% of the live corpus's 520
 `path:line` tokens, against 2 for the comma. It is the single largest silent
-class in the repository by two orders of magnitude.
+class in the repository by two orders of magnitude. The first draft of this
+page put it at 45%, which was 162 over the 358 that `PAIR`'s own path class
+finds — a denominator that excludes the thing being measured.
 
 **The line, `` (\d+)(?:-(\d+))? ``.** A citation naming several lines with
-commas — `` `bin/sd-docs-lint:113,135` `` — matches the first number and drops
-the rest. 13 in the live corpus, 51 archived. The claim is half-checked and the
-report says "checked".
+commas — `` `bin/sd-docs-lint:113,135` `` — matches **nothing**. The first
+draft of this page said it matched the first number and dropped the rest, so
+that the claim was half-checked while the report said "checked". That was
+recalled, not measured, and it is wrong: `PAIR`'s trailing backtick is
+mandatory, so `PAIR.search` returns `None` on the whole shape. The citation is
+not half-checked, it is invisible, and it lands in `no-adjacent-anchor` with
+everything else the anchor patterns never see. 13 in the live corpus at
+`405a9106` and 51 archived; the count was right and the behaviour was not.
 
 **The anchor, via `is_symbol`.** `SYMBOL` (`tests/test_doc_citations.py:54`)
 admits no hyphen, so every kebab-case name in this repository —
@@ -384,7 +445,8 @@ argument in one line.
 
 **Conservation is asserted, coverage is printed, neither is a threshold.** The
 partition assertion is `sum(census().values()) == len(tokens_found)` together
-with `set(census()) <= REASONS`. Both hold at any corpus size and neither
+with `set(census()) <= REASONS`, where `tokens_found` is the list of `TOKEN`
+matches defined above and nothing else. Both hold at any corpus size and neither
 changes when prose is reorganised, which is the property
 `test_the_scan_reaches_the_documents`'s docstring demands and the reason no
 number from this document is pinned in a test.
@@ -579,9 +641,16 @@ can be.
 than the one it does not.** Comma, em dash, semicolon and a bare *and* account
 for 3 near misses in the live corpus. The elided path accounts for 162.
 
-**The PRD's own citations of the gate are each one line early** — `:79-101` for
-a function spanning 80 to 102, `:116-130` for one spanning 117 to 131,
-`:145-154` for one spanning 146 to 155. All four pass, because `WINDOW`
+**The PRD's own citations of the gate were each one line early, and this item
+has already corrected them** — at `405a9106` the PRD carried `:79-101` for a
+function spanning 80 to 102, `:116-130` for one spanning 117 to 131, `:132-143`
+for one spanning 133 to 144, and `:145-154` for one spanning 146 to 155;
+`d3c26286` moved all four. A reviewer read this paragraph against `HEAD`, found
+the corrected values there, and concluded the defect never existed and the
+paragraph should be deleted. It existed: `git show 405a9106:.../prd.md | grep
+-n 'test_doc_citations.py:'` prints the four early values, and the paragraph is
+kept in the past tense because criterion 3 asks for the correction to be
+recorded rather than merely made. All four passed, because `WINDOW`
 (`tests/test_doc_citations.py:61`) is 2 and forgives an offset of one. They are
 corrected in `prd.md` as part of this plan, and the fact that a gate against
 stale line numbers tolerates every one of them is worth leaving on the record
@@ -605,7 +674,8 @@ parenthesis on both ends is narrower than the shape a reader would guess at,
 and the fixtures say exactly what it does.
 
 **D3 — the marker vocabulary is adopted, not invented.** `[absent: <reason>]`
-already exists with a written grammar and 38 live uses; `[quoted: <reason>]` is
+already exists with a written grammar and 29 live uses, 91 across `docs/`;
+`[quoted: <reason>]` is
 one new verb in the same grammar. Considered: a new syntax that reads better in
 prose. Rejected — the repository would then hold two markers meaning nearly the
 same thing, and the older one would keep being written by people copying the
@@ -617,6 +687,20 @@ unconditional skip, matching what 0.71.34 did. Rejected: 0.71.34's rule checked
 whether a *path* resolved, so a marker on a resolvable path was merely
 redundant. Here the marker is a claim about the state of the tree, and an
 unfalsifiable claim in a gate about unfalsifiable claims is the wrong shape.
+
+**D4a — `[quoted: ]` names a source, so it is falsifiable too.** The first
+draft took a free-text reason, which made `quoted` the one marker in the design
+that could never be wrong — the exact shape D4 rejects one paragraph above, and
+a reviewer was right to say the principle was stated and not applied. The form
+is `[quoted: <path:line>]`, and the gate asserts that the quoted citation's own
+text appears at that line of that file. A page quoting `` `is_symbol`
+(`tests/test_doc_citations.py:64`) `` as an example of the shape writes
+`[quoted: tests/test_doc_citations.py:64]` after it, and if the example is
+moved or the line changes, the quotation fails like any other claim. This costs
+nothing over the free-text form — it is the same grammar, the same
+`marker_after()`, and the same one-citation scope — and it removes the only
+unfalsifiable exemption on the page. Considered and rejected: a bare
+`[quoted]`, which is the mute button D4 already rejected under another name.
 
 **D5 — the elided path, the multi-line citation and the kebab anchor are named
 and counted, not resolved.** They are 162, 13 and 7 in the live corpus against
@@ -673,3 +757,60 @@ of 497 items. Four of those five manifests are empty, so all 25 rows come from
 one item, and a citation added after the recording is not checked by anything.
 Named here because it is the same failure in a neighbouring rule, and left
 alone because it is a second item.
+
+## The adversarial review, and what it moved
+
+`.claude/rules/sd-planning-adversarial-review.md` puts this item at
+**Development / prd and design**, cap **5**. Five passes ran: two by the author
+against these pages, and three by two independent readers. The cap is spent, so
+no further pass starts on its own, and what follows is the record the rule asks
+for rather than a claim of approval.
+
+Rounds 1 and 2 were arithmetic and vocabulary: a missing `declared-absent`
+bucket that would have broken the conservation assertion the page sells, a
+bare comma mis-filed under `no-adjacent-anchor`, a rule 7 figure this item's own
+pages had already moved, and a criterion 4 that read as closed when it is closed
+only in part. Commit `3feca986` carries them.
+
+Rounds 3 to 5 were the ones worth having, because they found a class of defect
+rather than a set of typos: **a number or a behaviour written into a page from
+recollection, and then cited by a later step as if it had been measured.** Six
+instances, each confirmed against the source and repaired above:
+
+1. `tokens_found` was never defined, so conservation was a tautology. `TOKEN`
+   is now written out, and defining it revealed that the enumerator actually
+   used to produce the first draft's census **excluded the elided path** — so
+   "162 of the 273 are elided" was not merely imprecise, it was false, and the
+   "45% of the corpus" figure divided by a denominator that omitted its own
+   numerator.
+2. An anchor can itself be a `path:line` token, and 4 of the 7 live
+   `PAREN_PAIR` matches are. One match, two tokens, no partition rule; the rule
+   is now one row per token, keyed by offset.
+3. `is_under_repo` was described as "containment only", which read literally
+   drops `resolve()` and turns the security refusal into a traversal.
+   `(REPO_ROOT / ".." / ".." / "etc" / "passwd").is_relative_to(REPO_ROOT)` is
+   `True`.
+4. `separator-not-adjacent` had two incompatible glosses and its 33 reproduced
+   under neither. It is now `SEPARATED_PAIR`, a named regex, and 20.
+5. `PAIR` was said to truncate a multi-comma citation. It matches nothing at
+   all; the trailing backtick is mandatory.
+6. Step 8 asked for 21 markers to be confirmed by a mechanism that can see two
+   of them.
+
+Three findings were **rebutted with evidence** rather than accepted. A reader
+reported that the PRD's four off-by-one citations never existed; they existed at
+`405a9106` and `d3c26286` corrected them, which is what
+`git show 405a9106:.../prd.md` prints. A reader reported that the reason
+vocabulary had no `[absent: ...]` bucket; it gained one in round 2, at
+`3feca986`, before that pass ran. And a reader reported that "same line" is
+unimplementable against the flattening; the flatten is a one-for-one character
+substitution, so offsets survive it and the rule is implementable, which is now
+stated on the page rather than assumed.
+
+**What is open at the cap.** No blocking finding survives: each is repaired
+above or rebutted with a command whose output is quoted. Two things remain open
+and neither is a review finding — questions 1 and 2 are the operator's calls,
+recorded under "The two calls that are not mine" with their options and
+consequences, and step 0 of `implement.md` says the item does not start until
+they are answered. The item is therefore **not** `blocked` by the review; it is
+waiting on two decisions that were never this agent's to make.

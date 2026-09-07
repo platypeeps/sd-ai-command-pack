@@ -18,12 +18,12 @@ by span against named built analogues, glue at the measured per-boundary rate
 for a module this size, seam at what the crossing actually costs, then variance
 and post-report discovery.
 
-**Body is 213**, against analogues measured on this worktree rather than
+**Body is 219**, against analogues measured on this worktree rather than
 recalled:
 
 | span | lines | analogue |
 |---|---|---|
-| `Citation` record and the closed `REASONS` vocabulary | 16 | `ITEM_STATUSES` (`bin/sd-docs-lint:56`) and the three tuples under it are one line each, plus a six-field record and the comment that says why the eight-name vocabulary is closed |
+| `Citation` record and the closed `REASONS` vocabulary | 16 | `ITEM_STATUSES` (`bin/sd-docs-lint:56`) and the three tuples under it are one line each, plus a six-field record, `TOKEN` and `SEPARATED_PAIR` written out, and the comment that says why the nine-name vocabulary is closed |
 | `classify()` | 32 | `check_work_references` (`bin/sd-docs-lint:465`) is 41 for walk-a-corpus, skip-with-a-named-reason, count, report; this is the same job without its git call and without `METAVARIABLE_RE`'s branch |
 | `anchored_citations()` as a thin filter over it | 5 | it is 23 today and becomes a comprehension the existing assertion calls |
 | `census()` | 10 | the accumulate-and-note half of `check_citations` (`bin/sd-docs-lint:404`), which is about 10 of its 52 |
@@ -34,6 +34,7 @@ recalled:
 | `PAREN_PAIR` and its fixtures | 20 | `test_prose_between_a_symbol_and_a_citation_breaks_the_anchor` (`tests/test_doc_citations.py:146`) is 10 for two; five assertions plus the pattern and the comment that says why it needs a parenthesis on both ends |
 | the module docstring | 40 | it is 41 today and lists four deliberate skips; it must list five silencers, two markers and three named-and-counted shapes |
 | the three counted-not-resolved reasons | 9 | three vocabulary entries and the branches that assign them |
+| the token partition rule and its comment | 6 | one loop keyed on token offset rather than on anchor-citation pairs, plus the four-line comment recording that 4 of 7 live `PAREN_PAIR` matches contain two tokens |
 
 **Glue is 8.** The module has four top-level definitions today and eight after —
 `is_symbol`, `is_under_repo`, `marker_after`, `Citation`, `classify`,
@@ -49,19 +50,19 @@ correction applies: a seam charge buys the discovery behind an unrepaired
 boundary, and there is no boundary here.
 
 **Body variance is 26%**, R11-D45's largest overrun yet observed, kept by
-R11-D46 rather than averaged down. 26% of 213 is 55.
+R11-D46 rather than averaged down. 26% of 219 is 57.
 
 **Post-report discovery is 5.5%**, R11-D46's mean of six observations. 5.5% of
-213 is 12.
+219 is 12.
 
-213 + 8 + 0 + 55 + 12 = **288 lines**, taking `tests/test_doc_citations.py`
-from 159 to roughly 447. Nothing consumes it, because `tests/` answers to no
+219 + 8 + 0 + 57 + 12 = **296 lines**, taking `tests/test_doc_citations.py`
+from 159 to roughly 455. Nothing consumes it, because `tests/` answers to no
 ceiling.
 
 The counterfactual is worth stating once, because it is the number a reviewer
 would otherwise have to compute to check D6. Had the design put this rule in
-`bin/sd-docs-lint` as a rule 8, the same 288 would land against 784 lines of
-headroom — 37% of it, affordable without a re-derivation and still the wrong
+`bin/sd-docs-lint` as a rule 8, the same 296 would land against 784 lines of
+headroom — 38% of it, affordable without a re-derivation and still the wrong
 home, for the reason D6 gives.
 
 ## Step checklist
@@ -113,12 +114,28 @@ rather than invent the argument.
       with a reason exempts; `[absent:]` and `[absent: ]` do not; anything
       non-blank between the citation and the marker does not; a marker on the
       next line does not; and a marker exempts only the citation it follows, so
-      a second citation of the same path is still classified on its own.
-- [ ] **4. The split, and the first thing that can go red.** `is_inside_repo`
-      becomes `is_under_repo` plus a `target.is_file()` at the call site.
+      a second citation of the same path is still classified on its own. The
+      next-line case is testable because the flatten is offset-preserving:
+      `marker_after()` matches on the flattened text and then asserts no `\n`
+      in the *unflattened* slice between citation and marker. `[quoted: ]`
+      takes a `path:line` and not free text, per D4a, and its reason string is
+      verified the same way a citation is.
+- [ ] **4. The split.** `is_inside_repo` becomes `is_under_repo` plus a
+      `target.is_file()` at the call site. `is_under_repo` **keeps the
+      `resolve()`**: `Path.is_relative_to` is lexical, and
+      `(REPO_ROOT / ".." / ".." / "etc" / "passwd").is_relative_to(REPO_ROOT)`
+      is `True` without it and `False` with it, so dropping it while reading
+      the predicate's name as "containment" would turn the security refusal
+      into an invitation. The first draft of `design.md` said "containment
+      only" and did not say this; a reviewer found it by reading the phrase
+      literally, which is how it would have been implemented.
       `escapes-checkout` stays silent; `target-missing` fails **unless** the
       citation carries `[absent: ...]`; an `[absent: ...]` whose target exists
-      fails. `test_a_citation_cannot_send_this_test_outside_the_checkout` keeps
+      fails. This is not the first step that can go red — step 2's conservation
+      assertion, step 5's widening and step 7's rewrite each can too, and the
+      first draft's heading claimed otherwise. It is the first step whose red
+      would be a *stale citation* rather than a defect in this item's own work.
+      `test_a_citation_cannot_send_this_test_outside_the_checkout` keeps
       its three outside-the-checkout assertions against `is_under_repo` and
       loses its fourth, which asserted the conflation; the missing-target case
       moves to its own test. Expected on today's tree: `target-missing` is
@@ -149,14 +166,24 @@ rather than invent the argument.
       `docs/spec/backend/manifest-and-filesystem.md`'s `prepare-release.py`
       citation is resolved by step 3's marker read rather than by an edit — it
       already carries `[absent: removed with the release train in 0.72.0]`, so
-      the mechanism generalising is the whole of the criterion. Confirm the
-      other 21 markers in that file are all still true, which under step 4 is a
-      test rather than a reading.
+      the mechanism generalising is the whole of the criterion. **Do not** try
+      to confirm the other 21 markers in that file by this mechanism, as the
+      first draft of this step said to: of the 22 markers there, exactly two
+      sit on a `path:line` token and only one of those reaches the marker read,
+      so for 21 of them the gate has no opinion and never will. They sit on
+      bare path references, which is rule 6's and rule 7's subject in
+      `bin/sd-docs-lint`, not this gate's. Saying so is the honest scope of
+      criterion 2 and it is smaller than the first draft claimed.
 - [ ] **9. Criterion 3.** Re-measure every count in `prd.md` and `design.md`
       from the filesystem, and correct both. The PRD's table is a snapshot from
       2026-09-04 and this plan's numbers are a snapshot from 2026-09-07; both
       will have moved. The corrections already known are listed under
-      "What the PRD got wrong the second time" in `design.md`.
+      "What the PRD got wrong the second time" in `design.md`. The four
+      off-by-one citations listed there are **already applied**, in `d3c26286`;
+      the entry is a record, not an outstanding edit, and re-applying it would
+      damage correct text. Everything else in that section still needs
+      re-measuring, and the re-measurement is the step — not the numbers this
+      page happens to carry.
 
 ## Verification
 
@@ -164,12 +191,13 @@ Named before the work, each naming its own result. A partial pass is not a
 pass.
 
 1. `.venv/bin/python -m unittest tests.test_doc_citations -v` -> `OK`, 0
-   failures, 0 errors, and the test count rises from **4 to 8**. The four are
+   failures, 0 errors, and the test count rises from **4 to 9**. The five are
    enumerated so the number is checkable rather than round: step 3's marker
    grammar, step 4's missing-target failure, step 4's absent-marker falsifier,
-   step 5's `PAREN_PAIR` fixtures. Step 2 adds assertions to
-   `test_the_scan_reaches_the_documents` rather than a test, which is why it is
-   not five.
+   step 5's `PAREN_PAIR` fixtures, and D4a's quoted-source falsifier — a
+   `[quoted: <path:line>]` whose named line does not carry the quoted text must
+   fail. Step 2 adds assertions to `test_the_scan_reaches_the_documents` rather
+   than a test, which is why it is not six.
 2. `make VENV=<shared venv> check` -> exit 0; `grep -c FAILED
    unittest-output.log` prints `0`. The `OK` count is one per test module and
    is **not** pinned to a number: it measured 56 on `405a9106` before this item
@@ -189,37 +217,57 @@ pass.
    because this item claims capacity but because it claims **none**: if this
    test's `bin/` figure has moved at all, a step touched a file it was not
    supposed to touch.
-5. **The census, printed and read once.** `grep 'citations:' unittest-output.log`
-   -> one line partitioning the corpus. The proposed classification was run
-   against this worktree to produce these, and they are to be re-measured at
-   step 6 rather than asserted:
+5. **The census, derived at run time, with no number to match.** `grep
+   'citations:' unittest-output.log` -> one line partitioning the corpus. The
+   check is that the line **exists, sums, and carries only names from
+   `REASONS`** — the two assertions step 2 adds. It is deliberately not a
+   comparison against a table, and the first draft of this page made it one,
+   twice: it pinned a column measured before these two pages existed, then
+   re-measured and pinned the new column, which went stale again on the next
+   edit. These pages are inside the corpus they count. `git ls-files -- '*.md'`
+   returns 1,091 in this worktree and returned 1,089 at `405a9106`, and the two
+   extra files are `design.md` and `implement.md`. A count written into a
+   document that the count includes cannot be kept true by re-measuring it; it
+   can only be pinned to a commit, or derived.
 
-   | reason | on `405a9106` | with these two pages |
+   So the figures below are pinned and labelled as history, and **nothing
+   asserts them**. Both columns are the classification `design.md` specifies —
+   nine reasons, `TOKEN` with an optional path, `SEPARATED_PAIR`, one row per
+   token — run over the live corpus, the left one with this item's two pages
+   excluded to reconstruct `405a9106`:
+
+   | reason | at `405a9106` | at `2694c4a5` |
    |---|---|---|
-   | `compared` | 44 | 67 |
+   | `compared` | 45 | 69 |
    | `declared-absent` | 1 | 1 |
    | `target-missing` | 0 | 0 |
    | `escapes-checkout` | 0 | 0 |
-   | `anchor-not-a-symbol` | 7 | 7 |
-   | `separator-not-adjacent` | 33 | 33 |
-   | `no-adjacent-anchor` | 273 | 277 |
+   | `anchor-not-a-symbol` | 12 | 12 |
+   | `elided-path` | 162 | 166 |
+   | `separator-not-adjacent` | 20 | 20 |
+   | `no-adjacent-anchor` | 280 | 283 |
    | `quoted` | 0 | 0 |
-   | **sum** | **358** | **385** |
+   | **sum** | **520** | **551** |
+   | live documents | 24 | 26 |
 
-   The sum equals the `path:line` tokens in the live documents — 358 in 24,
-   385 in 26 — which is the conservation property, and it held on both runs.
-   162 of the 273, and 166 of the 277, are the elided-path shape. This is the
-   check that answers criterion 6, and it is a reading rather than an assertion
-   for the reason `test_the_scan_reaches_the_documents`'s docstring gives.
+   Conservation held on both runs and the vocabulary was closed on both. Read
+   the columns as a measurement taken on two named commits, not as the current
+   state of anything.
 
-   The second column is the more useful one and is why the table has two: this
-   item's own planning pages add 23 compared citations and four more elided
-   paths, taking the gate's live coverage from 44 to 67. A plan about a citation
-   gate is a substantial fraction of what the gate then checks, and a figure
-   taken before the plan existed would be wrong by the time anyone implemented
-   it. The second column moved twice while these pages were being reviewed —
-   65, then 67 — which is the drift `design.md`'s risks describe, observed
-   rather than predicted.
+   Four of these differ from the numbers the first draft of this page carried,
+   and each difference is a defect a reviewer found rather than a change in the
+   tree. `compared` is 45 rather than 44 because the left column is the
+   *proposed* gate, `PAREN_PAIR` included; today's gate compares 44, and that
+   figure belongs to `design.md`'s headline and not to this table.
+   `anchor-not-a-symbol` is 12 rather than 7 because the anchors inside
+   `PAREN_PAIR` matches that are themselves paths now get rows.
+   `separator-not-adjacent` is 20 rather than 33 because 33 came from a
+   nearest-backticked-token rule with no distance bound, which no written
+   definition on either page described; `SEPARATED_PAIR` is the definition and
+   20 is what it finds. And the sum is 520 rather than 358 because the elided
+   path is now enumerated, which is the whole point: the first draft called it
+   "45% of the corpus" while excluding it from the corpus it was 45% of.
+
 6. **Conservation survives a hostile corpus.** A fixture document containing
    one citation of each declined shape, run through `classify()` -> every row
    carries a reason and the buckets sum to the tokens. This is the check that
