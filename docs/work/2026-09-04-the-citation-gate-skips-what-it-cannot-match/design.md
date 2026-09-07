@@ -79,6 +79,18 @@ closed vocabulary:
 - `no-adjacent-anchor` — the citation matched no anchoring shape at all.
 - `quoted` — the citation carries `[quoted: <reason>]`; see criterion 3.
 
+**`classify()` takes its corpus as a parameter.** `anchored_citations()` is
+nullary today: it reaches for `REPO_ROOT.glob` itself, so nothing in the module
+can be run against anything but this repository as it happens to stand.
+`classify(docs)` defaults to the live glob and accepts a list, for the reason
+the sweep item gave for handing `scan()` its branch set rather than letting it
+build one — a function that fetches its own input can only be tested against
+whatever it fetches, and the reasons that matter most here are the ones with no
+instance in the tree today. `escapes-checkout` has zero live instances and
+`quoted` will have zero until step 7; without an injectable corpus neither
+branch is reachable in a test, and the conservation assertion would be proved
+only on the shapes that happen to exist.
+
 Two things then become assertable that are not assertable today, and neither is
 a count:
 
@@ -233,6 +245,15 @@ one parenthesis containing nothing else.**
 PAREN_PAIR = re.compile(
     r"\(`([^`()]+)`\s*[,;]\s*`([A-Za-z0-9_./-]+):(\d+)(?:-(\d+))?`\)")
 ```
+
+The anchor class excludes parentheses so that the leading `\(` cannot bind to a
+parenthesis inside the anchor. That is a real narrowing — `PAIR`'s own anchor
+class admits them, and the assertion does `anchor.rstrip("()")` precisely
+because anchors like `frontmatter()` are written — and its measured cost today
+is zero: allowing parentheses in the class matches the same 34 places, so no
+citation in the checkout is currently excluded by it. Stated rather than
+assumed, because a narrowing that costs nothing today is exactly the kind that
+starts costing something quietly.
 
 Measured repo-wide, that pattern matches 34 places: 6 in the live corpus, 27
 under `archive/`, 1 in `CHANGELOG.md`. Of the 6 live ones, 5 have anchors that
@@ -488,9 +509,21 @@ deliberately unresolvable historical references and would each need an
 already sit next to a `[absent: <reason>]` example in the 0.71.34 entry that
 specified the grammar.
 
-**What changes with the answer.** One glob and, in the second and third
-options, one exclusion with a comment. The census gains a line either way. No
-other part of the design moves.
+**What changes with the answer, and the one place it is not free.** Option 1 is
+one comment. Options 2 and 3 change the glob, add one exclusion with a comment
+— and raise a question the glob currently hides: what *is* "every markdown file
+in the repository"? `anchored_citations` walks the filesystem
+(`REPO_ROOT.glob`), which under `docs/` is harmless and outside it is not — a
+filesystem walk of the whole checkout picks up untracked files and anything a
+`.venv` or a vendored tree happens to contain, while the git index does not.
+Rule 7 already answers this by asking git (`bin/sd-docs-lint:465`), and
+answering it the same way in the gate means a subprocess where there is none
+today. That is a seam, and `implement.md`'s budget prices the seam at zero on
+the strength of there being no boundary to cross. **So options 2 and 3 cost a
+re-derivation of the budget that option 1 does not.** It is small — the
+transport is `sd_lib.git_output` and is built — but it is not nothing, and a
+plan that said "one glob" without saying this would be understating the answer
+the operator is being asked for.
 
 ## What the PRD got wrong the second time
 

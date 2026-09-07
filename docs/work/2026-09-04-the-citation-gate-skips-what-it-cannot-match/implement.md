@@ -23,7 +23,7 @@ recalled:
 
 | span | lines | analogue |
 |---|---|---|
-| `Citation` record and the closed `REASONS` vocabulary | 16 | the four status tuples at `bin/sd-docs-lint:57`, one line each, plus a six-field record and the comment that says why the eight-name vocabulary is closed |
+| `Citation` record and the closed `REASONS` vocabulary | 16 | `ITEM_STATUSES` (`bin/sd-docs-lint:56`) and the three tuples under it are one line each, plus a six-field record and the comment that says why the eight-name vocabulary is closed |
 | `classify()` | 32 | `check_work_references` (`bin/sd-docs-lint:465`) is 41 for walk-a-corpus, skip-with-a-named-reason, count, report; this is the same job without its git call and without `METAVARIABLE_RE`'s branch |
 | `anchored_citations()` as a thin filter over it | 5 | it is 23 today and becomes a comprehension the existing assertion calls |
 | `census()` | 10 | the accumulate-and-note half of `check_citations` (`bin/sd-docs-lint:404`), which is about 10 of its 52 |
@@ -70,25 +70,50 @@ Ordered so that every step is green on its own. Steps 1 to 3 cannot make
 anything fail that does not fail today; step 4 is the first that can, and it is
 green only because step 3 landed.
 
+**Step 0 is not this agent's to take.** Criterion 5 asks for the archive and
+corpus-glob exclusions to be *decided*, and the decision is the PRD's open
+questions 1 and 2, which belong to the operator. `design.md`'s "The two calls
+that are not mine" carries the evidence and the options for both, and the
+design holds under every answer — what changes is one glob, one `continue`, and
+one line of the census. Steps 1 to 8 can be built and landed before either
+question is answered. **Step 9 cannot close, and criterion 5 cannot be claimed,
+until they are**, because what step 6 writes into the docstring is the reason,
+and there is no reason to write until somebody chooses one. An implementer who
+reaches step 9 with the questions still open should stop there and say so
+rather than invent the argument.
+
 - [ ] **1. The classification.** Replace the filter chain in
-      `anchored_citations` with `classify()`, returning one `Citation` row per
-      `path:line` token found in the corpus, each carrying a reason from
-      `REASONS`. `anchored_citations()` becomes the `compared` filter over it,
-      so `test_every_anchored_citation_names_its_symbol_at_the_cited_line` is
+      `anchored_citations` with `classify(docs=None)`, returning one `Citation`
+      row per `path:line` token found in the corpus, each carrying a reason
+      from `REASONS`. The parameter defaults to the live glob and is not a
+      convenience: `escapes-checkout` has no live instance and `quoted` has
+      none until step 7, so without it those branches are unreachable in a test
+      and checks 6 and 7 below cannot be written. `anchored_citations()` becomes
+      the `compared` filter over it, so
+      `test_every_anchored_citation_names_its_symbol_at_the_cited_line` is
       untouched and still compares the same 44. Landable and green alone:
       nothing reads the new reasons yet.
 - [ ] **2. The census and conservation.** `census()` returns the bucket counts.
       `test_the_scan_reaches_the_documents` keeps both non-emptiness assertions
       and its docstring's reasoning, and gains two more: the buckets sum to the
       number of tokens found, and no row carries a reason outside `REASONS`.
-      Print one census line; `.github/scripts/run-tests.sh` does not pass `-b`,
-      so it lands in `unittest-output.log`.
+      Print one census line; `.github/scripts/run-tests.sh` runs each module as
+      `python -m unittest <module> > <shard>.log 2>&1` and concatenates the
+      shards, with no `-b` anywhere, so a `print()` from a test lands in
+      `unittest-output.log`. This step also collapses the corpus rule's second
+      copy: the control currently rebuilds the glob-and-archive filter inline to
+      compute `live`, and after step 1 there is a function that already knows
+      what the corpus is.
 - [ ] **3. The marker vocabulary, read-only.** `marker_after()` implements
       0.71.34's grammar exactly: the reason is required, the marker follows the
       citation on the same line with nothing non-blank between them, and it
       covers one citation. `[quoted: <reason>]` yields the `quoted` reason;
       `[absent: <reason>]` is read but does not yet change any verdict. Five
-      grammar fixtures, all negative cases from the specification.
+      grammar cases from the specification, four of them negative: a marker
+      with a reason exempts; `[absent:]` and `[absent: ]` do not; anything
+      non-blank between the citation and the marker does not; a marker on the
+      next line does not; and a marker exempts only the citation it follows, so
+      a second citation of the same path is still classified on its own.
 - [ ] **4. The split, and the first thing that can go red.** `is_inside_repo`
       becomes `is_under_repo` plus a `target.is_file()` at the call site.
       `escapes-checkout` stays silent; `target-missing` fails **unless** the
@@ -96,14 +121,20 @@ green only because step 3 landed.
       fails. `test_a_citation_cannot_send_this_test_outside_the_checkout` keeps
       its three outside-the-checkout assertions against `is_under_repo` and
       loses its fourth, which asserted the conflation; the missing-target case
-      moves to its own test. Expected on today's tree: exactly one citation in
-      the `target-missing` class, already marked, so `make check` stays green.
+      moves to its own test. Expected on today's tree: `target-missing` is
+      **empty** and `declared-absent` holds exactly one — the
+      `prepare-release.py` citation, which already carries its marker — so
+      `make check` stays green. Landing step 4 before step 3 would put that one
+      citation in `target-missing` and break the build between two commits of
+      the same item, which is the whole reason for the ordering.
 - [ ] **5. `PAREN_PAIR`.** Added beside `PAIR`, not merged into it, so
       `test_prose_between_a_symbol_and_a_citation_breaks_the_anchor` keeps
-      meaning what it means. Five fixtures: parenthesised comma matches,
+      meaning what it means. Six fixtures: parenthesised comma matches,
       parenthesised semicolon matches, bare comma does not, bare semicolon does
       not, and the two shapes taken verbatim from the real list constructions
-      the design's table names.
+      the design's table names do not either. The last two are the point — a
+      synthetic negative proves the regex is narrow, and only the real ones
+      prove it is narrow enough for this corpus.
 - [ ] **6. The docstring.** Five silencers, each with the reason it exists and
       the count it drops today; the two markers and their grammar; and the
       three shapes named-and-counted rather than resolved, with their numbers.
