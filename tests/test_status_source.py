@@ -333,6 +333,45 @@ class TheRowDecides(Fixture):
         self.assertEqual(word, "")
         self.assertIn("the database is locked", problem)
 
+    def test_a_checkout_that_declares_the_row_says_when_the_library_is_absent(
+        self,
+    ) -> None:
+        """Two interpreters, one machine, two different answers, and no sign.
+
+        `sd_db` is installed into this pack's virtualenv, so the same
+        repository read with the system `python3` cannot import it, falls
+        through to git, and prints a different word for the same item -- which
+        is how this was found: an item whose row has said `planning` since it
+        was opened was reported `in_progress`, confidently, off git.
+
+        The fallback itself is correct and stays: git is the designed reader
+        for a checkout with no database, and `GitAloneWhenThereIsNoDatabase`
+        below asserts it. What is wrong is that it happens in silence. The
+        marker is the checkout saying rows are the authority; an answer that
+        came from somewhere else has to say so.
+        """
+        self.marker("row")
+        self.seed("planning")
+        with mock.patch.dict(sys.modules, {"sd_db": None}):
+            item = self.only()
+        self.assertTrue(
+            any("sd_db is not installed here" in problem
+                for problem in item.inconsistencies),
+            f"nothing named the absent library: {item.inconsistencies}",
+        )
+
+    def test_the_absent_library_does_not_stop_git_answering(self) -> None:
+        """The report gains a problem, not a refusal.
+
+        A fresh clone before `make setup` is the ordinary case, and turning it
+        into `unknown` for every item would make the fix worse than the defect
+        it repairs.
+        """
+        self.marker("row")
+        self.seed("planning")
+        with mock.patch.dict(sys.modules, {"sd_db": None}):
+            self.assertNotEqual(self.only().status, "unknown")
+
     def test_the_database_is_opened_once_for_a_whole_enumeration(self) -> None:
         self.marker("row")
         self.seed("ready")
