@@ -123,7 +123,7 @@ def parse_frontmatter(text: str) -> dict[str, str] | None:
 
 
 def _git(args: list[str], cwd: pathlib.Path) -> str | None:
-    """Run a read-only git query; None when git cannot answer."""
+    """Run one `git` command; None when git cannot answer."""
     try:
         completed = subprocess.run(  # fixed argv, no shell
             ["git", *args],
@@ -143,9 +143,9 @@ def _git(args: list[str], cwd: pathlib.Path) -> str | None:
 def git_output(args: list[str], root: pathlib.Path) -> str | None:
     """`git <args>` in `root`: stripped stdout, or None when git cannot answer.
 
-    The public face of the same read-only query the helpers below use, so a
-    sibling tool that needs one more `git` fact does not grow a second
-    subprocess policy (timeout, no shell, failure-is-None) of its own.
+    The public face of the same call the helpers below use, so a sibling
+    tool needing one more `git` fact grows no second subprocess policy
+    (timeout, no shell, failure-is-None). Most are reads; `delivered` fetches.
     """
     return _git(args, root)
 
@@ -977,3 +977,120 @@ def attribute(
             f"{(written.stderr or written.stdout).strip() or 'no reason given'}"
         )
     return git_output(["rev-parse", "HEAD"], root) or "", value, covered
+
+
+# --------------------------------------------------------------------------
+# Delivery: the one question a checkout with no database puts to git
+# --------------------------------------------------------------------------
+
+#: The closing trailers. `Delivers:` rides the merge that delivers the item;
+#: `Closes:` a later merge in the same repository, or an empty commit on the
+#: item's own branch, for a delivery or a cancellation whose own merge went
+#: out without one. `Item:` is deliberately not here: it ties a merge to an
+#: item and closes nothing, so a slice shipped without `--deliver` carries it
+#: alone, and the item stays open.
+DELIVERS_TRAILER = "Delivers:"
+CLOSES_TRAILER = "Closes:"
+
+#: `no` is a positive finding from history the checkout actually has;
+#: `unknown` is what a checkout that cannot see far enough says instead.
+#: Swapping the two silently reopens delivered work, since every reader that
+#: picks an item excludes a `yes` and treats an `unknown` as not selectable.
+YES, NO, UNKNOWN = "yes", "no", "unknown"
+
+
+class Answer(str):
+    """One of those three words, plus the repair an `unknown` asks for.
+
+    A string, so `delivered(...) == "yes"` is the whole of it for a caller
+    that wants only the word; `repair` rides along for the reader that has to
+    refuse by name, since a boundary and an unreachable remote differ.
+    """
+
+    repair: str
+
+    def __new__(cls, word: str, repair: str = "") -> "Answer":
+        answer = super().__new__(cls, word)
+        answer.repair = repair
+        return answer
+
+
+def _closes(message: str, item: str) -> bool:
+    """True when this message's trailer block -- its last paragraph, which is
+    what makes a trailer a trailer -- closes `item`. Reading the whole message
+    would let a commit that quoted a trailer close the item it named."""
+    for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
+        name, _, value = line.rstrip().partition(" ")
+        if name in (DELIVERS_TRAILER, CLOSES_TRAILER) and value.strip() == item:
+            return True
+    return False
+
+
+def _closed_by(root: pathlib.Path, ref: str, item: str) -> bool:
+    """Whether a commit reachable from `ref` closes `item`; a ref git cannot
+    resolve closes nothing. `--grep` only narrows the walk; `_closes` decides."""
+    grep = f"{DELIVERS_TRAILER}|{CLOSES_TRAILER}"
+    raw = git_output(["log", "--format=%H%x1f%B%x1e", "-E", "--grep", grep, ref], root) or ""
+    return any(_closes(c.partition("\x1f")[2], item) for c in raw.split("\x1e"))
+
+
+def _upstream(root: pathlib.Path) -> tuple[str, str]:
+    """The remote this checkout can be behind, and that remote's default branch:
+    HEAD's upstream then `origin`, and what the remote publishes then the first
+    of `main` and `master` this checkout resolves. A checkout with no remote is
+    never behind, and gets `""` -- it answers from what it has."""
+    names = (git_output(["remote"], root) or "").split()
+    head = git_output(["rev-parse", "--abbrev-ref", "HEAD"], root) or ""
+    tracked = git_output(["config", "--get", f"branch.{head}.remote"], root)
+    fallback = "origin" if "origin" in names else (names[0] if names else "")
+    remote = tracked if tracked in names else fallback
+    published = git_output(["symbolic-ref", "--short", f"refs/remotes/{remote}/HEAD"], root)
+    if published:
+        return remote, published.partition("/")[2] or published
+    for name in ("main", "master"):
+        if git_output(["rev-parse", "--verify", "--quiet", name], root) is not None:
+            return remote, name
+    return remote, "main"
+
+
+def delivered(root: pathlib.Path, item: str) -> Answer:
+    """`yes`, `no` or `unknown`: is `item` delivered, asked of git and nothing else.
+
+    `yes` when a commit reachable from the remote's default branch as just
+    fetched, from the checkout's branch as just fetched from its upstream, or
+    from `HEAD`, carries `Delivers: <item>` or `Closes: <item>`. `no` when
+    none does *and* the history is whole *and* it is current; `unknown` when
+    it is neither, because a shallow clone's trailer may sit past the boundary
+    and a clone retained while another machine delivered or cancelled the item
+    holds neither trailer -- both would answer `no` for finished work.
+
+    The default branch is fetched first and answers `yes` alone when it carries
+    the trailer; only otherwise is the checkout's branch fetched, because the
+    mark for a branch-only cancel and for a guest delivery lives on that branch
+    and on no other. A branch the remote no longer has, deleted at its own
+    merge, is nothing to be behind and the answer comes from the default branch
+    and `HEAD`; a branch fetch that fails while the ref is still published is
+    `unknown`, since the tip it lacks may carry the mark.
+    """
+    # "false" is the one answer meaning a repository, and a whole one: None is
+    # no git at all, "true" a boundary the trailer may be sitting past.
+    if git_output(["rev-parse", "--is-shallow-repository"], root) != "false":
+        return Answer(UNKNOWN, "git fetch --unshallow")
+    remote, default = _upstream(root)
+    if not remote:
+        return Answer(YES if any(_closed_by(root, r, item) for r in ("HEAD", default)) else NO)
+    if git_output(["fetch", remote, default], root) is None:
+        return Answer(UNKNOWN, f"git fetch {remote} {default}")
+    if _closed_by(root, "FETCH_HEAD", item):
+        return Answer(YES)
+    branch = git_output(["rev-parse", "--abbrev-ref", "HEAD"], root) or ""
+    if branch not in ("", "HEAD", default):
+        if git_output(["fetch", remote, branch], root) is None:
+            # The remote answered a moment ago, so a refusal here is about the
+            # ref -- unless it is still published, and then the tip is missing.
+            listed = git_output(["ls-remote", "--heads", remote, branch], root)
+            if listed is None or listed:
+                return Answer(UNKNOWN, f"git fetch {remote} {branch}")
+        elif _closed_by(root, "FETCH_HEAD", item):
+            return Answer(YES)
+    return Answer(YES if _closed_by(root, "HEAD", item) else NO)
