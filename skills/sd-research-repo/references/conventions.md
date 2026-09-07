@@ -164,13 +164,13 @@ Reviewing your own work is the weak form; it is the one that ships most often, s
 it is the one to be disciplined about. Where the document carries a decision
 someone will act on, get a second reader who was not involved in writing it.
 
-**The second reader is Codex**, and its framing is not written here any more.
-The stance, the four-part finding format and the confidence tags live in
-`local-adversarial-gate/core.md` in the `system` repo, shared with
-`sd-writing-pack`, which built the same gate separately and kept its own copy of
-the same caveats. `adversarial-gate render --lens research-brief` prints the
-focus text for the command below; `adversarial-gate run` does the whole pass for
-a caller that wants the scripted path.
+**The second reader is an independent CLI reviewer**, and its framing is not
+written here any more. The stance, the four-part finding format and the
+confidence tags live in `local-adversarial-gate/core.md` in the `system` repo,
+shared with `sd-writing-pack`, which built the same gate separately and kept its
+own copy of the same caveats. `adversarial-gate render --lens research-brief`
+prints the focus text; `adversarial-gate run` does the whole pass for a caller
+that wants the scripted path.
 
 This pass is the research flow's first review point, *after the brief and
 decisions*, and its cap is that row's in
@@ -178,16 +178,21 @@ decisions*, and its cap is that row's in
 product, before the send box, is the second row and has its own cap. Read the
 caps there; this file states none.
 
-**The second reader is the `codex` CLI, not a Claude plugin.** The
-`codex@openai-codex` plugin is not a dependency of this kit, it may not be
+**It runs as a CLI, not as a harness plugin.** Which reviewer runs the pass,
+and the exact invocation, are not retyped here — the kit's own checklist is the
+one place they are written, so nothing here can go stale against it:
+
+```bash
+sd-research-kit review
+```
+
+Under *The second reader* it prints two commands: the availability check, which
+says whether the CLI is installed and logged in, and the pass itself. Run it
+first and take the invocation from there. The plugin that supplies the
+`/codex:*` slash commands is not a dependency of this kit and may not be
 installed, and a research repo that tells its reader to run
 `/codex:adversarial-review` sends them to a command that does not exist. Do
 not reach for the `/codex:*` slash commands.
-
-```
-codex doctor                              # is it installed, is it logged in
-codex exec -s read-only "<focus>"         # the pass itself
-```
 
 Three things to get right:
 
@@ -202,39 +207,44 @@ Three things to get right:
   prompt and name the comparison: *"review `git diff main...HEAD`"*. Name the
   documents too when the diff is large.
 - **Its default framing is a code review** — auth boundaries, races, migrations,
-  rollback. Prose needs the focus text to redirect it:
+  rollback. Prose needs the focus text to redirect it. That text is what
+  `adversarial-gate render --lens research-brief` prints and what the checklist
+  embeds; it reads:
 
   ```
-  codex exec -s read-only "This is a markdown research repository, not code.
-    Review the uncommitted working-tree changes (git status, git diff, plus
-    untracked new files) as an adversarial reader. Attack the argument, not the
-    syntax: which load-bearing claims does the cited source not actually
-    support; which numbers are missing a unit, a date or a denominator; what
-    does the conclusion depend on that the document never states; where does a
-    document assert something as verified that the repo shows was not checked.
-    Cite file and line. Do not modify any files."
+  This is a markdown research repository, not code. Review the uncommitted
+  working-tree changes (git status, git diff, plus untracked new files) as an
+  adversarial reader. Attack the argument, not the syntax: which load-bearing
+  claims does the cited source not actually support; which numbers are missing
+  a unit, a date or a denominator; what does the conclusion depend on that the
+  document never states; where does a document assert something as verified
+  that the repo shows was not checked. Cite file and line. Do not modify any
+  files.
   ```
 
   Run it in the background for anything past a page. It buffers stdout, so it
   prints nothing at all until it exits — silence is normal, not a hang. If you
-  background it with `codex exec ... > pass.txt 2>&1 &`, the same applies to the
-  file: empty means still running.
+  background it by appending `> pass.txt 2>&1 &` to the invocation, the same
+  applies to the file: empty means still running.
 
-**What it cannot do.** Codex sees the repository, not the sources. It cannot
-discharge step 2 — opening the citation and reading it is yours, and no second
-reader substitutes for it. What it does catch is the claim with no citation
-behind it, the rate without its base, the assumption doing load-bearing work off
-the page, and the conclusion that only follows if you already know the material.
+**What it cannot do.** The second reader sees the repository, not the sources.
+It cannot discharge step 2 — opening the citation and reading it is yours, and
+no second reader substitutes for it. What it does catch is the claim with no
+citation behind it, the rate without its base, the assumption doing load-bearing
+work off the page, and the conclusion that only follows if you already know the
+material.
 
-Record the pass in Status like any other check: reviewed by Codex on `<date>`,
-what it raised, what was changed and what was rejected with the reason. If
-`codex` is missing or not logged in — `codex doctor` reports it — say *that* in
-Status. "No independent pass" is a stated gap; self-review that quietly presents
-itself as review is the defect this section exists to prevent.
+Record the pass in Status like any other check: which reader ran it and on
+`<date>`, what it raised, what was changed and what was rejected with the
+reason. If that CLI is missing or not logged in — the availability check the
+checklist prints reports it — say *that* in Status. "No independent pass" is a
+stated gap; self-review that quietly presents itself as review is the defect
+this section exists to prevent.
 
 ## Publishing — Notion, not artifacts
 
-**Research is not published as Claude artifacts.** Notion is the publishing
+**Research is not published as artifacts** — the hosted single-page surface the
+renderer's `build/artifact/` form was written for. Notion is the publishing
 surface. Pages published as artifacts before 2026-08-27 stay where they are as
 historical record; nothing new goes there, and updates go to Notion.
 
