@@ -3603,7 +3603,7 @@ from a number the operator types.
   remainder off a directory that no longer exists, so it is re-derived against
   what `bin/` actually holds. This change touches `tests/test_loc_caps.py` and
   these planning pages and nothing under `bin/`, which is the clause at
-  `tests/test_loc_caps.py:9-10`.
+  `tests/test_loc_caps.py:11-12`.
 
   The itemisation is **14,536 measured + 452 reserved + 62 unclaimed =
   15,050**.
@@ -3706,7 +3706,7 @@ from a number the operator types.
   leaves 155. The `url` client alone measures **+236**, so the ceiling is
   already crossed before criterion 11's mode predicate adds a line. This
   change touches `tests/test_loc_caps.py` and these planning pages and nothing
-  under `bin/`, which is the clause at `tests/test_loc_caps.py:9-10`.
+  under `bin/`, which is the clause at `tests/test_loc_caps.py:11-12`.
 
   The itemisation is **14,895 measured + 236 measured + 106 reserved + 119
   reserved + 20 reserved + 24 unclaimed = 15,400**.
@@ -3929,7 +3929,7 @@ from a number the operator types.
   **4,366** on `main` — `line_count` over the files `tests/test_loc_caps.py`
   enumerates, `migrate-*` excluded as always — leaving 140 and 9. This change
   touches `tests/test_loc_caps.py` and these planning pages and nothing under
-  either directory, which is the clause at `tests/test_loc_caps.py:9-10`.
+  either directory, which is the clause at `tests/test_loc_caps.py:11-12`.
 
   The `bin/` itemisation is **15,260 measured + 299 reserved + 119 reserved +
   34 reserved + 38 unclaimed = 15,750**; the dashboard's is **4,366 measured +
@@ -4479,7 +4479,7 @@ from a number the operator types.
 - **2026-09-07** — **R11-D42, `BIN_CAP` re-derived from 15,750 to 16,750, and
   PR 8 split into four pull requests**, in a change of its own that touches
   `tests/test_loc_caps.py` and these planning pages and nothing under `bin/`,
-  which is the clause at `tests/test_loc_caps.py:9-10`. On the operator's
+  which is the clause at `tests/test_loc_caps.py:11-12`. On the operator's
   decision of 2026-09-07, taken against a priced alternative rather than in
   the abstract.
 
@@ -4647,7 +4647,7 @@ from a number the operator types.
 - **2026-09-07** — **R11-D43, `BIN_CAP` re-derived from 16,750 to 17,000,
   funding criterion 29 and PR 8b**, in a change of its own that touches
   `tests/test_loc_caps.py` and these planning pages and nothing under `bin/`,
-  the clause at `tests/test_loc_caps.py:9-10`. Criteria 27 and 28 stay
+  the clause at `tests/test_loc_caps.py:11-12`. Criteria 27 and 28 stay
   unfunded, each to be preceded by its own re-derivation, which is what
   R11-D42's split committed to.
 
@@ -4777,3 +4777,118 @@ from a number the operator types.
   the active-status filter, the repository filter, the kind filter inverted,
   the ordering reversed, the rows dropped from the hook, and the packet section
   emptied.
+
+- **2026-09-07** — **R11-D44, `BIN_CAP` re-derived from 17,000 to 17,050,
+  funding criterion 27 and PR 8c**, in a change of its own that touches
+  `tests/test_loc_caps.py` and these planning pages and nothing under `bin/`,
+  the clause at `tests/test_loc_caps.py:11-12`. Criterion 28 stays unfunded, to
+  be preceded by its own re-derivation.
+
+  **The base is 16,723**, measured on `main` by `git ls-files bin | xargs wc -l`
+  after PR 8b merged, and equal to the figure the branch carried before it. The
+  cap in force is 17,000, so **277** is unclaimed headroom before this raise.
+
+  **Criterion 29 delivered 324 against 573, and the overrun is in the body.**
+  The three spans built came to 324 against the 258 priced for them —
+  `bin/sd_handoff_rows.py` 170 against 120, `bin/sd-note` 116 against 106,
+  `bin/sd-handoff-restore` +38 against +32 — **26% over**. The 162 for
+  `bin/sd-handoff-prompt` and the 119 of seam were cut on evidence and returned
+  281, which is the only reason the total came in under.
+
+  **So body variance becomes its own line, at 12%.** PR 8a's body was right to
+  −2% (650 against 663); PR 8b's overran by +26%. Two observations, opposite
+  signs, mean **+12%**. R11-D43 carried no such line because one observation at
+  −2% looked like precision rather than luck. It was luck: a cut, not an
+  estimate, is what kept 8b inside its cap. A line that is priced and built is
+  priced 12% low on the evidence there is.
+
+  **The seam is 40, not R11-D42's flat 119, because every boundary around the
+  push has a repaired counterpart.** Measured rather than assumed:
+
+  - The subprocess policy is built. `sd_lib.git_output` at `bin/sd_lib.py:143`
+    takes arbitrary `git` argv behind a fixed-argv call, a timeout, no shell and
+    a failure-is-None contract, and has **30 call sites** across seven files.
+  - The *network* git policy is built. `git fetch` already runs through that
+    same helper at `bin/sd_lib.py:1343` and `:1349`, and its failure is already
+    turned into an operator-readable `Answer(UNKNOWN, "git fetch <remote> <ref>")`
+    rather than a traceback.
+  - The *mutating* git policy is built. `git commit` runs at
+    `bin/sd_lib.py:1227` with a `TrailerError` that carries git's own stderr.
+    R11-D42's "no `git push` exists anywhere in `bin/`" was true and incomplete:
+    write-side git is not new, only the remote half of it is.
+  - The test harness is built. `tests/test_sd_pr_state.py:41-62` and `:147-161`
+    put a fake `gh` on `PATH` with fixed answers, which is exactly the recording
+    fixture a first write needs, and tests answer to no cap.
+
+  What is genuinely uncrossed is narrower than a push and is not the push.
+  **No `gh` call in `bin/` has ever sent a non-GET method or a request body.**
+  `sd_lib.gh_api` at `:269` runs `["gh", "api", endpoint]` with no method and no
+  body; `gh_json` at `bin/sd-pr-state:117` passes arbitrary args but every one of
+  its callers reads. Opening a pull request is the pack's **first write to
+  GitHub from `bin/`**, and it needs a refusal vocabulary a read does not have:
+  a rejected push, a pull request that already exists, a `gh` that is installed
+  but unauthorised. The last of those is already written at
+  `bin/sd-pr-state:166-171`. One boundary, half-repaired, failing loudly:
+  **40**.
+
+  **Two functions become one shared opener and two thin ends, and the reason is
+  whose file it is.** R11-D42 priced promotion and demotion as a directioned
+  pair on the `install_hook` / `remove_hook` precedent at
+  `bin/sd_install.py:536` and `:608` — 72 and 76 lines, 143 with the boundary.
+  Reading them, what makes that pair expensive is not that it has two
+  directions. It is that `~/.claude/settings.json` is **somebody else's file**:
+  the docstring's own reasons are idempotence against a second `--user` run,
+  interleaving against another installer, and refusing rather than overwriting
+  a file that will not parse. `skills/paths.json` is this repository's own
+  tracked file with a validating reader already built at
+  `bin/sd_install.py:265`. None of the three policies transfer. The precedent
+  was cited for its shape; its cost lives somewhere the shape does not reach.
+
+  What actually differs between the directions is the move and the edit. The
+  branch, the commit, the push and the pull request are identical, and pricing
+  them twice prices a copy.
+
+  **Criterion 27 is priced at 288** — 204 of body, 8 of glue, 40 of seam, 24 of
+  body variance, 12 of post-report — against the 417 R11-D42 carried. It is
+  built in `bin/sd_skill.py`, not a new module, because `sd skill promote` and
+  `sd skill demote` join `try`, `list` and the nightly under one verb group and
+  reuse five things already there: `SkillRefusal`, `checkout()`, `available()`,
+  `CONTRIB_DIR` and `SKILLS_DIR`. A new module would re-declare them and pay a
+  header for the privilege.
+
+  | span | lines | why |
+  |---|---|---|
+  | `paths_edit` | 34 | one function, both directions. Must load the whole document, not `read_paths`'s `data["paths"]`, or the `$comment` block is destroyed |
+  | `branch_and_open` | 66 | the shared half: branch, `git mv` staged, commit, push, open, print the URL. Six steps each needing to say which one failed, plus a dirty-tree refusal so the commit sweeps in no unrelated work |
+  | `promote` | 36 | `contrib/<name>` exists, `skills/<name>` does not, a `--path` is named or the call refuses |
+  | `demote` | 34 | a path names it; paths.json's own comment says a skill may be on two, so removing from all or refusing is a real branch |
+  | `bin/sd` | 22 | two subparsers under the existing `skill` group |
+  | docstring and banner | 12 | `sd_skill.py`'s docstring is about trials today |
+
+  **Glue is 8.** `bin/sd_skill.py` goes from six top-level definitions to ten,
+  still under fifteen, so R11-D43's 2.10 applies to four new boundaries. `bin/sd`
+  gains subparser lines and no definition, so it draws nothing at its 3.70.
+
+  **Post-report discovery is 5.7%**, the mean of four observations: R11-D38's
+  14.4% and 8.3%, PR 8a's 0% and PR 8b's 0%. 8b's review round, like 8a's,
+  landed entirely in documentation — the `packet_section` defect was found while
+  building and is counted in delivery, not after it. Two consecutive zeroes pull
+  the rate down; they are averaged rather than adopted, for the same reason
+  R11-D43 gave.
+
+  **The raise is 50 and not 100.** 16,723 plus 288 is 17,011, which busts 17,000
+  by eleven. Rounding to the next fifty leaves **39** unclaimed against
+  R11-D43's 28, and the extra slack is bought by the body-variance line being
+  new and two observations deep. Criterion 28 stays unfunded at 17,050; its own
+  re-derivation prices it against a measured tree, as this one did.
+
+  **Six citations of the cap-raise clause were stale, and this entry corrects
+  them.** Every re-derivation in this item cited it as
+  `tests/test_loc_caps.py:9-10` — `prd.md:3606`, `:3709`, `:3932`, `:4482`,
+  `:4650` and `implement.md:671`. It was right at `8f627e8f`, and the file's
+  own header has grown by three lines since, so the clause has been at `:11-12`
+  since `edb71875`. Traced by reading the line out of each of the last fourteen
+  commits that touched the file rather than by trusting the newest one. The
+  correction lands in documentation and costs no `bin/` line, which is the
+  third and fourth such round in a row and is why the post-report rate above is
+  falling.

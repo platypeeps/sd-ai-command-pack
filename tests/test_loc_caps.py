@@ -361,7 +361,104 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # evidence for a rate, which is why it is averaged rather than adopted.
 #
 # 16,399 plus 573 is 16,972; the 28 unclaimed is what a round 17,000 left.
-BIN_CAP = 17_000           # R11-D43: criteria 26 and 29; 27 and 28 unfunded
+#
+# R11-D44, 2026-09-07, funds **criterion 27 alone** -- PR 8c, the third of the
+# four R11-D42 split PR 8 into. The base is 16,723, measured on `main` by
+# `git ls-files bin` after PR 8b merged at `05adec9e`, and equal to what the
+# branch carried. Criterion 28 stays unfunded, to be preceded by its own
+# re-derivation against a measured tree, as this one was.
+#
+# **Body variance becomes its own line, at 12%.** Criterion 29 delivered 324
+# against 573, which looks like room to spare and is not. The three spans
+# actually built came to 324 against the 258 priced for them -- 26% over -- and
+# the total held only because `bin/sd-handoff-prompt` and its 119 of seam were
+# cut on evidence and returned 281. PR 8a's body was right to -2%; PR 8b's
+# overran by 26%. Two observations, opposite signs, mean **+12%**. R11-D43
+# carried no such line because one observation at -2% looked like precision. It
+# was luck: a cut, not an estimate, is what kept 8b inside its cap.
+#
+# **The seam is 40, not the flat 119, because every boundary around the push
+# has a repaired counterpart.** R11-D42 charged `git push` as a first crossing.
+# Measured rather than assumed:
+#
+#   - The subprocess policy is built. `sd_lib.git_output` at `bin/sd_lib.py:143`
+#     takes arbitrary `git` argv behind a fixed-argv call, a timeout, no shell
+#     and a failure-is-None contract, with **30 call sites** across seven files.
+#   - The *network* git policy is built. `git fetch` runs through that same
+#     helper at `bin/sd_lib.py:1343` and `:1349`, and its failure is already an
+#     operator-readable `Answer(UNKNOWN, "git fetch <remote> <ref>")`.
+#   - The *mutating* git policy is built. `git commit` runs at
+#     `bin/sd_lib.py:1227` with a `TrailerError` carrying git's own stderr.
+#     R11-D42's "no `git push` exists anywhere in `bin/`" was true and
+#     incomplete: write-side git is not new, only its remote half is.
+#   - The harness is built. `tests/test_sd_pr_state.py:41` and `:147` put a
+#     fake `gh` on `PATH` with fixed answers, which is the recording fixture a
+#     first write needs, and tests answer to no cap.
+#
+# What is genuinely uncrossed is narrower than a push and is not the push.
+# **No `gh` call in `bin/` has ever sent a non-GET method or a request body.**
+# `sd_lib.gh_api` at `:269` runs `["gh", "api", endpoint]` with no method and no
+# body; `gh_json` at `bin/sd-pr-state:117` passes arbitrary args but every one
+# of its callers reads. Opening a pull request is the pack's first write to
+# GitHub from `bin/`, and it needs a refusal vocabulary a read does not have: a
+# rejected push, a pull request that already exists, a `gh` installed but
+# unauthorised. The last is already written at `bin/sd-pr-state:166`. One
+# boundary, half-repaired, failing loudly: **40**.
+#
+# **Two functions become one shared opener and two thin ends, and the reason is
+# whose file it is.** R11-D42 priced promotion and demotion as a directioned
+# pair on the `install_hook` / `remove_hook` precedent at
+# `bin/sd_install.py:536` and `:608` -- 72 and 76 lines, 143 with the boundary.
+# Reading them, what makes that pair expensive is not that it has two
+# directions. It is that `~/.claude/settings.json` is **somebody else's file**:
+# its docstring's own reasons are idempotence against a second `--user` run,
+# interleaving against another installer, and refusing rather than overwriting
+# a file that will not parse. `skills/paths.json` is this repository's own
+# tracked file with a validating reader already built at
+# `bin/sd_install.py:265`. None of the three policies transfer. The precedent
+# was cited for its shape; its cost lives somewhere the shape does not reach.
+# What differs between the directions is the move and the edit; the branch, the
+# commit, the push and the pull request are identical, and pricing them twice
+# prices a copy.
+#
+# **The 204 of body** is built in `bin/sd_skill.py` and not a new module,
+# because `sd skill promote` and `sd skill demote` join `try`, `list` and the
+# nightly under one verb group and reuse five things already there:
+# `SkillRefusal`, `checkout()`, `available()`, `CONTRIB_DIR`, `SKILLS_DIR`. A
+# new module would re-declare them and pay a header for the privilege.
+#
+#   `paths_edit`            34   one function, both directions. Loads the whole
+#                                document, not `read_paths`'s `data["paths"]`,
+#                                or the `$comment` block is destroyed
+#   `branch_and_open`       66   the shared half: branch, staged `git mv`,
+#                                commit, push, open, print the URL. Six steps
+#                                each saying which one failed, plus a
+#                                dirty-tree refusal so the commit sweeps in no
+#                                unrelated work
+#   `promote`               36   `contrib/<name>` exists, `skills/<name>` does
+#                                not, a `--path` is named or the call refuses
+#   `demote`                34   a path names it; paths.json's own comment says
+#                                a skill may be on two, so removing from all or
+#                                refusing is a real branch
+#   `bin/sd`                22   two subparsers under the existing `skill` group
+#   docstring and banner    12   `sd_skill.py`'s docstring is about trials today
+#
+# **Glue is 8.** `bin/sd_skill.py` goes from six top-level definitions to ten,
+# still under fifteen, so R11-D43's 2.10 applies to four new boundaries.
+# `bin/sd` gains subparser lines and no definition, so it draws nothing at 3.70.
+#
+# **Post-report discovery is 5.7%**, the mean of four observations: R11-D38's
+# 14.4% and 8.3%, PR 8a's 0% and PR 8b's 0%. 8b's review round, like 8a's,
+# landed entirely in documentation -- the `packet_section` defect was found
+# while building and is counted in delivery, not after it. Two consecutive
+# zeroes pull the rate down; they are averaged rather than adopted, for the
+# reason R11-D43 gave. 5.7% of the 204 body is 12.
+#
+# 204 plus 8 plus 40 plus 24 plus 12 is **288**. 16,723 plus 288 is 17,011,
+# which busts a round 17,000 by eleven. Rounding to the next fifty leaves 39
+# unclaimed against R11-D43's 28, and the extra slack is bought by the
+# body-variance line being new and two observations deep.
+BIN_CAP = 17_050           # R11-D44: criteria 26, 29 and 27; 28 unfunded
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
 # R11-D29, re-derived 2026-09-03 with the itemisation R11-D24's clause asks
 # for: 4,190 measured on `main`, 158 measured on the branch that carries the
@@ -507,6 +604,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
         ("2026-09-06", 15_750),
         ("2026-09-07", 16_750),
         ("2026-09-07", 17_000),
+        ("2026-09-07", 17_050),
     ),
     "DASHBOARD_CAP": (
         ("2026-08-30", 2_500),
