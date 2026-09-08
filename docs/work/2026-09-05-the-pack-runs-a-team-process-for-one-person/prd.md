@@ -5102,3 +5102,42 @@ from a number the operator types.
   repointed. Recorded rather than silently corrected, because guessing which
   number they meant is how a citation gate learns to lie.
 
+
+- **2026-09-08** — **Criterion 28's writing-manifest clause closes on
+  evidence, and the `commands.yaml` clause does not.** The 2026-09-07 entry at
+  `prd.md:5059` recorded two clauses that could not close from this checkout.
+  One of them has closed. `platypeeps/sd-writing-pack#30` merged at `f02e883`
+  and the manifest now declares three kinds — `blog-idea`, `tip`, `topic` —
+  with three store bases, `templates/skill-proposal.md` deleted, and the two
+  claims in `CLAUDE.md` and `.claude/reference/pipeline.md` that rested on the
+  kind removed. `platypeeps/system#223` merged at `1173f027` and took the four
+  `skill-proposal` ladder rows out of `sd_db/sources/vault.py`'s `STAGES`. The
+  two landed in that order because criterion 5 there asserts manifest to
+  table: `./sd-db.sh test` gave `FAILED (failures=1)` before the manifest cut
+  and `Ran 321 tests ... OK` after it, which is C-177's ordering observed
+  rather than assumed.
+
+  **The clause is now true and still not assertable from here, and those are
+  different things.** No test in this repository reads another repository's
+  manifest, and none should. What closes it is the merge commit named above.
+  The other half of the same sentence — `sd-propose-skills` writes no vault
+  note — *is* asserted here, by
+  `tests/test_sd_suggest.py:288`, which greps the whole `contrib/sd-propose-skills/`
+  directory rather than its `SKILL.md`; 25 tests, `OK`. The `commands.yaml`
+  clause stays open behind item B's slice 4, because the file it enumerates is
+  not in this checkout and `tests/test_sd_suggest.py:17` says so deliberately.
+
+  **Three live references to the kind survive the retirement, and all three
+  are correct.** A repository-wide grep of all three checkouts, excluding
+  `docs/work/`, returns exactly these, and they are named here so a later
+  sweep does not "fix" them into being wrong:
+  `sd-writing-pack/.claude/reference/pipeline.md:248`, which records that
+  `skill-proposal-accept` was documented for months and never scheduled;
+  `sd-writing-pack/.claude/skills/sdw-tips/SKILL.md:51`, which says the score
+  floor of 6 is now declared twice rather than three times, on `tip` and
+  `blog-idea` — verified against the merged manifest, where `topic` carries no
+  floor at all; and `system/local-task-actions/task-actions.sh:68`, whose
+  `skill` row in `DBS` deliberately stays so that setting a Skill Proposal to
+  `accepted` still records the decision, with only the filing behind it gone.
+  The kind is retired; the ten notes and the decision they can still carry are
+  not, by the standing decision that no directory is deleted.
