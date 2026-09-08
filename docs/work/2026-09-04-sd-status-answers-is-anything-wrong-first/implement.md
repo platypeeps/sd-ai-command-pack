@@ -78,7 +78,7 @@ The ceiling is what checks this, not this paragraph.
       reader learns what was looked at and not only what was found.
 
       **The summary is assembled so the word `clear` cannot be printed while
-      any class is unchecked**, which is `prd.md:134`'s substring test written
+      any class is unchecked**, which is `prd.md:143`'s substring test written
       as a construction rather than as a wording convention: with something
       unread the tail reads `n of 11 checks could not run`, and only with
       nothing unread does it read `all 11 checks clear`.
@@ -392,10 +392,65 @@ The ceiling is what checks this, not this paragraph.
       Cost: `bin/` 18,262 to **18,367**, 105 lines against 79 priced -- inside
       the 1.34x this item has been running at, and **183 of headroom** left
       under `BIN_CAP` 18,550 for step 5.
-- [ ] **5. `--actions`, and the `--json` keys.** `abnormalities`, `actions` and
+- [x] **5. `--actions`, and the `--json` keys.** `abnormalities`, `actions` and
       `next` added to `collect()`; `SCHEMA_VERSION` bumped to 3, because
       consumers gain keys and the report gains a section order they may depend
       on.
+
+      **`SCHEMA_VERSION` was already 3 from step 4, and stays 3.** Step 4
+      needed `inventory` under the same version and said so there. Two bumps
+      before anything consumed either would describe a version that never
+      shipped.
+
+      **`--actions` is uncapped and `pending` is a view of its first ten.**
+      `pending` caps because a report is read whole; this is the list a caller
+      pipes, so capping it would make the cap the interface. The count leads
+      the output so a reader knows the length before the lines scroll.
+
+      **`next` is an object, not a sentence.** A caller acting on the
+      suggestion needs the row it came from in the same breath. A bare string
+      would send it back to look the id up and it could pick a different row
+      than the one the report named.
+
+      **`--json` wins when both flags are given.** It carries `actions` in
+      full, so a caller passing both loses nothing; the reverse would drop
+      every other key.
+
+      **Four rules falsified, and the second one passed when it should not
+      have.**
+
+      | rule broken | test that failed |
+      |---|---|
+      | `--actions` sliced to `PENDING_LIMIT` | the count no longer equals the rows |
+      | the `actions` key sliced to `PENDING_LIMIT` | **passed** -- see below |
+      | `next` returned a bare string | the object assertion |
+      | `--actions` dropped the leading id | three, including the widened-id one |
+
+      `ActionsFlagTests.result()` builds the `actions` key by hand to exercise
+      the renderer, so nothing in that class can see a slice applied inside
+      `collect()`. `ActionsCliTests` had the key but asserted only truthiness
+      against a one-item fixture, where `rows[:10]` is a no-op. This is the C-3
+      fixture defect of step 4 wearing a different hat: a fixture holding one
+      row cannot tell an uncapped list from a capped one. A test through
+      `collect()` with `PENDING_LIMIT + 4` items now asserts
+      `payload["actions"] == payload["inventory"]["rows"]`, and the slice
+      fails it.
+
+      **Two acceptance criteria were wrong and were corrected, not worked
+      around.** One named a `threads` JSON key with an `unreadable_rows` list;
+      no step builds it and no design names it. The guarantee behind it -- a
+      row the scanner cannot classify is listed rather than dropped -- is
+      already implemented, as `unreadable-concern-row` inventory rows, so the
+      criterion had the wrong shape rather than a missing feature and now
+      reads the count from `actions`. The other pinned a prototype split of
+      245/206/23/16 with `C-19` "among the open ones"; the corpus measures
+      531/462/14 open/20 parked/35 unclassifiable and `C-19` is parked, which
+      is what #792's `accepted` fix made it. Both now carry the date they were
+      measured.
+
+      Cost: `bin/` 18,367 to **18,402**, 35 lines, and **148 of headroom** left
+      under `BIN_CAP` 18,550 for steps 6 and 7. Neither of those touches
+      `bin/`.
 - [ ] **6. `skills/sd-status/SKILL.md`.** The twelve-section order, the ranking
       table, the id scheme, and the `AskUserQuestion` contract with its
       4-option/4-question limit and the resolution.

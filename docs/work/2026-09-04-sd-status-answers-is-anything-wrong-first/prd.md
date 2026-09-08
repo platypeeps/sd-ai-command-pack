@@ -1,7 +1,7 @@
 ---
 title: sd-status answers "is anything wrong" before it answers anything else
 created: 2026-09-04
-branch:
+branch: feat/sd-status-actions-flag
 ---
 
 # PRD — sd-status answers "is anything wrong" first
@@ -86,13 +86,19 @@ description to the same thing.
 
 ## Acceptance criteria
 
-- [ ] `make check` ends with `0 FAILED` and reports `40 OK` — unchanged from
-      `8cf99431`, because this adds tests to `tests/test_sd_status.py` and no
-      new test module
+- [ ] `make check` ends with `0 FAILED` and its `^OK` count is unchanged from
+      the commit this branch left `main` at, because this adds tests to
+      `tests/test_sd_status.py` and no new test module. The count is read at
+      branch time rather than written here: it was `40` on `8cf99431` and is
+      `56` today, and a criterion carrying a number that other items move is a
+      criterion that fails for reasons this item did not cause
 - [ ] `python3 -m unittest tests.test_sd_status -v` prints `OK` with 0 failures
       and 0 errors
 - [ ] `python3 -m unittest tests.test_loc_caps` prints `OK`; `bin/` measured by
-      `line_count(tracked("bin"))` stays at or under 14,000, and
+      `line_count(tracked("bin"))` stays at or under `BIN_CAP`, read from
+      `tests/test_loc_caps.py` rather than repeated here -- it was 14,000 when
+      this page was written and R11-D47 raised it to 18,550, reserving 750 for
+      steps 2 to 7 of this item, and
       `git diff --stat origin/main...HEAD -- dashboard/` prints nothing, so no
       dashboard ceiling moves — evaluated on the pushed branch, since before the
       commits exist the diff is empty whatever the tree holds
@@ -122,8 +128,11 @@ description to the same thing.
       and the section naming it states the 4-options/4-questions limit and the
       resolution
 - [ ] `./bin/sd-status --actions | head -1` names the total number of actionable
-      items, and `./bin/sd-status --actions | grep -cE '^[a-z][0-9a-f]{4} '`
-      equals that total
+      items, and `./bin/sd-status --actions | grep -cE '^[a-z][0-9a-f]{4,} '`
+      equals that total. `{4,}` and not `{4}`: an id that collided widens to
+      eight hex digits by this design's own rule, and two rows in this
+      checkout have -- `sd08e3f70` and `sd08e7003` -- so the fixed-width form
+      counted 120 against a total of 122 and could never pass here
 - [ ] `./bin/sd-status; echo $?` prints `0` in this checkout, which has
       abnormalities — a finding is a report, not a failure
 - [ ] two findings on one object get two ids: the test named in `implement.md`
@@ -138,23 +147,36 @@ description to the same thing.
       `True`
 - [ ] the ledger scanner classifies this repository's real corpus: `./bin/sd-status
       --json | python3 -c "import json,sys; a=json.load(sys.stdin)['actions'];
-      print(sum(1 for r in a if r['check']=='open-concern'))"` prints a non-zero
+      print(sum(1 for r in a if r['check']=='unresolved-concern'))"` prints a non-zero
       count, and the row for `C-19` in
       `docs/work/archive/2026-08/2026-08-26-codex-local-review-adapter/prd.md`
-      — disposed `ACCEPTED and parked` — is among them. That row is the one an
+      — disposed `ACCEPTED and parked` — is in `actions` at all, as
+      `parked-concern` and not as an open one: `ACCEPTED and parked` parks by
+      the precedence this design fixes, so asking for it among the *open*
+      concerns asked for the opposite of what the scanner is meant to do.
+      Presence is the claim worth making, because that row is the one an
       archive-excluding or `## Review`-heading-matching scanner silently drops
-- [ ] `./bin/sd-status --json | python3 -c "import json,sys;
-      print(json.load(sys.stdin)['threads']['unreadable_rows'])"` prints a list,
-      and every `C-` row in `docs/work` that the scanner could not classify
-      appears in it — nothing is dropped silently. On today's corpus that list
-      has 16 entries against 245 concerns; the criterion is that the list is
+- [ ] every `C-` row in `docs/work` that the scanner could not classify is
+      listed, not dropped: `./bin/sd-status --json | python3 -c "import
+      json,sys; a=json.load(sys.stdin)['actions']; print(sum(1 for r in a if
+      r['check']=='unreadable-concern-row'))"` prints the count, and it equals
+      the number of distinct rows whose disposition text matches none of the
+      four vocabularies. There is no separate `threads` key: an unclassified
+      row is an inventory row like any other, which is what puts it in the
+      banner instead of in a footnote a reader has to go looking for.
+      Re-measured 2026-09-07: 35 of 531. The criterion is that the list is
       printed and complete, not that it is empty
-- [ ] the ledger classifier reproduces the prototype's measured split on this
-      corpus: 245 distinct concerns, 206 closed, 23 open, 16 unclassifiable, and
-      `C-19` in `archive/2026-08/2026-08-26-codex-local-review-adapter` is among
-      the open ones. Any of the four rules in `implement.md` step 3 being dropped
-      changes one of these four numbers, which is what makes them a check rather
-      than a description
+- [ ] the ledger classifier reproduces the measured split on this corpus,
+      re-measured 2026-09-07: 531 distinct concerns, 462 closed, 14 open, 20
+      parked, 35 unclassifiable, and `C-19` in
+      `archive/2026-08/2026-08-26-codex-local-review-adapter` is among the
+      **parked** ones. Any of the four rules in `implement.md` step 3 being
+      dropped changes one of these numbers, which is what makes them a check
+      rather than a description. The numbers here superseded a prototype's
+      245/206/23/16, which was measured on a smaller corpus and before the
+      `accepted` precedence fix landed on #792 and moved ten rows; they carry
+      a date because a count cited as if measured now is this item's most
+      repeated defect, and the split moves as `docs/work` grows
 
 ### What these criteria do not cover
 
@@ -179,7 +201,8 @@ user's.
   dispositions `addressed`, `rebutted`, `parked`, `unresolved` that the concern
   scanner reads.
 - `tests/test_loc_caps.py` — `bin/` measured 12,416 on `8cf99431` against a
-  14,000 ceiling.
+  14,000 ceiling. Both numbers are records of that commit, not of now: the
+  ceiling is `BIN_CAP` and R11-D47 moved it to 18,550.
 
 ## Review
 

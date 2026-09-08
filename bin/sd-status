@@ -2133,7 +2133,35 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
     inventory = actionable_inventory(root, result)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
     result["abnormalities"] = banner(inventory)
+    # `actions` is the uncapped list and `pending` is a view of its first ten,
+    # so a consumer that wants row eleven has it without re-deriving anything.
+    # `next` is an object rather than a string because a caller that acts on
+    # the suggestion needs the id it belongs to in the same breath.
+    result["actions"] = inventory.rows
+    result["next"] = next_action(inventory.rows)
     return result
+
+
+def next_action(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The one row the report points at, or `None` when there is nothing."""
+    if not rows:
+        return None
+    top = rows[0]
+    return {"id": top["id"], "check": top["check"], "suggest": top["suggest"]}
+
+
+def render_actions(rows: list[dict[str, Any]], stream: TextIO) -> None:
+    """Every row, uncapped, one per line, id first.
+
+    `pending` caps at ten because a report is read whole; this is the list a
+    caller pipes, so capping it would make the cap the interface. The count
+    leads so a reader knows the length before the lines scroll past.
+    """
+    write = stream.write
+    write(f"{len(rows)} actionable\n")
+    for row in rows:
+        write(f"{row['id']} {row['check']:<{CHECK_WIDTH}} {row['title']}\n")
+        write(f"  {row['suggest']}\n")
 
 
 def _render_pack(result: dict[str, Any], write: Any) -> None:
@@ -2403,6 +2431,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="list only parked work items, from their own frontmatter",
     )
     parser.add_argument(
+        "--actions",
+        action="store_true",
+        help="list every actionable row by id, uncapped, one per line",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=pr_state.DEFAULT_LIMIT,
@@ -2441,6 +2474,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
+    elif args.actions:
+        render_actions(result["actions"], sys.stdout)
     else:
         render(result, sys.stdout)
     return 0
