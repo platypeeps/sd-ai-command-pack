@@ -50,6 +50,8 @@ a sentence and never a traceback.
 from __future__ import annotations
 
 import argparse
+import datetime
+import hashlib
 import importlib.machinery
 import importlib.util
 import itertools
@@ -59,7 +61,7 @@ import pathlib
 import re
 import shutil
 import sys
-from typing import Any, TextIO
+from typing import Any, NamedTuple, TextIO
 
 #: Read-only means read-only, and importing a sibling module would otherwise
 #: leave a `bin/__pycache__` behind. Set before the first sibling import.
@@ -70,6 +72,7 @@ if str(_BIN) not in sys.path:
     sys.path.insert(0, str(_BIN))
 
 import sd_lib  # noqa: E402
+import sd_sweep  # noqa: E402 - R10-D1's 45-day threshold, read not restated
 
 # The index reader lives in the dashboard package, one level above `bin/`.
 # `sd_lib` above is a sibling and always travels with this file; `dashboard` is
@@ -160,6 +163,7 @@ def work_section(root: pathlib.Path) -> dict[str, Any]:
                 "path": str(item.path.relative_to(root)),
                 "title": item.title,
                 "status": item.status,
+                "created": item.created,
                 "branch": item.branch,
                 "archived": item.archived,
                 "parked": item.parked,
@@ -1053,6 +1057,586 @@ def issues_section(root: pathlib.Path) -> dict[str, Any]:
         "needs_you": [row for row in rows if store.needs_you(row)],
         "other": [row for row in rows if not store.needs_you(row)],
     }
+
+
+# --------------------------------------------------------------------------
+# 9. The actionable inventory -- one producer, several renderings
+# --------------------------------------------------------------------------
+
+
+class Class(NamedTuple):
+    """One check that exists, and everything the report needs to know of it."""
+
+    check: str
+    letter: str
+    abnormal: bool
+    rank: int
+    source: str
+    what: str
+
+
+#: The enumeration. This tuple is the *only* answer to "which checks exist":
+#: the renderer iterates it, the ranking reads `rank` off it, the banner reads
+#: `abnormal` off it and `open threads` reads `source` off it. Adding a check
+#: means adding a row here and a producer below -- never editing a renderer, a
+#: sort, or a list in the skill, which is how those three drift apart.
+#:
+#: `letter` is a display prefix and nothing else. Identity is `(check, natural
+#: key)`, for the reason `action_id` states.
+CLASSES = (
+    Class("branch-already-merged", "w", True, 10, "work item + git",
+          "a non-done item whose branch already landed in the default branch"),
+    Class("in-progress-without-branch", "w", True, 10, "work item",
+          "status: in_progress with no branch: field to work on"),
+    Class("branch-unresolvable", "w", True, 10, "work item + git",
+          "a branch: field naming a ref no local or remote head carries"),
+    Class("status-unreadable", "w", True, 10, "work item",
+          "an item whose prd.md will not yield a status"),
+    Class("unresolved-concern", "c", True, 20, "## Review ledger",
+          "a review concern left open by its own ledger row"),
+    Class("pr-check-failing", "p", True, 30, "open pull requests",
+          "an open pull request with a failing check"),
+    Class("pr-check-missing", "p", True, 30, "open PRs + protection",
+          "an open pull request reporting no check the branch requires"),
+    Class("dirty-tree-with-open-pr", "p", True, 30, "git + open PRs",
+          "uncommitted work on a branch that already has a pull request"),
+    Class("protection-gap", "g", True, 40, "protection",
+          "an enforcement leg missing on the default branch"),
+    Class("accepted-gap-standing", "g", False, 45,
+          ".github/sd-status.json accepted_gaps[]",
+          "a written acceptance whose until condition nothing re-reads"),
+    Class("issue-needs-you", "i", False, 50, "dashboard index",
+          "an indexed issue the index says is waiting on you"),
+    Class("pr-needs-action", "p", False, 60, "open pull requests",
+          "an open pull request waiting on a review or a merge"),
+    Class("open-step", "s", False, 70, "- [ ] in item docs",
+          "an unchecked box on an item nobody has closed"),
+    Class("unmerged-branch", "b", False, 80, "git refs",
+          "a branch on origin with no open pull request carrying it"),
+    Class("parked-concern", "c", False, 90, "## Review ledger",
+          "a concern parked behind a trigger nobody is watching"),
+    Class("idle-planning", "w", True, 100, "work item + R10-D1",
+          "an item idle in planning past the 45-day threshold"),
+    Class("undated-planning", "w", True, 100, "work item",
+          "a planning item with no date to age it by"),
+    Class("issue-open", "i", False, 110, "dashboard index",
+          "an indexed issue open against this repository"),
+    Class("source-marker", "t", False, 120, "marker scan over the index",
+          "a marker left in tracked source"),
+    Class("unreadable-concern-row", "c", True, 20,
+          "ledger row nothing can classify",
+          "a C- row whose disposition this reader does not recognise"),
+    Class("undisclosed-tool", "k", False, 125, "skill claims bin/<tool>",
+          "a skill disclosing a tool that is not built"),
+)
+
+#: Keyed lookup over the same tuple, so no producer restates a rank or a
+#: letter. A check name absent here raises at the row that invented it, which
+#: is the loud form of "the table is the enumeration".
+BY_CHECK = {kind.check: kind for kind in CLASSES}
+
+#: What the counts do **not** contain, printed under `open threads` so the
+#: section never implies it swept what it skipped (`design.md:310`). A reader
+#: learns the denominator from the output rather than from a design document
+#: they do not have open.
+EXCLUDED = (
+    "archived work items (docs/work/archive/**) for status, checkboxes and "
+    "branches -- closed by where they live; their review ledgers are still read",
+    "parked work items -- parked is a disposition, not an open thread, and "
+    "`sd-status --parked` already lists them",
+    "concerns disposed addressed or rebutted -- two of the four dispositions "
+    "are closures",
+    "checkboxes on done, archived or parked items -- read as history rather "
+    "than as missed steps, a convention this asserts rather than observes",
+    "Jira rows in the dashboard index -- no committed fact ties a Jira project "
+    "key to a checkout, which is the exclusion `issues_section` already makes",
+    "CHANGELOG.md and docs/review-learnings.md -- narrative history, and the "
+    "second has no disposition field, so nothing in it can ever be marked handled",
+    "markers outside bin/, dashboard/, tests/ and .github/scripts/ -- in "
+    "skills/ and docs/ the word documents the convention instead of instancing it",
+)
+
+
+def action_id(check: str, key: str, width: int = 4) -> str:
+    """`<class letter><width hex digits>`: short enough to type, fixed by data.
+
+    Hashed on the **check name**, never on the class letter, and that is the
+    whole of C-11. Two checks in one class routinely fire on one object -- a
+    pull request that is both `pr-check-failing` and `dirty-tree-with-open-pr`,
+    an item that is both `branch-already-merged` and `idle-planning`. Keyed on
+    the letter, each pair hashes identically at four digits and at eight, so
+    widening cannot separate them and the id a user picks names two different
+    actions. The letter is a display prefix; identity is `(check, key)`.
+
+    Nothing here reads a clock, a sequence number or a ledger, so the same data
+    yields the same id in every run. That is requirement 7, and it is what
+    `implement.md`'s verification 5 diffs two runs to check.
+    """
+    digest = hashlib.sha1(
+        f"{check}\0{key}".encode(), usedforsecurity=False
+    ).hexdigest()
+    return f"{BY_CHECK[check].letter}{digest[:width]}"
+
+
+def _row(check: str, key: str, title: str, detail: str, suggest: str,
+         age_days: int = 0) -> dict[str, Any]:
+    """One inventory row, with everything but the wording read off `CLASSES`."""
+    kind = BY_CHECK[check]
+    return {
+        "id": action_id(check, key),
+        "check": check,
+        "letter": kind.letter,
+        "key": key,
+        "title": title,
+        "detail": detail,
+        "suggest": suggest,
+        "rank": kind.rank,
+        "abnormal": kind.abnormal,
+        "source": kind.source,
+        "age_days": age_days,
+        "widened": False,
+    }
+
+
+def _widen_collisions(rows: list[dict[str, Any]]) -> None:
+    """Rows sharing four hex digits both widen to eight, and record that they did.
+
+    Four digits is 65,536 values, so at ~40 rows this is a genuine accident of
+    hashing rather than the structural certainty C-11 found -- handled rather
+    than hoped, deterministic within a run, and flagged so the report can print
+    a note instead of changing an id in silence.
+    """
+    seen: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        seen.setdefault(row["id"], []).append(row)
+    for clashing in seen.values():
+        if len(clashing) < 2:
+            continue
+        for row in clashing:
+            row["id"] = action_id(row["check"], row["key"], width=8)
+            row["widened"] = True
+
+
+def actionable_inventory(
+    root: pathlib.Path,
+    sections: dict[str, Any],
+    today: datetime.date | None = None,
+) -> list[dict[str, Any]]:
+    """Every addressable row this repository carries, ranked.
+
+    One producer, not three (C-3). A work item whose branch already merged is
+    an abnormality, the top pending row and an unaddressed followup at once;
+    three independent producers would give that one fact three ids and three
+    wordings. The sections are views over this list -- `abnormal` selects the
+    banner, `rank` orders `pending`, `source` groups `open threads` -- so a
+    reader who sees one id twice is looking at one object.
+
+    Ranking is `(rank, -age_days, id)`: the class first, the oldest of a class
+    next, the id last so the order is total and reproducible. Requirement 4 is
+    that a reader can predict it without running it.
+
+    Everything comes from `sections` -- the state `collect` already gathered --
+    plus local git and the filesystem, never from a maintained list of known
+    problems, which is requirements 2 and 9.
+
+    Five classes in `CLASSES` have no producer here yet and so emit nothing:
+    `branch-already-merged` needs `branch_landed`, the three concern classes
+    need the ledger scanner, and `accepted-gap-standing` needs its own pass
+    over `accepted_gaps[]`. Those are later steps of this item, and the table
+    is the enumeration whether or not a producer stands behind a row -- which
+    is the whole reason the enumeration lives in the table.
+    """
+    day = today or datetime.date.today()
+    work = sections.get("work") or {}
+    pulls = sections.get("pull_requests") or {}
+    protection = sections.get("protection") or {}
+    rows: list[dict[str, Any]] = []
+    rows += _work_rows(root, work, day)
+    rows += _step_rows(root, work)
+    rows += _pull_rows(root, pulls, protection)
+    rows += _protection_rows(protection)
+    rows += _issue_rows(sections.get("issues") or {})
+    rows += _branch_rows(root, pulls, protection)
+    rows += _marker_rows(root)
+    rows += _tool_rows(root)
+    _widen_collisions(rows)
+    rows.sort(key=lambda row: (row["rank"], -row["age_days"], row["id"]))
+    return rows
+
+
+# -- the work-item producer -------------------------------------------------
+
+#: R10-D1's threshold, read from the sweep that owns it rather than restated,
+#: so "idle in planning" cannot come to mean two different numbers of days.
+IDLE_DAYS = sd_sweep.DEFAULT_DAYS
+
+_ITEM_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
+
+
+def _age_days(entry: dict[str, Any], today: datetime.date) -> int | None:
+    """Days since the item dated itself, or None when nothing dates it.
+
+    `created:` first, because it is what the item says about itself; the
+    directory's date prefix second, because every templated item carries one.
+    The same order and the same two sources as `sd_sweep.item_date`, read off
+    the dict this section already holds rather than off a second tree walk.
+    """
+    stamps = (entry.get("created") or "", pathlib.PurePosixPath(entry["path"]).name)
+    for text in stamps:
+        found = _ITEM_DATE_RE.match(str(text))
+        if not found:
+            continue
+        try:
+            return (today - datetime.date.fromisoformat(found.group(1))).days
+        except ValueError:
+            continue
+    return None
+
+
+def _branch_names(root: pathlib.Path) -> set[str] | None:
+    """Every branch name this checkout can see, local and remote-tracking.
+
+    Local *and* remote, because a branch pushed but never checked out here is
+    live work and calling it absent would put an abnormality on somebody's open
+    work -- the sweep item's criterion 5, adopted verbatim. `None` when git
+    cannot answer, which its criterion 4 keeps distinct from an empty answer:
+    an unresolvable branch is a finding, a git that refused is not.
+
+    Local refs only, as `carrier_branches` above reads them and for the same
+    reason: asking the remote would put a network call in every run.
+    """
+    listing = sd_lib.git_output(
+        ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"], root
+    )
+    if listing is None:
+        return None
+    names = set()
+    for ref in listing.split():
+        if ref.startswith("refs/heads/"):
+            names.add(ref[len("refs/heads/"):])
+        elif ref.startswith("refs/remotes/"):
+            names.add(ref[len("refs/remotes/"):].split("/", 1)[-1])
+    return names
+
+
+def _work_rows(
+    root: pathlib.Path, work: dict[str, Any], today: datetime.date
+) -> list[dict[str, Any]]:
+    """The work-item contradictions, one pass over the items already collected.
+
+    Archived and parked items are skipped for status, branch and age: archived
+    is closed by where it lives, and parked is a disposition rather than an
+    open thread. Both exclusions are printed, in `EXCLUDED`.
+
+    `branch-already-merged` is the sixth class of this shape and is
+    deliberately absent: it needs the two-tier `branch_landed`, which is the
+    next step of this item.
+    """
+    heads = _branch_names(root)
+    rows: list[dict[str, Any]] = []
+    for entry in work.get("items") or []:
+        if entry["archived"] or entry["parked"]:
+            continue
+        item = pathlib.PurePosixPath(entry["path"]).name
+        slug, status, branch = entry["slug"], entry["status"], entry["branch"]
+        where = entry["path"]
+        if status == "unknown":
+            rows.append(_row(
+                "status-unreadable", item, slug,
+                f"{where} yields no status this reader recognises",
+                f"give the frontmatter of {where}/prd.md a status: line",
+            ))
+        if status == "in_progress" and not branch:
+            rows.append(_row(
+                "in-progress-without-branch", item, slug,
+                f"{where} is in_progress with no branch: field",
+                f"set branch: in {where}/prd.md to the branch carrying this work",
+            ))
+        if branch and heads is not None and branch not in heads:
+            rows.append(_row(
+                "branch-unresolvable", item, slug,
+                f"{where} names branch {branch}, which no local or remote head has",
+                f"fetch, or correct the branch: field in {where}/prd.md",
+            ))
+        if status != "planning":
+            continue
+        age = _age_days(entry, today)
+        if age is None:
+            rows.append(_row(
+                "undated-planning", item, slug,
+                f"{where} is planning with no created: date and no dated directory",
+                f"add a created: date to {where}/prd.md so the sweep can age it",
+            ))
+        elif age > IDLE_DAYS:
+            rows.append(_row(
+                "idle-planning", item, slug,
+                f"{where} has been planning for {age} days, past the "
+                f"{IDLE_DAYS}-day R10-D1 threshold",
+                f"start {slug}, park it, or archive it",
+                age,
+            ))
+    return rows
+
+
+# -- the open-step producer -------------------------------------------------
+
+_BOX_RE = re.compile(r"^\s*[-*]\s*\[ \]\s*(?P<text>.+?)\s*$")
+_HEADING_RE = re.compile(r"^\s*#{1,6}\s+(?P<text>.+?)\s*$")
+
+
+def _step_rows(root: pathlib.Path, work: dict[str, Any]) -> list[dict[str, Any]]:
+    """Unchecked boxes on items nobody has closed.
+
+    The scope -- not `done`, not archived, not parked -- is what takes 1,747
+    boxes down to two dozen, and it **asserts a repository convention** rather
+    than observing one: it reads a box on a finished item as history. That is a
+    good assumption and it is still an assumption, so it is named in `EXCLUDED`
+    where a reader who disagrees can see what the counts leave out.
+
+    The key is heading, text and ordinal, never a line number, because a line
+    number moves on every edit above it while the heading and the text do not.
+    The ordinal is C-13: one box's text can appear under two implementation
+    steps and those are two tasks, so text alone would give them one id and
+    picking it would authorise an ambiguous action. It is the weakest component
+    here and it is stated as such -- inserting a duplicate *above* an existing
+    one shifts the existing one's ordinal.
+    """
+    rows: list[dict[str, Any]] = []
+    for entry in work.get("items") or []:
+        if entry["archived"] or entry["parked"] or entry["status"] == "done":
+            continue
+        item = pathlib.PurePosixPath(entry["path"]).name
+        where = str(entry["path"])
+        for path in sorted((root / entry["path"]).glob("*.md")):
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            heading = ""
+            seen: dict[tuple[str, str], int] = {}
+            for line in text.splitlines():
+                head = _HEADING_RE.match(line)
+                if head:
+                    heading = " ".join(head.group("text").split())
+                    continue
+                box = _BOX_RE.match(line)
+                if not box:
+                    continue
+                said = " ".join(box.group("text").split())
+                ordinal = seen.get((heading, said), 0)
+                seen[(heading, said)] = ordinal + 1
+                rows.append(_row(
+                    "open-step", f"{item}/{path.name}#{heading}#{said}#{ordinal}",
+                    said,
+                    f"{where}/{path.name}, under {heading or '(no heading)'}",
+                    f"do it, or strike the box in {where}/{path.name}",
+                ))
+    return rows
+
+
+# -- adapters over producers this file and `sd-pr-state` already have --------
+
+
+def _pull_rows(
+    root: pathlib.Path, pulls: dict[str, Any], protection: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """The four pull-request classes, shaped from `sd-pr-state`'s own rows.
+
+    An adapter and not a producer: `pr_state.describe` already decided what a
+    failing check is and what a merge state means, and a second opinion here
+    would drift the first time one of them was fixed.
+
+    One limit, recorded rather than papered over: `pr-check-missing` fires when
+    the branch requires status checks and the pull request reports **none**.
+    Naming *which* required context is absent needs the rollup's check names,
+    and `describe` keeps the counts and the failing names only. The class as
+    built catches the case that matters -- a pull request whose checks never
+    ran against a branch that requires them -- and undercounts the case where
+    some ran and one is absent.
+    """
+    required = (protection.get("detail") or {}).get("required_contexts") or []
+    dirty = bool(sd_lib.git_output(
+        ["--no-optional-locks", "status", "--porcelain"], root
+    ))
+    here = sd_lib.git_output(["rev-parse", "--abbrev-ref", "HEAD"], root)
+    slug = pulls.get("repo") or "?"
+    rows: list[dict[str, Any]] = []
+    for pull in pulls.get("pull_requests") or []:
+        key = f"{slug}!{pull['number']}"
+        title = f"#{pull['number']} {pull['title']}"
+        if pull["failing"]:
+            rows.append(_row(
+                "pr-check-failing", key, title,
+                "failing: " + ", ".join(pull["failing"]),
+                f"fix or re-run the failing checks on {pull['url']}",
+            ))
+        if required and not pull["checks_total"]:
+            rows.append(_row(
+                "pr-check-missing", key, title,
+                f"{pull['base']} requires {len(required)} context(s) and this "
+                "pull request reports no check at all",
+                f"check that the workflows triggered on {pull['url']}",
+            ))
+        if dirty and here and pull["head"] == here:
+            rows.append(_row(
+                "dirty-tree-with-open-pr", key, title,
+                f"the tree is dirty on {here}, which already has this pull request",
+                "commit or stash the working tree before the pull request moves",
+            ))
+        if not pull["draft"]:
+            rows.append(_row(
+                "pr-needs-action", key, title,
+                f"{pull['mergeable']}/{pull['merge_state']}, review "
+                f"{pull['review_decision']}",
+                f"review or merge {pull['url']}",
+            ))
+    return rows
+
+
+def _protection_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
+    """Each open enforcement gap, as `_protection_gaps` already found it.
+
+    Accepted gaps are deliberately not here: `accepted-gap-standing` is its own
+    class, at its own rank and not abnormal, because re-flagging a decision as
+    a defect is how a banner becomes noise. It is a later step of this item.
+    """
+    default = protection.get("default_branch") or "the default branch"
+    return [
+        _row(
+            "protection-gap", f"{default}#{gap['id']}", gap["id"], gap["gap"],
+            f"close the {gap['id']} gap on {default}, or accept it in "
+            f"{ACKNOWLEDGEMENT_RELATIVE_PATH}",
+        )
+        for gap in protection.get("gaps") or []
+    ]
+
+
+def _issue_rows(issues: dict[str, Any]) -> list[dict[str, Any]]:
+    """Indexed issues for this repository, read from the section that has them.
+
+    Jira rows never arrive here: `issues_section` does not return them, for the
+    reason it states and `EXCLUDED` repeats.
+    """
+    rows: list[dict[str, Any]] = []
+    for check, found in (("issue-needs-you", issues.get("needs_you")),
+                         ("issue-open", issues.get("other"))):
+        for issue in found or []:
+            why = ", ".join(issue.get("why") or [])
+            rows.append(_row(
+                check, f"{issue['repo']}#{issue['number']}",
+                f"#{issue['number']} {issue['title']}",
+                f"{issue['state']} since {issue['updated_at']}"
+                + (f", why: {why}" if why else ""),
+                f"answer or close {issue['url']}",
+            ))
+    return rows
+
+
+def _branch_rows(
+    root: pathlib.Path, pulls: dict[str, Any], protection: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Branches on origin that no open pull request is carrying.
+
+    Shaped on `carrier_branches` above -- the same read of origin's refs as
+    this checkout currently knows them -- without its `wip:` filter, because a
+    finished branch nobody opened a pull request for is exactly the thread this
+    class is for and it does not announce itself in a subject line.
+    """
+    default = protection.get("default_branch") or "main"
+    carried = {str(pull["head"]) for pull in pulls.get("pull_requests") or []}
+    listing = sd_lib.git_output(
+        ["for-each-ref",
+         "--format=%(refname:short)%09%(committerdate:relative)%09%(contents:subject)",
+         "refs/remotes/origin"],
+        root,
+    )
+    rows: list[dict[str, Any]] = []
+    for line in (listing or "").split("\n"):
+        parts = line.split("\t")
+        if len(parts) != 3 or not parts[0].startswith("origin/"):
+            continue
+        name = parts[0][len("origin/"):]
+        if name in ("HEAD", default) or name in carried:
+            continue
+        rows.append(_row(
+            "unmerged-branch", parts[0], parts[0],
+            f"last commit {parts[1]}: {parts[2]}",
+            f"open a pull request for {parts[0]}, or delete it",
+        ))
+    return rows
+
+
+# -- the two low-yield producers, counted rather than enumerated -------------
+
+#: Spelled with a group so this file is not its own first hit. The scan is
+#: bounded to tracked files under the four code directories: in `skills/` and
+#: `docs/` the word documents the convention rather than instancing it, which
+#: `EXCLUDED` says out loud.
+_MARKER_PATTERN = "TO(DO)|FIX(ME)"
+_MARKER_PATHS = ("bin", "dashboard", "tests", ".github/scripts")
+
+
+def _marker_rows(root: pathlib.Path) -> list[dict[str, Any]]:
+    """Markers left in tracked source: one search of the index, not a tree walk.
+
+    The true answer in this repository is zero, and the method is why: a
+    recursive grep over the working directory returns four by reaching into
+    untracked worktrees, while a scan bounded by the index returns none. The
+    zero is worth printing and does not deserve a section, which is what rank
+    120 and the counted-not-enumerated rule in `design.md` mean.
+
+    Keyed on the marker text and an ordinal rather than on a line number, for
+    the reason `_step_rows` gives: a line number moves on every edit above it.
+    """
+    listing = sd_lib.git_output(
+        ["grep", "-n", "-E", _MARKER_PATTERN, "--", *_MARKER_PATHS], root
+    )
+    seen: dict[tuple[str, str], int] = {}
+    rows: list[dict[str, Any]] = []
+    for line in (listing or "").split("\n"):
+        parts = line.split(":", 2)
+        if len(parts) != 3:
+            continue
+        path, said = parts[0], " ".join(parts[2].split())
+        ordinal = seen.get((path, said), 0)
+        seen[(path, said)] = ordinal + 1
+        rows.append(_row(
+            "source-marker", f"{path}#{said}#{ordinal}", said,
+            f"{path}:{parts[1]}", f"resolve the marker in {path}, or file it",
+        ))
+    return rows
+
+
+_DISCLOSED_RE = re.compile(r"bin/(?P<tool>[A-Za-z0-9][A-Za-z0-9_-]*)")
+
+
+def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
+    """Skills disclosing a tool under `bin/` that is not built.
+
+    Exact and low-yield: a known roadmap that would print the same lines every
+    run, which is why it sits at rank 125 and is not abnormal.
+
+    `design.md`'s natural-key table predates this class and names no key for
+    the `k` letter. The key used here is the disclosing file and the tool, and
+    it is stable for the same reason the others are: neither endpoint moves
+    when an unrelated tool gets built.
+    """
+    rows: list[dict[str, Any]] = []
+    for path in sorted((root / "skills").glob("*/SKILL.md")):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        where = str(path.relative_to(root))
+        for tool in sorted({m.group("tool") for m in _DISCLOSED_RE.finditer(text)}):
+            if (root / "bin" / tool).exists():
+                continue
+            rows.append(_row(
+                "undisclosed-tool", f"{where}#bin/{tool}", f"bin/{tool}",
+                f"{where} names bin/{tool}, which is not built",
+                f"build bin/{tool}, or stop disclosing it in {where}",
+            ))
+    return rows
 
 
 # --------------------------------------------------------------------------

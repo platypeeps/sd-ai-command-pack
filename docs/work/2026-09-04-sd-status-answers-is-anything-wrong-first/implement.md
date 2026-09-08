@@ -14,8 +14,8 @@ on `main` at `6f9b96ad` — `line_count` over the files `tracked("bin")`
 enumerates with `migrate-*` filtered out, which is exactly what
 `test_bin_stays_under_its_ceiling` does — against the 17,250 R11-D45 left.
 The headroom is **61 lines**, not 1,584. A claim of 600 against 61 is not a
-budget; it is a sentence that stopped being checked. The clause at the top of `tests/test_loc_caps.py` is why
-that mattered: a cap is never raised in the pull request that busts it, so
+budget; it is a sentence that stopped being checked. The clause at the top
+of `tests/test_loc_caps.py` is why that mattered: a cap is never raised in the pull request that busts it, so
 discovering this while implementing would have cost a re-derivation and a
 second pull request before a line of the item could land.
 
@@ -42,8 +42,9 @@ The ceiling is what checks this, not this paragraph.
 
 ## Step checklist
 
-- [ ] **1. The inventory producer.** Add `CLASSES`, `EXCLUDED`, `action_id()`
-      and `actionable_inventory()` to `bin/sd-status`, plus the per-class
+- [x] **1. The inventory producer.** Landed 2026-09-07, `333d1eec`. Add
+      `CLASSES`, `EXCLUDED`, `action_id()` and `actionable_inventory()` to
+      `bin/sd-status`, plus the per-class
       producers. Landable and green on its own: nothing renders it yet, and
       `python3 -m unittest tests.test_sd_status` still passes.
 - [ ] **2. The merged-branch derivation, two-tier.** `branch_landed(root,
@@ -145,3 +146,49 @@ Filled in as each check runs, so a claim here is a transcript and not a plan.
 
 - 2026-09-04 baseline, before any code change: `make check` →
   `grep -cE '^OK' unittest-output.log` = `40`, `grep -c FAILED` = `0`.
+- 2026-09-07, step 1: `make check` (shared venv) → `grep -c FAILED` = `0`,
+  `grep -cE '^OK'` = `56`, unchanged, step 1 adding no module.
+  `tests.test_sd_status` → `Ran 99 tests ... OK`, 69 before.
+  `tests.test_loc_caps` → `Ran 8 tests ... OK`. `ReadOnlyTests` → `OK`.
+  Check 4 is **not** run yet and cannot be: `branch-already-merged` is step 2,
+  and step 1 ships its `CLASSES` row with no producer behind it.
+  Id stability held on this checkout: 45 rows, two runs, identical ids, all
+  unique.
+- 2026-09-07, step 1 measured `bin/` at **17,800** against `BIN_CAP` 18,000.
+
+## Budget, amended after step 1
+
+Step 1 cost **586** lines. R11-D46 priced the same spans at about **328** — 260
+of body plus roughly 68 of glue at the file's 5.21 rate. The gap is 258, and it
+is in the derivation rather than in the scope: nothing was built that the
+design did not ask for.
+
+Two causes, both nameable:
+
+- **The four adapters were priced at 24 and cost 121.** R11-D46 called each
+  "a six-line row shaper". A row carries `title`, `detail` and `suggest` prose
+  and a docstring, and six lines cannot hold them. This is the first span in
+  the series priced by its shape rather than at a named built analogue, and it
+  is the one that missed.
+- **Four helpers were never priced at all and cost 79**: `_row` 18,
+  `_widen_collisions` 19 — the collision handling the design requires —
+  `_age_days` 18, `_branch_names` 24.
+
+**The remaining steps do not fit.** R11-D46 still prices about 264 of body for
+steps 2 through 5, plus glue, against **200** of headroom. That is recorded
+here and not acted on: a cap is never raised in the pull request that busts
+it, and step 1 does not bust it — 17,800 is under 18,000 with the tests green.
+The next step to touch `bin/` needs a re-derivation first, and that
+re-derivation now has a measured 26% figure of its own to price adapters and
+helpers against, rather than a shape guess.
+
+**And that re-derivation raises the ceiling; it does not cut the steps.** The
+operator's ruling of 2026-09-07, in their words: *"whatever does not reduce
+existing functionality. We gotta get out of the proposal to remove
+functionality to maintain a cap. I will never agree to that. If functionality
+requires more code, then it requires more code."* So the shortfall above is a
+statement about the ceiling, not about steps 2 through 5. None of them is
+dropped, deferred or trimmed to fit 18,000. The cap exists to make growth
+deliberate and measured, which is why a raise is derived and recorded rather
+than waved through — and why it is never raised in the pull request that busts
+it. It does not exist to decide what the tool does.
