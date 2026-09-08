@@ -1862,6 +1862,30 @@ class ConcernLedgerTests(InventoryFixture):
         ))
         self.assertEqual([], self.scan())
 
+    def test_a_bullet_row_outranks_a_prose_sentence_about_the_same_concern(
+        self,
+    ) -> None:
+        """Bullet is its own tier, above prose.
+
+        A bulleted row is a ledger entry; a sentence that happens to open with
+        a `C-` id is not. Sharing a tier, which one decides the concern is
+        settled by whichever line `git grep` returns first, so the prose is
+        written above the row here -- exactly as the shape-precedence fixture
+        does, and for the same reason.
+
+        Found by review on #792. On the live corpus the three-tier and
+        four-tier rules agree on every one of 530 concerns, so this is a latent
+        defect removed rather than a live misclassification corrected.
+        """
+        self.ledger("2026-08-01-bullet/prd.md", (
+            "# bullet\n\n"
+            "## Log\n\n"
+            "C-9 was raised while C-2 was still parked.\n\n"
+            "## Review\n\n"
+            "- C-9, minor: the count was off by one. Corrected.\n"
+        ))
+        self.assertEqual([], self.scan())
+
     def test_a_disposition_on_the_next_line_is_still_read(self) -> None:
         """Continuation absorption: dispositions wrap, and the row is one row."""
         self.ledger("2026-08-01-wrapped/prd.md", (

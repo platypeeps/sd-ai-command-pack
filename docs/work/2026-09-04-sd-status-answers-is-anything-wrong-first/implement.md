@@ -242,6 +242,21 @@ The ceiling is what checks this, not this paragraph.
       Log first. A test that cannot fail is not evidence, and this one was not
       until it was made to.
 
+      **Review on #792 found a fourth tier the design's rule did not have.**
+      `design.md` says table > bold > prose, and a `- C-113, minor: ...` row is
+      none of the first two, so bulleted ledger rows shared a tier with prose
+      sentences that merely open with a `C-` id. Sharing a tier, which of the
+      two decides a concern is settled by whichever line `git grep` returns
+      first. Measured before changing anything, the three-tier and four-tier
+      rules agree on every one of 530 concerns -- 453 closed, 24 open, 18
+      parked, 35 unreadable either way, zero verdicts changing -- so this is a
+      latent defect removed and not a live misclassification corrected. It is
+      still worth removing: the largest ledger in the corpus, 37 rows, is
+      written in exactly the bullet form that was sharing a tier with prose,
+      and its correctness today is an accident of file order. Precedence is now
+      table > bold > bullet > prose, with a test whose fixture puts the prose
+      above the row, and which fails when the tier is collapsed back.
+
       Verified against the live corpus, which is the point of the whole
       section: **18 parked, 24 open, 35 unreadable**, and `C-19` surfaces as
       parked from

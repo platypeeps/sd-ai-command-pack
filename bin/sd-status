@@ -1677,16 +1677,36 @@ def _disposition(text: str) -> str:
 
 
 def _concern_shape(text: str) -> int:
-    """Table beats bold beats prose: the ledger of record is the most
-    structured row present, and prose *about* a concern is not its disposition.
+    """Table beats bold beats bullet beats prose. The ledger of record is the
+    most structured row present, and prose *about* a concern is not its
+    disposition.
 
     Without this, a cross-reference decides a concern's fate. Measured on this
     item's own C-4, which is `rebutted` in its table and read as open from a
     `## Log` line that mentions a different concern's parking.
+
+    **Bullet is its own tier, above prose**, which `design.md`'s three-tier
+    rule did not separate. A bulleted row is a ledger entry; a sentence that
+    happens to open with a `C-` id is not. Folded together, which of the two
+    decides the concern is settled by whichever line `git grep` returns first,
+    since rows of equal shape keep the one seen first. Measured on the corpus
+    the two rules agree exactly -- 453 closed, 24 open, 18 parked, 35
+    unreadable either way, zero concerns changing verdict -- so this is a
+    latent defect removed rather than a live misclassification corrected. It
+    matters because the largest ledger in the corpus, 37 rows, is written in
+    the non-bold bullet form that was sharing a tier with prose.
     """
-    if text.lstrip().startswith("|"):
+    stripped = text.lstrip()
+    if stripped.startswith("|"):
+        return 3
+    if "**C-" in text:
         return 2
-    return 1 if "**C-" in text else 0
+    return 1 if _BULLET_RE.match(stripped) else 0
+
+
+#: A bulleted row, for the tier above prose. `[-*]` and then whitespace: the
+#: dash alone is not enough, since a prose line may begin with an em dash.
+_BULLET_RE = re.compile(r"^[-*]\s")
 
 
 def _absorb(lines: list[str], number: int) -> str:

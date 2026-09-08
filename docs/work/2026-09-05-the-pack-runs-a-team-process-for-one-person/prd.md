@@ -4062,13 +4062,13 @@ from a number the operator types.
       not 986, and `_render_work` is **24** lines and not 19. It then shifted a
       second time inside the same pull request, when review of that step added
       fifteen lines above it -- caught by review and not by the gate, whose
-      window tolerance accepts a start line off by a few -- and a **third**
-      time at that item's step 2b, which is where 1772 became 1920. A line
-      number in prose about a file under active edit is stale on the next
-      commit, including the next commit of the change that just fixed it, and
-      and a **fourth** at step 3, 1920 to 2114. Four corrections in four pull
-      requests is the measurement this bullet now has, and the rate is one per
-      landing with no sign of settling while `bin/sd-status` is under active
+      window tolerance accepts a start line off by a few -- a **third** time
+      at that item's step 2b, where 1772 became 1920, and a **fourth** at its
+      step 3, where 1920 became 2114. A line number in prose about a file under
+      active edit is stale on the next commit, including the next commit of the
+      change that just fixed it. Four corrections in four pull requests is the
+      measurement this bullet now has, and the rate is one per landing with no
+      sign of settling while `bin/sd-status` is under active
       edit. The anchor buys precision the length figure beside it already
       carries. Dropping the `:start-end` and citing `_render_work` by name
       alone is this item's to decide, and it is now the recommendation rather
