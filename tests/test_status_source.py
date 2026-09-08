@@ -366,37 +366,51 @@ class TheRowDecides(Fixture):
         """The two answers become one, and the marker is obeyed either way.
 
         `make setup` provisions `sd_db` into the pack's virtualenv and every
-        entrypoint runs under `#!/usr/bin/env python3`, so on this machine --
-        `python3` 3.14, virtualenv 3.13 -- `./bin/sd-status` answered off git
-        while `.venv/bin/python bin/sd-status` answered off the row, and the
-        two printed different words for the same item. The library is pure
-        Python, so the interpreter that found no `sd_db` reads the pinned copy
-        rather than a different source of truth.
+        entrypoint runs under `#!/usr/bin/env python3`, so on the machine this
+        was found on -- `python3` 3.14, virtualenv 3.13 -- `./bin/sd-status`
+        answered off git while `.venv/bin/python bin/sd-status` answered off
+        the row, and the two printed different words for the same item. The
+        library is pure Python, so the interpreter that found no `sd_db` reads
+        the pinned copy rather than a different source of truth.
 
-        Run under `-S`, which is what "an interpreter that cannot import it"
-        means here: no `site`, so the virtualenv's own `site-packages` is not
-        on the path and the first import fails exactly as the system
-        interpreter's does. The subprocess is the assertion -- patching
-        `sys.modules` cannot express it, because a name bound to `None` there
-        defeats the retry as well as the first try, which is what the two
-        tests above rely on and why they still pass.
+        Built here rather than borrowed from this checkout: a test that asks
+        the real `.venv` for a copy has to skip where there is none, and a
+        skipped test in CI asserts nothing at all. The tree is a whole pack --
+        `bin/sd_lib.py` and a provisioned `sd_db` beside it -- so the helper
+        resolves it from its own `__file__` exactly as it does in a real one.
+
+        Run under `-S`: no `site`, so no installed `sd_db` on any path can
+        answer the first import, and the retry is the only thing that can.
+        That is also why patching `sys.modules` cannot express this -- a name
+        bound to `None` defeats the retry as well as the first try, which is
+        what the two tests above rely on and why they still pass.
+
+        The stub is empty on purpose. `installed` is set the moment the import
+        succeeds, before `connect` is reached, so a package with no `connect`
+        proves the import and nothing further -- which is the whole claim.
         """
-        if not sd_lib._provisioned_library_paths():
-            self.skipTest("no provisioned copy in this checkout; `make setup` puts one there")
+        pack = self.tmp / "pack"
+        (pack / "bin").mkdir(parents=True)
+        (pack / "bin" / "sd_lib.py").write_bytes(
+            (REPO_ROOT / "bin" / "sd_lib.py").read_bytes())
+        stub = pack / ".venv" / "lib" / "python3.13" / "site-packages" / "sd_db"
+        stub.mkdir(parents=True)
+        (stub / "__init__.py").write_text("", encoding="utf-8")
         script = (
             "import sd_lib, sys;"
             " rows = sd_lib.Rows(sys.argv[1]);"
-            " print(int(rows.installed), rows.problem)"
+            " print(int(rows.installed))"
         )
         result = subprocess.run(
-            [sys.executable, "-S", "-c", script, str(REPO_ROOT)],
+            [sys.executable, "-S", "-c", script, str(self.root)],
             capture_output=True, text=True,
-            env={**os.environ, "PYTHONPATH": str(REPO_ROOT / "bin")},
+            env={**os.environ, "PYTHONPATH": str(pack / "bin")},
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            result.stdout.split()[0], "1",
-            f"an interpreter without the library did not find the provisioned copy: {result.stdout!r}",
+            result.stdout.strip(), "1",
+            f"an interpreter without the library did not find the provisioned"
+            f" copy: {result.stdout!r} {result.stderr!r}",
         )
 
     def test_no_provisioned_copy_is_offered_from_a_virtualenv_without_one(
