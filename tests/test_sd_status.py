@@ -1025,6 +1025,14 @@ class InventoryFixture(StatusFixture):
     producer stayed invisible.
     """
 
+    #: Every age in this class is measured from one fixed day, never from the
+    #: wall clock. `actionable_inventory` defaults `today` to `date.today()`,
+    #: and an unpinned fixture drifts twice over: two calls that straddle
+    #: midnight can order their rows differently, and a fixture item dated
+    #: `2026-08-01` silently crosses `IDLE_DAYS` as real time passes and starts
+    #: producing an `idle-planning` row no assertion here expects.
+    TODAY = datetime.date(2026, 9, 7)
+
     def pull(self, **overrides: Any) -> dict[str, Any]:
         """A row shaped exactly as `sd-pr-state`'s `describe` returns one."""
         row = {
@@ -1056,7 +1064,9 @@ class InventoryFixture(StatusFixture):
         return base
 
     def rows(self, **overrides: Any) -> list[dict[str, Any]]:
-        return status.actionable_inventory(self.repo, self.sections(**overrides))
+        return status.actionable_inventory(
+            self.repo, self.sections(**overrides), self.TODAY
+        )
 
     def by_check(self, rows: list[dict[str, Any]], check: str) -> list[dict[str, Any]]:
         return [row for row in rows if row["check"] == check]
@@ -1171,8 +1181,8 @@ class InventoryShapeTests(InventoryFixture):
         self.item("2026-08-01-alpha", status="in_progress")
         self.item("2026-08-02-beta")
         sections = self.sections()
-        first = status.actionable_inventory(self.repo, sections)
-        second = status.actionable_inventory(self.repo, sections)
+        first = status.actionable_inventory(self.repo, sections, self.TODAY)
+        second = status.actionable_inventory(self.repo, sections, self.TODAY)
         self.assertTrue(first)
         self.assertEqual([row["id"] for row in first], [row["id"] for row in second])
         self.assertEqual(len({row["id"] for row in first}), len(first))
@@ -1219,8 +1229,7 @@ class WorkItemInventoryTests(InventoryFixture):
             encoding="utf-8",
         )
         self.item("2026-08-01-alpha")
-        today = datetime.date(2026, 9, 7)
-        rows = status.actionable_inventory(self.repo, self.sections(), today)
+        rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY)
         idle = self.by_check(rows, "idle-planning")
         self.assertEqual([row["key"] for row in idle], ["2026-01-01-ancient"])
         self.assertGreater(idle[0]["age_days"], status.IDLE_DAYS)
@@ -1232,9 +1241,7 @@ class WorkItemInventoryTests(InventoryFixture):
             "---\ntitle: undated\nstatus: planning\n---\n\n# undated\n",
             encoding="utf-8",
         )
-        rows = status.actionable_inventory(
-            self.repo, self.sections(), datetime.date(2026, 9, 7)
-        )
+        rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY)
         self.assertEqual(
             [row["title"] for row in self.by_check(rows, "undated-planning")],
             ["undated-thing"],
@@ -1248,9 +1255,7 @@ class WorkItemInventoryTests(InventoryFixture):
         (archived / "2026-01-01-old" / "prd.md").write_text(
             PRD.format(title="old", status="planning", extra=""), encoding="utf-8"
         )
-        rows = status.actionable_inventory(
-            self.repo, self.sections(), datetime.date(2026, 9, 7)
-        )
+        rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY)
         self.assertEqual([], [row for row in rows if "old" in row["key"]])
         self.assertEqual([], [row for row in rows if "parked" in row["key"]])
 
