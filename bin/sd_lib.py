@@ -560,11 +560,15 @@ class Rows:
             try:
                 import sd_db  # noqa: PLC0415 - the provisioned copy, second and last try
             except ImportError as retry:
-                # A provisioned copy that will not import is a different fault
-                # from having none, and reporting the first error would hide
-                # it behind "No module named 'sd_db'". Where nothing was
-                # offered the first error is the only one there is.
-                self.problem = f"sd_db is not installed here: {retry if offered else error}"
+                # Two faults, two sentences. A provisioned copy that will not
+                # import is not a machine without the library, and saying "not
+                # installed" over the top of one sends the reader to `make
+                # setup` for a package that is already there. Where nothing
+                # was offered, the first error is the only one there is.
+                self.problem = (
+                    f"sd_db is provisioned at {offered[0]} but will not import: {retry}"
+                    if offered else f"sd_db is not installed here: {error}"
+                )
                 return
         self.installed = True
         try:

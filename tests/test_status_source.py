@@ -349,10 +349,18 @@ class TheRowDecides(Fixture):
         below asserts it. What is wrong is that it happens in silence. The
         marker is the checkout saying rows are the authority; an answer that
         came from somewhere else has to say so.
+
+        `_provisioned_library_paths` is emptied as well as the module blocked,
+        because this test names the machine with *nothing* to offer. The
+        checkout it runs in has a provisioned copy, so blocking the module
+        alone now describes a different machine -- one whose provisioned copy
+        will not import -- and that state has its own sentence and its own
+        test below.
         """
         self.marker("row")
         self.seed("planning")
-        with mock.patch.dict(sys.modules, {"sd_db": None}):
+        with mock.patch.dict(sys.modules, {"sd_db": None}), \
+                mock.patch.object(sd_lib, "_provisioned_library_paths", lambda: []):
             item = self.only()
         self.assertTrue(
             any("sd_db is not installed here" in problem
@@ -471,6 +479,12 @@ class TheRowDecides(Fixture):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("the provisioned copy is broken", result.stdout)
         self.assertNotIn("No module named", result.stdout)
+        # The prefix is half the message and the half a reader acts on:
+        # "not installed" sends them to `make setup` for a package that is
+        # already there. Pinned separately because the first fix corrected
+        # the detail and left the prefix saying the opposite of it.
+        self.assertNotIn("is not installed here", result.stdout)
+        self.assertIn("will not import", result.stdout)
 
     def test_no_provisioned_copy_is_offered_from_a_virtualenv_without_one(
         self,
@@ -498,7 +512,8 @@ class TheRowDecides(Fixture):
         """
         self.marker("row")
         self.seed("planning")
-        with mock.patch.dict(sys.modules, {"sd_db": None}):
+        with mock.patch.dict(sys.modules, {"sd_db": None}), \
+                mock.patch.object(sd_lib, "_provisioned_library_paths", lambda: []):
             self.assertNotEqual(self.only().status, "unknown")
 
     def test_the_database_is_opened_once_for_a_whole_enumeration(self) -> None:
