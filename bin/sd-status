@@ -2159,6 +2159,7 @@ def render_actions(rows: list[dict[str, Any]], stream: TextIO) -> None:
     """
     write = stream.write
     write(f"{len(rows)} actionable\n")
+    _widened_note(rows, write)
     for row in rows:
         write(f"{row['id']} {row['check']:<{CHECK_WIDTH}} {row['title']}\n")
         write(f"  {row['suggest']}\n")
@@ -2304,6 +2305,23 @@ def _render_banner(section: dict[str, Any], write: Any) -> None:
             write(f"    ... {len(fired) - BANNER_LIMIT} more, ranked in `pending`\n")
 
 
+def _widened_note(rows: list[dict[str, Any]], write: Any) -> None:
+    """Name the ids that widened, or print nothing.
+
+    `_widen_collisions` has set `widened` since step 2 and no renderer read it,
+    so the mitigation `design.md:540` accepts the collision risk on -- "the
+    note printed on collision is what makes the change visible rather than
+    silent" -- did not exist: the id simply changed between runs and only
+    `--json` said why. The ids are named rather than counted because the reader
+    who needs this is the one holding the four-digit id that stopped working.
+    """
+    widened = sorted({row["id"] for row in rows if row.get("widened")})
+    if not widened:
+        return
+    write(f"  {len(widened)} ids widened to eight digits to stay distinct: "
+          f"{', '.join(widened)}\n")
+
+
 def _render_pending(rows: list[dict[str, Any]], write: Any) -> None:
     """The whole inventory by rank, capped, with the cap's denominator."""
     write("\npending\n")
@@ -2314,6 +2332,7 @@ def _render_pending(rows: list[dict[str, Any]], write: Any) -> None:
     write(f"  {len(shown)} of {len(rows)}, by rank\n")
     for row in shown:
         write(f"  {row['id']}  {row['check']:<{CHECK_WIDTH}} {row['title']}\n")
+    _widened_note(rows, write)
 
 
 def _render_next(rows: list[dict[str, Any]], write: Any) -> None:

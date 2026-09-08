@@ -235,6 +235,29 @@ planning` lane. The ledger below is merged across both.
 | C-20 | inventory | 3 | high | yes | rebutted |
 | C-21 | inventory | 3 | high | yes | addressed |
 | C-22 | inventory | 3 | medium | yes | addressed |
+| C-23 | step 6 | 4 | medium | yes | addressed |
+
+
+**C-23 — the collision note the design accepts the risk on was never
+printed.** Found while writing `skills/sd-status/SKILL.md`, by a reader who
+went looking for the note in the output and could not find it.
+`_widen_collisions` sets `row["widened"] = True` and its own docstring says the
+flag exists "so the report can print a note instead of changing an id in
+silence" — and no renderer read it. `design.md:540` accepts the widening risk
+on exactly that mitigation: "the survivor reverts to four, so its id changed …
+The note printed on collision is what makes the change visible rather than
+silent." Measured on this corpus: `--json` carried `widened` on `sd08e3f70` and
+`sd08e7003` while `./bin/sd-status | grep -i widen` exited 1. So a user holding
+a four-digit id that stopped resolving had nothing in the report telling them
+why, which is the silent id change the risk section says was not accepted.
+
+Addressed rather than rebutted, and the design line is right rather than the
+code: the note is the mitigation, so removing the claim would leave an accepted
+risk unmitigated. `_widened_note` prints under both `pending` and `--actions`,
+naming the ids rather than counting them — the reader who needs it is the one
+holding the id that stopped working. Two tests pin it, one that the note
+appears for a widened pair and one that it stays absent otherwise, because a
+line that always prints is not a signal. Both falsified.
 
 **C-1 — the merged-branch check would have found nothing.** The first draft
 tested `git merge-base --is-ancestor <branch> <default>`, and this repository
