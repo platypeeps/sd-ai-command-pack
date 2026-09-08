@@ -1305,10 +1305,21 @@ a recorded decision — which is where C-39 and C-42 resolve. The scoring is
 parked with the operator, triggered by `mezmo-world-simulator` Phase 1 reaching
 `done`; `prd.md`'s log carries the reasoning.
 
-*Criterion 28's `commands.yaml` clause waits on item B's slice 4.* PR 8d says
-so in its own text and the closure table says so in its own row, and this
-section was written before either. This is now the **only** thing between the
-item and `done`.
+*Criterion 28 has two clauses that cannot close from this checkout.* PR 8d
+says so in its own text and the closure table says so in its own row, and this
+section was written before either. It is now the only criterion between the
+item and `done`, but it is **two** pieces of work and not one:
+
+1. **`commands.yaml`, item B's.** The "no palette entry" assertion enumerates
+   a file that does not exist in this repository. B's slice 4 PR 7 writes it,
+   as the dashboard's palette; that PR is behind B's slice 3 PRs 5 and 6.
+   `tests/test_sd_suggest.py:17` records the omission deliberately.
+2. **The writing manifest, another repository's.** `skill-proposal` has to be
+   absent from it, and PR 8d could only reach the
+   `contrib/sd-propose-skills/` half from here.
+
+Neither is code this repository writes. Both are one assertion each once the
+thing they assert against exists.
 
 **So `Delivers:` is deliberately not on `fe0712ae`.** `git log --grep
 '^Delivers:'` on `main` returns nothing, which is the state this paragraph
@@ -1319,9 +1330,11 @@ happened without its trailer — the next `sd-ship` merge here, or one empty
 commit on the branch — so nothing is lost by waiting, and the item stays
 `in_progress` until the two close.
 
-**What is left, in the order it can be done.** One thing, and it is not this
-repository's. Item B's slice 4 lands `commands.yaml` and the last clause of
-criterion 28 becomes checkable. Then, and not before, the delivery commit.
+**What is left, in the order it can be done.** Two things, and neither is this
+repository's to write. Item B's slice 4 PR 7 lands `commands.yaml`, and the
+palette clause becomes assertable here. The writing repository drops the
+`skill-proposal` kind from its manifest, and the manifest clause becomes
+assertable here. Then, and not before, the delivery commit.
 Scoring the seven passes is no longer in this order at all: it is evidence
 gathered from `answerbook/mezmo-world-simulator` rather than code written here
 — its git history records at least the fourth and the seventh (`0c39c78`,
