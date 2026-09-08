@@ -231,9 +231,21 @@ Filled in as each check runs, so a claim here is a transcript and not a plan.
   `bin/sd-docs-lint` → `sd-docs-lint: clean`, exit `0`; the test script → exit
   `0`, `^OK` = `56`, `FAILED` = `0`. Unchanged from the planning commit, so the
   `56` above survives four merges and is still the number criterion 1 compares
-  against. Run with the primary checkout's `.venv/bin/python`, because a fresh
-  worktree has no `.venv` and `make check` fails on the missing interpreter
-  rather than on anything it measures.
+  against.
+
+  A fresh worktree has no `.venv`, and `make check` there fails on the missing
+  interpreter rather than on anything it measures: `error: PYTHON_BIN must
+  resolve to an executable (got '.venv/bin/python')`. The `Makefile` declares
+  `VENV ?= .venv`, so the primary checkout's environment is borrowed by
+  overriding it, and this is the exact command that produced the line above:
+
+  ```
+  make check VENV="$HOME/repos/platypeeps/sd-ai-command-pack/.venv"
+  ```
+
+  `bin/sd-docs-lint` is run the same way, as
+  `"$VENV/bin/python" bin/sd-docs-lint`. Spelled out because a transcript that
+  cannot be re-run is a claim rather than a check. Found in review.
 - 2026-09-07, step 2's gate, on `main` at `5c23df19`: the `grep -cF` command
   prints `1`, and the sentence it matches — *"`sd-grill` moves to `contrib/` and
   a trial decides whether it stays, by the operator's decision on 2026-09-05"* —
