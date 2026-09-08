@@ -20,6 +20,7 @@ import io
 import itertools
 import json
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -1236,7 +1237,9 @@ class InventoryShapeTests(InventoryFixture):
         one pins only that the executable an operator runs shows them at all,
         which the in-process tests cannot say.
 
-        `actions` stays absent: that key is step 5's.
+        The `actions` key was asserted absent here until step 5 added it,
+        which is the same inversion one step later and for the same reason.
+        `ActionsCliTests` owns that surface now.
         """
         self.with_github(pulls=[])
         self.item("2026-08-01-alpha", status="in_progress")
@@ -1244,7 +1247,6 @@ class InventoryShapeTests(InventoryFixture):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         for present in ("abnormalities", "pending", "next", "open threads"):
             self.assertIn(f"\n{present}\n", completed.stdout)
-        self.assertNotIn("actions", self.report())
 
 
 class WorkItemInventoryTests(InventoryFixture):
@@ -2282,6 +2284,146 @@ class ReportSectionTests(InventoryFixture):
         abnormal = sum(1 for kind in status.CLASSES if kind.abnormal)
         self.assertEqual(abnormal, len(labels))
         self.assertEqual(1, len(set(labels)))
+
+class ActionsFlagTests(InventoryFixture):
+    """`--actions`, and the two `--json` keys the report now carries.
+
+    The flag exists because `pending` caps at ten and a caller that wants row
+    eleven should not have to re-derive the list. So the thing under test is
+    mostly that this surface is *not* the capped one.
+    """
+
+    def result(self, **overrides: Any) -> dict[str, Any]:
+        inventory = self.inventory(**overrides)
+        return {
+            "actions": inventory.rows,
+            "next": status.next_action(inventory.rows),
+        }
+
+    def actions_text(self, rows: list[dict[str, Any]]) -> str:
+        stream = io.StringIO()
+        status.render_actions(rows, stream)
+        return stream.getvalue()
+
+    def test_the_count_on_the_first_line_equals_the_rows_below_it(self) -> None:
+        """The acceptance criterion, in process rather than through a shell."""
+        for index in range(6):
+            self.item(f"2026-08-{index + 1:02d}-item", status="in_progress")
+        rows = self.inventory().rows
+        text = self.actions_text(rows)
+        head = text.splitlines()[0]
+        self.assertEqual(f"{len(rows)} actionable", head)
+        self.assertEqual(
+            len(rows),
+            sum(1 for line in text.splitlines()
+                if re.match(r"^[a-z][0-9a-f]{4,} ", line)),
+        )
+
+    def test_the_id_pattern_admits_a_widened_id(self) -> None:
+        """`{4,}` and not `{4}`, which is what the criterion said.
+
+        A collided id widens to eight hex digits by this design's own rule.
+        The fixed-width form counted 120 of 122 in this repository and could
+        never have passed here, so the criterion was wrong rather than the
+        ids.
+        """
+        # `sd08e3f70` verbatim, one of the two this checkout actually widened,
+        # and not a shortened stand-in: an id carrying seven hex digits passes
+        # both assertions below while contradicting the docstring above them,
+        # so the fixture has to carry the real width to be pinning anything.
+        rows = [{"id": "sd08e3f70", "check": "open-step", "title": "t",
+                 "suggest": "do the thing"}]
+        line = self.actions_text(rows).splitlines()[1]
+        self.assertTrue(re.match(r"^[a-z][0-9a-f]{4,} ", line))
+        self.assertFalse(re.match(r"^[a-z][0-9a-f]{4} ", line))
+
+    def test_actions_is_not_capped_the_way_pending_is(self) -> None:
+        """The whole point of the flag: `pending` elides, this does not."""
+        for index in range(status.PENDING_LIMIT + 4):
+            self.item(f"2026-08-{index + 1:02d}-item", status="in_progress")
+        rows = self.inventory().rows
+        self.assertGreater(len(rows), status.PENDING_LIMIT)
+        listed = [line for line in self.actions_text(rows).splitlines()
+                  if re.match(r"^[a-z][0-9a-f]{4,} ", line)]
+        self.assertEqual(len(rows), len(listed))
+
+    # -- the two keys -------------------------------------------------------
+
+    def test_next_carries_the_id_it_belongs_to(self) -> None:
+        """An object, not a string.
+
+        A caller that acts on the suggestion needs the row it came from in
+        the same breath; a bare sentence would make it look the id up again
+        and could pick a different row than the one the report named.
+        """
+        self.item("2026-08-01-alpha", status="in_progress")
+        self.item("2026-08-02-beta", status="in_progress")
+        result = self.result()
+        top = result["actions"][0]
+        self.assertEqual(
+            {"id": top["id"], "check": top["check"], "suggest": top["suggest"]},
+            result["next"],
+        )
+
+    def test_next_is_none_rather_than_an_empty_object_when_nothing_is_open(
+        self,
+    ) -> None:
+        """`null` says "no row"; `{}` would say "a row with no fields"."""
+        self.assertEqual([], self.result()["actions"])
+        self.assertIsNone(self.result()["next"])
+
+    def test_actions_is_the_whole_inventory_and_not_a_second_producer(
+        self,
+    ) -> None:
+        """C-3 again, at the `--json` boundary."""
+        self.item("2026-08-01-alpha", status="in_progress")
+        self.assertEqual(self.inventory().rows, self.result()["actions"])
+
+
+class ActionsCliTests(StatusFixture):
+    """The flag as a caller invokes it, including what wins against `--json`."""
+
+    def test_json_wins_when_both_flags_are_given(self) -> None:
+        """One output per run, and the machine-readable one is the wider.
+
+        `--json` carries `actions` in full, so a caller passing both loses
+        nothing by getting the object; the reverse would drop every other key.
+        """
+        self.item("2026-08-01-alpha", status="in_progress")
+        completed = self.run_tool(SD_STATUS, "--json", "--actions")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        payload = json.loads(completed.stdout)
+        self.assertEqual(3, payload["schema"])
+        self.assertTrue(payload["actions"])
+
+    def test_the_actions_key_is_the_whole_inventory_not_the_pending_slice(
+        self,
+    ) -> None:
+        """Through `collect()`, and with more rows than `pending` will show.
+
+        `ActionsFlagTests` builds this key by hand to exercise the renderer,
+        so nothing there can see a slice applied inside `collect()`: a
+        deliberate `rows[:PENDING_LIMIT]` in the producer passed that whole
+        class. It is the fixture defect the C-3 test had on step 4 wearing a
+        different hat -- a fixture holding one row cannot tell an uncapped
+        list from a capped one -- and the fix is the same, which is to hand
+        the assertion more rows than the cap.
+        """
+        for index in range(status.PENDING_LIMIT + 4):
+            self.item(f"2026-08-{index + 1:02d}-item", status="in_progress")
+        payload = self.report()
+        rows = payload["inventory"]["rows"]
+        self.assertGreater(len(rows), status.PENDING_LIMIT)
+        self.assertEqual(rows, payload["actions"])
+
+    def test_the_flag_prints_the_list_and_nothing_else(self) -> None:
+        self.item("2026-08-01-alpha", status="in_progress")
+        completed = self.run_tool(SD_STATUS, "--actions")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertTrue(completed.stdout.startswith("1 actionable\n"))
+        for absent in ("abnormalities", "pending", "work items"):
+            self.assertNotIn(f"\n{absent}\n", completed.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
