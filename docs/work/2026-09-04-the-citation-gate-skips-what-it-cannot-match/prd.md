@@ -162,3 +162,33 @@ and reports neither.
    the regex, not by a test. That reading should be finished rather than stopped
    at its first hit: an em dash, a semicolon, a bare "and", a line break landing
    between the halves.
+
+- **C-34, found 2026-09-07 while repairing rule 6 after an unrelated edit.**
+  Rule 6 checks that a recorded citation's *target* text is still at the
+  recorded line. It never checks that the *citing* line still carries the
+  citation. A row whose citation was deleted from the citing file therefore
+  stays in `.citations.tsv` and keeps passing, because the target it names is
+  untouched and nothing re-reads the source.
+
+  Measured, not supposed. Item A's manifest held 25 rows; four of them —
+  `implement.md:789` citing `prd.md:988-1002`, `:791` citing `:1600-1602`,
+  `:795` citing `:997-999`, and `:802` citing `:959` — name citations that are
+  absent from `implement.md` at `HEAD`, not only from the working tree:
+  `git show HEAD:.../implement.md | grep -c '988-1002'` returns `0` for all
+  four. They passed rule 6 on every run until an edit to `prd.md` moved the
+  targets, at which point they failed as though they were live citations that
+  had drifted. `--update-citations` then dropped them, correctly, and the
+  count fell 25 to 21 with no other row changing.
+
+  Two consequences, and the second is the one that matters. A deleted citation
+  leaves a row that reports a false failure later, which is noise. Worse, the
+  count in the manifest overstates how much of a page is actually cited, so
+  "checked 24 citation(s)" is a number nobody can act on: it counts rows, not
+  citations that exist. This is the same defect class this item already carries
+  — the gate skipping what it cannot match — arriving from the other side: the
+  gate *keeping* what no longer exists.
+
+  Fix belongs with step 2's census, which already has to return bucket counts
+  and conserve them. A row whose citing line no longer carries its citation is
+  a bucket of its own, reported and dropped, rather than a silent survivor or
+  a failure blamed on the target.
