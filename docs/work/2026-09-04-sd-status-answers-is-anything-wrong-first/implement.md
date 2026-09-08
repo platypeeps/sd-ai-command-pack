@@ -136,6 +136,32 @@ The ceiling is what checks this, not this paragraph.
       archived items into one bucket and loses `C-19` entirely). Expected on
       today's corpus: 245 concerns, 206 closed, 23 open, 16 unclassifiable.
       Note: `[[:space:]]` in the `git grep -E` pattern matches nothing; use ` *`.
+
+      **Two corrections measured 2026-09-07, before step 3 starts.** First,
+      `\b` in the pattern above matches nothing either, for the same reason
+      `[[:space:]]` does not: `git grep -E` is POSIX ERE here, and `\b` is a
+      GNU extension. The counts are decisive --
+
+      ```
+      with \b:    0
+      without \b: 624
+      with -P:    624
+      ```
+
+      -- so the scanner uses `([^0-9]|$)` as the right edge, or `-P`. `-P`
+      is not portable to a `git` built without PCRE, and this runs on
+      whatever a reader has, so the ERE form is the one to build.
+
+      Second, **the expected corpus figures are stale.** `245 concerns, 206
+      closed, 23 open, 16 unclassifiable` was measured on an older tree.
+      Deduping today's 624 matching rows by `(file, C-id)` gives **530**
+      across 22 item directories. That count is a rough shape and not the
+      scanner's -- it takes the first `C-` id on each line and does not
+      absorb continuation lines -- so 530 is not the number to write into a
+      test. What it does establish is that 245 is no longer a measurement of
+      anything, and the step must re-derive its own figures against the
+      corpus standing when it lands rather than assert these. Which is this
+      item's recurring defect class, caught before the assertion this time.
 - [ ] **3b. `accepted-gap-standing`.** Each `.github/sd-status.json`
       `accepted_gaps[]` entry becomes an inventory row carrying `since` and
       `until`, rank 45, not abnormal.
