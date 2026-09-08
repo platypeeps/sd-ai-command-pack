@@ -349,16 +349,159 @@ class TheRowDecides(Fixture):
         below asserts it. What is wrong is that it happens in silence. The
         marker is the checkout saying rows are the authority; an answer that
         came from somewhere else has to say so.
+
+        `_provisioned_library_paths` is emptied as well as the module blocked,
+        because this test names the machine with *nothing* to offer. The
+        checkout it runs in has a provisioned copy, so blocking the module
+        alone now describes a different machine -- one whose provisioned copy
+        will not import -- and that state has its own sentence and its own
+        test below.
         """
         self.marker("row")
         self.seed("planning")
-        with mock.patch.dict(sys.modules, {"sd_db": None}):
+        with mock.patch.dict(sys.modules, {"sd_db": None}), \
+                mock.patch.object(sd_lib, "_provisioned_library_paths", lambda: []):
             item = self.only()
         self.assertTrue(
             any("sd_db is not installed here" in problem
                 for problem in item.inconsistencies),
             f"nothing named the absent library: {item.inconsistencies}",
         )
+
+    def test_an_interpreter_without_the_library_reads_the_provisioned_copy(
+        self,
+    ) -> None:
+        """The two answers become one, and the marker is obeyed either way.
+
+        `make setup` provisions `sd_db` into the pack's virtualenv and every
+        entrypoint runs under `#!/usr/bin/env python3`, so on the machine this
+        was found on -- `python3` 3.14, virtualenv 3.13 -- `./bin/sd-status`
+        answered off git while `.venv/bin/python bin/sd-status` answered off
+        the row, and the two printed different words for the same item. The
+        library is pure Python, so the interpreter that found no `sd_db` reads
+        the pinned copy rather than a different source of truth.
+
+        Built here rather than borrowed from this checkout: a test that asks
+        the real `.venv` for a copy has to skip where there is none, and a
+        skipped test in CI asserts nothing at all. The tree is a whole pack --
+        `bin/sd_lib.py` and a provisioned `sd_db` beside it -- so the helper
+        resolves it from its own `__file__` exactly as it does in a real one.
+
+        Run under `-S`: no `site`, so no installed `sd_db` on any path can
+        answer the first import, and the retry is the only thing that can.
+        That is also why patching `sys.modules` cannot express this -- a name
+        bound to `None` defeats the retry as well as the first try, which is
+        what the two tests above rely on and why they still pass.
+
+        The stub is empty on purpose. `installed` is set the moment the import
+        succeeds, before `connect` is reached, so a package with no `connect`
+        proves the import and nothing further -- which is the whole claim.
+        """
+        pack = self.tmp / "pack"
+        (pack / "bin").mkdir(parents=True)
+        (pack / "bin" / "sd_lib.py").write_bytes(
+            (REPO_ROOT / "bin" / "sd_lib.py").read_bytes())
+        stub = pack / ".venv" / "lib" / "python3.13" / "site-packages" / "sd_db"
+        stub.mkdir(parents=True)
+        (stub / "__init__.py").write_text("", encoding="utf-8")
+        script = (
+            "import sd_lib, sys;"
+            " rows = sd_lib.Rows(sys.argv[1]);"
+            " print(int(rows.installed))"
+        )
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", script, str(self.root)],
+            capture_output=True, text=True,
+            env={**os.environ, "PYTHONPATH": str(pack / "bin")},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(), "1",
+            f"an interpreter without the library did not find the provisioned"
+            f" copy: {result.stdout!r} {result.stderr!r}",
+        )
+
+    def test_the_newest_interpreter_is_offered_first_by_number_not_by_name(
+        self,
+    ) -> None:
+        """A rebuilt virtualenv leaves two, and the first one answers.
+
+        The pair matters, and the obvious one does not test anything.
+        `sorted()` on `python3.9` and `python3.13` already yields the newer
+        first, so a test written on those two passes with the number sort
+        taken out -- which is how this test was wrong on its first writing.
+        `python3.1` and `python3.10` are where text and number disagree: the
+        shorter name is a prefix of the longer, so it sorts first and the
+        name order hands the import the older copy.
+
+        A directory below the library's 3.11 floor is exactly the leftover
+        this guards: a rebuilt virtualenv does not remove the old one, and the
+        first path on `sys.path` is the one the import takes.
+        """
+        root = self.tmp / "pack"
+        for version in ("python3.1", "python3.10"):
+            site = root / ".venv" / "lib" / version / "site-packages"
+            (site / "sd_db").mkdir(parents=True)
+        with mock.patch.object(sd_lib, "__file__", str(root / "bin" / "sd_lib.py")):
+            offered = sd_lib._provisioned_library_paths()
+        self.assertEqual(
+            ["python3.10", "python3.1"],
+            [pathlib.Path(path).parent.name for path in offered],
+            "the newer interpreter has to be the one the import reaches first",
+        )
+
+    def test_a_provisioned_copy_that_will_not_import_says_so(self) -> None:
+        """Two faults, two sentences. Reporting the first error hides the second.
+
+        A virtualenv holding an `sd_db` that raises on import is not a
+        machine without the library, and "No module named 'sd_db'" -- the
+        first attempt's error -- describes the wrong problem entirely. Where
+        nothing was offered the first error is still the only one there is,
+        which the test above this one covers.
+        """
+        pack = self.tmp / "pack"
+        (pack / "bin").mkdir(parents=True)
+        (pack / "bin" / "sd_lib.py").write_bytes(
+            (REPO_ROOT / "bin" / "sd_lib.py").read_bytes())
+        stub = pack / ".venv" / "lib" / "python3.13" / "site-packages" / "sd_db"
+        stub.mkdir(parents=True)
+        (stub / "__init__.py").write_text(
+            "raise ImportError('the provisioned copy is broken')", encoding="utf-8")
+        script = (
+            "import sd_lib, sys;"
+            " print(sd_lib.Rows(sys.argv[1]).problem)"
+        )
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", script, str(self.root)],
+            capture_output=True, text=True,
+            env={**os.environ, "PYTHONPATH": str(pack / "bin")},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("the provisioned copy is broken", result.stdout)
+        self.assertNotIn("No module named", result.stdout)
+        # The prefix is half the message and the half a reader acts on:
+        # "not installed" sends them to `make setup` for a package that is
+        # already there. Pinned separately because the first fix corrected
+        # the detail and left the prefix saying the opposite of it.
+        self.assertNotIn("is not installed here", result.stdout)
+        self.assertIn("will not import", result.stdout)
+
+    def test_no_provisioned_copy_is_offered_from_a_virtualenv_without_one(
+        self,
+    ) -> None:
+        """A bare virtualenv is not a library, and must not be offered as one.
+
+        Without this the helper would hand `sys.path` a directory holding no
+        `sd_db`, the retry would fail anyway, and the only trace would be a
+        path appended for nothing. It is also the direction that keeps the
+        test above honest: a helper returning every glob hit would pass it.
+        """
+        root = self.tmp / "pack"
+        (root / ".venv" / "lib" / "python3.13" / "site-packages").mkdir(parents=True)
+        with mock.patch.object(sd_lib, "__file__", str(root / "bin" / "sd_lib.py")):
+            self.assertEqual([], sd_lib._provisioned_library_paths())
+            (root / ".venv" / "lib" / "python3.13" / "site-packages" / "sd_db").mkdir()
+            self.assertEqual(1, len(sd_lib._provisioned_library_paths()))
 
     def test_the_absent_library_does_not_stop_git_answering(self) -> None:
         """The report gains a problem, not a refusal.
@@ -369,7 +512,8 @@ class TheRowDecides(Fixture):
         """
         self.marker("row")
         self.seed("planning")
-        with mock.patch.dict(sys.modules, {"sd_db": None}):
+        with mock.patch.dict(sys.modules, {"sd_db": None}), \
+                mock.patch.object(sd_lib, "_provisioned_library_paths", lambda: []):
             self.assertNotEqual(self.only().status, "unknown")
 
     def test_the_database_is_opened_once_for_a_whole_enumeration(self) -> None:

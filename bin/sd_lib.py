@@ -17,6 +17,7 @@ import pathlib
 import re
 import shlex
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -477,6 +478,39 @@ def external_id(root: pathlib.Path | str, item_dir: pathlib.Path) -> str:
             f"{WORK_DIR}/{item_dir.name}/prd.md")
 
 
+def _provisioned_library_paths() -> list[str]:
+    """Where `make setup` put `sd_db`, for an interpreter that did not find it.
+
+    The pack provisions the library into its own virtualenv and every
+    entrypoint runs under `#!/usr/bin/env python3`, so on a machine whose
+    `python3` is not that virtualenv the import fails and git answers in the
+    row's place -- silently, and differently. The run that found this reported
+    `in_progress` for an item whose row says `done`.
+
+    The library is pure Python and its floor is 3.11, so the interpreter that
+    found no `sd_db` can read the *pinned* one off the virtualenv it was
+    installed into. That is the same copy `make setup` chose, not a second
+    source: reading the checkout's source instead would answer from something
+    nothing pinned.
+
+    Ordered by version number and newest first, because a rebuilt virtualenv
+    can leave two `lib/python*` directories behind and the first path on
+    `sys.path` is the one that answers. Sorting the names compares text, and
+    text agrees with the numbers only by luck: it happens to be right for
+    `python3.9` against `python3.13`, and wrong for `python3.1` against
+    `python3.10`, where the shorter name is a prefix of the longer and sorts
+    first. Empty when there is no provisioned copy to offer.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    found = []
+    for path in root.glob(".venv/lib/python*/site-packages"):
+        if not (path / "sd_db").is_dir():
+            continue
+        version = tuple(int(part) for part in re.findall(r"\d+", path.parent.name))
+        found.append((version, str(path)))
+    return [path for _, path in sorted(found, reverse=True)]
+
+
 class Rows:
     """This checkout's item rows, read through `sd_db` and through nothing else.
 
@@ -519,8 +553,23 @@ class Rows:
         try:
             import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
         except ImportError as error:
-            self.problem = f"sd_db is not installed here: {error}"
-            return
+            offered = _provisioned_library_paths()
+            for path in offered:
+                if path not in sys.path:
+                    sys.path.append(path)
+            try:
+                import sd_db  # noqa: PLC0415 - the provisioned copy, second and last try
+            except ImportError as retry:
+                # Two faults, two sentences. A provisioned copy that will not
+                # import is not a machine without the library, and saying "not
+                # installed" over the top of one sends the reader to `make
+                # setup` for a package that is already there. Where nothing
+                # was offered, the first error is the only one there is.
+                self.problem = (
+                    f"sd_db is provisioned at {offered[0]} but will not import: {retry}"
+                    if offered else f"sd_db is not installed here: {error}"
+                )
+                return
         self.installed = True
         try:
             self._connection = sd_db.connect(write=False)

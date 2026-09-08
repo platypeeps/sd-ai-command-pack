@@ -3852,13 +3852,13 @@ from a number the operator types.
   the guard that was written.
 
   **The failure is specific to this predicate rather than a general robustness
-  point.** `remote_permits_full` (`bin/sd_lib.py:318`) returns `full` from three
+  point.** `remote_permits_full` (`bin/sd_lib.py:319`) returns `full` from three
   places, and one of them is an empty `others` — nobody else may push. Parsing
   an entry and filtering it in the same pass makes an unreadable entry
   indistinguishable from an absent one, so dropping every entry empties `others`
   and "nobody I could parse" arrives as "nobody else may push". A repository
   with a dozen unparseable pushers resolved to the most permissive mode, which
-  is the one direction `mode` (`bin/sd_lib.py:377`) is forbidden to move in.
+  is the one direction `mode` (`bin/sd_lib.py:378`) is forbidden to move in.
   Fixed in code at `bin/sd_lib.py:332-344`, where every entry is read first and
   the first one that cannot be read returns `answered` false rather than a
   permission; the comment there carries the reasoning.
@@ -3911,7 +3911,7 @@ from a number the operator types.
   administer and collaborators it has never heard of — the same inversion
   R11-D35 records one layer down, an unanswerable question arriving as a granted
   permission, and reached here without any answer being misread because none was
-  obtained. `remote_permits_full` (`bin/sd_lib.py:318`) already separates them
+  obtained. `remote_permits_full` (`bin/sd_lib.py:319`) already separates them
   at `bin/sd_lib.py:303-310`: the `.git` test first and decided on its own, then
   the `rev-parse` test returning `guest` with `answered` false, then the remote
   lookup.
@@ -4039,16 +4039,16 @@ from a number the operator types.
     - the row-to-`StatusReport` adapter — **38**. `_adapt`
       (`bin/sd_registry.py:232-269`, 38) is the one built instance of turning
       `sd_db` rows into this pack's frozen dataclasses. The file side it must
-      parallel is `_status_report` (`bin/sd_lib.py:666-691`, 26) with
-      `status_report` (`bin/sd_lib.py:710-726`, 17), and the row side has to answer one
+      parallel is `_status_report` (`bin/sd_lib.py:738-763`, 26) with
+      `status_report` (`bin/sd_lib.py:782-798`, 17), and the row side has to answer one
       question more than either — whether a line found beside the row is
       stale — so the larger analogue is the honest one.
     - `sd_lib.delivered`, from git alone — **50**. Criterion 13 requires that
       in a database-free checkout every reader that picks an item asks
       `sd_lib.delivered` and nothing else, and that it answers from a merge
       commit's `Item:` and `Delivers:` trailers. The built trailer scan is
-      `attribution` (`bin/sd_lib.py:1037-1070`, 34) with `_in_range`
-      (`bin/sd_lib.py:1073-1088`, 16). `author_vendors` (32) is *not*
+      `attribution` (`bin/sd_lib.py:1109-1142`, 34) with `_in_range`
+      (`bin/sd_lib.py:1145-1160`, 16). `author_vendors` (32) is *not*
       re-reserved: it maps authors onto vendors and `delivered` has no
       equivalent of that.
     - `bin/sd-status`'s row read and its stale line — **38**.
@@ -5102,3 +5102,42 @@ from a number the operator types.
   repointed. Recorded rather than silently corrected, because guessing which
   number they meant is how a citation gate learns to lie.
 
+
+- **2026-09-08** — **Criterion 28's writing-manifest clause closes on
+  evidence, and the `commands.yaml` clause does not.** The 2026-09-07 entry at
+  `prd.md:5059` recorded two clauses that could not close from this checkout.
+  One of them has closed. `platypeeps/sd-writing-pack#30` merged at `f02e883`
+  and the manifest now declares three kinds — `blog-idea`, `tip`, `topic` —
+  with three store bases, `templates/skill-proposal.md` deleted, and the two
+  claims in `CLAUDE.md` and `.claude/reference/pipeline.md` that rested on the
+  kind removed. `platypeeps/system#223` merged at `1173f027` and took the four
+  `skill-proposal` ladder rows out of `sd_db/sources/vault.py`'s `STAGES`. The
+  two landed in that order because criterion 5 there asserts manifest to
+  table: `./sd-db.sh test` gave `FAILED (failures=1)` before the manifest cut
+  and `Ran 321 tests ... OK` after it, which is C-177's ordering observed
+  rather than assumed.
+
+  **The clause is now true and still not assertable from here, and those are
+  different things.** No test in this repository reads another repository's
+  manifest, and none should. What closes it is the merge commit named above.
+  The other half of the same sentence — `sd-propose-skills` writes no vault
+  note — *is* asserted here, by
+  `tests/test_sd_suggest.py:288`, which greps the whole `contrib/sd-propose-skills/`
+  directory rather than its `SKILL.md`; 25 tests, `OK`. The `commands.yaml`
+  clause stays open behind item B's slice 4, because the file it enumerates is
+  not in this checkout and `tests/test_sd_suggest.py:17` says so deliberately.
+
+  **Three live references to the kind survive the retirement, and all three
+  are correct.** A repository-wide grep of all three checkouts, excluding
+  `docs/work/`, returns exactly these, and they are named here so a later
+  sweep does not "fix" them into being wrong:
+  `sd-writing-pack/.claude/reference/pipeline.md:248`, which records that
+  `skill-proposal-accept` was documented for months and never scheduled;
+  `sd-writing-pack/.claude/skills/sdw-tips/SKILL.md:51`, which says the score
+  floor of 6 is now declared twice rather than three times, on `tip` and
+  `blog-idea` — verified against the merged manifest, where `topic` carries no
+  floor at all; and `system/local-task-actions/task-actions.sh:68`, whose
+  `skill` row in `DBS` deliberately stays so that setting a Skill Proposal to
+  `accepted` still records the decision, with only the filing behind it gone.
+  The kind is retired; the ten notes and the decision they can still carry are
+  not, by the standing decision that no directory is deleted.
