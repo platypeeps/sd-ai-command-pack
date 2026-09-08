@@ -83,14 +83,14 @@ point, because none of them changes a shape either gate reads. They are
 separate steps because they are separate claims, not because they need separate
 commits; step 6 is what makes them one pull request.
 
-- [ ] **1. Record the baseline before touching anything.** On this worktree at
+- [x] **1. Record the baseline before touching anything.** On this worktree at
       `origin/main`: `make check`, then `grep -cE '^OK' unittest-output.log` and
       `grep -c FAILED unittest-output.log`, and
       `.venv/bin/python bin/sd-docs-lint`. Write the three results into
       `## Verification results` on this page. Landable and green on its own: it
       changes one planning page and no criterion. It is first because the `OK`
       count after the change is meaningless without the count before it.
-- [ ] **2. Verify the ruling still says what the design quotes.** This exact
+- [x] **2. Verify the ruling still says what the design quotes.** This exact
       command prints `1`:
 
       ```
@@ -106,7 +106,7 @@ commits; step 6 is what makes them one pull request.
       implementation time and not taken from the design. **If it no longer says
       it, stop.** The design rests on it; a changed ruling is a new design, not
       a step that adapts.
-- [ ] **3. Re-point six criteria and add the relocation note.** In `prd.md`,
+- [x] **3. Re-point six criteria and add the relocation note.** In `prd.md`,
       `skills/sd-grill/SKILL.md` becomes `contrib/sd-grill/SKILL.md` in the
       criteria for `disable-model-invocation`, the title, the lineage, the seven
       classes, `## Safety rules` and the gate sentence. Add the note under
@@ -114,7 +114,7 @@ commits; step 6 is what makes them one pull request.
       2026-09-05 operator ruling moved the file, quoting the ruling and naming
       the item that carries it. Criterion 4 is untouched here: it names
       `skills/sd-plan/SKILL.md`, which does not move.
-- [ ] **4. Repair criterion 1, and retire criterion 4.** Criterion 1 drops the
+- [x] **4. Repair criterion 1, and retire criterion 4.** Criterion 1 drops the
       pinned `40` for the invariant: `grep -c FAILED unittest-output.log` prints
       `0`, and the `^OK` count is unchanged across this item's own change, with
       the baseline from step 1 named. Criterion 4 gains the commit it was met at
@@ -122,7 +122,7 @@ commits; step 6 is what makes them one pull request.
       and `docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person` as
       the owner of the removal. Requirement 7 gains the matching sentence.
       Nothing under `skills/` is edited (design D4).
-- [ ] **5. The `## Log` entry.** Dated 2026-09-07: the work shipped in `8cf99431`
+- [x] **5. The `## Log` entry.** Dated 2026-09-07: the work shipped in `8cf99431`
       and `cec8721e` and closed no item because the merge carried no `Delivers:`
       trailer; `05eb8ddf` moved the file; the 2026-09-05 ruling is why the
       criteria follow the file rather than the file coming back; and the two
@@ -226,6 +226,25 @@ Filled in as each check runs, so a claim here is a transcript and not a plan.
   `make check` → exit `0`, `grep -cE '^OK' unittest-output.log` = `56`,
   `grep -c FAILED unittest-output.log` = `0`. That `56` is the baseline
   verification 2 compares against.
+- 2026-09-07, step 1 re-run on `main` at `5c23df19`, which is the commit this
+  branch left from and therefore the baseline the criteria actually name:
+  `bin/sd-docs-lint` → `sd-docs-lint: clean`, exit `0`; the test script → exit
+  `0`, `^OK` = `56`, `FAILED` = `0`. Unchanged from the planning commit, so the
+  `56` above survives four merges and is still the number criterion 1 compares
+  against. Run with the primary checkout's `.venv/bin/python`, because a fresh
+  worktree has no `.venv` and `make check` fails on the missing interpreter
+  rather than on anything it measures.
+- 2026-09-07, step 2's gate, on `main` at `5c23df19`: the `grep -cF` command
+  prints `1`, and the sentence it matches — *"`sd-grill` moves to `contrib/` and
+  a trial decides whether it stays, by the operator's decision on 2026-09-05"* —
+  names `contrib/`, a trial, and the 2026-09-05 decision. The design's
+  foundation still holds, so steps 3 through 5 proceed.
+- 2026-09-07, step 3's six re-pointed criteria, each run against
+  `contrib/sd-grill/SKILL.md`: `disable-model-invocation` → `0`; `^# sd-grill$`
+  → `1`; `obra/superpowers` → `1`; `This holds at every classification` → `1`;
+  the seven-class loop → seven lines each ending `1`; `## Safety rules` present
+  at `:217` with the read-only rule first. All six pass at the new path, which
+  is what says the move — and not the criteria — was the whole of the problem.
 - 2026-09-07, the two planning pages at `7cd1f5c1`, `wc -l`: `design.md`
   **599**, `implement.md` **228**. Both figures are pinned to that commit and
   are already stale at HEAD, which is the property rather than a defect to fix:
