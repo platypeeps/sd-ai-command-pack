@@ -1413,5 +1413,180 @@ class LowYieldProducerTests(InventoryFixture):
         self.assertEqual(found[0]["key"], "skills/sd-thing/SKILL.md#bin/sd-thing")
 
 
+class BranchLandedTests(StatusFixture):
+    """`branch_landed`, against real git and injected pull-request rows.
+
+    Real git because the whole point of the derivation is which git commands
+    answer correctly in a repository that squash-merges, and a mocked `git`
+    would be asserting the design rather than testing it.
+    """
+
+    def commit(self, path: str, text: str, message: str) -> str:
+        (self.repo / path).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / path).write_text(text, encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", message)
+        return self.git("rev-parse", "HEAD").strip()
+
+    def squash_merge(self, branch: str) -> None:
+        """What this repository does: one new commit, no ancestry to `branch`."""
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--squash", branch)
+        self.git("commit", "-q", "-m", f"squash {branch}")
+
+    def pull(self, **overrides: Any) -> dict[str, Any]:
+        row = {
+            "headRefName": "feature",
+            "baseRefName": "main",
+            "mergedAt": "2026-09-04T22:11:09Z",
+            "headRefOid": self.git("rev-parse", "feature").strip(),
+        }
+        row.update(overrides)
+        return row
+
+    # -- tier 1 -------------------------------------------------------------
+
+    def test_a_squash_merged_branch_is_landed_with_no_pull_requests_at_all(self) -> None:
+        self.git("checkout", "-q", "-b", "feature")
+        self.commit("b.txt", "two\n", "add b")
+        self.squash_merge("feature")
+        self.assertEqual(status.LANDED, status.branch_landed(self.repo, "feature", "main", []))
+
+    def test_ancestry_alone_resolves_nothing_a_squash_merge_leaves(self) -> None:
+        """C-1: the obvious test finds nothing in the repository it is for.
+
+        Asserted rather than assumed, because the whole two-tier design rests
+        on it. If this ever passes, this repository stopped squash-merging and
+        the derivation above is answering a question nobody has.
+        """
+        self.git("checkout", "-q", "-b", "feature")
+        self.commit("b.txt", "two\n", "add b")
+        self.squash_merge("feature")
+        ancestor = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", "feature", "main"],
+            cwd=str(self.repo), capture_output=True, text=True,
+        )
+        self.assertEqual(1, ancestor.returncode)
+        self.assertEqual(
+            status.LANDED, status.branch_landed(self.repo, "feature", "main", [])
+        )
+
+    def test_a_branch_whose_paths_main_has_since_edited_is_not_landed_by_tier_1(self) -> None:
+        """The measured 40% false negative: tier 1 abstains, it does not lie."""
+        self.git("checkout", "-q", "-b", "feature")
+        self.commit("b.txt", "two\n", "add b")
+        self.squash_merge("feature")
+        self.commit("b.txt", "two, edited later\n", "main moves on")
+        self.assertEqual(
+            status.NOT_LANDED, status.branch_landed(self.repo, "feature", "main", [])
+        )
+
+    def test_an_unmerged_branch_is_not_landed(self) -> None:
+        self.git("checkout", "-q", "-b", "feature")
+        self.commit("b.txt", "two\n", "add b")
+        self.git("checkout", "-q", "main")
+        self.assertEqual(
+            status.NOT_LANDED, status.branch_landed(self.repo, "feature", "main", [])
+        )
+
+    # -- tier 2, and C-19's two regressions ---------------------------------
+
+    def test_tier_2_resolves_what_tier_1_misses(self) -> None:
+        self.git("checkout", "-q", "-b", "feature")
+        self.commit("b.txt", "two\n", "add b")
+        self.squash_merge("feature")
+        self.commit("b.txt", "two, edited later\n", "main moves on")
+        self.assertEqual(
+            status.LANDED,
+            status.branch_landed(self.repo, "feature", "main", [self.pull()]),
+        )
+
+    def test_a_branch_extended_after_its_merge_is_not_landed(self) -> None:
+        """C-19: the stale `mergedAt` must not overrule tier 1's correct no."""
+        self.git("checkout", "-q", "-b", "feature")
+        self.commit("b.txt", "two\n", "add b")
+        merged_tip = self.git("rev-parse", "HEAD").strip()
+        self.squash_merge("feature")
+        self.commit("b.txt", "two, edited later\n", "main moves on")
+        self.git("checkout", "-q", "feature")
+        self.commit("c.txt", "three\n", "more work after the merge")
+        self.git("checkout", "-q", "main")
+        stale = self.pull(headRefOid=merged_tip)
+        self.assertEqual(
+            status.NOT_LANDED, status.branch_landed(self.repo, "feature", "main", [stale])
+        )
+
+    def test_a_pull_request_merged_into_another_base_does_not_count(self) -> None:
+        """C-19: merged into `some-other-base` says nothing about `main`."""
+        self.git("checkout", "-q", "-b", "feature")
+        self.commit("b.txt", "two\n", "add b")
+        self.squash_merge("feature")
+        self.commit("b.txt", "two, edited later\n", "main moves on")
+        self.assertEqual(
+            status.NOT_LANDED,
+            status.branch_landed(
+                self.repo, "feature", "main", [self.pull(baseRefName="release")]
+            ),
+        )
+
+    def test_an_unmerged_pull_request_does_not_count(self) -> None:
+        self.git("checkout", "-q", "-b", "feature")
+        self.commit("b.txt", "two\n", "add b")
+        self.squash_merge("feature")
+        self.commit("b.txt", "two, edited later\n", "main moves on")
+        self.assertEqual(
+            status.NOT_LANDED,
+            status.branch_landed(self.repo, "feature", "main", [self.pull(mergedAt=None)]),
+        )
+
+    # -- the third answer ---------------------------------------------------
+
+    def test_no_pull_request_lookup_is_unknown_and_never_not_landed(self) -> None:
+        self.git("checkout", "-q", "-b", "feature")
+        self.commit("b.txt", "two\n", "add b")
+        self.squash_merge("feature")
+        self.commit("b.txt", "two, edited later\n", "main moves on")
+        answer = status.branch_landed(self.repo, "feature", "main", None)
+        self.assertEqual(status.sd_lib.UNKNOWN, answer)
+        self.assertEqual(status.GH_MERGED_QUERY, answer.repair)
+        self.assertIn("headRefOid", answer.repair)
+
+    def test_a_branch_git_cannot_resolve_is_unknown_with_the_repair(self) -> None:
+        answer = status.branch_landed(self.repo, "no-such-branch", "main", [])
+        self.assertEqual(status.sd_lib.UNKNOWN, answer)
+        self.assertEqual(
+            "git rev-parse --verify 'no-such-branch^{commit}'", answer.repair
+        )
+
+    def test_tier_1_fires_before_the_lookup_so_an_absent_gh_still_answers(self) -> None:
+        """Positive evidence is offline, which is what makes tier 3 rare."""
+        self.git("checkout", "-q", "-b", "feature")
+        self.commit("b.txt", "two\n", "add b")
+        self.squash_merge("feature")
+        self.assertEqual(
+            status.LANDED, status.branch_landed(self.repo, "feature", "main", None)
+        )
+
+    # -- C-12 ---------------------------------------------------------------
+
+    def test_a_rename_the_default_branch_did_not_take_is_not_landed(self) -> None:
+        """C-12: with rename detection on, this case reports landed and is wrong.
+
+        The branch renames `a.txt` to `renamed.txt`. `main` gains an identical
+        `renamed.txt` without removing `a.txt`, so the branch's *removal* never
+        landed. `--no-renames` puts `a.txt` on both sides and the intersection
+        is non-empty; with renames detected, `touched` holds `renamed.txt`
+        alone and the two sets miss each other.
+        """
+        self.git("checkout", "-q", "-b", "feature")
+        self.git("mv", "a.txt", "renamed.txt")
+        self.git("commit", "-q", "-m", "rename a to renamed")
+        self.git("checkout", "-q", "main")
+        self.commit("renamed.txt", "one\n", "main adds a copy, keeps the original")
+        self.assertEqual(
+            status.NOT_LANDED, status.branch_landed(self.repo, "feature", "main", [])
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

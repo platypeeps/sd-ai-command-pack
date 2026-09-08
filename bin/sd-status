@@ -1319,6 +1319,93 @@ def _branch_names(root: pathlib.Path) -> set[str] | None:
     return names
 
 
+#: `branch_landed`'s two positive words. `sd_lib.Answer` carries them because
+#: this is the same never-a-bare-boolean contract `delivered` has -- a word plus
+#: the repair an `unknown` asks for -- and `sd_lib.UNKNOWN` is the third. The
+#: words differ from `delivered`'s `yes`/`no` because the question does: "did
+#: this branch land" answered `yes` reads as agreement rather than as a finding.
+LANDED, NOT_LANDED = "landed", "not landed"
+
+#: The tier 2 query, named once so the `unknown` repair is the command that
+#: would actually answer. `design.md:119` writes it out; the four fields after
+#: `number` are the three tier 2 compares plus the branch it matches on.
+GH_MERGED_QUERY = (
+    "gh pr list --state all --json "
+    "number,headRefName,headRefOid,baseRefName,mergedAt"
+)
+
+
+def branch_landed(
+    root: pathlib.Path,
+    branch: str,
+    default: str,
+    pulls: list[dict[str, Any]] | None,
+) -> sd_lib.Answer:
+    """Whether `branch`'s work is in `default`: two tiers, three answers.
+
+    **Tier 1 is offline and only ever produces positive evidence.** Every path
+    the branch touched holds, in the default branch, exactly what the branch
+    holds. That is what landing means after a squash merge -- which is how this
+    repository merges, and why the ancestor test, run first as a cheap
+    short-circuit, resolves none of its five merged branches. `--no-renames` on
+    both calls is load-bearing (C-12): with rename detection on, a branch
+    renaming `A` to `B` reports `B` alone, so `A`'s removal is invisible on one
+    side of the comparison and unlanded work is called landed.
+
+    **A tier 1 negative is not an answer** -- 3 of 5 measured here, because
+    `main` has since edited paths those branches touched -- so tier 2 asks the
+    pull requests, and accepts one only when `mergedAt`, `baseRefName` and
+    `headRefOid` all agree (C-19). `headRefName` alone says a branch of this
+    name was merged once, which is not the question: a branch extended after
+    its merge still matches that old row, and tier 1's correct not-landed would
+    be overruled by a stale fact.
+
+    **`pulls` of `None` means the lookup could not be made**, and is the whole
+    of the difference between the two negatives. A branch nothing merged is
+    `not landed`; a branch nobody could ask about is `unknown`, never `clear`.
+
+    Both repairs name the exact call that did not answer, as `delivered`'s do:
+    a reader who runs the string gets the failure itself rather than a nearby
+    command that fails differently. Found in review, where the first draft
+    named `git rev-parse <branch>` for a probe that is `--verify` on a
+    `^{commit}` peel, and `gh pr list --state all` for a query useless without
+    the four fields tier 2 reads.
+    """
+    resolved = tip = ""
+    for candidate in (f"origin/{branch}", branch):
+        found = sd_lib.git_output(["rev-parse", "--verify", f"{candidate}^{{commit}}"], root)
+        if found:
+            resolved, tip = candidate, found
+            break
+    if not tip:
+        return sd_lib.Answer(sd_lib.UNKNOWN, f"git rev-parse --verify '{branch}^{{commit}}'")
+    # `--is-ancestor` answers by exit status and prints nothing, so `""` is
+    # yes and `None` is no -- the one place an empty string is the signal.
+    if sd_lib.git_output(["merge-base", "--is-ancestor", resolved, default], root) is not None:
+        return sd_lib.Answer(LANDED)
+    base = sd_lib.git_output(["merge-base", default, resolved], root)
+    if base:
+        touched = _changed(root, base, resolved)
+        if touched and not (touched & _changed(root, default, resolved)):
+            return sd_lib.Answer(LANDED)
+    if pulls is None:
+        return sd_lib.Answer(sd_lib.UNKNOWN, GH_MERGED_QUERY)
+    for pull in pulls:
+        if (str(pull.get("headRefName") or "") == branch
+                and pull.get("mergedAt")
+                and str(pull.get("baseRefName") or "") == default
+                and str(pull.get("headRefOid") or "") == tip):
+            return sd_lib.Answer(LANDED)
+    return sd_lib.Answer(NOT_LANDED)
+
+
+def _changed(root: pathlib.Path, left: str, right: str) -> set[str]:
+    """Paths differing between two revisions, renames off for C-12's reason."""
+    listing = sd_lib.git_output(
+        ["diff", "--no-renames", "--name-only", left, right], root
+    )
+    return {path for path in (listing or "").split("\n") if path}
+
 def _work_rows(
     root: pathlib.Path, work: dict[str, Any], today: datetime.date
 ) -> list[dict[str, Any]]:
