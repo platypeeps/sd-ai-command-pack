@@ -1253,12 +1253,10 @@ def actionable_inventory(
     plus local git and the filesystem, never from a maintained list of known
     problems, which is requirements 2 and 9.
 
-    Four classes in `CLASSES` have no producer here yet and so emit nothing:
-    the three concern classes need the ledger scanner, and
-    `accepted-gap-standing` needs its own pass over `accepted_gaps[]`. Those
-    are later steps of this item, and the table is the enumeration whether or
-    not a producer stands behind a row -- which is the whole reason the
-    enumeration lives in the table.
+    Every class in `CLASSES` now has a producer, which is the point the table
+    stops being a promise. It was the enumeration while five of its rows emitted
+    nothing, and that is the whole reason the enumeration lives in the table
+    rather than in the renderers.
     """
     day = today or datetime.date.today()
     work = sections.get("work") or {}
@@ -1279,6 +1277,8 @@ def actionable_inventory(
     rows += _branch_rows(root, pulls, protection)
     rows += _marker_rows(root)
     rows += _tool_rows(root)
+    rows += _concern_rows(root)
+    rows += _accepted_rows(protection)
     _widen_collisions(rows)
     rows.sort(key=lambda row: (row["rank"], -row["age_days"], row["id"]))
     return Inventory(rows, unchecked)
@@ -1611,6 +1611,232 @@ def _work_rows(
                 f"start {slug}, park it, or archive it",
                 age,
             ))
+    return rows
+
+
+# -- the concern-ledger producer --------------------------------------------
+
+#: The candidate anchor, in POSIX ERE because `git grep -E` is what runs it.
+#: `\s` and `\b` are GNU/PCRE extensions matching **nothing** here -- the same
+#: trap `[[:space:]]` set in the first draft -- so the leading run is ` *` and
+#: the right edge is `([^0-9]|$)`. Measured: with `\b`, 0 rows; without it,
+#: 624; `git grep -P` agrees at 624 and needs a git built with PCRE, which
+#: this cannot assume.
+#:
+#: The ` *` after the table pipe is load-bearing (C-18): a ledger row written
+#: `| C-7 | host | 1 | low | no | parked |` has a space there, and the anchor
+#: without it matched none of them.
+CONCERN_ANCHOR = r"^ *(\| *|[-*] *)?(\*\*)?C-[0-9]+([^0-9]|$)"
+
+#: The same shape in Python's dialect, which does have `\s`. Used to re-read
+#: each hit and to stop continuation absorption at the next row.
+_CONCERN_RE = re.compile(
+    r"^\s*(?:\|\s*)?(?:\*\*)?(?:[-*]\s*(?:\*\*)?)?C-(?P<id>\d+)"
+)
+
+#: Five vocabularies, enumerated from the corpus rather than from the contract,
+#: which has one. `unresolved` appears zero times as a disposition anywhere in
+#: this repository; it is carried because the contract names it.
+#:
+#: **The order is the rule.** `parked` first, because `ACCEPTED and parked` is
+#: the common form and such a row is parked. Then the open words, so a row
+#: carrying both an open and a closing token reads open: under-reporting an
+#: open concern is the worst failure this feature can have. Closing words last
+#: -- which is also what makes adding one safe, since it can only ever
+#: reclassify a row nothing could read, never an open one.
+PARKED_WORDS = ("parked",)
+OPEN_WORDS = ("does not pass", "unresolved", "deferred")
+
+#: The last five are the sixth vocabulary `design.md` named and declined to
+#: add, on the grounds that a vocabulary should grow when a row is read and
+#: understood rather than when a count is being tuned. The rows were read.
+#: `Corrected.`, `Recorded rather than silently recounted.`, `Noted in the
+#: registry block`, `superseded here` and `**Confirmed, design changed.**` are
+#: dispositions, written by hand in ledgers older than this scanner.
+#:
+#: Measured on the corpus: they take unclassifiable rows from 58 of 530 to 35
+#: -- 6.6%, which is the 6.5% the design accepted at 16 of 245 -- and move
+#: `open` and `parked` by exactly zero, which the precedence above guarantees
+#: rather than hopes.
+CLOSED_WORDS = (
+    "addressed", "rebutted", "resolved", "fixed", "n/a",
+    "corrected", "recorded", "noted", "superseded", "confirmed",
+)
+
+#: `accepted` is checked after everything else because it is the one
+#: disposition word that is also ordinary English: "validation accepted a
+#: codex provider" is prose, not a verdict. Read last, it can only reach a row
+#: no other tier could read, so it inherits the same safety the closing words
+#: have. A row that only says `accepted` names a decision that stands, which is
+#: what `accepted-gap-standing` calls the same state on the file side.
+#:
+#: Measured on the corpus: moving it out of `OPEN_WORDS` drops 8 rows whose
+#: closing word it was masking and parks the 2 where it is the verdict.
+#: `parked` loses none and `open` gains none.
+STANDING_WORDS = ("accepted",)
+
+
+def _disposition(text: str) -> str:
+    """`parked`, `open`, `closed`, or `""` when the row does not say."""
+    lowered = text.lower()
+    for words, verdict in (
+        (PARKED_WORDS, "parked"), (OPEN_WORDS, "open"),
+        (CLOSED_WORDS, "closed"), (STANDING_WORDS, "parked"),
+    ):
+        for word in words:
+            if re.search(rf"(?<![a-z]){re.escape(word)}(?![a-z])", lowered):
+                return verdict
+    return ""
+
+
+def _concern_shape(text: str) -> int:
+    """Table beats bold beats bullet beats prose. The ledger of record is the
+    most structured row present, and prose *about* a concern is not its
+    disposition.
+
+    Without this, a cross-reference decides a concern's fate. Measured on this
+    item's own C-4, which is `rebutted` in its table and read as open from a
+    `## Log` line that mentions a different concern's parking.
+
+    **Bullet is its own tier, above prose**, which `design.md`'s three-tier
+    rule did not separate. A bulleted row is a ledger entry; a sentence that
+    happens to open with a `C-` id is not. Folded together, which of the two
+    decides the concern is settled by whichever line `git grep` returns first,
+    since rows of equal shape keep the one seen first. Measured on the corpus
+    the two rules agree exactly -- 453 closed, 24 open, 18 parked, 35
+    unreadable either way, zero concerns changing verdict -- so this is a
+    latent defect removed rather than a live misclassification corrected. It
+    matters because the largest ledger in the corpus, 37 rows, is written in
+    the non-bold bullet form that was sharing a tier with prose.
+    """
+    stripped = text.lstrip()
+    if stripped.startswith("|"):
+        return 3
+    if "**C-" in text:
+        return 2
+    return 1 if _BULLET_RE.match(stripped) else 0
+
+
+#: A bulleted row, for the tier above prose. `[-*]` and then whitespace: the
+#: dash alone is not enough, since a prose line may begin with an em dash.
+_BULLET_RE = re.compile(r"^[-*]\s")
+
+
+def _absorb(lines: list[str], number: int) -> str:
+    """The row plus its continuation, to the next blank line or next row.
+
+    Four lines, and the single largest defect the prototype had: dispositions
+    wrap, and reading the matched line alone left 18 rows unclassifiable inside
+    the active items where absorbing takes it to 1.
+    """
+    parts: list[str] = []
+    for text in lines[number - 1:]:
+        if parts and (not text.strip() or _CONCERN_RE.match(text)):
+            break
+        parts.append(text.strip())
+    return " ".join(parts)
+
+
+def _concern_rows(root: pathlib.Path) -> list[dict[str, Any]]:
+    """Review ledgers, found by row shape and never by heading.
+
+    Headings are not read at all. 75 distinct `##` headings match
+    /review|concern/ here and only a handful are ledgers, so a heading-matched
+    parser over-matches 81 non-ledgers and still misses the ledgers whose
+    heading nobody anticipated.
+
+    Archived items **are** read, the one deliberate exception to the archive
+    exclusion, because a parked security acceptance outlives the item it was
+    written in. `archive/2026-08/2026-08-26-codex-local-review-adapter` carries
+    exactly one, and excluding it because its directory moved would be the
+    silent under-report this section exists to prevent.
+    """
+    listing = sd_lib.git_output(
+        ["grep", "-n", "-E", CONCERN_ANCHOR, "--", "docs/work"], root
+    )
+    best: dict[tuple[str, str], tuple[int, int, str]] = {}
+    cache: dict[str, list[str]] = {}
+    for hit in (listing or "").split("\n"):
+        path, _, rest = hit.partition(":")
+        number, _, text = rest.partition(":")
+        found = _CONCERN_RE.match(text)
+        if not (found and number.isdigit()):
+            continue
+        if path not in cache:
+            cache[path] = _file_lines(root / path)
+        # Keyed on the **full** path. A prototype keying on `split("/")[2]`
+        # collapsed 487 archived items into one bucket and lost C-19 outright,
+        # which is the one row that most had to survive.
+        key = (path, found.group("id"))
+        shape = _concern_shape(text)
+        if key not in best or shape > best[key][0]:
+            best[key] = (shape, int(number), _absorb(cache[path], int(number)))
+    rows = []
+    for (path, ident), (_, line, text) in sorted(best.items()):
+        row = _concern_row(path, ident, line, _disposition(text))
+        if row:
+            rows.append(row)
+    return rows
+
+
+def _file_lines(path: pathlib.Path) -> list[str]:
+    """A file's lines, or none of them when it cannot be read."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+
+
+def _concern_row(
+    path: str, ident: str, line: int, verdict: str
+) -> dict[str, Any] | None:
+    """One ledger row as an inventory row, or `None` when it closed itself."""
+    name = f"C-{ident}"
+    where = f"{path}:{line}"
+    key = f"{path}#{name}"
+    if verdict == "closed":
+        return None
+    if verdict == "parked":
+        return _row("parked-concern", key, name,
+                    f"{where} parks {name} behind a trigger nothing re-reads",
+                    f"re-read {name}'s trigger in {path}, or close the row")
+    if verdict == "open":
+        return _row("unresolved-concern", key, name,
+                    f"{where} leaves {name} open by its own ledger row",
+                    f"close {name} in {path}, or record on the row why it stands")
+    # Never dropped, and abnormal on purpose: an unrecognised format has to
+    # inflate this count rather than empty it, or a sixth vocabulary retires
+    # the whole section in silence.
+    return _row("unreadable-concern-row", key, name,
+                f"{where} disposes {name} in words this reader does not carry",
+                f"read {where} and either dispose {name} in the ledger's "
+                f"vocabulary or add the word to CLOSED_WORDS")
+
+
+# -- the accepted-gap producer ----------------------------------------------
+
+
+def _accepted_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
+    """Written acceptances from `.github/sd-status.json`, standing until read.
+
+    Not abnormal. An acceptance is a decision, and re-flagging a decision as a
+    defect is how a banner becomes noise. It is listed because `until` is prose
+    nothing re-evaluates: the entry stays true only for as long as somebody
+    looks at it, and this is the looking.
+    """
+    rows = []
+    for entry in protection.get("accepted") or []:
+        ident = str(entry.get("id") or "")
+        if not ident:
+            continue
+        rows.append(_row(
+            "accepted-gap-standing", ident, ident,
+            f"accepted {entry.get('since') or 'at an unrecorded date'}: "
+            f"{entry.get('because') or 'no reason recorded'}",
+            f"re-read `until {entry.get('until') or 'no condition recorded'}`, "
+            f"and drop the entry from {ACKNOWLEDGEMENT_RELATIVE_PATH} if it "
+            f"has come true",
+        ))
     return rows
 
 

@@ -520,11 +520,9 @@ which the local lane never does, and they stay advisory under requirement 4.
 The local lane runs before every push regardless, so a Copilot outage costs
 nothing; the local list is its fallback by construction.
 
-**Code review is an experiment, not yet a rule.** The seven passes already run
-on `mezmo-world-simulator` are scored first: findings accepted against findings
-rejected, per pass, and each accepted finding's severity beside it. Then the
-other vendor reviews the next ten code pull requests, and cost is logged per
-pass. The experiment ends in a report on this item, not in a rule that
+**Code review is an experiment, not yet a rule.** The other vendor reviews the
+next ten code pull requests: findings accepted against findings rejected, per
+pass, each accepted finding's severity beside it, and cost logged per pass. The experiment ends in a report on this item, not in a rule that
 fires, from A's round nineteen: accepted against rejected, the highest
 severity accepted and what it would have cost to ship, and the cost per
 pass. A reviewer that finds one data-loss defect in ten passes and nine
@@ -1351,14 +1349,13 @@ confirmed by the next `sd-ship` run alone.
    bill, and that `--provider` on it refuses with the month's total. A `url:`
    entry whose response carries a `<think>` block and `reasoning_content`
    yields a clean finding list, asserted against a fixture response.
-7. The seven `mezmo-world-simulator` passes are scored, accepted against
-   rejected per pass with each accepted finding's severity, and the scores
-   are recorded on this item before the code review point runs on any new
-   pull request. After the ten, a report with the ratio, the highest
-   severity accepted, and the cost per pass is on this item, and the code
-   point stays or goes by a recorded decision, not by a threshold: a grep
-   of `bin/` and `skills/` for a percentage that disables a review point
-   returns nothing.
+7. No percentage removes the code review point. The other vendor reviews
+   the next ten code pull requests, accepted against rejected per pass with
+   each accepted finding's severity, and cost logged per pass. After the
+   ten, a report with the ratio, the highest severity accepted, and the
+   cost per pass is on this item, and the code point stays or goes by a
+   recorded decision, not by a threshold: a grep of `bin/` and `skills/`
+   for a percentage that disables a review point returns nothing.
 8. The concern-ledger and cross-artifact-sweep obligations are stated as
    conditional on a `sensitive` path in every place they appear.
 9. No pack surface requests a Copilot review. The global settings contain no
@@ -1743,6 +1740,10 @@ from a number the operator types.
   This week's deliverables, outside this item: the six `mcp-research` drafts
   filed, and `mezmo-world-simulator` Phase 1 to `done`. The seven
   `mezmo-world-simulator` passes are scored before any new code review runs.
+  *(That last sentence is what the interview decided on 2026-09-05 and is kept
+  as the record. It no longer holds: the operator cut the back-scoring gate on
+  2026-09-07, and the scoring is parked behind Phase 1 rather than in front of
+  any review. See the log's last entry.)*
 
   One decision from the interview is corrected here. The 104 Codex sessions
   that run from the Obsidian vault are not scheduled jobs: no launchd job or
@@ -4053,7 +4054,7 @@ from a number the operator types.
     - `bin/sd-status`'s row read and its stale line — **38**.
       `residue_section` (`bin/sd-status:990-1008`, 19) is a section that
       enumerates a condition and names it, which is what "report the line by
-      name as stale" is, and `_render_work` (`bin/sd-status:1920-1943`, 24) is
+      name as stale" is, and `_render_work` (`bin/sd-status`, 24) is
       the rendering half that has to say which source answered.
 
       Both citations were re-measured on 2026-09-07 while
@@ -4062,14 +4063,26 @@ from a number the operator types.
       not 986, and `_render_work` is **24** lines and not 19. It then shifted a
       second time inside the same pull request, when review of that step added
       fifteen lines above it -- caught by review and not by the gate, whose
-      window tolerance accepts a start line off by a few -- and a **third**
-      time at that item's step 2b, which is where 1772 became 1920. A line
-      number in prose about a file under active edit is stale on the next
-      commit, including the next commit of the change that just fixed it, and
-      three corrections in three pull requests is the measurement this bullet
-      now has: the anchor costs one edit per landing and buys precision the
-      length figures beside it already carry. Dropping the `:start-end` and
-      citing `_render_work` by name alone is this item's to decide. The lengths are
+      window tolerance accepts a start line off by a few -- a **third** time
+      at that item's step 2b, where 1772 became 1920, a **fourth** at its
+      step 3, where 1920 became 2114, and a **fifth** at that step's
+      verification fix, where 2114 became 2147. A line number in prose about a
+      file under active edit is stale on the next commit, including the next
+      commit of the change that just fixed it. Five corrections in five
+      landings is the measurement this bullet now has, and the rate is one per
+      landing with no sign of settling while `bin/sd-status` is under active
+      edit. The anchor buys precision the length figure beside it already
+      carries.
+
+      **The anchor is dropped on the fifth shift, which is what the fourth
+      recommended.** `_render_work` is now cited by name alone. The citation
+      gate reads the symbol at the start line, so an unanchored citation loses
+      nothing it was actually checking; what it loses is the ability to be
+      wrong about a number nothing reads. `residue_section` keeps its anchor:
+      it has shifted once in five landings, and a citation that is stable is
+      evidence rather than noise. The rule this leaves is narrower than "drop
+      line anchors" — a symbol in a file *this item is actively editing* is
+      cited by name, and everything else keeps its line. The lengths are
       what this bullet reserves against, so **38 is 43 by its own arithmetic**.
       Left as a reported measurement rather than a re-derivation, because the
       reservation is this item's to move and not that one's.
@@ -5046,3 +5059,46 @@ from a number the operator types.
   rounding left. Two of criterion 28's clauses still cannot close from this
   checkout — `commands.yaml` is item B's and the writing manifest is another
   repository's — and PR 8d claims neither.
+
+- **2026-09-07** — **Criterion 7's `mezmo-world-simulator` scoring is cut by
+  the operator; the no-threshold rule it was carrying stays.** The operator
+  does not want the benchmark worked in parallel right now, so the clause
+  requiring the seven passes already run on `mezmo-world-simulator` to be
+  back-scored — and requiring that scoring *before the code review point runs
+  on any new pull request* — is removed from criterion 7 and from requirement
+  3's prose. The gate was the only thing on this item that could not close
+  from a checkout, and it blocked a review point that has been running
+  correctly for weeks.
+
+  **Criterion 7 was doing two unrelated jobs, and only one of them was the
+  benchmark.** The other is a safety property: *no percentage removes the code
+  review point*, asserted by a grep of `bin/` and `skills/` returning nothing.
+  That half is where C-39 and C-42 both resolve — C-39 raised that a
+  thirty-percent acceptance ratio would remove the point on its own, and C-42
+  found `WORKFLOW.md` still carrying the threshold after requirement 3
+  withdrew it. Deleting criterion 7 whole would have reopened both. It is kept
+  verbatim, and the ten-pass forward experiment with it, so the report the
+  operator decides from still has to exist.
+
+  Cutting the back-scoring makes C-39 *more* settled rather than less: the
+  seven historical passes were the only source of a ratio to threshold
+  against, and with no ratio there is nothing for a percentage to fire on.
+  The forward experiment logs cost per pass and produces the report; the
+  decision is still recorded, still not a threshold.
+
+  Parked rather than dropped. Owner: the operator. Trigger:
+  `mezmo-world-simulator` Phase 1 reaching `done`, at which point the seven
+  passes can be scored as evidence rather than as a gate. The interview record
+  at `:1744` still says the passes are scored before any new code review runs;
+  that line is what was decided on 2026-09-05 and is left standing as a record,
+  superseded here rather than rewritten.
+
+  **Two stale citations found while enumerating criterion 7's dependants, not
+  fixed here.** C-66 says "Criterion 7 repoints and removes the entry after the
+  commits" and C-69 says "criterion 7 asserts the page's trailer forms equal
+  the library's". Neither describes criterion 7 in any version of this page:
+  both describe the provider registry and the `<name>/<vendor>` trailer, which
+  is criterion 6. The criteria were renumbered and these two were not
+  repointed. Recorded rather than silently corrected, because guessing which
+  number they meant is how a citation gate learns to lie.
+

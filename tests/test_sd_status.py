@@ -1756,5 +1756,321 @@ class BannerTests(InventoryFixture):
         )
 
 
+class ConcernLedgerTests(InventoryFixture):
+    """The ledger scanner, against real `git grep` over a real index.
+
+    Real git because the scan *is* a `git grep`, and its two known traps --
+    POSIX ERE rejecting `\\b`, and the space after a table pipe -- are
+    properties of that program rather than of the design.
+    """
+
+    def ledger(self, name: str, body: str) -> str:
+        """A `docs/work` page carrying a ledger, tracked so `git grep` sees it."""
+        path = self.repo / "docs" / "work" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        self.git("add", "-A")
+        return f"docs/work/{name}"
+
+    def checks(self, rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+        found: dict[str, list[str]] = {}
+        for row in rows:
+            found.setdefault(row["check"], []).append(row["key"])
+        return found
+
+    def scan(self, **overrides: Any) -> list[dict[str, Any]]:
+        return [
+            row for row in self.inventory(**overrides).rows
+            if row["check"].endswith("-concern") or row["check"].endswith("-concern-row")
+        ]
+
+    def inventory(self, **overrides: Any) -> Any:
+        return status.actionable_inventory(
+            self.repo, self.sections(**overrides), self.TODAY
+        )
+
+    # -- `accepted`, the word that is also prose ----------------------------
+
+    def test_accepted_beside_a_closing_word_does_not_open_the_row(self) -> None:
+        """`accepted` read before `addressed` turns a closed row into a finding.
+
+        Eight rows in this repo's own ledgers say `accepted` about something
+        other than their disposition -- "validation accepted a codex
+        provider" -- while closing themselves a few words later. Read as an
+        opening word, the prose wins and the row reports as a defect.
+        """
+        self.ledger("2026-08-03-prose/prd.md", (
+            "# prose\n\n"
+            "- **C-9 -- the ninth** `addressed`: validation accepted a "
+            "provider it should have refused.\n"
+        ))
+        self.assertEqual([], self.scan())
+
+    def test_accepted_alone_parks_the_row_rather_than_opening_it(self) -> None:
+        """An accepted concern is a decision that stands, not open work.
+
+        `accepted-gap-standing` already says so for the file side, and is not
+        abnormal. A ledger row saying only `accepted` describes the same
+        state and must not land in the banner as a defect.
+        """
+        self.ledger("2026-08-04-standing/prd.md", (
+            "# standing\n\n"
+            "- **C-11 -- the eleventh** (high, ACCEPTED): the guard reads "
+            "only the paths this change touches.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            {"parked-concern": ["docs/work/2026-08-04-standing/prd.md#C-11"]},
+            found,
+        )
+
+    # -- both shapes --------------------------------------------------------
+
+    def test_a_table_ledger_and_a_bullet_ledger_are_both_read(self) -> None:
+        """One ledger is a markdown table and one is a bold bullet list.
+
+        The space after the table pipe is C-18: `| C-7 | ... |` without ` *`
+        in the anchor matches nothing, which is how an entire ledger table
+        disappears in silence.
+        """
+        self.ledger("2026-08-01-table/prd.md", (
+            "# table\n\n"
+            "| id | disposition |\n| --- | --- |\n"
+            "| C-1 | addressed |\n| C-2 | deferred |\n"
+        ))
+        self.ledger("2026-08-02-bullets/prd.md", (
+            "# bullets\n\n"
+            "- **C-1 -- the first** `addressed`.\n"
+            "- **C-3 -- the third** left `unresolved`.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-01-table/prd.md#C-2",
+             "docs/work/2026-08-02-bullets/prd.md#C-3"],
+            sorted(found.get("unresolved-concern", [])),
+        )
+
+    # -- the precedence rules ----------------------------------------------
+
+    def test_an_open_token_beats_a_closing_one_on_the_same_row(self) -> None:
+        """`ACCEPTED and parked` is the common form, and such a row is parked.
+
+        Under-reporting an open concern is the worst failure this can have, so
+        the order is parked, then open, then closed, then standing.
+        """
+        self.ledger("2026-08-01-mixed/prd.md", (
+            "# mixed\n\n"
+            "- C-1 (high, ACCEPTED and parked): a security acceptance.\n"
+            "- C-2: addressed, but the fix is deferred to a later item.\n"
+            "- C-3: rebutted with evidence.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-01-mixed/prd.md#C-1"], found.get("parked-concern")
+        )
+        self.assertEqual(
+            ["docs/work/2026-08-01-mixed/prd.md#C-2"], found.get("unresolved-concern")
+        )
+        self.assertNotIn("C-3", str(found))
+
+    def test_a_table_row_outranks_a_prose_mention_of_the_same_concern(self) -> None:
+        """Shape precedence, and what it stops.
+
+        The ledger of record is the most structured row present. Without this
+        rule a `## Log` sentence that merely begins with a `C-` id decides the
+        concern's disposition -- measured on this item's own C-4, which is
+        `rebutted` in its table and read as open from a Log line that mentions
+        a *different* concern's parking.
+
+        The Log comes first in the fixture on purpose. Rows of equal shape keep
+        the one seen first, so a scanner with no precedence rule would keep the
+        table row anyway if the table came first, and the test would pass
+        against the broken code.
+        """
+        self.ledger("2026-08-01-both/prd.md", (
+            "# both\n\n"
+            "## Log\n\n"
+            "C-4, C-8 and C-10 were rebutted; C-6 parked.\n\n"
+            "## Review\n\n"
+            "| id | disposition |\n| --- | --- |\n"
+            "| C-4 | rebutted |\n"
+        ))
+        self.assertEqual([], self.scan())
+
+    def test_a_bullet_row_outranks_a_prose_sentence_about_the_same_concern(
+        self,
+    ) -> None:
+        """Bullet is its own tier, above prose.
+
+        A bulleted row is a ledger entry; a sentence that happens to open with
+        a `C-` id is not. Sharing a tier, which one decides the concern is
+        settled by whichever line `git grep` returns first, so the prose is
+        written above the row here -- exactly as the shape-precedence fixture
+        does, and for the same reason.
+
+        Found by review on #792. On the live corpus the three-tier and
+        four-tier rules agree on every one of 530 concerns, so this is a latent
+        defect removed rather than a live misclassification corrected.
+        """
+        self.ledger("2026-08-01-bullet/prd.md", (
+            "# bullet\n\n"
+            "## Log\n\n"
+            "C-9 was raised while C-2 was still parked.\n\n"
+            "## Review\n\n"
+            "- C-9, minor: the count was off by one. Corrected.\n"
+        ))
+        self.assertEqual([], self.scan())
+
+    def test_a_disposition_on_the_next_line_is_still_read(self) -> None:
+        """Continuation absorption: dispositions wrap, and the row is one row."""
+        self.ledger("2026-08-01-wrapped/prd.md", (
+            "# wrapped\n\n"
+            "- C-5, minor: the count in the third paragraph is off by one\n"
+            "  under the criterion's own literal strings.\n"
+            "  Corrected.\n\n"
+            "- C-6, minor: a second row whose disposition never arrives\n"
+            "  because the paragraph simply stops.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-01-wrapped/prd.md#C-6"],
+            found.get("unreadable-concern-row"),
+        )
+
+    # -- never dropped ------------------------------------------------------
+
+    def test_a_row_with_no_word_this_reader_carries_is_a_finding(self) -> None:
+        """An unrecognised format inflates the count rather than emptying it.
+
+        That is the failure the design was protecting against: parsing one
+        format, finding nothing in the other three, and printing a clean
+        banner. A row nobody can classify is abnormal on purpose.
+        """
+        path = self.ledger("2026-08-01-strange/prd.md", (
+            "# strange\n\n- C-7: **Disputed, pending a second opinion.**\n"
+        ))
+        rows = self.scan()
+        self.assertEqual(["unreadable-concern-row"], [row["check"] for row in rows])
+        self.assertTrue(rows[0]["abnormal"])
+        self.assertIn(f"{path}:3", rows[0]["detail"])
+
+    def test_the_sixth_vocabulary_closes_rows_and_moves_nothing_else(self) -> None:
+        """`Corrected`/`Recorded`/`Noted`/`superseded`/`Confirmed` were read.
+
+        Closing words are checked last, so adding one can only ever reclassify
+        a row nothing could read -- never an open one. This asserts both
+        halves: the five close, and a row that also carries an open token
+        stays open.
+        """
+        self.ledger("2026-08-01-sixth/prd.md", (
+            "# sixth\n\n"
+            "- C-1, minor: a line number was wrong. Corrected.\n"
+            "- C-2, minor: the count is off. Recorded rather than recounted.\n"
+            "- C-3, minor: the omission stands. Noted in the registry block.\n"
+            "- C-4, minor: C-3 superseded here.\n"
+            "- C-5: **Confirmed, design changed.**\n"
+            "- C-6: Corrected in place, but the wider gap is deferred.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-01-sixth/prd.md#C-6"], found.get("unresolved-concern")
+        )
+        self.assertEqual([], found.get("unreadable-concern-row", []))
+
+    # -- the keying ---------------------------------------------------------
+
+    def test_one_c_id_in_two_items_is_two_concerns(self) -> None:
+        """Keyed on the full path.
+
+        A prototype keying on `split("/")[2]` collapsed 487 archived items
+        into one bucket and lost `C-19` outright.
+        """
+        self.ledger("2026-08-01-alpha/prd.md", "# a\n\n- C-19: deferred.\n")
+        self.ledger(
+            "archive/2026-08/2026-08-02-beta/prd.md", "# b\n\n- C-19: deferred.\n"
+        )
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-01-alpha/prd.md#C-19",
+             "docs/work/archive/2026-08/2026-08-02-beta/prd.md#C-19"],
+            sorted(found.get("unresolved-concern", [])),
+        )
+
+    def test_the_same_concern_written_three_times_is_one_row(self) -> None:
+        """Dedupe by `(file, C-id)`: three rows about one concern, one id."""
+        self.ledger("2026-08-01-repeat/prd.md", (
+            "# repeat\n\n"
+            "| id | disposition |\n| --- | --- |\n| C-8 | deferred |\n\n"
+            "- C-8 re-raised in a later pass, no new disposition.\n\n"
+            "- **C-8** deferred again.\n"
+        ))
+        self.assertEqual(1, len(self.scan()))
+
+    def test_an_archived_ledger_is_read_though_its_boxes_are_not(self) -> None:
+        """The one deliberate exception to the archive exclusion.
+
+        A parked security acceptance outlives the item it was written in, so
+        excluding it because its directory moved is the silent under-report
+        this section exists to prevent.
+        """
+        self.ledger(
+            "archive/2026-08/2026-08-26-adapter/prd.md",
+            "# adapter\n\n- C-19 (high, ACCEPTED and parked): reads anywhere.\n",
+        )
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/archive/2026-08/2026-08-26-adapter/prd.md#C-19"],
+            found.get("parked-concern"),
+        )
+
+
+class AcceptedGapTests(InventoryFixture):
+    """Step 3b: a written acceptance is listed, and is not an abnormality."""
+
+    ENTRY = {
+        "id": "required-checks",
+        "state": "missing",
+        "because": "the check is reported by an app nobody has installed",
+        "since": "2026-07-01",
+        "until": "the app is installed or the check is dropped",
+    }
+
+    def rows_for(self, *entries: dict[str, str]) -> list[dict[str, Any]]:
+        sections = self.sections(protection={
+            "default_branch": "main", "gaps": [], "detail": {},
+            "accepted": list(entries),
+        })
+        return [
+            row for row in
+            status.actionable_inventory(self.repo, sections, self.TODAY).rows
+            if row["check"] == "accepted-gap-standing"
+        ]
+
+    def test_an_accepted_gap_is_listed_and_is_not_abnormal(self) -> None:
+        """A decision is not a defect; re-flagging one is how a banner becomes
+        noise. It is listed because `until` is prose nothing re-evaluates."""
+        rows = self.rows_for(self.ENTRY)
+        self.assertEqual(["required-checks"], [row["key"] for row in rows])
+        self.assertFalse(rows[0]["abnormal"])
+        self.assertEqual(45, rows[0]["rank"])
+        self.assertIn("2026-07-01", rows[0]["detail"])
+        self.assertIn("the app is installed", rows[0]["suggest"])
+
+    def test_an_accepted_gap_never_reaches_the_banner(self) -> None:
+        inventory = status.actionable_inventory(
+            self.repo,
+            self.sections(protection={
+                "default_branch": "main", "gaps": [], "detail": {},
+                "accepted": [self.ENTRY],
+            }),
+            self.TODAY,
+        )
+        result = status.banner(inventory)
+        self.assertEqual([], result["findings"])
+        self.assertNotIn(
+            "accepted-gap-standing", [row["check"] for row in result["classes"]]
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
