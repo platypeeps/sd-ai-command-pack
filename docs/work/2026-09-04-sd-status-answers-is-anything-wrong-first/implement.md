@@ -306,9 +306,92 @@ The ceiling is what checks this, not this paragraph.
       looking. Read from `protection["accepted"]`, which
       `load_acknowledgements` already validates, so no second reader of that
       file is added.
-- [ ] **4. The three new sections and the fixed skeleton.** `_render_banner`,
-      `_render_pending`, `_render_next`, `_render_threads`, and an empty-state
-      sentence for each of the eight existing sections that could vanish.
+- [x] **4. The three new sections and the fixed skeleton.** Landed 2026-09-07.
+      `_render_banner`, `_render_pending`, `_render_next`, `_render_threads`,
+      wired into `render()` ahead of the eight that were already there. Twelve
+      headings print in `design.md`'s order in a repository with nothing in it
+      and in this one.
+
+      **The empty-state sentence for each of the eight is zero of eight.**
+      This step was priced for eight sections that "could vanish", and the
+      number was checked rather than carried: `sd-status` run in a bare `git
+      init` prints all twelve headings, because every one of the eight already
+      writes its own empty line -- `none found`, `no open pull requests`,
+      `none open`, and so on. Nothing was added and nothing was needed, which
+      is budget the step did not spend.
+
+      **Two defects that passed every structural test became visible the
+      moment the structure was rendered.** Both are step 2b's, and neither
+      could have been seen before there was text to read:
+
+      - *`all 12 checks clear` printed beside `52 findings`.* The tail had two
+        branches, blind and not-blind, so a run with findings and nothing
+        unchecked asserted every class was clear in the same sentence that
+        counted three that were not. The head and the tail describe the same
+        twelve classes and contradicted each other; the tail is the half a
+        skimmer reads. Three branches now: `N of M could not run` when any
+        class is blind, `the other N checks clear` when some fired, `all N
+        checks clear` only when none did. The never-say-clear rule outranks
+        the new middle branch -- with a blind class the word is still absent
+        entirely, because `the other N clear` would count the blind class
+        among the clear ones.
+      - *The banner printed all 52 findings.* One class carried 35 and pushed
+        the other eleven sections off the screen, which is the failure
+        `design.md` names under rejected alternatives: the banner becoming the
+        section people skim. `BANNER_LIMIT` is 3 per class with the elision
+        stated (`... 32 more, ranked in pending`), and the class line already
+        carries the true count, so nothing is lost that `pending` does not
+        rank.
+
+      **Column widths are measured off `CLASSES`, not typed.** The first draft
+      padded to 24 and `in-progress-without-branch` is 26, so that one row
+      overflowed and every aligned line below it read as ragged.
+      `CHECK_WIDTH` and `SOURCE_WIDTH` are `max(len(...))` over the tuple, so
+      a check added to it widens the column on the next run.
+
+      **`collect()` gains `inventory` and `abnormalities`, and
+      `SCHEMA_VERSION` goes to 3 here rather than in step 5.** The renderer
+      needs the rows and `render()` takes a dict, so the first new `--json`
+      key appears at this step. Step 5 adds `actions` and `next` under the
+      same version; nothing consumes 3 in between, and bumping twice before
+      anything shipped would describe a version that never existed.
+
+      **Every rule falsified, and one test that could not fail.** Six
+      deliberate breakages:
+
+      | rule broken | test that failed |
+      |---|---|
+      | `next` rendered before `pending` | three order assertions |
+      | the summary's middle branch removed | `all 12 checks clear` beside a finding |
+      | `BANNER_LIMIT` slice removed | the elision line is absent |
+      | `CHECK_WIDTH` hardcoded to 24 | the column no longer fits the longest name |
+      | one source dropped from the thread counts | the counts stop summing to the inventory |
+      | `next` reads `rows[1]` | **passed** -- see below |
+
+      The C-3 test -- the id in `next` is the id at the top of `pending`, one
+      row and not a fourth judgement -- **passed against a renderer taking the
+      wrong row**, because its fixture built a single item and `rows[1]` fell
+      back to `rows[0]`. This is the same failure the shape-precedence test
+      had on #792: a fixture whose only row is the right row cannot tell a
+      correct renderer from a broken one. Three items now, `assertEqual` on
+      the id rather than `assertIn`, and every other row asserted absent from
+      the section. It then failed as predicted: `'w0a35' != 'w94b9'`.
+
+      **`test_nothing_renders_it_yet` is retired, inverted rather than
+      loosened.** Steps 1 to 3b built producers wired to nothing and that test
+      is what said each was landable alone. Step 4 is the step that falsifies
+      it, so it now asserts the four sections *are* in the executable's output.
+      `actions` stays absent: that key is step 5's.
+
+      **One rule the suite enforces that this step tripped.**
+      `test_suite_shape` refuses any class defined after a module's
+      `if __name__ == "__main__":` guard, and appending to the file put
+      `ReportSectionTests` there. Moved above the guard; the rule is right and
+      the append was the mistake.
+
+      Cost: `bin/` 18,262 to **18,367**, 105 lines against 79 priced -- inside
+      the 1.34x this item has been running at, and **183 of headroom** left
+      under `BIN_CAP` 18,550 for step 5.
 - [ ] **5. `--actions`, and the `--json` keys.** `abnormalities`, `actions` and
       `next` added to `collect()`; `SCHEMA_VERSION` bumped to 3, because
       consumers gain keys and the report gains a section order they may depend

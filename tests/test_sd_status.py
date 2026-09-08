@@ -16,6 +16,8 @@ import datetime
 import hashlib
 import importlib.machinery
 import importlib.util
+import io
+import itertools
 import json
 import pathlib
 import shutil
@@ -1033,6 +1035,36 @@ class InventoryFixture(StatusFixture):
     #: producing an `idle-planning` row no assertion here expects.
     TODAY = datetime.date(2026, 9, 7)
 
+    #: A `protection` section that says GitHub could not be read at all, which
+    #: is what puts tier 2 out of reach and the merge class into `unchecked`.
+    BLIND = {
+        "default_branch": "main",
+        "gaps": [],
+        "detail": {},
+        "available": False,
+        "reason": "gh is not installed",
+    }
+
+    def inventory(self, **overrides: Any) -> Any:
+        return status.actionable_inventory(
+            self.repo, self.sections(**overrides), self.TODAY
+        )
+
+    def branch(self, name: str, *, land: bool) -> None:
+        """A real branch off `main`, squash-merged back or left standing.
+
+        Committed before any item file exists, so `git add -A` cannot sweep a
+        `docs/work` fixture into the branch and change what the diff sees.
+        """
+        self.git("checkout", "-q", "-b", name)
+        (self.repo / f"{name}.txt").write_text("work\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", f"work on {name}")
+        self.git("checkout", "-q", "main")
+        if land:
+            self.git("merge", "-q", "--squash", name)
+            self.git("commit", "-q", "-m", f"squash {name}")
+
     def pull(self, **overrides: Any) -> dict[str, Any]:
         """A row shaped exactly as `sd-pr-state`'s `describe` returns one."""
         row = {
@@ -1193,14 +1225,25 @@ class InventoryShapeTests(InventoryFixture):
         ordered = sorted(rows, key=lambda r: (r["rank"], -r["age_days"], r["id"]))
         self.assertEqual(rows, ordered)
 
-    def test_nothing_renders_it_yet(self) -> None:
-        """Step 1 is landable and invisible: the report is unchanged."""
+    def test_the_report_now_carries_what_steps_one_to_three_produced(self) -> None:
+        """Retires `test_nothing_renders_it_yet`, which step 4 falsified.
+
+        Steps 1 to 3b built producers deliberately wired to nothing, and that
+        test asserted the report was unchanged -- true then, and the check
+        that said each step was landable on its own. Step 4 is the step that
+        makes them visible, so the assertion inverts here rather than being
+        loosened. `ReportSectionTests` pins the order and the wording; this
+        one pins only that the executable an operator runs shows them at all,
+        which the in-process tests cannot say.
+
+        `actions` stays absent: that key is step 5's.
+        """
         self.with_github(pulls=[])
         self.item("2026-08-01-alpha", status="in_progress")
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        for absent in ("abnormalities", "pending", "open threads"):
-            self.assertNotIn(f"\n{absent}\n", completed.stdout)
+        for present in ("abnormalities", "pending", "next", "open threads"):
+            self.assertIn(f"\n{present}\n", completed.stdout)
         self.assertNotIn("actions", self.report())
 
 
@@ -1596,36 +1639,6 @@ class BannerTests(InventoryFixture):
     the arrangement rather than the answer.
     """
 
-    #: A `protection` section that says GitHub could not be read at all, which
-    #: is what puts tier 2 out of reach and the merge class into `unchecked`.
-    BLIND = {
-        "default_branch": "main",
-        "gaps": [],
-        "detail": {},
-        "available": False,
-        "reason": "gh is not installed",
-    }
-
-    def inventory(self, **overrides: Any) -> Any:
-        return status.actionable_inventory(
-            self.repo, self.sections(**overrides), self.TODAY
-        )
-
-    def branch(self, name: str, *, land: bool) -> None:
-        """A real branch off `main`, squash-merged back or left standing.
-
-        Committed before any item file exists, so `git add -A` cannot sweep a
-        `docs/work` fixture into the branch and change what the diff sees.
-        """
-        self.git("checkout", "-q", "-b", name)
-        (self.repo / f"{name}.txt").write_text("work\n", encoding="utf-8")
-        self.git("add", "-A")
-        self.git("commit", "-q", "-m", f"work on {name}")
-        self.git("checkout", "-q", "main")
-        if land:
-            self.git("merge", "-q", "--squash", name)
-            self.git("commit", "-q", "-m", f"squash {name}")
-
     def state_of(self, result: dict[str, Any], check: str) -> dict[str, Any]:
         return next(row for row in result["classes"] if row["check"] == check)
 
@@ -1783,11 +1796,6 @@ class ConcernLedgerTests(InventoryFixture):
             row for row in self.inventory(**overrides).rows
             if row["check"].endswith("-concern") or row["check"].endswith("-concern-row")
         ]
-
-    def inventory(self, **overrides: Any) -> Any:
-        return status.actionable_inventory(
-            self.repo, self.sections(**overrides), self.TODAY
-        )
 
     # -- `accepted`, the word that is also prose ----------------------------
 
@@ -2072,5 +2080,210 @@ class AcceptedGapTests(InventoryFixture):
         )
 
 
+class ReportSectionTests(InventoryFixture):
+    """The twelve headings, and the three the inventory feeds.
+
+    Rendered rather than inspected. Step 1 through 3b built producers nothing
+    printed, so every assertion up to here was about a structure; these are
+    about the text an operator reads, which is where two defects that passed
+    every structural test became visible at once.
+    """
+
+    def report(self, **overrides: Any) -> str:
+        inventory = self.inventory(**overrides)
+        result = {
+            "repo": str(self.repo),
+            "pack": {"root": str(self.repo), "branch": "main",
+                     "head": "0000000", "dirty": False},
+            "inventory": {"rows": inventory.rows, "unchecked": inventory.unchecked},
+            "abnormalities": status.banner(inventory),
+            "work": status.work_section(self.repo),
+            "pull_requests": {"repo": "acme/widget", "pull_requests": [],
+                              "available": False, "reason": "no gh"},
+            "setup": {"mode": "full", "mode_error": "", "source": "",
+                      "detected": 0, "entrypoints": {}},
+            "protection": {"available": False, "reason": "no remote",
+                           "gaps": [], "accepted": [], "detail": {}},
+            "handoff": {"packet": {"pending": False, "detail": "none written"},
+                        "carriers": []},
+            "backends": [],
+            "residue": [],
+            "issues": {"available": False, "reason": "no index",
+                       "needs_you": [], "other": []},
+        }
+        stream = io.StringIO()
+        status.render(result, stream)
+        return stream.getvalue()
+
+    def headings(self, text: str) -> list[str]:
+        return [line for line in text.splitlines()
+                if line and not line[0].isspace() and not line.startswith("sd-status:")]
+
+    #: `design.md`'s skeleton, verbatim. The three new sections lead because
+    #: the report is read top-down and the judgement is what the reader came
+    #: for; the eight below keep the order they already had.
+    ORDER = [
+        "abnormalities", "pending", "next", "open threads", "work items",
+        "open pull requests", "detected setup",
+        "issues (this repo, from the index)", "protection",
+        "resumable handoffs", "backends", "legacy residue",
+    ]
+
+    # -- the skeleton -------------------------------------------------------
+
+    def test_twelve_headings_print_in_order_when_there_is_nothing_to_report(
+        self,
+    ) -> None:
+        """The skeleton is fixed, so a missing section is a missing section.
+
+        A report whose sections appear only when non-empty cannot be read for
+        absence: the reader cannot tell "nothing found" from "not looked at",
+        which is the same distinction the banner's third state exists to make.
+        """
+        self.assertEqual(self.ORDER, self.headings(self.report()))
+
+    def test_the_same_twelve_print_in_the_same_order_with_findings(self) -> None:
+        self.item("2026-08-01-alpha", status="in_progress")
+        self.assertEqual(self.ORDER, self.headings(self.report()))
+
+    # -- the summary sentence -----------------------------------------------
+
+    def test_the_summary_does_not_call_checks_clear_beside_its_own_findings(
+        self,
+    ) -> None:
+        """`all N checks clear` printed beside `1 finding` contradicts itself.
+
+        The head and the tail describe the same twelve classes. Saying every
+        one is clear while naming a class that fired hands a skimmer the
+        opposite of the answer, and the tail is the half people skim.
+        """
+        self.item("2026-08-01-alpha", status="in_progress")
+        summary = status.banner(self.inventory())["summary"]
+        self.assertIn("1 finding across 1 check;", summary)
+        self.assertIn("the other 11 checks clear", summary)
+        self.assertNotIn("all 12 checks clear", summary)
+
+    def test_nothing_found_still_says_all_of_them_are_clear(self) -> None:
+        summary = status.banner(self.inventory())["summary"]
+        self.assertEqual("no findings; all 12 checks clear", summary)
+
+    def test_a_blind_class_keeps_the_word_out_even_when_others_fired(self) -> None:
+        """The never-say-clear rule outranks the new middle tail.
+
+        A run with findings *and* a class nobody could ask must not print the
+        word at all: `the other N checks clear` would count the blind class
+        among the clear ones, which is the under-report the third state
+        exists to prevent.
+        """
+        self.branch("feature", land=False)
+        self.item("2026-08-01-alpha", status="in_progress", extra="branch: feature\n")
+        self.item("2026-08-02-beta", status="in_progress")
+        summary = status.banner(self.inventory(protection=self.BLIND))["summary"]
+        self.assertNotIn("clear", summary)
+        self.assertIn("could not run", summary)
+
+    # -- the banner is the judgement, not the list --------------------------
+
+    def test_a_class_over_the_cap_elides_and_says_how_many(self) -> None:
+        """Four findings in one class print three rows and a count.
+
+        The class line already carries the true total, so the elision is not
+        a loss of information -- it is the difference between a banner and a
+        listing, and `pending` is the listing.
+        """
+        for name in ("alpha", "beta", "gamma", "delta"):
+            self.item(f"2026-08-01-{name}", status="in_progress")
+        banner = self.report().split("\npending\n")[0].splitlines()
+        start = next(i for i, line in enumerate(banner)
+                     if line.startswith("  in-progress-without-branch"))
+        under = list(itertools.takewhile(
+            lambda line: line.startswith("    "), banner[start + 1:]))
+        self.assertEqual("4 findings", banner[start].split()[-2] + " findings")
+        self.assertEqual(status.BANNER_LIMIT + 1, len(under))
+        self.assertEqual("... 1 more, ranked in `pending`", under[-1].strip())
+
+    def test_a_class_at_the_cap_elides_nothing(self) -> None:
+        for name in ("alpha", "beta", "gamma"):
+            self.item(f"2026-08-01-{name}", status="in_progress")
+        self.assertNotIn("more, ranked in", self.report().split("\npending\n")[0])
+
+    # -- one row, three renderings ------------------------------------------
+
+    def test_next_names_the_first_row_of_pending_and_not_a_fourth_judgement(
+        self,
+    ) -> None:
+        """C-3, rendered. The id in `next` is an id in `pending`.
+
+        Three independent producers would give one fact three ids; one
+        producer with three views gives it one, and this is the assertion
+        that says the views did not drift apart.
+        """
+        # Three rows, not one. With a single row every candidate for "the
+        # row `next` names" is the same row, so a renderer reaching for the
+        # second would still pass -- which is exactly what this test did
+        # until the breakage that was supposed to fail it did not.
+        self.item("2026-08-01-alpha", status="in_progress")
+        self.item("2026-08-02-beta", status="in_progress")
+        self.item("2026-08-03-gamma", status="in_progress")
+        rows = self.inventory().rows
+        self.assertGreater(len(rows), 1)
+        text = self.report()
+        pending = text.split("\npending\n")[1].split("\nnext\n")[0]
+        following = text.split("\nnext\n")[1].split("\nopen threads\n")[0]
+        self.assertEqual(rows[0]["id"], pending.splitlines()[1].split()[0])
+        self.assertEqual(rows[0]["id"], following.split()[0])
+        self.assertIn(rows[0]["suggest"], following)
+        for other in rows[1:]:
+            self.assertNotIn(other["id"], following)
+
+    def test_pending_states_the_denominator_it_capped_against(self) -> None:
+        """A list that elides in silence is worse than no list."""
+        for index in range(status.PENDING_LIMIT + 3):
+            self.item(f"2026-08-{index + 1:02d}-item", status="in_progress")
+        pending = self.report().split("\npending\n")[1].split("\nnext\n")[0]
+        self.assertIn(f"{status.PENDING_LIMIT} of 13, by rank", pending)
+        self.assertEqual(status.PENDING_LIMIT, len(pending.strip().splitlines()) - 1)
+
+    def test_open_threads_counts_every_row_the_inventory_carries(self) -> None:
+        """The per-source counts are a partition, not a sample.
+
+        If they summed to less than the inventory, `pending`'s cap would have
+        a denominator that understated what was elided.
+        """
+        self.item("2026-08-01-alpha", status="in_progress")
+        self.item("2026-08-02-beta", status="planning")
+        rows = self.inventory().rows
+        threads = self.report().split("\nopen threads\n")[1].split("\nwork items\n")[0]
+        counted = sum(
+            int(line.rsplit(" ", 1)[1])
+            for line in threads.splitlines()
+            if line.startswith("  ") and line.rsplit(" ", 1)[-1].isdigit()
+        )
+        self.assertEqual(len(rows), counted)
+
+    # -- widths are measured, never typed -----------------------------------
+
+    def test_the_check_column_is_wide_enough_for_the_longest_check(self) -> None:
+        """A hardcoded width lets one long name break every other line.
+
+        `in-progress-without-branch` is 26 characters and the first draft of
+        this renderer padded to 24, so that one row overflowed and every
+        aligned line below it read as ragged.
+        """
+        self.assertEqual(
+            max(len(kind.check) for kind in status.CLASSES), status.CHECK_WIDTH
+        )
+        banner = self.report().split("\npending\n")[0].splitlines()
+        # The class rows start two lines below the heading: the summary
+        # sentence sits between them and also ends in the word.
+        start = banner.index("abnormalities") + 2
+        labels = [line.index("clear") for line in banner[start:]
+                  if line.startswith("  ") and line.rstrip().endswith("clear")]
+        abnormal = sum(1 for kind in status.CLASSES if kind.abnormal)
+        self.assertEqual(abnormal, len(labels))
+        self.assertEqual(1, len(set(labels)))
+
 if __name__ == "__main__":
     unittest.main()
+
+

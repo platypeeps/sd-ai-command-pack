@@ -94,7 +94,7 @@ except ImportError:  # pragma: no cover - exercised by the copied-tools test
 #: That is the intended meaning -- an accepted finding is not an open one --
 #: but it is a semantic change to an existing key, which is what a version is
 #: for.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _sibling(name: str, module_name: str) -> Any:
@@ -1334,10 +1334,17 @@ def banner(inventory: Inventory) -> dict[str, Any]:
         f"{fired} check{_s(fired)}"
         if findings else "no findings"
     )
-    tail = (
-        f"{blind} of {len(classes)} checks could not run" if blind
-        else f"all {len(classes)} checks {CLEAR}"
-    )
+    # Three tails, not two. `all N checks clear` printed beside a non-zero
+    # finding count is a sentence that contradicts the clause in front of it,
+    # and a reader skimming the second half carries away the wrong answer.
+    # When any class is blind the word is not printed at all, which is the
+    # rule `prd.md:134` states and `BannerTests` pins.
+    if blind:
+        tail = f"{blind} of {len(classes)} checks could not run"
+    elif fired:
+        tail = f"the other {len(classes) - fired} checks {CLEAR}"
+    else:
+        tail = f"all {len(classes)} checks {CLEAR}"
     return {
         "summary": f"{head}; {tail}",
         "classes": classes,
@@ -2109,7 +2116,7 @@ def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
 def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str, Any]:
     gh = pr_state.probe(root)
     pulls = pr_state.collect(root, limit)
-    return {
+    result = {
         "tool": "sd-status",
         "schema": SCHEMA_VERSION,
         "repo": str(root),
@@ -2123,6 +2130,10 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "residue": residue_section(root),
         "issues": issues_section(root),
     }
+    inventory = actionable_inventory(root, result)
+    result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
+    result["abnormalities"] = banner(inventory)
+    return result
 
 
 def _render_pack(result: dict[str, Any], write: Any) -> None:
@@ -2224,9 +2235,103 @@ def _render_handoff(section: dict[str, Any], write: Any) -> None:
         write("  carrier: no `wip:` branches on origin\n")
 
 
+#: `pending` is capped so a hundred-row backlog does not bury the nine
+#: sections under it. The cap is stated with its denominator on the same line,
+#: because a list that silently elides is worse than no list: `open threads`
+#: is where the full count lives.
+PENDING_LIMIT = 10
+
+#: The banner is the judgement, not the list. A class with 35 findings would
+#: otherwise push the other eleven sections off the screen, which is the
+#: failure `design.md` names under rejected alternatives -- the banner
+#: becoming the section people skim. The class line always carries the true
+#: count, so eliding under it is honest as long as the elision says so, and
+#: `pending` ranks what is elided.
+BANNER_LIMIT = 3
+
+#: Column widths are measured off `CLASSES`, never typed. A check added to
+#: that tuple widens the column on the next run; a hardcoded number would let
+#: one long name break the alignment of every other line silently.
+CHECK_WIDTH = max(len(kind.check) for kind in CLASSES)
+SOURCE_WIDTH = max(len(kind.source) for kind in CLASSES)
+
+
+def _render_banner(section: dict[str, Any], write: Any) -> None:
+    """Every abnormal class, whether or not it fired.
+
+    A class that produced nothing prints `clear`, one that fired prints its
+    count, and one that could not be asked prints `unchecked: <reason>`. The
+    third is why this section lists classes rather than only findings: a
+    reader who sees eight lines learns what was looked at, and a missing line
+    would read as health nobody established.
+    """
+    write("\nabnormalities\n")
+    write(f"  {section['summary']}\n")
+    for row in section["classes"]:
+        write(f"  {row['check']:<{CHECK_WIDTH}} {row['label']}\n")
+        fired = [f for f in section["findings"] if f["check"] == row["check"]]
+        for found in fired[:BANNER_LIMIT]:
+            write(f"    {found['id']}  {found['detail']}\n")
+        if len(fired) > BANNER_LIMIT:
+            write(f"    ... {len(fired) - BANNER_LIMIT} more, ranked in `pending`\n")
+
+
+def _render_pending(rows: list[dict[str, Any]], write: Any) -> None:
+    """The whole inventory by rank, capped, with the cap's denominator."""
+    write("\npending\n")
+    if not rows:
+        write("  nothing pending\n")
+        return
+    shown = rows[:PENDING_LIMIT]
+    write(f"  {len(shown)} of {len(rows)}, by rank\n")
+    for row in shown:
+        write(f"  {row['id']}  {row['check']:<{CHECK_WIDTH}} {row['title']}\n")
+
+
+def _render_next(rows: list[dict[str, Any]], write: Any) -> None:
+    """One row's `suggest`, from the top of `pending`.
+
+    Deliberately the same row rather than a fourth judgement: the id printed
+    here appears in `pending` and, when abnormal, in `abnormalities`, and a
+    reader who sees it three times is looking at one object.
+    """
+    write("\nnext\n")
+    if not rows:
+        write("  nothing to do that this tool can see\n")
+        return
+    top = rows[0]
+    write(f"  {top['id']}  {top['suggest']}\n")
+
+
+def _render_threads(rows: list[dict[str, Any]], write: Any) -> None:
+    """Per-source counts over the same list, and what was not swept.
+
+    The counts give `pending`'s cap a denominator per source. The exclusions
+    are printed rather than implied, so the section never reads as a claim to
+    have swept what it declined to read.
+    """
+    write("\nopen threads\n")
+    counts: dict[str, int] = {}
+    for row in rows:
+        counts[row["source"]] = counts.get(row["source"], 0) + 1
+    if not counts:
+        write("  no source carries an open thread\n")
+    for kind in CLASSES:
+        if kind.source in counts:
+            write(f"  {kind.source:<{SOURCE_WIDTH}} {counts.pop(kind.source)}\n")
+    write("  not swept, and named so the counts above are not read as total:\n")
+    for reason in EXCLUDED:
+        write(f"    - {reason}\n")
+
+
 def render(result: dict[str, Any], stream: TextIO) -> None:
     write = stream.write
     _render_pack(result, write)
+    rows = result["inventory"]["rows"]
+    _render_banner(result["abnormalities"], write)
+    _render_pending(rows, write)
+    _render_next(rows, write)
+    _render_threads(rows, write)
     _render_work(result["work"], write)
 
     write("\nopen pull requests\n")
