@@ -720,7 +720,133 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # against a body specified span by span in a design that already ran a prototype.
 # Step 1 of its checklist is still landable alone, which is a property of the
 # work and not of the funding.
-BIN_CAP = 18_000           # R11-D46: sd-status answers "is anything wrong" first
+#
+# **R11-D47, 2026-09-07, funds steps 2 through 7 of the same item, and is the
+# first record in this file derived from a measurement of its own predecessor
+# rather than from analogues alone.** The base is **17,800**: `line_count` over
+# the files `tracked("bin")` enumerates with `migrate-*` filtered out -- the two
+# functions `test_bin_stays_under_its_ceiling` calls -- run on `main` at
+# `5c23df19`. R11-D46 funded the item whole at 18,000; step 1 spent 584 of the
+# 801 it reserved, and the 200 left do not hold the rest.
+#
+# **The ceiling moves; the steps do not.** The operator's ruling of 2026-09-07,
+# in their words: *"whatever does not reduce existing functionality. We gotta
+# get out of the proposal to remove functionality to maintain a cap. I will
+# never agree to that. If functionality requires more code, then it requires
+# more code."* Nothing below trims scope to fit a number. The cap exists to make
+# growth deliberate and measured, which is why this record derives a raise
+# rather than waving one through -- and why it is not raised in the pull request
+# that needs it.
+#
+# **Step 1 measured span by span against what R11-D46 priced.** Each span was
+# located by walking the module's AST on `main` at `5c23df19` and taking the
+# top-level definition's own line extent, so these are delivered spans and not a
+# re-reading of the diff:
+#
+#   `Class`, `CLASSES`, `BY_CHECK`      priced  79   actual  56   0.71x
+#   `EXCLUDED`                          priced  14   actual  16   1.14x
+#   `action_id()`                       priced  14   actual  19   1.36x
+#   `actionable_inventory()`            priced  21   actual  45   2.14x
+#   `_work_rows()`                      priced  33   actual  57   1.73x
+#   `_step_rows()`                      priced  33   actual  48   1.45x
+#   `_marker_rows()`                    priced  21   actual  29   1.38x
+#   `_tool_rows()`                      priced  21   actual  27   1.29x
+#   four adapters                       priced  24   actual 121   5.04x
+#                                       ----------   ----------
+#                                              260          495   1.90x
+#
+# The item's own `implement.md` records step 1 at 586. The measure above, taken
+# at `d3166845~1` and `d3166845` by the same two functions the test calls, is
+# **584**. Two lines, and the smaller number is the measured one.
+#
+# **Where the other 89 went, and it is not all glue.** 584 minus the 495 above
+# leaves 89. Seven of it is seven one-line module constants nobody enumerated --
+# `IDLE_DAYS`, `_BOX_RE`, `_DISCLOSED_RE`, `_HEADING_RE`, `_ITEM_DATE_RE`,
+# `_MARKER_PATHS`, `_MARKER_PATTERN` -- and four unpriced helpers cost a further
+# 77: `_row` 18, `_widen_collisions` 17, `_age_days` 18, `_branch_names` 24.
+# Those 77 sit inside the 495 as delivered lines but against a price of zero.
+# Measured spans are therefore 502 and true glue -- blank lines, comment heads,
+# the import -- is **82**.
+#
+# **Three findings, and only one is "the estimate was low".**
+#
+# - **The glue rate came in under, and the definition count came in over.**
+#   R11-D46 charged 5.21 a definition, this file's own figure, over an assumed
+#   13. Step 1 added **25** top-level definitions and 82 lines of glue, which is
+#   **3.28** each. Forecasting a definition count is the fragile half, so glue
+#   is charged below as a fraction of measured span instead: 82/502 = **16.3%**.
+# - **A span priced at a built same-file analogue lands near it.** The four
+#   producers ran 1.29, 1.38, 1.45 and 1.73 against `residue_section` and
+#   `backends_section`, mean **1.46**; `CLASSES` came in *under* at 0.71 against
+#   `RESIDUE`.
+# - **A span priced by its shape missed by five.** The four adapters were "a
+#   six-line row shaper" and cost 30 each. R11-D46 flagged that span itself as
+#   "the first span in the series priced by its shape rather than at a named
+#   built analogue". It was, and it is the one that missed. The cause is
+#   nameable and not adapter-specific: an inventory row carries `title`,
+#   `detail` and `suggest` prose plus a docstring, and six lines cannot hold
+#   them.
+#
+# **So the remaining 264 is priced by how each span was priced, not by one
+# blended multiplier.** Eight of the nine sit at a built analogue in this same
+# file and take **1.5x**, the producers' measured mean rounded up. The ninth is
+# shape-priced and takes **2.0x**:
+#
+#   `branch_landed()`                    41   1.5x    62   `sd_lib.delivered`
+#   the ledger scanner, `DISPOSITIONS`   96   1.5x   144   `load_acknowledgements`
+#   `accepted-gap-standing` rows         12   1.5x    18   `_apply_acknowledgements`
+#   `_render_banner`                     22   1.5x    33   `pack_banner`
+#   `_render_pending`                    26   1.5x    39   `_render_work`
+#   `_render_next`                       15   1.5x    22   `_render_issues`
+#   `_render_threads`                    16   1.5x    24   `_render_handoff`
+#   eight empty-state sentences          16   2.0x    32   shape, "2 each"
+#   `--actions`, `collect`, the bump     20   1.5x    30   `build_parser`
+#                                       ---          ---
+#                                       264          404
+#
+# **Plus 84 for spans nobody will enumerate.** Step 1's four helpers and seven
+# constants cost 84 against a price of zero, which is **32%** of its priced 260.
+# This is the honest half of the derivation: a span list is a forecast of what
+# the work will turn out to need, and the single measurement available says such
+# a list undercounts by about a third. 32% of the priced 264 is 84 -- taken on
+# the priced figure rather than on the 404, because the 1.5x already absorbed
+# part of the same effect and charging both to the adjusted number would ask
+# twice. Body is **488**.
+#
+# Glue at 16.3% of 488 is **80**. Body plus glue is **568**.
+#
+# **The seam is 0, for the reason R11-D46 gave and R11-D44 fixed.** Steps 2 and
+# 3 cross into `git grep` and branch resolution. Both go through
+# `sd_lib.git_output`, the fixed-argv transport with 30 call sites, so the
+# transport is built; and the discovery is written down -- step 3's prototype
+# run with its four earned rules and its expected counts, step 2's tier split
+# verified against this checkout's five squash-merged branches. A seam charge
+# buys discovery that has not happened. This one has.
+#
+# **Variance stays at 26%**, this file's largest observed overrun, still 8b's.
+# It is deliberately not raised to step 1's 1.90x: that overrun is priced into
+# the multipliers above rather than left for a contingency to absorb, and
+# charging it in both places would ask twice. 26% of 568 is **148**.
+#
+# **Post-report discovery is 4.76%, and a seventh observation lowered it.**
+# R11-D46 recorded six: 14.4%, 8.3%, 0%, 0%, 0% and 10.6%. Step 1's review is
+# the seventh. It raised two findings -- a wall-clock-dependent test, confirmed
+# and fixed, and a Windows path separator, rejected because the line it names is
+# untouched context, the same pattern stands at 12 sites, and this pack targets
+# no Windows. The fix landed in `#787` touching `tests/test_sd_status.py` alone,
+# so it cost `bin/` **0**. Mean of seven is 4.76%; 4.76% of the 488 body is
+# **23**.
+#
+# 488 plus 80 plus 0 plus 148 plus 23 is **739**. 17,800 plus 739 is 18,539 and
+# the cap is **18,550**; the 11 unclaimed is what rounding to the next fifty
+# left. The raise is 550 on 18,000, or 3.1%.
+#
+# One sanity line, because a derivation this long can be right at every step and
+# wrong in total: 739 is a little above the 584 step 1 actually cost, for a
+# remaining half whose priced spans total 264 against step 1's 260. The halves
+# are the same size, the first is measured, and the second is funded slightly
+# above it. That is the shape the number should have.
+BIN_CAP = 18_550           # R11-D47: the same item, steps 2 through 7
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
 # R11-D29, re-derived 2026-09-03 with the itemisation R11-D24's clause asks
 # for: 4,190 measured on `main`, 158 measured on the branch that carries the
@@ -869,6 +995,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
         ("2026-09-07", 17_050),
         ("2026-09-07", 17_250),
         ("2026-09-07", 18_000),
+        ("2026-09-07", 18_550),
     ),
     "DASHBOARD_CAP": (
         ("2026-08-30", 2_500),
