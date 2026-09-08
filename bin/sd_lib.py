@@ -491,15 +491,24 @@ def _provisioned_library_paths() -> list[str]:
     found no `sd_db` can read the *pinned* one off the virtualenv it was
     installed into. That is the same copy `make setup` chose, not a second
     source: reading the checkout's source instead would answer from something
-    nothing pinned. Returns the directories to try, newest version last, and
-    an empty list when there is no provisioned copy to offer.
+    nothing pinned.
+
+    Ordered by version number and newest first, because a rebuilt virtualenv
+    can leave two `lib/python*` directories behind and the first path on
+    `sys.path` is the one that answers. Sorting the names compares text, and
+    text agrees with the numbers only by luck: it happens to be right for
+    `python3.9` against `python3.13`, and wrong for `python3.1` against
+    `python3.10`, where the shorter name is a prefix of the longer and sorts
+    first. Empty when there is no provisioned copy to offer.
     """
     root = pathlib.Path(__file__).resolve().parent.parent
-    return [
-        str(path)
-        for path in sorted(root.glob(".venv/lib/python*/site-packages"))
-        if (path / "sd_db").is_dir()
-    ]
+    found = []
+    for path in root.glob(".venv/lib/python*/site-packages"):
+        if not (path / "sd_db").is_dir():
+            continue
+        version = tuple(int(part) for part in re.findall(r"\d+", path.parent.name))
+        found.append((version, str(path)))
+    return [path for _, path in sorted(found, reverse=True)]
 
 
 class Rows:
@@ -544,13 +553,18 @@ class Rows:
         try:
             import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
         except ImportError as error:
-            for path in _provisioned_library_paths():
+            offered = _provisioned_library_paths()
+            for path in offered:
                 if path not in sys.path:
                     sys.path.append(path)
             try:
                 import sd_db  # noqa: PLC0415 - the provisioned copy, second and last try
-            except ImportError:
-                self.problem = f"sd_db is not installed here: {error}"
+            except ImportError as retry:
+                # A provisioned copy that will not import is a different fault
+                # from having none, and reporting the first error would hide
+                # it behind "No module named 'sd_db'". Where nothing was
+                # offered the first error is the only one there is.
+                self.problem = f"sd_db is not installed here: {retry if offered else error}"
                 return
         self.installed = True
         try:

@@ -413,6 +413,65 @@ class TheRowDecides(Fixture):
             f" copy: {result.stdout!r} {result.stderr!r}",
         )
 
+    def test_the_newest_interpreter_is_offered_first_by_number_not_by_name(
+        self,
+    ) -> None:
+        """A rebuilt virtualenv leaves two, and the first one answers.
+
+        The pair matters, and the obvious one does not test anything.
+        `sorted()` on `python3.9` and `python3.13` already yields the newer
+        first, so a test written on those two passes with the number sort
+        taken out -- which is how this test was wrong on its first writing.
+        `python3.1` and `python3.10` are where text and number disagree: the
+        shorter name is a prefix of the longer, so it sorts first and the
+        name order hands the import the older copy.
+
+        A directory below the library's 3.11 floor is exactly the leftover
+        this guards: a rebuilt virtualenv does not remove the old one, and the
+        first path on `sys.path` is the one the import takes.
+        """
+        root = self.tmp / "pack"
+        for version in ("python3.1", "python3.10"):
+            site = root / ".venv" / "lib" / version / "site-packages"
+            (site / "sd_db").mkdir(parents=True)
+        with mock.patch.object(sd_lib, "__file__", str(root / "bin" / "sd_lib.py")):
+            offered = sd_lib._provisioned_library_paths()
+        self.assertEqual(
+            ["python3.10", "python3.1"],
+            [pathlib.Path(path).parent.name for path in offered],
+            "the newer interpreter has to be the one the import reaches first",
+        )
+
+    def test_a_provisioned_copy_that_will_not_import_says_so(self) -> None:
+        """Two faults, two sentences. Reporting the first error hides the second.
+
+        A virtualenv holding an `sd_db` that raises on import is not a
+        machine without the library, and "No module named 'sd_db'" -- the
+        first attempt's error -- describes the wrong problem entirely. Where
+        nothing was offered the first error is still the only one there is,
+        which the test above this one covers.
+        """
+        pack = self.tmp / "pack"
+        (pack / "bin").mkdir(parents=True)
+        (pack / "bin" / "sd_lib.py").write_bytes(
+            (REPO_ROOT / "bin" / "sd_lib.py").read_bytes())
+        stub = pack / ".venv" / "lib" / "python3.13" / "site-packages" / "sd_db"
+        stub.mkdir(parents=True)
+        (stub / "__init__.py").write_text(
+            "raise ImportError('the provisioned copy is broken')", encoding="utf-8")
+        script = (
+            "import sd_lib, sys;"
+            " print(sd_lib.Rows(sys.argv[1]).problem)"
+        )
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", script, str(self.root)],
+            capture_output=True, text=True,
+            env={**os.environ, "PYTHONPATH": str(pack / "bin")},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("the provisioned copy is broken", result.stdout)
+        self.assertNotIn("No module named", result.stdout)
+
     def test_no_provisioned_copy_is_offered_from_a_virtualenv_without_one(
         self,
     ) -> None:
