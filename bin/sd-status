@@ -1217,11 +1217,25 @@ def _widen_collisions(rows: list[dict[str, Any]]) -> None:
             row["widened"] = True
 
 
+class Inventory(NamedTuple):
+    """The rows, and the checks that could not be asked at all.
+
+    Two returns and not one, because they answer different questions and only
+    the first is a list of problems. `unchecked` maps a check name to the
+    sentence saying why nothing was read for it; requirement 2b is that those
+    classes are never folded into the clear count, and a class cannot be kept
+    out of a count it was never separated from.
+    """
+
+    rows: list[dict[str, Any]]
+    unchecked: dict[str, str]
+
+
 def actionable_inventory(
     root: pathlib.Path,
     sections: dict[str, Any],
     today: datetime.date | None = None,
-) -> list[dict[str, Any]]:
+) -> Inventory:
     """Every addressable row this repository carries, ranked.
 
     One producer, not three (C-3). A work item whose branch already merged is
@@ -1239,19 +1253,25 @@ def actionable_inventory(
     plus local git and the filesystem, never from a maintained list of known
     problems, which is requirements 2 and 9.
 
-    Five classes in `CLASSES` have no producer here yet and so emit nothing:
-    `branch-already-merged` needs `branch_landed`, the three concern classes
-    need the ledger scanner, and `accepted-gap-standing` needs its own pass
-    over `accepted_gaps[]`. Those are later steps of this item, and the table
-    is the enumeration whether or not a producer stands behind a row -- which
-    is the whole reason the enumeration lives in the table.
+    Four classes in `CLASSES` have no producer here yet and so emit nothing:
+    the three concern classes need the ledger scanner, and
+    `accepted-gap-standing` needs its own pass over `accepted_gaps[]`. Those
+    are later steps of this item, and the table is the enumeration whether or
+    not a producer stands behind a row -- which is the whole reason the
+    enumeration lives in the table.
     """
     day = today or datetime.date.today()
     work = sections.get("work") or {}
     pulls = sections.get("pull_requests") or {}
     protection = sections.get("protection") or {}
+    unchecked: dict[str, str] = {}
     rows: list[dict[str, Any]] = []
-    rows += _work_rows(root, work, day)
+    rows += _work_rows(
+        root, work, day,
+        str(protection.get("default_branch") or "main"),
+        merged_pulls(root, protection),
+        unchecked,
+    )
     rows += _step_rows(root, work)
     rows += _pull_rows(root, pulls, protection)
     rows += _protection_rows(protection)
@@ -1261,7 +1281,74 @@ def actionable_inventory(
     rows += _tool_rows(root)
     _widen_collisions(rows)
     rows.sort(key=lambda row: (row["rank"], -row["age_days"], row["id"]))
-    return rows
+    return Inventory(rows, unchecked)
+
+
+#: The three per-class words requirement 2b names. `CLEAR` is assembled into
+#: the summary rather than chosen by a formatter, because whether it may be
+#: printed at all depends on a different class than the one being described.
+CLEAR, FINDINGS, UNCHECKED = "clear", "findings", "unchecked"
+
+
+def banner(inventory: Inventory) -> dict[str, Any]:
+    """The answer to "is anything wrong", before the rest of the report.
+
+    Every abnormal class in `CLASSES` gets a row whether or not it fired, so
+    the reader learns what was looked at and not only what was found. A class
+    that produced nothing and could be asked is `clear`; one that fired is
+    `n finding(s)`; one that could not be asked is `unchecked: <reason>` and
+    is counted separately, never as clear.
+
+    The summary is assembled so the word `clear` cannot appear while any class
+    is unchecked. That is not a wording preference. A banner that says clear
+    over a class it never read asserts health it did not establish, which is
+    the failure `protection` already refuses (`Never present the absence of
+    gaps you did not read as safety`), and `prd.md:134` checks this exact
+    substring with `gh` taken off `PATH`.
+    """
+    findings = [row for row in inventory.rows if row["abnormal"]]
+    classes: list[dict[str, Any]] = []
+    for kind in CLASSES:
+        if not kind.abnormal:
+            continue
+        reason = inventory.unchecked.get(kind.check, "")
+        count = sum(1 for row in findings if row["check"] == kind.check)
+        if reason:
+            state, label = UNCHECKED, f"{UNCHECKED}: {reason}"
+        elif count:
+            state, label = FINDINGS, f"{count} finding{_s(count)}"
+        else:
+            state, label = CLEAR, CLEAR
+        classes.append({
+            "check": kind.check,
+            "state": state,
+            "label": label,
+            "count": count,
+            "reason": reason,
+            "what": kind.what,
+        })
+    blind = sum(1 for row in classes if row["state"] == UNCHECKED)
+    fired = sum(1 for row in classes if row["state"] == FINDINGS)
+    head = (
+        f"{len(findings)} finding{_s(len(findings))} across "
+        f"{fired} check{_s(fired)}"
+        if findings else "no findings"
+    )
+    tail = (
+        f"{blind} of {len(classes)} checks could not run" if blind
+        else f"all {len(classes)} checks {CLEAR}"
+    )
+    return {
+        "summary": f"{head}; {tail}",
+        "classes": classes,
+        "findings": findings,
+        "unchecked_classes": blind,
+    }
+
+
+def _s(count: int) -> str:
+    """The plural `s`, so the three call sites above stay one line each."""
+    return "" if count == 1 else "s"
 
 
 # -- the work-item producer -------------------------------------------------
@@ -1326,13 +1413,53 @@ def _branch_names(root: pathlib.Path) -> set[str] | None:
 #: this branch land" answered `yes` reads as agreement rather than as a finding.
 LANDED, NOT_LANDED = "landed", "not landed"
 
-#: The tier 2 query, named once so the `unknown` repair is the command that
-#: would actually answer. `design.md:119` writes it out; the four fields after
-#: `number` are the three tier 2 compares plus the branch it matches on.
-GH_MERGED_QUERY = (
-    "gh pr list --state all --json "
-    "number,headRefName,headRefOid,baseRefName,mergedAt"
-)
+#: `gh pr list --state all` capped, so the cap is a decision rather than
+#: `gh`'s own undocumented default of 30 -- which would have stopped answering
+#: at the thirty-first pull request without saying so. An item whose branch
+#: has fallen 200 pull requests behind is not the case this check exists for.
+MERGED_LIMIT = 200
+
+#: The tier 2 query, in one place, as the argument vector that actually runs.
+#: `design.md:119` writes it out; the four fields after `number` are the three
+#: tier 2 compares plus the branch it matches on.
+GH_MERGED_ARGS = [
+    "pr", "list", "--state", "all", "--limit", str(MERGED_LIMIT),
+    "--json", "number,headRefName,headRefOid,baseRefName,mergedAt",
+]
+
+#: The same call as a sentence, **derived** from the vector rather than typed
+#: beside it. A repair is a command the reader is being told to run, so the two
+#: drifting apart hands out a command that was never the one that failed --
+#: the defect this file already fixed once, in `delivered`'s repairs.
+GH_MERGED_QUERY = "gh " + " ".join(GH_MERGED_ARGS)
+
+
+class Merged(NamedTuple):
+    """Tier 2's corpus, and the sentence saying why it is absent when it is."""
+
+    pulls: list[dict[str, Any]] | None
+    reason: str
+
+
+def merged_pulls(root: pathlib.Path, protection: dict[str, Any]) -> Merged:
+    """Every pull request this repository has, or `None` and why not.
+
+    Fetched once per run whether or not tier 1 has already answered. Deferring
+    it until a tier 1 miss would save a call on a clean checkout and cost the
+    report its determinism: whether GitHub gets asked would then depend on
+    which items happen to be open, so two runs a minute apart could say
+    `clear` and `unchecked` with nothing having changed.
+
+    The reason is `probe`'s when GitHub is unreachable at all -- no `gh`, no
+    remote, not authenticated -- and `gh`'s own first line otherwise, because
+    "I could not look" is only actionable with the reason attached.
+    """
+    if not protection.get("available"):
+        return Merged(None, str(protection.get("reason") or "GitHub is unreachable"))
+    payload, error = pr_state.gh_json(GH_MERGED_ARGS, root)
+    if not isinstance(payload, list):
+        return Merged(None, error or f"`{GH_MERGED_QUERY}` returned no list")
+    return Merged([entry for entry in payload if isinstance(entry, dict)], "")
 
 
 def branch_landed(
@@ -1407,7 +1534,12 @@ def _changed(root: pathlib.Path, left: str, right: str) -> set[str]:
     return {path for path in (listing or "").split("\n") if path}
 
 def _work_rows(
-    root: pathlib.Path, work: dict[str, Any], today: datetime.date
+    root: pathlib.Path,
+    work: dict[str, Any],
+    today: datetime.date,
+    default: str,
+    merged: Merged,
+    unchecked: dict[str, str],
 ) -> list[dict[str, Any]]:
     """The work-item contradictions, one pass over the items already collected.
 
@@ -1415,9 +1547,14 @@ def _work_rows(
     is closed by where it lives, and parked is a disposition rather than an
     open thread. Both exclusions are printed, in `EXCLUDED`.
 
-    `branch-already-merged` is the sixth class of this shape and is
-    deliberately absent: it needs the two-tier `branch_landed`, which is the
-    next step of this item.
+    `branch-already-merged` is asked only of a branch that resolves, in the
+    `elif` below and not a second `if`. A `branch:` naming no ref is already a
+    finding of its own class, and `branch_landed` would answer `unknown` on
+    it for a reason that has nothing to do with whether GitHub could be read
+    -- marking the whole class unchecked, on every run, because one item
+    carries a stale field. Unchecked has to mean *I could not look*, or the
+    banner's third state degrades into a second way of saying "something is
+    wrong over there".
     """
     heads = _branch_names(root)
     rows: list[dict[str, Any]] = []
@@ -1445,6 +1582,18 @@ def _work_rows(
                 f"{where} names branch {branch}, which no local or remote head has",
                 f"fetch, or correct the branch: field in {where}/prd.md",
             ))
+        elif branch and status != "done":
+            answer = branch_landed(root, branch, default, merged.pulls)
+            if answer == LANDED:
+                rows.append(_row(
+                    "branch-already-merged", item, slug,
+                    f"{where} is {status} and branch {branch} is already in {default}",
+                    f"set status: done in {where}/prd.md, or say what is left",
+                ))
+            elif answer == sd_lib.UNKNOWN:
+                unchecked.setdefault(
+                    "branch-already-merged", merged.reason or answer.repair
+                )
         if status != "planning":
             continue
         age = _age_days(entry, today)

@@ -71,12 +71,75 @@ The ceiling is what checks this, not this paragraph.
       happens to hold. Twelve tests in `BranchLandedTests`, against real git
       and not a mock, because the claim under test is *which git commands
       answer correctly in a repository that squash-merges*.
-- [ ] **2b. The three-state banner.** `clear` / `n finding(s)` /
-      `unchecked: reason` per class, with unchecked counted separately from
-      clear in the summary line.
+- [x] **2b. The three-state banner.** Landed 2026-09-07. `clear` /
+      `n finding(s)` / `unchecked: reason` per class, with unchecked counted
+      separately from clear in the summary line. `banner(inventory)` builds one
+      row per abnormal class in `CLASSES` whether or not it fired, so the
+      reader learns what was looked at and not only what was found.
+
+      **The summary is assembled so the word `clear` cannot be printed while
+      any class is unchecked**, which is `prd.md:134`'s substring test written
+      as a construction rather than as a wording convention: with something
+      unread the tail reads `n of 11 checks could not run`, and only with
+      nothing unread does it read `all 11 checks clear`.
+
+      Two things this step needed that the checklist line did not say. First,
+      the third state has no source until a producer can report *I could not
+      look*, so `branch-already-merged` is wired here -- `merged_pulls` fetches
+      tier 2's corpus once per run and `_work_rows` turns `branch_landed`'s
+      three answers into a finding, nothing, or an entry in `unchecked`.
+      Second, `actionable_inventory` now returns `Inventory(rows, unchecked)`:
+      a class cannot be kept out of a count it was never separated from, and
+      the rows alone carry no channel for a check that produced nothing
+      *because it never ran*.
+
+      **`branch-already-merged` is asked only of a branch that resolves** --
+      an `elif` after `branch-unresolvable`, not a second `if`. A `branch:`
+      naming no ref answers `unknown` for a reason that has nothing to do with
+      GitHub, so one stale field would otherwise mark the class unchecked on
+      every run and `unchecked` would decay into a second way of saying
+      "something is wrong over there". Both that guard and the never-fold-into-
+      clear rule were falsified before being claimed: turning the `elif` into
+      an `if` produces `{} != {'branch-already-merged': 'gh is not installed'}`,
+      and folding unchecked into clear produces `'unchecked' != 'clear'`.
+
+      `merged_pulls` fetches once per run whether or not tier 1 already
+      answered. Deferring it until a tier 1 miss would save a call on a clean
+      checkout and cost the report its determinism: whether GitHub gets asked
+      would depend on which items happen to be open, so two runs a minute apart
+      could say `clear` and `unchecked` with nothing having changed.
+
+      Cost: `bin/` 17,887 to **18,035**, 148 lines against the 750 R11-D47
+      reserved for steps 2 through 7; 515 of that reservation is left for steps
+      3, 3b, 4, 5 and 7. Nothing renders the banner yet, so the report is
+      byte-identical again; the acceptance criterion that runs it through
+      `--json` with `gh` off `PATH` becomes runnable at step 5, and until then
+      its two assertions are made against the structure in
+      `BannerTests.test_a_check_that_could_not_run_is_unchecked_and_the_word_clear_is_gone`.
+
+      Review on #791 found two, both real and both fixed there. The banner's
+      docstring opened `""""Is anything wrong"` -- legal Python and unreadable.
+      And `GH_MERGED_QUERY`, the sentence an `unknown` hands the reader as its
+      repair, was typed beside the argument vector rather than derived from it,
+      so it named a call without the `--limit 200` the code actually sends. A
+      repair is a command the reader is being told to run; one that was never
+      the command that failed is the defect this file already fixed once, in
+      `delivered`'s repairs. The vector is now the single source and the
+      sentence is joined from it, with a test that records the argv
+      `merged_pulls` passes and asserts every token of it appears in the
+      sentence. Falsified: restoring the old string produces
+      `'--limit' not found in 'gh pr list --state all --json ...'`.
+
+      This step shifted `_render_work` a **third** time, 1772 to 1920, and the
+      citation in `2026-09-05-the-pack-runs-a-team-process-for-one-person`
+      was re-pointed again. Three corrections in three pull requests is now
+      recorded on that item's own bullet, with the option of dropping the
+      line anchor left to it.
 - [ ] **3. The concern-ledger scanner, by row shape.** One
-      `git grep -n -E '^\s*(\|\s*|[-*]\s*)?(\*\*)?C-[0-9]+\b' -- docs/work` over
-      the index, archived items included. Classify each row against the
+      `git grep -n -E '^ *(\| *|[-*] *)?(\*\*)?C-[0-9]+([^0-9]|$)' -- docs/work`
+      over the index, archived items included. That is the POSIX ERE form and
+      it is the one to run; `\s` and `\b` are the two corrections recorded
+      below, and both match nothing here. Classify each row against the
       five-vocabulary `DISPOSITIONS` table; an open token beats a closing one on
       the same row; a row with no recognised token becomes an
       `unreadable-concern-row` finding rather than being dropped. Headings are
@@ -85,9 +148,56 @@ The ceiling is what checks this, not this paragraph.
       required: dedupe by `(full item path, C-id)`; absorb continuation lines to
       the next blank or next candidate; shape precedence table > bold > prose;
       and never truncate the item path (keying on `split("/")[2]` collapses 487
-      archived items into one bucket and loses `C-19` entirely). Expected on
-      today's corpus: 245 concerns, 206 closed, 23 open, 16 unclassifiable.
-      Note: `[[:space:]]` in the `git grep -E` pattern matches nothing; use ` *`.
+      archived items into one bucket and loses `C-19` entirely).
+
+      **The pattern and the counts were both re-measured 2026-09-07, before
+      this step starts.** Two corrections, and the checklist line above already
+      carries the first one.
+
+      `\b` matches nothing here, for the same reason the previously noted
+      `[[:space:]]` does not: `git grep -E` is POSIX ERE and `\b` is a GNU
+      extension. `\s` in the original anchor fails the same way. Decisive --
+
+      ```
+      with \b:    0
+      without \b: 624
+      with -P:    624
+      ```
+
+      -- so the right edge is `([^0-9]|$)`. `-P` answers identically and is not
+      portable to a `git` built without PCRE, and this runs on whatever a
+      reader has, so the ERE form is the one built.
+
+      **The corpus figures this step used to assert are retired.** `245
+      concerns, 206 closed, 23 open, 16 unclassifiable` was measured on an
+      older tree and is no longer a measurement of anything. A prototype of
+      the full scanner -- all four rules, continuation absorption included --
+      run against the corpus on 2026-09-07 returns:
+
+      ```
+      624 candidate rows   530 distinct concerns
+      430 closed   24 open   18 parked   58 unclassifiable
+      ```
+
+      and `C-19` surfaces as `parked` from
+      `archive/2026-08/2026-08-26-codex-local-review-adapter/prd.md:61`, which
+      is the must-survive case. These are recorded as the shape to expect, not
+      as numbers to pin a test to: the step re-derives against the corpus
+      standing when it lands, because a count asserted from a run three days
+      old is this item's own recurring defect class.
+
+      **One of those numbers is a decision this step has to make, not a
+      measurement it can report.** The design accepted 16 unclassifiable of 245
+      (6.5%) as honest noise in the correct direction. Today it is 58 of 530
+      (10.9%), and `unreadable-concern-row` is an *abnormal* class, so all 58
+      land in the banner whose whole job is to be readable at a glance. **37 of
+      the 58 come from one file**, `2026-09-05-the-pack-runs-a-team-process-for-
+      one-person/prd.md`, whose ledger is written `- C-113, minor: ...` with the
+      disposition in a later `## Log` paragraph rather than on the row. Three
+      ways out, none of them free: carry the 58; teach the scanner that item's
+      shape; or make the class non-abnormal so it reports without asserting.
+      Left open here, with the measurement attached, because the design's
+      acceptance was made against 16 and is not evidence about 58.
 - [ ] **3b. `accepted-gap-standing`.** Each `.github/sd-status.json`
       `accepted_gaps[]` entry becomes an inventory row carrying `since` and
       `until`, rank 45, not abnormal.
