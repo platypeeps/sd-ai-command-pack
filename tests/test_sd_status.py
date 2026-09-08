@@ -1390,7 +1390,9 @@ class WorkItemInventoryTests(InventoryFixture):
         self.assertEqual(
             ["2026-08-01-live"],
             sorted({row["key"] for row in rows if "2026-08-0" in row["key"]}),
-            "only the item carrying none of the three suppressors may fire",
+            "only the item carrying neither `parked:` nor an archive path may "
+            "fire; the other three carry `branch:` to make the guard "
+            "observable, which is not a fourth suppressor",
         )
         self.assertEqual(
             len(rows), len({(row["check"], row["key"]) for row in rows}),
