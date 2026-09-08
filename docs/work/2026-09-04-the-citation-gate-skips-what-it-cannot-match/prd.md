@@ -31,6 +31,14 @@ its own corpus and its own count. Anything reading the table above as a standing
 measurement rather than a snapshot will be wrong by the time it reads it, which
 is why criterion 3 exists.
 
+**Re-measured 2026-09-07 on `405a9106`, and the table has already moved.** The
+punctuation-alone row is 3, not 0; the archive row is not reproducible at 21
+under any definition tried; and the largest silent class in the repository is
+not in this table at all. The corrections, the commands that produced them and
+what each one changes are in `design.md` under "What the PRD got wrong the
+second time" — one copy, in the page that derived them, because a second copy
+here is the failure mode this section is already about.
+
 **The fourth cost four rounds.** During #732 one citation written
 `` (`sym`, `path:line`) `` went stale **four times** across four review rounds
 while `make check` passed green each time. Every other citation in that same file
@@ -38,7 +46,7 @@ was caught on the first run. The gate was working; that one line was invisible t
 it, and nothing distinguished "checked and correct" from "never looked at".
 
 `PAIR` is anchored deliberately — `test_prose_between_a_symbol_and_a_citation_breaks_the_anchor`
-(`tests/test_doc_citations.py:145-154`) asserts that a symbol and a citation
+(`tests/test_doc_citations.py:146-155`) asserts that a symbol and a citation
 separated by prose do *not* match, so the anchoring is a design decision with a
 test defending it, not an oversight. What has no test is the case where a real
 citation is written in a shape the anchor rejects.
@@ -54,7 +62,7 @@ That is false, and review said so. It was written from the 24-citation grep
 without checking what the gate does with each one. Measured:
 
 - 21 are under `docs/**/archive/**`, which
-  `anchored_citations` (`tests/test_doc_citations.py:79-101`) skips by path part
+  `anchored_citations` (`tests/test_doc_citations.py:80-102`) skips by path part
   regardless of regex.
 - 1 is in `CHANGELOG.md`, which the corpus glob never reaches.
 - 1 names a file deleted with the retired stack, which `is_inside_repo` skips.
@@ -80,7 +88,7 @@ The interesting silencer is the third, not the fourth.
 `is_inside_repo` exists for a real reason, stated in its own comment: `REPO_ROOT / path`
 follows `..` out of the tree, so an edit to any document under `docs/` could make
 CI read a file of its choosing, and `test_a_citation_cannot_send_this_test_outside_the_checkout`
-(`tests/test_doc_citations.py:132-143`) defends that. It must stay.
+(`tests/test_doc_citations.py:133-144`) defends that. It must stay.
 
 But it answers two questions with one `continue`. *"This path escapes the
 checkout"* is a security refusal and should be silent. *"This path is inside the
@@ -116,17 +124,33 @@ and reports neither.
    not by an argument anyone wrote down.
 6. `make check` green, and the number of citations actually *validated* is
    reported rather than assumed — the control test
-   `test_the_scan_reaches_the_documents` (`tests/test_doc_citations.py:116-130`)
+   `test_the_scan_reaches_the_documents` (`tests/test_doc_citations.py:117-131`)
    already exists for this reason and asserts only that the count is non-zero.
 
 ## Open questions
 
-1. Should a stale citation in an **archived** item fail? Archived items are
-   historical records; a citation into a file that has since moved is arguably
-   correct-as-of-writing. But 21 comma-shaped citations sit there unexamined, and
-   "we never look" is not the same answer as "we decided not to".
-2. Should the corpus include `CHANGELOG.md`? It carries a citation into
+1. **Answered 2026-09-07 — narrow it.** Should a stale citation in an
+   **archived** item fail? Archived items are historical records; a citation
+   into a file that has since moved is arguably correct-as-of-writing. But
+   "we never look" is not the same answer as "we decided not to". *Decision:
+   archived citations are compared and a stale one is reported, not failed —
+   a new `archived-stale` reason and a census line, nothing red.* Measured, the
+   population is **17** stale citations in three items, not the 21 this list
+   originally claimed; that figure is not reproducible under any definition
+   tried and `design.md` records the three that were.
+2. **Answered 2026-09-07 — widen, and exclude `CHANGELOG.md` by name.** Should
+   the corpus include `CHANGELOG.md`? It carries a citation into
    `internal/review/rules.go`, which has never existed in this repository.
+   *Decision: the corpus becomes every tracked markdown file, asked of git, and
+   `CHANGELOG.md` is excluded by name carrying rule 7's stated reason — the
+   changelog names paths as they were at the time, the one place a reference
+   that no longer resolves is still correct.* It holds **8** tokens, not the
+   one this list assumed, six naming paths that do not exist.
+
+   Both answers take the same shape, and it is the operator's ruling of the
+   same day: take the coverage, and do not buy it by editing the historical
+   record. The rejected options each did the opposite — one left the gate
+   blind on purpose, the other paid for sight by rewriting archived documents.
 3. **Can a document quote a citation without making it a claim?** Found by being
    caught: this PRD's first draft reproduced `PAIR`'s own self-test verbatim, and
    `make check` failed on *this file* — the example was written for a different
