@@ -158,10 +158,11 @@ Filled in as each check runs, so a claim here is a transcript and not a plan.
 
 ## Budget, amended after step 1
 
-Step 1 cost **586** lines. R11-D46 priced the same spans at about **328** — 260
-of body plus roughly 68 of glue at the file's 5.21 rate. The gap is 258, and it
-is in the derivation rather than in the scope: nothing was built that the
-design did not ask for.
+Step 1 cost **584** lines, measured at `d3166845~1` and `d3166845` by the two
+functions `test_bin_stays_under_its_ceiling` calls. R11-D46 priced the same
+spans at about **328** — 260 of body plus roughly 68 of glue at the file's 5.21
+rate. The gap is 256, and it is in the derivation rather than in the scope:
+nothing was built that the design did not ask for.
 
 Two causes, both nameable:
 
@@ -170,16 +171,17 @@ Two causes, both nameable:
   and a docstring, and six lines cannot hold them. This is the first span in
   the series priced by its shape rather than at a named built analogue, and it
   is the one that missed.
-- **Four helpers were never priced at all and cost 79**: `_row` 18,
-  `_widen_collisions` 19 — the collision handling the design requires —
-  `_age_days` 18, `_branch_names` 24.
+- **Four helpers were never priced at all and cost 77**: `_row` 18,
+  `_widen_collisions` 17 — the collision handling the design requires —
+  `_age_days` 18, `_branch_names` 24. Seven one-line module constants were
+  unpriced too, for a further 7, so 84 of the 584 answered to no price at all.
 
 **The remaining steps do not fit.** R11-D46 still prices about 264 of body for
 steps 2 through 5, plus glue, against **200** of headroom. That is recorded
 here and not acted on: a cap is never raised in the pull request that busts
 it, and step 1 does not bust it — 17,800 is under 18,000 with the tests green.
 The next step to touch `bin/` needs a re-derivation first, and that
-re-derivation now has a measured 26% figure of its own to price adapters and
+re-derivation has step 1's own span-by-span measurement to price adapters and
 helpers against, rather than a shape guess.
 
 **And that re-derivation raises the ceiling; it does not cut the steps.** The
@@ -192,3 +194,13 @@ dropped, deferred or trimmed to fit 18,000. The cap exists to make growth
 deliberate and measured, which is why a raise is derived and recorded rather
 than waved through — and why it is never raised in the pull request that busts
 it. It does not exist to decide what the tool does.
+
+**R11-D47 is that re-derivation, and it is done.** `BIN_CAP` moves 18,000 →
+**18,550** on a base of 17,800 measured on `main` at `5c23df19`, funding steps
+2 through 7 at **739**: 488 of body, 80 of glue, 0 of seam, 148 of variance and
+23 of post-report discovery. Three things it learned from step 1 rather than
+guessing again — a span priced at a built same-file analogue lands within about
+1.5x of it, a span priced by its *shape* missed by five, and 32% of what step 1
+delivered answered to no price at all. The full derivation is in
+`tests/test_loc_caps.py`, which is the only place a ceiling is allowed to be
+argued. Steps 2 through 7 are funded whole; none was trimmed to fit.
