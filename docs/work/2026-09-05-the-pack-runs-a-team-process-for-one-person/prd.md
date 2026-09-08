@@ -4039,7 +4039,7 @@ from a number the operator types.
     - the row-to-`StatusReport` adapter — **38**. `_adapt`
       (`bin/sd_registry.py:232-269`, 38) is the one built instance of turning
       `sd_db` rows into this pack's frozen dataclasses. The file side it must
-      parallel is `_status_report` (`bin/sd_lib.py:666-691`, 26) with
+      parallel is `_status_report` (`bin/sd_lib.py:724-749`, 26) with
       `status_report` (`bin/sd_lib.py:710-726`, 17), and the row side has to answer one
       question more than either — whether a line found beside the row is
       stale — so the larger analogue is the honest one.
@@ -4047,8 +4047,8 @@ from a number the operator types.
       in a database-free checkout every reader that picks an item asks
       `sd_lib.delivered` and nothing else, and that it answers from a merge
       commit's `Item:` and `Delivers:` trailers. The built trailer scan is
-      `attribution` (`bin/sd_lib.py:1037-1070`, 34) with `_in_range`
-      (`bin/sd_lib.py:1073-1088`, 16). `author_vendors` (32) is *not*
+      `attribution` (`bin/sd_lib.py:1095-1128`, 34) with `_in_range`
+      (`bin/sd_lib.py:1131-1146`, 16). `author_vendors` (32) is *not*
       re-reserved: it maps authors onto vendors and `delivered` has no
       equivalent of that.
     - `bin/sd-status`'s row read and its stale line — **38**.

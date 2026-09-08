@@ -360,6 +360,62 @@ class TheRowDecides(Fixture):
             f"nothing named the absent library: {item.inconsistencies}",
         )
 
+    def test_an_interpreter_without_the_library_reads_the_provisioned_copy(
+        self,
+    ) -> None:
+        """The two answers become one, and the marker is obeyed either way.
+
+        `make setup` provisions `sd_db` into the pack's virtualenv and every
+        entrypoint runs under `#!/usr/bin/env python3`, so on this machine --
+        `python3` 3.14, virtualenv 3.13 -- `./bin/sd-status` answered off git
+        while `.venv/bin/python bin/sd-status` answered off the row, and the
+        two printed different words for the same item. The library is pure
+        Python, so the interpreter that found no `sd_db` reads the pinned copy
+        rather than a different source of truth.
+
+        Run under `-S`, which is what "an interpreter that cannot import it"
+        means here: no `site`, so the virtualenv's own `site-packages` is not
+        on the path and the first import fails exactly as the system
+        interpreter's does. The subprocess is the assertion -- patching
+        `sys.modules` cannot express it, because a name bound to `None` there
+        defeats the retry as well as the first try, which is what the two
+        tests above rely on and why they still pass.
+        """
+        if not sd_lib._provisioned_library_paths():
+            self.skipTest("no provisioned copy in this checkout; `make setup` puts one there")
+        script = (
+            "import sd_lib, sys;"
+            " rows = sd_lib.Rows(sys.argv[1]);"
+            " print(int(rows.installed), rows.problem)"
+        )
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", script, str(REPO_ROOT)],
+            capture_output=True, text=True,
+            env={**os.environ, "PYTHONPATH": str(REPO_ROOT / "bin")},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.split()[0], "1",
+            f"an interpreter without the library did not find the provisioned copy: {result.stdout!r}",
+        )
+
+    def test_no_provisioned_copy_is_offered_from_a_virtualenv_without_one(
+        self,
+    ) -> None:
+        """A bare virtualenv is not a library, and must not be offered as one.
+
+        Without this the helper would hand `sys.path` a directory holding no
+        `sd_db`, the retry would fail anyway, and the only trace would be a
+        path appended for nothing. It is also the direction that keeps the
+        test above honest: a helper returning every glob hit would pass it.
+        """
+        root = self.tmp / "pack"
+        (root / ".venv" / "lib" / "python3.13" / "site-packages").mkdir(parents=True)
+        with mock.patch.object(sd_lib, "__file__", str(root / "bin" / "sd_lib.py")):
+            self.assertEqual([], sd_lib._provisioned_library_paths())
+            (root / ".venv" / "lib" / "python3.13" / "site-packages" / "sd_db").mkdir()
+            self.assertEqual(1, len(sd_lib._provisioned_library_paths()))
+
     def test_the_absent_library_does_not_stop_git_answering(self) -> None:
         """The report gains a problem, not a refusal.
 
