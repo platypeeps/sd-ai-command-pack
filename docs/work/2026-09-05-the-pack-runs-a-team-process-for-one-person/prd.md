@@ -4053,7 +4053,7 @@ from a number the operator types.
     - `bin/sd-status`'s row read and its stale line — **38**.
       `residue_section` (`bin/sd-status:990-1008`, 19) is a section that
       enumerates a condition and names it, which is what "report the line by
-      name as stale" is, and `_render_work` (`bin/sd-status:1772-1795`, 24) is
+      name as stale" is, and `_render_work` (`bin/sd-status:1920-1943`, 24) is
       the rendering half that has to say which source answered.
 
       Both citations were re-measured on 2026-09-07 while
@@ -4062,9 +4062,14 @@ from a number the operator types.
       not 986, and `_render_work` is **24** lines and not 19. It then shifted a
       second time inside the same pull request, when review of that step added
       fifteen lines above it -- caught by review and not by the gate, whose
-      window tolerance accepts a start line off by a few. A line number in
-      prose about a file under active edit is stale on the next commit,
-      including the next commit of the change that just fixed it. The lengths are
+      window tolerance accepts a start line off by a few -- and a **third**
+      time at that item's step 2b, which is where 1772 became 1920. A line
+      number in prose about a file under active edit is stale on the next
+      commit, including the next commit of the change that just fixed it, and
+      three corrections in three pull requests is the measurement this bullet
+      now has: the anchor costs one edit per landing and buys precision the
+      length figures beside it already carry. Dropping the `:start-end` and
+      citing `_render_work` by name alone is this item's to decide. The lengths are
       what this bullet reserves against, so **38 is 43 by its own arithmetic**.
       Left as a reported measurement rather than a re-derivation, because the
       reservation is this item's to move and not that one's.

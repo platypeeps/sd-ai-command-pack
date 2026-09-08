@@ -71,9 +71,57 @@ The ceiling is what checks this, not this paragraph.
       happens to hold. Twelve tests in `BranchLandedTests`, against real git
       and not a mock, because the claim under test is *which git commands
       answer correctly in a repository that squash-merges*.
-- [ ] **2b. The three-state banner.** `clear` / `n finding(s)` /
-      `unchecked: reason` per class, with unchecked counted separately from
-      clear in the summary line.
+- [x] **2b. The three-state banner.** Landed 2026-09-07. `clear` /
+      `n finding(s)` / `unchecked: reason` per class, with unchecked counted
+      separately from clear in the summary line. `banner(inventory)` builds one
+      row per abnormal class in `CLASSES` whether or not it fired, so the
+      reader learns what was looked at and not only what was found.
+
+      **The summary is assembled so the word `clear` cannot be printed while
+      any class is unchecked**, which is `prd.md:134`'s substring test written
+      as a construction rather than as a wording convention: with something
+      unread the tail reads `n of 11 checks could not run`, and only with
+      nothing unread does it read `all 11 checks clear`.
+
+      Two things this step needed that the checklist line did not say. First,
+      the third state has no source until a producer can report *I could not
+      look*, so `branch-already-merged` is wired here -- `merged_pulls` fetches
+      tier 2's corpus once per run and `_work_rows` turns `branch_landed`'s
+      three answers into a finding, nothing, or an entry in `unchecked`.
+      Second, `actionable_inventory` now returns `Inventory(rows, unchecked)`:
+      a class cannot be kept out of a count it was never separated from, and
+      the rows alone carry no channel for a check that produced nothing
+      *because it never ran*.
+
+      **`branch-already-merged` is asked only of a branch that resolves** --
+      an `elif` after `branch-unresolvable`, not a second `if`. A `branch:`
+      naming no ref answers `unknown` for a reason that has nothing to do with
+      GitHub, so one stale field would otherwise mark the class unchecked on
+      every run and `unchecked` would decay into a second way of saying
+      "something is wrong over there". Both that guard and the never-fold-into-
+      clear rule were falsified before being claimed: turning the `elif` into
+      an `if` produces `{} != {'branch-already-merged': 'gh is not installed'}`,
+      and folding unchecked into clear produces `'unchecked' != 'clear'`.
+
+      `merged_pulls` fetches once per run whether or not tier 1 already
+      answered. Deferring it until a tier 1 miss would save a call on a clean
+      checkout and cost the report its determinism: whether GitHub gets asked
+      would depend on which items happen to be open, so two runs a minute apart
+      could say `clear` and `unchecked` with nothing having changed.
+
+      Cost: `bin/` 17,887 to **18,035**, 148 lines against the 750 R11-D47
+      reserved for steps 2 through 7; 515 of that reservation is left for steps
+      3, 3b, 4, 5 and 7. Nothing renders the banner yet, so the report is
+      byte-identical again; the acceptance criterion that runs it through
+      `--json` with `gh` off `PATH` becomes runnable at step 5, and until then
+      its two assertions are made against the structure in
+      `BannerTests.test_a_check_that_could_not_run_is_unchecked_and_the_word_clear_is_gone`.
+
+      This step shifted `_render_work` a **third** time, 1772 to 1920, and the
+      citation in `2026-09-05-the-pack-runs-a-team-process-for-one-person`
+      was re-pointed again. Three corrections in three pull requests is now
+      recorded on that item's own bullet, with the option of dropping the
+      line anchor left to it.
 - [ ] **3. The concern-ledger scanner, by row shape.** One
       `git grep -n -E '^\s*(\|\s*|[-*]\s*)?(\*\*)?C-[0-9]+\b' -- docs/work` over
       the index, archived items included. Classify each row against the

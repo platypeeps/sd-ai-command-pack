@@ -1066,7 +1066,7 @@ class InventoryFixture(StatusFixture):
     def rows(self, **overrides: Any) -> list[dict[str, Any]]:
         return status.actionable_inventory(
             self.repo, self.sections(**overrides), self.TODAY
-        )
+        ).rows
 
     def by_check(self, rows: list[dict[str, Any]], check: str) -> list[dict[str, Any]]:
         return [row for row in rows if row["check"] == check]
@@ -1181,8 +1181,8 @@ class InventoryShapeTests(InventoryFixture):
         self.item("2026-08-01-alpha", status="in_progress")
         self.item("2026-08-02-beta")
         sections = self.sections()
-        first = status.actionable_inventory(self.repo, sections, self.TODAY)
-        second = status.actionable_inventory(self.repo, sections, self.TODAY)
+        first = status.actionable_inventory(self.repo, sections, self.TODAY).rows
+        second = status.actionable_inventory(self.repo, sections, self.TODAY).rows
         self.assertTrue(first)
         self.assertEqual([row["id"] for row in first], [row["id"] for row in second])
         self.assertEqual(len({row["id"] for row in first}), len(first))
@@ -1229,7 +1229,7 @@ class WorkItemInventoryTests(InventoryFixture):
             encoding="utf-8",
         )
         self.item("2026-08-01-alpha")
-        rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY)
+        rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY).rows
         idle = self.by_check(rows, "idle-planning")
         self.assertEqual([row["key"] for row in idle], ["2026-01-01-ancient"])
         self.assertGreater(idle[0]["age_days"], status.IDLE_DAYS)
@@ -1241,7 +1241,7 @@ class WorkItemInventoryTests(InventoryFixture):
             "---\ntitle: undated\nstatus: planning\n---\n\n# undated\n",
             encoding="utf-8",
         )
-        rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY)
+        rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY).rows
         self.assertEqual(
             [row["title"] for row in self.by_check(rows, "undated-planning")],
             ["undated-thing"],
@@ -1255,7 +1255,7 @@ class WorkItemInventoryTests(InventoryFixture):
         (archived / "2026-01-01-old" / "prd.md").write_text(
             PRD.format(title="old", status="planning", extra=""), encoding="utf-8"
         )
-        rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY)
+        rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY).rows
         self.assertEqual([], [row for row in rows if "old" in row["key"]])
         self.assertEqual([], [row for row in rows if "parked" in row["key"]])
 
@@ -1585,6 +1585,149 @@ class BranchLandedTests(StatusFixture):
         self.commit("renamed.txt", "one\n", "main adds a copy, keeps the original")
         self.assertEqual(
             status.NOT_LANDED, status.branch_landed(self.repo, "feature", "main", [])
+        )
+
+
+class BannerTests(InventoryFixture):
+    """The three per-class states, and the one substring `prd.md:134` checks.
+
+    Against real git for the same reason `BranchLandedTests` is: the state
+    under test is produced by asking git a question, and a mock would assert
+    the arrangement rather than the answer.
+    """
+
+    #: A `protection` section that says GitHub could not be read at all, which
+    #: is what puts tier 2 out of reach and the merge class into `unchecked`.
+    BLIND = {
+        "default_branch": "main",
+        "gaps": [],
+        "detail": {},
+        "available": False,
+        "reason": "gh is not installed",
+    }
+
+    def inventory(self, **overrides: Any) -> Any:
+        return status.actionable_inventory(
+            self.repo, self.sections(**overrides), self.TODAY
+        )
+
+    def branch(self, name: str, *, land: bool) -> None:
+        """A real branch off `main`, squash-merged back or left standing.
+
+        Committed before any item file exists, so `git add -A` cannot sweep a
+        `docs/work` fixture into the branch and change what the diff sees.
+        """
+        self.git("checkout", "-q", "-b", name)
+        (self.repo / f"{name}.txt").write_text("work\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", f"work on {name}")
+        self.git("checkout", "-q", "main")
+        if land:
+            self.git("merge", "-q", "--squash", name)
+            self.git("commit", "-q", "-m", f"squash {name}")
+
+    def state_of(self, result: dict[str, Any], check: str) -> dict[str, Any]:
+        return next(row for row in result["classes"] if row["check"] == check)
+
+    # -- the shape ----------------------------------------------------------
+
+    def test_the_banner_lists_every_abnormal_class_and_only_those(self) -> None:
+        """`CLASSES` is the enumeration; the banner does not keep a second one."""
+        result = status.banner(self.inventory())
+        self.assertEqual(
+            [kind.check for kind in status.CLASSES if kind.abnormal],
+            [row["check"] for row in result["classes"]],
+        )
+
+    def test_nothing_wrong_and_nothing_unread_is_the_only_way_to_say_clear(self) -> None:
+        result = status.banner(self.inventory())
+        self.assertEqual(0, result["unchecked_classes"])
+        self.assertEqual([], result["findings"])
+        self.assertIn("clear", result["summary"])
+        self.assertEqual(
+            {status.CLEAR}, {row["state"] for row in result["classes"]}
+        )
+
+    def test_a_class_that_fired_carries_its_own_count(self) -> None:
+        self.item("2026-08-01-alpha", status="in_progress")
+        one = status.banner(self.inventory())
+        self.assertEqual(
+            "1 finding", self.state_of(one, "in-progress-without-branch")["label"]
+        )
+        self.assertIn("1 finding across 1 check;", one["summary"])
+        self.item("2026-08-02-beta", status="in_progress")
+        two = status.banner(self.inventory())
+        self.assertEqual(
+            "2 findings", self.state_of(two, "in-progress-without-branch")["label"]
+        )
+        self.assertIn("2 findings across 1 check;", two["summary"])
+
+    # -- the third state ----------------------------------------------------
+
+    def test_a_check_that_could_not_run_is_unchecked_and_the_word_clear_is_gone(
+        self,
+    ) -> None:
+        """`prd.md:134`, in process: unchecked > 0 and `clear` not in summary.
+
+        The acceptance criterion runs this through `--json` with `gh` taken
+        off `PATH`; nothing renders the banner until step 4, so the same two
+        assertions are made against the structure the renderer will read.
+        """
+        self.branch("feature", land=False)
+        self.item("2026-08-01-alpha", status="in_progress", extra="branch: feature\n")
+        result = status.banner(self.inventory(protection=self.BLIND))
+        row = self.state_of(result, "branch-already-merged")
+        self.assertEqual(status.UNCHECKED, row["state"])
+        self.assertEqual("unchecked: gh is not installed", row["label"])
+        self.assertEqual(1, result["unchecked_classes"])
+        self.assertNotIn("clear", result["summary"])
+
+    def test_an_unresolvable_branch_leaves_the_merge_check_clear(self) -> None:
+        """The `elif` in `_work_rows`, and what it stops.
+
+        A stale `branch:` field is a finding of its own class. Asked of
+        `branch_landed` it would answer `unknown` -- and one such item would
+        then mark the merge class unchecked on every run, for a reason that
+        has nothing to do with whether GitHub could be read.
+        """
+        self.item(
+            "2026-08-01-alpha", status="in_progress", extra="branch: gone-away\n"
+        )
+        inventory = self.inventory(protection=self.BLIND)
+        self.assertEqual(
+            ["branch-unresolvable"],
+            [row["check"] for row in inventory.rows if row["check"].startswith("branch-")],
+        )
+        self.assertEqual({}, inventory.unchecked)
+        result = status.banner(inventory)
+        self.assertEqual(
+            status.CLEAR, self.state_of(result, "branch-already-merged")["state"]
+        )
+
+    # -- the producer -------------------------------------------------------
+
+    def test_a_landed_branch_is_a_finding_and_a_done_item_is_not(self) -> None:
+        self.branch("feature", land=True)
+        self.item("2026-08-01-alpha", status="in_progress", extra="branch: feature\n")
+        fired = self.by_check(self.inventory().rows, "branch-already-merged")
+        self.assertEqual(["2026-08-01-alpha"], [row["key"] for row in fired])
+        self.assertIn("already in main", fired[0]["detail"])
+
+    def test_a_done_item_whose_branch_landed_is_not_a_finding(self) -> None:
+        self.branch("feature", land=True)
+        self.item("2026-08-01-alpha", status="done", extra="branch: feature\n")
+        self.assertEqual(
+            [], self.by_check(self.inventory().rows, "branch-already-merged")
+        )
+
+    def test_merged_pulls_hands_back_the_reason_github_could_not_be_read(self) -> None:
+        self.assertEqual(
+            status.Merged(None, "gh is not installed"),
+            status.merged_pulls(self.repo, self.BLIND),
+        )
+        self.assertEqual(
+            status.Merged(None, "GitHub is unreachable"),
+            status.merged_pulls(self.repo, {"available": False}),
         )
 
 
