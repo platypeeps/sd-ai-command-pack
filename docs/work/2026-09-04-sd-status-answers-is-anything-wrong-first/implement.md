@@ -47,7 +47,7 @@ The ceiling is what checks this, not this paragraph.
       `bin/sd-status`, plus the per-class
       producers. Landable and green on its own: nothing renders it yet, and
       `python3 -m unittest tests.test_sd_status` still passes.
-- [ ] **2. The merged-branch derivation, two-tier.** `branch_landed(root,
+- [x] **2. The merged-branch derivation, two-tier.** Landed 2026-09-07. `branch_landed(root,
       branch, default, pulls)` — ancestor test, then the `--no-renames`
       path-equality test, then a pull request matched by `headRefName` whose
       `mergedAt` is set, whose `baseRefName` is the default branch, and whose
@@ -55,9 +55,22 @@ The ceiling is what checks this, not this paragraph.
       `unknown`, never a bare boolean. Regression cases, both from C-19: a
       branch extended after its PR merged must not report landed, and a PR
       merged into a non-default base must not count.
-      Verified against this checkout's five squash-merged branches:
+      ~~Verified against this checkout's five squash-merged branches:
       tier 1 resolves three, tier 2 resolves the remaining two, ancestry
-      resolves none.
+      resolves none.~~ **That verification cannot be run and was not run.**
+      `git ls-remote --heads origin` returns `main` and nothing else: all five
+      were deleted at their own merges, three of them by this session's
+      `--delete-branch`. The design's table was measured on 2026-09-04 against
+      a corpus that no longer exists, which is this item's own recurring defect
+      class -- a check written while the evidence stood, cited later as though
+      it still ran. It is struck rather than quietly restated.
+
+      **Substituted, and stronger in the way that matters:** each row of that
+      table is reconstructed as a git fixture, so the shapes are tested
+      deterministically instead of being sampled from whatever `origin`
+      happens to hold. Twelve tests in `BranchLandedTests`, against real git
+      and not a mock, because the claim under test is *which git commands
+      answer correctly in a repository that squash-merges*.
 - [ ] **2b. The three-state banner.** `clear` / `n finding(s)` /
       `unchecked: reason` per class, with unchecked counted separately from
       clear in the summary line.
@@ -195,7 +208,38 @@ deliberate and measured, which is why a raise is derived and recorded rather
 than waved through — and why it is never raised in the pull request that busts
 it. It does not exist to decide what the tool does.
 
-**R11-D47 is that re-derivation, and it is done.** `BIN_CAP` moves 18,000 →
+**R11-D47 is that re-derivation, and it is done.**
+
+**And step 2 is the first test of R11-D47's method, which held.** `branch_landed`
+was priced at 41, funded at 62 by the 1.5x that R11-D47 charges a span priced at
+a built same-file analogue. It came in at **55**, or 1.34x -- inside the charge
+and inside the 1.29-1.73 band the four producers set. The two other predictions
+came in as well: unenumerated spans cost **7** (`_changed` at 6 and the
+`LANDED`/`NOT_LANDED` line) against the 13 the 32% surcharge reserved, and glue
+was **10** on a 62-line measured span, or **16.1%**, against the 16.3% charged.
+Step 2 spent 72 of the 739 and `bin/` stands at 17,872 with 678 of headroom.
+
+One observation is not a validated model, and the two spans still to come --
+the ledger scanner at 96 and the renderers at 79 -- are the larger half. But the
+failure mode R11-D46 hit was a span priced by shape missing by five, and this
+span was priced at an analogue and missed by a third of its contingency.
+
+**Step 2's 72 lines shifted a citation in another item, and the gate caught it.**
+`2026-09-05-the-pack-runs-a-team-process-for-one-person` cites `_render_work` as
+an analogue for a 38-line reservation. Re-pointing it turned up two wrong
+measurements that predate this change: `residue_section` starts at 990 and was
+cited at 986, and `_render_work` is 24 lines and was cited as 19. Both are
+corrected in place; the 38 they feed is 43 by its own arithmetic, and that is
+reported on that page rather than re-derived here, because the reservation is
+that item's to move.
+
+Worth naming because of *how* it surfaced. The stale end line sat there through
+every prior run: `test_every_anchored_citation_names_its_symbol_at_the_cited_line`
+compares the symbol at the **start** line and never reads the end, so a range
+whose end is five lines short passes. It only became visible when an unrelated
+edit moved the start. That is the gap
+`2026-09-04-the-citation-gate-skips-what-it-cannot-match` exists to close,
+arriving here from a direction its own measurement did not count. `BIN_CAP` moves 18,000 →
 **18,550** on a base of 17,800 measured on `main` at `5c23df19`, funding steps
 2 through 7 at **739**: 488 of body, 80 of glue, 0 of seam, 148 of variance and
 23 of post-report discovery. Three things it learned from step 1 rather than

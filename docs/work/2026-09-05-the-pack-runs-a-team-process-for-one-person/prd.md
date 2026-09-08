@@ -4051,10 +4051,18 @@ from a number the operator types.
       re-reserved: it maps authors onto vendors and `delivered` has no
       equivalent of that.
     - `bin/sd-status`'s row read and its stale line — **38**.
-      `residue_section` (`bin/sd-status:986-1004`, 19) is a section that
+      `residue_section` (`bin/sd-status:990-1008`, 19) is a section that
       enumerates a condition and names it, which is what "report the line by
-      name as stale" is, and `_render_work` (`bin/sd-status:1685-1703`, 19) is
+      name as stale" is, and `_render_work` (`bin/sd-status:1757-1780`, 24) is
       the rendering half that has to say which source answered.
+
+      Both citations were re-measured on 2026-09-07 while
+      `2026-09-04-sd-status-answers-is-anything-wrong-first` step 2 shifted the
+      second of them, and both were wrong: `residue_section` starts at 990 and
+      not 986, and `_render_work` is **24** lines and not 19. The lengths are
+      what this bullet reserves against, so **38 is 43 by its own arithmetic**.
+      Left as a reported measurement rather than a re-derivation, because the
+      reservation is this item's to move and not that one's.
     - `bin/sd-docs-lint` rules 1 and 2 — **44**. `item_directories`
       (`bin/sd-docs-lint:77-87`, 11) has to carry the archived distinction,
       and it is a reshape of every line of it rather than an added argument;
