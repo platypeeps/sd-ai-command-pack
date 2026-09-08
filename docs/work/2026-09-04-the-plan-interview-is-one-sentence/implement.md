@@ -240,12 +240,15 @@ Filled in as each check runs, so a claim here is a transcript and not a plan.
   overriding it, and this is the exact command that produced the line above:
 
   ```
-  make check VENV="$HOME/repos/platypeeps/sd-ai-command-pack/.venv"
+  make check VENV=<path>/.venv
   ```
 
-  `bin/sd-docs-lint` is run the same way, as
-  `"$VENV/bin/python" bin/sd-docs-lint`. Spelled out because a transcript that
-  cannot be re-run is a claim rather than a check. Found in review.
+  `<path>` is any checkout `make` has already provisioned; this run borrowed the
+  primary one. `bin/sd-docs-lint` is run the same way, as
+  `<path>/.venv/bin/python bin/sd-docs-lint`. Spelled out, and with a
+  placeholder rather than one machine's absolute path, because a transcript that
+  cannot be re-run somewhere else is a claim rather than a check. Both points
+  found in review.
 - 2026-09-07, step 2's gate, on `main` at `5c23df19`: the `grep -cF` command
   prints `1`, and the sentence it matches — *"`sd-grill` moves to `contrib/` and
   a trial decides whether it stays, by the operator's decision on 2026-09-05"* —
