@@ -117,6 +117,19 @@ The ceiling is what checks this, not this paragraph.
       its two assertions are made against the structure in
       `BannerTests.test_a_check_that_could_not_run_is_unchecked_and_the_word_clear_is_gone`.
 
+      Review on #791 found two, both real and both fixed there. The banner's
+      docstring opened `""""Is anything wrong"` -- legal Python and unreadable.
+      And `GH_MERGED_QUERY`, the sentence an `unknown` hands the reader as its
+      repair, was typed beside the argument vector rather than derived from it,
+      so it named a call without the `--limit 200` the code actually sends. A
+      repair is a command the reader is being told to run; one that was never
+      the command that failed is the defect this file already fixed once, in
+      `delivered`'s repairs. The vector is now the single source and the
+      sentence is joined from it, with a test that records the argv
+      `merged_pulls` passes and asserts every token of it appears in the
+      sentence. Falsified: restoring the old string produces
+      `'--limit' not found in 'gh pr list --state all --json ...'`.
+
       This step shifted `_render_work` a **third** time, 1772 to 1920, and the
       citation in `2026-09-05-the-pack-runs-a-team-process-for-one-person`
       was re-pointed again. Three corrections in three pull requests is now

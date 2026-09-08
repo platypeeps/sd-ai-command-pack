@@ -1720,6 +1720,31 @@ class BannerTests(InventoryFixture):
             [], self.by_check(self.inventory().rows, "branch-already-merged")
         )
 
+    def test_the_repair_names_the_command_that_actually_ran(self) -> None:
+        """The `--limit` was in the call and not in the sentence beside it.
+
+        A repair is a command the reader is being told to run. Typed beside
+        the argument vector instead of derived from it, it hands out a command
+        that was never the one that failed -- which is the defect this file
+        already fixed once, in `delivered`'s repairs.
+        """
+        seen: list[list[str]] = []
+
+        def record(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
+            seen.append(args)
+            return [], ""
+
+        original = status.pr_state.gh_json
+        status.pr_state.gh_json = record
+        try:
+            status.merged_pulls(self.repo, {"available": True})
+        finally:
+            status.pr_state.gh_json = original
+        self.assertEqual([status.GH_MERGED_ARGS], seen)
+        for token in status.GH_MERGED_ARGS:
+            self.assertIn(token, status.GH_MERGED_QUERY)
+        self.assertIn(str(status.MERGED_LIMIT), status.GH_MERGED_QUERY)
+
     def test_merged_pulls_hands_back_the_reason_github_could_not_be_read(self) -> None:
         self.assertEqual(
             status.Merged(None, "gh is not installed"),
