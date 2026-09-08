@@ -129,12 +129,28 @@ and reports neither.
 
 ## Open questions
 
-1. Should a stale citation in an **archived** item fail? Archived items are
-   historical records; a citation into a file that has since moved is arguably
-   correct-as-of-writing. But 21 comma-shaped citations sit there unexamined, and
-   "we never look" is not the same answer as "we decided not to".
-2. Should the corpus include `CHANGELOG.md`? It carries a citation into
+1. **Answered 2026-09-07 — narrow it.** Should a stale citation in an
+   **archived** item fail? Archived items are historical records; a citation
+   into a file that has since moved is arguably correct-as-of-writing. But
+   "we never look" is not the same answer as "we decided not to". *Decision:
+   archived citations are compared and a stale one is reported, not failed —
+   a new `archived-stale` reason and a census line, nothing red.* Measured, the
+   population is **17** stale citations in three items, not the 21 this list
+   originally claimed; that figure is not reproducible under any definition
+   tried and `design.md` records the three that were.
+2. **Answered 2026-09-07 — widen, and exclude `CHANGELOG.md` by name.** Should
+   the corpus include `CHANGELOG.md`? It carries a citation into
    `internal/review/rules.go`, which has never existed in this repository.
+   *Decision: the corpus becomes every tracked markdown file, asked of git, and
+   `CHANGELOG.md` is excluded by name carrying rule 7's stated reason — the
+   changelog names paths as they were at the time, the one place a reference
+   that no longer resolves is still correct.* It holds **8** tokens, not the
+   one this list assumed, six naming paths that do not exist.
+
+   Both answers take the same shape, and it is the operator's ruling of the
+   same day: take the coverage, and do not buy it by editing the historical
+   record. The rejected options each did the opposite — one left the gate
+   blind on purpose, the other paid for sight by rewriting archived documents.
 3. **Can a document quote a citation without making it a claim?** Found by being
    caught: this PRD's first draft reproduced `PAIR`'s own self-test verbatim, and
    `make check` failed on *this file* — the example was written for a different

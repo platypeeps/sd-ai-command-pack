@@ -42,20 +42,48 @@ recalled:
 under fifteen, so R11-D43's **2.10** for a module this size applies rather than
 the 3.70 of the eleven larger ones. 4 x 2.10 = 8.
 
-**Seam is 0.** Nothing crosses a boundary that is not already crossed. The
+**Seam was 0, and the operator's answer to question 2 made it real.** The
+figure below is superseded and kept so the correction is legible.
+
+*As derived:* nothing crosses a boundary that is not already crossed. The
 module reads the filesystem through `pathlib` and `REPO_ROOT.glob` today; it
 shells out to nothing, imports nothing new, and the one thing that looks new —
 reading `[absent: <reason>]` — is a regex over text already in hand. R11-D44's
 correction applies: a seam charge buys the discovery behind an unrepaired
-boundary, and there is no boundary here.
+boundary, and there was no boundary here.
+
+*As decided:* question 2 was answered "widen the corpus", and a widened corpus
+must be asked of **git** rather than walked from the filesystem — a filesystem
+walk outside `docs/` picks up untracked files, a `.venv`, and anything a
+vendored tree contains, while the index does not. `design.md` said this in
+advance and priced it as the one place the answer is not free. So the module
+gains a subprocess where it has none today.
+
+**The seam charge is still 0, and now for the R11-D44 reason rather than for
+lack of a boundary.** The transport is `sd_lib.git_output`, built and in use at
+30 call sites, and the discovery behind the boundary is already written down —
+`bin/sd-docs-lint:465` does exactly this for rule 7 and is the model the widened
+corpus copies. A seam charge buys discovery that has not happened yet. This one
+has.
+
+What does change is body: one call, its error path, and the comment naming the
+exclusion. Priced against `check_work_references`'s own git call, that is **6
+lines**, carried in the body total below rather than as a seam.
+
+Recording it this way rather than leaving `0` unexplained is the point. The
+number is the same; the reason is not, and a later reader finding a subprocess
+in a module whose budget said "no boundary here" would be right to distrust the
+whole derivation.
 
 **Body variance is 26%**, R11-D45's largest overrun yet observed, kept by
-R11-D46 rather than averaged down. 26% of 219 is 57.
+R11-D46 rather than averaged down. 26% of 219 is 57. The 6 lines question 2
+added are inside the body's variance rather than outside it; at 225 the same
+26% is 58, and the difference is not worth a second figure.
 
 **Post-report discovery is 5.5%**, R11-D46's mean of six observations. 5.5% of
 219 is 12.
 
-219 + 8 + 0 + 57 + 12 = **296 lines**, taking `tests/test_doc_citations.py`
+219 + 6 + 8 + 0 + 57 + 12 = **302 lines**, taking `tests/test_doc_citations.py`
 from 159 to roughly 455. Nothing consumes it, because `tests/` answers to no
 ceiling.
 
@@ -71,9 +99,29 @@ Ordered so that every step is green on its own. Steps 1 to 3 cannot make
 anything fail that does not fail today; step 4 is the first that can, and it is
 green only because step 3 landed.
 
-**Step 0 is not this agent's to take.** Criterion 5 asks for the archive and
-corpus-glob exclusions to be *decided*, and the decision is the PRD's open
-questions 1 and 2, which belong to the operator. `design.md`'s "The two calls
+**Step 0 is taken. The operator answered both questions on 2026-09-07.**
+
+- **Question 1 — narrow it.** Archived citations are compared and a stale one
+  is *reported*, not failed: one new reason, `archived-stale`, and one census
+  line. Nothing goes red.
+- **Question 2 — widen the corpus and exclude `CHANGELOG.md` by name**, with
+  rule 7's reason written where a reader finds it.
+
+Both follow one principle from the ruling that decided them: take the coverage,
+and do not buy it by editing the historical record. Keeping either exclusion
+would have left the gate unable to see something it could see; dropping either
+would have paid for sight by rewriting archived documents or historical
+changelog entries. `design.md`'s "The two calls that are not mine" carries the
+evidence, the options and the reasoning under each.
+
+**Step 9 can therefore close and criterion 5 can be claimed**, because what
+step 6 writes into the docstring is the reason, and there is now a reason to
+write. What follows is the original note, kept because it states what the
+questions gated and why an implementer should not have invented the argument.
+
+**Step 0 was not this agent's to take.** Criterion 5 asks for the archive and
+corpus-glob exclusions to be *decided*, and the decision was the PRD's open
+questions 1 and 2, which belonged to the operator. `design.md`'s "The two calls
 that are not mine" carries the evidence and the options for both, and the
 design holds under every answer — what changes is one glob, one `continue`, and
 one line of the census. Steps 1 to 8 can be built and landed before either

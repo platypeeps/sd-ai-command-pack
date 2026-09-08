@@ -530,6 +530,26 @@ fixable by an `[absent: ...]`-style marker or by correcting the line. It is 17
 edits to six archived documents in three items — records of what was, which is
 the objection.
 
+**Decided by the operator, 2026-09-07: narrow it.** Archived citations are
+compared, and a stale one is reported rather than failed — the second option.
+It costs one vocabulary entry (`archived-stale`) and a census line, and nothing
+goes red.
+
+The reasoning is the operator's ruling of the same day, given on a different
+question and general in form: *"whatever does not reduce existing
+functionality. We gotta get out of the proposal to remove functionality to
+maintain a cap. I will never agree to that. If functionality requires more
+code, then it requires more code."* Of the three options, keeping the exclusion
+is the only one that leaves the gate unable to see something it could see; 17
+known-wrong citations stay unmarked and the gate stays blind by construction.
+Dropping the exclusion sees them but pays for it by editing six archived
+documents in three items — rewriting records of what was, to satisfy a check
+written afterwards. Narrowing takes the coverage and refuses the rewrite.
+
+It is also the option this section already identified as the one the question
+is actually about: it "makes 'we decided not to' different from 'we never
+look'".
+
 **What changes with the answer.** Only the corpus filter and one vocabulary
 entry. The classification, the marker vocabulary, the conservation assertion and
 `PAREN_PAIR` are identical under all three, and the archive filter is one
@@ -579,6 +599,30 @@ deliberately unresolvable historical references and would each need an
 `[absent: ...]` marker — which is what that marker is for, and two of the six
 already sit next to a `[absent: <reason>]` example in the 0.71.34 entry that
 specified the grammar.
+
+**Decided by the operator, 2026-09-07: widen the corpus and exclude
+`CHANGELOG.md` by name, with rule 7's reason.** The second option.
+
+Same ruling, same reading. Option 1 leaves 112 tracked markdown files outside
+the gate's sight because of a glob string nobody argued for, which is coverage
+lost to an accident. Option 3 takes the coverage but pays by writing
+`[absent: ...]` markers into six historical `CHANGELOG.md` entries — the same
+rewrite-the-record cost that question 1 refused, and against rule 7's own
+stated reason that the changelog "names paths as they were at the time, which
+is the one place a reference that no longer resolves is still correct". Option
+2 scans everything and states the one exclusion where a reader will find it,
+so the gate and rule 7 agree on what the corpus is instead of disagreeing by
+accident.
+
+**And the budget consequence is accepted rather than avoided.** This section
+says plainly that options 2 and 3 cost a re-derivation option 1 does not: the
+corpus must be asked of git rather than walked from the filesystem, which is a
+subprocess where there is none today, and `implement.md` prices the seam at
+zero on the strength of there being no boundary to cross. That price is now
+wrong and the seam is real. Under the ruling, that is a cost to pay and record,
+not a reason to choose the cheaper answer — the item lands in `tests/`, which
+answers to no ceiling, so what changes is the derivation's honesty rather than
+any cap. `implement.md`'s budget section carries the correction.
 
 **What changes with the answer, and the one place it is not free.** Option 1 is
 one comment. Options 2 and 3 change the glob, add one exclusion with a comment
@@ -809,8 +853,13 @@ stated on the page rather than assumed.
 
 **What is open at the cap.** No blocking finding survives: each is repaired
 above or rebutted with a command whose output is quoted. Two things remain open
-and neither is a review finding — questions 1 and 2 are the operator's calls,
+and neither is a review finding — questions 1 and 2 were the operator's calls,
 recorded under "The two calls that are not mine" with their options and
-consequences, and step 0 of `implement.md` says the item does not start until
-they are answered. The item is therefore **not** `blocked` by the review; it is
-waiting on two decisions that were never this agent's to make.
+consequences. **Both were answered on 2026-09-07** and the decisions are
+recorded there. The item is **not** `blocked` and is no longer waiting.
+
+One correction while this paragraph is being touched: it previously said "step
+0 of `implement.md` says the item does not start until they are answered",
+which overstated the gate. `implement.md` says steps 1 to 8 could be built and
+landed before either answer, and that only step 9's closure and criterion 5's
+claim depended on them. The narrower statement was the true one.
