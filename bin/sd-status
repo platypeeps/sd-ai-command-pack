@@ -1645,7 +1645,7 @@ _CONCERN_RE = re.compile(
 #: -- which is also what makes adding one safe, since it can only ever
 #: reclassify a row nothing could read, never an open one.
 PARKED_WORDS = ("parked",)
-OPEN_WORDS = ("does not pass", "unresolved", "accepted", "deferred")
+OPEN_WORDS = ("does not pass", "unresolved", "deferred")
 
 #: The last five are the sixth vocabulary `design.md` named and declined to
 #: add, on the grounds that a vocabulary should grow when a row is read and
@@ -1663,12 +1663,25 @@ CLOSED_WORDS = (
     "corrected", "recorded", "noted", "superseded", "confirmed",
 )
 
+#: `accepted` is checked after everything else because it is the one
+#: disposition word that is also ordinary English: "validation accepted a
+#: codex provider" is prose, not a verdict. Read last, it can only reach a row
+#: no other tier could read, so it inherits the same safety the closing words
+#: have. A row that only says `accepted` names a decision that stands, which is
+#: what `accepted-gap-standing` calls the same state on the file side.
+#:
+#: Measured on the corpus: moving it out of `OPEN_WORDS` drops 8 rows whose
+#: closing word it was masking and parks the 2 where it is the verdict.
+#: `parked` loses none and `open` gains none.
+STANDING_WORDS = ("accepted",)
+
 
 def _disposition(text: str) -> str:
     """`parked`, `open`, `closed`, or `""` when the row does not say."""
     lowered = text.lower()
     for words, verdict in (
-        (PARKED_WORDS, "parked"), (OPEN_WORDS, "open"), (CLOSED_WORDS, "closed"),
+        (PARKED_WORDS, "parked"), (OPEN_WORDS, "open"),
+        (CLOSED_WORDS, "closed"), (STANDING_WORDS, "parked"),
     ):
         for word in words:
             if re.search(rf"(?<![a-z]){re.escape(word)}(?![a-z])", lowered):

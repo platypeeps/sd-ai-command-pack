@@ -257,8 +257,40 @@ The ceiling is what checks this, not this paragraph.
       table > bold > bullet > prose, with a test whose fixture puts the prose
       above the row, and which fails when the tier is collapsed back.
 
+      **The verification review found the one disposition word that is also
+      ordinary English.** `accepted` sat in `OPEN_WORDS`, and Copilot's second
+      pass said an accepted concern is a decision, not a defect. Measured
+      before changing anything, the finding was wider than the report: ten rows
+      classified `unresolved-concern` on that word alone, and on **eight** of
+      them `accepted` is prose -- "validation accepted a codex provider it
+      should have refused" -- standing in front of an `addressed` the row
+      already carried. Opening words are read before closing ones, so the prose
+      won and eight closed rows reported as open defects.
+
+      The fix is a fourth tier rather than a move between the first three. As
+      an opening word it opens eight rows that are shut; as a parking word it
+      would park them without reading their real disposition; removed
+      altogether it leaves the two rows where it *is* the verdict unreadable.
+      `STANDING_WORDS` is read **after** the closing words, so it reaches only a
+      row nothing else could read, which is the same safety the closing tier
+      has and is measured the same way:
+
+      ```
+      before   parked 18  open 24  unreadable 35   (77 rows)
+      after    parked 20  open 14  unreadable 35   (69 rows)
+      ```
+
+      Eight rows leave as closed, two move to parked, and **no row that was
+      parked changed at all**. `parked` is where the file side already puts
+      this state: `accepted-gap-standing` is rank 45 and not abnormal, so the
+      ledger scanner and the `accepted_gaps[]` scanner now agree on what an
+      acceptance is. Two tests, both falsified by putting the word back in
+      `OPEN_WORDS`: the prose row must not open
+      (`[] != [{'check': 'unresolved-concern'...}]`) and the bare `ACCEPTED`
+      row must park (`{'parked-concern': [...]} != {'unresolved-concern': [...]}`).
+
       Verified against the live corpus, which is the point of the whole
-      section: **18 parked, 24 open, 35 unreadable**, and `C-19` surfaces as
+      section: **20 parked, 14 open, 35 unreadable**, and `C-19` surfaces as
       parked from
       `docs/work/archive/2026-08/2026-08-26-codex-local-review-adapter/prd.md:61`
       -- the must-survive case, from an archived item, through a `## Review`

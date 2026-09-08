@@ -1789,6 +1789,41 @@ class ConcernLedgerTests(InventoryFixture):
             self.repo, self.sections(**overrides), self.TODAY
         )
 
+    # -- `accepted`, the word that is also prose ----------------------------
+
+    def test_accepted_beside_a_closing_word_does_not_open_the_row(self) -> None:
+        """`accepted` read before `addressed` turns a closed row into a finding.
+
+        Eight rows in this repo's own ledgers say `accepted` about something
+        other than their disposition -- "validation accepted a codex
+        provider" -- while closing themselves a few words later. Read as an
+        opening word, the prose wins and the row reports as a defect.
+        """
+        self.ledger("2026-08-03-prose/prd.md", (
+            "# prose\n\n"
+            "- **C-9 -- the ninth** `addressed`: validation accepted a "
+            "provider it should have refused.\n"
+        ))
+        self.assertEqual([], self.scan())
+
+    def test_accepted_alone_parks_the_row_rather_than_opening_it(self) -> None:
+        """An accepted concern is a decision that stands, not open work.
+
+        `accepted-gap-standing` already says so for the file side, and is not
+        abnormal. A ledger row saying only `accepted` describes the same
+        state and must not land in the banner as a defect.
+        """
+        self.ledger("2026-08-04-standing/prd.md", (
+            "# standing\n\n"
+            "- **C-11 -- the eleventh** (high, ACCEPTED): the guard reads "
+            "only the paths this change touches.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            {"parked-concern": ["docs/work/2026-08-04-standing/prd.md#C-11"]},
+            found,
+        )
+
     # -- both shapes --------------------------------------------------------
 
     def test_a_table_ledger_and_a_bullet_ledger_are_both_read(self) -> None:
@@ -1821,7 +1856,7 @@ class ConcernLedgerTests(InventoryFixture):
         """`ACCEPTED and parked` is the common form, and such a row is parked.
 
         Under-reporting an open concern is the worst failure this can have, so
-        the order is parked, then open, then closed.
+        the order is parked, then open, then closed, then standing.
         """
         self.ledger("2026-08-01-mixed/prd.md", (
             "# mixed\n\n"
