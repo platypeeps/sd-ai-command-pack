@@ -2400,6 +2400,11 @@ class ActionsFlagTests(InventoryFixture):
         status.render_actions(rows, stream)
         return stream.getvalue()
 
+    def pending_text(self, rows: list[dict[str, Any]]) -> str:
+        stream = io.StringIO()
+        status._render_pending(rows, stream.write)
+        return stream.getvalue()
+
     def test_the_count_on_the_first_line_equals_the_rows_below_it(self) -> None:
         """The acceptance criterion, in process rather than through a shell."""
         for index in range(6):
@@ -2431,6 +2436,35 @@ class ActionsFlagTests(InventoryFixture):
         line = self.actions_text(rows).splitlines()[1]
         self.assertTrue(re.match(r"^[a-z][0-9a-f]{4,} ", line))
         self.assertFalse(re.match(r"^[a-z][0-9a-f]{4} ", line))
+
+    def test_a_widened_id_is_named_rather_than_changed_in_silence(self) -> None:
+        """The mitigation `design.md:540` accepts the collision risk on.
+
+        `_widen_collisions` has set `widened` since step 2 and no renderer read
+        it, so a colliding id changed between runs with nothing in the text
+        report saying why -- only `--json` carried the flag. The risk the
+        design accepts is that "the survivor reverts to four, so its id
+        changed"; the note is the whole reason that was acceptable.
+
+        Two rows are forced to collide by giving them the same `(check, key)`
+        under different data, which is what `_widen_collisions` keys on. One
+        row would prove nothing: widening only happens to a pair.
+        """
+        rows = [
+            {"id": "s0000", "check": "open-step", "title": "a",
+             "suggest": "do a", "key": "same", "widened": True},
+            {"id": "s0000", "check": "open-step", "title": "b",
+             "suggest": "do b", "key": "same", "widened": True},
+        ]
+        for text in (self.actions_text(rows), self.pending_text(rows)):
+            self.assertIn("widened to eight digits", text)
+            self.assertIn("s0000", text)
+
+    def test_no_note_is_printed_when_nothing_widened(self) -> None:
+        """A line that always prints is not a signal."""
+        rows = [{"id": "s0001", "check": "open-step", "title": "a",
+                 "suggest": "do a", "key": "k", "widened": False}]
+        self.assertNotIn("widened", self.actions_text(rows))
 
     def test_actions_is_not_capped_the_way_pending_is(self) -> None:
         """The whole point of the flag: `pending` elides, this does not."""
