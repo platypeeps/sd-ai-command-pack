@@ -2327,7 +2327,11 @@ class ActionsFlagTests(InventoryFixture):
         never have passed here, so the criterion was wrong rather than the
         ids.
         """
-        rows = [{"id": "s08e3f70", "check": "open-step", "title": "t",
+        # `sd08e3f70` verbatim, one of the two this checkout actually widened,
+        # and not a shortened stand-in: an id carrying seven hex digits passes
+        # both assertions below while contradicting the docstring above them,
+        # so the fixture has to carry the real width to be pinning anything.
+        rows = [{"id": "sd08e3f70", "check": "open-step", "title": "t",
                  "suggest": "do the thing"}]
         line = self.actions_text(rows).splitlines()[1]
         self.assertTrue(re.match(r"^[a-z][0-9a-f]{4,} ", line))
