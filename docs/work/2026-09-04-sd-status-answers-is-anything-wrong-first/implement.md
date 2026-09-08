@@ -135,7 +135,7 @@ The ceiling is what checks this, not this paragraph.
       was re-pointed again. Three corrections in three pull requests is now
       recorded on that item's own bullet, with the option of dropping the
       line anchor left to it.
-- [ ] **3. The concern-ledger scanner, by row shape.** One
+- [x] **3. The concern-ledger scanner, by row shape.** Landed 2026-09-07. One
       `git grep -n -E '^ *(\| *|[-*] *)?(\*\*)?C-[0-9]+([^0-9]|$)' -- docs/work`
       over the index, archived items included. That is the POSIX ERE form and
       it is the one to run; `\s` and `\b` are the two corrections recorded
@@ -196,11 +196,69 @@ The ceiling is what checks this, not this paragraph.
       disposition in a later `## Log` paragraph rather than on the row. Three
       ways out, none of them free: carry the 58; teach the scanner that item's
       shape; or make the class non-abnormal so it reports without asserting.
-      Left open here, with the measurement attached, because the design's
-      acceptance was made against 16 and is not evidence about 58.
-- [ ] **3b. `accepted-gap-standing`.** Each `.github/sd-status.json`
-      `accepted_gaps[]` entry becomes an inventory row carrying `since` and
-      `until`, rank 45, not abnormal.
+      **Resolved on Sven's word: teach the scanner the shape.** Read, the 58
+      turned out not to be a shape problem at all but the sixth vocabulary
+      `design.md` named and declined to add -- `Corrected.`, `Recorded rather
+      than silently recounted.`, `Noted in the registry block`, `superseded
+      here`, `**Confirmed, design changed.**`. The design's reason for
+      declining was that a vocabulary should grow when a row is read and
+      understood rather than when a count is being tuned. The rows were read,
+      one by one, and those five words are dispositions written by hand in
+      ledgers older than this scanner.
+
+      Adding them is safe by construction and not by hope. Closing words are
+      checked **last**, after parked and after open, so a closing word can only
+      ever reclassify a row nothing could read -- never an open one. Measured
+      across every candidate combination, `open` and `parked` moved by exactly
+      zero:
+
+      ```
+      base       parked 18  open 24  closed 430  unreadable 58
+      all five   parked 18  open 24  closed 453  unreadable 35
+      ```
+
+      35 of 530 is 6.6%, which is the 6.5% the design accepted at 16 of 245.
+      `test_the_sixth_vocabulary_closes_rows_and_moves_nothing_else` asserts
+      both halves: the five close, and a row also carrying an open token stays
+      open.
+
+      **What the step actually landed, and what each rule cost.** All four of
+      the design's rules are in, and all four were falsified rather than
+      asserted -- each one broken deliberately to watch the predicted test
+      fail:
+
+      | rule broken | test that failed |
+      |---|---|
+      | ` *` dropped after the table pipe | the whole table ledger vanishes, C-2 lost |
+      | closing words checked before open | `['...#C-2'] != None` |
+      | shape precedence removed | a `## Log` line parks C-4, `[] != [parked-concern]` |
+      | continuation absorption removed | the wrapped row's `Corrected.` is unread |
+      | keyed on `split("/")[2]` | `'docs/work/...#C-6' != '2026-08-01-wrapped#C-6'` |
+
+      The shape-precedence test **did not fail on the first attempt**, and that
+      is worth recording: rows of equal shape keep the one seen first, so with
+      the table written above the `## Log` the broken scanner kept the right
+      row by accident and the test passed against it. The fixture now puts the
+      Log first. A test that cannot fail is not evidence, and this one was not
+      until it was made to.
+
+      Verified against the live corpus, which is the point of the whole
+      section: **18 parked, 24 open, 35 unreadable**, and `C-19` surfaces as
+      parked from
+      `docs/work/archive/2026-08/2026-08-26-codex-local-review-adapter/prd.md:61`
+      -- the must-survive case, from an archived item, through a `## Review`
+      heading no heading-matcher anticipated. The one `git grep` runs in
+      **0.043s** real over the whole corpus, which is the run-time this item
+      said it would check rather than assume.
+- [x] **3b. `accepted-gap-standing`.** Landed 2026-09-07 with step 3. Each
+      `.github/sd-status.json` `accepted_gaps[]` entry becomes an inventory row
+      carrying `since` and `until`, rank 45, not abnormal -- an acceptance is a
+      decision, and re-flagging a decision as a defect is how a banner becomes
+      noise. It is listed at all because `until` is prose nothing re-evaluates:
+      the entry stays true only for as long as somebody looks, and this is the
+      looking. Read from `protection["accepted"]`, which
+      `load_acknowledgements` already validates, so no second reader of that
+      file is added.
 - [ ] **4. The three new sections and the fixed skeleton.** `_render_banner`,
       `_render_pending`, `_render_next`, `_render_threads`, and an empty-state
       sentence for each of the eight existing sections that could vanish.
