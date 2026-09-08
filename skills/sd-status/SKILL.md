@@ -85,7 +85,7 @@ predict `pending` from this table before running the command.
 | 120 | `source-marker` | `t` | no | `marker scan over the index` | a marker left in tracked source |
 | 125 | `undisclosed-tool` | `k` | no | `skill claims bin/<tool>` | a skill disclosing a tool that is not built |
 
-## Ids: `<letter><4 hex digits>`, from the data alone
+## Ids: `<letter><4 hex digits, 8 on collision>`, from the data alone
 
 Every actionable row carries an id like `w0a35` — short enough to type, and a
 pure function of the data, so "do `w0a35`" in a later session still names the
@@ -102,8 +102,9 @@ prefix; identity is `(check, key)`.
 
 **Colliding ids widen to eight hex digits, both of them, and record that they
 did.** The widened rows carry `"widened": true` in `--json`; the text report
-shows the wider id itself and prints no separate note. So a consumer matching
-ids wants `^[a-z][0-9a-f]{4,}$` — `{4}` is wrong, and this checkout already
+shows the wider id and names the widened ids in a line under the rows, so
+the change is visible rather than silent. So a consumer matching ids wants
+`^[a-z][0-9a-f]{4,}$` — `{4}` is wrong, and this checkout already
 carries two eight-digit ids that a fixed-width pattern misses.
 
 ## Picking a row through `AskUserQuestion`
