@@ -1548,12 +1548,15 @@ class BranchLandedTests(StatusFixture):
         self.commit("b.txt", "two, edited later\n", "main moves on")
         answer = status.branch_landed(self.repo, "feature", "main", None)
         self.assertEqual(status.sd_lib.UNKNOWN, answer)
-        self.assertEqual("gh pr list --state all", answer.repair)
+        self.assertEqual(status.GH_MERGED_QUERY, answer.repair)
+        self.assertIn("headRefOid", answer.repair)
 
     def test_a_branch_git_cannot_resolve_is_unknown_with_the_repair(self) -> None:
         answer = status.branch_landed(self.repo, "no-such-branch", "main", [])
         self.assertEqual(status.sd_lib.UNKNOWN, answer)
-        self.assertEqual("git rev-parse no-such-branch", answer.repair)
+        self.assertEqual(
+            "git rev-parse --verify 'no-such-branch^{commit}'", answer.repair
+        )
 
     def test_tier_1_fires_before_the_lookup_so_an_absent_gh_still_answers(self) -> None:
         """Positive evidence is offline, which is what makes tier 3 rare."""

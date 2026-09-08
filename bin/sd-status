@@ -1326,6 +1326,14 @@ def _branch_names(root: pathlib.Path) -> set[str] | None:
 #: this branch land" answered `yes` reads as agreement rather than as a finding.
 LANDED, NOT_LANDED = "landed", "not landed"
 
+#: The tier 2 query, named once so the `unknown` repair is the command that
+#: would actually answer. `design.md:119` writes it out; the four fields after
+#: `number` are the three tier 2 compares plus the branch it matches on.
+GH_MERGED_QUERY = (
+    "gh pr list --state all --json "
+    "number,headRefName,headRefOid,baseRefName,mergedAt"
+)
+
 
 def branch_landed(
     root: pathlib.Path,
@@ -1355,6 +1363,13 @@ def branch_landed(
     **`pulls` of `None` means the lookup could not be made**, and is the whole
     of the difference between the two negatives. A branch nothing merged is
     `not landed`; a branch nobody could ask about is `unknown`, never `clear`.
+
+    Both repairs name the exact call that did not answer, as `delivered`'s do:
+    a reader who runs the string gets the failure itself rather than a nearby
+    command that fails differently. Found in review, where the first draft
+    named `git rev-parse <branch>` for a probe that is `--verify` on a
+    `^{commit}` peel, and `gh pr list --state all` for a query useless without
+    the four fields tier 2 reads.
     """
     resolved = tip = ""
     for candidate in (f"origin/{branch}", branch):
@@ -1363,7 +1378,7 @@ def branch_landed(
             resolved, tip = candidate, found
             break
     if not tip:
-        return sd_lib.Answer(sd_lib.UNKNOWN, f"git rev-parse {branch}")
+        return sd_lib.Answer(sd_lib.UNKNOWN, f"git rev-parse --verify '{branch}^{{commit}}'")
     # `--is-ancestor` answers by exit status and prints nothing, so `""` is
     # yes and `None` is no -- the one place an empty string is the signal.
     if sd_lib.git_output(["merge-base", "--is-ancestor", resolved, default], root) is not None:
@@ -1374,7 +1389,7 @@ def branch_landed(
         if touched and not (touched & _changed(root, default, resolved)):
             return sd_lib.Answer(LANDED)
     if pulls is None:
-        return sd_lib.Answer(sd_lib.UNKNOWN, "gh pr list --state all")
+        return sd_lib.Answer(sd_lib.UNKNOWN, GH_MERGED_QUERY)
     for pull in pulls:
         if (str(pull.get("headRefName") or "") == branch
                 and pull.get("mergedAt")
