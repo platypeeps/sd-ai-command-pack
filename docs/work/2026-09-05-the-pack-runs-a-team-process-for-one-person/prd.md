@@ -4053,13 +4053,18 @@ from a number the operator types.
     - `bin/sd-status`'s row read and its stale line — **38**.
       `residue_section` (`bin/sd-status:990-1008`, 19) is a section that
       enumerates a condition and names it, which is what "report the line by
-      name as stale" is, and `_render_work` (`bin/sd-status:1757-1780`, 24) is
+      name as stale" is, and `_render_work` (`bin/sd-status:1772-1795`, 24) is
       the rendering half that has to say which source answered.
 
       Both citations were re-measured on 2026-09-07 while
       `2026-09-04-sd-status-answers-is-anything-wrong-first` step 2 shifted the
       second of them, and both were wrong: `residue_section` starts at 990 and
-      not 986, and `_render_work` is **24** lines and not 19. The lengths are
+      not 986, and `_render_work` is **24** lines and not 19. It then shifted a
+      second time inside the same pull request, when review of that step added
+      fifteen lines above it -- caught by review and not by the gate, whose
+      window tolerance accepts a start line off by a few. A line number in
+      prose about a file under active edit is stale on the next commit,
+      including the next commit of the change that just fixed it. The lengths are
       what this bullet reserves against, so **38 is 43 by its own arithmetic**.
       Left as a reported measurement rather than a re-derivation, because the
       reservation is this item's to move and not that one's.
