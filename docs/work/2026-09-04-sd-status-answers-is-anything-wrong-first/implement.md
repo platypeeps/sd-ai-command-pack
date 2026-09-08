@@ -454,7 +454,7 @@ The ceiling is what checks this, not this paragraph.
 - [ ] **6. `skills/sd-status/SKILL.md`.** The twelve-section order, the ranking
       table, the id scheme, and the `AskUserQuestion` contract with its
       4-option/4-question limit and the resolution.
-- [ ] **7. Tests.** Every new behaviour in `tests/test_sd_status.py` — no new
+- [x] **7. Tests.** Every new behaviour in `tests/test_sd_status.py` — no new
       module, so `make check`'s `OK` count does not change. Named cases, in order of
       what they protect: **(a)** two checks firing on one pull request produce
       two rows with two different ids — C-11's regression, which fails under the
@@ -469,6 +469,54 @@ The ceiling is what checks this, not this paragraph.
       section skeleton is identical for a repository
       with content and one with none; **(e)** the pending cap prints at most 10
       rows and states the suppressed count.
+
+      **Five of the seven cases already shipped in steps 1 to 5, and were
+      audited rather than assumed.** Enumerated from `tests/test_sd_status.py`,
+      not from memory: **(a)** is
+      `PullRequestInventoryTests.test_two_checks_firing_on_one_pull_request_are_two_rows`,
+      which builds a real pull request that is both `pr-check-failing` and
+      `dirty-tree-with-open-pr` and asserts two ids against one key -- the
+      acceptance criterion's exact scenario, and not a unit test on the
+      formula; **(b)** is `BranchLandedTests`, squash-merged and unmerged both;
+      **(c)** is `ConcernLedgerTests`, table and bullet shapes plus the
+      unrecognised-disposition default; **(c2)** is
+      `BannerTests.test_a_check_that_could_not_run_is_unchecked_and_the_word_clear_is_gone`;
+      **(e)** is `ReportSectionTests`, three tests over the cap and its
+      denominator. Two were missing, and both are written here.
+
+      **(c3) was wrong on its first writing, and the falsification is what
+      said so.** The existing
+      `test_parked_and_archived_items_contribute_no_rows` holds each condition
+      on a *different* item, so the intersection is never built. The
+      replacement builds one item carrying `parked:`, an `archive/` path and a
+      `branch:` at once. Deleting either half of the guard at `bin/sd-status`
+      -- `if entry["archived"] or entry["parked"]` -- now fails it.
+
+      The first draft failed that check in one direction only: dropping
+      `entry["archived"]` left it passing. The fixture, not the guard, was at
+      fault. **`bin/sd_lib.py:701` returns `StatusReport("done", True, ...)`
+      for any archived item without opening `prd.md`**, so archiving decides
+      the status and the declared one is never read -- which is why the real
+      case's own `status: in_progress` line is invisible to this reader. With
+      status forced to `done`, no status-keyed check can fire on an archived
+      item, and the fixture had nothing else to fire either. Giving every item
+      a `branch:` naming no ref supplies `branch-unresolvable`, the one check
+      that fires regardless of status, and the guard becomes observable in
+      both directions. This is the same fixture defect as step 4's C-3 and
+      step 5's `actions` key, found the same way and by the same means.
+
+      **(d) compares two runs rather than a hardcoded list.** A list would
+      pass while the report grew a thirteenth section neither run printed.
+      Headings are read out of the rendered text as the lines starting at
+      column 0. The first run is empty of *items*, not of findings -- the
+      fixture's protection requires a `build` context no workflow produces, so
+      one gap stands either way -- so `work items` is the section that
+      genuinely differs, and teaching `_render_work` to skip its heading when
+      the repository has none is what falsifies it.
+
+      No new module, so `make check`'s `OK` count is unchanged. The count in
+      `tests/test_sd_status.py` goes 154 to **156**, and `bin/` is untouched at
+      18,402.
 
 ## Verification
 

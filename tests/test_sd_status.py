@@ -456,6 +456,17 @@ class StatusFixture(ToolFixture):
     def report(self, *args: str) -> dict[str, Any]:
         return self.run_json(SD_STATUS, *args)
 
+    @staticmethod
+    def headings(text: str) -> list[str]:
+        """Section headings, which are the only lines starting at column 0.
+
+        Derived from the output rather than declared, so a section added to
+        `render()` is picked up by whoever compares two of these instead of
+        being missed by both.
+        """
+        return [line for line in text.splitlines()
+                if line and not line[0].isspace() and not line.startswith("sd-status:")]
+
 
 class ReportShapeTests(StatusFixture):
     def test_every_section_is_present(self) -> None:
@@ -472,6 +483,38 @@ class ReportShapeTests(StatusFixture):
             "residue",
         ):
             self.assertIn(key, result)
+
+    def test_the_section_skeleton_is_the_same_with_content_and_without(
+        self,
+    ) -> None:
+        """Step 7(d): the shape of the report is not a function of its data.
+
+        A reader learns where to look once. If a section vanished when it had
+        nothing to say, "no open pull requests" and "this tool stopped
+        reporting pull requests" would render identically -- as absence -- and
+        only one of them is good news. Every section therefore prints its
+        heading and says so in words underneath.
+
+        Headings are read out of the rendered text rather than listed here.
+        A hardcoded list would pass while the report grew a thirteenth section
+        that neither run printed, which is the failure this compares two runs
+        to avoid.
+
+        The first run is empty of *items*, not of findings: the fixture's
+        protection requires a `build` context no workflow here produces, so it
+        carries one gap either way. `work items` is therefore the section that
+        genuinely differs between the two runs, and it is what falsifies this
+        -- teaching `_render_work` to skip its heading when the repository has
+        no items fails the comparison.
+        """
+        self.with_github(pulls=[])
+        empty = self.headings(self.run_tool(SD_STATUS).stdout)
+        self.assertIn("work items", empty)
+
+        self.item("2026-08-01-alpha", status="in_progress")
+        self.item("2026-08-02-beta", status="planning")
+        filled = self.headings(self.run_tool(SD_STATUS).stdout)
+        self.assertEqual(empty, filled)
 
     def test_the_pack_banner_names_the_checkout_the_tools_came_from(self) -> None:
         self.with_github(pulls=[])
@@ -1303,6 +1346,56 @@ class WorkItemInventoryTests(InventoryFixture):
         rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY).rows
         self.assertEqual([], [row for row in rows if "old" in row["key"]])
         self.assertEqual([], [row for row in rows if "parked" in row["key"]])
+
+    def test_one_item_that_is_parked_and_archived_and_branched_at_once(
+        self,
+    ) -> None:
+        """The real case, and the intersection rather than the union.
+
+        `archive/2026-09/2026-08-21-port-integration-only-profile` carries
+        `status: in_progress`, a `parked:` line, a `branch:` field and an
+        `archive/` path all at once. The test above holds each condition on a
+        *different* item, so neither ever meets the other: two items with one
+        condition each cannot tell a reader that handles the intersection from
+        one that double-counts it or raises on it.
+
+        **The frontmatter's `in_progress` is not what the reader sees.**
+        `sd_lib.py:701` returns `done` for any archived item without opening
+        `prd.md`, so archiving decides the status and the declared one is never
+        read. That is why every item here carries a `branch:` naming no ref:
+        `branch-unresolvable` is the one check that fires regardless of status,
+        so it is the only thing that can prove the archive guard is doing work.
+        A fixture without it passes with that guard deleted, which is how this
+        test was wrong on its first writing.
+
+        The live item is the contrast that makes the rest able to fail. A
+        producer that silently returned nothing would fail on it rather than
+        pass four times over.
+        """
+        self.item("2026-08-01-live", status="in_progress")
+        self.item("2026-08-02-parked", status="in_progress",
+                  extra="parked: 2026-09-01 superseded\nbranch: feat/nope\n")
+        archive = self.repo / "docs" / "work" / "archive" / "2026-09"
+        for name, extra in (
+            ("2026-08-03-filed", "branch: feat/nope\n"),
+            ("2026-08-04-port", "parked: 2026-09-01 superseded\nbranch: feat/nope\n"),
+        ):
+            directory = archive / name
+            directory.mkdir(parents=True)
+            (directory / "prd.md").write_text(
+                PRD.format(title=name, status="in_progress", extra=extra),
+                encoding="utf-8",
+            )
+        rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY).rows
+        self.assertEqual(
+            ["2026-08-01-live"],
+            sorted({row["key"] for row in rows if "2026-08-0" in row["key"]}),
+            "only the item carrying none of the three suppressors may fire",
+        )
+        self.assertEqual(
+            len(rows), len({(row["check"], row["key"]) for row in rows}),
+            "no object may produce the same check twice",
+        )
 
 
 class OpenStepTests(InventoryFixture):
