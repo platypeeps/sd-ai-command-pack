@@ -54,27 +54,56 @@ is not caught downstream — every later gate reads the PRD as authored.
    whether the user's approval is required before implementation: that gate is
    identical at every classification, and the skill says so in as many words.
 7. `sd-plan`'s interview step names the skill, so the relationship is not
-   asserted in one direction only.
+   asserted in one direction only. **Met at `405a9106` and retired there**, with
+   the criterion that pinned it: the 2026-09-05 ruling deletes `sd-plan`'s
+   delegation, so the two-way relationship this requirement asks for ends by
+   decision rather than by defect. The removal is
+   `docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person`'s to make.
 8. Material adapted from outside the pack records where it came from, under
    which licence, at which revision.
 
 ## Acceptance criteria
 
-- [ ] `make check` reports 40 `OK` and 0 `FAILED` — unchanged from `6b1ea46e`
-- [ ] `grep -c disable-model-invocation skills/sd-grill/SKILL.md` prints `0`
-- [ ] `grep -c '^# sd-grill$' skills/sd-grill/SKILL.md` prints `1`, satisfying
+The criteria below name `contrib/sd-grill/SKILL.md` and not `skills/`. The file
+moved: *"`sd-grill` moves to `contrib/` and a trial decides whether it stays, by
+the operator's decision on 2026-09-05"*, carried by
+`docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person`. The criteria
+follow the file rather than the file coming back, because a criterion is a
+question about what the pack does now, and the pack now keeps this skill in
+`contrib/` on trial. Nothing under `skills/` is edited by this item.
+
+- [ ] `make check` reports 0 `FAILED`, and its `^OK` count is unchanged across
+      this item's own change — `grep -c FAILED unittest-output.log` prints `0`
+      and `grep -cE '^OK' unittest-output.log` prints what the baseline in
+      `implement.md`'s `## Verification results` records for the commit this
+      branch left from. The pinned `40` is gone: it was true at `6b1ea46e` and
+      the suite has grown since, so a criterion naming a constant fails on
+      every unrelated test anyone adds. What this item can promise is that it
+      breaks nothing and adds no test, which is an invariant and not a number
+- [ ] `grep -c disable-model-invocation contrib/sd-grill/SKILL.md` prints `0`
+- [ ] `grep -c '^# sd-grill$' contrib/sd-grill/SKILL.md` prints `1`, satisfying
       the title contract in `tests/test_skill_frontmatter.py`
 - [ ] ``grep -cF -- '`sd-grill` is that interrogation written down' skills/sd-plan/SKILL.md``
       prints `1` — a bare name count would pass on a sentence saying never to
       use it, so the criterion pins the sentence that establishes the
       relationship, not the occurrence of the word. Fixed-string, not `grep -c`:
       an unescaped `.` is a wildcard and would match variants the criterion does
-      not mean
+      not mean.
+
+      **Met at `405a9106`, and retired there.** The command printed `1` at that
+      commit and prints `1` today. It is retired rather than carried because the
+      2026-09-05 ruling deletes the sentence it pins: *"Step 1's delegation to
+      `sd-grill` (:23) goes: attended, `sd-plan` asks its three to five questions
+      itself; unattended, none."* The removal belongs to
+      `docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person`, which
+      owns `skills/sd-plan/SKILL.md`. A criterion that will be made false on
+      purpose by another item is not a criterion this item can hold, and
+      converting it to its own negation would claim work this item does not do
 - [ ] on the pushed branch, `git diff --stat origin/main...HEAD -- bin/ dashboard/`
       prints nothing, so no line-count ceiling in `tests/test_loc_caps.py` moves
       — evaluated after the commits exist, since before them it passes whatever
       the branch contains
-- [ ] `grep -c 'obra/superpowers' skills/sd-grill/SKILL.md` prints `1` and that
+- [ ] `grep -c 'obra/superpowers' contrib/sd-grill/SKILL.md` prints `1` and that
       line names both the licence and the revision — the `## Lineage` section
       exists to be re-audited, and a section heading with nothing under it
       cannot be
@@ -84,18 +113,18 @@ is not caught downstream — every later gate reads the PRD as authored.
       ```
       for c in grounded asserted deferred contradiction unfalsifiable \
                scope-drift not-asked; do
-        echo "$c $(grep -cF -- "**$c**" skills/sd-grill/SKILL.md)"
+        echo "$c $(grep -cF -- "**$c**" contrib/sd-grill/SKILL.md)"
       done
       ```
 
       The bold token appears only in the class list, so deleting a class from
       that list fails the check even though the bare word survives elsewhere in
       the prose — which a plain `grep -c grounded` would not catch
-- [ ] `skills/sd-grill/SKILL.md` has a `## Safety rules` section whose first
+- [ ] `contrib/sd-grill/SKILL.md` has a `## Safety rules` section whose first
       rule states the skill is read-only and writes no file, creates no branch,
       and invokes nothing that would
 
-- [ ] `grep -cF 'This holds at every classification' skills/sd-grill/SKILL.md`
+- [ ] `grep -cF 'This holds at every classification' contrib/sd-grill/SKILL.md`
       prints `1`, and the sentence sits under `## The gate` — requirement 6's
       claim is that the skill states the gate is classification-independent, so
       the criterion checks the statement rather than the intent behind it
@@ -289,3 +318,23 @@ parked, and no parked concern blocks.
   existed — a standalone skill rather than a `--grill` flag on `sd-plan`, chosen
   by the user, and a design restating that is a design nobody needed. No
   `implement.md`: one landable step, one pull request.
+- 2026-09-07. The work shipped in `8cf99431` and `cec8721e` and closed no item:
+  neither merge carried a `Delivers:` trailer, so nothing swept this page to
+  `done` and it stayed `in_progress` while its subject was already built. Then
+  `05eb8ddf` moved `skills/sd-grill/SKILL.md` to `contrib/sd-grill/SKILL.md`,
+  which made six of the nine criteria name a path that does not exist — passing
+  no gate, because no gate reads a criterion's grep target.
+
+  The criteria now follow the file. That is the 2026-09-05 ruling's doing and
+  not a repair of it: `sd-grill` is on trial in `contrib/`, and a criterion
+  asking about `skills/` would be asking about a pack that no longer exists.
+  Criterion 4 and requirement 7 are retired rather than re-pointed, because the
+  same ruling deletes the `sd-plan` sentence they pin.
+
+  This page acquired a `design.md` and an `implement.md` on 2026-09-07, which
+  the 2026-09-04 entry above says it would not need. Both entries are correct
+  about their own day. The approach *was* obvious when the item was created, and
+  stopped being obvious the moment a ruling moved the subject file and retired
+  one of its criteria — at which point what to do about six stale criteria, and
+  which of them to retire rather than re-point, was a decision with more than one
+  defensible answer. That is what a design is for.
