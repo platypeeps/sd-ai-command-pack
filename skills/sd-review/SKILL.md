@@ -75,7 +75,7 @@ deterministic gate failed, or too few reviewers could complete.
 An incomplete run does not go quiet about it: it prints completed versus
 requested reviews, the actual providers in `reviewed_by`, and each attempt's
 outcome. `not enough reviewers were available:` includes eligibility reasons:
-registry refusal if there is no registry, the missing `reviewers` consent line,
+registry refusal if there is no registry, missing or denied effective authorization,
 and every entry the chain passed over with why. That report is printed on an
 ordinary run, not only under `--explain`.
 
@@ -114,13 +114,13 @@ is documented in [Claude Code's headless guide](https://code.claude.com/docs/en/
 
 ## Who reviews
 
-Not stated here. The registry (`providers.yaml`, read through `sd_registry`, its
-format documented in `WORKFLOW.md`) is the only list of providers anywhere, and
-this file must not grow a second copy of it. What the chain is comes from the
-registry's `reviewer` line, intersected with the repository's own `reviewers`
-consent line in `CLAUDE.local.md`; without that line no reviewer resolves. Ask
-the tool — `--explain` prints the chain, every entry, and the reason for each
-one it passed over.
+The effective registry is the only provider list. Read `sd config get sd.external_reviews` for the operator's standing policy.
+`configured` permits private code and scoped review context to eligible configured providers, including future entries.
+Machine `deny` vetoes local consent. A present repository `reviewers` list restricts recipients; an empty list denies all.
+Malformed local consent refuses. An absent key inherits standing policy; without either grant, stop before transmission.
+Never treat installation or another user's setting as this operator's grant.
+`--explain` prints the authorization source, chain, and reasons for skipped entries.
+Provider selection, author exclusions, review depth, and spending or automatic pass limits remain unchanged.
 
 When the database exists, provider enabled state and role order come from its
 rows through a read-only connection. A missing database uses the registry file

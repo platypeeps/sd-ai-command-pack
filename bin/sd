@@ -1000,14 +1000,10 @@ SETTINGS_KEY = "config"
 
 
 def declared_config(prefix: str) -> tuple[dict[str, dict[str, str]], pathlib.Path]:
-    """What `prefix` says it accepts, read from its manifest now.
+    """Read core declarations or a registered plugin manifest. Unknown prefixes refuse."""
 
-    Resolving through the registry rather than taking the prefix on trust is
-    what makes a typo a refusal: `sd config set sdww.google_account x` names a
-    plugin that is not registered, and without this it would write a setting
-    into a namespace nothing will ever read.
-    """
-
+    if prefix == "sd":
+        return sd_lib.CORE_CONFIG, pathlib.Path(sd_lib.__file__)
     roots = registry(sd_lib.machine_config())
     known = registered(roots)
     if prefix not in known:
@@ -2918,7 +2914,7 @@ def build_parser() -> argparse.ArgumentParser:
                            " this whenever the text carries backticks, which a"
                            " shell would run")
     part.set_defaults(handler=store_set_section)
-    config = groups.add_parser("config", help="read and write a plugin's declared settings")
+    config = groups.add_parser("config", help="read and write declared core or plugin settings")
     setting_verbs = config.add_subparsers(dest="verb", required=True)
 
     getter = setting_verbs.add_parser("get", help="print one setting, or refuse with the remedy")

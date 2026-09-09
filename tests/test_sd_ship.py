@@ -470,6 +470,48 @@ roles:
             self.merge()
         self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
 
+    def test_standing_review_revocation_invalidates_receipt_but_unrelated_settings_do_not(self):
+        self.environment["XDG_CONFIG_HOME"] = str(self.home / ".config")
+        os.environ["XDG_CONFIG_HOME"] = self.environment["XDG_CONFIG_HOME"]
+        config = self.home / ".config/sd-ai-command-pack/config.json"
+        config.parent.mkdir(parents=True)
+        config.write_text('{"config":{"sd":{"external_reviews":"configured"}}}')
+        self.prepare()
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        config.write_text('{"config":{"sd":{"external_reviews":"configured","merge_authorization":"controlled"}},"unrelated":1}')
+        operation.check_review(head)
+        config.write_text('{"config":{"sd":{"external_reviews":"deny"}}}')
+        with self.assertRaisesRegex(ship.Refusal, "policy changed"):
+            self.merge()
+        self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
+
+    def test_absent_to_dangling_local_config_cannot_reuse_a_completed_review(self):
+        self.environment["XDG_CONFIG_HOME"] = str(self.home / ".config")
+        os.environ["XDG_CONFIG_HOME"] = self.environment["XDG_CONFIG_HOME"]
+        config = self.home / ".config/sd-ai-command-pack/config.json"
+        config.parent.mkdir(parents=True)
+        config.write_text('{"config":{"sd":{"external_reviews":"configured"}}}')
+        local = self.root / "CLAUDE.local.md"
+        local.unlink()
+        self.prepare()
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        operation.check_review(head)
+        local.symlink_to(self.root / "missing-config")
+        with self.assertRaises(OSError):
+            operation.check_review(head)
+        self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
+
+    def test_linked_worktree_binding_changes_when_main_checkout_consent_is_revoked(self):
+        linked = self.directory / "linked"
+        _git(self.root, "worktree", "add", "--detach", str(linked), "HEAD")
+        before = ship.binding(linked)
+        local = self.root / "CLAUDE.local.md"
+        local.write_text('<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\nreviewers: ""\n<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n')
+        self.assertEqual(ship.sd_lib.local_block(linked)["reviewers"], "")
+        self.assertNotEqual(ship.binding(linked), before)
+
     def test_new_review_configuration_invalidates_the_saved_receipt(self):
         self.prepare()
         with (self.root / "CLAUDE.local.md").open("a") as stream:

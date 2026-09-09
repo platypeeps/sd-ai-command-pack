@@ -716,11 +716,9 @@ def _refuse_author_reviewing(registry: Registry) -> None:
         )
 
 
-# Consent: capability comes from the registry; permission comes only from
-# the repository reviewers line. Missing consent refuses review. Each pair
-# binds an entry to its URL host, or to its executable plus command/env-name
-# fingerprint. Repointing a host or changing the command requires renewed
-# consent; an entry name alone never authorizes a destination.
+# Capability comes from the registry; permission comes from operator policy.
+# Local pairs restrict destinations to a host or executable/command fingerprint.
+# Standing configured-provider consent follows current registry entries instead.
 
 
 #: `<entry>@<recipient>`, and for a `start` entry `<entry>@<executable>+<hash>`.
@@ -783,19 +781,26 @@ class Allowance:
         return f"{self.entry}{CONSENT_SEPARATOR}{_one_word(self.recipient)}{tail}"
 
 
-def parse_consent(line: str | None) -> dict[str, Allowance]:
-    """The `reviewers` line as a mapping of entry name to what it may reach.
+def resolve_consent(registry: Registry, line: str | None, policy: str | None) -> tuple[dict[str, Allowance], str]:
+    """Explicit local restrictions override standing configured-provider consent."""
+    if policy not in (None, "configured", "deny"):
+        raise ConsentRefusal("invalid external review authorization")
+    if policy == "deny":
+        return {}, "machine-deny"
+    if line is not None:
+        return parse_consent(line), "repository"
+    if policy == "configured":
+        return {entry.name: recipient(entry) for entry in registry.order("reviewer")}, "machine-configured"
+    return parse_consent(None), "none"
 
-    An absent line and an empty one are the same answer and both mean no
-    reviewer resolves; the caller distinguishes them because the installer
-    writes no line for an empty answer.
-    """
+
+def parse_consent(line: str | None) -> dict[str, Allowance]:
+    """Parse a local allowance list. Empty denies; absence needs standing policy."""
     if line is None:
         raise ConsentRefusal(
-            "this repository has no 'reviewers' line in CLAUDE.local.md, so no "
-            "entry may receive its diff and no reviewer resolves. The installer "
-            "asks for it once per repository; add the key, or re-run the "
-            "installer with --reviewers."
+            "no standing authorization or repository 'reviewers' line in CLAUDE.local.md; "
+            "no reviewer resolves. Set sd.external_reviews only with operator consent, "
+            "or use the installer with --reviewers for a local restriction."
         )
     allowances: dict[str, Allowance] = {}
     for part in consent_parts(line):
@@ -857,7 +862,7 @@ def fingerprint(provider: Provider) -> str:
     """Digest a start entry's command line and environment variable names.
 
     Never hash secret values into a public consent record. Changed arguments
-    or declared variables require renewed consent, even for the same executable.
+    or declared variables invalidate a local pair, even for the same executable.
     """
     material = "\n".join([provider.start or "", *sorted(provider.env)])
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:FINGERPRINT_LENGTH]
@@ -904,9 +909,8 @@ def refuse_allowance(provider: Provider, allowed: Allowance | None) -> str | Non
         return cleartext
     if allowed is None:
         return (
-            f"{provider.name} is not on the repository's 'reviewers' line. A "
-            f"registry entry is capability; the line is consent, and a new entry "
-            f"resolves nowhere until the line names it."
+            f"{provider.name} is not allowed by the effective review authorization. "
+            f"Check machine sd.external_reviews and the local 'reviewers' restriction."
         )
     current = recipient(provider)
     if allowed.recipient != current.recipient:

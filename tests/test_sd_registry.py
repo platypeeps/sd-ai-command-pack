@@ -644,7 +644,7 @@ class WhatConsentRefuses(unittest.TestCase):
 
     def test_an_entry_the_line_does_not_name(self) -> None:
         message = self.refusal("kimi", "codex@codex")
-        self.assertIn("not on the repository's 'reviewers' line", message)
+        self.assertIn("not allowed by the effective review authorization", message)
 
     def test_a_url_host_edited_to_another_host_names_both(self) -> None:
         message = self.refusal("baseten", "baseten@inference.baseten.co.evil")
@@ -1264,6 +1264,44 @@ class TheSchemeIsAConsentQuestion(unittest.TestCase):
         registry = sd_registry.read_file(SHIPPED)
         exo = registry.providers["exo"]
         self.assertIsNone(sd_registry.refuse_allowance(exo, sd_registry.recipient(exo)))
+
+
+class StandingReviewConsentTests(unittest.TestCase):
+    def test_machine_policy_and_local_presence_resolve_without_widening_restrictions(self):
+        registry = sd_registry.read_file(SHIPPED)
+        allowed, source = sd_registry.resolve_consent(registry, None, "configured")
+        self.assertEqual(source, "machine-configured")
+        self.assertEqual(allowed, {p.name: sd_registry.recipient(p) for p in registry.order("reviewer")})
+        self.assertEqual(sd_registry.resolve_consent(registry, "", "configured"), ({}, "repository"))
+        local = str(next(iter(allowed.values())))
+        self.assertEqual(sd_registry.resolve_consent(registry, local, "configured")[0], sd_registry.parse_consent(local))
+        self.assertEqual(sd_registry.resolve_consent(registry, local, "deny"), ({}, "machine-deny"))
+        for policy, line in ((None, None), ("configured", "broken"), ("wrong", None)):
+            with self.subTest(policy=policy, line=line), self.assertRaises(sd_registry.ConsentRefusal):
+                sd_registry.resolve_consent(registry, line, policy)
+
+    def test_new_configured_providers_still_obey_vendor_bill_reader_and_transport_guards(self):
+        from dataclasses import replace
+
+        registry = sd_registry.read_file(SHIPPED)
+        template = next(p for p in registry.order("reviewer") if p.url and p.enabled)
+        entry = replace(template, name="future-reviewer", vendor="future-vendor", ranks={"reviewer": 999})
+        registry.providers[entry.name] = entry
+        consent, _ = sd_registry.resolve_consent(registry, None, "configured")
+        self.assertIn(entry.name, consent)
+        self.assertEqual(sd_registry.pick(registry, entry.name, consent=consent), entry)
+        for overrides in ({"author_vendors": (entry.vendor,)}, {"capped_bills": (entry.bill,)}):
+            with self.subTest(overrides=overrides), self.assertRaises(sd_registry.ConsentRefusal):
+                sd_registry.pick(registry, entry.name, consent=consent, **overrides)
+        registry.providers[entry.name] = replace(entry, enabled=False)
+        self.assertNotIn(entry.name, sd_registry.resolve_consent(registry, None, "configured")[0])
+        with self.assertRaises(sd_registry.RegistryError):
+            sd_registry.pick(registry, entry.name, consent=consent)
+        for changes in ({"url": "http://external.example/v1"}, {"url": None, "start": "future-cli", "reader": "unknown-reader"}):
+            registry.providers[entry.name] = replace(entry, **changes)
+            consent, _ = sd_registry.resolve_consent(registry, None, "configured")
+            with self.subTest(changes=changes), self.assertRaises(sd_registry.ConsentRefusal):
+                sd_registry.pick(registry, entry.name, consent=consent, readers=("codex-json",))
 
 
 if __name__ == "__main__":

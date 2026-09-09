@@ -84,6 +84,29 @@ missing. Zero or all, never partial, is the rule; what the test asserts today
 is the zero half of it — no `sd-*` under any of the three candidate roots —
 because P1 has not passed and there is no all half to check yet.
 
+## Standing operator authorization
+
+The pack supports standing permission across consuming repositories. Installation grants neither permission for a new user.
+After that operator explicitly grants permission, record it through the existing configuration commands:
+
+```sh
+sd config set sd.external_reviews configured
+sd config set sd.merge_authorization controlled
+```
+
+These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOME` overrides the configuration root.
+`sd config get`, `list`, and `unset` inspect or remove settings. No personal grant ships in this repository.
+
+`configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
+A local `reviewers` list restricts recipients; an explicit empty value denies review.
+Machine `sd.external_reviews deny` vetoes local consent. Missing machine policy requires explicit local consent.
+The installer preserves restrictions and refuses malformed answers. It cannot recover historical empty answers whose keys were erased.
+
+`controlled` permits the assistant to merge active, in-scope PR work in repositories the user controls.
+An explicit instruction to wait overrides it. `ask`, or an absent setting, requires task-specific permission.
+Ownership, review, CI, protection, and runner gates remain mandatory. This setting starts no background work.
+See [the workflow policy](WORKFLOW.md#standing-authorization) for resolution and limits.
+
 ## Daily workflow
 
 The dashboard and CLI use the same `sd_db` operations from `system/local-sd-db`.

@@ -1546,5 +1546,75 @@ class ScopeProvidersOverASkipTier(unittest.TestCase):
             self.assertIn(scope, sd_review.SCOPES, f"{scope!r} is not a scope")
 
 
+class StandingReviewPolicyTests(ReviewFixture):
+    def policy(self, value):
+        path = self.registry_home / ".config" / sd_review.sd_lib.CONFIG_RELATIVE_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"config": {"sd": {"external_reviews": value}}}))
+        return str(path)
+
+    def test_two_consumers_inherit_one_policy_and_explain_matches_actual_canned_review(self):
+        policy_path = self.policy("configured")
+        for name in ("one", "two"):
+            root = self.make_repo(name)
+            (root / "CLAUDE.local.md").unlink()
+            (root / "src.py").write_text("x = 1\n")
+            runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+            args = namespace(provider="second", explain=True)
+            explained = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+            self.assertEqual(explained["authorization"]["source"], "machine-configured")
+            self.assertEqual(explained["authorization"]["path"], policy_path)
+            self.assertEqual(explained["providers"], ["second"])
+            args.explain = False
+            actual = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+            self.assertEqual(actual["authorization"], explained["authorization"])
+            self.assertEqual(actual["status"], "clean")
+            self.assertEqual(actual["reviewed_by"], ["second"])
+
+    def test_linked_worktree_reports_the_main_checkout_consent_path(self):
+        self.policy("configured")
+        root = self.make_repo()
+        linked = self.tmp / "linked"
+        subprocess.run(["git", "worktree", "add", "--detach", str(linked), "HEAD"], cwd=root, check=True, capture_output=True)
+        (linked / "src.py").write_text("x = 1\n")
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        result = sd_review.review(linked, namespace(explain=True), runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(result["authorization"]["source"], "repository")
+        self.assertEqual(result["authorization"]["path"], str(root / "CLAUDE.local.md"))
+
+    def test_configured_policy_cannot_inherit_through_existing_unreadable_local_path(self):
+        self.policy("configured")
+        root = self.make_repo()
+        local = root / "CLAUDE.local.md"
+        local.unlink()
+        local.mkdir()
+        (root / "src.py").write_text("x = 1\n")
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        with self.assertRaises(sd_review.sd_lib.ConfigError):
+            sd_review.review(root, namespace(), runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(runner.calls, [])
+
+    def test_local_empty_and_machine_denial_send_nothing(self):
+        root = self.make_repo()
+        policy_path = self.policy("configured")
+        self.local_block(root, "reviewers: \"\"")
+        (root / "src.py").write_text("x = 1\n")
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        result = sd_review.review(root, namespace(), runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(result["providers"], [])
+        self.assertEqual(result["authorization"]["source"], "repository")
+        self.assertEqual(result["authorization"]["path"], str(root / "CLAUDE.local.md"))
+        self.assertEqual(result["completed_reviews"], 0)
+        self.local_block(root)
+        result = sd_review.review(root, namespace(explain=True), runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(result["authorization"], {"source": "repository", "policy": "configured", "path": str(root / "CLAUDE.local.md")})
+        self.policy("deny")
+        result = sd_review.review(root, namespace(), runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(result["providers"], [])
+        self.assertEqual(result["authorization"]["source"], "machine-deny")
+        self.assertEqual(result["authorization"]["path"], policy_path)
+        self.assertEqual(result["completed_reviews"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

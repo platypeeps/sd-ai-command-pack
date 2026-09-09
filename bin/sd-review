@@ -1102,8 +1102,11 @@ def review(
         # A named entry cannot be answered from an empty registry: the refusal
         # it would get -- "no such provider" -- would be a lie about the name.
         raise sd_registry.RegistryError(registry_refusal)
+    consent_source = "none"
+    authorization = sd_lib.core_setting("external_reviews", dict(env))
     try:
-        consent = sd_registry.parse_consent(sd_lib.local_block(root).get(sd_lib.CONSENT_KEY))
+        consent, consent_source = sd_registry.resolve_consent(
+            registry, sd_lib.local_block(root).get(sd_lib.CONSENT_KEY), authorization)
         consent_refusal = ""
     except sd_registry.ConsentRefusal as error:
         # Not fatal, deliberately. With no line the chain marks every entry
@@ -1201,6 +1204,8 @@ def review(
         "registry": str(registry.path),
         "registry_refusal": registry_refusal,
         "consent_refusal": consent_refusal,
+        "authorization": {"source": consent_source, "policy": authorization,
+                          "path": str(sd_lib.local_block_path(root) if consent_source == "repository" else sd_lib.machine_config_path(dict(env)))},
         "authored_with": list(vendors),
         "authorship_base": authored_subject.base,
         "authored_with_report": _authored_report(args.scope, vendors),
@@ -1359,6 +1364,8 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write(f"  route       tier {route['tier']}  category {route['category'] or '-'}\n")
     write(f"  because     {route['reason']}\n")
     write(f"  providers   {', '.join(result['providers']) or '(none)'}\n")
+    if result.get("authorization"):
+        write(f"  consent     {result['authorization']['source']} ({result['authorization']['path']})\n")
     if result.get("fallback_candidates"):
         write(f"  fallbacks   {', '.join(result['fallback_candidates'])}\n")
     write(f"  authored    {result['authored_with_report']}\n")

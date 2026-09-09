@@ -855,5 +855,28 @@ class ListTests(PluginFixture):
                 self.assertEqual(self.run_sd(*args).returncode, 2)
 
 
+class CorePolicyConfigTests(PluginFixture):
+    def test_core_policy_round_trips_without_a_plugin_and_preserves_unrelated_settings(self):
+        self.write_config({"plugins": [], "config": {"pp": {"kept": "value"}}})
+        for key, value in (("external_reviews", "configured"), ("merge_authorization", "controlled")):
+            with self.subTest(key=key):
+                result = self.run_sd("config", "set", "sd." + key, value)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.run_sd("config", "get", "sd." + key).stdout.strip(), value)
+        listing = self.run_sd("config", "list", "sd", "--json")
+        self.assertEqual(listing.returncode, 0, listing.stderr)
+        self.assertEqual(json.loads(listing.stdout)["external_reviews"]["value"], "configured")
+        self.assertEqual(self.config()["config"]["pp"], {"kept": "value"})
+        self.assertEqual(self.run_sd("config", "unset", "sd.external_reviews").returncode, 0)
+        self.assertNotIn("external_reviews", self.config()["config"]["sd"])
+
+    def test_new_user_has_no_grant_and_invalid_policy_writes_nothing(self):
+        self.assertNotEqual(self.run_sd("config", "get", "sd.external_reviews").returncode, 0)
+        for key, value in (("external_reviews", "true"), ("merge_authorization", "all"), ("typo", "configured")):
+            with self.subTest(key=key):
+                self.assertNotEqual(self.run_sd("config", "set", "sd." + key, value).returncode, 0)
+                self.assertFalse(self.config_path.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

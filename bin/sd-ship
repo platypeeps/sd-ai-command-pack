@@ -68,8 +68,9 @@ def binding(root: pathlib.Path) -> str:
     names = ("sd-review", "sd_lib.py", "sd_registry.py", "sd_route.py", "sd_codex.py", "sd-check", "sd-docs-lint")
     files = {name: hashlib.sha256((BIN / name).read_bytes()).hexdigest() for name in names}
     for name in ("CLAUDE.local.md", ".github/sd-review.json"):
-        path = root / name
-        files[name] = hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else "absent"
+        path = sd_lib.local_block_path(root) if name == sd_lib.LOCAL_FILE_NAME else root / name
+        files[name] = hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() or path.is_symlink() else "absent"
+    files["external_review_policy"] = digest({"path": str(sd_lib.machine_config_path()), "value": sd_lib.core_setting("external_reviews")})
     return digest(files)
 
 

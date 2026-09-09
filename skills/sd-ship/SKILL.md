@@ -11,6 +11,17 @@ push and the merge — and for nothing outside the paths you enumerate. It is
 not approval to delete anything local: not a branch, not a worktree, not a
 checkout. Step 8 reports those and leaves them standing.
 
+## Standing permission
+
+Read `sd config get sd.merge_authorization` before relying on standing merge permission.
+`controlled` permits finishing the active, in-scope PR in a repository the user controls, unless they explicitly say wait.
+`ask`, or an absent setting, requires task-specific permission. Installation never grants another user's authorization.
+Shared contributors do not revoke permission; existing sole-operator ownership, review, CI, and protection gates still apply.
+Use the existing manual operator path when authorized. A refusal remains a stop; never change gates to obtain a merge.
+This permission starts no background work and does not enable the runner's `merge: auto` policy.
+Read `sd config get sd.external_reviews` separately for standing private-code/context review authorization and local restrictions.
+Review caps and the separate explicit additional-review request remain unchanged.
+
 ## Where the review happens
 
 The adversarial pass that gates the push runs on the machine, in step 2, where

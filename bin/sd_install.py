@@ -1002,29 +1002,17 @@ def path_is_tracked(repo: Path, relative: str) -> bool:
 
 # ----------------------------------------------------------------- consent
 
-# The registry says who *can* review; this line says who may receive *this*
-# repository's diff. `bin/sd_registry.py` parses a pair, so it renders every
-# pair written here: one composed by hand could name a recipient the parser
-# reads as a different one, and the diff would leave for somewhere nobody
-# agreed to. Nothing defaults -- an answer that is not wholly understood
-# writes no line, and a repository with no line refuses naming the key.
+# Local answers restrict standing machine authorization. Render every pair
+# through the canonical parser; malformed or unknown answers must not inherit.
 CONSENT_KEY = "reviewers"
 CONSENT_LINE = re.compile(rf"^[ \t]*{CONSENT_KEY}:(?P<value>.*)\n?", re.MULTILINE)
 
 
 def consent_body(consent: str | None) -> str:
-    """`DEFAULT_BLOCK_BODY` with the key answered, or with the key removed.
+    """Quote an answer using the reader's grammar; None inherits, empty denies.
 
-    Quoted, and escaped the way `sd_lib._unquote` unescapes. An unquoted value
-    ends at the reader's first `#`, and `#` is legal in a recipient -- it is
-    why `consent_parts` sets `commenters` to `""` -- so an unquoted
-    `hashed@/opt/x#y/tool` reaches the reader as `/opt/x`, a destination
-    nobody named. `sub` takes a function and never a string, because a
-    backslash in a recipient would otherwise be read as a group reference.
-
-    No answer removes the line rather than leaving the placeholder: an absent
-    key refuses naming the key and this flag, where the placeholder would be
-    refused as a bare name and send the operator to the pair's grammar.
+    Quoting preserves # and backslashes in recipients. Callable replacement
+    prevents re.sub from treating recipient backslashes as group references.
     """
     if consent is None:
         return CONSENT_LINE.sub(lambda _: "", DEFAULT_BLOCK_BODY)
@@ -1033,21 +1021,16 @@ def consent_body(consent: str | None) -> str:
 
 
 def standing_consent(repo: Path) -> str | None:
-    """The answer already in this repo's block, read by the reader itself.
-
-    Through `sd_lib` rather than a regex here: comments, quoting and a `#`
-    inside quotes are the reader's rules, and a second implementation of them
-    is exactly how the markers drifted. A block it cannot parse and a block
-    carrying only the shipped placeholder are both no answer, and the prompt
-    runs again -- fail-closed, since consent is what is being decided.
-    """
+    """Read local consent through its canonical grammar, preserving empty denial."""
     lib = sibling("sd_lib")
     try:
         text = migrated((repo / LOCAL_BLOCK_FILE).read_text(encoding="utf-8"))
-        value = lib.parse_local_block(text).get(CONSENT_KEY, "").strip()
-    except (OSError, lib.ConfigError):
+        value = lib.parse_local_block(text).get(CONSENT_KEY)
+    except FileNotFoundError:
+        if (repo / LOCAL_BLOCK_FILE).is_symlink():
+            raise lib.ConfigError("cannot read dangling local configuration link") from None
         return None
-    return value if value and not value.startswith("<") else None
+    return None if value == lib.parse_scalars(DEFAULT_BLOCK_BODY, comments=True).get(CONSENT_KEY) else value
 
 
 def consent_offers(ctx: Context) -> list:
@@ -1118,27 +1101,38 @@ def chosen_consent(offers: list, answer: str, out) -> str | None:
 
 
 def repo_consent(ctx: Context, repo: Path, answer: str | None, out) -> str | None:
-    """Asked once per repository and kept ever after.
-
-    A rerun keeps the line it finds and asks nothing; re-asking on every
-    install is how a default gets in. With nothing to offer, or on a
-    non-interactive run with no `--reviewers`, no line is written.
-    """
+    """Keep local restrictions; otherwise inherit explicit user policy or ask once."""
     standing = standing_consent(repo)
-    if standing:
+    if standing is not None:
+        sibling("sd_registry").parse_consent(standing)
         print(f"{CONSENT_KEY} already answered here, kept as it stands", file=out)
         return standing
+    if answer is not None and not answer.strip():
+        print("this repository consents to nobody; explicit empty denial written", file=out)
+        return ""
+    env = dict(ctx.environ, HOME=str(ctx.home), XDG_CONFIG_HOME=str(config_home(ctx.home, ctx.environ)))
+    if answer is None and sibling("sd_lib").core_setting("external_reviews", env) is not None:
+        print("repository inherits the operator's external review policy", file=out)
+        return None
     offers = consent_offers(ctx)
     if not offers:
         print(f"no enabled reviewer entry to offer; no {CONSENT_KEY} line", file=out)
+        if answer is not None:
+            raise sibling("sd_lib").ConfigError("no offered reviewer matches; local block left unchanged")
         return None
     if answer is None:
         print("which of these may receive this repository's diff?", file=out)
         for pair in offers:
             print(f"  {pair}", file=out)
         print("names, space- or comma-separated; empty for none:", file=out)
-        answer = sys.stdin.readline() if sys.stdin.isatty() else ""
-    return chosen_consent(offers, answer, out)
+        if not sys.stdin.isatty():
+            print("no answer supplied; this repository consents to nobody", file=out)
+            return None
+        answer = sys.stdin.readline()
+    chosen = chosen_consent(offers, answer, out)
+    if chosen is None and answer.strip():
+        raise sibling("sd_lib").ConfigError("invalid reviewer answer; local block left unchanged")
+    return chosen if chosen is not None else ""
 
 
 # ------------------------------------------------------------- the library
@@ -1710,7 +1704,12 @@ def cmd_adopt_legacy(ctx: Context, out) -> int:
 
 
 def cmd_repo(ctx: Context, repo: Path, out, reviewers: str | None = None) -> int:
-    consent = repo_consent(ctx, repo, reviewers, out)
+    repo = sibling("sd_lib").main_worktree_root(repo)
+    try:
+        consent = repo_consent(ctx, repo, reviewers, out)
+    except (OSError, sibling("sd_lib").ConfigError, sibling("sd_registry").ConsentRefusal) as error:
+        print(f"error: {error}", file=out)
+        return 2
     action = write_local_block(repo, dry_run=ctx.dry_run, consent=consent)
     prefix = "would have " if ctx.dry_run else ""
     print(f"{prefix}{action} the sd block in {repo / LOCAL_BLOCK_FILE}", file=out)

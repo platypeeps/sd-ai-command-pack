@@ -29,7 +29,10 @@ Treat related implementation, tests, documentation, CI, and coordinated delivery
 Do not request confirmation solely because an in-scope operation targets either companion repository.
 Read each repository's instructions and preserve its existing work before making changes.
 This scope exception does not authorize unrelated work or remove specific approval requirements for destructive actions or upstream Trellis PRs.
-External reviewer consent remains specific to the approved recipients and task.
+External review uses the operator's standing machine policy, with local restrictions and existing spending limits.
+Read `sd config get sd.external_reviews` and `sd config get sd.merge_authorization`; these settings are never granted by installation.
+With `controlled` merge authorization, finish active in-scope PR work through existing gates unless the user explicitly says wait.
+Shared contributors do not revoke user permission, but existing ownership gates still apply; do not bypass a refusal.
 
 ## Contributor Entry Points
 

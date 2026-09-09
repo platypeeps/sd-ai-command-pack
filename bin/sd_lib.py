@@ -1,9 +1,7 @@
 """Shared detection and derivation for the sd-* tools under bin/.
 
-Every question this module answers, it answers from the repository itself: the
-git worktree you are standing in, the tracked artifacts under `docs/work`, the
-repo's own check entrypoints. Nothing is read from stored state, because stored
-state is state that goes stale without telling anyone.
+Repository state is derived from Git, work artifacts, and check entrypoints.
+Operator policy comes from the current machine configuration, read on demand.
 
 Stdlib only, Python 3.10+, no network. A caller that cannot proceed gets a
 `ConfigError` carrying a sentence a human can act on, never a traceback.
@@ -26,6 +24,12 @@ LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
 LOCAL_BLOCK_END = "<!-- SD-AI-COMMAND-PACK:LOCAL:END -->"
 
 CONFIG_RELATIVE_PATH = pathlib.Path("sd-ai-command-pack") / "config.json"
+CORE_CONFIG = {
+    "external_reviews": {"pattern": "configured|deny",
+                         "description": "Standing private-code/context review authorization; unset uses local consent."},
+    "merge_authorization": {"pattern": "controlled|ask",
+                            "description": "Assistant merge permission for active controlled-repo work; unset asks, explicit wait wins."},
+}
 
 WORK_DIR = "docs/work"
 ARCHIVE_DIR = "archive"
@@ -37,10 +41,8 @@ DEFAULT_MODE = "full"
 #: The three names every repository is asked about, in the order they run.
 CHECK_NAMES = ("check", "test", "lint")
 
-#: Consent, not policy: the registry entries a repository allows to receive
-#: its diff. The installer asks for it once and writes the key; nothing
-#: derives the value. Named here so the installer's block, `WORKFLOW.md` and
-#: the test that compares them all read one source.
+#: Optional repository restriction, overriding standing operator review consent.
+#: Shared by the installer, runtime reader, and workflow inventory check.
 CONSENT_KEY = "reviewers"
 
 GIT_TIMEOUT_SECONDS = 15
@@ -242,19 +244,31 @@ def local_block(root: pathlib.Path) -> dict[str, str]:
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return {}
-    except (IsADirectoryError, NotADirectoryError):
+        if path.is_symlink():
+            raise ConfigError(f"cannot read dangling local configuration link: {path}") from None
         return {}
     except (OSError, UnicodeDecodeError) as error:
         raise ConfigError(f"cannot read {path}: {error}") from None
     return parse_local_block(text, str(path))
 
 
-def machine_config_path() -> pathlib.Path:
-    """`~/.config/sd-ai-command-pack/config.json`, honouring `XDG_CONFIG_HOME`."""
-    base = os.environ.get("XDG_CONFIG_HOME") or ""
-    home = pathlib.Path(base) if base else pathlib.Path.home() / ".config"
+def machine_config_path(environ: dict[str, str] | None = None) -> pathlib.Path:
+    """Read the supplied operator's XDG/HOME, or the current environment."""
+    env = os.environ if environ is None else environ
+    home = pathlib.Path(env.get("XDG_CONFIG_HOME") or pathlib.Path(env.get("HOME") or pathlib.Path.home()) / ".config")
     return home / CONFIG_RELATIVE_PATH
+
+
+def core_setting(key: str, environ: dict[str, str] | None = None) -> str | None:
+    """Validated standing user policy; absence grants no new permission."""
+    config = machine_config(machine_config_path(environ)).get("config", {})
+    mine = config.get("sd", {}) if isinstance(config, dict) else None
+    if not isinstance(mine, dict):
+        raise ConfigError("machine config config.sd must be an object")
+    value = mine.get(key)
+    if key in mine and (not isinstance(value, str) or not re.fullmatch(CORE_CONFIG[key]["pattern"], value)):
+        raise ConfigError(f"invalid sd.{key} policy")
+    return value
 
 
 def machine_config(path: pathlib.Path | None = None) -> dict[str, object]:

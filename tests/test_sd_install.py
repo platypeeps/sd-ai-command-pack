@@ -735,7 +735,7 @@ class ConsentPromptTests(InstallerHarness):
         self.seed_registry()
         repo = self.make_repo("residue")
         rc, output = self.run_cli("--repo", str(repo), "--reviewers", "residue")
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 2)
         self.assertIn("does not read back", output)
         self.assertIsNone(self.consent_line(repo))
 
@@ -767,26 +767,24 @@ class ConsentPromptTests(InstallerHarness):
         self.seed_registry()
         repo = self.make_repo("unknown")
         rc, output = self.run_cli("--repo", str(repo), "--reviewers", "plain nosuch")
-        self.assertEqual(rc, 0)
+        self.assertEqual(rc, 2)
         self.assertIn("no entry named nosuch", output)
         self.assertIsNone(self.consent_line(repo), "a partial answer granted something")
 
-    def test_an_empty_answer_writes_no_line(self):
+    def test_an_empty_answer_writes_explicit_denial(self):
         self.seed_registry()
         repo = self.make_repo("nobody")
         rc, output = self.run_cli("--repo", str(repo), "--reviewers", "")
         self.assertEqual(rc, 0)
         self.assertIn("consents to nobody", output)
-        self.assertIsNone(self.consent_line(repo))
+        self.assertEqual(self.consent_line(repo), "")
 
-    def test_no_line_refuses_the_first_review_naming_the_key(self):
+    def test_empty_line_denies_the_first_review(self):
         """What "grants nothing" means at the other end of the seam."""
         self.seed_registry()
         repo = self.make_repo("refused")
         self.run_cli("--repo", str(repo), "--reviewers", "")
-        with self.assertRaises(self.registry().ConsentRefusal) as caught:
-            self.registry().parse_consent(self.consent_line(repo))
-        self.assertIn(sd_install.CONSENT_KEY, str(caught.exception))
+        self.assertEqual(self.registry().parse_consent(self.consent_line(repo)), {})
 
     def test_a_registry_with_nothing_enabled_offers_nothing(self):
         repo = self.make_repo("bare")
@@ -1133,8 +1131,6 @@ class CommandLineTests(InstallerHarness):
             [],
             "a dry run created files",
         )
-
-
 
 
 class GitContextTests(InstallerHarness):
@@ -2208,6 +2204,131 @@ class ProviderRegistrySeedTests(InstallerHarness):
         self.assertNotIn(str(self.target), owned)
 
 
+class StandingPolicyInstallerTests(InstallerHarness):
+    make_repo = ConsentPromptTests.make_repo
+    consent_line = ConsentPromptTests.consent_line
+    def test_explicit_empty_is_a_durable_denial_even_without_registry(self):
+        repo = self.make_repo()
+        code, output = self.run_cli("--repo", str(repo), "--reviewers", "")
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.consent_line(repo), "")
+        code, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(code, 0, output)
+        self.assertIn("already answered", output)
+        self.assertEqual(self.consent_line(repo), "")
+
+    def test_interactive_empty_answer_is_preserved_as_local_denial(self):
+        ConsentPromptTests.seed_registry(self)
+        repo = self.make_repo()
+        stdin = unittest.mock.Mock()
+        stdin.isatty.return_value = True
+        stdin.readline.return_value = "\n"
+        with unittest.mock.patch.object(sys, "stdin", stdin):
+            code, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.consent_line(repo), "")
+
+    def test_machine_authorization_is_inherited_without_copying_a_recipient_list(self):
+        path = self.home / ".config/sd-ai-command-pack/config.json"
+        path.parent.mkdir(parents=True)
+        path.write_text('{"config":{"sd":{"external_reviews":"configured"}}}')
+        repo = self.make_repo()
+        code, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(code, 0, output)
+        self.assertIn("inherits", output)
+        self.assertNotIn("which of these", output)
+        self.assertIsNone(self.consent_line(repo))
+        self.assertEqual(json.loads(path.read_text())["config"]["sd"]["external_reviews"], "configured")
+
+    def test_dangling_local_link_cannot_be_repaired_into_inherited_authorization(self):
+        policy = self.home / ".config/sd-ai-command-pack/config.json"
+        policy.parent.mkdir(parents=True)
+        policy.write_text('{"config":{"sd":{"external_reviews":"configured"}}}')
+        repo = self.make_repo()
+        target = repo / "missing-config"
+        local = repo / sd_install.LOCAL_BLOCK_FILE
+        local.symlink_to(target)
+        code, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(code, 2, output)
+        self.assertTrue(local.is_symlink())
+        self.assertFalse(target.exists())
+
+    def test_linked_repo_installer_writes_and_protects_the_canonical_main_config(self):
+        repo = self.make_repo()
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "seed"], check=True)
+        linked = self.home / "linked"
+        subprocess.run(["git", "-C", str(repo), "worktree", "add", "--detach", str(linked), "HEAD"], check=True, capture_output=True)
+        code, output = self.run_cli("--repo", str(linked), "--reviewers", "")
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.consent_line(repo), "")
+        self.assertFalse((linked / sd_install.LOCAL_BLOCK_FILE).exists())
+        self.assertIn(str(repo / sd_install.LOCAL_BLOCK_FILE), output)
+        local = repo / sd_install.LOCAL_BLOCK_FILE
+        before = local.read_bytes()
+        subprocess.run(["git", "-C", str(repo), "add", "-f", sd_install.LOCAL_BLOCK_FILE], check=True)
+        with self.assertRaisesRegex(SystemExit, "tracked"):
+            self.run_cli("--repo", str(linked), "--reviewers", "")
+        self.assertEqual(local.read_bytes(), before)
+
+    def test_only_exact_shipped_placeholder_can_inherit_machine_authorization(self):
+        policy = self.home / ".config/sd-ai-command-pack/config.json"
+        policy.parent.mkdir(parents=True)
+        policy.write_text('{"config":{"sd":{"external_reviews":"configured"}}}')
+        repo = self.make_repo()
+        local = repo / sd_install.LOCAL_BLOCK_FILE
+        before = f'{sd_install.BLOCK_BEGIN}\nreviewers: <broken\n{sd_install.BLOCK_END}\n'
+        local.write_text(before)
+        code, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(code, 2, output)
+        self.assertEqual(local.read_text(), before)
+        local.write_text(f'{sd_install.BLOCK_BEGIN}\n{sd_install.DEFAULT_BLOCK_BODY}{sd_install.BLOCK_END}\n')
+        code, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(code, 0, output)
+        self.assertIn("inherits", output)
+        self.assertIsNone(self.consent_line(repo))
+
+    def test_malformed_local_block_cannot_be_rewritten_into_inherited_authorization(self):
+        policy = self.home / ".config/sd-ai-command-pack/config.json"
+        policy.parent.mkdir(parents=True)
+        policy.write_text('{"config":{"sd":{"external_reviews":"configured"}}}')
+        repo = self.make_repo()
+        local = repo / sd_install.LOCAL_BLOCK_FILE
+        before = f'{sd_install.BLOCK_BEGIN}\nreviewers: "unterminated\n{sd_install.BLOCK_END}\n'
+        local.write_text(before)
+        code, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(code, 2, output)
+        self.assertIn("error:", output)
+        self.assertEqual(local.read_text(), before)
+
+    def test_unknown_explicit_answer_cannot_fall_through_to_machine_authorization(self):
+        ConsentPromptTests.seed_registry(self)
+        policy = self.home / ".config/sd-ai-command-pack/config.json"
+        policy.parent.mkdir(parents=True)
+        policy.write_text('{"config":{"sd":{"external_reviews":"configured"}}}')
+        repo = self.make_repo()
+        code, output = self.run_cli("--repo", str(repo), "--reviewers", "plain nosuch")
+        self.assertEqual(code, 2, output)
+        self.assertFalse((repo / sd_install.LOCAL_BLOCK_FILE).exists())
+
+    def test_malformed_local_syntax_and_unreadable_file_refuse_without_overwrite(self):
+        repo = self.make_repo()
+        local = repo / sd_install.LOCAL_BLOCK_FILE
+        before = f'{sd_install.BLOCK_BEGIN}\nreviewers ""\n{sd_install.BLOCK_END}\n'
+        local.write_text(before)
+        code, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(code, 2, output)
+        self.assertEqual(local.read_text(), before)
+        with unittest.mock.patch.object(Path, "read_text", side_effect=PermissionError("read denied")):
+            code, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(code, 2, output)
+        self.assertEqual(local.read_text(), before)
+
+    def test_explicit_unknown_with_no_registry_refuses_without_write(self):
+        repo = self.make_repo()
+        code, output = self.run_cli("--repo", str(repo), "--reviewers", "unknown")
+        self.assertEqual(code, 2, output)
+        self.assertFalse((repo / sd_install.LOCAL_BLOCK_FILE).exists())
+
+
 if __name__ == "__main__":
     unittest.main()
-
