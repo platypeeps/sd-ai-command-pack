@@ -1274,7 +1274,7 @@ def provision_library(ctx: Context, out) -> tuple[bool, str]:
         return True, f"would install sd_db from {source} at {ref}{dirty}"
     try:
         done = subprocess.run(  # nosec B603 - fixed argv, no shell
-            [str(python), "-m", "pip", "install", "--quiet", "--upgrade", target],
+            [str(python), "-m", "pip", "install", "--quiet", "--upgrade", "--force-reinstall", target],
             capture_output=True,
             text=True,
             check=False,
