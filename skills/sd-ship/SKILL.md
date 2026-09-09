@@ -225,8 +225,13 @@ report>`. The adapter supplies the preceding database receipt, including its
 blocking findings. The verifier receives current source for those findings,
 including files outside the fix diff, and excludes all original and fix-author
 vendors. A third automatic review refuses; an explicit additional-review
-request is a separate operator decision. An interrupted review retains its
-reserved pass and requires reconciliation of its evidence.
+request is a separate operator decision. An interrupted review retains its reserved pass.
+`sd-ship prepare --item ID --retry-review --json` spends the remaining pass on a full branch review.
+Use it only after an incomplete initial review and explicit retry authorization.
+The original receipt remains unchanged, including all findings and failed attempts.
+The retry supplies that evidence through `sd-review --resume-report` and verifies every previous blocker.
+It also checks the full current branch because the initial review lacked complete coverage.
+A second failure exhausts the automatic review cap and cannot authorize publication.
 
 The state lives in append-only database checkpoint receipts, keyed by remote,
 branch and item, with a per-repository process lock across clones. A supplied

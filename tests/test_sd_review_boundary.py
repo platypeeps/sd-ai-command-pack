@@ -209,7 +209,7 @@ class NeverPostsTests(unittest.TestCase):
                           and call in list(ast.walk(node))]
             self.assertTrue(any("tempfile.TemporaryDirectory" in ast.unparse(node.items[0].context_expr)
                                 for node in containers), "writes must stay in a temporary attempt")
-        self.assertNotIn('open(', SOURCE.replace('.open("r"', ""))
+        self.assertNotIn('open(', SOURCE.replace('.open("r"', "").replace('.open("rb"', ""))
 
 
 class RepoFromCwdTests(unittest.TestCase):

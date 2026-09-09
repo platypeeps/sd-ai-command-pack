@@ -1,32 +1,15 @@
-"""The provider registry, as the pack reads it.
+"""Read the provider registry; WORKFLOW.md defines its format and role rules.
 
-`providers.yaml` is the only list of providers anywhere: what a provider is,
-whose money pays for it, and which of the two roles -- `author`, `reviewer` --
-it may hold. Skills name roles; nothing in `skills/` names a vendor. The file's
-format is documented in `WORKFLOW.md`, which is where its rules live.
+With sd_db installed, its registry reader merges provider and bill rows so
+runtime controls remain authoritative. Fresh checkouts, CI, and the installer
+can instead read the file without a database. Criterion 32 requires both
+readers to resolve the same ordered providers from the same providers.yaml.
 
-**Two readers, one answer.** With `sd_db` installed this module delegates to
-`sd_db.registry`, which merges the file with the `provider` and `bill` rows so
-that a provider disabled from the dashboard is disabled here too. Without it --
-a fresh checkout, a CI runner, the installer itself, any machine where
-`make setup` has not run -- it reads the file alone. Criterion 32 is the test
-that keeps the two honest: both must return the same reviewer order from the
-same file. That test is the whole reason a second reader is allowed to exist.
-
-The fallback is deliberately the smaller of the two. It reads what resolution
-needs and carries the refusals a caller would otherwise trip over later:
-
-* a provider with both `start` and `url`, or with neither;
-* a `start` entry on a capped bill, whose cap would be a number nothing
-  enforces -- the library refuses a `url` call before it is sent and cannot
-  refuse a spawned command's;
-* a name that does not resolve, in either direction;
-* `author` and `reviewer` resolving to the same provider, which is a review
-  by the author.
-
-It does not reimplement the row merge, the seed, or the parser's full YAML
-subset, because a checkout with no database has no rows and this file is the
-one document either reader parses.
+The standalone reader validates transport exclusivity, role references,
+author/reviewer separation, and the refusal of capped start entries. It does
+not duplicate database row merging, seeding, or the full YAML parser. Registry
+validation does not meter actual provider usage or enforce monetary caps;
+usage accounting and provider-charge enforcement remain separate work.
 """
 
 from __future__ import annotations
@@ -67,7 +50,11 @@ def provider_environment(provider: Provider, parent: Mapping[str, str]) -> dict[
     allowed = set(BASE_ENV) | set(provider.env)
     result = {name: value for name, value in parent.items() if name in allowed}
     # Native macOS keychain lookup needs the actual login identity, not a key.
-    result["USER"] = pwd.getpwuid(os.getuid()).pw_name
+    try:
+        result["USER"] = pwd.getpwuid(os.getuid()).pw_name
+    except KeyError:
+        # A numeric container uid must not inherit a spoofed login identity.
+        result.pop("USER", None)
     return result
 
 #: A bill with one of these bases has a spend limit something enforces, so
@@ -81,6 +68,7 @@ CAPPED_BASES = ("company", "plan", "prepaid")
 #: different entry.
 CHAT_COMPLETIONS = "/chat/completions"
 AUTH_SCHEME = "Bearer"
+MAX_RESPONSE_BYTES = 2_000_000
 
 _CONSTANTS = {"true": True, "false": False, "null": None, "~": None}
 
@@ -319,9 +307,7 @@ def read_file(path: Path | str) -> Registry:
     return parse(text, target)
 
 
-# --------------------------------------------------------------------------
 # The file
-# --------------------------------------------------------------------------
 
 
 def _uncomment(text: str) -> str:
@@ -719,9 +705,7 @@ def _refuse_author_reviewing(registry: Registry) -> None:
         )
 
 
-# --------------------------------------------------------------------------
 # Consent
-# --------------------------------------------------------------------------
 #
 # The registry says who *can* review. `CLAUDE.local.md`'s `reviewers` line says
 # who may receive *this repository's* diff, and nothing derives it: the
@@ -1060,9 +1044,7 @@ def refuse_cleartext(provider: Provider) -> str | None:
     )
 
 
-# --------------------------------------------------------------------------
 # The one client for `url` entries, and the one reader for their answers
-# --------------------------------------------------------------------------
 
 #: The second seam `bin/sd-review` injects, beside its runner. A test hands in
 #: a recorder and asserts on what left -- including, for a refused entry, that
@@ -1123,10 +1105,14 @@ def chat_completion(
     )
     try:
         with _OPENER.open(request, timeout=timeout) as answer:
-            return (0, answer.read().decode("utf-8", "replace"), "", True)
+            body = answer.read(MAX_RESPONSE_BYTES + 1)
+            if len(body) > MAX_RESPONSE_BYTES:
+                return (1, body.decode("utf-8", "replace"), "response exceeds the declared byte limit", True)
+            return (0, body.decode("utf-8", "replace"), "", True)
     except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8", "replace")
-        return (error.code, "", f"HTTP {error.code} from {provider.name}: {body}", True)
+        with error:
+            body = error.read(MAX_RESPONSE_BYTES + 1).decode("utf-8", "replace")
+        return (error.code, body, f"HTTP {error.code} from {provider.name}", True)
     except OSError as error:
         # `URLError` and a timeout are both `OSError`; neither is an answer, so
         # neither may read as a quota stop however the message is worded.
@@ -1150,6 +1136,55 @@ def chat_completion(
 _THINK = re.compile(r"<think\b[^>]*>.*?(?:</think\s*>|\Z)", re.DOTALL | re.IGNORECASE)
 
 
+def url_response(body: str) -> tuple[str, dict[str, Any]]:
+    """Read bounded response structure; diagnostics never contain model text."""
+    encoded = body.encode("utf-8")
+    diagnostic: dict[str, Any] = {
+        "response_text_bytes": len(encoded),
+        "response_text_sha256": hashlib.sha256(encoded).hexdigest(),
+        "category": "invalid_envelope",
+    }
+    if len(encoded) > MAX_RESPONSE_BYTES:
+        diagnostic["category"] = "response_limit"
+        diagnostic["hash_scope"] = "captured_text_only"
+        return "", diagnostic
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, TypeError, ValueError, RecursionError):
+        diagnostic["category"] = "invalid_json"
+        return "", diagnostic
+    if not isinstance(payload, dict):
+        return "", diagnostic
+    if payload.get("error") is not None:
+        diagnostic["category"] = "api_error"
+        error = payload["error"]
+        diagnostic["error_fields"] = [key for key in ("code", "type", "message") if isinstance(error, dict) and key in error]
+        return "", diagnostic
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return "", diagnostic
+    first = choices[0]
+    reason = first.get("finish_reason")
+    diagnostic["finish_reason"] = reason if reason in (None, "stop", "length", "content_filter", "tool_calls", "function_call") else "other"
+    message = first.get("message")
+    if not isinstance(message, dict):
+        return "", diagnostic
+    content, reasoning = message.get("content"), message.get("reasoning_content")
+    diagnostic["content_bytes"] = len(content.encode("utf-8")) if isinstance(content, str) else 0
+    diagnostic["reasoning_bytes"] = len(reasoning.encode("utf-8")) if isinstance(reasoning, str) else 0
+    text = _THINK.sub("", content).strip() if isinstance(content, str) else ""
+    diagnostic["content_format"] = "fenced" if text.startswith("```") else "text"
+    if reason == "length":
+        diagnostic["category"] = "truncated"
+    elif reason not in (None, "stop"):
+        diagnostic["category"] = "incomplete_finish"
+    elif not text:
+        diagnostic["category"] = "reasoning_only" if diagnostic["reasoning_bytes"] or isinstance(content, str) and "<think" in content else "empty_content"
+    else:
+        diagnostic["category"] = "content"
+    return text, diagnostic
+
+
 def url_answer(body: str) -> str:
     """The answer in an OpenAI-compatible response body, or `""` for none.
 
@@ -1162,22 +1197,10 @@ def url_answer(body: str) -> str:
     `<think>` holds inline, and concatenating it breaks the `json.loads` that
     follows, reporting an entry that answered correctly as unavailable.
     """
-    try:
-        payload = json.loads(body)
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return ""
-    choices = payload.get("choices") if isinstance(payload, dict) else None
-    first = choices[0] if isinstance(choices, list) and choices else None
-    message = first.get("message") if isinstance(first, dict) else None
-    content = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(content, str):
-        return ""
-    return _THINK.sub("", content).strip()
+    return url_response(body)[0]
 
 
-# --------------------------------------------------------------------------
 # The chain
-# --------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)

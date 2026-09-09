@@ -936,8 +936,8 @@ class _Answer:
     def __init__(self, body: str) -> None:
         self.body = body.encode("utf-8")
 
-    def read(self) -> bytes:
-        return self.body
+    def read(self, size: int = -1) -> bytes:
+        return self.body if size < 0 else self.body[:size]
 
     def __enter__(self) -> "_Answer":
         return self

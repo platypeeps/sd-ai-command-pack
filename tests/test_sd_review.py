@@ -537,14 +537,16 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(parsed.findings[0]["path"], "<unknown>")
         self.assertIn("schema", parsed.error)
 
-    def test_excess_findings_are_preserved_and_the_response_is_incomplete(self) -> None:
+    def test_excess_findings_are_bounded_and_omissions_block_completion(self) -> None:
         many = [
             {"path": "a", "line": None, "severity": "low", "summary": str(index), "family": "f"}
             for index in range(sd_review.MAX_FINDINGS + 10)
         ]
         parsed = sd_review.parse_findings(json.dumps({"findings": many}))
         assert parsed is not None
-        self.assertEqual(len(parsed.findings), len(many))
+        self.assertEqual(len(parsed.findings), sd_review.MAX_FINDINGS)
+        self.assertIn("omitted", parsed.findings[-1]["summary"])
+        self.assertEqual(parsed.findings[-1]["severity"], "high")
         self.assertIn("limits", parsed.error)
 
 
@@ -1355,6 +1357,15 @@ class TheUrlEntryRunsTests(ReviewFixture):
         self.assertEqual(result["findings"], [])
         self.assertEqual(len(client.sent), 1)
         self.assertIn("Review", client.sent[0]["prompt"])
+
+    def test_incomplete_url_diagnostics_survive_the_fallback_receipt(self) -> None:
+        client = FakeClient(default=chat_answer("", reasoning_content="rate_limit private-marker"))
+        result = self.run_review(client)
+        first = result["outcomes"][0]
+        self.assertEqual(first["status"], sd_review.UNAVAILABLE)
+        self.assertEqual(first["diagnostic"]["category"], "reasoning_only")
+        self.assertNotIn("private-marker", json.dumps(first))
+        self.assertEqual(result["reviewed_by"], ["second"])
 
     def test_findings_come_back_through_the_same_reader(self) -> None:
         client = FakeClient(

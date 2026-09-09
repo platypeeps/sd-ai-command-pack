@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Prepare, merge, and reconcile committed code from the repository enclosing cwd."""
+"""Prepare, merge, and reconcile committed code from the repository enclosing cwd.
+
+Local receipts coordinate trusted clients sharing this OS account; they do not
+authenticate against an actor who can rewrite its database, tools or credentials.
+Merge independently rechecks GitHub ownership, protection and exact-head checks.
+"""
 
 from __future__ import annotations
 
@@ -26,6 +31,11 @@ def digest(value) -> str:
 
 def moment() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def completed_depth(report: dict) -> bool:
+    requested, completed = report.get("requested_reviews"), report.get("completed_reviews")
+    return type(requested) is int and type(completed) is int and requested > 0 and completed >= requested
 
 
 def current_head(root: pathlib.Path) -> str:
@@ -120,11 +130,16 @@ class Ship:
                 or report.get("completed_reviews", 0) < report["requested_reviews"]):
             raise Refusal("local review receipt is incomplete or does not name this exact head")
         first = passes[0].get("report") or {}
-        if not first.get("requested_reviews") or first.get("completed_reviews", 0) < first["requested_reviews"]:
-            raise Refusal("the original branch never completed the requested local review depth")
-        if len(passes) == 2 and (report.get("subject", {}).get("base") != passes[0].get("head")
-                                or report.get("verification_report_digest") != digest(passes[0]["report"])):
-            raise Refusal("fix verification does not continue the initially reviewed head")
+        if len(passes) == 2 and last.get("retry"):
+            if (completed_depth(first) or report.get("subject", {}).get("base") != report.get("authorship_base")
+                    or report.get("resume_report_digest") != (digest(first) if first else None)):
+                raise Refusal("retry must complete the full branch and retain the incomplete review evidence")
+        else:
+            if not completed_depth(first):
+                raise Refusal("the original branch never completed the requested local review depth")
+            if len(passes) == 2 and (report.get("subject", {}).get("base") != passes[0].get("head")
+                                    or report.get("verification_report_digest") != digest(first)):
+                raise Refusal("fix verification does not continue the initially reviewed head")
         if any(row.get("disposition") == "blocking" for row in report.get("findings", [])):
             raise Refusal("local review contains unresolved blocking findings")
 
@@ -152,37 +167,42 @@ class Ship:
 
     def review(self, head: str) -> None:
         passes = list(self.state.get("passes") or [])
-        if self.state.get("reviewed_head") == head:
+        prior = (passes[-1].get("report") or {}) if passes else {}
+        retry = bool(self.args.retry_review)
+        if self.state.get("reviewed_head") == head and (not retry or completed_depth(prior)):
             self.check_review(head)
             return
-        if passes and passes[-1].get("head") == head:
-            raise Refusal("this head was already reviewed; fix its findings or explicitly request another review cycle")
         if len(passes) >= 2:
             raise Refusal("one code review and one fix verification are spent; further review requires an explicit new request")
+        if retry and (not passes or completed_depth(prior)):
+            raise Refusal("--retry-review can continue only an incomplete initial review")
+        if passes and not retry:
+            if not completed_depth(prior):
+                raise Refusal("the preceding review did not complete its requested depth; use --retry-review for a full-branch retry")
+            if passes[-1].get("head") == head:
+                raise Refusal("this head was already reviewed; address its findings before the fix verification")
+        base = passes[-1]["head"] if passes and not retry else None
         if passes:
-            prior = passes[-1].get("report") or {}
-            if not prior or prior.get("completed_reviews", 0) < prior.get("requested_reviews", 1):
-                raise Refusal("the preceding review did not complete its requested depth; reconcile it before a fix-only pass")
-        base = passes[-1]["head"] if passes else None
-        if base:
-            git(self.root, "merge-base", "--is-ancestor", base, head)
+            git(self.root, "merge-base", "--is-ancestor", passes[-1]["head"], head)
         argv = [sys.executable, str(BIN / "sd-review"), "--scope", "branch", "--challenge", "--json", "--database", str(self.database)]
         if base:
             argv += ["--base", base]
-        passes.append({"head": head, "started_at": moment(), "base": base})
+        passes.append({"head": head, "started_at": moment(), "base": base, "retry": retry})
         self.save(passes=passes, phase="reviewing", head=head, binding=binding(self.root))
         # sd-review emits useful blocking evidence with nonzero status, so the
         # JSON is retained even when it refuses. No transport fixture is used here.
         with tempfile.TemporaryDirectory(prefix="sd-ship-verify-") as directory:
-            if base:
-                prior = pathlib.Path(directory) / "prior-review.json"
-                prior.write_text(json.dumps(passes[-2]["report"], sort_keys=True))
-                argv += ["--verify-report", str(prior)]
+            if prior:
+                prior_path = pathlib.Path(directory) / "prior-review.json"
+                prior_path.write_text(json.dumps(prior, sort_keys=True))
+                argv += ["--resume-report" if retry else "--verify-report", str(prior_path)]
             result = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, timeout=3600, check=False)
         try:
             report = json.loads(result.stdout)
         except ValueError:
             raise Refusal("local review emitted no valid receipt; its reserved pass remains recorded") from None
+        if not isinstance(report, dict):
+            raise Refusal("local review emitted no valid receipt; its reserved pass remains recorded")
         passes[-1]["report"] = report
         passes[-1]["exit_code"] = result.returncode
         self.save(passes=passes, reviewed_head=head if result.returncode == 0 else None, phase="reviewed")
@@ -417,6 +437,7 @@ def parser():
         action.add_argument("--json", action="store_true")
         action.add_argument("--database", type=pathlib.Path, help="owned runner database; defaults to the operator HOME")
         if name == "prepare":
+            action.add_argument("--retry-review", action="store_true", help="spend the remaining pass on a full-branch retry of an incomplete initial review")
             action.add_argument("--path", action="append", default=[])
             action.add_argument("--message-file", type=pathlib.Path)
             action.add_argument("--author")

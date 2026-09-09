@@ -619,6 +619,70 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "preceding review did not complete"):
             self.prepare()
 
+    def test_explicit_retry_preserves_incomplete_pass_and_reviews_the_full_branch(self):
+        provider = self.programs / "review-fixture"
+        working = provider.read_text()
+        provider.write_text("#!/usr/bin/env python3\nprint('not a review')\n")
+        with self.assertRaises(ship.Refusal):
+            self.prepare()
+        first = self.operation().state["passes"][0]
+        self.assertEqual(first["report"]["completed_reviews"], 0)
+        self.assertEqual(len(self.remote.pull_requests), 0)
+        _git(self.root, "commit", "--allow-empty", "-m", "recover parser\n\nAuthored-with: human")
+        provider.write_text(working)
+        self.prepare("--retry-review")
+        state = self.operation().state
+        self.assertEqual(state["passes"][0], first)
+        self.assertEqual(len(state["passes"]), 2)
+        report = state["passes"][1]["report"]
+        self.assertIn("src.py", report["subject"]["paths"])
+        self.assertEqual(report["subject"]["base"], report["authorship_base"])
+        self.assertEqual(report["resume_report_digest"], ship.digest(first["report"]))
+        self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_missing_receipt_retry_is_explicit_and_never_rolls_back_spent_pass(self):
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        with patch.object(ship.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "not JSON", "")):
+            with self.assertRaisesRegex(ship.Refusal, "no valid receipt"):
+                operation.review(head)
+        first = self.operation().state["passes"][0]
+        with self.assertRaisesRegex(ship.Refusal, "retry-review"):
+            self.prepare()
+        self.prepare("--retry-review")
+        state = self.operation().state
+        self.assertEqual(state["passes"][0], first)
+        self.assertEqual(len(state["passes"]), 2)
+
+    def test_zero_exit_with_unusable_json_receipt_can_retry(self):
+        operation = self.operation()
+        head = _git(self.root, "rev-parse", "HEAD")
+        with patch.object(ship.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "{}", "")):
+            with self.assertRaises(ship.Refusal):
+                operation.review(head)
+        first = self.operation().state["passes"][0]
+        self.prepare("--retry-review")
+        self.assertEqual(self.operation().state["passes"][0], first)
+        self.assertEqual(len(self.operation().state["passes"]), 2)
+
+    def test_retry_cannot_spend_a_third_pass(self):
+        provider = self.programs / "review-fixture"
+        provider.write_text("#!/usr/bin/env python3\nprint('not a review')\n")
+        with self.assertRaises(ship.Refusal):
+            self.prepare()
+        with self.assertRaises(ship.Refusal):
+            self.prepare("--retry-review")
+        with self.assertRaisesRegex(ship.Refusal, "spent"):
+            self.prepare("--retry-review")
+        self.assertEqual(len(self.operation().state["passes"]), 2)
+        self.assertEqual(len(self.remote.pull_requests), 0)
+
+    def test_retry_flag_cannot_replace_a_complete_review(self):
+        self.prepare()
+        _git(self.root, "commit", "--allow-empty", "-m", "fix\n\nAuthored-with: human")
+        with self.assertRaisesRegex(ship.Refusal, "only an incomplete"):
+            self.prepare("--retry-review")
+
 
 if __name__ == "__main__":
     unittest.main()

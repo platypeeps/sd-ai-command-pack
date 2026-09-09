@@ -1,50 +1,28 @@
 #!/usr/bin/env python3
-"""Read-only status for the repository you are standing in.
+"""Read-only status for the repository enclosing cwd (R10-D6).
 
-There is no repo-path argument and no fleet walk (R10-D6): the repository is
-the one enclosing the current working directory, full stop. Sessions stick to
-their repos, and a status command that could be pointed anywhere is how a
-session stops sticking. The dashboard is the cross-repo view; this is not it.
+No repo-path argument or fleet walk; the dashboard owns cross-repository views.
+No repository, state-directory or cache writes. Derive from files, Git and GitHub.
 
-Nothing here is written. Not the repo, not the state directory, not a cache.
-Every section derives its answer at run time from the filesystem, from git, or
-from GitHub, because committed derived state is permanent staleness.
-
-Eight sections, in the order a human wants them:
-
+Eight sections:
   pack        the checkout these tools came from
-  work        derived item status from `docs/work` -- the `status:` line, or
-              the item's row where `docs/work/.status-source` says `row`, with
-              a surviving line named as stale and a `done` row no commit
-              closed named as unmarked -- counted; `--parked` lists
-              every parked item, read from their own frontmatter -- the age
-              sweep and the D2 bulk-park both write the field
-  prs         open pull requests, via the same code path as `sd-pr-state`
-  setup       mode and the detected check entrypoints
-  protection  branch-protection *enforcement*, gap by gap, plus the two r7
-              merge-settings flags
-  handoff     the pending local packet for this directory (read, never
-              consumed) and the Lane B carrier branches on origin
-  backends    which review backends are installed, names only
-  residue     legacy leftovers, each with the exact command that removes it
+  work        counted docs/work status from frontmatter or the authoritative row;
+              flag stale status lines and done rows without closing evidence;
+              --parked reads each item's own field, written by age sweep/D2 parking
+  prs         open pull requests through the sd-pr-state code path
+  setup       mode and detected check entrypoints
+  protection  actual enforcement gaps and both r7 merge-settings flags
+  handoff     this directory's pending packet, never consumed, and origin Lane B carriers
+  backends    installed review backend names only
+  residue     legacy leftovers with exact removal commands
 
-The protection section is the one that matters. The doctrine is that merge
-authority is GitHub branch protection *wherever protection is actually
-enforcing*; protection that exempts admins is prose, not authority, and a
-non-strict required check is a green tick on a base that moved. So this
-section reports enforcement state rather than mere presence, and every missing
-leg prints as a named gap. That is what makes the doctrine conditional in
-tooling instead of only in prose.
+Open-row closing contradictions require trailers reachable from local or remote default refs.
+Enforcing GitHub branch protection is merge authority; mere presence is insufficient.
+Report each missing enforcement condition, including admin exemptions and non-strict checks.
+Repository acknowledgements in .github/sd-status.json match observed facts, not gap IDs.
+Changed protection invalidates them; load_acknowledgements holds incident and deletion criteria.
 
-One kind of gap prints as accepted instead: a state the repository has looked
-at, decided to keep, and written down in `.github/sd-status.json`. The
-acknowledgement is keyed on the observed protection facts and not on the gap
-id, so it stops applying the moment the branch changes underneath it -- see
-`load_acknowledgements`, which carries the incident and the deletion criterion.
-
-A gap is a report, not a failure: this command exits 0 whether or not it found
-any. Exit 2 is reserved for an invocation or configuration fault, which prints
-a sentence and never a traceback.
+Exit 0 includes reported gaps. Exit 2 indicates invocation or configuration faults, explained without a traceback.
 """
 
 from __future__ import annotations
@@ -1571,6 +1549,25 @@ def _changed(root: pathlib.Path, left: str, right: str) -> set[str]:
     )
     return {path for path in (listing or "").split("\n") if path}
 
+
+def _closing_items(root: pathlib.Path, refs: tuple[str, ...]) -> set[str]:
+    """Read each default ref once; the shared trailer parser decides closure."""
+    closed: set[str] = set()
+    grep = f"{sd_lib.DELIVERS_TRAILER}|{sd_lib.CLOSES_TRAILER}"
+    for ref in dict.fromkeys(refs):
+        raw = sd_lib.git_output(
+            ["log", "--format=%H%x1f%B%x1e", "-E", "--grep", grep, ref], root
+        ) or ""
+        for commit in raw.split("\x1e"):
+            message = commit.partition("\x1f")[2]
+            for line in message.splitlines():
+                name, _, value = line.rstrip().partition(" ")
+                item = value.strip()
+                if name in (sd_lib.DELIVERS_TRAILER, sd_lib.CLOSES_TRAILER) and item and sd_lib._closes(message, item):
+                    closed.add(item)
+    return closed
+
+
 def _work_rows(
     root: pathlib.Path,
     work: dict[str, Any],
@@ -1586,8 +1583,8 @@ def _work_rows(
     open thread. Both exclusions are printed, in `EXCLUDED`.
 
     In row mode a slice merge says nothing about completion. Only an explicit
-    closing trailer in local history can contradict an open row. No fetch or
-    GitHub lookup is needed to find that positive evidence; the row remains
+    closing trailer in local default-branch history can contradict an open row.
+    No fetch or GitHub lookup is needed to find that positive evidence; the row remains
     authoritative when local history has no closing trailer.
 
     In file mode, `branch-already-merged` is asked only of a branch that
@@ -1603,9 +1600,10 @@ def _work_rows(
     if source is None:
         source, _ = sd_lib.status_marker(root)
     closing_refs: tuple[str, ...] = ()
+    closing_items: set[str] | None = None
     if source == sd_lib.FROM_ROW:
         remote, local_default = sd_lib.upstream(root)
-        closing_refs = ("HEAD", local_default)
+        closing_refs = (local_default,)
         if remote:
             closing_refs += (f"{remote}/{local_default}",)
     heads = _branch_names(root)
@@ -1663,10 +1661,12 @@ def _work_rows(
                     "branch-already-merged", merged.reason or answer.repair
                 )
         if source == sd_lib.FROM_ROW and status not in ("done", "unknown"):
-            if any(sd_lib._closed_by(root, ref, item) for ref in closing_refs):
+            if closing_items is None:
+                closing_items = _closing_items(root, closing_refs)
+            if item in closing_items:
                 rows.append(_row(
                     "branch-already-merged", item, slug,
-                    f"{where} is {status}, but local git history carries "
+                    f"{where} is {status}, but local default-branch history carries "
                     f"Closes: {item} or Delivers: {item}",
                     f"reconcile the database row for {item} with its closing trailer, "
                     "then rerun sd-status",

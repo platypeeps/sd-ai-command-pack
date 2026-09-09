@@ -172,7 +172,9 @@ Other flags: `--dry-run` (print what would be written, write nothing), `--json`,
 - Never review a different diff than the one the scope named.
 - Never call a provider CLI directly to bypass the router, the preflight, or
   the severity floor.
-- Never report a rate-limited run as clean.
+- Never count a rate-limited attempt as a completed review. A run can be clean
+  only after eligible, consented replacements satisfy its full depth and no
+  findings remain.
 
 ## Fix verification used by sd-ship
 

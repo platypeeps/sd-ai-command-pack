@@ -70,6 +70,46 @@ class FixReviewTests(ReviewFixture):
                                  self.environment(), self.chatgpt_home())
             self.assertEqual(runner.calls, [])
 
+    def test_resume_reviews_full_branch_and_repeats_prior_blockers(self):
+        root, first = self.branch()
+        blocking = json.dumps({"findings": [{"path": "src.py", "line": 1, "summary": "original unresolved defect",
+                                            "family": "correctness", "severity": "high"}]})
+        prior = sd_review.review(root, namespace(scope="branch"), FakeRunner({"codex": sd_review.Completed(0, blocking, "")}),
+                                 self.environment(), self.chatgpt_home())
+        prior["completed_reviews"] = 0
+        report = self.tmp / "prior.json"
+        report.write_text(json.dumps(prior))
+        self.commit(root, "other.py", "unrelated_fix = True\n")
+        runner = FakeRunner({"codex": sd_review.Completed(0, blocking, "")})
+        result = sd_review.review(root, namespace(scope="branch", resume_report=str(report)), runner,
+                                  self.environment(), self.chatgpt_home())
+        self.assertEqual(result["status"], "blocking")
+        self.assertEqual(set(result["subject"]["paths"]), {"src.py", "other.py"})
+        self.assertEqual(result["subject"]["base"], result["authorship_base"])
+        self.assertNotEqual(result["subject"]["base"], first)
+        handed = json.dumps(runner.calls, default=str)
+        self.assertIn("original unresolved defect", handed)
+        self.assertIn("the_original_defect = True", handed)
+        self.assertTrue(result["resume_report_digest"])
+        self.assertIsNone(result["verification_report_digest"])
+
+    def test_resume_refuses_fix_only_or_unrelated_prior_head(self):
+        root, first = self.branch()
+        prior = sd_review.review(root, namespace(scope="branch"), FakeRunner(), self.environment(), self.chatgpt_home())
+        report = self.tmp / "prior.json"
+        report.write_text(json.dumps(prior))
+        runner = FakeRunner()
+        for args in (namespace(scope="branch", base=first, resume_report=str(report)),
+                     namespace(scope="worktree", resume_report=str(report))):
+            with self.assertRaises(sd_review.UsageError):
+                sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+        prior["subject"]["head"] = "0" * 40
+        report.write_text(json.dumps(prior))
+        with self.assertRaises(sd_review.UsageError):
+            sd_review.review(root, namespace(scope="branch", resume_report=str(report)), runner,
+                             self.environment(), self.chatgpt_home())
+        self.assertEqual(runner.calls, [])
+
     def test_every_actual_squash_author_vendor_is_excluded(self):
         root, first = self.branch()
         self.commit(root, "combined.py", "combined = 1\n", "multi author\n\nAuthored-with: codex/openai\nAuthored-with: claude/anthropic")

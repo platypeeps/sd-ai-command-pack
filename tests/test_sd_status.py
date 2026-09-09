@@ -1785,6 +1785,35 @@ class RowWorkItemInventoryTests(InventoryFixture):
             connection.close()
         return directory
 
+    def test_unmerged_feature_closing_trailer_is_not_already_merged(self) -> None:
+        self.branch("feature", land=False)
+        self.row_item()
+        self.git("checkout", "-q", "feature")
+        self.git("commit", "-q", "--allow-empty", "-m", f"Proposed delivery\n\nDelivers: {self.ITEM}")
+        result = self.inventory(protection=self.BLIND)
+        self.assertEqual([], self.by_check(result.rows, "branch-already-merged"))
+
+    def test_row_closing_history_is_read_once_per_default_ref(self) -> None:
+        self.git("commit", "-q", "--allow-empty", "-m", "Delivered item\n\nCloses: item-0")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        work = {"status_source": status.sd_lib.FROM_ROW, "items": [
+            {"path": f"docs/work/item-{index}", "slug": f"item-{index}",
+             "status": "in_progress", "branch": "main", "archived": False, "parked": False}
+            for index in range(40)]}
+        with mock.patch.object(status.sd_lib, "upstream", return_value=("origin", "main")), \
+                mock.patch.object(status.sd_lib, "git_output", wraps=status.sd_lib.git_output) as git_calls:
+            rows = status._work_rows(self.repo, work, self.TODAY, "main", status.Merged(None, ""), {})
+        walks = [call.args[0] for call in git_calls.call_args_list
+                 if call.args[0][0] == "log" and "--grep" in call.args[0]]
+        self.assertEqual([argv[-1] for argv in walks], ["main", "origin/main"])
+        self.assertEqual([row["key"] for row in self.by_check(rows, "branch-already-merged")], ["item-0"])
+
+    def test_quoted_closing_line_is_not_a_default_branch_trailer(self) -> None:
+        self.branch("feature", land=True)
+        self.row_item()
+        self.git("commit", "-q", "--allow-empty", "-m", f"Quoted example\n\nCloses: {self.ITEM}\n\nThis is an example, not a delivery.")
+        self.assertEqual([], self.by_check(self.inventory(protection=self.BLIND).rows, "branch-already-merged"))
+
     def test_an_ordinary_slice_merge_does_not_close_a_row_owned_item(self) -> None:
         self.branch("feature", land=True)
         self.row_item()
