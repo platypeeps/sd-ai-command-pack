@@ -311,7 +311,7 @@ class LineBudgetTests(unittest.TestCase):
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            1860,
+            1885,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

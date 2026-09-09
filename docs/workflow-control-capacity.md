@@ -71,3 +71,37 @@ The capacity decision and constants belong in a preparatory commit before the
 implementation commit on the same delivery branch. No separate bookkeeping
 pull request is needed. The preparatory commit contains this decision, the
 test constants and the ceiling history entry; implementation follows it.
+
+## Measured review recovery reservation, 2026-09-09
+
+The remaining closeout corrects review timeouts, renewals, and response parsing.
+This reservation uses the combined implementation, not estimates from separate patches.
+Its baseline is `bb7c6653d7f96669ead1e25ebe444351d2cc51e8`.
+
+| Tracked component | Baseline lines | Combined lines | Change |
+| --- | ---: | ---: | ---: |
+| `bin/sd-ship` | 539 | 682 | +143 |
+| `bin/sd-review` | 1,518 | 1,559 | +41 |
+| Other 38 `bin/` files | 17,990 | 17,990 | 0 |
+| Total | 20,047 | 20,231 | +184 |
+
+The ship changes budget the complete eligible reviewer chain, including fallbacks.
+They bound process-group cleanup and preserve timeout evidence without certifying completion.
+A renewed request binds one allowance to the exact prior history and current head.
+The reviewer binds timing inputs and accepts whole-message JSON fences only for URL responses.
+Bounded schema diagnostics retain the existing findings and completion requirements.
+
+The review lane remains `bin/sd-review` plus `bin/sd_setup_github.py`.
+It grows from 1,844 to 1,885 lines; the 326-line GitHub module is unchanged.
+The import-derived inventory continues to enforce this boundary.
+
+Set `BIN_CAP` to 20,231 and the review-lane ceiling to 1,885.
+The increases are 181 and 25 lines, consuming the existing headroom of 3 and 16 lines.
+No additional reserve is included. Any further growth requires another capacity decision or a reduction.
+No dashboard, migration, file-enumeration, or completion gate changes.
+
+This preparatory commit changes only this record, the two ceilings, and the appended bin ceiling history entry.
+Its runtime remains at 20,047 bin lines and 1,844 review-lane lines, within both previous ceilings.
+The implementation follows on the same delivery branch, under the existing closeout exception.
+The required tests, static checks, external review, and exact-head CI still govern delivery.
+This capacity decision does not establish implementation correctness or external review completion.
