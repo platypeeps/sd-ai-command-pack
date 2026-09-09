@@ -71,7 +71,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          ref: 7f51cf98fc3ca50ca6edaede57562b3cff0a6247
+          ref: dea826991c1cae4ac93c9149b04a1fe5bf28c9f9
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false
