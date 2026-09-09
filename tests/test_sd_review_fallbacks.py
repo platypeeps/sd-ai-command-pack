@@ -254,6 +254,41 @@ class DatabaseProviderStateTests(ReviewRunFixture):
 
 
 class ClaudeReaderTests(ReviewFixture):
+    def test_typed_quota_errors_preserve_their_classification(self) -> None:
+        for fields in ({"errors": ["API Error: rate limit reached"]},
+                       {"api_error_status": 429, "result": "request rejected"},
+                       {"result": "API Error: rate limit reached"}):
+            with self.subTest(fields=fields):
+                result, parsed = sd_review.claude_answer(sd_review.Completed(0, json.dumps({
+                    "type": "result", "subtype": "error_during_execution", "is_error": True, **fields}), ""))
+                self.assertEqual(sd_review._answer("claude", result, parsed).status, sd_review.RATE_LIMITED)
+
+    def test_successful_model_quota_text_and_untyped_status_do_not_fake_an_error(self) -> None:
+        for fields in ({"result": "rate limit reached"}, {"errors": ["rate limit reached"]},
+                       {"api_error_status": 429}):
+            with self.subTest(fields=fields):
+                result, parsed = sd_review.claude_answer(sd_review.Completed(0, json.dumps({
+                    "type": "result", "subtype": "success", "is_error": False,
+                    "structured_output": {"findings": []}, **fields}), ""))
+                self.assertEqual(sd_review._answer("claude", result, parsed).status, sd_review.CLEAN)
+
+    def test_typed_nonquota_or_malformed_errors_remain_unavailable(self) -> None:
+        for fields in ({"errors": ["request rejected"]}, {"errors": "rate limit reached"},
+                       {"errors": [{"message": "rate limit reached"}]}, {"api_error_status": "429"},
+                       {"api_error_status": 429.0}):
+            with self.subTest(fields=fields):
+                result, parsed = sd_review.claude_answer(sd_review.Completed(0, json.dumps({
+                    "type": "result", "subtype": "error_during_execution", "is_error": True, **fields}), ""))
+                self.assertEqual(sd_review._answer("claude", result, parsed).status, sd_review.UNAVAILABLE)
+
+    def test_quota_metadata_does_not_discard_adverse_findings(self) -> None:
+        result, parsed = sd_review.claude_answer(sd_review.Completed(0, json.dumps({
+            "type": "result", "subtype": "success", "is_error": True, "api_error_status": 429,
+            "structured_output": json.loads(finding())}), ""))
+        outcome = sd_review._answer("claude", result, parsed)
+        self.assertEqual(outcome.status, sd_review.RATE_LIMITED)
+        self.assertEqual(outcome.findings[0]["severity"], "high")
+
     def execute(self, envelope: Any, exit_code: int = 0) -> tuple[Any, list[dict[str, Any]]]:
         root = self.make_repo()
         (root / "src.py").write_text("claude_exact_subject = True\n")

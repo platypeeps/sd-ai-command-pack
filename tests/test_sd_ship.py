@@ -419,6 +419,21 @@ roles:
         self.assertEqual(_git(self.operator, "status", "--porcelain"), before_status)
         self.assertEqual(self.connection.execute("SELECT COUNT(*) FROM state").fetchone()[0], before_rows)
 
+    def test_observe_without_receipt_returns_cli_refusal_without_writes(self):
+        before = list(self.connection.iterdump())
+        refs = _git(self.root, "show-ref")
+        calls = len(self.remote.calls)
+        result = self.cli("observe")
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        value = json.loads(result.stdout)
+        self.assertFalse(value["ok"])
+        self.assertTrue(value["manualRequired"])
+        self.assertIn("no unique ship receipt", value["error"])
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(list(self.connection.iterdump()), before)
+        self.assertEqual(_git(self.root, "show-ref"), refs)
+        self.assertEqual(len(self.remote.calls), calls)
+
     def test_repository_lock_cannot_be_owned_by_two_clones(self):
         from sd_db.workflow import WorkflowError
         with receipts.repository_lock(self.database, "fixture/repo"):
@@ -682,6 +697,163 @@ roles:
         _git(self.root, "commit", "--allow-empty", "-m", "fix\n\nAuthored-with: human")
         with self.assertRaisesRegex(ship.Refusal, "only an incomplete"):
             self.prepare("--retry-review")
+
+    def spent_reviews(self, blockers=False):
+        provider = self.programs / "review-fixture"
+        working = provider.read_text()
+        for index in range(2):
+            if blockers:
+                payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
+                    {"path": "src.py", "line": 1, "severity": "high", "family": "correctness",
+                     "summary": f"unresolved from pass {index + 1}"}]}}
+                provider.write_text("#!/usr/bin/env python3\nprint(" + repr(json.dumps(payload)) + ")\n")
+                if index:
+                    _git(self.root, "commit", "--allow-empty", "-m", "fix attempt\n\nAuthored-with: human")
+            else:
+                provider.write_text("#!/usr/bin/env python3\nprint('not JSON')\n")
+            with self.assertRaises(ship.Refusal):
+                self.prepare(*(["--retry-review"] if index and not blockers else []))
+        return provider, working, json.loads(json.dumps(self.operation().state["passes"]))
+
+    def additional(self, head=None, reason="Operator requests one bounded fixture review"):
+        return self.prepare("--additional-review-for", head or _git(self.root, "rev-parse", "HEAD"),
+                            "--request-reason", reason)
+
+    def test_additional_review_preserves_all_blockers_and_full_branch_coverage(self):
+        provider, _, prior = self.spent_reviews(blockers=True)
+        _git(self.root, "commit", "--allow-empty", "-m", "resolve findings\n\nAuthored-with: human")
+        captured = self.directory / "third-prompt.txt"
+        provider.write_text("#!/usr/bin/env python3\nimport pathlib,sys\n"
+                           "work=pathlib.Path(sys.argv[sys.argv.index('--add-dir')+1])\n"
+                           f"pathlib.Path({str(captured)!r}).write_text((work/'review-subject.md').read_text())\n"
+                           "print('{\"type\":\"result\",\"subtype\":\"success\",\"structured_output\":{\"findings\":[]}}')\n")
+        self.additional()
+        state = self.operation().state
+        self.assertEqual(state["passes"][:2], prior)
+        self.assertEqual(len(state["passes"]), 3)
+        request = state["passes"][2]["additional_review_request"]
+        self.assertEqual(request["prior_history_digest"], ship.digest(prior))
+        self.assertEqual(request["head"], _git(self.root, "rev-parse", "HEAD"))
+        report = state["passes"][2]["report"]
+        self.assertIn("src.py", report["subject"]["paths"])
+        self.assertEqual(report["subject"]["base"], report["authorship_base"])
+        self.assertEqual(report["resume_report_digest"], ship.digest(ship.review_history(prior)))
+        prompt = captured.read_text()
+        for index, old in enumerate(prior):
+            self.assertIn(f"unresolved from pass {index + 1}", prompt)
+            self.assertIn(ship.digest(old["report"]), prompt)
+            self.assertIn(old["head"], prompt)
+        self.assertIn("value = 1", prompt)
+        self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_additional_failed_reservation_remains_spent_and_cannot_be_reused(self):
+        _, _, prior = self.spent_reviews()
+        with self.assertRaises(ship.Refusal):
+            self.additional()
+        saved = self.operation().state["passes"]
+        self.assertEqual(saved[:2], prior)
+        self.assertEqual(len(saved), 3)
+        for flags in ([], ["--retry-review"], ["--additional-review-for", _git(self.root, "rev-parse", "HEAD"),
+                                              "--request-reason", "A changed reason must not reset the request"]):
+            with self.assertRaises(ship.Refusal):
+                self.prepare(*flags)
+            self.assertEqual(self.operation().state["passes"], saved)
+        self.assertFalse(self.remote.pull_requests)
+
+    def test_additional_request_validates_head_reason_and_existing_cap_before_dispatch(self):
+        head = _git(self.root, "rev-parse", "HEAD")
+        with self.assertRaises(ship.Refusal):
+            self.additional(head)
+        self.spent_reviews()
+        prior = self.operation().state["passes"]
+        for flags in (["--additional-review-for", head], ["--request-reason", "reason"],
+                      ["--additional-review-for", head, "--request-reason", "  "],
+                      ["--additional-review-for", head[:12], "--request-reason", "reason"],
+                      ["--additional-review-for", "0" * 40, "--request-reason", "reason"],
+                      ["--additional-review-for", head, "--request-reason", "reason", "--retry-review"]):
+            operation = self.operation("prepare", *flags)
+            with self.subTest(flags=flags), patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")):
+                with self.assertRaises(ship.Refusal):
+                    operation.review(head)
+            self.assertEqual(self.operation().state["passes"], prior)
+
+    def test_additional_request_refuses_dirty_or_commit_stage_before_mutation(self):
+        self.spent_reviews()
+        head = _git(self.root, "rev-parse", "HEAD")
+        (self.root / "src.py").write_text("uncommitted = True\n")
+        for extra in ([], ["--path", "src.py", "--message-file", str(self.directory / "missing-message"), "--author", "author"]):
+            with self.assertRaises(ship.Refusal):
+                self.prepare("--additional-review-for", head, "--request-reason", "reason", *extra)
+            self.assertEqual(_git(self.root, "rev-parse", "HEAD"), head)
+            self.assertEqual(_git(self.root, "diff", "--cached", "--name-only"), "")
+        self.assertEqual(len(self.operation().state["passes"]), 2)
+
+    def test_additional_receipt_revalidates_history_coverage_and_request_at_merge(self):
+        provider, working, _ = self.spent_reviews()
+        provider.write_text(working)
+        self.additional()
+        operation = self.operation()
+        original = json.loads(json.dumps(operation.state))
+        for change in ("missing-request", "history", "reason", "head", "coverage", "subject", "evidence"):
+            operation.state = json.loads(json.dumps(original))
+            last = operation.state["passes"][-1]
+            if change == "missing-request":
+                last.pop("additional_review_request")
+            elif change == "history":
+                operation.state["passes"][0]["report"]["findings"].append({"path": "src.py", "summary": "lost"})
+            elif change in ("reason", "head"):
+                last["additional_review_request"][change] = ""
+            elif change == "coverage":
+                last["report"]["completed_reviews"] = 0
+            elif change == "subject":
+                last["report"]["subject"]["base"] = last["head"]
+            else:
+                last["report"]["resume_report_digest"] = "invented"
+            operation.save()
+            with self.subTest(change=change), self.assertRaises(ship.Refusal):
+                self.merge()
+        operation.state = original
+        operation.save()
+        self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_additional_history_keeps_missing_reports_and_all_author_vendors(self):
+        history = ship.review_history([
+            {"head": "a" * 40, "report": {"findings": [], "authored_with": ["old-vendor"]}},
+            {"head": "b" * 40}])
+        self.assertEqual(history["authored_with"], ["old-vendor"])
+        self.assertEqual(history["history"][1]["report_digest"], None)
+        self.assertEqual(history["subject"]["head"], "b" * 40)
+        self.assertNotIn("completed_reviews", history)
+
+    def test_additional_timeout_keeps_reportless_reservation_spent(self):
+        _, _, prior = self.spent_reviews()
+        head = _git(self.root, "rev-parse", "HEAD")
+        operation = self.operation("prepare", "--additional-review-for", head, "--request-reason", "reason")
+        original_run = ship.subprocess.run
+
+        def timed_out(argv, *args, **kwargs):
+            if str(ROOT / "bin/sd-review") in argv[:2]:
+                raise subprocess.TimeoutExpired(argv, 3600)
+            return original_run(argv, *args, **kwargs)
+
+        with patch.object(ship.subprocess, "run", side_effect=timed_out), self.assertRaises(subprocess.TimeoutExpired):
+            operation.review(head)
+        state = self.operation().state
+        self.assertEqual(state["passes"][:2], prior)
+        self.assertEqual(len(state["passes"]), 3)
+        self.assertNotIn("report", state["passes"][-1])
+        with self.assertRaises(ship.Refusal):
+            self.additional()
+        self.assertEqual(self.operation().state["passes"], state["passes"])
+
+    def test_additional_review_rejects_rewritten_ancestry_before_reserving(self):
+        _, _, prior = self.spent_reviews()
+        unrelated = _git(self.root, "commit-tree", _git(self.root, "rev-parse", "HEAD^{tree}"), "-m", "unrelated")
+        _git(self.root, "update-ref", "refs/heads/topic", unrelated)
+        with self.assertRaises(ship.Refusal):
+            self.additional(unrelated)
+        self.assertEqual(self.operation().state["passes"], prior)
+        self.assertFalse(self.remote.pull_requests)
 
 
 if __name__ == "__main__":

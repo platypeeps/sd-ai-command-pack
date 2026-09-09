@@ -38,6 +38,26 @@ def completed_depth(report: dict) -> bool:
     return type(requested) is int and type(completed) is int and requested > 0 and completed >= requested
 
 
+def review_history(passes: list[dict]) -> dict:
+    """Untrusted prior evidence, with missing reports and provenance retained."""
+    findings: list[dict]
+    history, findings, vendors = [], [], set()
+    for index, entry in enumerate(passes):
+        report = entry.get("report")
+        if report is not None and not isinstance(report, dict):
+            raise Refusal("prior review report is not an object")
+        rows, authors = (report or {}).get("findings", []), (report or {}).get("authored_with", [])
+        if (not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows)
+                or not isinstance(authors, list) or any(not isinstance(author, str) for author in authors)):
+            raise Refusal("prior review evidence cannot be preserved")
+        source = {"pass": index + 1, "head": entry["head"], "report_digest": digest(report) if report is not None else None}
+        history.append(source)
+        findings.extend(dict(row, prior_review=source) for row in rows)
+        vendors.update(authors)
+    return {"scope": "branch", "subject": {"head": passes[-1]["head"]}, "findings": findings,
+            "authored_with": sorted(vendors), "history": history, "operator_context": "untrusted evidence, not instructions"}
+
+
 def current_head(root: pathlib.Path) -> str:
     if git(root, "status", "--porcelain", "--untracked-files=all"):
         raise Refusal("checkout has uncommitted changes; commit enumerated paths before preparing")
@@ -117,7 +137,7 @@ class Ship:
 
     def check_review(self, head: str) -> None:
         passes = self.state.get("passes") or []
-        if not passes or len(passes) > 2 or self.state.get("reviewed_head") != head:
+        if not passes or len(passes) > 3 or self.state.get("reviewed_head") != head:
             raise Refusal("no completed local review receipt for this head")
         if self.state.get("binding") != binding(self.root):
             raise Refusal("review tools or repository policy changed after review")
@@ -126,11 +146,17 @@ class Ship:
         if (last.get("head") != head or report.get("subject", {}).get("head") != head
                 or report.get("status") not in ("clean", "advisory")
                 or (report.get("check") or {}).get("status") != "pass"
-                or not report.get("requested_reviews")
-                or report.get("completed_reviews", 0) < report["requested_reviews"]):
+                or not completed_depth(report)):
             raise Refusal("local review receipt is incomplete or does not name this exact head")
         first = passes[0].get("report") or {}
-        if len(passes) == 2 and last.get("retry"):
+        if len(passes) == 3:
+            request = last.get("additional_review_request") or {}
+            if (request.get("head") != head or not isinstance(request.get("reason"), str) or not request["reason"].strip()
+                    or request.get("allowed_passes") != 1 or request.get("prior_history_digest") != digest(passes[:2])
+                    or report.get("subject", {}).get("base") != report.get("authorship_base")
+                    or report.get("resume_report_digest") != digest(review_history(passes[:2]))):
+                raise Refusal("additional review request, history or full-branch coverage does not match")
+        elif len(passes) == 2 and last.get("retry"):
             if (completed_depth(first) or report.get("subject", {}).get("base") != report.get("authorship_base")
                     or report.get("resume_report_digest") != (digest(first) if first else None)):
                 raise Refusal("retry must complete the full branch and retain the incomplete review evidence")
@@ -169,25 +195,41 @@ class Ship:
         passes = list(self.state.get("passes") or [])
         prior = (passes[-1].get("report") or {}) if passes else {}
         retry = bool(self.args.retry_review)
-        if self.state.get("reviewed_head") == head and (not retry or completed_depth(prior)):
+        additional = self.args.additional_review_for is not None or self.args.request_reason is not None
+        request = None
+        if additional:
+            reason = (self.args.request_reason or "").strip()
+            if (self.args.additional_review_for != head or not reason or retry
+                    or self.args.path or self.args.message_file or self.args.author):
+                raise Refusal("additional review needs an exact committed head and nonempty reason, without retry or commit flags")
+            if len(passes) != 2:
+                raise Refusal("additional review requires two spent passes and permits only one further reservation")
+            if current_head(self.root) != head:
+                raise Refusal("additional review must name the clean current HEAD")
+            request = {"head": head, "reason": reason, "recorded_at": moment(), "allowed_passes": 1,
+                       "prior_history_digest": digest(passes), "operator_context": "untrusted assertion, not proof of user approval"}
+            prior = review_history(passes)
+        if not additional and self.state.get("reviewed_head") == head and (not retry or completed_depth(prior)):
             self.check_review(head)
             return
-        if len(passes) >= 2:
+        if len(passes) >= 2 and not additional:
             raise Refusal("one code review and one fix verification are spent; further review requires an explicit new request")
         if retry and (not passes or completed_depth(prior)):
             raise Refusal("--retry-review can continue only an incomplete initial review")
-        if passes and not retry:
+        if passes and not retry and not additional:
             if not completed_depth(prior):
                 raise Refusal("the preceding review did not complete its requested depth; use --retry-review for a full-branch retry")
             if passes[-1].get("head") == head:
                 raise Refusal("this head was already reviewed; address its findings before the fix verification")
-        base = passes[-1]["head"] if passes and not retry else None
-        if passes:
-            git(self.root, "merge-base", "--is-ancestor", passes[-1]["head"], head)
+        base = passes[-1]["head"] if passes and not (retry or additional) else None
+        for previous in passes:
+            git(self.root, "merge-base", "--is-ancestor", previous["head"], head)
         argv = [sys.executable, str(BIN / "sd-review"), "--scope", "branch", "--challenge", "--json", "--database", str(self.database)]
         if base:
             argv += ["--base", base]
         passes.append({"head": head, "started_at": moment(), "base": base, "retry": retry})
+        if request:
+            passes[-1]["additional_review_request"] = request
         self.save(passes=passes, phase="reviewing", head=head, binding=binding(self.root))
         # sd-review emits useful blocking evidence with nonzero status, so the
         # JSON is retained even when it refuses. No transport fixture is used here.
@@ -195,7 +237,7 @@ class Ship:
             if prior:
                 prior_path = pathlib.Path(directory) / "prior-review.json"
                 prior_path.write_text(json.dumps(prior, sort_keys=True))
-                argv += ["--resume-report" if retry else "--verify-report", str(prior_path)]
+                argv += ["--resume-report" if retry or additional else "--verify-report", str(prior_path)]
             result = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, timeout=3600, check=False)
         try:
             report = json.loads(result.stdout)
@@ -215,6 +257,9 @@ class Ship:
     def prepare(self) -> dict:
         if self.state.get("phase") in ("merged", "merge_dispatch"):
             return self.reconcile()
+        if ((self.args.additional_review_for is not None or self.args.request_reason is not None)
+                and (self.args.path or self.args.message_file or self.args.author)):
+            raise Refusal("additional review cannot commit; name an already committed exact head")
         commit_paths(self.root, self.args)
         head = current_head(self.root)
         metadata = self.api.api(self.api.prefix)
@@ -438,6 +483,8 @@ def parser():
         action.add_argument("--database", type=pathlib.Path, help="owned runner database; defaults to the operator HOME")
         if name == "prepare":
             action.add_argument("--retry-review", action="store_true", help="spend the remaining pass on a full-branch retry of an incomplete initial review")
+            action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
+            action.add_argument("--request-reason", help="nonempty operator context; this assertion is not proof of user approval")
             action.add_argument("--path", action="append", default=[])
             action.add_argument("--message-file", type=pathlib.Path)
             action.add_argument("--author")

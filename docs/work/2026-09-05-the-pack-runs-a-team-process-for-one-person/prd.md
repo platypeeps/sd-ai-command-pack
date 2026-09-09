@@ -3727,7 +3727,7 @@ from a number the operator types.
   contained. The installer had been writing a `CLAUDE.local.md` block with
   markers `bin/sd_lib.py` could not read, so every key it wrote was silently
   unread; the `url` client found the scheme consent and the `Allowance`
-  (`bin/sd_registry.py:789-809`) round trip that nobody had assigned; and a
+  (`bin/sd_registry.py:770-783`) round trip that nobody had assigned; and a
   loopback exemption spelled as a string prefix admitted
   `http://127.evil.com/v1`, a name RFC 1123 permits anyone to register.
 
@@ -3768,10 +3768,10 @@ from a number the operator types.
     (`bin/sd_setup_github.py:188-260`, 73) with `resolve_pin`
     (`bin/sd_setup_github.py:77-95`, 19) and `action_reference`
     (`bin/sd_setup_github.py:98-111`, 14). So does the `url` client's
-    now-spent analogue: `codex_argv` (`bin/sd-review:650-683`, 34),
-    `subprocess_runner` (`bin/sd-review:541-565`, 23), `_finding`
-    (`bin/sd-review:771-807`, 37) and `parse_findings`
-    (`bin/sd-review:803-829`, 20) still total 114. Its transport line was if
+    now-spent analogue: `codex_argv` (`bin/sd-review:642-675`, 34),
+    `subprocess_runner` (`bin/sd-review:533-557`, 23), `_finding`
+    (`bin/sd-review:736-770`, 37) and `parse_findings`
+    (`bin/sd-review:798-824`, 20) still total 114. Its transport line was if
     anything generous — the one built stdlib-HTTP transport in `bin/`,
     `read_source` (`bin/sd-skill-adopt:347-365`), is 19.
   - **119, reserved, in-flight discovery.** The predicate crosses one seam:
@@ -4031,13 +4031,13 @@ from a number the operator types.
     `implement.md` pins no body for any of it.
 
     - the file-or-row resolver in `bin/sd_lib.py` — **37**. `library`
-      (`bin/sd_registry.py:177-183`, 7) and `read`
-      (`bin/sd_registry.py:170-199`, 30) are this exact decision one level
+      (`bin/sd_registry.py:167-173`, 7) and `read`
+      (`bin/sd_registry.py:176-209`, 30) are this exact decision one level
       down: an optional `sd_db`, a file target, and a refusal when a caller
       holds a connection the library cannot serve. `status_source` asks the
       same question of `docs/work/.status-source` and a row.
     - the row-to-`StatusReport` adapter — **38**. `_adapt`
-      (`bin/sd_registry.py:260-297`, 38) is the one built instance of turning
+      (`bin/sd_registry.py:256-295`, 38) is the one built instance of turning
       `sd_db` rows into this pack's frozen dataclasses. The file side it must
       parallel is `_status_report` (`bin/sd_lib.py:738-763`, 26) with
       `status_report` (`bin/sd_lib.py:812-828`, 17), and the row side has to answer one

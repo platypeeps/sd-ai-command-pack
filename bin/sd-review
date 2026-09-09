@@ -462,22 +462,14 @@ def _mode_label(value: object) -> str:
 
 
 def codex_preflight(home: pathlib.Path | None = None) -> pathlib.Path:
-    """Refuse unless this codex run is billed to the ChatGPT subscription.
+    """Refuse Codex unless auth.json selects the ChatGPT subscription.
 
-    The codex CLI resolves credentials as `CODEX_API_KEY` env -> ephemeral ->
-    `CODEX_ACCESS_TOKEN` env -> `auth.json`. Two of those are metered API paths
-    and both are environment variables, so `child_environment` removes them;
-    what is left is `auth.json`, and this function asserts two things about it:
-
-      * `auth_mode` is `chatgpt`, so the run is on the subscription;
-      * the `OPENAI_API_KEY` *field* is null or absent, because a value there is
-        a stored metered credential that the subscription mode would not stop.
-
-    An unrelated OPENAI_API_KEY in the parent is not a refusal. The child only
-    receives it if the registry explicitly declares that variable.
-
-    Returns the path it checked. Raises `Refusal` naming what was wrong, and
-    never the value of anything.
+    CODEX_API_KEY and CODEX_ACCESS_TOKEN select other credential paths;
+    child_environment removes them. Here, auth_mode must be chatgpt and
+    its OPENAI_API_KEY field must be null or absent: subscription mode
+    alone does not exclude a stored metered credential.
+    An unrelated parent OPENAI_API_KEY is allowed; only a registry declaration
+    can forward it. Return the checked path or raise Refusal without values.
     """
 
     base = home if home is not None else codex_home()
@@ -730,10 +722,13 @@ def claude_answer(result: Completed) -> tuple[Completed, ParsedFindings | None]:
         value = None
     if not isinstance(value, dict) or value.get("type") != "result":
         return result, None
-    if value.get("is_error") or value.get("subtype") != "success" or len(result.stdout.encode("utf-8")) > MAX_OUTPUT_BYTES:
-        detail = value.get("result") if value.get("is_error") else None
-        result = result._replace(exit_code=result.exit_code or 1,
-                                 stderr=result.stderr or (detail[:2000] if isinstance(detail, str) else ""))
+    if value.get("is_error") or value.get("subtype") != "success":
+        errors = value.get("errors")
+        details = [value.get("result"), *(errors if isinstance(errors, list) else [])] if value.get("is_error") is True else []
+        detail = "\n".join(part[:2000] for part in details if isinstance(part, str))[:2000]
+        status = value.get("api_error_status")
+        code = 429 if value.get("is_error") is True and type(status) is int and status == 429 else result.exit_code or 1
+        result = result._replace(exit_code=code, stderr=(result.stderr + "\n" + detail).strip()[:2000])
     raw = value.get("structured_output")
     return result, parse_findings(json.dumps(raw)) if isinstance(raw, dict) else None
 

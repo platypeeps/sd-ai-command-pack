@@ -266,9 +266,18 @@ shows them beside the bill, a `plan` bill reserves no dollars, and
 fallthrough skips it while either window reads zero; the two Baseten tools
 pin
 DeepSeek V4 Pro, whose 0813 build is the cheapest of Baseten's frontier
-reviewers. `max_tokens` is the same on all four because a review reply that
-needs more than sixteen thousand tokens is a review that should have been
-scoped. A pin is changed by editing this file, never by a page.
+reviewers. `max_tokens` bounds generated reasoning and the final answer together;
+exhausting it does not establish that the review subject was too large.
+URL entries can declare one optional control: `thinking: disabled|adaptive`
+or `reasoning_effort: none|low|high|max`. The client sends `thinking` as
+`{"type": "disabled"}` or `{"type": "adaptive"}`, and effort as a top-level
+string. Both registry readers validate and preserve these fields; omission
+retains the endpoint default. These values require support from the selected
+model: MiniMax-M3 supports disabled thinking, and Baseten's DeepSeek-V4-Pro-0813
+supports effort `none`. Lower reasoning can change finding quality; full
+subject coverage and the required reviewer count remain mandatory.
+Incomplete output still fails the review. A pin is changed by editing the
+registry file, never by a page.
 
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched

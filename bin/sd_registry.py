@@ -101,6 +101,8 @@ class Provider:
     model: str | None = None
     reader: str | None = None
     max_tokens: int | None = None
+    thinking: str | None = None
+    reasoning_effort: str | None = None
     price: dict[str, float] = field(default_factory=dict)
     env: tuple[str, ...] = ()
     roles: tuple[str, ...] = ()
@@ -198,7 +200,11 @@ def read(
             )
         return read_file(target)
     try:
-        return _adapt(module.read(target, connection=connection))
+        registry = module.read(target, connection=connection)
+        if any(not hasattr(provider, key) for provider in registry.providers.values() for key in ("thinking", "reasoning_effort")):
+            if any(provider.thinking or provider.reasoning_effort for provider in read_file(target).providers.values()):
+                raise RegistryError("installed sd_db cannot preserve reasoning controls; provision the updated library")
+        return _adapt(registry)
     except module.RegistryError as error:  # one refusal vocabulary, not two
         raise RegistryError(str(error)) from None
 
@@ -211,22 +217,12 @@ def read_or_report(
     with_database: bool = False,
     database_path: Path | str | None = None,
 ) -> tuple[Registry, str]:
-    """The registry, or an empty one and the reason it is empty.
+    """Return the registry, or an empty registry and its refusal reason.
 
-    A machine with no registry is a fact to report, not a crash. `sd-review
-    --explain` prints the plan and asks nobody, so it has to answer on a bare
-    CI runner that has never run the installer -- and a real review with no
-    registry has to say "nobody could be reached" rather than exiting before it
-    can say anything at all.
-
-    Falling back to the copy in the pack checkout was the other option and is
-    worse: it would review with the shipped pins while reporting them as the
-    operator's, and the whole point of seeding the file into the home is that
-    what is there afterwards is theirs.
-
-    A caller that must have a real registry -- one resolving a named entry, say
-    -- checks the second value and refuses. `RegistryError` still comes out of
-    `read` for callers that want it.
+    Bare-checkout --explain must report missing configuration without crashing;
+    a real review must refuse it. Never substitute shipped pins for the
+    operator's missing registry. Callers requiring a registry check the reason;
+    read() retains the raising interface.
     """
     target = Path(path) if path is not None else registry_path(home)
     try:
@@ -285,6 +281,8 @@ def _adapt(registry: Any) -> Registry:
                 model=provider.model,
                 reader=provider.reader,
                 max_tokens=provider.max_tokens,
+                thinking=getattr(provider, "thinking", None),
+                reasoning_effort=getattr(provider, "reasoning_effort", None),
                 price=dict(provider.price),
                 env=tuple(provider.env),
                 roles=tuple(provider.roles),
@@ -543,17 +541,29 @@ def parse(text: str, path: Path | str = REGISTRY_NAME) -> Registry:
 def _typed(
     value: Any, kind: type | tuple[type, ...], what: str, form: str, path: Path
 ) -> Any:
-    """`value`, or a refusal naming what it should have been.
+    """Return a correctly typed value or name the required shape.
 
-    Every field below is read straight into a `Provider`, so a value of the
-    wrong shape does not fail here -- it fails somewhere later, or worse, does
-    not fail at all. `env: OPENAI_API_KEY` in place of a one-item list walked
-    the string and produced fourteen single-character variable names, which
-    the fingerprint then covered and the environment check then looked for.
+    Validate before constructing Provider: an env scalar once became individual
+    variable names, corrupting both fingerprint and credential lookup.
     """
     if not isinstance(value, kind) or isinstance(value, bool) and kind is not bool:
         raise RegistryError(f"{path}: {what} is {value!r}, which is not {form}")
     return value
+
+
+def reasoning_controls(body: dict[str, Any], path: Path, name: str) -> dict[str, Any]:
+    """Explicit URL controls; omitted fields leave the endpoint default intact."""
+    controls = {}
+    for key, values in (("thinking", ("disabled", "adaptive")),
+                        ("reasoning_effort", ("none", "low", "high", "max"))):
+        value = body.get(key)
+        if value is not None:
+            if not isinstance(value, str) or value not in values or not body.get("url"):
+                raise RegistryError(f"{path}: provider {name!r} needs a URL and {key} in {values}")
+            controls[key] = value
+    if len(controls) > 1:
+        raise RegistryError(f"{path}: provider {name!r} must choose one reasoning control")
+    return controls
 
 
 def _provider(
@@ -672,6 +682,7 @@ def _provider(
         model=body.get("model"),
         reader=body.get("reader"),
         max_tokens=body.get("max_tokens"),
+        **reasoning_controls(body, path, name),
         price=dict(body.get("price") or {}),
         env=tuple(str(variable) for variable in (body.get("env") or ())),
         roles=roles,
@@ -705,20 +716,11 @@ def _refuse_author_reviewing(registry: Registry) -> None:
         )
 
 
-# Consent
-#
-# The registry says who *can* review. `CLAUDE.local.md`'s `reviewers` line says
-# who may receive *this repository's* diff, and nothing derives it: the
-# installer asks once, the operator answers, and a repository that was skipped
-# refuses its first review naming the key.
-#
-# The line names entries, because the entry is the recipient. Each pair carries
-# that recipient beside the name -- the host of a `url` entry, the executable of
-# a `start` entry with a fingerprint over its command line and the variables it
-# receives -- so an entry repointed at another host, or given another argument,
-# is refused until the line is rewritten. Consent to send a diff somewhere is
-# consent to send it *there*, and an entry is a name for a destination rather
-# than the destination itself.
+# Consent: capability comes from the registry; permission comes only from
+# the repository reviewers line. Missing consent refuses review. Each pair
+# binds an entry to its URL host, or to its executable plus command/env-name
+# fingerprint. Repointing a host or changing the command requires renewed
+# consent; an entry name alone never authorizes a destination.
 
 
 #: `<entry>@<recipient>`, and for a `start` entry `<entry>@<executable>+<hash>`.
@@ -740,16 +742,11 @@ class ConsentRefusal(RegistryError):
 
 
 def _one_word(recipient: str) -> str:
-    """`recipient` rendered so `consent_parts` reads it back as one word.
+    """Quote a recipient so consent_parts reads exactly one word.
 
-    Not `shlex.quote` alone. Its safe set contains the comma -- exactly the
-    character `consent_parts` splits on -- so the guarded call that looked
-    like protection was a no-op on the one character that needed it:
-    `Allowance("entry", "x,y@z")` rendered unchanged, and read back as consent
-    for `entry` to reach a host nobody wrote plus a second entry, `y`, that
-    does not exist. Anything the reader separates on is quoted here by this
-    module's own rule; everything else defers to `shlex`, which still has to
-    handle the quotes and the `#` a recipient may hold.
+    shlex.quote alone leaves commas unquoted, but consent_parts splits them.
+    Quote our separators explicitly; retain shlex handling of quotes and #.
+    Otherwise one recipient can become an unintended host and another entry.
     """
     if any(character in recipient for character in CONSENT_WHITESPACE):
         return "'" + recipient.replace("'", "'\"'\"'") + "'"
@@ -778,13 +775,9 @@ class Allowance:
     fingerprint: str | None = None
 
     def __str__(self) -> str:
-        """The pair as it is written on the line, and readable back off it.
+        """Render one allowance that parse_consent reads back unchanged.
 
-        The invariant, which `TheRoundTrip` states as a test: for any
-        recipient, `parse_consent(str(allowance))` returns exactly this
-        allowance and nothing else. A pair that renders here and reads back as
-        something else puts the two halves of consent out of step in the
-        direction that matters -- a destination nobody wrote, consented to.
+        TheRoundTrip tests this boundary: splitting a pair can authorize another host.
         """
         tail = f"{FINGERPRINT_JOIN}{self.fingerprint}" if self.fingerprint else ""
         return f"{self.entry}{CONSENT_SEPARATOR}{_one_word(self.recipient)}{tail}"
@@ -839,14 +832,10 @@ def parse_consent(line: str | None) -> dict[str, Allowance]:
 
 
 def consent_parts(line: str) -> list[str]:
-    """The pairs on a `reviewers` line, split the way a start line is split.
+    """Split reviewer pairs on unquoted commas and whitespace.
 
-    Commas and whitespace separate, and a quoted recipient survives both. A
-    plain `str.split` could not name a `start` entry whose executable holds a
-    space -- the very case `executable()` is shlex-aware to support -- so the
-    one line that could consent to it was unparseable, and refused as a bare
-    name. The two halves of the same consent have to agree on where a word
-    ends.
+    Use the start-line quoting rules so an executable containing spaces can
+    round-trip through consent; plain str.split makes that consent unreadable.
     """
     lexer = shlex.shlex(line, posix=True)
     lexer.whitespace = CONSENT_WHITESPACE
@@ -865,13 +854,10 @@ def consent_parts(line: str) -> list[str]:
 
 
 def fingerprint(provider: Provider) -> str:
-    """A short digest over a `start` entry's command line and its `env` names.
+    """Digest a start entry's command line and environment variable names.
 
-    The names and not the values: the digest goes in a file the operator reads
-    and a diff someone else may see, and a value is a key. An argument added to
-    the start line, or a variable added to the list, changes it, which is the
-    point -- a spawned command that gained `--upload` is a different recipient
-    wearing the same executable.
+    Never hash secret values into a public consent record. Changed arguments
+    or declared variables require renewed consent, even for the same executable.
     """
     material = "\n".join([provider.start or "", *sorted(provider.env)])
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:FINGERPRINT_LENGTH]
@@ -947,14 +933,10 @@ def refuse_allowance(provider: Provider, allowed: Allowance | None) -> str | Non
 
 
 def refuse_reader(provider: Provider, readers: tuple[str, ...]) -> str | None:
-    """Why this build cannot run this entry, or `None` when it can.
+    """Return this build's reader refusal, or None.
 
-    One function, because three places asked the question and answered it
-    differently: the chain marked the entry, the dry run planned it, and the
-    run reported it, and each carried its own sentence. Two of them said a
-    `url` entry named a reader called `None`, which is not a thing anyone
-    wrote -- a `url` entry names no reader because a reader parses what a
-    spawned command prints, and it spawns nothing.
+    The chain, dry run, and execution share this decision and wording.
+    Only process entries name readers; URL entries spawn no process.
     """
     if not readers:
         return None
@@ -973,17 +955,11 @@ def refuse_reader(provider: Provider, readers: tuple[str, ...]) -> str | None:
 
 
 def refuse_environment(provider: Provider, environ: Mapping[str, str]) -> str | None:
-    """A variable whose value is a URL, which a spawned session may not receive.
+    """Refuse URL-valued variables passed to a spawned session.
 
-    A key is a secret and the operator has consented to that; a URL in the
-    environment is a destination the `reviewers` line never named, and a session
-    that inherits one can send the diff somewhere this repository did not agree
-    to. Named without its value, because printing it would put the destination
-    in the log that reports the refusal.
-
-    A `url` entry is exempt: nothing inherits this environment, and answering
-    "No session was started" to an entry that starts none is the same wrong
-    sentence `refuse_reader` used to carry.
+    A declared key grants credentials, not an additional destination absent
+    from repository consent. Report the variable name without its value.
+    URL entries are exempt because no process inherits their environment.
     """
     if provider.url:
         return None
@@ -1000,29 +976,14 @@ def refuse_environment(provider: Provider, environ: Mapping[str, str]) -> str | 
 
 
 def refuse_cleartext(provider: Provider) -> str | None:
-    """Why this entry's url may not carry the diff, or `None` when it may.
+    """Refuse cleartext outside loopback; never silently upgrade the URL.
 
-    `recipient()` compares `netloc`, which excludes the scheme, so consent to
-    `baseten@inference.baseten.co` is satisfied by `https://` and `http://`
-    alike and an edit from one to the other passes `refuse_allowance` in
-    silence, on the wire in the clear. Refused here and never upgraded: a
-    client that quietly rewrote the scheme would be deciding, for the
-    operator, that the registry does not mean what it says. Loopback is the
-    exception, and `exo` is why -- cleartext over a socket that never leaves
-    the machine.
-
-    Loopback is decided by `ipaddress`, not by how the host is spelled. The
-    first version of this asked `host.startswith("127.")`, and RFC 1123 lets a
-    DNS label begin with a digit, so `127.evil.com` and `127.0.0.1.evil.com`
-    are registrable public domains that took the exemption and got cleartext
-    -- this refusal's own defect class, one level down. `localhost` is the one
-    name, matched whole.
-
-    `127.1` is refused. curl reads the shortened form as loopback and
-    `ipaddress` does not parse it at all, and that is the direction to fail
-    in: a shortened-form parser here would be a second opinion about what an
-    address means, on the path that decides whether a diff goes out in the
-    clear. Write it in full.
+    Host consent excludes the scheme, so changing https to http can otherwise
+    expose the diff without changing its recipient. The configured scheme
+    must remain explicit. Local exo sockets are the loopback exception.
+    Use ipaddress or exact localhost, never a 127. prefix: 127.evil.com and
+    127.0.0.1.evil.com are public DNS names. Refuse abbreviated 127.1 too;
+    curl accepts it, but adding a second address parser weakens this boundary.
     """
     if not provider.url:
         return None
@@ -1076,14 +1037,11 @@ def chat_completion(
     environ: Mapping[str, str],
     timeout: int,
 ) -> tuple[int, str, str, bool]:
-    """POST one review to an OpenAI-compatible endpoint.
+    """POST one review through the injected OpenAI-compatible transport.
 
-    Returns `bin/sd-review`'s `Completed` as a tuple this module can build
-    without importing it: body in `stdout`, status and error body in `stderr`,
-    `launched=False` for an answer that never arrived. That last is what keeps
-    a refused connection out of the rate-limit vocabulary -- `classify_failure`
-    reads `launched` before any marker -- while `HTTP 429` in `stderr` lands on
-    the markers already there.
+    Return Completed-compatible fields without importing sd-review: raw body
+    in stdout, status-only HTTP errors in stderr. A missing response sets
+    launched=False; an HTTP429 response remains distinct from connection failure.
     """
     refusal = refuse_cleartext(provider)
     if refusal is not None:
@@ -1092,10 +1050,13 @@ def chat_completion(
     key = environ.get(name, "")
     if not key:
         return (1, "", f"{provider.name} has no value for {name or 'any key'}", False)
-    payload = json.dumps(
-        {"model": provider.model, "max_tokens": provider.max_tokens,
-         "messages": [{"role": "user", "content": prompt}]}
-    ).encode("utf-8")
+    request_body: dict[str, Any] = {"model": provider.model, "max_tokens": provider.max_tokens,
+                            "messages": [{"role": "user", "content": prompt}]}
+    if provider.thinking is not None:
+        request_body["thinking"] = {"type": provider.thinking}
+    if provider.reasoning_effort is not None:
+        request_body["reasoning_effort"] = provider.reasoning_effort
+    payload = json.dumps(request_body).encode("utf-8")
     request = urllib.request.Request(
         endpoint(provider),
         data=payload,
@@ -1119,20 +1080,11 @@ def chat_completion(
         return (1, "", f"{provider.name}: {error}", False)
 
 
-# Five decisions the plan left open -- `prd.md:503-504` says only "strips a
-# `<think>` block", singular, with no delimiters:
-#
-#   * Every block, not the first: a model that reasons twice is still reasoning.
-#   * Case-insensitive, and any attributes on the open tag. Leaving the trace
-#     inline fails `json.loads` and reports an entry that answered as unavailable.
-#   * Not nested. `.*?` stops at the first close, so a nested pair leaves a stray
-#     `</think>` and the remainder does not parse -- unavailable, the safe
-#     direction, and no parser written for a shape these models do not emit.
-#   * An unclosed span runs to the end of the string. `max_tokens` is 16,384 on
-#     every enabled `url` entry, so a model that spends its budget reasoning is
-#     cut off mid-tag, and what follows an unclosed `<think>` is not an answer.
-#   * A whitespace-only remainder is nothing: reasoning with no answer is
-#     unusable, not clean.
+# Inline thinking: strip every block, case-insensitively, allowing opening
+# attributes. Nested blocks are unsupported and remain nonpassing. An unclosed
+# block consumes the remainder because truncated reasoning is not an answer.
+# Empty or whitespace-only final content also remains nonpassing. Separate
+# reasoning never becomes final JSON; see url_response and response tests.
 _THINK = re.compile(r"<think\b[^>]*>.*?(?:</think\s*>|\Z)", re.DOTALL | re.IGNORECASE)
 
 
@@ -1186,16 +1138,11 @@ def url_response(body: str) -> tuple[str, dict[str, Any]]:
 
 
 def url_answer(body: str) -> str:
-    """The answer in an OpenAI-compatible response body, or `""` for none.
+    """Return final answer text, or an empty string for unreadable output.
 
-    `""` is the whole vocabulary for "this build could not read it": the caller
-    hands it to `parse_findings`, which answers `None` for an empty string, and
-    `None` is a review that did not happen. It must never become an empty
-    finding list -- that reports a clean review of a change nobody read.
-
-    `reasoning_content` is never read. It is a sibling key holding what
-    `<think>` holds inline, and concatenating it breaks the `json.loads` that
-    follows, reporting an entry that answered correctly as unavailable.
+    Empty text must fail parsing, never become a clean empty finding list.
+    Separate reasoning_content contributes diagnostic lengths only; never
+    concatenate it with final JSON. Inline thinking is stripped by url_response.
     """
     return url_response(body)[0]
 
@@ -1243,17 +1190,11 @@ def reviewer_chain(
     capped_bills: tuple[str, ...] = (),
     readers: tuple[str, ...] = (),
 ) -> list[Candidate]:
-    """Every enabled entry holding `reviewer`, in order, each marked.
+    """Return enabled reviewers in order, including eligibility and reasons.
 
-    Marked rather than filtered, because the run has to say which providers it
-    passed over and why. A chain that returned only the survivors would report
-    "codex reviewed" where the interesting sentence is "codex reviewed;
-    claude was skipped as the author's vendor and minimax's bill is at its cap".
-
-    Preflight is not decided here. Whether a binary answers is a fact about the
-    machine at this second, and this function is a decision about the registry,
-    the repository's consent and the branch's trailers -- all three of which are
-    the same for a dry run as for a real one.
+    Mark rather than filter so receipts preserve skipped providers and why.
+    This evaluates registry, consent, authorship, and declared caps consistently
+    for planning and execution; runtime availability preflight happens later.
     """
     candidates: list[Candidate] = []
     for provider in registry.order("reviewer"):

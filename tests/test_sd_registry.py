@@ -21,6 +21,7 @@ import pathlib
 import shlex
 import sys
 import tempfile
+import types
 import unittest
 import unittest.mock
 import urllib.error
@@ -174,6 +175,75 @@ class TheTwoReadersAgree(unittest.TestCase):
         with self.assertRaises(sd_registry.RegistryError) as caught:
             sd_registry.read(SHIPPED, connection=object(), prefer_library=False)
         self.assertIn("sd_db is not installed", str(caught.exception))
+
+
+class TheReasoningControls(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = pathlib.Path(self.tmp.name) / "providers.yaml"
+        self.text = MINIMAL.replace("vendor: alpha,", "vendor: alpha, bill: free,").replace(
+            "vendor: beta,", "vendor: beta, bill: free, model: exact-model, max_tokens: 16384,")
+
+    def write(self, **controls: Any) -> pathlib.Path:
+        fields = "".join(f", {name}: {json.dumps(value)}" for name, value in controls.items())
+        self.path.write_text(self.text.replace("roles: [reviewer] }", "roles: [reviewer]" + fields + " }"))
+        return self.path
+
+    def test_both_readers_preserve_every_explicit_control(self) -> None:
+        for name, values in (("thinking", ("disabled", "adaptive")),
+                             ("reasoning_effort", ("none", "low", "high", "max"))):
+            for value in values:
+                with self.subTest(name=name, value=value):
+                    path = self.write(**{name: value})
+                    standalone = sd_registry.read(path, prefer_library=False)
+                    shared = sd_registry.read(path)
+                    self.assertEqual(standalone.providers, shared.providers)
+                    self.assertEqual(getattr(shared.providers["two"], name), value)
+
+    def test_invalid_or_conflicting_controls_refuse_in_both_readers(self) -> None:
+        cases = ({"thinking": value} for value in (True, 1, [], {}, "enabled"))
+        cases = [*cases, *({"reasoning_effort": value} for value in (False, 1, [], {}, "medium")),
+                 {"thinking": "disabled", "reasoning_effort": "none"}]
+        for controls in cases:
+            for prefer in (True, False):
+                with self.subTest(controls=controls, prefer_library=prefer):
+                    with self.assertRaises(sd_registry.RegistryError):
+                        sd_registry.read(self.write(**controls), prefer_library=prefer)
+
+    def test_process_entries_cannot_declare_url_controls(self) -> None:
+        self.text = self.text.replace('url: "http://localhost:2/v1"', 'start: "two -p", reader: claude-json')
+        for name, value in (("thinking", "disabled"), ("reasoning_effort", "none")):
+            for prefer in (True, False):
+                with self.assertRaises(sd_registry.RegistryError):
+                    sd_registry.read(self.write(**{name: value}), prefer_library=prefer)
+
+    def test_old_library_remains_compatible_without_controls_but_cannot_drop_them(self) -> None:
+        source = sd_registry.read_file(self.write())
+        old = types.SimpleNamespace(**{**vars(source), "providers": {
+            name: types.SimpleNamespace(**{key: value for key, value in vars(provider).items()
+                                          if key not in ("thinking", "reasoning_effort")})
+            for name, provider in source.providers.items()}})
+        module = types.SimpleNamespace(read=lambda *args, **kwargs: old, RegistryError=sd_registry.RegistryError)
+        with unittest.mock.patch.object(sd_registry, "library", return_value=module):
+            self.assertEqual(sd_registry.read(self.path).providers, source.providers)
+            for name, value in (("thinking", "disabled"), ("reasoning_effort", "none")):
+                with self.assertRaisesRegex(sd_registry.RegistryError, "cannot preserve reasoning controls"):
+                    sd_registry.read(self.write(**{name: value}))
+
+    def test_request_options_change_only_the_declared_top_level_fields(self) -> None:
+        prompt = "full diff\n" + "unchanged subject " * 10000
+        for controls, additions in (({}, {}), ({"thinking": "disabled"}, {"thinking": {"type": "disabled"}}),
+                                    ({"reasoning_effort": "none"}, {"reasoning_effort": "none"})):
+            provider = sd_registry.read(self.write(**controls)).providers["two"]
+            provider = sd_registry.Provider(**{**vars(provider), "env": ("OWN_KEY",)})
+            with unittest.mock.patch.object(sd_registry._OPENER, "open", return_value=_Answer("{}")) as opened:
+                sd_registry.chat_completion(provider, prompt, {"OWN_KEY": "fixture"}, 30)
+            request = opened.call_args.args[0]
+            self.assertEqual(json.loads(request.data), {"model": "exact-model", "max_tokens": 16384,
+                "messages": [{"role": "user", "content": prompt}], **additions})
+            self.assertEqual(request.full_url, "http://localhost:2/v1/chat/completions")
+            self.assertEqual(request.get_header("Authorization"), "Bearer fixture")
 
 
 class TheRefusals(unittest.TestCase):
