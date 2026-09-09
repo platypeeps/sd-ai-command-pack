@@ -76,6 +76,7 @@ EXIT_RATE_LIMITED = 4
 EXIT_GATE = 5
 
 DEFAULT_TIMEOUT_SECONDS = 1800
+SETUP_TIMEOUT_SECONDS = 3600
 MAX_FINDINGS = 50
 MAX_OUTPUT_BYTES = 2_000_000
 SCHEMA_VERSION = 1
@@ -786,34 +787,65 @@ def oversized_findings() -> ParsedFindings:
     return ParsedFindings((evidence_limit(reason + "; omitted evidence may contain blocking findings"),), reason)
 
 
-def _valid_finding(raw: Any) -> bool:
-    """The exact flat schema supplied to every provider, without coercion."""
+def _finding_error(raw: Any) -> str:
+    """First declared-schema issue, without coercion or model text disclosure."""
     schema = CODEX_OUTPUT_SCHEMA["properties"]["findings"]["items"]
-    return (isinstance(raw, dict) and set(raw) == set(schema["required"])
-            and all(isinstance(raw[key], str) and bool(raw[key].strip()) for key in ("path", "summary", "family"))
-            and raw["severity"] in schema["properties"]["severity"]["enum"]
-            and (raw["line"] is None or isinstance(raw["line"], int) and not isinstance(raw["line"], bool)))
+    if not isinstance(raw, dict):
+        return "expected object"
+    for key in schema["required"]:
+        if key not in raw:
+            return f"{key}: missing required field"
+    if extra := len(set(raw) - set(schema["required"])):
+        return f"unexpected field count {extra}"
+    for key in ("path", "summary", "family"):
+        if not isinstance(raw[key], str) or not raw[key].strip():
+            return f"{key}: expected nonempty string"
+    if raw["severity"] not in schema["properties"]["severity"]["enum"]:
+        return "severity: invalid enum value"
+    if raw["line"] is not None and (not isinstance(raw["line"], int) or isinstance(raw["line"], bool)):
+        return "line: expected integer or null"
+    return ""
 
 
-def parse_findings(text: str) -> ParsedFindings | None:
+def parse_findings(text: str, diagnostic: dict[str, Any] | None = None, *, allow_json_fence: bool = False) -> ParsedFindings | None:
     """Validate the response and preserve usable evidence even when invalid."""
+    diagnostic = diagnostic if diagnostic is not None else {}
+    diagnostic["normalization"] = "none"
     if len(text.encode("utf-8")) > MAX_OUTPUT_BYTES:
         return oversized_findings()
     stripped = text.strip()
     if not stripped:
         return None
+    if allow_json_fence and stripped.startswith("```"):
+        fence = re.fullmatch(r"```(?:json)?\r?\n(.*)\r?\n```", stripped, re.DOTALL)
+        if fence is None:
+            diagnostic["validation_error"] = "invalid JSON fence"
+            return None
+        stripped = fence[1]
+        diagnostic["normalization"] = "json_fence"
     try:
         value = json.loads(stripped)
-    except (json.JSONDecodeError, RecursionError):
+    except json.JSONDecodeError as error:
+        diagnostic["validation_error"] = f"invalid JSON at line {error.lineno} column {error.colno}"
+        return None
+    except RecursionError:
+        diagnostic["validation_error"] = "JSON nesting exceeds the parser limit"
+        return None
+    except ValueError:
+        diagnostic["validation_error"] = "JSON value exceeds the parser limit"
         return None
     if not isinstance(value, dict) or not isinstance(value.get("findings"), list):
+        diagnostic["validation_error"] = ("response: expected object" if not isinstance(value, dict) else
+            "response.findings: missing required field" if "findings" not in value else "response.findings: expected array")
         return None
     rows = value["findings"]
     errors = []
     if len(rows) > MAX_FINDINGS:
         errors.append("response exceeds the declared output limits")
-    if set(value) != {"findings"} or not all(_valid_finding(raw) for raw in rows):
-        errors.append("response violates the findings schema")
+    issue = (f"response: unexpected field count {len(value) - 1}" if set(value) != {"findings"} else
+             next((f"findings[{index}].{problem}" for index, raw in enumerate(rows) if (problem := _finding_error(raw))), ""))
+    if issue:
+        errors.append(f"response violates the findings schema: {issue}")
     findings = tuple(item for raw in rows if (item := _finding(raw)) is not None)
     if len(rows) > MAX_FINDINGS:
         # Inspect the bounded JSON before selecting: a late blocker must survive.
@@ -938,7 +970,7 @@ def run_provider(
         diagnostic["transport_exit_code"] = result.exit_code
         diagnostic["http_status"] = result.exit_code if 100 <= result.exit_code <= 599 else None
         diagnostic["response_received"] = result.launched
-        parsed = oversized_findings() if diagnostic["category"] == "response_limit" else parse_findings(text)
+        parsed = oversized_findings() if diagnostic["category"] == "response_limit" else parse_findings(text, diagnostic, allow_json_fence=True)
         if parsed is not None and diagnostic["category"] in ("truncated", "incomplete_finish"):
             parsed = parsed._replace(error="; ".join(filter(None, (parsed.error, "provider reported an incomplete response"))))
         diagnostic["schema"] = "unparseable" if parsed is None else "invalid" if parsed.error else "valid"
@@ -1171,6 +1203,10 @@ def review(
     else:
         chosen = [candidate.provider for candidate in chain if candidate.eligible] if depth else []
     providers = [provider.name for provider in chosen[:depth]]
+    timing: dict[str, Any] = {"setup_seconds": SETUP_TIMEOUT_SECONDS, "phase_seconds": args.timeout,
+              "candidates": [{"name": provider.name, "recipient": str(sd_registry.recipient(provider))}
+                             for provider in chosen]}
+    timing["execution_seconds"] = SETUP_TIMEOUT_SECONDS + args.timeout * (1 + len(chosen))
     result: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "repo": str(root),
@@ -1197,6 +1233,7 @@ def review(
             "reason": plan.reason,
         },
         "providers": list(providers),
+        "timing": timing,
         "fallback_candidates": [provider.name for provider in chosen[depth:]],
         "requested_reviews": depth,
         "completed_reviews": 0,
@@ -1222,6 +1259,9 @@ def review(
         "dry_run": bool(args.dry_run),
     }
 
+    expected_timing = getattr(args, "expected_timing", None)
+    if expected_timing is not None and expected_timing != hashlib.sha256(json.dumps(timing, sort_keys=True).encode()).hexdigest():
+        raise Refusal("review timing inputs changed; explain again before dispatch")
     if args.explain:
         result["status"] = "explained"
         return result
@@ -1468,6 +1508,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--explain", action="store_true", help="print the routing decision and why, then exit without running anything")
     parser.add_argument("--dry-run", action="store_true", help="print the exact invocations, run nothing")
     parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
+    parser.add_argument("--expected-timing", help=argparse.SUPPRESS)
     # No network call means draft state cannot be read from GitHub; it is stated.
     parser.add_argument("--draft", action="store_true", help="treat the change as a draft pull request; routing reduces the tier")
     parser.add_argument(

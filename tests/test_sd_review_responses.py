@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import pathlib
@@ -92,13 +93,104 @@ class URLDiagnostics(ReviewFixture):
         outcome = self.run_response(self.envelope(json.dumps({"findings": [finding("high", "rate_limit defect")]})))
         self.assertEqual(outcome.status, sd_review.FINDINGS)
         self.assertEqual(outcome.diagnostic["schema"], "valid")
+        self.assertEqual(outcome.diagnostic["normalization"], "none")
 
-    def test_fenced_or_invalid_json_is_visible_without_text_disclosure(self) -> None:
-        for content in ("```json\n{\"findings\": []}\n```", "rate_limit credential-marker"):
-            outcome = self.run_response(self.envelope(content))
+    def test_exact_json_fences_preserve_findings_and_original_diagnostics(self) -> None:
+        for label in ("json", ""):
+            for newline in ("\n", "\r\n"):
+                for rows in ([], [finding("high", "fixture blocker")]):
+                    content = "```" + label + newline + json.dumps({"findings": rows}) + newline + "```"
+                    body = json.dumps(self.envelope(content))
+                    outcome = self.run_response(body)
+                    self.assertEqual(outcome.status, sd_review.FINDINGS if rows else sd_review.CLEAN)
+                    self.assertEqual(list(outcome.findings), rows)
+                    self.assertEqual(outcome.diagnostic["normalization"], "json_fence")
+                    self.assertEqual(outcome.diagnostic["content_format"], "fenced")
+                    self.assertEqual(outcome.diagnostic["response_text_sha256"], hashlib.sha256(body.encode()).hexdigest())
+                    self.assertEqual(outcome.diagnostic["response_text_bytes"], len(body.encode()))
+
+    def test_only_one_complete_json_fence_is_accepted(self) -> None:
+        valid = json.dumps({"findings": []})
+        wrapped = "```json\n" + valid + "\n```"
+        for content in ("preface\n" + wrapped, wrapped + "\ntrailer", wrapped + "\n" + wrapped,
+                        "```python\n" + valid + "\n```", "```JSON\n" + valid + "\n```",
+                        "``` json\n" + valid + "\n```", "```json " + valid + "```",
+                        "```json\n" + valid, valid + "\n```", "````json\n" + valid + "\n````",
+                        "```json\n" + valid + "\n``", "rate_limit credential-marker"):
+            with self.subTest(content=content):
+                outcome = self.run_response(self.envelope(content))
+                self.assertEqual(outcome.status, sd_review.UNAVAILABLE)
+                self.assertEqual(outcome.diagnostic["schema"], "unparseable")
+                self.assertNotIn(content, json.dumps(outcome.diagnostic))
+
+    def test_fenced_json_syntax_and_top_level_schema_remain_strict(self) -> None:
+        for content, issue in (("not JSON", "invalid JSON at line 1 column 1"),
+                               ('{"findings": []} trailing', "invalid JSON at line 1 column 18"),
+                               ("[]", "response: expected object"),
+                               ("{}", "response.findings: missing required field"),
+                               ('{"findings": {}}', "response.findings: expected array")):
+            with self.subTest(content=content):
+                outcome = self.run_response(self.envelope("```json\n" + content + "\n```"))
+                self.assertEqual(outcome.status, sd_review.UNAVAILABLE)
+                self.assertEqual(outcome.diagnostic["normalization"], "json_fence")
+                self.assertEqual(outcome.diagnostic["validation_error"], issue)
+
+    def test_first_schema_issue_is_precise_and_never_discloses_unknown_fields(self) -> None:
+        base = finding("high", "retained blocker")
+        cases = [(None, "expected object"), ({k: v for k, v in base.items() if k != "line"}, "line: missing required field"),
+                 ({**base, "credential-marker": "private"}, "unexpected field count 1"),
+                 ({**base, "path": " "}, "path: expected nonempty string"),
+                 ({**base, "family": 2}, "family: expected nonempty string"),
+                 ({**base, "summary": None}, "summary: expected nonempty string"),
+                 ({**base, "severity": "credential-marker"}, "severity: invalid enum value"),
+                 ({**base, "line": True}, "line: expected integer or null")]
+        for row, issue in cases:
+            payload = {"findings": [base, row, {"second-error-marker": "private"}]}
+            for fenced in (False, True):
+                with self.subTest(issue=issue, fenced=fenced):
+                    content = json.dumps(payload)
+                    outcome = self.run_response(self.envelope("```\n" + content + "\n```" if fenced else content))
+                    self.assertEqual(outcome.status, sd_review.UNAVAILABLE)
+                    self.assertEqual(outcome.findings[0], base)
+                    self.assertEqual(outcome.diagnostic["validation_error"],
+                                     "response violates the findings schema: findings[1]." + issue)
+                    for marker in ("credential-marker", "second-error-marker", "private"):
+                        self.assertNotIn(marker, json.dumps(outcome.diagnostic))
+
+    def test_top_level_extra_keys_refuse_without_disclosing_them(self) -> None:
+        unknown_key = "secret-marker" * 1000
+        outcome = self.run_response(self.envelope(json.dumps({"findings": [], unknown_key: True})))
+        self.assertEqual(outcome.status, sd_review.UNAVAILABLE)
+        self.assertEqual(outcome.diagnostic["validation_error"],
+                         "response violates the findings schema: response: unexpected field count 1")
+        self.assertNotIn("secret-marker", json.dumps(outcome.diagnostic))
+        self.assertLess(len(outcome.diagnostic["validation_error"]), 100)
+
+    def test_every_required_field_stays_required_inside_a_fence(self) -> None:
+        for key in finding():
+            row = {k: v for k, v in finding().items() if k != key}
+            outcome = self.run_response(self.envelope("```json\n" + json.dumps({"findings": [row]}) + "\n```"))
             self.assertEqual(outcome.status, sd_review.UNAVAILABLE)
-            self.assertEqual(outcome.diagnostic["schema"], "unparseable")
-            self.assertNotIn(content, json.dumps(outcome.diagnostic))
+            self.assertIn(key + ": missing required field", outcome.diagnostic["validation_error"])
+
+    def test_fence_decoding_never_bypasses_byte_or_finish_limits(self) -> None:
+        content = '```json\n{"findings": []}\n```'
+        with mock.patch.object(sd_review, "MAX_OUTPUT_BYTES", len(content.encode()) - 1):
+            outcome = self.run_response(self.envelope(content))
+        self.assertEqual(outcome.status, sd_review.UNAVAILABLE)
+        self.assertIn("byte limit", outcome.diagnostic["validation_error"])
+        self.assertNotEqual(outcome.diagnostic.get("normalization"), "json_fence")
+        for reason in ("length", "content_filter", "tool_calls"):
+            outcome = self.run_response(self.envelope(content, reason))
+            self.assertEqual(outcome.status, sd_review.UNAVAILABLE)
+            self.assertEqual(outcome.diagnostic["normalization"], "json_fence")
+            self.assertIn("incomplete response", outcome.diagnostic["validation_error"])
+        rows = [finding()] * sd_review.MAX_FINDINGS + [finding("high", "late blocker")]
+        outcome = self.run_response(self.envelope("```\n" + json.dumps({"findings": rows}) + "\n```"))
+        self.assertEqual(outcome.status, sd_review.UNAVAILABLE)
+        self.assertLessEqual(len(outcome.findings), sd_review.MAX_FINDINGS)
+        self.assertTrue(any(row["summary"] == "late blocker" for row in outcome.findings))
+        self.assertIn("output limits", outcome.diagnostic["validation_error"])
 
     def test_schema_failure_preserves_adverse_evidence(self) -> None:
         row = finding("high", "blocker")
@@ -131,6 +223,34 @@ class URLDiagnostics(ReviewFixture):
         self.assertEqual(outcome.diagnostic["category"], "response_limit")
         self.assertEqual(outcome.findings[0]["severity"], "high")
         self.assertIn("omitted", outcome.findings[0]["summary"])
+
+    def test_integer_conversion_limit_is_a_nonpassing_redacted_diagnostic(self) -> None:
+        content = '{"findings":[{"path":"src.py","line":' + "1" * 5000 + ',"severity":"high","summary":"private-marker","family":"correctness"}]}'
+        for fenced in (False, True):
+            with self.subTest(fenced=fenced):
+                outcome = self.run_response(self.envelope("```json\n" + content + "\n```" if fenced else content))
+                self.assertEqual(outcome.status, sd_review.UNAVAILABLE)
+                self.assertEqual(outcome.diagnostic["schema"], "unparseable")
+                self.assertEqual(outcome.diagnostic["validation_error"], "JSON value exceeds the parser limit")
+                self.assertNotIn("private-marker", json.dumps(outcome.diagnostic))
+                self.assertNotIn("1" * 100, json.dumps(outcome.diagnostic))
+
+    def test_direct_and_codex_parsers_do_not_accept_unrecorded_fence_normalization(self) -> None:
+        content = '```json\n{"findings": []}\n```'
+        self.assertIsNone(sd_review.parse_findings(content))
+        provider = sd_review.sd_registry.Provider(name="fixture", vendor="fixture", bill="free",
+            start="fixture exec", reader="codex-json")
+
+        def reply(argv, env, cwd, timeout):
+            target = pathlib.Path(argv[argv.index("--output-last-message") + 1])
+            target.write_text(content)
+            return sd_review.Completed(0, "", "")
+
+        outcome = sd_review.run_provider(provider, self.tmp,
+            sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""), "review", reply,
+            self.environment(), 5, self.chatgpt_home())
+        self.assertEqual(outcome.status, sd_review.UNAVAILABLE)
+        self.assertEqual(outcome.findings, ())
 
     def test_codex_answer_file_uses_a_bounded_read(self) -> None:
         provider = sd_review.sd_registry.Provider(name="fixture", vendor="fixture", bill="free",

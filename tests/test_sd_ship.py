@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler
 from unittest.mock import patch
@@ -700,7 +701,10 @@ roles:
     def test_missing_receipt_retry_is_explicit_and_never_rolls_back_spent_pass(self):
         operation = self.operation()
         head = _git(self.root, "rev-parse", "HEAD")
-        with patch.object(ship.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "not JSON", "")):
+        original = ship.review_process
+        def malformed(root, argv, **kwargs):
+            return original(root, argv, **kwargs) if "--explain" in argv else subprocess.CompletedProcess([], 1, "not JSON", "")
+        with patch.object(ship, "review_process", side_effect=malformed):
             with self.assertRaisesRegex(ship.Refusal, "no valid receipt"):
                 operation.review(head)
         first = self.operation().state["passes"][0]
@@ -714,7 +718,10 @@ roles:
     def test_zero_exit_with_unusable_json_receipt_can_retry(self):
         operation = self.operation()
         head = _git(self.root, "rev-parse", "HEAD")
-        with patch.object(ship.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "{}", "")):
+        original = ship.review_process
+        def malformed(root, argv, **kwargs):
+            return original(root, argv, **kwargs) if "--explain" in argv else subprocess.CompletedProcess([], 0, "{}", "")
+        with patch.object(ship, "review_process", side_effect=malformed):
             with self.assertRaises(ship.Refusal):
                 operation.review(head)
         first = self.operation().state["passes"][0]
@@ -757,9 +764,10 @@ roles:
                 self.prepare(*(["--retry-review"] if index and not blockers else []))
         return provider, working, json.loads(json.dumps(self.operation().state["passes"]))
 
-    def additional(self, head=None, reason="Operator requests one bounded fixture review"):
+    def additional(self, head=None, reason="Operator requests one bounded fixture review", history_digest=None):
+        extra = ["--review-history-digest", history_digest] if history_digest is not None else []
         return self.prepare("--additional-review-for", head or _git(self.root, "rev-parse", "HEAD"),
-                            "--request-reason", reason)
+                            "--request-reason", reason, *extra)
 
     def test_additional_review_preserves_all_blockers_and_full_branch_coverage(self):
         provider, _, prior = self.spent_reviews(blockers=True)
@@ -871,22 +879,242 @@ roles:
         _, _, prior = self.spent_reviews()
         head = _git(self.root, "rev-parse", "HEAD")
         operation = self.operation("prepare", "--additional-review-for", head, "--request-reason", "reason")
-        original_run = ship.subprocess.run
+        original_run = ship.review_process
 
-        def timed_out(argv, *args, **kwargs):
-            if str(ROOT / "bin/sd-review") in argv[:2]:
-                raise subprocess.TimeoutExpired(argv, 3600)
-            return original_run(argv, *args, **kwargs)
+        def timed_out(root, argv, **kwargs):
+            if "--explain" not in argv:
+                raise ship.ReviewTimeout({"kind": "watchdog_expired", "allowed_seconds": kwargs["timeout"]})
+            return original_run(root, argv, **kwargs)
 
-        with patch.object(ship.subprocess, "run", side_effect=timed_out), self.assertRaises(subprocess.TimeoutExpired):
+        with patch.object(ship, "review_process", side_effect=timed_out), self.assertRaisesRegex(ship.Refusal, "watchdog expired"):
             operation.review(head)
         state = self.operation().state
         self.assertEqual(state["passes"][:2], prior)
         self.assertEqual(len(state["passes"]), 3)
         self.assertNotIn("report", state["passes"][-1])
+        self.assertEqual(state["passes"][-1]["execution_error"]["stage"], "execution")
+        self.assertEqual(state["passes"][-1]["exit_code"], 124)
+        self.assertIsNone(state["reviewed_head"])
         with self.assertRaises(ship.Refusal):
             self.additional()
         self.assertEqual(self.operation().state["passes"], state["passes"])
+
+    def spent_additional(self):
+        provider, working, _ = self.spent_reviews()
+        with self.assertRaises(ship.Refusal):
+            self.additional()
+        return provider, working, json.loads(json.dumps(self.operation().state["passes"]))
+
+    def test_renewed_fourth_and_fifth_reviews_preserve_each_prefix_and_full_branch(self):
+        provider, working, prior = self.spent_additional()
+        provider.write_text(working)
+        for count in (4, 5):
+            _git(self.root, "commit", "--allow-empty", "-m", f"renewal {count}\n\nAuthored-with: human")
+            head = _git(self.root, "rev-parse", "HEAD")
+            with self.assertRaises(ship.Refusal):
+                self.operation().check_review(head)
+            self.additional(history_digest=ship.digest(prior))
+            state = self.operation().state
+            self.assertEqual(len(state["passes"]), count)
+            self.assertEqual(state["passes"][:-1], prior)
+            last = state["passes"][-1]
+            self.assertEqual(last["additional_review_request"]["prior_history_digest"], ship.digest(prior))
+            self.assertEqual(last["additional_review_request"]["allowed_passes"], 1)
+            self.assertEqual(last["report"]["subject"]["head"], head)
+            self.assertEqual(last["report"]["subject"]["base"], last["report"]["authorship_base"])
+            self.assertEqual(last["report"]["resume_report_digest"], ship.digest(ship.review_history(prior)))
+            self.assertIn("src.py", last["report"]["subject"]["paths"])
+            prior = json.loads(json.dumps(state["passes"]))
+        with self.assertRaisesRegex(ship.Refusal, "required CI is not passing"):
+            self.merge()
+        pull = self.remote.pull(1)
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_renewal_replayed_or_missing_digest_never_reserves_or_dispatches(self):
+        provider, working, prior = self.spent_additional()
+        consumed = ship.digest(prior)
+        provider.write_text(working)
+        self.additional(history_digest=consumed)
+        head = _git(self.root, "rev-parse", "HEAD")
+        prefix = ["--additional-review-for", head, "--request-reason", "another reason"]
+        saved = self.operation().state
+        revision = self.operation().revision
+        for flags in (prefix, [*prefix, "--review-history-digest", consumed],
+                      [*prefix, "--review-history-digest", "0" * 64],
+                      [*prefix, "--review-history-digest", "not-hex"],
+                      [*prefix, "--review-history-digest", "NaN"],
+                      ["--review-history-digest", ship.digest(saved["passes"])],
+                      [*prefix, "--review-history-digest", ship.digest(saved["passes"]), "--retry-review"]):
+            operation = self.operation("prepare", *flags)
+            with self.subTest(flags=flags), patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")):
+                with self.assertRaises(ship.Refusal):
+                    operation.review(head)
+            self.assertEqual(self.operation().state, saved)
+            self.assertEqual(self.operation().revision, revision)
+        operation = self.operation("prepare", *prefix, "--review-history-digest", consumed)
+        with patch.object(operation.api, "api", side_effect=AssertionError("remote read attempted")), patch.object(ship, "run", side_effect=AssertionError("check started")):
+            with self.assertRaisesRegex(ship.Refusal, ship.digest(saved["passes"])):
+                operation.prepare()
+        self.assertEqual(self.operation().state, saved)
+        self.assertEqual(self.operation().revision, revision)
+
+    def test_renewal_validates_every_additional_request_and_prior_evidence_before_reserving(self):
+        self.spent_additional()
+        operation = self.operation()
+        original = json.loads(json.dumps(operation.state))
+        head = _git(self.root, "rev-parse", "HEAD")
+        for change in ("missing", "type", "reason", "head", "allowance", "digest", "earlier-history", "report-envelope"):
+            state = json.loads(json.dumps(original))
+            entry = state["passes"][2]
+            request = entry["additional_review_request"]
+            if change == "missing":
+                entry.pop("additional_review_request")
+            elif change == "type":
+                entry["additional_review_request"] = []
+            elif change in ("reason", "head"):
+                request[change] = ""
+            elif change == "allowance":
+                request["allowed_passes"] = True
+            elif change == "digest":
+                request["prior_history_digest"] = "wrong"
+            elif change == "earlier-history":
+                state["passes"][0]["report"]["findings"].append({"summary": "changed evidence"})
+            else:
+                entry["report"]["findings"] = {}
+            operation.state = state
+            operation.save()
+            revision = operation.revision
+            candidate = self.operation("prepare", "--additional-review-for", head, "--request-reason", "renew",
+                                       "--review-history-digest", ship.digest(state["passes"]))
+            with self.subTest(change=change), patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")):
+                with self.assertRaises(ship.Refusal):
+                    candidate.review(head)
+            self.assertEqual(self.operation().state, state)
+            self.assertEqual(self.operation().revision, revision)
+
+    def test_renewal_after_reportless_additional_pass_requires_a_new_complete_report(self):
+        provider, working, _ = self.spent_reviews()
+        head = _git(self.root, "rev-parse", "HEAD")
+        operation = self.operation("prepare", "--additional-review-for", head, "--request-reason", "initial additional")
+        original_run = ship.review_process
+
+        def reportless(root, argv, **kwargs):
+            if "--explain" not in argv:
+                return subprocess.CompletedProcess(argv, 1, "not a receipt", "")
+            return original_run(root, argv, **kwargs)
+
+        with patch.object(ship, "review_process", side_effect=reportless), self.assertRaises(ship.Refusal):
+            operation.review(head)
+        prior = self.operation().state["passes"]
+        self.assertNotIn("report", prior[-1])
+        with self.assertRaises(ship.Refusal):
+            self.operation().check_review(head)
+        # A failed report need not retroactively acquire successful coverage fields.
+        def failed(root, argv, **kwargs):
+            if "--explain" not in argv:
+                return subprocess.CompletedProcess(argv, 1, '{"status":"gate_failed"}', "")
+            return original_run(root, argv, **kwargs)
+
+        with patch.object(ship, "review_process", side_effect=failed), self.assertRaises(ship.Refusal):
+            self.additional(history_digest=ship.digest(prior))
+        saved = self.operation().state["passes"]
+        self.assertEqual(saved[:-1], prior)
+        self.assertEqual(saved[-1]["report"], {"status": "gate_failed"})
+        prior = saved
+        with self.assertRaises(ship.Refusal):
+            self.operation().check_review(head)
+        provider.write_text(working)
+        self.additional(history_digest=ship.digest(prior))
+        state = self.operation().state
+        self.assertEqual(state["passes"][:-1], prior)
+        self.assertEqual(state["passes"][-1]["report"]["resume_report_digest"], ship.digest(ship.review_history(prior)))
+        self.assertTrue(ship.completed_depth(state["passes"][-1]["report"]))
+        self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_renewed_receipt_rechecks_all_prefixes_and_only_current_success_at_merge(self):
+        provider, working, prior = self.spent_additional()
+        provider.write_text(working)
+        self.additional(history_digest=ship.digest(prior))
+        operation = self.operation()
+        original = json.loads(json.dumps(operation.state))
+        for change in ("earlier-request", "earlier-history", "base", "resume", "depth", "head", "check", "blocker", "binding"):
+            operation.state = json.loads(json.dumps(original))
+            report = operation.state["passes"][-1]["report"]
+            if change == "earlier-request":
+                operation.state["passes"][2].pop("additional_review_request")
+                operation.state["passes"][-1]["additional_review_request"]["prior_history_digest"] = ship.digest(operation.state["passes"][:-1])
+                report["resume_report_digest"] = ship.digest(ship.review_history(operation.state["passes"][:-1]))
+            elif change == "earlier-history":
+                operation.state["passes"][0]["report"]["findings"].append({"summary": "changed"})
+            elif change == "base":
+                report["subject"]["base"] = report["subject"]["head"]
+            elif change == "resume":
+                report["resume_report_digest"] = "wrong"
+            elif change == "depth":
+                report["completed_reviews"] = 0
+            elif change == "head":
+                report["subject"]["head"] = "0" * 40
+            elif change == "check":
+                report["check"]["status"] = "fail"
+            elif change == "blocker":
+                report["findings"].append({"disposition": "blocking"})
+            else:
+                operation.state["binding"] = "wrong"
+            operation.save()
+            with self.subTest(change=change), self.assertRaises(ship.Refusal):
+                self.merge()
+        operation.state = original
+        operation.save()
+        self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_renewed_current_report_requires_valid_full_branch_bases(self):
+        provider, working, prior = self.spent_additional()
+        provider.write_text(working)
+        self.additional(history_digest=ship.digest(prior))
+        operation = self.operation()
+        original = json.loads(json.dumps(operation.state))
+        head = _git(self.root, "rev-parse", "HEAD")
+        for base in (None, "", "not-a-sha", [], "a" * 39, "g" * 40):
+            operation.state = json.loads(json.dumps(original))
+            report = operation.state["passes"][-1]["report"]
+            if base is None:
+                report.pop("authorship_base")
+                report["subject"].pop("base")
+            else:
+                report["authorship_base"] = report["subject"]["base"] = base
+            operation.save()
+            with self.subTest(base=base), self.assertRaises(ship.Refusal):
+                self.operation().check_review(head)
+        operation.state = original
+        operation.save()
+        self.operation().check_review(head)
+
+    def test_renewal_digest_with_commit_flags_refuses_before_index_or_commit_changes(self):
+        _, _, prior = self.spent_additional()
+        head = _git(self.root, "rev-parse", "HEAD")
+        (self.root / "src.py").write_text("uncommitted = True\n")
+        message = self.directory / "message.txt"
+        message.write_text("Should never commit")
+        commit = ["--path", "src.py", "--message-file", str(message), "--author", "author"]
+        for extra in ([], ["--additional-review-for", head, "--request-reason", "renew"]):
+            with self.subTest(extra=extra), patch.object(ship, "commit_paths", side_effect=AssertionError("commit attempted")):
+                with self.assertRaises(ship.Refusal):
+                    self.prepare("--review-history-digest", ship.digest(prior), *extra, *commit)
+            self.assertEqual(_git(self.root, "rev-parse", "HEAD"), head)
+            self.assertEqual(_git(self.root, "diff", "--cached", "--name-only"), "")
+            self.assertEqual((self.root / "src.py").read_text(), "uncommitted = True\n")
+            self.assertEqual(self.operation().state["passes"], prior)
+
+    def test_renewal_digest_is_not_accepted_before_three_reservations(self):
+        self.spent_reviews()
+        prior = self.operation().state["passes"]
+        head = _git(self.root, "rev-parse", "HEAD")
+        operation = self.operation("prepare", "--additional-review-for", head, "--request-reason", "renew",
+                                   "--review-history-digest", ship.digest(prior))
+        with patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")), self.assertRaises(ship.Refusal):
+            operation.review(head)
+        self.assertEqual(self.operation().state["passes"], prior)
 
     def test_additional_review_rejects_rewritten_ancestry_before_reserving(self):
         _, _, prior = self.spent_reviews()
@@ -896,6 +1124,272 @@ roles:
             self.additional(unrelated)
         self.assertEqual(self.operation().state["passes"], prior)
         self.assertFalse(self.remote.pull_requests)
+
+
+    def test_timing_plan_allows_valid_sequential_work_without_another_reservation(self):
+        from tests.test_sd_review import sd_review
+        trace = []
+        stages = []
+        def child(root, argv, *, timeout):
+            args = sd_review.build_parser().parse_args(argv[2:])
+            stages.append((args.explain, timeout))
+            elapsed = 0
+            def logical_runner(command, env, cwd, allowance):
+                nonlocal elapsed
+                check = any(str(a).endswith("/sd-check") for a in command)
+                elapsed += 899 if check else 1799
+                self.assertLess(899 if check else 1799, allowance)
+                if elapsed > timeout:
+                    raise ship.ReviewTimeout({"kind": "watchdog_expired", "allowed_seconds": timeout})
+                trace.append("check" if check else "provider")
+                payload = {} if check else {"type": "result", "subtype": "success", "structured_output": {"findings": []}}
+                return sd_review.Completed(0, json.dumps(payload), "")
+            report = sd_review.review(root, args, logical_runner, self.environment)
+            return subprocess.CompletedProcess(argv, sd_review.STATUS_EXIT.get(report["status"], 0), json.dumps(report), "")
+        with patch.object(ship, "review_process", side_effect=child):
+            self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        state = self.operation().state
+        self.assertEqual(stages, [(True, 3600), (False, 9000)])
+        self.assertEqual(trace, ["check", "provider", "provider"])
+        self.assertEqual(len(state["passes"]), 1)
+        self.assertEqual(state["passes"][0]["report"]["completed_reviews"], 2)
+
+    def test_planning_timeout_saves_diagnostics_without_dispatch_or_completion(self):
+        diagnostic = {"kind": "watchdog_expired", "allowed_seconds": 3600,
+                      "stdout": {"bytes": 8, "tail": "partial", "truncated": False},
+                      "cleanup": {"term": "sent", "kill": "absent", "leader_reaped": True},
+                      "captured_report": {"completed_reviews": 3, "status": "clean"}}
+        with patch.object(ship, "review_process", side_effect=ship.ReviewTimeout(diagnostic)) as child:
+            with self.assertRaisesRegex(ship.Refusal, "planning watchdog expired"):
+                self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        state = self.operation().state
+        self.assertEqual(child.call_count, 1)
+        self.assertEqual(len(state["passes"]), 1)
+        entry = state["passes"][0]
+        self.assertEqual(entry["execution_error"], dict(diagnostic, stage="planning"))
+        self.assertNotIn("report", entry)
+        self.assertIsNone(state["reviewed_head"])
+
+    def test_invalid_timing_plan_never_starts_execution_and_keeps_reservation(self):
+        with patch.object(ship, "review_process", return_value=subprocess.CompletedProcess([], 0, "{}", "")) as child:
+            with self.assertRaisesRegex(ship.Refusal, "no valid timing plan"):
+                self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        self.assertEqual(child.call_count, 1)
+        self.assertEqual(len(self.operation().state["passes"]), 1)
+
+
+    def captured_timeout_retry(self, extra_reviewer=False):
+        from tests.test_sd_review import sd_review
+        if extra_reviewer:
+            registry = self.database.parent / "providers.yaml"
+            provider = self.programs / "review-fixture"
+            body = registry.read_text().replace("roles:\n  author:",
+                f"  reviewer3: {{ start: '{provider}', vendor: fourthvendor, bill: fixture, roles: [reviewer], reader: claude-json }}\nroles:\n  author:")
+            registry.write_text(body.replace("reviewer: [reviewer, reviewer2]", "reviewer: [reviewer, reviewer2, reviewer3]"))
+            local = self.root / "CLAUDE.local.md"
+            local.write_text(local.read_text().replace("reviewers: ", f"reviewers: reviewer3@{provider}, "))
+        original = ship.review_process
+        def expires(root, argv, **kwargs):
+            if "--explain" in argv:
+                return original(root, argv, **kwargs)
+            args = sd_review.build_parser().parse_args(argv[2:])
+            def canned(command, env, cwd, timeout):
+                if any(str(a).endswith("/sd-check") for a in command):
+                    return sd_review.Completed(0, "{}", "")
+                payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
+                    {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": "captured timeout blocker"}]}}
+                return sd_review.Completed(0, json.dumps(payload), "")
+            report = sd_review.review(root, args, canned, self.environment)
+            report["authored_with"] = ["secondvendor"]
+            raise ship.ReviewTimeout({"kind": "watchdog_expired", "allowed_seconds": kwargs["timeout"], "captured_report": report})
+        with patch.object(ship, "review_process", side_effect=expires), self.assertRaisesRegex(ship.Refusal, "watchdog expired"):
+            self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        failed = self.operation().state["passes"][0]
+        self.assertNotIn("report", failed)
+        raw_capture = json.loads(json.dumps(failed["execution_error"]["captured_report"]))
+        self.assertEqual(failed["exit_code"], 124)
+        self.assertIsNone(self.operation().state["reviewed_head"])
+        self.assertIn("captured timeout blocker", json.dumps(ship.review_history([failed])))
+        observed = []
+        def resumes(root, argv, **kwargs):
+            if "--resume-report" in argv:
+                observed.append(json.loads(pathlib.Path(argv[argv.index("--resume-report") + 1]).read_text()))
+            return original(root, argv, **kwargs)
+        with patch.object(ship, "review_process", side_effect=resumes):
+            if extra_reviewer:
+                self.prepare("--retry-review")
+            else:
+                with self.assertRaises(ship.Refusal):
+                    self.prepare("--retry-review")
+        self.assertEqual(len(observed), 2)
+        self.assertTrue(all(value == ship.review_history([failed]) for value in observed))
+        self.assertTrue(all("completed_reviews" not in value for value in observed))
+        self.assertEqual(failed["execution_error"]["captured_report"], raw_capture)
+        state = self.operation().state
+        self.assertEqual(state["passes"][0], failed)
+        latest = state["passes"][-1]["report"]
+        self.assertEqual(latest["completed_reviews"], 2 if extra_reviewer else 1)
+        self.assertEqual(latest["authored_with"], ["secondvendor"])
+        self.assertEqual(latest["reviewed_by"], ["reviewer2", "reviewer3"] if extra_reviewer else ["reviewer2"])
+
+    def test_captured_timeout_blocker_and_authorship_survive_actual_retry(self):
+        self.captured_timeout_retry()
+
+    def test_successful_captured_timeout_retry_reaches_verified_fixture_merge(self):
+        self.captured_timeout_retry(extra_reviewer=True)
+        self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_deep_timing_plan_refusal_retains_the_reserved_pass(self):
+        raw = '{"timing":' + '[' * 10000 + '0' + ']' * 10000 + '}'
+        with patch.object(ship, "review_process", return_value=subprocess.CompletedProcess([], 0, raw, "")):
+            with self.assertRaises(ship.Refusal):
+                self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        state = self.operation().state
+        self.assertEqual(len(state["passes"]), 1)
+        self.assertNotIn("report", state["passes"][0])
+        self.assertIsNone(state.get("reviewed_head"))
+
+
+class ReviewWatchdogTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = pathlib.Path(self.temp.name)
+
+    def test_normal_nonzero_output_remains_available_for_report_validation(self):
+        result = ship.review_process(self.root, [sys.executable, "-c",
+            "import sys; print('{\"status\":\"blocking\"}'); print('diagnostic',file=sys.stderr); sys.exit(1)"], timeout=5)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(json.loads(result.stdout), {"status": "blocking"})
+        self.assertEqual(result.stderr, "diagnostic\n")
+
+    def expired_group(self, *, ignores_term=False, valid_report=False, leader_exits=False):
+        ready = self.root / "ready"
+        grandchild = self.root / "grandchild"
+        def stop_owned_fixture():
+            if ready.exists():
+                try:
+                    os.killpg(int(ready.read_text()), ship.signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        self.addCleanup(stop_owned_fixture)
+        script = self.root / "tree.py"
+        script.write_text("import os,signal,time,pathlib,sys\n"
+            + ("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignores_term else "")
+            + "child=os.fork()\nif child==0:\n"
+            + " signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            + f" pathlib.Path({str(grandchild)!r}).write_text(str(os.getpid()))\n"
+            + " while True: time.sleep(1)\n"
+            + f"while not pathlib.Path({str(grandchild)!r}).exists(): time.sleep(.005)\n"
+            + ("print('{\"completed_reviews\":3,\"status\":\"clean\"}',flush=True)\n" if valid_report else "print('x'*10000,flush=True)\n")
+            + "print('e'*10000,file=sys.stderr,flush=True)\n"
+            + f"pathlib.Path({str(ready)!r}).write_text(str(os.getpid()))\n"
+            + ("sys.exit(0)\n" if leader_exits else "while True: time.sleep(1)\n"))
+        original_communicate = subprocess.Popen.communicate
+        waiting = False
+        def after_ready(process, *args, **kwargs):
+            nonlocal waiting
+            if not waiting:
+                waiting = True
+                deadline = time.monotonic() + 5
+                while not ready.exists() and time.monotonic() < deadline:
+                    time.sleep(.005)
+                self.assertTrue(ready.exists(), "fixture did not reach its explicit ready barrier")
+            return original_communicate(process, *args, **kwargs)
+        with subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], start_new_session=True) as unrelated:
+            try:
+                started = time.monotonic()
+                with patch.object(subprocess.Popen, "communicate", after_ready), patch.object(ship, "REVIEW_CLEANUP_SECONDS", .05):
+                    with self.assertRaises(ship.ReviewTimeout) as raised:
+                        ship.review_process(self.root, [sys.executable, str(script)], timeout=.05)
+                self.assertLess(time.monotonic() - started, 6)
+                self.assertIsNone(unrelated.poll(), "the unrelated process must remain alive")
+            finally:
+                unrelated.terminate()
+                unrelated.wait(timeout=5)
+        for identity in (ready, grandchild):
+            pid = int(identity.read_text())
+            observed = subprocess.run(["ps", "-p", str(pid), "-o", "stat="], text=True, capture_output=True, timeout=5)
+            self.assertIn(observed.returncode, (0, 1), observed.stderr)
+            self.assertTrue(not observed.stdout.strip() or observed.stdout.strip().startswith("Z"), observed.stdout)
+        return raised.exception.diagnostic
+
+    def test_timeout_stops_descendant_after_leader_exits_and_bounds_output(self):
+        diagnostic = self.expired_group()
+        self.assertEqual(diagnostic["kind"], "watchdog_expired")
+        self.assertEqual(diagnostic["cleanup"]["kill"], "sent")
+        self.assertTrue(diagnostic["cleanup"]["leader_reaped"])
+        for stream in ("stdout", "stderr"):
+            self.assertTrue(diagnostic[stream]["truncated"])
+            self.assertEqual(diagnostic[stream]["bytes"], 10001)
+            self.assertLessEqual(len(diagnostic[stream]["tail"]), 4096)
+
+    def test_ignored_term_is_killed_and_captured_json_is_only_evidence(self):
+        diagnostic = self.expired_group(ignores_term=True, valid_report=True)
+        self.assertEqual(diagnostic["cleanup"], {"term": "sent", "kill": "sent", "drained": True, "leader_reaped": True})
+        self.assertEqual(diagnostic["captured_report"], {"completed_reviews": 3, "status": "clean"})
+
+    def test_exited_leader_cannot_leave_inherited_pipes_and_a_live_grandchild(self):
+        diagnostic = self.expired_group(leader_exits=True)
+        self.assertEqual(diagnostic["cleanup"]["kill"], "sent")
+        self.assertTrue(diagnostic["cleanup"]["leader_reaped"])
+
+    def test_cleanup_failure_is_bounded_and_explicit(self):
+        process = unittest.mock.Mock(pid=123, returncode=None)
+        process.communicate.side_effect = subprocess.TimeoutExpired([], .01)
+        process.poll.return_value = None
+        with patch.object(ship.subprocess, "Popen", return_value=process), patch.object(ship.os, "killpg", side_effect=PermissionError("fixture refusal")):
+            with self.assertRaises(ship.ReviewTimeout) as raised:
+                ship.review_process(self.root, ["fixture"], timeout=.01)
+        self.assertEqual(process.communicate.call_count, 3)
+        self.assertFalse(raised.exception.diagnostic["cleanup"]["leader_reaped"])
+        self.assertIn("failed", raised.exception.diagnostic["cleanup"]["kill"])
+
+
+    def test_initial_timeout_output_survives_both_failed_cleanup_drains(self):
+        body = b'{"findings":[{"summary":"preserved blocker"}]}'
+        process = unittest.mock.Mock(pid=123)
+        process.communicate.side_effect = [subprocess.TimeoutExpired([], 1, output=body, stderr=b"initial stderr"),
+                                           OSError("first drain failed"), subprocess.SubprocessError("second drain failed")]
+        process.poll.return_value = 0
+        with patch.object(ship.subprocess, "Popen", return_value=process), patch.object(ship.os, "killpg"):
+            with self.assertRaises(ship.ReviewTimeout) as raised:
+                ship.review_process(self.root, ["fixture"], timeout=1)
+        diagnostic = raised.exception.diagnostic
+        self.assertEqual(diagnostic["stdout"]["bytes"], len(body))
+        self.assertEqual(diagnostic["stderr"]["tail"], "initial stderr")
+        self.assertEqual(diagnostic["captured_report"], json.loads(body))
+        self.assertFalse(diagnostic["cleanup"]["drained"])
+
+    def test_deep_captured_json_stays_a_typed_timeout(self):
+        body = ('{"deep":' + '[' * 10000 + '0' + ']' * 10000 + '}').encode()
+        process = unittest.mock.Mock(pid=123)
+        process.communicate.side_effect = [subprocess.TimeoutExpired([], 1), (body, b""), (body, b"")]
+        process.poll.return_value = 0
+        with patch.object(ship.subprocess, "Popen", return_value=process), patch.object(ship.os, "killpg"):
+            with self.assertRaises(ship.ReviewTimeout) as raised:
+                ship.review_process(self.root, ["fixture"], timeout=1)
+        self.assertNotIn("captured_report", raised.exception.diagnostic)
+        self.assertEqual(raised.exception.diagnostic["stdout"]["bytes"], len(body))
+
+    def test_interrupt_also_cleans_the_owned_group(self):
+        process = unittest.mock.Mock(pid=123)
+        process.communicate.side_effect = [KeyboardInterrupt(), (b"", b""), (b"", b"")]
+        process.poll.return_value = 0
+        with patch.object(ship.subprocess, "Popen", return_value=process), patch.object(ship.os, "killpg") as stop:
+            with self.assertRaises(KeyboardInterrupt):
+                ship.review_process(self.root, ["fixture"], timeout=1)
+        self.assertEqual([row.args[1] for row in stop.call_args_list], [ship.signal.SIGTERM, ship.signal.SIGKILL])
+
+    def test_untrusted_timing_values_cannot_disable_the_watchdog(self):
+        valid = {"setup_seconds": 3600, "phase_seconds": 1800, "execution_seconds": 9000,
+                 "candidates": [{"name": "a", "recipient": "a@fixture"}, {"name": "b", "recipient": "b@fixture"}]}
+        cases = [dict(valid, phase_seconds=0), dict(valid, execution_seconds=float("inf")),
+                 dict(valid, execution_seconds=True), dict(valid, candidates="not a list"),
+                 dict(valid, candidates=[{}]), dict(valid, execution_seconds=3600), dict(valid, setup_seconds=0)]
+        for plan in cases:
+            with self.subTest(plan=plan), self.assertRaises(ship.Refusal):
+                ship.timing_plan(subprocess.CompletedProcess([], 0, json.dumps({"status": "explained", "timing": plan}), ""))
 
 
 if __name__ == "__main__":

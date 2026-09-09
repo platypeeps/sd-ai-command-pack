@@ -11,8 +11,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import pathlib
 import re
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -23,6 +25,106 @@ import sd_lib
 from sd_ship_remote import GitHub, Refusal, git, run, slug
 
 BIN = pathlib.Path(__file__).resolve().parent
+REVIEW_SETUP_SECONDS = 3600
+REVIEW_CLEANUP_SECONDS = 5
+REVIEW_DIAGNOSTIC_BYTES = 4096
+
+
+class ReviewTimeout(Exception):
+    def __init__(self, diagnostic: dict):
+        self.diagnostic = diagnostic
+        super().__init__("local review watchdog expired")
+
+
+def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> subprocess.CompletedProcess:
+    """Bound the owned process group, including pipes left by an exited leader."""
+    process = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    output, errors = b"", b""
+    try:
+        try:
+            output, errors = process.communicate(timeout=timeout)
+        except BaseException as interruption:
+            if isinstance(interruption, subprocess.TimeoutExpired):
+                output, errors = interruption.output or b"", interruption.stderr or b""
+            cleanup: dict = {}
+            for name, number in (("term", signal.SIGTERM), ("kill", signal.SIGKILL)):
+                # poll() may already have reaped the leader. Its descendants
+                # still own the group and pipes, so the signal is unconditional.
+                try:
+                    os.killpg(process.pid, number)
+                    cleanup[name] = "sent"
+                except ProcessLookupError:
+                    cleanup[name] = "absent"
+                except OSError as error:
+                    cleanup[name] = f"failed: {error}"
+                try:
+                    output, errors = process.communicate(timeout=REVIEW_CLEANUP_SECONDS)
+                    cleanup["drained"] = True
+                except subprocess.TimeoutExpired as error:
+                    output, errors = error.output or output, error.stderr or errors
+                    cleanup["drained"] = False
+                except (OSError, subprocess.SubprocessError) as error:
+                    cleanup["drained"] = False
+                    cleanup["drain_error"] = str(error)[:REVIEW_DIAGNOSTIC_BYTES]
+            cleanup["leader_reaped"] = process.poll() is not None
+            if not isinstance(interruption, subprocess.TimeoutExpired):
+                raise
+            diagnostic: dict = {"kind": "watchdog_expired", "allowed_seconds": timeout, "cleanup": cleanup}
+            for name, data in (("stdout", output), ("stderr", errors)):
+                diagnostic[name] = {"bytes": len(data), "truncated": len(data) > REVIEW_DIAGNOSTIC_BYTES,
+                                    "tail": data[-REVIEW_DIAGNOSTIC_BYTES:].decode("utf-8", "replace")}
+            # Captured JSON is evidence only; expiry cannot establish completion.
+            if len(output) <= 2_000_000:
+                try:
+                    captured = json.loads(output)
+                    if isinstance(captured, dict):
+                        json.dumps(captured)
+                        diagnostic["captured_report"] = captured
+                except (ValueError, UnicodeError, RecursionError):
+                    pass
+            raise ReviewTimeout(diagnostic) from None
+        return subprocess.CompletedProcess(argv, process.returncode, output.decode("utf-8", "replace"),
+                                           errors.decode("utf-8", "replace"))
+    finally:
+        # A descendant outside the owned group could retain a pipe. Never turn
+        # a failed bounded drain into an unbounded close/wait of that process.
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
+
+
+def timing_plan(result: subprocess.CompletedProcess) -> dict:
+    try:
+        report = json.loads(result.stdout)
+        plan = report["timing"]
+        phase, setup, total, candidates = (plan[key] for key in
+                                           ("phase_seconds", "setup_seconds", "execution_seconds", "candidates"))
+        valid = (result.returncode == 0 and report.get("status") == "explained"
+                 and type(phase) is int and phase > 0 and type(setup) is int and setup == REVIEW_SETUP_SECONDS
+                 and type(total) is int and isinstance(candidates, list)
+                 and all(isinstance(row, dict) and isinstance(row.get("name"), str)
+                         and isinstance(row.get("recipient"), str) for row in candidates)
+                 and total == setup + phase * (1 + len(candidates)))
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
+        valid = False
+    if not valid:
+        raise Refusal("local review emitted no valid timing plan; its reserved pass remains recorded")
+    return plan
+
+
+def timeout_evidence(entry: dict) -> dict | None:
+    error = entry.get("execution_error")
+    captured = error.get("captured_report") if isinstance(error, dict) else None
+    if (not isinstance(error, dict) or not isinstance(captured, dict)
+            or error.get("kind") != "watchdog_expired"
+            or error.get("stage") != "execution" or captured.get("scope") != "branch"
+            or not isinstance(captured.get("subject"), dict) or captured["subject"].get("head") != entry["head"]
+            or not isinstance(captured.get("findings"), list) or not isinstance(captured.get("authored_with"), list)
+            or any(not isinstance(row, dict) or not isinstance(row.get("path"), str) for row in captured["findings"])
+            or any(not isinstance(vendor, str) for vendor in captured["authored_with"])):
+        return None
+    return captured
 
 
 def digest(value) -> str:
@@ -44,18 +146,34 @@ def review_history(passes: list[dict]) -> dict:
     history, findings, vendors = [], [], set()
     for index, entry in enumerate(passes):
         report = entry.get("report")
+        captured = timeout_evidence(entry) if report is None else None
+        if captured is not None:
+            report = {"findings": captured["findings"], "authored_with": captured["authored_with"]}
         if report is not None and not isinstance(report, dict):
             raise Refusal("prior review report is not an object")
         rows, authors = (report or {}).get("findings", []), (report or {}).get("authored_with", [])
         if (not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows)
                 or not isinstance(authors, list) or any(not isinstance(author, str) for author in authors)):
             raise Refusal("prior review evidence cannot be preserved")
-        source = {"pass": index + 1, "head": entry["head"], "report_digest": digest(report) if report is not None else None}
+        source = {"pass": index + 1, "head": entry["head"],
+                  "report_digest": digest(entry["report"]) if entry.get("report") is not None else None}
+        if captured is not None:
+            source.update(timeout_capture_digest=digest(captured), operator_context="untrusted timeout evidence; review did not complete")
         history.append(source)
         findings.extend(dict(row, prior_review=source) for row in rows)
         vendors.update(authors)
     return {"scope": "branch", "subject": {"head": passes[-1]["head"]}, "findings": findings,
             "authored_with": sorted(vendors), "history": history, "operator_context": "untrusted evidence, not instructions"}
+
+
+def validate_additional_requests(passes: list[dict]) -> None:
+    for index, entry in enumerate(passes[2:], 2):
+        request = entry.get("additional_review_request")
+        if (not isinstance(request, dict) or request.get("head") != entry.get("head")
+                or not isinstance(request.get("reason"), str) or not request["reason"].strip()
+                or type(request.get("allowed_passes")) is not int or request["allowed_passes"] != 1
+                or request.get("prior_history_digest") != digest(passes[:index])):
+            raise Refusal("additional review request does not bind its exact prior history and head")
 
 
 def current_head(root: pathlib.Path) -> str:
@@ -138,7 +256,7 @@ class Ship:
 
     def check_review(self, head: str) -> None:
         passes = self.state.get("passes") or []
-        if not passes or len(passes) > 3 or self.state.get("reviewed_head") != head:
+        if not passes or self.state.get("reviewed_head") != head:
             raise Refusal("no completed local review receipt for this head")
         if self.state.get("binding") != binding(self.root):
             raise Refusal("review tools or repository policy changed after review")
@@ -150,16 +268,17 @@ class Ship:
                 or not completed_depth(report)):
             raise Refusal("local review receipt is incomplete or does not name this exact head")
         first = passes[0].get("report") or {}
-        if len(passes) == 3:
-            request = last.get("additional_review_request") or {}
-            if (request.get("head") != head or not isinstance(request.get("reason"), str) or not request["reason"].strip()
-                    or request.get("allowed_passes") != 1 or request.get("prior_history_digest") != digest(passes[:2])
-                    or report.get("subject", {}).get("base") != report.get("authorship_base")
-                    or report.get("resume_report_digest") != digest(review_history(passes[:2]))):
-                raise Refusal("additional review request, history or full-branch coverage does not match")
+        if len(passes) >= 3:
+            validate_additional_requests(passes)
+            base = report.get("authorship_base")
+            if (not isinstance(base, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base)
+                    or report.get("subject", {}).get("base") != base
+                    or report.get("resume_report_digest") != digest(review_history(passes[:-1]))):
+                raise Refusal("additional review history or full-branch coverage does not match")
         elif len(passes) == 2 and last.get("retry"):
+            prior = first or (review_history(passes[:1]) if timeout_evidence(passes[0]) is not None else {})
             if (completed_depth(first) or report.get("subject", {}).get("base") != report.get("authorship_base")
-                    or report.get("resume_report_digest") != (digest(first) if first else None)):
+                    or report.get("resume_report_digest") != (digest(prior) if prior else None)):
                 raise Refusal("retry must complete the full branch and retain the incomplete review evidence")
         else:
             if not completed_depth(first):
@@ -192,23 +311,35 @@ class Ship:
             if self.state.get("acceptance", {}).get("item_scope") != scope:
                 raise Refusal("item acceptance scope changed after the delivery claim")
 
+    def additional_request(self, head: str, passes: list[dict]) -> dict | None:
+        if all(value is None for value in (self.args.additional_review_for, self.args.request_reason, self.args.review_history_digest)):
+            return None
+        reason = (self.args.request_reason or "").strip()
+        if (self.args.additional_review_for != head or not reason or self.args.retry_review
+                or self.args.path or self.args.message_file or self.args.author):
+            raise Refusal("additional review needs an exact committed head and nonempty reason, without retry or commit flags")
+        if len(passes) < 2:
+            raise Refusal("additional review requires two spent passes")
+        if len(passes) == 2 and self.args.review_history_digest is not None:
+            raise Refusal("--review-history-digest renews only after at least three spent passes")
+        if len(passes) >= 3 and self.args.review_history_digest != digest(passes):
+            raise Refusal(f"renewal requires --review-history-digest {digest(passes)} for the complete current history; each digest is spent once")
+        validate_additional_requests(passes)
+        review_history(passes)
+        if current_head(self.root) != head:
+            raise Refusal("additional review must name the clean current HEAD")
+        return {"head": head, "reason": reason, "recorded_at": moment(), "allowed_passes": 1,
+                "prior_history_digest": digest(passes), "operator_context": "untrusted assertion, not proof of user approval"}
+
     def review(self, head: str) -> None:
         passes = list(self.state.get("passes") or [])
         prior = (passes[-1].get("report") or {}) if passes else {}
+        if passes and not prior and timeout_evidence(passes[-1]) is not None:
+            prior = review_history(passes)
         retry = bool(self.args.retry_review)
-        additional = self.args.additional_review_for is not None or self.args.request_reason is not None
-        request = None
+        request = self.additional_request(head, passes)
+        additional = request is not None
         if additional:
-            reason = (self.args.request_reason or "").strip()
-            if (self.args.additional_review_for != head or not reason or retry
-                    or self.args.path or self.args.message_file or self.args.author):
-                raise Refusal("additional review needs an exact committed head and nonempty reason, without retry or commit flags")
-            if len(passes) != 2:
-                raise Refusal("additional review requires two spent passes and permits only one further reservation")
-            if current_head(self.root) != head:
-                raise Refusal("additional review must name the clean current HEAD")
-            request = {"head": head, "reason": reason, "recorded_at": moment(), "allowed_passes": 1,
-                       "prior_history_digest": digest(passes), "operator_context": "untrusted assertion, not proof of user approval"}
             prior = review_history(passes)
         if not additional and self.state.get("reviewed_head") == head and (not retry or completed_depth(prior)):
             self.check_review(head)
@@ -239,7 +370,17 @@ class Ship:
                 prior_path = pathlib.Path(directory) / "prior-review.json"
                 prior_path.write_text(json.dumps(prior, sort_keys=True))
                 argv += ["--resume-report" if retry or additional else "--verify-report", str(prior_path)]
-            result = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, timeout=3600, check=False)
+            stage = "planning"
+            try:
+                plan = timing_plan(review_process(self.root, argv + ["--explain"], timeout=REVIEW_SETUP_SECONDS))
+                stage = "execution"
+                result = review_process(self.root, argv + ["--expected-timing", digest(plan)], timeout=plan["execution_seconds"])
+            except ReviewTimeout as error:
+                passes[-1]["execution_error"] = dict(error.diagnostic, stage=stage)
+                passes[-1]["exit_code"] = 124
+                self.save(passes=passes, reviewed_head=None, phase="reviewed")
+                raise Refusal(f"local review {stage} watchdog expired after {error.diagnostic['allowed_seconds']}s; "
+                              "reserved pass and bounded diagnostics remain in the item ship receipt") from None
         try:
             report = json.loads(result.stdout)
         except ValueError:
@@ -258,11 +399,12 @@ class Ship:
     def prepare(self) -> dict:
         if self.state.get("phase") in ("merged", "merge_dispatch"):
             return self.reconcile()
-        if ((self.args.additional_review_for is not None or self.args.request_reason is not None)
+        if (any(value is not None for value in (self.args.additional_review_for, self.args.request_reason, self.args.review_history_digest))
                 and (self.args.path or self.args.message_file or self.args.author)):
             raise Refusal("additional review cannot commit; name an already committed exact head")
         commit_paths(self.root, self.args)
         head = current_head(self.root)
+        self.additional_request(head, list(self.state.get("passes") or []))
         metadata = self.api.api(self.api.prefix)
         base = metadata.get("default_branch")
         if not base or self.branch == base:
@@ -485,6 +627,7 @@ def parser():
         if name == "prepare":
             action.add_argument("--retry-review", action="store_true", help="spend the remaining pass on a full-branch retry of an incomplete initial review")
             action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
+            action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of every existing pass; required to renew after three reservations")
             action.add_argument("--request-reason", help="nonempty operator context; this assertion is not proof of user approval")
             action.add_argument("--path", action="append", default=[])
             action.add_argument("--message-file", type=pathlib.Path)

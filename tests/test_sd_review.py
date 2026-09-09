@@ -1616,5 +1616,75 @@ class StandingReviewPolicyTests(ReviewFixture):
         self.assertEqual(result["completed_reviews"], 0)
 
 
+class TimingPlanTests(ReviewFixture):
+    def planned(self, count=4, depth="deep", timeout=1800):
+        root = self.make_repo()
+        (root / "src.py").write_text("x=1\n")
+        (root / ".github").mkdir()
+        (root / ".github/sd-review.json").write_text(json.dumps({"default_tier": depth}))
+        registry = self.registry_home / ".local/share/sd/providers.yaml"
+        entries = [f"p{index}" for index in range(count)]
+        registry.write_text("bills:\n  fixture: {cost: subscription}\nproviders:\n"
+            + "".join(f"  {name}: {{start: '{name} exec', vendor: '{name}', bill: fixture, roles: [reviewer], reader: claude-json}}\n" for name in entries)
+            + "roles:\n  author: []\n  reviewer: [" + ", ".join(entries) + "]\n")
+        (root / "CLAUDE.local.md").write_text("<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\nreviewers: "
+            + ", ".join(f"{name}@{name}" for name in entries) + "\n<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n")
+        runner = FakeRunner()
+        args = namespace(explain=True, timeout=timeout)
+        report = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(runner.calls, [])
+        return root, args, report
+
+    def test_all_fallbacks_receive_an_allowance_without_changing_depth(self):
+        root, args, planned = self.planned()
+        self.assertEqual(planned["requested_reviews"], 3)
+        self.assertEqual(planned["fallback_candidates"], ["p3"])
+        self.assertEqual(planned["timing"]["execution_seconds"], 12600)
+        self.assertEqual([row["name"] for row in planned["timing"]["candidates"]], ["p0", "p1", "p2", "p3"])
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""), "p0": sd_review.Completed(127, "", "missing", False)},
+                            default=sd_review.Completed(0, json.dumps({"type": "result", "subtype": "success", "structured_output": {"findings": []}}), ""))
+        args.explain = False
+        args.expected_timing = sd_review.hashlib.sha256(json.dumps(planned["timing"], sort_keys=True).encode()).hexdigest()
+        actual = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(len(runner.calls), 5)
+        self.assertEqual(actual["timing"], planned["timing"])
+        self.assertEqual(actual["completed_reviews"], 3)
+        self.assertEqual(actual["requested_reviews"], 3)
+
+    def test_timeout_change_refuses_before_check_or_provider(self):
+        root, args, report = self.planned(count=2, depth="standard", timeout=90)
+        args.explain = False
+        args.expected_timing = sd_review.hashlib.sha256(json.dumps(report["timing"], sort_keys=True).encode()).hexdigest()
+        args.timeout = 91
+        runner = FakeRunner()
+        with self.assertRaisesRegex(sd_review.Refusal, "timing inputs changed"):
+            sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(runner.calls, [])
+
+    def test_candidate_identity_drift_refuses_even_when_count_is_unchanged(self):
+        root, args, report = self.planned(count=2, depth="standard")
+        args.explain = False
+        args.expected_timing = sd_review.hashlib.sha256(json.dumps(report["timing"], sort_keys=True).encode()).hexdigest()
+        registry = self.registry_home / ".local/share/sd/providers.yaml"
+        registry.write_text(registry.read_text().replace("p0", "replacement"))
+        local = root / "CLAUDE.local.md"
+        local.write_text(local.read_text().replace("p0", "replacement"))
+        runner = FakeRunner()
+        with self.assertRaisesRegex(sd_review.Refusal, "timing inputs changed"):
+            sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(runner.calls, [])
+
+    def test_only_timing_inputs_are_bound(self):
+        root, args, report = self.planned(count=1, depth="cheap")
+        args.explain = False
+        args.expected_timing = sd_review.hashlib.sha256(json.dumps(report["timing"], sort_keys=True).encode()).hexdigest()
+        args.challenge = True
+        runner = FakeRunner({"sd-check": sd_review.Completed(1, "{}", "fixture gate failure")})
+        actual = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(actual["timing"], report["timing"])
+        self.assertEqual(actual["status"], "gate_failed")
+        self.assertEqual(len(runner.calls), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
