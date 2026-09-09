@@ -285,6 +285,29 @@ class Rule5PullRequestLinkTests(LintFixture):
         report = self.run_lint("Work: docs/work/2026-08-29-a-workable-item\n")
         self.assertEqual(report.failures, [])
 
+    def test_database_associations_pass_without_claiming_verified_rows(self) -> None:
+        for value in ("sd:1", "sd:36", "sd:999999999999999999999999999999"):
+            with self.subTest(value=value):
+                report = self.run_lint(f"Work: {value}\n")
+                self.assertEqual(report.failures, [])
+                note = next(note for note in report.notes if "rule 5 PR link:" in note)
+                self.assertIn(f"database association {value}", note)
+                self.assertIn("row existence, ownership and delivery require sd-ship verification", note)
+
+    def test_malformed_database_associations_refuse(self) -> None:
+        for value in ("sd:", "sd:0", "sd:01", "sd:-1", "sd:+1", "sd:1.0",
+                      "sd: 1", "sd:1 extra", "sd:1/other", "sd:١", "SD:1"):
+            with self.subTest(value=value):
+                self.assert_fails("must use sd:<positive integer>", pr_body=f"Work: {value}\n")
+
+    def test_database_association_does_not_hide_another_work_line(self) -> None:
+        self.assert_fails("exactly one is allowed", pr_body=(
+            "Work: sd:36\nWork: docs/work/2026-08-29-a-workable-item\n"))
+
+    def test_database_association_does_not_bypass_work_directory_checks(self) -> None:
+        (self.work / "2026-08-30-empty").mkdir()
+        self.assert_fails("every work item has a prd.md", pr_body="Work: sd:36\n")
+
     def test_green_no_work_line_claims_no_item(self) -> None:
         """A change with no item carries no line, and is not asked for one.
 
@@ -426,6 +449,37 @@ class Rule6CitationTests(LintFixture):
     def test_green_a_recorded_citation_that_has_not_moved(self) -> None:
         self.record()
         self.assert_clean()
+
+    def long_cited_item(self) -> tuple[pathlib.Path, str, int]:
+        item = self.cited_item()
+        prefix = "Cited source text stays meaningful across edits"
+        lines = (item / "prd.md").read_text().splitlines()
+        lines.append(prefix + " beyond the first phrase.")
+        (item / "prd.md").write_text("\n".join(lines) + "\n")
+        (item / "design.md").write_text(f"# design\n\nSee `prd.md:{len(lines)}`.\n")
+        self.assertEqual(lint.write_citation_manifest(item, self.work), 1)
+        return item, prefix, len(lines)
+
+    def test_manifest_writer_emits_no_space_at_the_truncation_boundary(self) -> None:
+        item, prefix, _ = self.long_cited_item()
+        rows = (item / lint.CITATION_MANIFEST).read_text().splitlines()
+        self.assertEqual(rows[0].split("\t")[-1], prefix)
+        self.assertTrue(all(row == row.rstrip() for row in rows))
+        self.assert_clean()
+
+    def test_legacy_trailing_space_anchor_still_detects_moved_and_changed_text(self) -> None:
+        item, _, start = self.long_cited_item()
+        manifest = item / lint.CITATION_MANIFEST
+        manifest.write_text(manifest.read_text().rstrip("\n") + " \n")
+        self.assert_clean()
+        source = item / "prd.md"
+        lines = source.read_text().splitlines()
+        lines.insert(start - 1, "New text before the cited sentence.")
+        source.write_text("\n".join(lines) + "\n")
+        self.assert_fails(f"that text is now at line {start + 1}")
+        lines[start] = "The original cited sentence has changed."
+        source.write_text("\n".join(lines) + "\n")
+        self.assert_fails("that text is gone from the file")
 
     def test_red_an_insertion_above_the_target_moves_it(self) -> None:
         self.record()
