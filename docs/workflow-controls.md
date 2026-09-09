@@ -1,5 +1,9 @@
 # Workflow controls and local rollout
 
+The installed-state details below record earlier rollouts on 2026-09-08.
+They do not establish the currently loaded build or complete the coordinated closeout.
+Verify installation, process identity and live acceptance after delivering matching commits across all three repositories.
+
 The workflow dashboard is installed at **http://127.0.0.1:8767** and privately at
 **https://sol.tail6dbb92.ts.net:8443**. Remote access requires the Tailscale login
 `sven@ignoranceisbliss.com`. The command pack, system repository and writing pack
@@ -88,17 +92,19 @@ Recovery material remains at:
 only files still matching this operation's output and preserves concurrent
 edits for explicit reconciliation. Database restore stages and validates the
 snapshot before replacing a live database; it does not unlink live WAL files.
-An older backup can lack post-cutover progress. The existing generic
-`sd restore reimport` remains incomplete for unproven historical sources;
-do not treat it as recovery of data absent from the snapshot. Retain these
-backups and reconcile authority before resuming dispatch after a restore.
+An older backup can lack post-cutover progress. `sd restore reimport REPOSITORY`
+now previews recovery from verified historical source evidence. Applying that
+preview requires its `--if-fingerprint` value. Missing or unproven sources
+refuse recovery; the command cannot invent progress absent from the surviving
+evidence. Retain backups and reconcile authority before resuming dispatch.
 
 The dashboard launcher uses the command pack's installed library in an isolated
 interpreter. Health verifies schema, loaded process identity and hashes of the
 running build; changing installed code requires a restart. Provisioning refuses
 to replace a newer schema library with an older committed system version.
-These changes are uncommitted across three repositories and must be released
-together when publication is requested.
+Deliver matching committed versions of all three repositories and verify a
+fresh installation before activating the coordinated rollout. A source commit
+or merged pull request alone does not establish the installed runtime.
 
 ## Verification on 2026-09-08
 
@@ -213,8 +219,11 @@ Job actions apply only to recognized installed launchd jobs. Unknown runtime
 output disables controls. An accepted request is not a completed job; the UI
 shows the observed state separately. Repeated requests are suppressed until
 the observation changes. Running assignments without an owned cancellation
-backend cannot be stopped through the dashboard. An autonomous queue runner
-has not been added.
+backend cannot be stopped through the dashboard. The system now includes an
+owned queue runner and finite command execution. Their implementation does not
+activate the service: verify its configured work volume, installed build and
+observed runtime before dispatch. The pack exposes these controls through
+`sd runner`; `sd-ship` records reviewed delivery and verified remote merges.
 
 The refreshed UI contains Today, Backlog, Writing, Operations and item details.
 Operations has Jobs, Services, Ports, Progress and Usage subtabs. Services lists
@@ -232,5 +241,6 @@ privileged process is absent. Other legacy plugin views remain CLI-only.
 Metered-cost redesign is deferred; existing figures moved to Usage.
 
 See `system/local-project-dashboard/RUNTIME.md` for the fingerprinted installer,
-health checks and rollback limits. No commits, pushes or GitHub writes were
-performed as part of this rollout.
+health checks and rollback limits. The earlier rollout evidence above records
+its own source and live operations; use the coordinated delivery receipts for
+subsequent commits, merges, installation and acceptance.
