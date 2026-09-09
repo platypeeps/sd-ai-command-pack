@@ -241,10 +241,13 @@ class AgainstADatabase(unittest.TestCase):
         self.connection.execute(
             "INSERT INTO bill (name, cost_basis, cap_usd_month) VALUES ('baseten', 'company', 50)")
         row = self.open_restore()
+        restored_at = self.sd_db.unresolved_state(self.connection, "restore")[0]["timestamp"]
 
         status, out, _err = run(sd_restore.resume)
 
         self.assertEqual(status, 0)
+        self.assertIn(f"restore of 2026-09-06, restored at {restored_at}.", out)
+        self.assertNotIn("taken", out)
         self.assertIn(f"assignment {assignment} (reviewer)", out)
         self.assertIn("baseten", out)
         self.assertIn("Dispatch resumes", out)

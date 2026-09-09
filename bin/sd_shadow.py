@@ -21,6 +21,47 @@ to keep.
 
 from __future__ import annotations
 
+import argparse
+import math
+import re
+from datetime import datetime, timezone
+
+
+def timestamp(value: str) -> datetime:
+    """Require a timezone and normalize conservative whole-second UTC bounds."""
+    if not re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?"
+        r"(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)", value,
+    ):
+        raise argparse.ArgumentTypeError("use an ISO timestamp with Z or an explicit timezone offset")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc).replace(microsecond=0)
+    except (ValueError, OverflowError):
+        raise argparse.ArgumentTypeError("use a valid timezone-aware ISO timestamp") from None
+
+
+def positive_requests(value: str) -> int:
+    """A request budget counts whole requests, with at least one permitted."""
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a positive integer") from None
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def positive_seconds(value: str) -> float:
+    """Reject NaN and infinity, which do not impose a useful time budget."""
+    try:
+        parsed = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a positive finite number") from None
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive finite number")
+    return parsed
+
 
 def _rows():
     """`bin/sd_handoff_rows.py`, which owns the library frame and its refusal."""
@@ -32,10 +73,24 @@ def _rows():
 def shadow_sync(args) -> int:
     """Run one sync and report what moved. Writes rows; never closes anything."""
     rows = _rows()
+    since = getattr(args, "since", None)
+    until = getattr(args, "until", None)
+    current = datetime.now(timezone.utc).replace(microsecond=0)
+    if until is not None and until > current:
+        raise rows.RowsRefusal("--until must not be in the future")
+    if since is not None and since > (until if until is not None else current):
+        raise rows.RowsRefusal("--since must not be after --until (or the current time)")
+    options = {
+        name: value for name, value in (
+            ("since", since), ("now", until),
+            ("max_requests", getattr(args, "max_requests", None)),
+            ("max_seconds", getattr(args, "max_seconds", None)),
+        ) if value is not None
+    }
     sd_db = rows.library()
     connection = rows.connect(sd_db, write=True)
     try:
-        result = sd_db.sync_shadow(connection)
+        result = sd_db.sync_shadow(connection, **options)
     finally:
         connection.close()
 
@@ -43,9 +98,12 @@ def shadow_sync(args) -> int:
     if result.truncated:
         # Named, because a truncated page means the next run starts from the
         # same watermark and there is more behind it than this run saw.
-        print("the tracker returned a truncated page; run again to reach the rest")
+        print("coverage is incomplete; retry a smaller window or increase the request/time limits")
     if result.ok:
-        print(f"cursor moved to cover from {result.window_start}")
+        if result.watermark_moved:
+            print(f"cursor moved to cover from {result.window_start}")
+        else:
+            print(f"coverage completed from {result.window_start}; existing cursor retained")
         return 0
     # The rows above are still written and still true. Only the cursor held,
     # so the next run re-reads the same window rather than skipping it.

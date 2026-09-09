@@ -98,6 +98,21 @@ preview requires its `--if-fingerprint` value. Missing or unproven sources
 refuse recovery; the command cannot invent progress absent from the surviving
 evidence. Retain backups and reconcile authority before resuming dispatch.
 
+`sd shadow sync --strict` fails when any requested tracker interval remains
+incomplete. It retains collected rows and holds the cursor for a later retry.
+Bound recovery with `--since` and `--until`, using timezone-aware ISO timestamps
+such as `2026-09-06T10:00:00Z`. Bounds are inclusive UTC seconds; fractional
+seconds round down. The end cannot exceed the current time. Equal bounds
+request one second. Complete historical intervals retain a later cursor.
+Complete intervals separated from the cursor also retain it, preserving the
+uncovered gap. Both cases report successful coverage and cursor retention.
+
+`--max-requests` accepts a positive integer. `--max-seconds` accepts a positive
+finite number. Omitted controls use the library defaults. Invalid controls
+refuse before database access. If coverage exceeds these limits, retry a
+smaller interval or increase the limits; strict mode continues to report
+failure until coverage is complete.
+
 The dashboard launcher uses the command pack's installed library in an isolated
 interpreter. Health verifies schema, loaded process identity and hashes of the
 running build; changing installed code requires a restart. Provisioning refuses

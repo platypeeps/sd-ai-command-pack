@@ -2978,7 +2978,11 @@ def build_parser() -> argparse.ArgumentParser:
         "sync", help="collect the tracker's open issues and write shadow rows")
     syncer.add_argument(
         "--strict", action="store_true",
-        help="exit non-zero when the cursor could not move")
+        help="exit non-zero when the requested window is not fully covered")
+    syncer.add_argument("--since", type=sd_shadow.timestamp, help="inclusive recovery start, with timezone")
+    syncer.add_argument("--until", type=sd_shadow.timestamp, help="inclusive recovery end, with timezone; no future times")
+    syncer.add_argument("--max-requests", type=sd_shadow.positive_requests, help="positive request budget (library default when omitted)")
+    syncer.add_argument("--max-seconds", type=sd_shadow.positive_seconds, help="positive finite time budget (library default when omitted)")
     syncer.set_defaults(handler=sd_shadow.shadow_sync)
 
     skill = groups.add_parser(

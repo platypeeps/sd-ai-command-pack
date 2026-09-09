@@ -186,7 +186,7 @@ def resume(args: argparse.Namespace) -> int:
 
         blocked = blocked_assignments(connection)
         frozen = frozen_bills(connection)
-        print(f"sd: restore of {restore_row['key']}, taken {restore_row['timestamp']}.")
+        print(f"sd: restore of {restore_row['key']}, restored at {restore_row['timestamp']}.")
         if blocked:
             print(f"sd: {len(blocked)} assignment(s) stay blocked and are not requeued:")
             for identifier, role in blocked:
