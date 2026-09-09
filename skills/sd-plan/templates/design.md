@@ -1,7 +1,6 @@
 # Design — <slug>
 
-Written only when the approach is not obvious from the PRD. A design that
-restates the requirements is a design nobody needed.
+Written only when requested. Explain the choices the PRD leaves open.
 
 ## Approach
 

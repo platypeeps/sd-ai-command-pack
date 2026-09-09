@@ -290,7 +290,7 @@ class ReaderTests(ReviewFixture):
     def test_an_unimplemented_reader_is_not_run_and_names_itself(self) -> None:
         runner = FakeRunner()
         outcome = sd_review.run_provider(
-            self.provider(reader="claude-json"),
+            self.provider(reader="unimplemented-json"),
             pathlib.Path("/nonexistent"),
             sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
             "prompt",
@@ -299,7 +299,7 @@ class ReaderTests(ReviewFixture):
             60,
         )
         self.assertEqual(outcome.status, sd_review.NOT_RUN)
-        self.assertIn("claude-json", outcome.detail)
+        self.assertIn("unimplemented-json", outcome.detail)
         self.assertEqual(runner.calls, [], "an unreadable provider is not started")
 
     def test_a_url_entry_does_not_borrow_a_start_entry_s_words(self) -> None:
@@ -335,7 +335,7 @@ class ReaderTests(ReviewFixture):
         """The chain marks it, the dry run plans it, the run reports it. Each
         had its own sentence, and two of the three were wrong about the same
         case, so fixing one left the others saying the old thing."""
-        provider = self.provider(reader="claude-json")
+        provider = self.provider(reader="unimplemented-json")
         expected = sd_review.sd_registry.refuse_reader(provider, sd_review.READERS)
         self.assertIsNotNone(expected)
         planned = sd_review._planned([provider], pathlib.Path("/nonexistent"), "prompt")
@@ -507,7 +507,8 @@ class ParseTests(unittest.TestCase):
             )
         )
         assert flat is not None
-        self.assertEqual(flat[0]["path"], "a.py")
+        self.assertEqual(flat.findings[0]["path"], "a.py")
+        self.assertEqual(flat.error, "")
         nested = sd_review.parse_findings(
             json.dumps(
                 {
@@ -523,25 +524,28 @@ class ParseTests(unittest.TestCase):
             )
         )
         assert nested is not None
-        self.assertEqual(nested[0], {"path": "b.py", "line": 9, "severity": "low", "summary": "t", "family": "testing"})
+        self.assertEqual(nested.findings[0], {"path": "b.py", "line": 9, "severity": "low", "summary": "t", "family": "testing"})
+        self.assertIn("schema", nested.error)
 
     def test_non_json_and_wrong_shapes_are_not_findings(self) -> None:
         self.assertIsNone(sd_review.parse_findings("boom"))
         self.assertIsNone(sd_review.parse_findings(""))
         self.assertIsNone(sd_review.parse_findings(json.dumps({"issues": []})))
 
-    def test_a_finding_missing_its_path_is_dropped_not_invented(self) -> None:
+    def test_a_finding_missing_its_path_is_incomplete_not_clean(self) -> None:
         parsed = sd_review.parse_findings(json.dumps({"findings": [{"summary": "s"}]}))
-        self.assertEqual(parsed, [])
+        self.assertEqual(parsed.findings[0]["path"], "<unknown>")
+        self.assertIn("schema", parsed.error)
 
-    def test_findings_are_capped(self) -> None:
+    def test_excess_findings_are_preserved_and_the_response_is_incomplete(self) -> None:
         many = [
             {"path": "a", "line": None, "severity": "low", "summary": str(index), "family": "f"}
             for index in range(sd_review.MAX_FINDINGS + 10)
         ]
         parsed = sd_review.parse_findings(json.dumps({"findings": many}))
         assert parsed is not None
-        self.assertEqual(len(parsed), sd_review.MAX_FINDINGS)
+        self.assertEqual(len(parsed.findings), len(many))
+        self.assertIn("limits", parsed.error)
 
 
 class ClassifyTests(unittest.TestCase):
@@ -612,7 +616,7 @@ class PipelineTests(ReviewFixture):
         self.assertEqual(result["findings"][0]["disposition"], "blocking")
         self.assertEqual(result["findings"][0]["backend"], "codex")
 
-    def test_a_rate_limited_provider_stops_the_chain_and_names_the_rest(self) -> None:
+    def test_a_rate_limited_provider_falls_through_and_reports_the_shortfall(self) -> None:
         root = self.make_repo()
         self.prepare(root)
         runner = FakeRunner(
@@ -626,9 +630,10 @@ class PipelineTests(ReviewFixture):
         self.assertEqual(result["status"], "rate_limited")
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["codex"], sd_review.RATE_LIMITED)
-        self.assertEqual(statuses["second"], sd_review.NOT_RUN)
-        self.assertEqual(sorted(result["remaining"]), ["codex", "second"])
-        self.assertNotIn("second", [pathlib.Path(call["argv"][0]).name for call in runner.calls])
+        self.assertEqual(statuses["second"], sd_review.CLEAN)
+        self.assertEqual(result["remaining"], ["codex"])
+        self.assertEqual(result["reviewed_by"], ["second"])
+        self.assertEqual((result["completed_reviews"], result["requested_reviews"]), (1, 2))
 
     def test_an_unavailable_provider_lets_the_chain_continue(self) -> None:
         root = self.make_repo()
@@ -644,7 +649,8 @@ class PipelineTests(ReviewFixture):
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["codex"], sd_review.UNAVAILABLE)
         self.assertEqual(statuses["second"], sd_review.CLEAN)
-        self.assertEqual(result["status"], "clean")
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual((result["completed_reviews"], result["requested_reviews"]), (1, 2))
 
     def test_every_provider_unavailable_is_not_a_clean_review(self) -> None:
         root = self.make_repo()
@@ -917,16 +923,16 @@ class DepthCountsProvidersThatCanAnswerTests(ReviewFixture):
         )
 
     def test_an_unimplemented_reader_is_ineligible_and_says_why(self) -> None:
-        rows = self.explained(self.registry_with("claude-json", "codex-json"), 2)["chain"]
+        rows = self.explained(self.registry_with("unimplemented-json", "codex-json"), 2)["chain"]
         self.assertFalse(rows[0]["eligible"])
-        self.assertIn("claude-json", rows[0]["reason"])
+        self.assertIn("unimplemented-json", rows[0]["reason"])
         self.assertTrue(rows[1]["eligible"], rows[1]["reason"])
 
     def test_it_does_not_consume_a_depth_slot(self) -> None:
         """The defect in one assertion: with an unrunnable entry ahead of a
         runnable one, the run still picks the one that can answer."""
 
-        result = self.explained(self.registry_with("claude-json", "codex-json"), 2)
+        result = self.explained(self.registry_with("unimplemented-json", "codex-json"), 2)
         self.assertGreaterEqual(result["route"]["depth"], 1)
         self.assertEqual(result["providers"][:1], ["p1"], result["chain"])
 
@@ -935,7 +941,7 @@ class DepthCountsProvidersThatCanAnswerTests(ReviewFixture):
         `run_provider` does not implement would mark an entry eligible and then
         refuse it at the run, which is the hole this closes reopened."""
 
-        self.assertEqual(sd_review.READERS, ("codex-json",))
+        self.assertEqual(sd_review.READERS, ("codex-json", "claude-json"))
 
 
 class AnEmptyChainThatWantedReviewersTests(ReviewFixture):
@@ -977,7 +983,7 @@ class AnEmptyChainThatWantedReviewersTests(ReviewFixture):
         stream = io.StringIO()
         sd_review.render(result, stream)
         printed = stream.getvalue()
-        self.assertIn("no reviewer was available:", printed)
+        self.assertIn("not enough reviewers were available:", printed)
         self.assertIn("reviewers", printed)
         self.assertIn("unavailable", printed)
 
@@ -1382,12 +1388,12 @@ class TheUrlEntryRunsTests(ReviewFixture):
         }
         self.assertEqual(statuses["remote"], sd_review.CLEAN)
 
-    def test_a_429_is_a_rate_limit_and_stops_the_chain(self) -> None:
+    def test_a_429_falls_through_and_reports_insufficient_reviews(self) -> None:
         client = FakeClient({"remote": (429, "", "HTTP 429 from remote: slow down", True)})
         result = self.run_review(client)
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["remote"], sd_review.RATE_LIMITED)
-        self.assertEqual(statuses["second"], sd_review.NOT_RUN)
+        self.assertEqual(statuses["second"], sd_review.CLEAN)
         self.assertEqual(result["status"], "rate_limited")
 
     def test_a_connection_error_is_unavailable_and_the_chain_continues(self) -> None:
@@ -1399,7 +1405,7 @@ class TheUrlEntryRunsTests(ReviewFixture):
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["remote"], sd_review.UNAVAILABLE)
         self.assertEqual(statuses["second"], sd_review.CLEAN)
-        self.assertEqual(result["status"], "clean")
+        self.assertEqual(result["status"], "unavailable")
 
     def test_a_host_that_moved_refuses_naming_both_and_sends_nothing(self) -> None:
         client = FakeClient()

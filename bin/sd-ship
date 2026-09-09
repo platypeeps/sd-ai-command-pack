@@ -1,0 +1,470 @@
+#!/usr/bin/env python3
+"""Prepare, merge, and reconcile committed code from the repository enclosing cwd."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import pathlib
+import re
+import sqlite3
+import subprocess
+import sys
+import tempfile
+from datetime import datetime, timezone
+
+import sd_lib
+from sd_ship_remote import GitHub, Refusal, git, run, slug
+
+BIN = pathlib.Path(__file__).resolve().parent
+
+
+def digest(value) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+def moment() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def current_head(root: pathlib.Path) -> str:
+    if git(root, "status", "--porcelain", "--untracked-files=all"):
+        raise Refusal("checkout has uncommitted changes; commit enumerated paths before preparing")
+    return git(root, "rev-parse", "HEAD")
+
+
+def binding(root: pathlib.Path) -> str:
+    names = ("sd-review", "sd_lib.py", "sd_registry.py", "sd_route.py", "sd_codex.py", "sd-check", "sd-docs-lint")
+    files = {name: hashlib.sha256((BIN / name).read_bytes()).hexdigest() for name in names}
+    for name in ("CLAUDE.local.md", ".github/sd-review.json"):
+        path = root / name
+        files[name] = hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else "absent"
+    return digest(files)
+
+
+def commit_paths(root: pathlib.Path, args) -> None:
+    if not args.path:
+        if args.message_file or args.author:
+            raise Refusal("--message-file and --author require enumerated --path arguments")
+        return
+    if not args.message_file or not args.author:
+        raise Refusal("committing paths requires --message-file and --author")
+    if git(root, "diff", "--cached", "--name-only"):
+        raise Refusal("the index already contains changes; preserve them before using the commit stage")
+    paths = []
+    for name in args.path:
+        path = pathlib.PurePosixPath(name)
+        if path.is_absolute() or ".." in path.parts or name in ("", ".") or name.startswith(":"):
+            raise Refusal("commit paths must be literal repository-relative file names")
+        if (root / path).is_dir():
+            raise Refusal("enumerate files, not directories, in --path")
+        paths.append(name)
+    import sd_registry
+    registry, error = sd_registry.read_or_report(with_database=True, database_path=args.database)
+    provider = registry.providers.get(args.author)
+    if error or provider is None or not provider.enabled or "author" not in provider.roles:
+        raise Refusal(error or "--author is not an enabled author provider")
+    message = args.message_file.read_text(encoding="utf-8").strip()
+    if not message or re.match(r"(?i)wip\b", message):
+        raise Refusal("commit message needs a final title")
+    if re.search(r"(?im)^Authored-with:", message):
+        raise Refusal("the commit stage owns the Authored-with trailer")
+    message += f"\n\nNeeded-by: sd:{args.item}\nAuthored-with: {provider.name}/{provider.vendor}\n"
+    git(root, "--literal-pathspecs", "add", "--", *paths)
+    run(root, ["git", "--literal-pathspecs", "commit", "--only", "--file=-", "--", *paths], input=message)
+
+
+class Ship:
+    def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args):
+        from sd_db import ship
+        self.store, self.root, self.connection, self.args = ship, root, connection, args
+        self.database = database
+        self.repository = slug(git(root, "remote", "get-url", "origin"))
+        self.branch = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+        info = ship.identity(connection, args.item)
+        self.item, self.repo = info["item"], info["repo"]
+        if slug(self.repo["remote"] or "") != self.repository:
+            raise Refusal("item repository does not match this checkout's origin")
+        if args.command == "observe":
+            self.key, self.revision, self.state = ship.for_item(connection, self.repository, args.item, self.item.get("branch"))
+            self.branch = self.state["branch"]
+        if self.item.get("branch") and self.item["branch"] != self.branch:
+            raise Refusal("item belongs to a different branch")
+        self.key = ship.receipt_key(self.repository, self.branch, args.item)
+        self.revision, self.state = ship.read(connection, self.key)
+        self.api = GitHub(root, self.repository)
+
+    def save(self, **updates) -> None:
+        self.state.update(updates)
+        self.revision = self.store.save(self.connection, self.key, self.revision, self.state)
+
+    def result(self, phase: str, **extra) -> dict:
+        return {"ok": True, "phase": phase, "item": self.args.item,
+                "head": self.state.get("head"), "reviewed_head": self.state.get("reviewed_head"),
+                "pull_request": self.state.get("pull_request"), "deliver": self.state.get("deliver", False),
+                "observed_at": moment(), "warnings": self.state.get("warnings", []), **extra}
+
+    def check_review(self, head: str) -> None:
+        passes = self.state.get("passes") or []
+        if not passes or len(passes) > 2 or self.state.get("reviewed_head") != head:
+            raise Refusal("no completed local review receipt for this head")
+        if self.state.get("binding") != binding(self.root):
+            raise Refusal("review tools or repository policy changed after review")
+        last = passes[-1]
+        report = last.get("report") or {}
+        if (last.get("head") != head or report.get("subject", {}).get("head") != head
+                or report.get("status") not in ("clean", "advisory")
+                or (report.get("check") or {}).get("status") != "pass"
+                or not report.get("requested_reviews")
+                or report.get("completed_reviews", 0) < report["requested_reviews"]):
+            raise Refusal("local review receipt is incomplete or does not name this exact head")
+        first = passes[0].get("report") or {}
+        if not first.get("requested_reviews") or first.get("completed_reviews", 0) < first["requested_reviews"]:
+            raise Refusal("the original branch never completed the requested local review depth")
+        if len(passes) == 2 and (report.get("subject", {}).get("base") != passes[0].get("head")
+                                or report.get("verification_report_digest") != digest(passes[0]["report"])):
+            raise Refusal("fix verification does not continue the initially reviewed head")
+        if any(row.get("disposition") == "blocking" for row in report.get("findings", [])):
+            raise Refusal("local review contains unresolved blocking findings")
+
+    def acceptance(self) -> dict | None:
+        if not self.args.deliver:
+            return None
+        if self.item["kind"] != "work":
+            raise Refusal("--deliver closes work items; ordinary tasks can ship associated slices")
+        if self.args.acceptance_file is None:
+            raise Refusal("--deliver requires --acceptance-file with evidence for every criterion")
+        value = json.loads(self.args.acceptance_file.read_text())
+        rows = value.get("criteria") if isinstance(value, dict) else None
+        if (not isinstance(value, dict) or value.get("item") != self.args.item or value.get("complete") is not True or not isinstance(rows, list)
+                or not rows or any(not isinstance(row, dict) or not row.get("criterion") or not row.get("evidence")
+                                   or row.get("passed") is not True for row in rows)):
+            raise Refusal("acceptance file must name this item and passing evidence for every criterion")
+        return {"claim": value, "item_scope": digest({k: self.item[k] for k in ("title", "body", "path")})}
+
+    def assert_scope(self) -> None:
+        if self.state.get("deliver"):
+            item = self.store.identity(self.connection, self.args.item)["item"]
+            scope = digest({key: item[key] for key in ("title", "body", "path")})
+            if self.state.get("acceptance", {}).get("item_scope") != scope:
+                raise Refusal("item acceptance scope changed after the delivery claim")
+
+    def review(self, head: str) -> None:
+        passes = list(self.state.get("passes") or [])
+        if self.state.get("reviewed_head") == head:
+            self.check_review(head)
+            return
+        if passes and passes[-1].get("head") == head:
+            raise Refusal("this head was already reviewed; fix its findings or explicitly request another review cycle")
+        if len(passes) >= 2:
+            raise Refusal("one code review and one fix verification are spent; further review requires an explicit new request")
+        if passes:
+            prior = passes[-1].get("report") or {}
+            if not prior or prior.get("completed_reviews", 0) < prior.get("requested_reviews", 1):
+                raise Refusal("the preceding review did not complete its requested depth; reconcile it before a fix-only pass")
+        base = passes[-1]["head"] if passes else None
+        if base:
+            git(self.root, "merge-base", "--is-ancestor", base, head)
+        argv = [sys.executable, str(BIN / "sd-review"), "--scope", "branch", "--challenge", "--json", "--database", str(self.database)]
+        if base:
+            argv += ["--base", base]
+        passes.append({"head": head, "started_at": moment(), "base": base})
+        self.save(passes=passes, phase="reviewing", head=head, binding=binding(self.root))
+        # sd-review emits useful blocking evidence with nonzero status, so the
+        # JSON is retained even when it refuses. No transport fixture is used here.
+        with tempfile.TemporaryDirectory(prefix="sd-ship-verify-") as directory:
+            if base:
+                prior = pathlib.Path(directory) / "prior-review.json"
+                prior.write_text(json.dumps(passes[-2]["report"], sort_keys=True))
+                argv += ["--verify-report", str(prior)]
+            result = subprocess.run(argv, cwd=self.root, capture_output=True, text=True, timeout=3600, check=False)
+        try:
+            report = json.loads(result.stdout)
+        except ValueError:
+            raise Refusal("local review emitted no valid receipt; its reserved pass remains recorded") from None
+        passes[-1]["report"] = report
+        passes[-1]["exit_code"] = result.returncode
+        self.save(passes=passes, reviewed_head=head if result.returncode == 0 else None, phase="reviewed")
+        if result.returncode:
+            raise Refusal(f"local review {report.get('status')}: {report.get('completed_reviews', 0)}/{report.get('requested_reviews', 0)} completed; see item ship receipt")
+        self.check_review(head)
+        if current_head(self.root) != head:
+            raise Refusal("HEAD or checkout changed during local checks and review")
+
+    def prepare(self) -> dict:
+        if self.state.get("phase") in ("merged", "merge_dispatch"):
+            return self.reconcile()
+        commit_paths(self.root, self.args)
+        head = current_head(self.root)
+        metadata = self.api.api(self.api.prefix)
+        base = metadata.get("default_branch")
+        if not base or self.branch == base:
+            raise Refusal("prepare requires a feature branch distinct from the remote default")
+        # A fetch updates only this clone's remote refs; never merge or rebase
+        # an operator's checkout implicitly to make a check pass.
+        git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}:refs/remotes/origin/{base}")
+        git(self.root, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{base}")
+        title = self.args.title or self.state.get("title") or git(self.root, "show", "-s", "--format=%s", head)
+        if not title or re.match(r"(?i)wip\b", title):
+            raise Refusal("provide a final --title; wip titles never reach the default branch")
+        deliver = bool(self.args.deliver) if self.args.deliver is not None else bool(self.state.get("deliver"))
+        claim = self.acceptance() if self.args.deliver is not None or not self.state else self.state.get("acceptance")
+        body = self.args.body_file.read_text() if self.args.body_file else self.state.get("body") or f"Code changes associated with sd:{self.args.item}."
+        if self.args.body_file and re.search(r"(?im)^(?:Item|Delivers|Closes|Authored-with|Attributes|Work):", body):
+            raise Refusal("the ship adapter owns association and delivery trailers")
+        local_work = (self.item["kind"] == "work" and self.item.get("path")
+                      and git(self.root, "ls-files", "--", self.item["path"]))
+        mode = sd_lib.mode(self.root, ask=lambda endpoint, root: self._mode_ask(endpoint))
+        if (mode != "guest" or local_work) and f"Work: sd:{self.args.item}" not in body:
+            body += f"\n\nWork: sd:{self.args.item}\n"
+        if not self.state:
+            self.save(repository=self.repository, branch=self.branch, item=self.args.item, phase="new")
+        if self.state.get("pull_request") and (self.state.get("title") != title or self.state.get("deliver") != deliver):
+            raise Refusal("existing PR delivery claim or title differs; reconcile the prepared scope first")
+        self.save(title=title, body=body, base=base, deliver=deliver, acceptance=claim)
+        self.assert_scope()
+        work = self.root / "docs/work"
+        if work.is_dir():
+            run(self.root, [sys.executable, str(BIN / "sd-docs-lint")], timeout=300)
+        self.review(head)
+        warnings = []
+        if pathlib.Path(self.repo["path"]).name in {"sd-ai-command-pack", "system", "sd-writing-pack"}:
+            start = self.state["passes"][-1]["report"].get("authorship_base") or self.state["passes"][0]["report"]["subject"]["base"]
+            for commit, message in sd_lib.commit_messages(self.root, start, head):
+                if not any(line.startswith("Needed-by:") for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()):
+                    warnings.append(f"commit {commit} has no Needed-by trailer; delivery continues")
+        self.save(warnings=warnings)
+        self.assert_scope()
+        # Artifact exposure is checked again against the actual push target.
+        mode = sd_lib.mode(self.root, ask=lambda endpoint, root: self._mode_ask(endpoint))
+        if mode == "guest":
+            if not local_work:
+                body = body.replace(f"\n\nWork: sd:{self.args.item}\n", "")
+                self.save(body=body)
+            changed = git(self.root, "diff", "--name-only", f"origin/{base}...{head}").splitlines()
+            if any(path.startswith(("docs/work/", "docs/spec/", "docs/decisions/")) for path in changed):
+                raise Refusal("guest destination cannot receive local planning artifacts")
+        self.check_review(head)
+        if current_head(self.root) != head:
+            raise Refusal("HEAD moved before push")
+        self.save(phase="push_dispatch", head=head)
+        git(self.root, "push", "origin", f"{head}:refs/heads/{self.branch}")
+        if current_head(self.root) != head:
+            raise Refusal("HEAD moved during push; remote still contains only the reviewed commit")
+        pulls = self.api.pages(f"{self.api.prefix}/pulls?state=all&head={quote_branch(self.repository, self.branch)}&base={base}")
+        candidates = [pull for pull in pulls if pull.get("head", {}).get("ref") == self.branch
+                      and str(pull.get("head", {}).get("repo", {}).get("full_name", "")).lower() == self.repository
+                      and pull.get("base", {}).get("ref") == base]
+        if len(candidates) > 1:
+            raise Refusal("multiple PRs match this branch; resolve explicitly before continuing")
+        if not candidates:
+            if self.state.get("create_dispatched"):
+                raise Refusal("prior PR creation outcome is uncertain; an empty search cannot authorize another PR")
+            self.save(create_dispatched=True, phase="create_dispatch")
+            pull = self.api.api(f"{self.api.prefix}/pulls", method="POST",
+                                body={"title": title, "body": body, "head": self.branch, "base": base, "draft": False})
+        else:
+            pull = candidates[0]
+        number = pull.get("number")
+        if type(number) is not int or number <= 0:
+            raise Refusal("GitHub did not return a pull-request number")
+        pull = self.api.pull(number)
+        if pull.get("head", {}).get("sha") != head:
+            raise Refusal("PR head changed after push")
+        reference = {"number": number, "repository": self.repository, "base": base,
+                     "url": f"https://github.com/{self.repository}/pull/{number}"}
+        if str(pull.get("html_url", "")).lower() != reference["url"]:
+            raise Refusal("GitHub pull-request URL does not match the prepared repository")
+        self.save(pull_request=reference, phase="ready_to_send")
+        return self.result("ready_to_send")
+
+    def _mode_ask(self, endpoint):
+        try:
+            path = endpoint.replace("{owner}/{repo}", self.repository)
+            return (self.api.pages(path) if path.endswith("/collaborators") else self.api.api(path)), ""
+        except Refusal as error:
+            return None, str(error)
+
+    def merge(self) -> dict:
+        from sd_db import runner
+        if not self.state.get("pull_request"):
+            raise Refusal("prepare this branch before merging")
+        observed = self.api.pull(self.state["pull_request"]["number"])
+        if observed.get("merged") is True:
+            return self.reconcile()
+        head = self.args.expected_head
+        if not head or current_head(self.root) != head:
+            raise Refusal("--expected-head must name the current exact reviewed commit")
+        self.check_review(head)
+        if self.args.run:
+            authority = runner.merge_authority(self.connection, self.args.run, head)
+            if pathlib.Path(authority["work_path"]).resolve() != self.root.resolve() or authority["item"] != self.args.item:
+                raise Refusal("merge assignment does not own this checkout and item")
+        elif not self.args.manual:
+            raise Refusal("merge needs a separate owned --run assignment or explicit --manual invocation")
+        else:
+            self.store.manual_merge_guard(self.connection, self.repo["path"])
+        if sd_lib.local_block(self.root).get("mode") == "guest":
+            raise Refusal("guest mode has no merge authority")
+        self.assert_scope()
+        if self.args.watch and not self.state.get("watch_started"):
+            self.save(watch_started=True)
+            run(self.root, ["gh", "pr", "checks", str(observed["number"]), "--repo", self.repository,
+                            "--watch", "--fail-fast"], timeout=self.args.wait_seconds)
+        metadata = self.api.owned()
+        base = metadata.get("default_branch")
+        if base != self.state["base"] or metadata.get("allow_squash_merge") is not True:
+            raise Refusal("default branch changed or squash merging is disabled")
+        protection = self.api.protection(base)
+        observed = self.api.pull(observed["number"])
+        self.api.ready(observed, head, base, protection)
+        self.save(phase="ci_passed")
+        body = self.state["body"].rstrip() + f"\n\nItem: sd:{self.args.item}\n"
+        if self.state.get("deliver"):
+            body += f"Delivers: sd:{self.args.item}\n"
+        # Preserve actual authorship through the squash, including its vendor
+        # at authoring time. No declaration supplied to merge can rewrite it.
+        start = self.state["passes"][-1]["report"].get("authorship_base") or self.state["passes"][0]["report"]["subject"]["base"]
+        sd_lib.author_vendors(self.root, start, head)
+        authors = set(sd_lib.attribution(self.root, start, head).values())
+        for _, message in sd_lib.commit_messages(self.root, start, head):
+            authors.update(line.partition(":")[2].strip() for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()
+                           if line.startswith("Authored-with:"))
+        for author in sorted(authors):
+            body += f"Authored-with: {author}\n"
+        self.check_review(head)
+        if current_head(self.root) != head:
+            raise Refusal("HEAD moved immediately before merge")
+        if self.args.run:
+            runner.merge_authority(self.connection, self.args.run, head)
+        if self.api.owned().get("default_branch") != base or self.api.protection(base) != protection:
+            raise Refusal("ownership or branch protection changed before merge")
+        self.save(phase="merge_dispatch", merge_message=body)
+        try:
+            self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
+                         body={"sha": head, "merge_method": "squash", "commit_title": f"{self.state['title']} (#{observed['number']})",
+                               "commit_message": body})
+        except Refusal:
+            # A response can be lost after GitHub merged. Read back the same
+            # PR once; never call merge again to discover what happened.
+            return self.reconcile()
+        return self.reconcile()
+
+    def observe(self) -> dict:
+        reference = self.state.get("pull_request")
+        if not reference:
+            raise Refusal("there is no durable pull-request receipt to observe")
+        pull = self.api.pull(reference["number"])
+        if (str(pull.get("html_url", "")).lower() != reference["url"] or pull.get("base", {}).get("ref") != reference["base"]
+                or pull.get("head", {}).get("sha") != self.state.get("reviewed_head")):
+            raise Refusal("remote PR differs from the prepared receipt")
+        if pull.get("merged") is True:
+            return self.result("merged", merged=True, observed_only=True, verified=False,
+                               merge_commit=pull.get("merge_commit_sha"))
+        return self.result("ready_to_send", merged=False, observed_only=True, verified=False,
+                           remote_state=pull.get("state"))
+
+    def reconcile(self) -> dict:
+        reference = self.state.get("pull_request")
+        if not reference:
+            raise Refusal("there is no durable pull-request receipt to reconcile")
+        pull = self.api.pull(reference["number"])
+        if pull.get("merged") is not True:
+            raise Refusal("GitHub has not confirmed this pull request merged; database completion stays open")
+        commit = pull.get("merge_commit_sha")
+        if (not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit)
+                or str(pull.get("html_url", "")).lower() != reference["url"]
+                or pull.get("base", {}).get("ref") != reference["base"]
+                or pull.get("head", {}).get("sha") != self.state.get("reviewed_head")):
+            raise Refusal("merged PR evidence does not match the prepared receipt")
+        metadata = self.api.api(self.api.prefix)
+        if metadata.get("default_branch") != reference["base"]:
+            raise Refusal("the current default branch differs from the prepared base")
+        git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{reference['base']}")
+        tip = git(self.root, "rev-parse", "FETCH_HEAD")
+        git(self.root, "merge-base", "--is-ancestor", commit, tip)
+        advertised = git(self.root, "ls-remote", "origin", f"refs/heads/{reference['base']}").split()
+        if not advertised or advertised[0] != tip:
+            raise Refusal("default branch changed during merge verification; retry reconciliation")
+        evidence = self.result("merged", merge_commit=commit, verified_tip=tip)
+        self.save(phase="merged", merge_commit=commit, evidence=evidence)
+        self.store.note_merge(self.connection, self.args.item, evidence)
+        if self.state.get("deliver"):
+            from sd_db.errors import SdDbError
+            from sd_db.progress import deliver_work
+            self.assert_scope()
+            try:
+                deliver_work(self.connection, self.args.item, commit, verification_root=self.root)
+            except (SdDbError, sqlite3.Error, ValueError) as error:
+                return {**evidence, "delivery_pending": True, "delivery_error": str(error)}
+        git(self.root, "fetch", "--prune", "origin")
+        return {**evidence, "delivery_pending": False, "retained_branch": self.branch,
+                "retained_worktrees": git(self.root, "worktree", "list", "--porcelain")}
+
+
+def quote_branch(repository, branch):
+    from urllib.parse import quote
+    return quote(f"{repository.split('/')[0]}:{branch}", safe="")
+
+
+def parser():
+    command = argparse.ArgumentParser(description=__doc__)
+    commands = command.add_subparsers(dest="command", required=True)
+    for name in ("prepare", "merge", "reconcile", "observe"):
+        action = commands.add_parser(name)
+        action.add_argument("--item", type=int, required=True)
+        action.add_argument("--json", action="store_true")
+        action.add_argument("--database", type=pathlib.Path, help="owned runner database; defaults to the operator HOME")
+        if name == "prepare":
+            action.add_argument("--path", action="append", default=[])
+            action.add_argument("--message-file", type=pathlib.Path)
+            action.add_argument("--author")
+            action.add_argument("--title")
+            action.add_argument("--body-file", type=pathlib.Path)
+            action.add_argument("--deliver", action="store_true", default=None)
+            action.add_argument("--acceptance-file", type=pathlib.Path)
+        if name == "merge":
+            action.add_argument("--expected-head", required=True)
+            authority = action.add_mutually_exclusive_group()
+            authority.add_argument("--run")
+            authority.add_argument("--manual", action="store_true")
+            action.add_argument("--watch", action="store_true")
+            action.add_argument("--wait-seconds", type=int, default=900)
+    return command
+
+
+def main(argv=None) -> int:
+    args = parser().parse_args(argv)
+    try:
+        from sd_db import ship
+        from sd_db.database import connect, default_path
+        from sd_db.errors import SdDbError
+        from sd_db.workflow import WorkflowError
+    except ImportError as error:
+        print(json.dumps({"ok": False, "manualRequired": True, "error": f"install matching sd_db: {error}"}))
+        return 3
+    try:
+        root = sd_lib.repo_root(None)
+        if root is None:
+            raise Refusal("cwd is not inside a Git repository")
+        database = args.database or default_path()
+        connection = connect(database, write=args.command != "observe")
+        try:
+            delivery = Ship(root, connection, database, args)
+            if args.command == "observe":
+                result = delivery.observe()
+            else:
+                with ship.repository_lock(database, delivery.repository):
+                    delivery.revision, delivery.state = ship.read(connection, delivery.key)
+                    result = getattr(delivery, args.command)()
+        finally:
+            connection.close()
+    except (Refusal, WorkflowError, SdDbError, sd_lib.ConfigError, sd_lib.TrailerError, OSError, sqlite3.Error, ValueError, subprocess.SubprocessError) as error:
+        result = {"ok": False, "manualRequired": True, "error": str(error)}
+    print(json.dumps(result, indent=2, sort_keys=True) if args.json else result)
+    return 0 if result["ok"] else 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

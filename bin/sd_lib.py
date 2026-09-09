@@ -550,6 +550,8 @@ class Rows:
         self.problem = ""
         self._connection: Any = None
         self._read: Any = None
+        self._artifact_read: Any = None
+        self._completion_read: Any = None
         try:
             import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
         except ImportError as error:
@@ -577,6 +579,13 @@ class Rows:
             self.problem = f"sd_db could not open the database: {error}"
             return
         self._read = sd_db.writes.item_by_external
+        try:
+            from sd_db.progress import completion_record, item_for_artifact
+        except ImportError:
+            pass  # Older installations retain their original identity reader.
+        else:
+            self._artifact_read = item_for_artifact
+            self._completion_read = completion_record
         self.opened = True
 
     def external_id(self, item_dir: pathlib.Path) -> str:
@@ -589,7 +598,7 @@ class Rows:
             return "", ""
         identity = self.external_id(item_dir)
         try:
-            row = self._read(self._connection, ITEM_ROW_SOURCE, identity)
+            row = self.item(item_dir)
         except Exception as error:
             return "", f"the row for {identity} could not be read: {error}"
         if row is None:
@@ -599,6 +608,19 @@ class Rows:
             return "", (f"the row for {identity} says status {said!r}, which is not "
                         f"one of {', '.join(ROW_STATUSES)}")
         return said, ""
+
+    def item(self, item_dir: pathlib.Path) -> Any:
+        """Resolve a current artifact link without changing the row's identity."""
+        if self._artifact_read is not None:
+            relative = (item_dir / "prd.md").relative_to(_root_of(item_dir)).as_posix()
+            return self._artifact_read(self._connection, self.base, relative)
+        return self._read(self._connection, ITEM_ROW_SOURCE, self.external_id(item_dir))
+
+    def completed(self, item_dir: pathlib.Path) -> bool:
+        if self._completion_read is None:
+            return False
+        row = self.item(item_dir)
+        return row is not None and self._completion_read(row) is not None
 
     def close(self) -> None:
         if self._connection is not None:
@@ -731,7 +753,8 @@ def _from_row(
             f"{prd}: its `status:` line says {line!r} where the row says {said!r}; "
             f"the line is stale"
         )
-    if said == "done" and delivered(statuses.root, item_dir.name) != YES:
+    recorded = statuses.rows is not None and statuses.rows.completed(item_dir)
+    if said == "done" and not recorded and delivered(statuses.root, item_dir.name) != YES:
         problems.append(
             f"{prd}: the row is done and no commit carries {DELIVERS_TRAILER} or "
             f"{CLOSES_TRAILER} for {item_dir.name}; the item is unmarked"
@@ -748,6 +771,9 @@ def _status_report(
     archived = _is_archived(item_dir)
     prd = item_dir / "prd.md"
     if archived:
+        if statuses.source == FROM_ROW and statuses.rows is not None and statuses.rows.opened:
+            report = _from_row(item_dir, prd, fields, problems, statuses)
+            return StatusReport(report.status, True, report.inconsistencies)
         return StatusReport("done", True, tuple(problems))
 
     if not statuses.source:
@@ -1177,7 +1203,12 @@ def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
             f"`sd attribute {untagged[-1][:12]} <entry>`."
         )
     vendors = []
-    for sha, value in said.items():
+    claims = list(said.items())
+    for sha, message in commit_messages(root, base, head):
+        claims.extend((sha, line[len(AUTHORED_TRAILER):].strip())
+                      for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()
+                      if line.startswith(AUTHORED_TRAILER))
+    for sha, value in claims:
         if value == HUMAN_AUTHOR:
             continue
         entry, separator, vendor = value.partition("/")

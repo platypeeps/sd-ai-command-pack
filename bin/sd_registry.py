@@ -35,10 +35,13 @@ import hashlib
 import ipaddress
 import json
 import os
+import pwd
 import re
 import shlex
+import sqlite3
 import urllib.error
 import urllib.request
+from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -53,6 +56,19 @@ REGISTRY_RELATIVE = Path(".local/share/sd") / REGISTRY_NAME
 #: The two role lists. A third is added to the file and to this tuple, and to
 #: nothing else.
 ROLES = ("author", "reviewer")
+
+# A provider receives its declared variables and only this execution base.
+# This limits accidental credential inheritance; it is not a filesystem sandbox.
+BASE_ENV = ("PATH", "HOME", "LANG", "TERM", "TMPDIR", "USER")
+
+
+def provider_environment(provider: Provider, parent: Mapping[str, str]) -> dict[str, str]:
+    """Build the environment passed to one provider, without unrelated keys."""
+    allowed = set(BASE_ENV) | set(provider.env)
+    result = {name: value for name, value in parent.items() if name in allowed}
+    # Native macOS keychain lookup needs the actual login identity, not a key.
+    result["USER"] = pwd.getpwuid(os.getuid()).pw_name
+    return result
 
 #: A bill with one of these bases has a spend limit something enforces, so
 #: every provider on it must be callable by the library rather than spawned.
@@ -204,6 +220,8 @@ def read_or_report(
     *,
     home: Path | str | None = None,
     connection: Any = None,
+    with_database: bool = False,
+    database_path: Path | str | None = None,
 ) -> tuple[Registry, str]:
     """The registry, or an empty one and the reason it is empty.
 
@@ -224,9 +242,31 @@ def read_or_report(
     """
     target = Path(path) if path is not None else registry_path(home)
     try:
-        return read(target, connection=connection), ""
+        return (read_runtime(target, home=home, database_path=database_path) if with_database else read(target, connection=connection)), ""
     except RegistryError as error:
         return Registry(target, {}, {}), str(error)
+
+
+def read_runtime(target: Path, *, home: Path | str | None = None, database_path: Path | str | None = None) -> Registry:
+    """Read provider state without writing; a missing database uses the file."""
+    try:
+        from sd_db import database  # noqa: PLC0415 - optional at runtime
+        from sd_db.errors import SdDbError  # noqa: PLC0415
+    except ImportError:
+        if database_path is not None or registry_path(home).with_name("sd.db").exists():
+            raise RegistryError("provider state exists but sd_db is unavailable; provision the library") from None
+        return read_file(target)
+    explicit = database_path is not None
+    database_path = Path(database_path) if database_path is not None else database.default_path(home)
+    if not database_path.exists():
+        if explicit:
+            raise RegistryError(f"configured provider database is missing: {database_path}")
+        return read(target)
+    try:
+        with closing(database.connect(database_path, write=False)) as connection:
+            return read(target, connection=connection)
+    except (OSError, sqlite3.Error, SdDbError) as error:
+        raise RegistryError(f"cannot read provider state at {database_path}: {error}") from None
 
 
 def _adapt(registry: Any) -> Registry:

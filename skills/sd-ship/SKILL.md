@@ -6,8 +6,7 @@ disable-model-invocation: true
 
 # sd-ship
 
-`sd-ship` sequences the stages between "the work is done" and "the branch is
-gone". Invocation is explicit approval for the in-scope commits, the PR-branch
+`sd-ship` sequences the stages between "the work is done" and "delivery is confirmed". Invocation is explicit approval for the in-scope commits, the PR-branch
 push and the merge — and for nothing outside the paths you enumerate. It is
 not approval to delete anything local: not a branch, not a worktree, not a
 checkout. Step 8 reports those and leaves them standing.
@@ -15,7 +14,7 @@ checkout. Step 8 reports those and leaves them standing.
 ## Where the review happens
 
 The adversarial pass that gates the push runs on the machine, in step 2, where
-it is `sd-review`, costs nothing but time, and answers to the *code, before
+it is `sd-review`, uses the consented provider registry, and answers to the *code, before
 merge* row of the review table. The lane on the pull request is advisory and
 this command asks for none of it: where GitHub requests a review of its own
 when the pull request opens, those findings are read and dispositioned — fixed,
@@ -26,9 +25,12 @@ pushing a head no adversary has seen, which is what step 2 exists to prevent.
 
 ## The sequence
 
-Eight steps. Before the first of them every acceptance criterion in the item's
-`prd.md` is checked, with the actual check run and its output seen. A partial
-pass is not a pass.
+Eight steps. Before the first of them verify the scope this branch delivers,
+with the actual checks run and their output seen. A slice may ship while later
+item criteria remain open. Only `--deliver` claims the whole item is complete:
+for that claim, every acceptance criterion in the item's `prd.md` must have
+supporting evidence. A partial pass is not a pass for the scope being shipped.
+A change with no work item needs no PRD or database row to ship.
 
 1. **Commit enumerated paths only** — the exact paths you can name. In the
    pack, the system repository and the writing repository, the message also
@@ -45,9 +47,12 @@ pass is not a pass.
    it. `WORKFLOW.md` names those three and nothing here recognises one from
    its remote or its path; which repository you are in is yours to know.
 2. **Local review.** `sd-review --scope branch --challenge` on the commits,
-   before anything leaves the machine, and `sd-docs-lint` with all five rules
-   enforced locally regardless of repo mode: shape · ready · decision shape ·
-   spec index · PR link. The review is the development flow's *code, before
+   before anything leaves the machine. When the selected work root exists
+   (`docs/work` by default), run `sd-docs-lint` for that root with its applicable
+   rules enforced locally regardless of repo mode: shape · ready · decision
+   shape · spec index · PR link. With no work root, omit that artifact lint;
+   do not create a planning directory to satisfy it. The repository's checks
+   and local code review still run. The review is the development flow's *code, before
    merge* point, and its cap is that row's in
    `.claude/rules/sd-planning-adversarial-review.md`. Dispose every blocking
    finding here: fix it, or record the decision and the reason it stands. A fix
@@ -60,11 +65,12 @@ pass is not a pass.
    first irreversible act in the sequence and the thing that wakes every
    remote reader. A head the lane has not passed refuses here, and the
    refusal names both shas: the head the lane passed, and the head standing
-   in the checkout. Take the difference back to step 2. `--match-head-commit`
-   refuses such a head at GitHub anyway; refusing it here is the same answer,
-   arriving while the sha it names is still cheap to act on.
-4. **Open the pull request** with a `Work:` line resolving to the item, 0
-   unchecked boxes. The line is there when the item is, and absent when the
+   in the checkout. Take the difference back to step 2.
+   GitHub CLI's --match-head-commit option also refuses a changed head at GitHub.
+   This check catches the mismatch before the push.
+4. **Open the pull request** with a `Work:` line resolving to the item. The line
+   records association, not whole-item completion; later slices can still have
+   unchecked criteria. The line is there when the item is, and absent when the
    change has none. There is no placeholder form of it.
 5. **Wait for CI once.** One background wait, started once and left to run:
    `gh pr checks <N> --watch` in the background, not a foreground sleep and not
@@ -73,33 +79,40 @@ pass is not a pass.
    starting a second wait, and a fix to it re-enters at step 1.
 6. **Merge**: `gh pr merge --squash --match-head-commit <the reviewed sha>
    -t "<title> (#N)" -b "<body>"`. The explicit `-t`/`-b` is the wip-eraser:
-   `wip:` subjects must never reach main. `--match-head-commit` is what refuses
-   a head that moved under the review; a merge carrying only a title and a body
-   refuses nothing. Not `--delete-branch`, whose own help reads "Delete the
-   local and remote branch after merge" — it does the local deletion this
-   command forbids, which is exactly the kind of thing a flag name hides.
+   `wip:` subjects must never reach main.
+   GitHub CLI's --match-head-commit option refuses a head that moved after review.
+   A merge with only a title and body cannot check that condition.
+   Never use GitHub CLI's --delete-branch option: it deletes both local and remote branches.
 7. **Close the item on the default branch.** The closure is a trailer on that
    merge, never a commit or a pull request of its own. Every merge `sd-ship`
-   makes carries `Item: <item>`, which ties the commit to the item and closes
+   makes for an associated item carries `Item: <item>`, which ties the commit to the item and closes
    nothing; the one merge that delivers carries `Delivers: <item>` as well —
    `sd-ship --deliver`, or your own hand in the merge message. On that merge
    and on no other the item is closed, nothing is written into a file for it,
-   and its directory stays. A delivery whose merge went out without the
-   trailer is marked by the next merge message `sd-ship` writes in this
-   repository, which carries `Closes: <item>` for it; nothing here pushes to
-   the default branch to say so. A cancelled item rides that same line: the
-   cancel writes the row `done` with a `cancelled` note and touches no file,
-   and the next merge `sd-ship` writes here carries `Closes: <item>` for it,
-   with no `Delivers:` for it anywhere and no pull request opened to say the
-   cancel happened. `Delivers:` says the item shipped and `Closes:` says only
+   and its directory stays. A change with no associated item omits `Item:` and
+   `Delivers:`, creates no item or row, and uses no placeholder trailer.
+   A delivery whose merge went out without the trailer remains unverified;
+   report the missing evidence rather than silently inventing completion.
+   Cancel with `sd work cancel <row-id> --reason TEXT`: the cancel writes
+   the row `done` with a `cancelled` receipt and touches no file.
+   If a later merge is associated with that cancelled item, it may carry
+   `Closes: <item>` with no `Delivers:`; the cancel opens no pull request and
+   its database completion does not wait for another merge.
+   `Delivers:` says the item shipped and `Closes:` says only
    that it is over, which is why a cancel never earns the first one.
 
    **Then the row, once the remote has confirmed the merge and not before.**
-   That write goes through `sd_db` and through nothing else: `transition` to
-   `done`, the one function that writes an item's status and that writes the
-   single `status_change` note in the same transaction, and `set_item_fields`
-   for `shipped_at`. One merge, one status write, one note; no hand-rolled
-   SQL and no second connection to the database. `shipped_at` is the moment
+   Run `sd work deliver <row-id> <full-merge-commit-sha>`. Its shared
+   `sd_db.progress.deliver_work` operation verifies the delivery trailer and
+   the commit against the current remote default branch before recording
+   completion and `shipped_at` together. Cached issue or pull-request status
+   cannot authorize completion. If verification cannot reach the remote or
+   its ref changes during the check, leave the row open and report the
+   verification failure; retry this command once the evidence is available.
+   Do not call `transition(..., "done")` or set `shipped_at` separately.
+   The shared transition writes a single `status_change` note and its
+   completion receipt in the same transaction.
+   `shipped_at` is the moment
    the item shipped and not the moment a merge last ran, so a second
    delivering merge on an item whose row already reads `done` leaves the
    field exactly where it was and adds no further note. A non-delivering
@@ -138,8 +151,9 @@ runs no handler — so the next `sd-ship` run in that repository does it, before
 it starts a sequence of its own.
 
 Reconciliation reads the pull request the row names and takes that remote's
-answer for it. Merged and carrying `Delivers:`, the row goes to `done` with
-`shipped_at`, **and no merge is called**: the merge already happened, and
+answer for it. Merged and carrying `Delivers:`, run
+`sd work deliver <row-id> <full-merge-commit-sha>` to verify and record the
+delivery, **and no merge is called**: the merge already happened, and
 calling one against a settled pull request either errors or lands a second
 squash on a branch nobody is watching. Merged carrying `Item:` alone, the
 squash commit goes onto a note and the row stays open. Still open is not a
@@ -166,48 +180,84 @@ untouched, and `sd-plan` and `sd-review` go on picking the item. The next run
 re-enters at step 1 rather than repairing anything, a pushed branch with no
 merge behind it being a branch and not a half-finished delivery.
 
-## Flags
+## Executable interface
 
-| Flag | Effect |
-|---|---|
-| `--pr N` | settle an existing PR rather than opening one |
-| `--backlog` | loop over ready items (acceptance criteria present, no open BLOCKING) |
-| `--author <entry>` | the registry entry that does the work in `--backlog`; `SD_AUTHOR` names it too, and the registry's resolved `author` role is the default |
-| `--deliver` | this merge is the item's delivery: its message carries `Delivers:` |
-| `--jobs N` | concurrent worktrees, default 1, **hard ceiling 3** |
-| `--cap N` | items per invocation, default 3 |
-| `--dry-run` | print selected items, worktree paths, resolved budget; exit |
-| `--tier` | override the routed review tier |
-| `--no-github` | local stages only |
+The pack provides `bin/sd-ship`. Each invocation uses the Git
+repository enclosing cwd. The matching `sd_db` library and an associated item
+with a registered repository are required by this mechanical interface. The
+manual eight-step sequence above also supports a change with no database item.
+`--database PATH` binds receipts and reviewer provider state to an explicitly
+provisioned runner database; otherwise both use the operator HOME. The runner
+invokes the adapter with its own provisioned Python interpreter.
 
-## The autonomous lane (R10-D1)
+- `sd-ship prepare --item ID --json` checks the committed branch, performs its
+  local adversarial review, pushes that exact commit, and opens or reconciles
+  its pull request. Repreparing a combined head preserves the saved description
+  and explicit delivery claim. It returns `ready_to_send` and never merges. `--title` and
+  `--body-file` provide the reviewable PR description.
+- The optional commit stage requires one `--path FILE` per enumerated file,
+  `--message-file FILE`, and `--author ENTRY`. It refuses directories and a
+  pre-populated index. It records the actual registry provider/vendor and the
+  associated item's `Needed-by` trailer.
+- `sd-ship merge --item ID --expected-head SHA --run RUN-ID --json` is the
+  runner's separate serial merge assignment. It requires that run's exclusive
+  lease, matching clone, item and head, and the repository's `merge: auto`
+  policy. An author assignment cannot use this authority.
+- `sd-ship merge --item ID --expected-head SHA --manual --json` is an explicit
+  operator invocation. Both merge forms require fresh sole-operator ownership,
+  enforcing protection, the current default branch, exact reviewed head,
+  passing required checks and GitHub's satisfied merge rules. Failure returns
+  `manualRequired: true`, without changing protections or requesting reviews.
+- `--watch --wait-seconds 900` on merge starts one bounded `gh pr checks
+  --watch --fail-fast` process. Its start is recorded before waiting, so a
+  repeated invocation does not begin another automatic watch.
+- `sd-ship observe --item ID --json` reads the item receipt and GitHub without
+  changing checkout refs, files or the database. It can watch from the operator
+  checkout. An observed merge still needs owned-clone ancestry verification.
+- `sd-ship reconcile --item ID --json` checks the receipt's actual PR and
+  verifies the merge commit against the current default branch. Run it in an
+  owned clone: it fetches remote evidence into that clone. It does not delete
+  local branches, worktrees or clones.
 
-`--backlog --author <entry>` runs each item as a non-interactive run of that
-entry's start command, sandboxed to a workspace it may write, in its own fresh
-worktree cut off `origin/main` at the item's `branch:`. The prompt is built
-**from the item's own artifacts** — prd + design + implement + the `## Log`
-tail, the same context a reattaching session reads — never a bespoke prompt
-file. Green `sd-check` in the worktree opens a **draft** PR carrying the
-`Work:` line; red, timeout, or rate-limit appends a `handoff:` entry to
-`## Log` and leaves the worktree standing for inspection.
+The first review covers the branch. A committed fix gets one verification
+using `sd-review --scope branch --base <previous-head> --verify-report <saved
+report>`. The adapter supplies the preceding database receipt, including its
+blocking findings. The verifier receives current source for those findings,
+including files outside the fix diff, and excludes all original and fix-author
+vendors. A third automatic review refuses; an explicit additional-review
+request is a separate operator decision. An interrupted review retains its
+reserved pass and requires reconciliation of its evidence.
 
-Its bounds are not negotiable:
+The state lives in append-only database checkpoint receipts, keyed by remote,
+branch and item, with a per-repository process lock across clones. A supplied
+`--expected-head` is a comparison, never a replacement for an actual local
+review receipt. No `--reviewed-head` override exists. PR creation and merge
+intent are persisted before dispatch. A lost response is reconciled against
+the same remote operation; an empty search after uncertain creation does not
+authorize creating another PR.
 
-- **It never merges and never marks a PR ready-for-review.** Not even in a repo
-  with no branch protection at all — which is exactly the repo where the
-  distinction matters. It produces reviewable drafts and nothing else.
-  Settling is a human running `sd-ship --pr N`.
-- **One writer per checkout.** Worktree isolation is the mechanism; `--jobs` is
-  capped because the merge lane is serial regardless.
-- **No silent death.** Every item gets an explicit wall-clock budget; exceeding
-  it is a reported failure with a `## Log` entry, never a skipped item.
-- **Rate-limited is not unavailable.** A quota stop ends the run cleanly with
-  the remaining items untouched and named. No retry-thrash, no falling through
-  to another provider.
-- Runs here are subscription-only: the same preflight env scrub and
-  subscription-auth assertion `sd-review` applies (R10-D4).
-- The repo's `CLAUDE.local.md` marked block is prepended to the prompt this
-  lane builds (R10-D7).
+Slices are the default. `prepare --deliver --acceptance-file FILE` declares a
+whole work-item delivery. The JSON file has `item`, `complete: true`, and a
+nonempty `criteria` array whose entries each contain `criterion`, `passed:
+true`, and concrete `evidence`. The claim is bound to the item's current title,
+body and artifact path; a changed scope refuses. The operator is responsible
+for the completeness and meaning of that evidence; this structure does not
+prove a human acceptance criterion by itself. Ordinary tasks ship associated
+slices and use their existing task completion controls.
+
+After GitHub confirms a delivering merge, `progress.deliver_work` verifies the
+actual commit and trailer before completing the work item. A database failure
+or still-active assignment returns `delivery_pending: true` with the confirmed
+merge evidence. For runner delivery, the shared library prepares a proof in
+its mutable owned clone, bound to the item revision, acceptance claim, exact
+commit and run. After retention, the release transaction clears its own
+assignment and applies that proof without network access. A changed item,
+other active assignment or conflicting merge evidence rolls the release back
+and preserves the confirmed merge. The immutable ancestry witness remains
+valid across delayed cleanup; it has no arbitrary expiry. A slice records its
+SHA once and leaves item status open.
+
+Queue execution belongs to `sd runner`.
 
 ## Never
 
@@ -239,16 +289,10 @@ Its bounds are not negotiable:
 
 ## State of the tooling
 
-There is no `bin/sd-ship` yet. Today the agent runs the stages: `sd-check`,
-`sd-review`, `sd-docs-lint`, then `git` and `gh` by hand under the constraints
-above. `--backlog`/`--author` is not implemented; do not simulate it with
-ad-hoc worktree scripting.
-
-Steps 2 and 7 are therefore conventions an agent follows rather than things a
-runner enforces, and that is the honest description of them until there is one.
-Step 2 has a mechanical assist available now: it is one command. Step 7 does
-not. Its row is the library's, which the pack's installer provisions and which
-is not installed here yet, so until it is, the word also sits in the file: a
-delivered item's `prd.md` goes to `status: done` and drops its `branch:` field
-on the default branch, in the next commit made here rather than in a pull
-request of its own.
+`bin/sd-ship` now enforces the committed-head review, push, PR, merge and
+reconciliation boundaries above. It leaves author execution, process ownership,
+clone retention and queue policy to the runner. It never turns a provider's
+claim that it merged into a delivery receipt: the GitHub response, fetched
+commit and current default branch supply that evidence. Installed copies must
+be refreshed together with the matching shared database library before this
+interface is used.

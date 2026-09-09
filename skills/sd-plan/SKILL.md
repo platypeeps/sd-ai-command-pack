@@ -8,33 +8,41 @@ disable-model-invocation: true
 
 `sd-plan <slug>` turns an intention into one tracked work item:
 `docs/work/<YYYY-MM-DD>-<slug>/prd.md`, plus `design.md` and `implement.md`
-**only when the work warrants them**. Invocation is explicit approval to write
-inside `<work>/` and to create the item's branch. It is approval for nothing
-else.
+**only when you ask for them**. Invocation is explicit approval to write
+inside the selected work root, create the item's branch, and record that
+item's progress and decisions through `sd_db`. The work root defaults to
+`docs/work`; `--work-dir` selects another root within this repository. This
+does not authorize unrelated database rows, other project files, or external
+writes.
 
 ## When to use
 
-Before writing code for anything larger than a one-line fix, and whenever a
-change needs a record someone else could pick up. Not for a typo, not for a
-revert, not to retro-document work already merged.
+Use when requested for work spanning more than one session or more than about
+300 changed lines, as `WORKFLOW.md` describes. A smaller change follows the
+normal branch, check, review and ship path without a planning artifact. Do not
+create a PRD just to record routine progress or work already merged.
 
 ## The sequence
 
-1. **Interview.** Ask until the PRD's headings can be filled honestly. The
+1. **Use the existing context.** Ask only for answers that would change the
+   work and are not already available. The
    problem stated in terms an outsider would recognise; requirements each
    testable by someone who did not write them; acceptance criteria that name a
    check *and its result* ("`pytest tests/auth` passes with 0 failures"), never
-   an intention ("tests pass"). `sd-grill` is that interrogation written down —
-   one question per turn, a closed set of answer classes, and a ledger that
-   keeps what the user stated apart from what you supplied. Use it when the
-   intention is vague enough that filling the headings would mean guessing;
-   whether you use it or not, nothing here writes before those headings hold.
+   an intention ("tests pass"). Keep stated requirements apart from assumptions.
+   Do not restart an interview when a handoff or an existing decision supplies
+   the answer. In an authorized unattended run, record routine choices on the
+   item and continue under `WORKFLOW.md`'s stop conditions.
 2. **Write from the templates** in `skills/sd-plan/templates/` (`prd.md`,
    `design.md`, `implement.md`, `decision.md`, `work-README.md`). Create
    `<work>/README.md` from the template if the directory is new. Add
-   `design.md` only when the approach is not obvious from the PRD — a design
-   that restates requirements is a design nobody needed — and `implement.md`
-   only when the work is more than one landable step.
+   `design.md` or `implement.md` only when explicitly requested. Adapt the
+   templates to the selected work root's `.status-source` marker, including
+   when `--work-dir` changes that root. When it says `row`, keep progress in
+   the database and add no `status:` field. With `file` or no marker, add
+   `status: planning` for the legacy reader. Report an
+   unrecognized marker instead of falling back. Do not recreate retired
+   frontmatter from a template.
 3. **Review the plan.** Run `sd-review --scope planning`, which resolves the
    active `planning`/`in_progress` item's `prd.md`/`design.md`/`implement.md`
    and routes them to the reviewer the registry gives. This is the development
@@ -43,18 +51,17 @@ revert, not to retro-document work already merged.
    under a `## Review` heading in the item.
 4. **Promote.** `planning → ready` only when acceptance criteria are present
    and **no open `BLOCKING` line remains**. An unresolved blocking concern is a
-   stop, not a note.
+   stop, not a note. In a checkout using row status, write the transition
+   through `sd_db`; a missing item row is reported as missing, never replaced
+   by a status field or a GitHub issue.
 5. **Branch.** Create the branch and record it as `branch:` in the PRD
-   frontmatter. `status: in_progress` without `branch:` is a lint failure
-   (`sd-docs-lint` rule 2) and `sd_lib.status_report` reports it as an
-   inconsistency.
-6. **Sweep, on the first commit.** Move merged items to `archive/YYYY-MM/`,
-   and park any item idle in `planning` for more than **45 days with no
-   `branch:`** (R10-D1). A parked item keeps its directory under
-   `archive/YYYY-MM/`, gets `parked: <date> age-sweep` written into its own
-   frontmatter, and is recoverable with `git mv`. Print every item the sweep
-   touched — parked is not hidden. `sd-status --parked` lists them from that
-   field; never write a separate ledger.
+   frontmatter when work starts. An `in_progress` item still needs a branch
+   (`sd-docs-lint` rule 2); in a checkout using row status, the status itself
+   remains on the row.
+
+There is no automatic archive or parking step. `sd sweep` reports idle items
+without moving them or changing their status. Planning and the first commit
+leave unrelated work items where they are.
 
 ## Flags
 
@@ -64,7 +71,7 @@ revert, not to retro-document work already merged.
 | `--work-dir` | Work root other than `docs/work` |
 | `--worktree` | Create the branch in its own git worktree (one writer per checkout) |
 | `--from gh:owner/repo#123` / `--from jira:KEY-123` | Seed `## References` from a tracker item, resolved by `sd-trackers ref` |
-| `--from-suggestion` | Seed from a pending `sd-suggest` draft |
+| `--from-suggestion` | Reserved: seed from a local proposal note; not implemented |
 | `--from-proposal` | Seed from a skill proposal |
 
 ## Seeding from a tracker
@@ -98,10 +105,11 @@ interview, and leave its prose where it will still be current next month.
 - **Never accept a repo path.** The repository is the one enclosing cwd
   (R10-D6). A work item whose `branch:` resolves to a different checkout is a
   refusal with the path printed, never a silent `cd`.
-- **Never write outside `<work>/`** (plus `docs/decisions/` under `--decision`).
-  No `.claude/`, no `.trellis/`, no hooks, no labels, no managed gitignore
-  blocks, no bookkeeping commits, and never `AGENTS.md` or any other tracked
-  file the user did not ask you to change.
+- **Keep writes within the authorized scope.** Files belong under the selected
+  work root (plus `docs/decisions/` under `--decision`); database progress and
+  decision writes belong only to the current item and go through `sd_db`.
+  No unrelated rows, `.claude/`, `.trellis/`, hooks, labels, managed gitignore
+  blocks, bookkeeping commits, or `AGENTS.md` edits are authorized here.
 - **Never promote past an open `BLOCKING` line**, and never claim approval from
   a review lane that was skipped or that failed.
 - **In `mode: guest`, never write artifacts into the upstream tree** — the
@@ -121,7 +129,9 @@ There is no `bin/sd-plan` yet; the templates ship and this procedure is carried
 out by the agent. `sd-review`, `sd-check`, `sd-status`, `sd-handoff`,
 `sd-trackers` and `sd-docs-lint` are real and callable today.
 
-`--from-suggestion` and `--from-proposal` have no resolution path yet. They land
-with `sd-suggest` and `sd-skill-adopt`; until then they are rows in the table
-above and nothing more, and improvising one is how a flag comes to mean whatever
-the last session decided it meant.
+`sd suggest add` can record a proposal on an existing imported work item, but
+`--from-suggestion` and `--from-proposal` have no resolution path yet. Do not
+invent one. `sd task add` captures a standalone task; it does not create or
+import a planning artifact. An artifact whose row has not been imported needs
+that prerequisite resolved before row-backed planning can continue.
+`sd-status` only reports; it does not import the item.

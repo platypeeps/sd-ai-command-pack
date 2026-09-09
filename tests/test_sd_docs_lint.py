@@ -281,7 +281,7 @@ class Rule4SpecIndexTests(LintFixture):
 
 
 class Rule5PullRequestLinkTests(LintFixture):
-    def test_green_work_line_resolving_with_no_unchecked_boxes(self) -> None:
+    def test_green_work_line_resolving_to_an_item(self) -> None:
         report = self.run_lint("Work: docs/work/2026-08-29-a-workable-item\n")
         self.assertEqual(report.failures, [])
 
@@ -304,6 +304,9 @@ class Rule5PullRequestLinkTests(LintFixture):
                 "Work: docs/work/2026-08-29-another-item\n"
             ),
         )
+
+    def test_red_empty_work_line(self) -> None:
+        self.assert_fails("Work: line is empty", pr_body="Work: \t\n")
 
     def test_red_the_none_form_is_no_longer_an_escape(self) -> None:
         """`none - <reason>` is now a path that does not resolve, and fails.
@@ -329,14 +332,33 @@ class Rule5PullRequestLinkTests(LintFixture):
     def test_red_path_outside_the_work_directory(self) -> None:
         self.assert_fails("is not a path under", pr_body="Work: docs/spec/backend\n")
 
-    def test_red_unchecked_box_in_the_item(self) -> None:
-        self.write_item(
+    def test_red_path_traversing_outside_the_work_directory(self) -> None:
+        self.assert_fails("is not a path under", pr_body="Work: docs/work/../spec/backend\n")
+
+    def test_red_symlink_outside_the_work_directory(self) -> None:
+        (self.work / "2026-08-30-escape").symlink_to(self.spec / "backend", target_is_directory=True)
+        self.assert_fails("is not a path under", pr_body="Work: docs/work/2026-08-30-escape\n")
+
+    def test_red_work_root_is_not_an_item(self) -> None:
+        self.assert_fails("does not resolve to a work item", pr_body="Work: docs/work\n")
+
+    def test_green_non_final_slice_with_later_acceptance_criteria_pending(self) -> None:
+        item = self.write_item(
             "2026-08-29-a-workable-item",
-            GOOD_PRD.replace("- [x] the thing works", "- [ ] the thing works"),
+            GOOD_PRD.replace(
+                "- [x] the thing works",
+                "- [x] database reads work\n- [ ] dashboard controls work",
+            ),
         )
-        self.assert_fails(
-            "unchecked box", pr_body="Work: docs/work/2026-08-29-a-workable-item\n"
+        (item / "implement.md").write_text(
+            "# Implementation\n\n- [x] Add database reads\n- [ ] Add dashboard controls\n",
+            encoding="utf-8",
         )
+        report = self.run_lint(
+            "Add database reads; dashboard controls follow in the next slice.\n\n"
+            "Work: docs/work/2026-08-29-a-workable-item\n"
+        )
+        self.assertEqual(report.failures, [])
 
 
 class RepositoryTests(unittest.TestCase):

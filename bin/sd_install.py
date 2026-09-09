@@ -1262,6 +1262,10 @@ def provision_library(ctx: Context, out) -> tuple[bool, str]:
     ref, why = library_pin(checkout)
     if not ref:
         return False, f"sd_db not installed, trials unavailable: {why}"
+    refusal = sibling("sd_library_guard").downgrade_refusal(
+        ctx.checkout, checkout, ref, sibling("sd_lib").git_output)
+    if refusal:
+        return False, refusal
     target = f"git+file://{checkout}@{ref}#subdirectory={LIBRARY_RELATIVE}"
     dirty = " (uncommitted work in that checkout is not installed)" if sibling(
         "sd_lib"

@@ -42,6 +42,7 @@ module raises and lets each caller decide.
 from __future__ import annotations
 
 import pathlib
+import sys
 
 #: Why the reader cannot run yet, when it cannot. Printed by `bin/sd-note`;
 #: swallowed by the hooks, which exit 0 silently rather than break a session.
@@ -77,7 +78,15 @@ def library():
         # run `make setup`. The ImportError below is a supported state.
         import sd_db
     except ImportError:
-        raise RowsRefusal(NOT_INSTALLED) from None
+        import sd_lib
+
+        for path in sd_lib._provisioned_library_paths():
+            if path not in sys.path:
+                sys.path.append(path)
+        try:
+            import sd_db
+        except ImportError:
+            raise RowsRefusal(NOT_INSTALLED) from None
     return sd_db
 
 
@@ -95,14 +104,26 @@ def open_followups(connection, repo: str) -> list[dict]:
     in the same second are ordered by the sequence they were written in, so a
     session gets its own list back in the order it named things.
     """
-    rows = connection.execute(
-        "SELECT note.id AS id, note.body AS body, note.timestamp AS timestamp, "
-        "item.title AS title, item.status AS status "
-        "FROM note JOIN item ON item.id = note.item "
-        "WHERE note.kind = ? AND note.resolved_at IS NULL AND item.repo = ? "
-        "ORDER BY note.timestamp, note.id",
-        (FOLLOWUP, repo),
-    )
+    # Older stores have no parking column. Paused work must stay out of the
+    # resumed session's action list just as it stays out of Today.
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(item)")}
+    if "parked_at" in columns:
+        query = (
+            "SELECT note.id AS id, note.body AS body, note.timestamp AS timestamp, "
+            "item.title AS title, item.status AS status "
+            "FROM note JOIN item ON item.id = note.item "
+            "WHERE note.kind = ? AND note.resolved_at IS NULL AND item.repo = ? "
+            "AND item.parked_at IS NULL ORDER BY note.timestamp, note.id"
+        )
+    else:
+        query = (
+            "SELECT note.id AS id, note.body AS body, note.timestamp AS timestamp, "
+            "item.title AS title, item.status AS status "
+            "FROM note JOIN item ON item.id = note.item "
+            "WHERE note.kind = ? AND note.resolved_at IS NULL AND item.repo = ? "
+            "ORDER BY note.timestamp, note.id"
+        )
+    rows = connection.execute(query, (FOLLOWUP, repo))
     # `status` is filtered here and not in an `IN (...)` clause, which would
     # need the placeholders interpolated into the statement. Every value would
     # still be a bound parameter, but a query built by string formatting is a
@@ -120,6 +141,15 @@ def item_for(connection, sd_db, root, item_dir):
     """
     import sd_lib
 
+    try:
+        from sd_db.progress import item_for_artifact
+    except ImportError:
+        pass
+    else:
+        base = sd_lib.main_worktree_root(root)
+        relative = (item_dir / "prd.md").relative_to(root).as_posix()
+        row = item_for_artifact(connection, str(base), relative)
+        return None if row is None else dict(row)
     identity = sd_lib.external_id(root, item_dir)
     row = sd_db.writes.item_by_external(connection, sd_lib.ITEM_ROW_SOURCE, identity)
     return None if row is None else dict(row)

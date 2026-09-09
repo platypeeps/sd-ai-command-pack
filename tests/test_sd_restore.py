@@ -34,6 +34,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
@@ -144,12 +145,23 @@ class TheCommandLine(unittest.TestCase):
         self.assertIn("reimport", completed.stdout)
         self.assertIn("resume", completed.stdout)
 
-    def test_a_refusal_exits_one_and_says_why(self) -> None:
+    def test_reimport_help_names_preview_default_and_required_apply_fingerprint(self) -> None:
         completed = subprocess.run(
-            [str(REPO_ROOT / "bin" / "sd"), "restore", "resume"],
+            [str(REPO_ROOT / "bin" / "sd"), "restore", "reimport", "--help"],
             capture_output=True, text=True, input="",
-            env={**os.environ, "PYTHONPATH": ""},
         )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        help_text = " ".join(completed.stdout.split())
+        self.assertIn("the default", help_text)
+        self.assertIn("required to apply", help_text)
+
+    def test_a_refusal_exits_one_and_says_why(self) -> None:
+        with tempfile.TemporaryDirectory() as fixture_home:
+            completed = subprocess.run(
+                [str(REPO_ROOT / "bin" / "sd"), "restore", "resume"],
+                capture_output=True, text=True, input="",
+                env={**os.environ, "HOME": fixture_home, "PYTHONPATH": ""},
+            )
         # Not which refusal -- that depends on whether this machine has run
         # the installer and whether it has a database. That it is a refusal
         # and not a traceback is the contract, and it holds either way.
@@ -249,14 +261,12 @@ class AgainstADatabase(unittest.TestCase):
         self.assertIn("sd restore reimport", message)
         self.assertEqual(len(self.sd_db.unresolved_state(self.connection, "restore")), 1)
 
-    def test_a_verified_row_in_the_snapshot_proves_the_repository(self) -> None:
+    def test_old_verified_row_does_not_clear_a_still_retiring_authority(self) -> None:
         self.sd_db.upsert_repo(self.connection, "/repos/one", status_source="retiring")
-        self.sd_db.record_state(
-            self.connection, "verified", key="/repos/one:status_source", body="hash")
+        self.sd_db.record_state(self.connection, "verified", key="/repos/one:status_source", body="old hash")
         self.open_restore()
-        status, out, _err = run(sd_restore.resume)
-        self.assertEqual(status, 0)
-        self.assertIn("Dispatch resumes", out)
+        with self.assertRaisesRegex(sd_restore.RestoreRefusal, "still retiring"):
+            sd_restore.resume(argparse.Namespace())
 
     def test_two_unresolved_restores_are_not_this_command_s_call(self) -> None:
         self.open_restore("2026-09-05")
@@ -278,16 +288,23 @@ class AgainstADatabase(unittest.TestCase):
             sd_restore.reimport(argparse.Namespace(repository="/repos/one"))
         self.assertIn("not awaiting a reimport", str(raised.exception))
 
-    def test_reimport_reports_what_is_held_and_says_the_import_is_not_here(self) -> None:
-        """The verb group lands now; the per-kind import lands with the
-        migration that wrote the rows, and says so rather than pretending."""
+    def test_reimport_refuses_unavailable_sources_without_a_traceback(self) -> None:
         self.sd_db.upsert_repo(self.connection, "/repos/one", status_source="retiring")
         self.open_restore()
-        status, out, _err = run(sd_restore.reimport, repository="/repos/one")
-        self.assertEqual(status, 1)
-        self.assertIn("retiring for status_source", out)
-        self.assertIn("rehearsal rows", out)
-        self.assertIn("rerun the sitting", out)
+        with self.assertRaisesRegex(sd_restore.RestoreRefusal, "repository is unavailable"):
+            sd_restore.reimport(argparse.Namespace(repository="/repos/one"))
+
+    def test_unqualified_reimport_previews_and_only_a_fingerprint_requests_apply(self) -> None:
+        self.open_restore()
+        result = {"authorities": {"status_source": 1}, "fingerprint": "fixture-fingerprint",
+                  "dry_run": True, "warning": "Preview only."}
+        for arguments, preview in (({}, True), ({"if_fingerprint": "fixture-fingerprint"}, False),
+                                   ({"if_fingerprint": "fixture-fingerprint", "dry_run": True}, True)):
+            with self.subTest(arguments=arguments), patch("sd_db.recovery.reimport", return_value=result) as recover:
+                status, _, _ = run(sd_restore.reimport, repository="/repos/one", **arguments)
+                self.assertEqual(status, 0)
+                self.assertEqual(recover.call_args.kwargs["dry_run"], preview)
+                self.assertEqual(recover.call_args.kwargs["expected_fingerprint"], arguments.get("if_fingerprint"))
 
 
 if __name__ == "__main__":

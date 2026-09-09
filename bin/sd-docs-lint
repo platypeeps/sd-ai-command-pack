@@ -14,8 +14,9 @@ Five rules, no more (adding a sixth is a decision record, not a patch):
 4. Spec index    -- every spec directory has an `index.md` that links each of
                     its siblings, so no page can be reached only by guessing.
 5. PR link       -- when a pull request names the item it advances, that item
-                    exists and nothing in it is still unchecked. A change with
+                    exists under the work directory. A change with
                     no item carries no `Work:` line and is not asked for one.
+                    Delivery evidence belongs to `sd-ship --deliver`.
 
 Rules 1 through 4 read the tree. Rule 5 needs the pull request body, so it runs
 only when `--pr-body` supplies one and reports itself as not run otherwise.
@@ -44,7 +45,6 @@ DECISION_FILE_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>[a-z0-9]+(
 ARCHIVE_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 ACCEPTANCE_HEADING_RE = re.compile(r"^#{1,6}\s+.*acceptance criteri", re.IGNORECASE)
 DECISION_HEADING_RE = re.compile(r"^#{1,6}\s+decision\b", re.IGNORECASE)
-UNCHECKED_BOX_RE = re.compile(r"^\s*[-*]\s+\[ \]")
 # A marker, not a word. `\bBLOCKING\b` matched the token anywhere on a line,
 # so an item whose own log discussed blocking findings could never be
 # `in_progress` -- confirmed on 2026-09-06 by this repository's item, whose
@@ -260,7 +260,11 @@ def check_spec_index(spec_root: pathlib.Path, report: Report) -> None:
 def check_pr_link(
     repo: pathlib.Path, work_root: pathlib.Path, body: str | None, report: Report
 ) -> None:
-    """Rule 5."""
+    """Rule 5. `Work:` associates a pull request with the item it advances.
+
+    A slice can land while later acceptance criteria remain open. Delivery
+    evidence is checked by `sd-ship --deliver`, not by this association.
+    """
     if body is None:
         report.note("rule 5 PR link: no --pr-body supplied, not run")
         return
@@ -284,23 +288,11 @@ def check_pr_link(
     except ValueError:
         report.fail("pull request body", f"Work: {value} is not a path under {work_root}")
         return
-    if not candidate.is_dir():
+    if not candidate.is_dir() or not (candidate / "prd.md").is_file():
         report.fail("pull request body", f"Work: {value} does not resolve to a work item")
         return
 
-    unchecked = []
-    for document in sorted(candidate.glob("*.md")):
-        for number, line in enumerate(document.read_text(encoding="utf-8").split("\n"), start=1):
-            if UNCHECKED_BOX_RE.match(line):
-                unchecked.append(f"{document.relative_to(repo)}:{number}")
-    if unchecked:
-        report.fail(
-            "pull request body",
-            f"Work: {value} still has {len(unchecked)} unchecked box(es), first at {unchecked[0]}",
-        )
-        return
-
-    report.note(f"rule 5 PR link: {value} resolves with no unchecked boxes")
+    report.note(f"rule 5 PR link: {value} resolves to a work item")
 
 
 CITATION_RE = re.compile(r"`(?P<path>[A-Za-z0-9_./-]+\.md):(?P<start>\d+)(?:-(?P<end>\d+))?`")

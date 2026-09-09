@@ -469,6 +469,24 @@ class TheLibraryDoor(unittest.TestCase):
         self.assertIn("would install sd_db from", report)
         self.assertFalse(marker.exists())
 
+    def test_provisioning_preserves_a_newer_installed_database_library(self) -> None:
+        marker = self.home / "pip-ran"
+        self.interpreter(f'#!/bin/sh\ntouch "{marker}"\n')
+        source = self.library()
+        schema = source / "sd_db/schema.py"
+        schema.parent.mkdir()
+        schema.write_text("SCHEMA_VERSION = 2\n")
+        self.git("add", "-A")
+        self.git("commit", "-m", "schema two")
+        installed = self.checkout / ".venv/lib/python3.13/site-packages/sd_db/schema.py"
+        installed.parent.mkdir(parents=True)
+        installed.write_text("SCHEMA_VERSION = 3\n")
+        ok, report = sd_install.provision_library(self.context(), io.StringIO())
+        self.assertFalse(ok)
+        self.assertIn("preserving installed sd_db schema 3", report)
+        self.assertFalse(marker.exists())
+        self.assertEqual(installed.read_text(), "SCHEMA_VERSION = 3\n")
+
     def test_an_interpreter_that_cannot_run_is_reported_not_raised(self) -> None:
         # Present and executable to the guard above, unrunnable to the kernel:
         # an interpreter line naming a program that does not exist.

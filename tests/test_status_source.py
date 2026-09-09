@@ -256,6 +256,48 @@ class AMarkerNothingReads(Fixture):
 class TheRowDecides(Fixture):
     """Requirement 2, on a machine that has the database."""
 
+    def test_explicit_relink_preserves_status_and_followups(self) -> None:
+        import sd_db.progress as progress
+        import sd_handoff_rows
+
+        self.marker("row")
+        connection = self.seed("in_progress")
+        sd_db.upsert_repo(connection, str(self.root), status_source="row")
+        row = sd_db.writes.item_by_external(connection, sd_lib.ITEM_ROW_SOURCE, self.identity())
+        note = sd_db.add_note(connection, row["id"], "followup", "Keep the original history")
+        moved = self.work / "2026-09-08-renamed"
+        self.item.rename(moved)
+        progress.relink_artifact(connection, row["id"], "docs/work/2026-09-08-renamed/prd.md")
+        self.assertEqual(sd_lib.status_report(moved).status, "in_progress")
+        linked = sd_handoff_rows.item_for(connection, sd_db, self.root, moved)
+        self.assertEqual(linked["id"], row["id"])
+        self.assertEqual(linked["external_id"], self.identity())
+        self.assertIn(note, [entry["id"] for entry in sd_db.reads.item_notes(connection, row["id"])])
+
+    def test_archive_location_does_not_override_a_live_row(self) -> None:
+        self.marker("row")
+        self.seed("in_progress")
+        archived = self.work / "archive" / "2026-09" / ITEM
+        archived.parent.mkdir(parents=True)
+        self.item.rename(archived)
+        report = sd_lib.status_report(archived)
+        self.assertTrue(report.archived)
+        self.assertEqual(report.status, "in_progress")
+
+    def test_verified_cancellation_needs_no_status_only_commit(self) -> None:
+        import sd_db.progress as progress
+
+        self.marker("row")
+        self.write(prd(None))
+        connection = self.seed("in_progress")
+        sd_db.upsert_repo(connection, str(self.root), status_source="row")
+        row = sd_db.writes.item_by_external(connection, sd_lib.ITEM_ROW_SOURCE, self.identity())
+        progress.cancel_work(connection, row["id"], reason="No longer needed")
+        with mock.patch.object(sd_lib, "delivered", side_effect=AssertionError("asked Git")):
+            item = self.only()
+        self.assertEqual(item.status, "done")
+        self.assertEqual(item.inconsistencies, ())
+
     def test_the_row_answers_and_the_line_does_not(self) -> None:
         self.marker("row")
         self.seed("ready")
@@ -314,7 +356,7 @@ class TheRowDecides(Fixture):
         self.seed("planning")
         rows = sd_lib.Rows(self.root)
         self.addCleanup(rows.close)
-        rows._read = lambda *_: {"status": "shipped"}
+        rows._artifact_read = lambda *_: {"status": "shipped"}
         word, problem = rows.status(self.item)
         self.assertEqual(word, "")
         self.assertIn("'shipped'", problem)
@@ -328,7 +370,7 @@ class TheRowDecides(Fixture):
         def refuse(*_: Any) -> Any:
             raise RuntimeError("the database is locked")
 
-        rows._read = refuse
+        rows._artifact_read = refuse
         word, problem = rows.status(self.item)
         self.assertEqual(word, "")
         self.assertIn("the database is locked", problem)

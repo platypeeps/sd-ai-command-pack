@@ -333,11 +333,16 @@ class WhatItRefuses(SuggestCase):
         self.assertEqual([], self.proposals())
 
     def test_add_refuses_an_item_the_database_has_never_seen(self):
-        """A directory with no row is a `sd-status` that has not run, and says so."""
+        """Missing import refuses capture; running a read-only report cannot repair it."""
         (self.root / sd_lib.WORK_DIR / "unseen").mkdir()
+        items_before = list(self.connection.execute("SELECT id FROM item"))
         with self.assertRaises(sd_handoff_rows.RowsRefusal) as raised:
             self.run_verb(sd_suggest.suggest_add, item="unseen", body="a thing")
-        self.assertIn("`sd-status`", str(raised.exception))
+        self.assertIn("Import the work item before recording a proposal", str(raised.exception))
+        self.assertIn("`sd-status` only reports", str(raised.exception))
+        self.assertEqual(items_before, list(self.connection.execute("SELECT id FROM item")))
+        self.assertEqual([], self.proposals())
+        self.assertEqual([], self.issue_calls())
 
     def test_publish_refuses_a_note_id_that_is_not_a_proposal(self):
         """A followup id is not a suggestion, and filing one would be a surprise."""

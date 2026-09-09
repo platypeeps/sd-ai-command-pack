@@ -98,24 +98,14 @@ def open_restore(sd_db, connection):
 def unproven_repositories(connection, restore_row) -> list[tuple[str, str]]:
     """Repositories the snapshot cannot prove it holds the rows for.
 
-    A repository is proven for a kind when the snapshot carries a `verified`
-    row for that repository and kind written *before* the snapshot. Without
-    one the column stays `retiring` and every writer refuses.
+    A still-retiring authority needs a successful replay. An old receipt alone
+    must not bypass it; reimport switches ownership in the receipt transaction.
     """
-    verified = {
-        (row["key"] or "").split("\t", 1)[0]: row["timestamp"]
-        for row in connection.execute(
-            "SELECT key, timestamp FROM state WHERE kind = 'verified'"
-        )
-    }
-    unproven = []
-    for row in connection.execute("SELECT path, status_source, pieces_source FROM repo"):
-        for column in AUTHORITY:
-            if row[column] != RETIRING:
-                continue
-            marker = f"{row['path']}:{column}"
-            if marker not in verified and row["path"] not in verified:
-                unproven.append((row["path"], column))
+    unproven = [
+        (row["path"], column)
+        for row in connection.execute("SELECT path, status_source, pieces_source FROM repo")
+        for column in AUTHORITY if row[column] == RETIRING
+    ]
     del restore_row
     return unproven
 
@@ -149,50 +139,30 @@ def blocked_assignments(connection) -> list[tuple[int, str]]:
 
 
 def reimport(args: argparse.Namespace) -> int:
-    """Reconcile one repository's source authority against its checkout.
-
-    This is the verb group item C's own pull request builds the
-    piece-specific half of. What lands here is the shape and the refusals:
-    which repository, whether the snapshot can prove it, and what it means
-    when it cannot. Importing a kind's lines from each row's `source_commit`
-    belongs to the migration that wrote those rows, and arrives with it.
-    """
+    """Rebuild one repository from verified historical source evidence."""
     sd_db = _library()
     connection = _open(sd_db)
     try:
-        restore_row = open_restore(sd_db, connection)
-        row = connection.execute(
-            "SELECT path, status_source, pieces_source FROM repo WHERE path = ?",
-            (args.repository,),
-        ).fetchone()
-        if row is None:
-            known = [entry["path"] for entry in connection.execute("SELECT path FROM repo")]
-            raise RestoreRefusal(
-                f"{args.repository} is not a registered repository. "
-                + (f"Registered: {', '.join(known)}." if known else "None are registered.")
+        open_restore(sd_db, connection)
+        try:
+            from sd_db.recovery import reimport as recover_repository
+        except ImportError:
+            raise RestoreRefusal("sd_db recovery support is outdated; provision the current shared library") from None
+        try:
+            fingerprint = getattr(args, "if_fingerprint", None)
+            result = recover_repository(
+                connection, args.repository,
+                dry_run=getattr(args, "dry_run", False) or fingerprint is None,
+                expected_fingerprint=fingerprint,
             )
-        retiring = [column for column in AUTHORITY if row[column] == RETIRING]
-        if not retiring:
-            raise RestoreRefusal(
-                f"{args.repository} is not awaiting a reimport: its "
-                f"status_source is {row['status_source']!r} and its "
-                f"pieces_source is {row['pieces_source']!r}. Nothing here is "
-                f"held back by the restore of {restore_row['key']}."
-            )
-        print(
-            f"sd: {args.repository} is {RETIRING} for "
-            f"{', '.join(retiring)} after the restore of {restore_row['key']}."
-        )
-        print(
-            "sd: the snapshot predates the sitting's verify, so its rows are "
-            "rehearsal rows and every writer refuses."
-        )
-        print(
-            "sd: reimporting a kind's lines from each row's source_commit is "
-            "the migration's half and is not installed here yet; until it is, "
-            "rerun the sitting for this repository."
-        )
-        return 1
+        except sd_db.SdDbError as error:
+            raise RestoreRefusal(str(error)) from None
+        detail = ", ".join(f"{name}: {count} row(s)" for name, count in result["authorities"].items())
+        verb = "would recover" if result.get("dry_run") else "recovered"
+        print(f"sd: {verb} {args.repository} ({detail}).")
+        print(f"sd: fingerprint {result['fingerprint']}")
+        print(f"sd: {result['warning']}")
+        return 0
     finally:
         connection.close()
 

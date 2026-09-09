@@ -89,12 +89,10 @@ class EnvironmentTests(ReviewFixture):
         self.assertEqual(child, {"PATH": "/bin"})
         self.assertEqual(sd_review.scrubbed_names(parent), ("CODEX_API_KEY", "CODEX_ACCESS_TOKEN"))
 
-    def test_openai_api_key_is_not_scrubbed_and_is_not_a_refusal(self) -> None:
-        # The codex CLI does not read OPENAI_API_KEY. Removing it, or refusing
-        # because it is set, would be a false positive on any machine that has
-        # it exported for an unrelated tool -- which is most of them.
+    def test_openai_api_key_needs_a_declaration_but_is_not_a_billing_refusal(self) -> None:
         parent = {"PATH": "/bin", "OPENAI_API_KEY": "sk-unrelated"}
-        self.assertEqual(sd_review.child_environment(parent), parent)
+        self.assertEqual(sd_review.child_environment(parent), {"PATH": "/bin"})
+        self.assertEqual(sd_review.child_environment(parent, ("OPENAI_API_KEY",)), parent)
         self.assertEqual(sd_review.scrubbed_names(parent), ())
         self.assertNotIn("OPENAI_API_KEY", sd_review.CODEX_METERED_ENV)
 
@@ -123,7 +121,7 @@ class EnvironmentTests(ReviewFixture):
         handed = codex_calls[0]["env"]
         self.assertNotIn("CODEX_API_KEY", handed)
         self.assertNotIn("CODEX_ACCESS_TOKEN", handed)
-        self.assertEqual(handed["OPENAI_API_KEY"], "sk-unrelated")
+        self.assertNotIn("OPENAI_API_KEY", handed)
         self.assertEqual(
             result["outcomes"][0]["scrubbed_env_names"],
             ["CODEX_API_KEY", "CODEX_ACCESS_TOKEN"],

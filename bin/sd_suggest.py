@@ -74,7 +74,8 @@ def suggest_add(args) -> int:
         if item is None:
             raise rows.RowsRefusal(
                 f"the database holds no {sd_lib.ITEM_ROW_SOURCE} row for "
-                f"{item_dir.name}. Run `sd-status` in this checkout first."
+                f"{item_dir.name}. Import the work item before recording a proposal; "
+                "`sd-status` only reports."
             )
         note = sd_db.add_note(connection, item["id"], PROPOSAL, f"[{where}] {args.body}")
     finally:
