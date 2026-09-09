@@ -1148,7 +1148,7 @@ log, not here.
   (`bin/sd-status:903`), derived from the registry instead; the residue
   detectors (`bin/sd-status:946-1004`) after one clean run across the fleet;
   the history comments in `Makefile`; `--stash-ref` (`bin/sd-handoff:374`) and
-  `carrier_branches` (`bin/sd-status:871-894`); `sd-status`'s `_git` is taken --
+  `carrier_branches` (`bin/sd-status:855-878`); `sd-status`'s `_git` is taken --
   it now calls `sd_lib.git_output`, which already carried the timeout.
   `bin/sd-pr-state` remains; `bin/sd-handoff` and `bin/sd-handoff-restore` are
   not cuts, both pinned self-contained by their own suites; `bin/sd-docs-lint:52,72-82,148` imports the vocabulary, the
@@ -3768,10 +3768,10 @@ from a number the operator types.
     (`bin/sd_setup_github.py:188-260`, 73) with `resolve_pin`
     (`bin/sd_setup_github.py:77-95`, 19) and `action_reference`
     (`bin/sd_setup_github.py:98-111`, 14). So does the `url` client's
-    now-spent analogue: `codex_argv` (`bin/sd-review:682-715`, 34),
-    `subprocess_runner` (`bin/sd-review:567-589`, 23), `_finding`
+    now-spent analogue: `codex_argv` (`bin/sd-review:650-683`, 34),
+    `subprocess_runner` (`bin/sd-review:541-565`, 23), `_finding`
     (`bin/sd-review:771-807`, 37) and `parse_findings`
-    (`bin/sd-review:760-779`, 20) still total 114. Its transport line was if
+    (`bin/sd-review:803-829`, 20) still total 114. Its transport line was if
     anything generous — the one built stdlib-HTTP transport in `bin/`,
     `read_source` (`bin/sd-skill-adopt:347-365`), is 19.
   - **119, reserved, in-flight discovery.** The predicate crosses one seam:
@@ -4037,7 +4037,7 @@ from a number the operator types.
       holds a connection the library cannot serve. `status_source` asks the
       same question of `docs/work/.status-source` and a row.
     - the row-to-`StatusReport` adapter — **38**. `_adapt`
-      (`bin/sd_registry.py:272-309`, 38) is the one built instance of turning
+      (`bin/sd_registry.py:260-297`, 38) is the one built instance of turning
       `sd_db` rows into this pack's frozen dataclasses. The file side it must
       parallel is `_status_report` (`bin/sd_lib.py:738-763`, 26) with
       `status_report` (`bin/sd_lib.py:812-828`, 17), and the row side has to answer one
@@ -4052,7 +4052,7 @@ from a number the operator types.
       re-reserved: it maps authors onto vendors and `delivered` has no
       equivalent of that.
     - `bin/sd-status`'s row read and its stale line — **38**.
-      `residue_section` (`bin/sd-status:990-1008`, 19) is a section that
+      `residue_section` (`bin/sd-status:970-988`, 19) is a section that
       enumerates a condition and names it, which is what "report the line by
       name as stale" is, and `_render_work` (`bin/sd-status`, 24) is
       the rendering half that has to say which source answered.
