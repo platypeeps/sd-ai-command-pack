@@ -215,3 +215,16 @@ The preparatory commit contains this record, `BIN_CAP`, and its appended history
 Implementation follows on the same delivery branch under the existing closeout exception.
 All existing validation, review, reservation-history, and merge requirements remain enforced.
 This capacity correction grants no additional provider calls.
+
+## Review history input bound, 2026-09-10
+
+The separate 65,536-byte findings limit refused complete retained history before the existing verification budget was reached.
+Remove that smaller limit and preserve every finding and its provenance.
+Enforce the existing 2,000,000-byte UTF-8 verification-prompt limit after all prompt assembly, including empty and advisory-only history.
+This check precedes explanation, dry-run output, deterministic checks, and provider execution.
+The bounded prior-report loader, current-source reads, incremental prompt checks, and separate review-material guard remain in place.
+
+The runtime change removes two lines and adds two lines in `bin/sd-review`.
+Runtime inventory, line ceilings, review depth, and spent-pass history remain unchanged.
+These byte limits do not define an aggregate URL-request limit, model token budget, or platform command-argument limit.
+This correction does not discard history or authorize additional provider calls.

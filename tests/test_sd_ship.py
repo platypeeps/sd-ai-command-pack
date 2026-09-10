@@ -1235,7 +1235,7 @@ roles:
         from tests.test_sd_review import sd_review
         _, _, prior = self.spent_reviews()
         operation = self.operation()
-        prior[0]["report"]["findings"] = [{"path": "src.py", "line": 1, "summary": "x" * 65536,
+        prior[0]["report"]["findings"] = [{"path": "src.py", "line": 1, "summary": "x" * (sd_review.MAX_OUTPUT_BYTES - 10000),
                                              "disposition": "blocking", "severity": "high", "family": "correctness"}]
         operation.save(passes=prior, review_preflight_error={"stage": "planning", "kind": "old"})
         head = _git(self.root, "rev-parse", "HEAD")
@@ -1248,7 +1248,8 @@ roles:
             def no_execution(*_args):
                 raise AssertionError("check or provider dispatched during invalid planning")
             try:
-                report = sd_review.review(root, args, no_execution, self.environment)
+                with patch.object(sd_review, "local_conventions", return_value="fixture convention " + "y" * 20000):
+                    report = sd_review.review(root, args, no_execution, self.environment)
             except sd_review.UsageError as error:
                 return subprocess.CompletedProcess(argv, 2, "", str(error))
             return subprocess.CompletedProcess(argv, 0, json.dumps(report), "")
@@ -1257,7 +1258,7 @@ roles:
         self.assertEqual(stages, [True])
         failed = self.operation().state
         self.assertEqual(failed["passes"], before["passes"])
-        self.assertEqual(failed["review_preflight_error"]["stderr"]["tail"], "prior review findings exceed the bounded verification input")
+        self.assertEqual(failed["review_preflight_error"]["stderr"]["tail"], "fix verification evidence exceeds the bounded input")
         self.assertEqual(failed["review_preflight_error"]["exit_code"], 2)
         prior[0]["report"]["findings"][0]["summary"] = "bounded blocker"
         operation.save(passes=prior)

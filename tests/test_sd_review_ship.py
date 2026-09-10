@@ -6,6 +6,7 @@ import json
 import os
 import pwd
 import subprocess
+from unittest.mock import patch
 
 from tests.test_sd_review import FakeRunner, ReviewFixture, namespace, sd_review
 
@@ -93,13 +94,13 @@ class FixReviewTests(ReviewFixture):
         self.assertTrue(result["resume_report_digest"])
         self.assertIsNone(result["verification_report_digest"])
 
-    def test_explain_refuses_oversized_resume_findings_and_current_source(self):
+    def test_explain_refuses_oversized_resume_report_and_current_source(self):
         root, first = self.branch()
         report = self.tmp / "prior.json"
         row = {"path": "src.py", "line": 1, "severity": "high", "family": "correctness",
-               "disposition": "blocking", "summary": "x" * 65536}
+               "disposition": "blocking", "summary": "x" * (sd_review.MAX_OUTPUT_BYTES + 1)}
         prior = {"scope": "branch", "subject": {"head": first}, "findings": [row], "authored_with": []}
-        for oversized in ("findings", "source"):
+        for oversized in ("report", "source"):
             if oversized == "source":
                 row["summary"] = "original blocker"
                 (root / "src.py").write_text("x" * (sd_review.MAX_OUTPUT_BYTES + 1))
@@ -110,6 +111,69 @@ class FixReviewTests(ReviewFixture):
                     sd_review.review(root, namespace(scope="branch", resume_report=str(report), explain=explain),
                                      runner, self.environment(), self.chatgpt_home())
                 self.assertEqual(runner.calls, [])
+
+    def test_history_over_64k_preserves_every_raw_finding_and_provenance(self):
+        root, first = self.branch()
+        self.commit(root, "other.py", "unrelated_change = True\n")
+        findings = [{"path": "src.py", "line": 1, "disposition": "blocking", "summary": "x" * 1500,
+                     "prior_review": {"pass": index, "head": first, "backend": "original", "status": "blocking"}}
+                    for index in range(60)]
+        prior = {"scope": "branch", "subject": {"head": first}, "status": "blocking",
+                 "findings": findings, "authored_with": []}
+        evidence = json.dumps(findings, sort_keys=True)
+        self.assertGreater(len(evidence.encode()), 65536)
+        report = self.tmp / "large-prior.json"
+        original = json.dumps(prior).encode()
+        report.write_bytes(original)
+        for mode in ("resume", "verify"):
+            kwargs = {"resume_report": str(report)} if mode == "resume" else {"verify_report": str(report), "base": first}
+            runner = FakeRunner()
+            with self.subTest(mode=mode):
+                result = sd_review.review(root, namespace(scope="branch", **kwargs), runner,
+                                          self.environment(), self.chatgpt_home())
+                self.assertEqual(result["status"], "clean")
+                prompts = [call["argv"][-1] for call in runner.calls if call["argv"][0] == "codex"]
+                self.assertEqual(len(prompts), 1)
+                self.assertIn("Prior findings:\n" + evidence, prompts[0])
+                recovered, _ = json.JSONDecoder().raw_decode(prompts[0].split("Prior findings:\n", 1)[1])
+                self.assertEqual(recovered, findings)
+                self.assertIn("the_original_defect = True", prompts[0])
+                self.assertEqual(report.read_bytes(), original)
+
+    def test_final_prompt_bound_applies_without_blocking_history_before_any_dispatch(self):
+        root, first = self.branch()
+        report = self.tmp / "prior.json"
+        for history in (None, [], [{"path": "src.py", "disposition": "advisory", "summary": "advice"}]):
+            kwargs = {}
+            if history is not None:
+                report.write_text(json.dumps({"scope": "branch", "subject": {"head": first},
+                                              "findings": history, "authored_with": []}))
+                kwargs["resume_report"] = str(report)
+            for text in ("x" * sd_review.MAX_OUTPUT_BYTES, "é" * (sd_review.MAX_OUTPUT_BYTES // 2 + 1)):
+                for explain in (True, False):
+                    runner = FakeRunner()
+                    with self.subTest(history=history, multibyte=text[0] == "é", explain=explain), \
+                            patch.object(sd_review, "local_conventions", return_value=text), \
+                            self.assertRaisesRegex(sd_review.UsageError, "fix verification evidence exceeds the bounded input"):
+                        sd_review.review(root, namespace(scope="branch", explain=explain, **kwargs), runner,
+                                         self.environment(), self.chatgpt_home())
+                    self.assertEqual(runner.calls, [])
+
+    def test_cumulative_current_source_remains_bounded_before_any_dispatch(self):
+        root, first = self.branch()
+        report = self.tmp / "prior.json"
+        findings = [{"path": name, "disposition": "blocking", "summary": "unchanged blocker"}
+                    for name in ("src.py", "other.py")]
+        for finding in findings:
+            (root / finding["path"]).write_text("x" * (sd_review.MAX_OUTPUT_BYTES // 2))
+        report.write_text(json.dumps({"scope": "branch", "subject": {"head": first},
+                                      "findings": findings, "authored_with": []}))
+        for explain in (True, False):
+            runner = FakeRunner()
+            with self.subTest(explain=explain), self.assertRaisesRegex(sd_review.UsageError, "fix verification evidence exceeds the bounded input"):
+                sd_review.review(root, namespace(scope="branch", resume_report=str(report), explain=explain), runner,
+                                 self.environment(), self.chatgpt_home())
+            self.assertEqual(runner.calls, [])
 
     def test_resume_refuses_fix_only_or_unrelated_prior_head(self):
         root, first = self.branch()
