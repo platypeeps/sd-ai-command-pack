@@ -848,7 +848,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # above it. That is the shape the number should have.
 # Approved additional controls: docs/workflow-control-capacity.md. Keep this
 # capacity decision separate from the implementation when publishing.
-BIN_CAP = 20_733
+BIN_CAP = 20_745
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
 # R11-D29, re-derived 2026-09-03 with the itemisation R11-D24's clause asks
 # for: 4,190 measured on `main`, 158 measured on the branch that carries the
@@ -1005,6 +1005,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
         ("2026-09-09", 20_475),
         ("2026-09-09", 20_731),
         ("2026-09-09", 20_733),
+        ("2026-09-10", 20_745),
     ),
     "DASHBOARD_CAP": (
         ("2026-08-30", 2_500),

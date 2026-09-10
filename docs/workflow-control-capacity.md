@@ -228,3 +228,30 @@ The runtime change removes two lines and adds two lines in `bin/sd-review`.
 Runtime inventory, line ceilings, review depth, and spent-pass history remain unchanged.
 These byte limits do not define an aggregate URL-request limit, model token budget, or platform command-argument limit.
 This correction does not discard history or authorize additional provider calls.
+
+
+## Committed-source and stdin transport correction, 2026-09-10
+
+The baseline is `d9c1a7717c6d55532f99d9ba38c9dc4b422d018e`.
+The bounded correction reads prior-finding source from exact committed regular blobs.
+It excludes untracked files and Git metadata, retains deleted-file evidence, and refuses unreadable or oversized blobs.
+Codex receives the complete prompt through stdin instead of a platform-limited command argument.
+The existing prompt limit, finding retention, completion checks, and provider selection remain unchanged.
+
+| Tracked component | Baseline lines | Corrected lines | Change |
+| --- | ---: | ---: | ---: |
+| `bin/sd-review` | 1,641 | 1,660 | +19 |
+| Other 40 `bin/` files | 19,085 | 19,085 | 0 |
+| Total | 20,726 | 20,745 | +19 |
+
+Set `BIN_CAP` to 20,745, consuming seven existing spare lines and adding twelve lines of capacity.
+Set the review-lane ceiling to 1,986, an increase of nineteen lines.
+The lane remains `sd-review` plus the unchanged 326-line `sd_setup_github.py`.
+The inventory remains 41 runtime files, with zero reserve after the correction.
+Removing the required validation or transport evidence to fit would weaken the correction.
+
+This preparatory change contains only this record, the two ceilings, and the appended bin ceiling history entry.
+Its runtime remains at 20,726 bin lines and 1,967 review-lane lines, within both old ceilings.
+Implementation follows in a separate commit on the same delivery branch under the existing closeout exception.
+All behavioral, inventory, native, external-review, and merge gates remain enforced.
+This capacity decision neither proves implementation correctness nor increases the provider-call allowance.
