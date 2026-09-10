@@ -32,6 +32,7 @@ import importlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Iterable
@@ -1531,6 +1532,62 @@ def cmd_user(ctx: Context, out) -> int:
     return 0
 
 
+def command_report(checkout: Path, environ: dict[str, str]) -> str:
+    """One line on how this checkout's commands, `bin/sd` and `bin/sd-*`, are reached.
+
+    The installer renders surfaces -- skills, agents, companions, hooks -- and
+    links no executable anywhere. A receipt is therefore not evidence that
+    `sd-handoff` resolves, and it never was: `bin/` is invoked by path, the way
+    the two installed hooks invoke it. Leaving that to be inferred from an
+    absence reads as a partial install, and has been read that way.
+
+    Enumerated at runtime from `bin/` (its extensionless executables; the
+    `sd_*.py` beside them are modules) and from `PATH`, never from a list here.
+    """
+    binaries = sorted(
+        entry.name
+        for entry in (checkout / "bin").glob("sd*")
+        if entry.suffix == "" and entry.is_file() and os.access(entry, os.X_OK)
+    )
+    if not binaries:
+        return "commands: none in bin/"
+
+    own = (checkout / "bin").resolve()
+    entries = [Path(part) for part in environ.get("PATH", "").split(os.pathsep) if part]
+    on_path = any(_resolves_to(entry, own) for entry in entries)
+
+    # A command that resolves somewhere else is worse than one that does not
+    # resolve at all: it runs, and it runs another checkout's code.
+    #
+    # Resolve the executable, not the directory holding it. A hand-made symlink
+    # in some other `bin` pointing back into this checkout is this checkout's
+    # command reached by another name, not a competing install -- and its
+    # parent directory resolves to that other `bin`, so testing the directory
+    # calls it a shadow when it is not.
+    elsewhere = sorted(
+        name
+        for name in binaries
+        if (found := shutil.which(name, path=environ.get("PATH", "")))
+        and not _resolves_to(Path(found), own / name)
+    )
+
+    if on_path:
+        report = f"commands: {len(binaries)} in bin/, on PATH from this checkout"
+    else:
+        report = (
+            f"commands: {len(binaries)} in bin/, not on PATH -- "
+            f"invoke by path (bin/{binaries[0]})"
+        )
+    if elsewhere:
+        report += f"  [{len(elsewhere)} shadowed by another install: {elsewhere[0]}]"
+    return report
+
+
+def _resolves_to(candidate: Path, target: Path) -> bool:
+    """Same path once symlinks on both sides are followed, as far as they go."""
+    return candidate.resolve() == target.resolve()
+
+
 def cmd_status(ctx: Context, out) -> int:
     """Report what is installed, what drifted, and what legacy residue remains."""
     receipt = read_receipt(ctx.receipt)
@@ -1566,6 +1623,7 @@ def cmd_status(ctx: Context, out) -> int:
         f"{missing} missing, {drifted} modified",
         file=out,
     )
+    print(command_report(ctx.checkout, ctx.environ), file=out)
 
     legacy = [
         path
