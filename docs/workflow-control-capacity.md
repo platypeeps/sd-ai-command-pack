@@ -163,3 +163,32 @@ This preparatory commit changes only this record, both ceilings, and the appende
 Its runtime remains at 20,246 bin lines and 1,887 review-lane lines, within the previous ceilings.
 Implementation follows on the same delivery branch under the existing closeout exception.
 The capacity decision does not establish correctness, accept any finding, or authorize further paid reviews.
+
+## Provider diagnostics and contribution tracking, 2026-09-09
+
+The user approved tasks sd:131 and sd:132, captured from issues #800 and #801.
+Provider preflight adds a synthetic schema probe and bounded diagnostics.
+Contribution commands and status use the shared database projection in the system repository.
+
+The combined inventory starts at `2272ac43c516d848660b75adb903c0ca1a96ebaf`.
+Git and filesystem enumeration agree on all 41 runtime files.
+
+| Tracked component | Baseline lines | Combined lines | Change |
+| --- | ---: | ---: | ---: |
+| `bin/sd-review` | 1,585 | 1,641 | +56 |
+| `bin/sd_registry.py` | 1,274 | 1,297 | +23 |
+| `bin/sd_work.py` | 202 | 333 | +131 |
+| `bin/sd-status` | 2,583 | 2,629 | +46 |
+| Other 37 `bin/` files | 14,831 | 14,831 | 0 |
+| Total | 20,475 | 20,731 | +256 |
+
+Set `BIN_CAP` to 20,731 and the review-lane ceiling to 1,967, with zero reserve.
+The review lane still includes the unchanged 326-line GitHub module.
+Shared validation, activity classification, and notification state remain in the system repository.
+The pack adds no duplicate storage or dependency rules.
+
+This preparatory commit changes only this record, the two ceilings, and the appended history entry.
+Its runtime remains within the previous ceilings: 20,475 total lines and 1,911 review-lane lines.
+Implementation follows on the same delivery branch under the existing closeout exception.
+All existing inventory, test, lint, security, review, and merge checks remain required.
+This capacity record neither proves live provider recovery nor grants additional provider calls.
