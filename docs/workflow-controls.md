@@ -47,6 +47,73 @@ commands delegate to the same operations. JSON item responses carry a revision;
 Parked pieces and their followups stay out of Today, Backlog and resumed-session
 followups. The Writing view can show parked pieces explicitly and revive them.
 
+## Contributions
+
+Contribution metadata belongs to a Task in the shared database. It can exist
+before a pull request. Filing the contribution preserves that item's ID,
+notes, local evidence, and workflow status.
+
+```bash
+sd task contribution add "Upstream contribution" --file contribution.json --json
+sd task contribution edit 42 --file changes.json --if-revision ITEM_REVISION --json
+sd task contribution list --json
+sd task contribution show item:42 --json
+sd task contribution ack item:42 --event EVENT_ID --if-revision CHECKPOINT_REVISION --json
+```
+
+Use `edit` to attach metadata to an existing Task. Use `sd store item 42 --json`
+for its current item revision. A changes file is a UTF-8 JSON object, limited
+to 64 KiB. Unknown fields, invalid dependencies, stale revisions, and invalid
+local evidence refuse the operation. Duplicate JSON keys also refuse.
+
+An unfiled contribution requires the local clone and branch. Supply the tested
+commit and evidence group to record verified test results. Missing evidence
+remains explicitly unverified. A filed contribution can supply only `pull_url`.
+
+```json
+{
+  "local_clone": "/absolute/path/to/clone",
+  "local_branch": "contribution-branch",
+  "tested_commit": "FULL_COMMIT_SHA",
+  "evidence": [{
+    "argv": ["python", "-m", "unittest"],
+    "cwd": "/absolute/path/to/clone",
+    "exit_code": 0,
+    "commit": "FULL_COMMIT_SHA",
+    "artifact": "/absolute/path/to/test.log",
+    "sha256": "LOG_SHA256"
+  }],
+  "blocked_on": "Waiting for the dependency release",
+  "depends_on": [{"kind": "item", "item": 43}],
+  "blocking_labels": ["blocked"]
+}
+```
+
+Replace placeholders with actual evidence. Registration checks the branch
+commit and evidence file hashes. Stored command arguments are data; registration
+never executes them. Nonzero test results remain recorded as failures.
+
+Filing needs a changes file such as
+`{"pull_url":"https://github.com/OWNER/REPO/pull/123"}`.
+`depends_on` also accepts a merge dependency with `kind` and the exact PR `url`.
+A release dependency uses `kind: "release"`, `repo: "OWNER/REPO"`, `tag`,
+and `contains_pull`. An optional `package` object binds its `name` and `version`.
+Merge alone does not prove release inclusion or package publication.
+An unknown release requirement remains unresolved. All dependencies must resolve
+before the contribution becomes newly unblocked.
+
+The ordered list uses the shared dashboard projection. It keeps unknown and
+stale observations visible. Local task completion remains an explicit task
+operation; an upstream merge does not complete the task.
+
+Each row's `attention_sources` identifies its checkpoint key, revision, and
+event IDs. PR attention uses `github:https://github.com/OWNER/REPO/pull/123`;
+dependency attention uses `item:42`. These checkpoints have separate revisions.
+Inspect the matching key with `show`, then acknowledge its explicit event IDs.
+Repeat `--event` for multiple events from that checkpoint. A stale checkpoint
+revision refuses acknowledgement. Acknowledgement does not erase source history
+or claim that a notification was delivered.
+
 ## Authority and review
 
 Task completion requires no commit, pull request or GitHub issue. Repository

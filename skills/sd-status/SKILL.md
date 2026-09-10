@@ -8,12 +8,11 @@ disable-model-invocation: true
 
 `bin/sd-status` answers "where does this repository actually stand" without
 writing anything — not the repo, not the state directory, not a cache. Every
-section derives its answer at run time from the filesystem, from git, or from
-GitHub, because committed derived state is permanent staleness.
+section derives its answer at run time from the filesystem, git, GitHub, or the shared database.
 
 **There is no repo-path argument and no fleet walk (R10-D6).** The repository
 is the one enclosing cwd, full stop. The old fleet-walking sd-status is
-dropped; the dashboard is the cross-repo view, and it reads, never acts.
+dropped; the dashboard provides the cross-repo view.
 
 The report leads with the judgement. `abnormalities`, `pending` and `next`
 answer "is anything wrong", "what is waiting" and "what do I do now" before a
@@ -21,13 +20,13 @@ single inventory section appears, because those are the questions a reader
 came with; the eight older sections keep their order underneath them so
 nobody's muscle memory breaks.
 
-## The twelve sections, in output order
+## The thirteen sections, in output order
 
 Above them all sits the banner — two lines, `sd-status: <repo path>` and the
 `pack:` line naming the checkout these tools came from with its branch and
 head. It is a header rather than a section: it names where the report ran and
 what ran it, and nothing under it is a finding. Count it and the report
-opens with thirteen top-level lines; the twelve below are the sections.
+opens with fourteen top-level lines; the thirteen below are the sections.
 
 | Section | What it shows |
 |---|---|
@@ -36,6 +35,7 @@ opens with thirteen top-level lines; the twelve below are the sections.
 | `next` | one row: the top-ranked id and its `suggest`. Not a menu, not three options |
 | `open threads` | a count per `source`, then the exclusions named in full, so the counts are never read as a total of everything that exists |
 | `work items` | derived item status from `docs/work`, counted, with the parked ones counted and not listed |
+| `contributions (this repo, shared database order)` | upstream activity, local evidence, and dependency readiness from the shared contribution projection |
 | `open pull requests` | open pull requests, via the same code path as `sd-pr-state` |
 | `detected setup` | mode (`full`/`minimal`/`guest`) and the detected check entrypoints |
 | `issues (this repo, from the index)` | indexed issues for this repository, split into the ones the index says need you and the rest |
@@ -43,6 +43,13 @@ opens with thirteen top-level lines; the twelve below are the sections.
 | `resumable handoffs` | the pending local packet for this directory (**read, never consumed**) and Lane B carrier branches on origin |
 | `backends` | which review backends are installed — names only |
 | `legacy residue` | legacy leftovers, each with the exact command that removes it |
+
+The contribution section filters the shared projection by the current checkout path and its GitHub repository name.
+Its order is newly unblocked, awaiting you, awaiting them, then merged.
+The dashboard uses the same projection and order across repositories.
+Read event IDs and their revision with `sd task contribution show KEY --json`.
+Use `sd task contribution ack KEY --event EVENT --if-revision REVISION` to acknowledge an event explicitly.
+Acknowledgement records attention separately from notification delivery and local task completion.
 
 **A class that could not be asked prints `unchecked` and is not counted
 clear.** The summary line is assembled so the word `clear` cannot appear while

@@ -2370,6 +2370,7 @@ class ReportSectionTests(InventoryFixture):
             "residue": [],
             "issues": {"available": False, "reason": "no index",
                        "needs_you": [], "other": []},
+            "contributions": {"available": False, "reason": "no shared database", "rows": []},
         }
         stream = io.StringIO()
         status.render(result, stream)
@@ -2384,6 +2385,7 @@ class ReportSectionTests(InventoryFixture):
     #: for; the eight below keep the order they already had.
     ORDER = [
         "abnormalities", "pending", "next", "open threads", "work items",
+        "contributions (this repo, shared database order)",
         "open pull requests", "detected setup",
         "issues (this repo, from the index)", "protection",
         "resumable handoffs", "backends", "legacy residue",
@@ -2391,7 +2393,7 @@ class ReportSectionTests(InventoryFixture):
 
     # -- the skeleton -------------------------------------------------------
 
-    def test_twelve_headings_print_in_order_when_there_is_nothing_to_report(
+    def test_thirteen_headings_print_in_order_when_there_is_nothing_to_report(
         self,
     ) -> None:
         """The skeleton is fixed, so a missing section is a missing section.
@@ -2402,7 +2404,7 @@ class ReportSectionTests(InventoryFixture):
         """
         self.assertEqual(self.ORDER, self.headings(self.report()))
 
-    def test_the_same_twelve_print_in_the_same_order_with_findings(self) -> None:
+    def test_the_same_thirteen_print_in_the_same_order_with_findings(self) -> None:
         self.item("2026-08-01-alpha", status="in_progress")
         self.assertEqual(self.ORDER, self.headings(self.report()))
 

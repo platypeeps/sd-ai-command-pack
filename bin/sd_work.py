@@ -9,6 +9,8 @@ from __future__ import annotations
 import argparse
 import getpass
 import json
+import os
+import stat
 from typing import Any
 
 import sd_handoff_rows
@@ -133,6 +135,134 @@ def _output(parser: argparse.ArgumentParser, action: str, *, revision: bool = Fa
     parser.set_defaults(handler=run, work_action=action)
 
 
+def _contribution_library():
+    sd_db = sd_handoff_rows.library()
+    try:
+        import sd_db.contributions as contributions
+    except ImportError as error:
+        raise WorkRefusal(
+            "the installed sd_db lacks contribution controls; install the current "
+            "system/local-sd-db build"
+        ) from error
+    return sd_db, contributions
+
+
+def _contribution_changes(path: str) -> dict[str, Any]:
+    def pairs(entries):
+        result = {}
+        for key, value in entries:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    def constant(value):
+        raise ValueError(f"nonfinite JSON number: {value}")
+
+    try:
+        # Nonblocking open also makes FIFO input refuse instead of waiting for a writer.
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK), "rb") as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise ValueError("input must be a regular file")
+            raw = source.read(65537)
+        if len(raw) > 65536:
+            raise ValueError("input exceeds 65536 bytes")
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=pairs, parse_constant=constant)
+        if not isinstance(value, dict):
+            raise ValueError("input must be a JSON object")
+        return value
+    except (OSError, ValueError, RecursionError) as error:
+        raise WorkRefusal(f"contribution input refused: {error}") from error
+
+
+def _emit_contributions(value: Any, *, machine: bool) -> None:
+    if machine:
+        print(json.dumps(value, ensure_ascii=False))
+        return
+    if isinstance(value, dict) and "item" in value:
+        _emit(value, machine=False)
+        print(f"contribution: item:{value['item']['id']}")
+        return
+    rows = value if isinstance(value, list) else [value.get("contribution")]
+    for row in rows:
+        if row is None:
+            continue
+        print(f"{row['key']}  {row['lane']}  {row['title']}")
+        print(f"  local: {row.get('local_status')} · external: {row.get('external_state')}"
+              f" · freshness: {row.get('freshness')}")
+        print(f"  evidence_verified: {json.dumps(row.get('evidence_verified', False))}")
+        for field in ("url", "local_clone", "local_branch", "tested_commit", "blocked_on", "depends_on",
+                      "evidence", "reasons", "event_ids", "attention_sources"):
+            if row.get(field):
+                print(f"  {field}: {json.dumps(row[field], ensure_ascii=False)}")
+    if not rows:
+        print("No contributions.")
+    if isinstance(value, dict):
+        print(f"key: {value['key']}")
+        for field in ("attention", "notifications"):
+            print(f"{field}: {json.dumps(value.get(field), ensure_ascii=False)}")
+        print(f"revision: {value['revision']}")
+
+
+def run_contribution(args: argparse.Namespace) -> int:
+    changes = _contribution_changes(args.file) if args.verb in {"add", "edit"} else None
+    sd_db, contributions = _contribution_library()
+    connection = None
+    try:
+        connection = sd_handoff_rows.connect(sd_db, write=args.verb not in {"list", "show"})
+        who = getpass.getuser()
+        result: Any
+        if args.verb == "add":
+            result = contributions.capture(connection, title=args.title, changes=changes, who=who)
+        elif args.verb == "edit":
+            result = contributions.configure(
+                connection, args.item, changes, who=who, expected_revision=args.if_revision)
+        elif args.verb == "list":
+            result = contributions.projection(connection)
+        elif args.verb in {"show", "ack"}:
+            if args.verb == "show":
+                result = contributions.snapshot(connection, args.key)
+            else:
+                result = contributions.acknowledge(
+                    connection, args.key, args.event, who=who, expected_revision=args.if_revision)
+            result = {**result, "contribution": next(
+                (row for row in contributions.projection(connection)
+                 if row["key"] == result["key"] or f"item:{row.get('item_id')}" == result["key"]
+                 or any(source["key"] == result["key"] for source in row.get("attention_sources", []))),
+                None,
+            )}
+        else:
+            raise WorkRefusal(f"unknown contribution operation: {args.verb}")
+        _emit_contributions(result, machine=args.json)
+        return 0
+    except sd_db.SdDbError as error:
+        raise WorkRefusal(str(error)) from error
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+def _register_contributions(verbs: Any) -> None:
+    group = verbs.add_parser("contribution", help="track local work and upstream contribution attention")
+    actions = group.add_subparsers(dest="verb", required=True)
+    for action in ("add", "edit", "list", "show", "ack"):
+        parser = actions.add_parser(action)
+        parser.add_argument("--json", action="store_true", help="machine-readable")
+        parser.set_defaults(handler=run_contribution)
+        if action in {"add", "edit"}:
+            parser.add_argument("--file", required=True, help="contribution changes as JSON (maximum 64 KiB)")
+            if action == "add":
+                parser.add_argument("title")
+            else:
+                parser.add_argument("item", type=int)
+                parser.add_argument("--if-revision", help="item revision from sd store item")
+        if action in {"show", "ack"}:
+            parser.add_argument("key", help="item:ID or github:https://github.com/OWNER/REPO/pull/NUMBER")
+        if action == "ack":
+            parser.add_argument("--event", action="append", required=True, help="observed event ID; repeat as needed")
+            parser.add_argument("--if-revision", required=True, help="checkpoint revision from contribution show")
+
+
 def register(groups: Any, store: Any) -> None:
     """Extend the existing parser, preserving the plugin note-store verbs."""
     today = groups.add_parser("today", help="due and active work, in dashboard order")
@@ -149,6 +279,7 @@ def register(groups: Any, store: Any) -> None:
 
     task = groups.add_parser("task", help="capture and manage work without files or GitHub")
     verbs = task.add_subparsers(dest="verb", required=True)
+    _register_contributions(verbs)
     add = verbs.add_parser("add", help="capture a standalone task")
     add.add_argument("title")
     add.add_argument("--body", default="")

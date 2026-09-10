@@ -1011,6 +1011,30 @@ def _database_issues(slug: str) -> dict[str, Any] | None:
             "freshness": freshness, "needs_you": [], "other": rows}
 
 
+def contributions_section(root: pathlib.Path) -> dict[str, Any]:
+    """Read the shared contribution projection without collecting or opening a writer."""
+    try:
+        import sd_db
+        from sd_db import contributions
+    except ImportError:
+        return {"available": False, "reason": "shared contribution library is not installed", "rows": []}
+    if not sd_db.default_path().exists():
+        return {"available": False, "reason": "no shared database yet", "rows": []}
+    identities = [str(root)]
+    slug = pr_state.remote_slug(root)
+    if slug:
+        identities.append(slug)
+    try:
+        connection = sd_db.connect(write=False)
+        try:
+            rows = contributions.projection(connection, repo=identities)
+        finally:
+            connection.close()
+    except Exception as error:
+        return {"available": False, "reason": f"contributions unreadable: {error}", "rows": []}
+    return {"available": True, "reason": "", "source": "database", "rows": rows}
+
+
 def issues_section(root: pathlib.Path) -> dict[str, Any]:
     """Indexed issues for *this* repository, read and never collected.
 
@@ -2203,6 +2227,7 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "backends": backends_section(root),
         "residue": residue_section(root),
         "issues": issues_section(root),
+        "contributions": contributions_section(root),
     }
     inventory = actionable_inventory(root, result)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
@@ -2454,6 +2479,7 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     _render_next(rows, write)
     _render_threads(rows, write)
     _render_work(result["work"], write)
+    _render_contributions(result.get("contributions"), write)
 
     write("\nopen pull requests\n")
     pr_state.render_pulls(result["pull_requests"], stream)
@@ -2481,6 +2507,26 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     for entry in result["residue"]:
         write(f"  {entry['id']}: {', '.join(entry['paths'])} -- {entry['why']}\n")
         write(f"    remove: {entry['remove']}\n")
+
+
+def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:
+    write("\ncontributions (this repo, shared database order)\n")
+    if not section or not section["available"]:
+        write("  ! " + json.dumps(section["reason"] if section else "not collected", ensure_ascii=False) + "\n")
+        return
+    write("  external activity and dependency readiness do not complete local tasks\n")
+    if not section["rows"]:
+        write("  none recorded\n")
+    for row in section["rows"]:
+        # JSON string encoding prevents external metadata from injecting terminal
+        # controls or a second status heading. Ordering belongs to the library.
+        write(f"  [{row['lane']}] " + json.dumps(row["title"], ensure_ascii=False) + "\n")
+        for key in ("key", "item_id", "url", "local_status", "external_state", "reasons", "observed_at",
+                    "freshness", "blocked_on", "depends_on", "local_clone", "local_branch", "tested_commit",
+                    "evidence", "evidence_verified", "notification_state", "attention_sources"):
+            value = row.get(key)
+            if value is not None and value != [] and value != "":
+                write(f"    {key}: " + json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 def _render_issues(issues: dict[str, Any], write: Any) -> None:
