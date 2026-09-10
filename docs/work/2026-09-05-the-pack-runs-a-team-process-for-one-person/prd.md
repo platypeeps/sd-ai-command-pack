@@ -1,7 +1,7 @@
 ---
 title: the pack runs a team process for a repository with one person in it
 created: 2026-09-05
-branch: feat/solo-first-workflow-policy
+branch: main
 ---
 
 # PRD — the process outgrew the person it serves

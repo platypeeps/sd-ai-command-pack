@@ -1,7 +1,7 @@
 ---
 title: the interview that decides every downstream artifact is one sentence long
 created: 2026-09-04
-branch: skill/sd-grill
+branch: main
 ---
 
 # PRD — the plan interview is one sentence
