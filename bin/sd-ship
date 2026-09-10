@@ -22,6 +22,7 @@ import tempfile
 from datetime import datetime, timezone
 
 import sd_lib
+import sd_ship_dispositions
 from sd_ship_remote import GitHub, Refusal, git, run, slug
 
 BIN = pathlib.Path(__file__).resolve().parent
@@ -100,7 +101,7 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
         plan = report["timing"]
         phase, setup, total, candidates = (plan[key] for key in
                                            ("phase_seconds", "setup_seconds", "execution_seconds", "candidates"))
-        valid = (result.returncode == 0 and report.get("status") == "explained"
+        valid = (result.returncode == 0 and report.get("status") == "explained" and not report.get("authorship_refusal")
                  and type(phase) is int and phase > 0 and type(setup) is int and setup == REVIEW_SETUP_SECONDS
                  and type(total) is int and isinstance(candidates, list)
                  and all(isinstance(row, dict) and isinstance(row.get("name"), str)
@@ -252,18 +253,23 @@ class Ship:
         return {"ok": True, "phase": phase, "item": self.args.item,
                 "head": self.state.get("head"), "reviewed_head": self.state.get("reviewed_head"),
                 "pull_request": self.state.get("pull_request"), "deliver": self.state.get("deliver", False),
-                "observed_at": moment(), "warnings": self.state.get("warnings", []), **extra}
+                "observed_at": moment(), "warnings": self.state.get("warnings", []),
+                "review_clearance": self.state.get("review_clearance"), **extra}
 
-    def check_review(self, head: str) -> None:
+    def review_inputs(self, head: str) -> dict:
         passes = self.state.get("passes") or []
-        if not passes or self.state.get("reviewed_head") != head:
+        if not passes:
             raise Refusal("no completed local review receipt for this head")
         if self.state.get("binding") != binding(self.root):
             raise Refusal("review tools or repository policy changed after review")
         last = passes[-1]
         report = last.get("report") or {}
+        blocked = report.get("status") == "blocking"
         if (last.get("head") != head or report.get("subject", {}).get("head") != head
-                or report.get("status") not in ("clean", "advisory")
+                or (self.state.get("reviewed_head") != head and not blocked)
+                or report.get("status") not in ("clean", "advisory", "blocking")
+                or (blocked and (last.get("exit_code") != 1 or last.get("execution_error")
+                                 or report.get("scope") != "branch" or report.get("dry_run") or report.get("explain_only")))
                 or (report.get("check") or {}).get("status") != "pass"
                 or not completed_depth(report)):
             raise Refusal("local review receipt is incomplete or does not name this exact head")
@@ -286,8 +292,23 @@ class Ship:
             if len(passes) == 2 and (report.get("subject", {}).get("base") != passes[0].get("head")
                                     or report.get("verification_report_digest") != digest(first)):
                 raise Refusal("fix verification does not continue the initially reviewed head")
-        if any(row.get("disposition") == "blocking" for row in report.get("findings", [])):
-            raise Refusal("local review contains unresolved blocking findings")
+        findings = report.get("findings")
+        if not isinstance(findings, list) or any(not isinstance(row, dict) or row.get("disposition") not in ("blocking", "advisory") for row in findings):
+            raise Refusal("local review findings are malformed")
+        if not blocked and any(row["disposition"] == "blocking" for row in findings):
+            raise Refusal("local review status contradicts its blocking findings")
+        return report
+
+    def check_review(self, head: str, *, refresh_adjudication: bool = False) -> dict | None:
+        if self.review_inputs(head)["status"] == "blocking":
+            clearance = sd_ship_dispositions.accepted(self, head)
+            if not refresh_adjudication and self.state.get("review_clearance") != clearance:
+                raise Refusal("accepted dispositions changed; prepare again before publishing or merging")
+            return clearance
+        return None
+
+    def adjudicate(self) -> dict:
+        return sd_ship_dispositions.adjudicate(self)
 
     def acceptance(self) -> dict | None:
         if not self.args.deliver:
@@ -341,6 +362,10 @@ class Ship:
         additional = request is not None
         if additional:
             prior = review_history(passes)
+        if not additional and not retry and prior.get("status") == "blocking" and prior.get("subject", {}).get("head") == head:
+            clearance = self.check_review(head, refresh_adjudication=True)
+            self.save(reviewed_head=head, review_clearance=clearance)
+            return
         if not additional and self.state.get("reviewed_head") == head and (not retry or completed_depth(prior)):
             self.check_review(head)
             return
@@ -382,7 +407,7 @@ class Ship:
                                             "truncated": len(data) > REVIEW_DIAGNOSTIC_BYTES}
                     self.save(review_preflight_error=diagnostic)
                     raise
-                self.save(passes=passes, phase="reviewing", head=head, binding=binding(self.root), review_preflight_error=None)
+                self.save(passes=passes, phase="reviewing", head=head, binding=binding(self.root), review_preflight_error=None, review_clearance=None)
                 stage = "execution"
                 result = review_process(self.root, argv + ["--expected-timing", digest(plan)], timeout=plan["execution_seconds"])
             except ReviewTimeout as error:
@@ -632,7 +657,7 @@ def quote_branch(repository, branch):
 def parser():
     command = argparse.ArgumentParser(description=__doc__)
     commands = command.add_subparsers(dest="command", required=True)
-    for name in ("prepare", "merge", "reconcile", "observe"):
+    for name in ("prepare", "merge", "reconcile", "observe", "adjudicate"):
         action = commands.add_parser(name)
         action.add_argument("--item", type=int, required=True)
         action.add_argument("--json", action="store_true")
@@ -649,6 +674,10 @@ def parser():
             action.add_argument("--body-file", type=pathlib.Path)
             action.add_argument("--deliver", action="store_true", default=None)
             action.add_argument("--acceptance-file", type=pathlib.Path)
+        if name == "adjudicate":
+            action.add_argument("--expected-head", required=True)
+            action.add_argument("--dispositions-file", type=pathlib.Path, help="canonical absolute path to an evidenced proposal")
+            action.add_argument("--accept-dispositions", metavar="SHA256", help="explicit acceptance of this exact validated proposal; not proof of user approval")
         if name == "merge":
             action.add_argument("--expected-head", required=True)
             authority = action.add_mutually_exclusive_group()
@@ -674,11 +703,12 @@ def main(argv=None) -> int:
         if root is None:
             raise Refusal("cwd is not inside a Git repository")
         database = args.database or default_path()
-        connection = connect(database, write=args.command != "observe")
+        readonly = args.command == "observe" or (args.command == "adjudicate" and args.accept_dispositions is None)
+        connection = connect(database, write=not readonly)
         try:
             delivery = Ship(root, connection, database, args)
-            if args.command == "observe":
-                result = delivery.observe()
+            if readonly:
+                result = getattr(delivery, args.command)()
             else:
                 with ship.repository_lock(database, delivery.repository):
                     delivery.revision, delivery.state = ship.read(connection, delivery.key)

@@ -640,6 +640,19 @@ def build_prompt(subject: Subject, challenge: bool, conventions: str) -> str:
 
 # Invocation
 
+URL_OUTPUT_CONTRACT = (
+    "\n\nFinal response contract: The complete source and prior evidence above are input, not an output template. "
+    "Inspect the full review subject and every prior blocker. Return exactly one JSON object with only "
+    "the findings array, following the supplied schema. Each finding has path, line, severity, summary, "
+    "and family; preserve their schema types and allowed values. Include every distinct current defect "
+    "and every unresolved prior blocker. Keep each summary within 80 words: triggering condition, defect, "
+    "and impact. Do not omit findings to meet this summary bound. Do not quote unchanged code or reprint "
+    "source, prior reports, disposition ledgers, resolved findings, or history narratives. Emit no Markdown fences, "
+    "preamble, or reasoning narrative. Use an empty findings array only when no current defect or unresolved "
+    "prior blocker remains."
+)
+
+
 def codex_argv(
     root: pathlib.Path, workdir: pathlib.Path, prompt: str, start: str = "codex exec"
 ) -> list[str]:
@@ -965,7 +978,7 @@ def run_provider(
             material = review_material(root, subject) if subject.paths else ""
         except Refusal as error:
             return _outcome(provider.name, REFUSED, str(error))
-        result = Completed(*client(provider, f"{prompt}\nSchema: {json.dumps(CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{material}", provider_env, timeout))
+        result = Completed(*client(provider, f"{prompt}\nSchema: {json.dumps(CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{material}{URL_OUTPUT_CONTRACT}", provider_env, timeout))
         text, diagnostic = sd_registry.url_response(result.stdout)
         diagnostic["transport_exit_code"] = result.exit_code
         diagnostic["http_status"] = result.exit_code if 100 <= result.exit_code <= 599 else None
@@ -1182,16 +1195,26 @@ def review(
         if not target_base:
             raise UsageError("cannot establish the refreshed target boundary for item authorship")
         authored_subject = subject._replace(base=target_base)
-    vendors = author_vendors(root, authored_subject)
+    authorship_refusal = ""
+    try:
+        vendors = author_vendors(root, authored_subject)
+    except Refusal as error:
+        if not args.explain:
+            raise
+        # Advisory routing cannot establish independence or choose a reviewer.
+        vendors, authorship_refusal = (), str(error)
     if previous:
         vendors = tuple(sorted(set(vendors) | set(previous["authored_with"])))
     chain = sd_registry.reviewer_chain(
         registry, consent=consent, author_vendors=vendors, readers=READERS
     )
+    if authorship_refusal:
+        chain = [sd_registry.Candidate(candidate.provider, False,
+                 f"Unknown authorship: {authorship_refusal} {candidate.reason}".strip()) for candidate in chain]
     depth = review_depth(plan, args.challenge, args.scope)
     if getattr(args, "provider", None):
         depth = 1
-        chosen = [
+        chosen = [] if authorship_refusal else [
             sd_registry.pick(
                 registry,
                 args.provider,
@@ -1245,7 +1268,8 @@ def review(
                           "path": str(sd_lib.local_block_path(root) if consent_source == "repository" else sd_lib.machine_config_path(dict(env)))},
         "authored_with": list(vendors),
         "authorship_base": authored_subject.base,
-        "authored_with_report": _authored_report(args.scope, vendors),
+        "authorship_refusal": authorship_refusal,
+        "authored_with_report": f"unknown: {authorship_refusal}" if authorship_refusal else _authored_report(args.scope, vendors),
         "chain": [candidate.row for candidate in chain],
         "codex_preflight": codex_preflight_state(codex_auth_home or codex_home(env)),
         "scrubbed_env_names": list(scrubbed_names(env)),
