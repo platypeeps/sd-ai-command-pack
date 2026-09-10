@@ -848,7 +848,33 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # above it. That is the shape the number should have.
 # Approved additional controls: docs/workflow-control-capacity.md. Keep this
 # capacity decision separate from the implementation when publishing.
-BIN_CAP = 20_745
+#
+# Raised 2026-09-10, 20,745 to 20,803, for the installer's `commands:` line.
+# `bin/` measured 20,745 against the cap of 20,745: the previous raise's
+# unclaimed 11 is spent, and every further line in `bin/` now needs a decision
+# of its own. This is that decision, published before the change that needs it,
+# as the clause above requires.
+#
+# The span is measured, not forecast, so nothing here carries a multiplier. It
+# is written and it builds; what it costs is a fact rather than a price. Walking
+# the module's AST and taking each top-level definition's own line extent, the
+# way step 1 was measured above:
+#
+#   `command_report()`                  actual  49
+#   `_resolves_to()`                    actual   3
+#                                       ----------
+#                                               52
+#
+# Glue is **6** and is enumerated rather than rated: the `shutil` import, the
+# one call added to `cmd_status`, and four blank separator lines outside both
+# spans. 52 plus 6 is **58**, and 20,745 plus 58 is **20,803**.
+#
+# It is not rounded up to the next fifty. Step 1's derivation rounded a forecast
+# of 739 and said what the remainder was; there is no forecast here to absorb a
+# rounding, and 47 unclaimed lines would be capacity that no derivation asked
+# for. The cap therefore lands back at zero headroom, deliberately: the next
+# line in `bin/` should have to argue for itself the way this one did.
+BIN_CAP = 20_803
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
 # R11-D29, re-derived 2026-09-03 with the itemisation R11-D24's clause asks
 # for: 4,190 measured on `main`, 158 measured on the branch that carries the
@@ -972,10 +998,11 @@ DASHBOARD_CODE_SLACK = 29
 # still governs the other two ceilings and should not be read as retired.
 
 
-# Every value each ceiling has held, oldest first, read from this file's own
-# history with `git log -- tests/test_loc_caps.py` on 2026-09-06. Data, not
-# prose: the docstring above records each raise where it happened, and no
-# reader of nine separate paragraphs can see the shape the nine make together.
+# Every value each ceiling has held, oldest first: read from this file's own
+# history with `git log -- tests/test_loc_caps.py` on 2026-09-06, and appended
+# by every raise since. Data, not prose: the docstring above records each raise
+# where it happened, and no reader of that many separate paragraphs can see the
+# shape they make together.
 # `bin/` nearly doubled in a week. Nothing here has ever fallen, and nothing
 # here has ever refused. That is the finding R11-D41 was written from, and it
 # is only visible in one place because this list exists.
@@ -1006,6 +1033,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
         ("2026-09-09", 20_731),
         ("2026-09-09", 20_733),
         ("2026-09-10", 20_745),
+        ("2026-09-10", 20_803),
     ),
     "DASHBOARD_CAP": (
         ("2026-08-30", 2_500),

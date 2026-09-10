@@ -255,3 +255,28 @@ Its runtime remains at 20,726 bin lines and 1,967 review-lane lines, within both
 Implementation follows in a separate commit on the same delivery branch under the existing closeout exception.
 All behavioral, inventory, native, external-review, and merge gates remain enforced.
 This capacity decision neither proves implementation correctness nor increases the provider-call allowance.
+
+## Installer calling-convention line, 2026-09-10
+
+The baseline is `9a70cc0fd042889761f9f00185e56fd9b54bb7ad`.
+`sd_install.py --status` gains one `commands:` line that says how this checkout's commands are reached.
+It enumerates the executables in `bin/` and the entries of `PATH` at run time, and names a command that `PATH` resolves to another install.
+The installer records surfaces only, so its receipt read as a partial install whenever the commands were looked for on `PATH`.
+
+| Tracked component | Baseline lines | Corrected lines | Change |
+| --- | ---: | ---: | ---: |
+| `bin/sd_install.py` | 1,834 | 1,892 | +58 |
+| Other 40 `bin/` files | 18,911 | 18,911 | 0 |
+| Total | 20,745 | 20,803 | +58 |
+
+Set `BIN_CAP` to 20,803, adding fifty-eight lines of capacity and no reserve.
+The fifty-eight lines are measured on the written change, not forecast: `command_report()` is 49 lines, `_resolves_to()` is 3, and the 6 lines of glue are the `shutil` import, one call in `cmd_status`, and four blank separators.
+The derivation is recorded beside `BIN_CAP` in `tests/test_loc_caps.py`.
+The review-lane ceiling remains at 1,986; `sd_install.py` is not in that lane.
+The inventory remains 41 runtime files, with zero reserve after the change.
+
+This preparatory change contains only this record, `BIN_CAP`, and the appended bin ceiling history entry.
+Its runtime remains at 20,745 bin lines, within the old ceiling.
+Implementation follows in a separate pull request stacked on this one.
+All behavioral, inventory, native, external-review, and merge gates remain enforced.
+This capacity decision neither proves implementation correctness nor increases the provider-call allowance.
