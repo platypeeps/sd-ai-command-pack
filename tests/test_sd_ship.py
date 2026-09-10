@@ -1154,7 +1154,7 @@ roles:
         self.assertEqual(len(state["passes"]), 1)
         self.assertEqual(state["passes"][0]["report"]["completed_reviews"], 2)
 
-    def test_planning_timeout_saves_diagnostics_without_dispatch_or_completion(self):
+    def test_planning_timeout_saves_diagnostics_without_dispatch_or_reservation(self):
         diagnostic = {"kind": "watchdog_expired", "allowed_seconds": 3600,
                       "stdout": {"bytes": 8, "tail": "partial", "truncated": False},
                       "cleanup": {"term": "sent", "kill": "absent", "leader_reaped": True},
@@ -1164,19 +1164,75 @@ roles:
                 self.operation().review(_git(self.root, "rev-parse", "HEAD"))
         state = self.operation().state
         self.assertEqual(child.call_count, 1)
-        self.assertEqual(len(state["passes"]), 1)
-        entry = state["passes"][0]
-        self.assertEqual(entry["execution_error"], dict(diagnostic, stage="planning"))
-        self.assertNotIn("report", entry)
-        self.assertIsNone(state["reviewed_head"])
+        self.assertFalse(state.get("passes"))
+        self.assertEqual(state["review_preflight_error"], dict(diagnostic, stage="planning"))
+        self.assertIsNone(state.get("reviewed_head"))
 
-    def test_invalid_timing_plan_never_starts_execution_and_keeps_reservation(self):
+    def test_invalid_timing_plan_never_starts_execution_or_reserves(self):
         with patch.object(ship, "review_process", return_value=subprocess.CompletedProcess([], 0, "{}", "")) as child:
             with self.assertRaisesRegex(ship.Refusal, "no valid timing plan"):
                 self.operation().review(_git(self.root, "rev-parse", "HEAD"))
         self.assertEqual(child.call_count, 1)
-        self.assertEqual(len(self.operation().state["passes"]), 1)
+        state = self.operation().state
+        self.assertFalse(state.get("passes"))
+        self.assertEqual(state["review_preflight_error"]["exit_code"], 0)
+        self.assertEqual(state["review_preflight_error"]["stdout"]["tail"], "{}")
 
+    def test_planning_failure_diagnostics_are_bounded_and_hash_original_streams(self):
+        stdout, stderr = "x" * 10000, "y" * 10000 + "prior evidence exceeds limit"
+        with patch.object(ship, "review_process", return_value=subprocess.CompletedProcess([], 2, stdout, stderr)):
+            with self.assertRaises(ship.Refusal):
+                self.operation().review(_git(self.root, "rev-parse", "HEAD"))
+        state = self.operation().state
+        self.assertFalse(state.get("passes"))
+        diagnostic = state["review_preflight_error"]
+        self.assertEqual((diagnostic["kind"], diagnostic["stage"], diagnostic["exit_code"]), ("invalid_timing_plan", "planning", 2))
+        for name, text in (("stdout", stdout), ("stderr", stderr)):
+            self.assertEqual(diagnostic[name]["bytes"], len(text))
+            self.assertEqual(diagnostic[name]["sha256"], ship.hashlib.sha256(text.encode()).hexdigest())
+            self.assertEqual(diagnostic[name]["tail"], text[-4096:])
+            self.assertTrue(diagnostic[name]["truncated"])
+
+    def test_oversized_resume_preflight_preserves_history_and_next_success_clears_diagnostic(self):
+        from tests.test_sd_review import sd_review
+        _, _, prior = self.spent_reviews()
+        operation = self.operation()
+        prior[0]["report"]["findings"] = [{"path": "src.py", "line": 1, "summary": "x" * 65536,
+                                             "disposition": "blocking", "severity": "high", "family": "correctness"}]
+        operation.save(passes=prior, review_preflight_error={"stage": "planning", "kind": "old"})
+        head = _git(self.root, "rev-parse", "HEAD")
+        operation = self.operation("prepare", "--additional-review-for", head, "--request-reason", "fixture")
+        before = json.loads(json.dumps(operation.state))
+        stages = []
+        def child(root, argv, *, timeout):
+            args = sd_review.build_parser().parse_args(argv[2:])
+            stages.append(args.explain)
+            def no_execution(*_args):
+                raise AssertionError("check or provider dispatched during invalid planning")
+            try:
+                report = sd_review.review(root, args, no_execution, self.environment)
+            except sd_review.UsageError as error:
+                return subprocess.CompletedProcess(argv, 2, "", str(error))
+            return subprocess.CompletedProcess(argv, 0, json.dumps(report), "")
+        with patch.object(ship, "review_process", side_effect=child), self.assertRaisesRegex(ship.Refusal, "no valid timing plan"):
+            operation.review(head)
+        self.assertEqual(stages, [True])
+        failed = self.operation().state
+        self.assertEqual(failed["passes"], before["passes"])
+        self.assertEqual(failed["review_preflight_error"]["stderr"]["tail"], "prior review findings exceed the bounded verification input")
+        self.assertEqual(failed["review_preflight_error"]["exit_code"], 2)
+        prior[0]["report"]["findings"][0]["summary"] = "bounded blocker"
+        operation.save(passes=prior)
+        valid = {"status": "explained", "timing": {"phase_seconds": 1800, "setup_seconds": 3600,
+                 "execution_seconds": 7200, "candidates": [{"name": "fixture", "recipient": "fixture@fixture"}]}}
+        answers = [subprocess.CompletedProcess([], 0, json.dumps(valid), ""), subprocess.CompletedProcess([], 2, "", "failed")]
+        with patch.object(ship, "review_process", side_effect=answers), self.assertRaisesRegex(ship.Refusal, "reserved pass remains recorded"):
+            operation.review(head)
+        saved = self.operation().state
+        self.assertEqual(saved["passes"][:-1], prior)
+        self.assertEqual(len(saved["passes"]), 3)
+        self.assertIsNone(saved["review_preflight_error"])
+        self.assertEqual(before["review_preflight_error"], {"stage": "planning", "kind": "old"})
 
     def captured_timeout_retry(self, extra_reviewer=False):
         from tests.test_sd_review import sd_review
@@ -1239,14 +1295,13 @@ roles:
         self.captured_timeout_retry(extra_reviewer=True)
         self.assertEqual(self.merge()["phase"], "merged")
 
-    def test_deep_timing_plan_refusal_retains_the_reserved_pass(self):
+    def test_deep_timing_plan_refusal_does_not_reserve(self):
         raw = '{"timing":' + '[' * 10000 + '0' + ']' * 10000 + '}'
         with patch.object(ship, "review_process", return_value=subprocess.CompletedProcess([], 0, raw, "")):
             with self.assertRaises(ship.Refusal):
                 self.operation().review(_git(self.root, "rev-parse", "HEAD"))
         state = self.operation().state
-        self.assertEqual(len(state["passes"]), 1)
-        self.assertNotIn("report", state["passes"][0])
+        self.assertFalse(state.get("passes"))
         self.assertIsNone(state.get("reviewed_head"))
 
 

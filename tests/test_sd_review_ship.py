@@ -93,6 +93,24 @@ class FixReviewTests(ReviewFixture):
         self.assertTrue(result["resume_report_digest"])
         self.assertIsNone(result["verification_report_digest"])
 
+    def test_explain_refuses_oversized_resume_findings_and_current_source(self):
+        root, first = self.branch()
+        report = self.tmp / "prior.json"
+        row = {"path": "src.py", "line": 1, "severity": "high", "family": "correctness",
+               "disposition": "blocking", "summary": "x" * 65536}
+        prior = {"scope": "branch", "subject": {"head": first}, "findings": [row], "authored_with": []}
+        for oversized in ("findings", "source"):
+            if oversized == "source":
+                row["summary"] = "original blocker"
+                (root / "src.py").write_text("x" * (sd_review.MAX_OUTPUT_BYTES + 1))
+            report.write_text(json.dumps(prior))
+            for explain in (True, False):
+                runner = FakeRunner()
+                with self.subTest(oversized=oversized, explain=explain), self.assertRaises(sd_review.UsageError):
+                    sd_review.review(root, namespace(scope="branch", resume_report=str(report), explain=explain),
+                                     runner, self.environment(), self.chatgpt_home())
+                self.assertEqual(runner.calls, [])
+
     def test_resume_refuses_fix_only_or_unrelated_prior_head(self):
         root, first = self.branch()
         prior = sd_review.review(root, namespace(scope="branch"), FakeRunner(), self.environment(), self.chatgpt_home())

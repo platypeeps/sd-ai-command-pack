@@ -109,7 +109,7 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
         valid = False
     if not valid:
-        raise Refusal("local review emitted no valid timing plan; its reserved pass remains recorded")
+        raise Refusal("local review emitted no valid timing plan; no provider pass was reserved")
     return plan
 
 
@@ -362,9 +362,7 @@ class Ship:
         passes.append({"head": head, "started_at": moment(), "base": base, "retry": retry})
         if request:
             passes[-1]["additional_review_request"] = request
-        self.save(passes=passes, phase="reviewing", head=head, binding=binding(self.root))
-        # sd-review emits useful blocking evidence with nonzero status, so the
-        # JSON is retained even when it refuses. No transport fixture is used here.
+        # Retain blocking JSON even when the review exits nonzero.
         with tempfile.TemporaryDirectory(prefix="sd-ship-verify-") as directory:
             if prior:
                 prior_path = pathlib.Path(directory) / "prior-review.json"
@@ -372,15 +370,30 @@ class Ship:
                 argv += ["--resume-report" if retry or additional else "--verify-report", str(prior_path)]
             stage = "planning"
             try:
-                plan = timing_plan(review_process(self.root, argv + ["--explain"], timeout=REVIEW_SETUP_SECONDS))
+                planned = review_process(self.root, argv + ["--explain"], timeout=REVIEW_SETUP_SECONDS)
+                try:
+                    plan = timing_plan(planned)
+                except Refusal:
+                    diagnostic: dict = {"kind": "invalid_timing_plan", "stage": "planning", "exit_code": planned.returncode}
+                    for name in ("stdout", "stderr"):
+                        data = getattr(planned, name).encode("utf-8", "replace")
+                        diagnostic[name] = {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                                            "tail": data[-REVIEW_DIAGNOSTIC_BYTES:].decode("utf-8", "replace"),
+                                            "truncated": len(data) > REVIEW_DIAGNOSTIC_BYTES}
+                    self.save(review_preflight_error=diagnostic)
+                    raise
+                self.save(passes=passes, phase="reviewing", head=head, binding=binding(self.root), review_preflight_error=None)
                 stage = "execution"
                 result = review_process(self.root, argv + ["--expected-timing", digest(plan)], timeout=plan["execution_seconds"])
             except ReviewTimeout as error:
-                passes[-1]["execution_error"] = dict(error.diagnostic, stage=stage)
-                passes[-1]["exit_code"] = 124
-                self.save(passes=passes, reviewed_head=None, phase="reviewed")
+                if stage == "planning":
+                    self.save(review_preflight_error=dict(error.diagnostic, stage=stage))
+                else:
+                    passes[-1].update(execution_error=dict(error.diagnostic, stage=stage), exit_code=124)
+                    self.save(passes=passes, reviewed_head=None, phase="reviewed")
                 raise Refusal(f"local review {stage} watchdog expired after {error.diagnostic['allowed_seconds']}s; "
-                              "reserved pass and bounded diagnostics remain in the item ship receipt") from None
+                              + ("no provider pass reserved; " if stage == "planning" else "reserved pass retained; ")
+                              + "bounded diagnostics remain in the item ship receipt") from None
         try:
             report = json.loads(result.stdout)
         except ValueError:

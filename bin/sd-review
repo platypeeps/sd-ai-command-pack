@@ -1262,10 +1262,6 @@ def review(
     expected_timing = getattr(args, "expected_timing", None)
     if expected_timing is not None and expected_timing != hashlib.sha256(json.dumps(timing, sort_keys=True).encode()).hexdigest():
         raise Refusal("review timing inputs changed; explain again before dispatch")
-    if args.explain:
-        result["status"] = "explained"
-        return result
-
     conventions = local_conventions(root)
     prompt = build_prompt(subject, args.challenge, conventions)
     if previous:
@@ -1282,11 +1278,17 @@ def review(
             if path.is_absolute() or ".." in path.parts or not (root / path).resolve().is_relative_to(root.resolve()):
                 raise UsageError("prior blocking finding path is outside this repository")
             target = root / path
-            current = target.read_text(encoding="utf-8") if target.is_file() else "[file absent at current HEAD]"
+            current = "[file absent at current HEAD]"
+            if target.is_file():
+                with target.open("r", encoding="utf-8") as source_file:
+                    current = source_file.read(MAX_OUTPUT_BYTES + 1)
             prompt += f"\nCurrent source for prior finding {name}:\n{current}\n"
             if len(prompt.encode()) > MAX_OUTPUT_BYTES:
                 raise UsageError("fix verification evidence exceeds the bounded input")
     result["local_block_prepended"] = bool(conventions)
+    if args.explain:
+        result["status"] = "explained"
+        return result
 
     if args.dry_run:
         result["planned_invocations"] = _planned(chosen, root, prompt)
