@@ -25,12 +25,12 @@ def schema_version(source: str) -> int | None:
 
 
 def downgrade_refusal(checkout: Path, system: Path, ref: str,
-                      git_output: Callable[[list[str], Path], str]) -> str:
+                      git_output: Callable[[list[str], Path], str | None]) -> str:
     packages = sorted((checkout / ".venv/lib").glob("python*/site-packages/sd_db"))
     if not packages:
         return ""
     installed = [package / "schema.py" for package in packages]
-    candidate = schema_version(git_output(["show", f"{ref}:local-sd-db/sd_db/schema.py"], system))
+    candidate = schema_version(git_output(["show", f"{ref}:local-sd-db/sd_db/schema.py"], system) or "")
     try:
         versions = [schema_version(path.read_text(encoding="utf-8")) for path in installed]
     except (OSError, UnicodeError) as error:

@@ -99,11 +99,13 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
     try:
         report = json.loads(result.stdout)
         plan = report["timing"]
+        requested = report["requested_reviews"]
         phase, setup, total, candidates = (plan[key] for key in
                                            ("phase_seconds", "setup_seconds", "execution_seconds", "candidates"))
         valid = (result.returncode == 0 and report.get("status") == "explained" and not report.get("authorship_refusal")
                  and type(phase) is int and phase > 0 and type(setup) is int and setup == REVIEW_SETUP_SECONDS
                  and type(total) is int and isinstance(candidates, list)
+                 and type(requested) is int and 0 < requested <= len(candidates)
                  and all(isinstance(row, dict) and isinstance(row.get("name"), str)
                          and isinstance(row.get("recipient"), str) for row in candidates)
                  and total == setup + phase * (1 + len(candidates)))

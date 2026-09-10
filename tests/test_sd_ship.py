@@ -230,9 +230,11 @@ roles:
         set_provider_state(connection, "reviewer2", enabled=False)
         result = self.cli("prepare", "--database", str(custom))
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
-        self.assertIn("1/2 completed", json.loads(result.stdout)["error"])
+        self.assertIn("no provider pass was reserved", json.loads(result.stdout)["error"])
         key = receipts.receipt_key(self.remote.slug, "topic", self.item)
-        self.assertTrue(receipts.read(connection, key)[1]["passes"])
+        state = receipts.read(connection, key)[1]
+        self.assertFalse(state.get("passes"))
+        self.assertEqual(state["review_preflight_error"]["kind"], "invalid_timing_plan")
         self.assertEqual(receipts.read(self.connection, key), (0, {}))
 
     def test_reprepare_preserves_whole_item_acceptance_and_reviewable_description(self):
@@ -1178,6 +1180,41 @@ roles:
         self.assertEqual(state["review_preflight_error"]["exit_code"], 0)
         self.assertEqual(state["review_preflight_error"]["stdout"]["tail"], "{}")
 
+    def assert_insufficient_reviewers_refuse(self, count):
+        import sd_registry
+        from tests.test_sd_review import sd_review
+        registry = sd_registry.read_file(self.database.parent / "providers.yaml")
+        consent = str(sd_registry.recipient(registry.providers["reviewer"])) if count else ""
+        (self.root / "CLAUDE.local.md").write_text(
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\nmode: full\n"
+            f"reviewers: {consent}\n<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n")
+        stages = []
+        def child(root, argv, *, timeout):
+            args = sd_review.build_parser().parse_args(argv[2:])
+            stages.append(args.explain)
+            self.assertTrue(args.explain, "undersupplied planning must not start execution")
+            def no_execution(*_args):
+                raise AssertionError("planning dispatched a check or provider")
+            report = sd_review.review(root, args, no_execution, self.environment)
+            self.assertEqual(report["requested_reviews"], 2)
+            self.assertEqual(len(report["timing"]["candidates"]), count)
+            return subprocess.CompletedProcess(argv, 0, json.dumps(report), "")
+        operation = self.operation()
+        with patch.object(ship, "review_process", side_effect=child):
+            with self.assertRaisesRegex(ship.Refusal, "no valid timing plan"):
+                operation.review(_git(self.root, "rev-parse", "HEAD"))
+        self.assertEqual(stages, [True])
+        state = self.operation().state
+        self.assertFalse(state.get("passes"))
+        self.assertIsNone(state.get("reviewed_head"))
+        self.assertEqual(state["review_preflight_error"]["kind"], "invalid_timing_plan")
+
+    def test_no_eligible_reviewers_refuse_before_reservation_or_execution(self):
+        self.assert_insufficient_reviewers_refuse(0)
+
+    def test_one_eligible_reviewer_cannot_reserve_a_two_review_pass(self):
+        self.assert_insufficient_reviewers_refuse(1)
+
     def test_planning_failure_diagnostics_are_bounded_and_hash_original_streams(self):
         stdout, stderr = "x" * 10000, "y" * 10000 + "prior evidence exceeds limit"
         with patch.object(ship, "review_process", return_value=subprocess.CompletedProcess([], 2, stdout, stderr)):
@@ -1223,7 +1260,7 @@ roles:
         self.assertEqual(failed["review_preflight_error"]["exit_code"], 2)
         prior[0]["report"]["findings"][0]["summary"] = "bounded blocker"
         operation.save(passes=prior)
-        valid = {"status": "explained", "timing": {"phase_seconds": 1800, "setup_seconds": 3600,
+        valid = {"status": "explained", "requested_reviews": 1, "timing": {"phase_seconds": 1800, "setup_seconds": 3600,
                  "execution_seconds": 7200, "candidates": [{"name": "fixture", "recipient": "fixture@fixture"}]}}
         answers = [subprocess.CompletedProcess([], 0, json.dumps(valid), ""), subprocess.CompletedProcess([], 2, "", "failed")]
         with patch.object(ship, "review_process", side_effect=answers), self.assertRaisesRegex(ship.Refusal, "reserved pass remains recorded"):
@@ -1277,18 +1314,23 @@ roles:
             else:
                 with self.assertRaises(ship.Refusal):
                     self.prepare("--retry-review")
-        self.assertEqual(len(observed), 2)
+        self.assertEqual(len(observed), 2 if extra_reviewer else 1)
         self.assertTrue(all(value == ship.review_history([failed]) for value in observed))
         self.assertTrue(all("completed_reviews" not in value for value in observed))
         self.assertEqual(failed["execution_error"]["captured_report"], raw_capture)
         state = self.operation().state
         self.assertEqual(state["passes"][0], failed)
+        if not extra_reviewer:
+            self.assertEqual(state["passes"], [failed])
+            self.assertIsNone(state["reviewed_head"])
+            self.assertEqual(state["review_preflight_error"]["kind"], "invalid_timing_plan")
+            return
         latest = state["passes"][-1]["report"]
-        self.assertEqual(latest["completed_reviews"], 2 if extra_reviewer else 1)
+        self.assertEqual(latest["completed_reviews"], 2)
         self.assertEqual(latest["authored_with"], ["secondvendor"])
-        self.assertEqual(latest["reviewed_by"], ["reviewer2", "reviewer3"] if extra_reviewer else ["reviewer2"])
+        self.assertEqual(latest["reviewed_by"], ["reviewer2", "reviewer3"])
 
-    def test_captured_timeout_blocker_and_authorship_survive_actual_retry(self):
+    def test_captured_timeout_blocker_and_authorship_survive_unavailable_retry_planning(self):
         self.captured_timeout_retry()
 
     def test_successful_captured_timeout_retry_reaches_verified_fixture_merge(self):
@@ -1444,7 +1486,20 @@ class ReviewWatchdogTests(unittest.TestCase):
                  dict(valid, candidates=[{}]), dict(valid, execution_seconds=3600), dict(valid, setup_seconds=0)]
         for plan in cases:
             with self.subTest(plan=plan), self.assertRaises(ship.Refusal):
-                ship.timing_plan(subprocess.CompletedProcess([], 0, json.dumps({"status": "explained", "timing": plan}), ""))
+                ship.timing_plan(subprocess.CompletedProcess([], 0, json.dumps({"status": "explained", "requested_reviews": 2, "timing": plan}), ""))
+
+    def test_timing_plan_requires_positive_integer_review_depth_and_enough_candidates(self):
+        timing = {"setup_seconds": 3600, "phase_seconds": 1800, "execution_seconds": 9000,
+                  "candidates": [{"name": "a", "recipient": "a@fixture"}, {"name": "b", "recipient": "b@fixture"}]}
+        report = {"status": "explained", "timing": timing}
+        for requested in (None, True, 0, -1, "2", 2.0, float("inf"), 3):
+            with self.subTest(requested=requested), self.assertRaises(ship.Refusal):
+                ship.timing_plan(subprocess.CompletedProcess([], 0, json.dumps(dict(report, requested_reviews=requested)), ""))
+        with self.assertRaises(ship.Refusal):
+            ship.timing_plan(subprocess.CompletedProcess([], 0, json.dumps(report), ""))
+        for requested in (1, 2):
+            self.assertEqual(ship.timing_plan(subprocess.CompletedProcess(
+                [], 0, json.dumps(dict(report, requested_reviews=requested)), "")), timing)
 
 
 if __name__ == "__main__":

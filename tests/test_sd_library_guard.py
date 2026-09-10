@@ -58,6 +58,12 @@ class LibraryDowngradeGuard(unittest.TestCase):
             with self.subTest(source=source):
                 self.assertTrue(self.check(source))
 
+    def test_git_read_failure_returns_a_refusal_and_preserves_installed_schema(self):
+        self.installed()
+        before = self.schema.read_bytes()
+        self.assertIn("cannot verify", self.check(None))
+        self.assertEqual(self.schema.read_bytes(), before)
+
     def test_existing_package_without_schema_is_preserved_not_treated_as_first_install(self):
         self.package.mkdir(parents=True)
         (self.package / "__init__.py").write_text("# Installed package with damaged metadata\n")
