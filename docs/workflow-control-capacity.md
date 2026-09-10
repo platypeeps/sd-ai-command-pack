@@ -105,3 +105,26 @@ Its runtime remains at 20,047 bin lines and 1,844 review-lane lines, within both
 The implementation follows on the same delivery branch, under the existing closeout exception.
 The required tests, static checks, external review, and exact-head CI still govern delivery.
 This capacity decision does not establish implementation correctness or external review completion.
+
+
+## Deterministic review preflight correction, 2026-09-09
+
+The completed review found that oversized prior evidence passed planning and then consumed a reservation before refusing.
+The correction validates evidence during planning and reserves a provider pass only after planning succeeds.
+It keeps complete prior history, preserves planning timeout diagnostics, and leaves execution failures spent.
+The current pack history is 48,932 findings bytes, below the unchanged 65,536-byte input bound.
+
+| Tracked component | Reviewed lines | Corrected lines | Change |
+| --- | ---: | ---: | ---: |
+| `bin/sd-ship` | 682 | 695 | +13 |
+| `bin/sd-review` | 1,559 | 1,561 | +2 |
+| Other 38 `bin/` files | 17,990 | 17,990 | 0 |
+| Total | 20,231 | 20,246 | +15 |
+
+Set `BIN_CAP` to 20,246 and the review-lane ceiling to 1,887.
+The inventory remains 40 files, with zero reserve and no change to the 326-line GitHub module.
+These fifteen lines fund bounded source reads and the preflight reservation/diagnostic boundary.
+Malformed or failed planning retains bounded stream tails and hashes, so its exact refusal remains inspectable.
+No review-history truncation, numeric review allowance, provider selection, or automatic cap changes.
+The coordinator approved this measured correction within the existing closeout scope.
+The capacity commit precedes its implementation; required validation and external review still govern delivery.
