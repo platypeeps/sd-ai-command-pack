@@ -16,8 +16,10 @@ import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -468,6 +470,95 @@ class TheLibraryDoor(unittest.TestCase):
         self.assertTrue(installed)
         self.assertIn("would install sd_db from", report)
         self.assertFalse(marker.exists())
+
+    def test_provisioning_preserves_a_newer_installed_database_library(self) -> None:
+        marker = self.home / "pip-ran"
+        self.interpreter(f'#!/bin/sh\ntouch "{marker}"\n')
+        source = self.library()
+        schema = source / "sd_db/schema.py"
+        schema.parent.mkdir()
+        schema.write_text("SCHEMA_VERSION = 2\n")
+        self.git("add", "-A")
+        self.git("commit", "-m", "schema two")
+        installed = self.checkout / ".venv/lib/python3.13/site-packages/sd_db/schema.py"
+        installed.parent.mkdir(parents=True)
+        installed.write_text("SCHEMA_VERSION = 3\n")
+        ok, report = sd_install.provision_library(self.context(), io.StringIO())
+        self.assertFalse(ok)
+        self.assertIn("preserving installed sd_db schema 3", report)
+        self.assertFalse(marker.exists())
+        self.assertEqual(installed.read_text(), "SCHEMA_VERSION = 3\n")
+
+    def test_new_commit_replaces_the_same_package_version(self) -> None:
+        source = self.library()
+        (source / "pyproject.toml").write_text(
+            '[build-system]\nrequires = []\nbuild-backend = "_build"\n'
+            'backend-path = ["."]\n\n[project]\nname = "sd-db"\nversion = "0.1.0"\n',
+            encoding="utf-8",
+        )
+        (source / "_build.py").write_text(textwrap.dedent("""\
+            from pathlib import Path
+            import zipfile
+
+            def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
+                root = Path(__file__).parent
+                dist = "sd_db-0.1.0.dist-info"
+                files = {str(p.relative_to(root)): p.read_bytes()
+                         for p in (root / "sd_db").glob("*.py")}
+                files[dist + "/METADATA"] = b"Metadata-Version: 2.1\\nName: sd-db\\nVersion: 0.1.0\\n"
+                files[dist + "/WHEEL"] = b"Wheel-Version: 1.0\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n"
+                record = dist + "/RECORD"
+                files[record] = "".join(name + ",,\\n" for name in [*files, record]).encode()
+                filename = "sd_db-0.1.0-py3-none-any.whl"
+                with zipfile.ZipFile(Path(wheel_directory) / filename, "w") as wheel:
+                    for name, data in files.items():
+                        wheel.writestr(name, data)
+                return filename
+            """), encoding="utf-8")
+        package = source / "sd_db"
+        package.mkdir()
+        (package / "__init__.py").write_text('MARKER = "old-commit"\n', encoding="utf-8")
+        (package / "schema.py").write_text("SCHEMA_VERSION = 3\n", encoding="utf-8")
+        self.git("add", "local-sd-db")
+        self.git("commit", "-m", "old same-version library")
+        old_commit = self.git("rev-parse", "HEAD")
+        python = self.checkout / sd_install.VENV_RELATIVE
+        environment = {key: value for key, value in os.environ.items() if not key.startswith("PIP_")}
+        environment.update(HOME=str(self.home), PIP_CONFIG_FILE=os.devnull,
+                           PIP_NO_INDEX="1", PIP_NO_CACHE_DIR="1",
+                           PIP_DISABLE_PIP_VERSION_CHECK="1", TZ="UTC")
+        probe = (
+            "import importlib.metadata,json,sd_db;from sd_db.schema import SCHEMA_VERSION;"
+            "d=importlib.metadata.distribution('sd-db');"
+            "print(json.dumps({'marker':sd_db.MARKER,'schema':SCHEMA_VERSION,"
+            "'version':d.version,'path':sd_db.__file__,"
+            "'provenance':json.loads(d.read_text('direct_url.json'))}))"
+        )
+        with patch.dict(os.environ, environment, clear=True):
+            subprocess.run([sys.executable, "-m", "venv", str(self.checkout / ".venv")],
+                           capture_output=True, text=True, check=True, timeout=60)
+            installed, report = sd_install.provision_library(self.context(), io.StringIO())
+            self.assertTrue(installed, report)
+            initial = json.loads(subprocess.check_output([str(python), "-I", "-B", "-c", probe], text=True))
+            self.assertEqual(initial["marker"], "old-commit")
+            self.assertEqual(initial["provenance"]["vcs_info"]["commit_id"], old_commit)
+            (package / "__init__.py").write_text('MARKER = "new-commit"\n', encoding="utf-8")
+            (package / "schema.py").write_text("SCHEMA_VERSION = 5\n", encoding="utf-8")
+            self.git("add", "local-sd-db")
+            self.git("commit", "-m", "new bytes at the same version")
+            new_commit = self.git("rev-parse", "HEAD")
+            self.assertNotEqual(old_commit, new_commit)
+            (package / "__init__.py").write_text('MARKER = "uncommitted"\n', encoding="utf-8")
+            installed, report = sd_install.provision_library(self.context(), io.StringIO())
+            self.assertTrue(installed, report)
+            self.assertIn(new_commit, report)
+            observed = json.loads(subprocess.check_output([str(python), "-I", "-B", "-c", probe], text=True))
+        self.assertEqual(observed["marker"], "new-commit")
+        self.assertEqual(observed["schema"], 5)
+        self.assertEqual(initial["version"], observed["version"])
+        self.assertEqual(observed["version"], "0.1.0")
+        self.assertEqual(observed["provenance"]["vcs_info"]["commit_id"], new_commit)
+        self.assertTrue(Path(observed["path"]).is_relative_to(self.checkout / ".venv"))
 
     def test_an_interpreter_that_cannot_run_is_reported_not_raised(self) -> None:
         # Present and executable to the guard above, unrunnable to the kernel:

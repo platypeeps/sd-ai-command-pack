@@ -125,6 +125,21 @@ class TheCriterion(RowCase):
 
 
 class WhatIsNotHandedOver(RowCase):
+    def test_parked_followups_wait_until_the_piece_is_revived(self):
+        from sd_db import writing
+
+        path = self.root / "content/2026/paused/index.md"
+        path.parent.mkdir(parents=True)
+        path.write_text("---\ntitle: Paused piece\nstatus: drafting\n---\n## Draft\nText.\n")
+        state = writing.import_piece(self.connection, str(self.root), "2026/paused")
+        item = state["item"]["id"]
+        self.followup(item, "resume the research")
+        self.assertIn("resume the research", "\n".join(self.read()))
+        writing.park_piece(self.connection, item)
+        self.assertEqual(self.read(), [])
+        writing.park_piece(self.connection, item, parked=False)
+        self.assertIn("resume the research", "\n".join(self.read()))
+
     def test_a_resolved_followup_is_gone(self):
         item = self.item()
         note = self.followup(item, "already done")

@@ -14,8 +14,7 @@
       "Bash(python3 bin/sd-status:*)",
       "Bash(python3 bin/sd_install.py --pull)",
       "Bash(python3 bin/sd_install.py --status)",
-      "Bash(python3 bin/sd_install.py --user)",
-      "mcp__github__list_issues"
+      "Bash(python3 bin/sd_install.py --user)"
     ]
   }
 }

@@ -48,6 +48,7 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+import tempfile
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -136,7 +137,7 @@ def read_only_surfaces() -> list[str]:
             if (REPO_ROOT / "bin" / name).is_file()]
 
 
-def skill_mcp_tools() -> set[str]:
+def skill_mcp_tools(root: pathlib.Path = REPO_ROOT) -> set[str]:
     """The GitHub tools a shipped skill tells a reader to call.
 
     `SKILL.md` only, never `skills/**/*.md`. A skill directory also holds
@@ -145,14 +146,13 @@ def skill_mcp_tools() -> set[str]:
     capability because some prose mentioned it. The entrypoint is the shipped
     instruction; everything beside it is documentation.
 
-    Unlike the `bin/` derivation, this does not require the skill's own binary
-    to exist: `sd-suggest` names `mcp__github__list_issues` and has no
-    `bin/sd-suggest`, but the tool is how the skill reaches the tracker, which
-    is a separate thing from the runner it does not yet have.
+    Unlike the `bin/` derivation, this does not require a skill's own binary
+    to exist: a skill can invoke an MCP tool directly. No tool mentions is a
+    valid result when no shipped skill needs a GitHub grant.
     """
 
     found: set[str] = set()
-    for skill in REPO_ROOT.glob("skills/**/SKILL.md"):
+    for skill in root.glob("skills/**/SKILL.md"):
         found.update(MCP_TOOL.findall(skill.read_text(encoding="utf-8")))
     return found
 
@@ -249,7 +249,30 @@ class PermissionAllowlistTests(unittest.TestCase):
         self.assertNotEqual(public_make_targets(), [], "Makefile .PHONY not parsed")
         self.assertNotEqual(readme_install_modes(), [], "README install table not parsed")
         self.assertNotEqual(read_only_surfaces(), [], "README surface table not parsed")
-        self.assertNotEqual(skill_mcp_tools(), set(), "no skill named an mcp__github__ tool")
+        self.assertNotEqual(list(REPO_ROOT.glob("skills/**/SKILL.md")), [],
+                            "no skill entrypoints were enumerated")
+
+    def test_skill_tool_inventory_reads_entrypoints_and_allows_no_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            skill = root / "skills" / "example"
+            skill.mkdir(parents=True)
+            entrypoint = skill / "SKILL.md"
+            entrypoint.write_text("Local work only.\n", encoding="utf-8")
+            (skill / "reference.md").write_text(
+                "mcp__github__issue_write\n", encoding="utf-8")
+            self.assertEqual(skill_mcp_tools(root), set())
+
+            entrypoint.write_text(
+                "Call `mcp__github__list_issues`; then `mcp__github__list_issues` again.\n",
+                encoding="utf-8")
+            nested = root / "skills" / "group" / "second"
+            nested.mkdir(parents=True)
+            (nested / "SKILL.md").write_text(
+                "Call `mcp__github__pull_request_read`.\n", encoding="utf-8")
+            self.assertEqual(skill_mcp_tools(root), {
+                "mcp__github__list_issues", "mcp__github__pull_request_read",
+            })
 
     def test_the_read_only_adjective_is_on_the_row_it_is_credited_to(self) -> None:
         """The control above only asks that *something* matched.

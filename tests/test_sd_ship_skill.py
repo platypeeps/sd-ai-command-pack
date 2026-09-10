@@ -1,9 +1,8 @@
-"""`sd-ship` is a skill, so criteria 2, 3 and 32 are claims about its text.
+"""Canonical manual ship-sequence invariants supplement the executable tests.
 
-There is no `bin/sd-ship`. The eight steps are prose an agent follows, which
-is why criterion 2 says "asserted against the skill text, not inferred": the
-only place "the command does not do X" can be checked is the file that tells
-the agent what to do. Two consequences shape every assertion here.
+`tests/test_sd_ship.py` exercises the actual CLI with real Git and a local
+GitHub protocol server. These checks retain the prose guards for the manual
+eight-step sequence, which also supports changes without a database item.
 
 **Absence carries the weight.** A test that greps for a sentence passes
 forever and catches nothing -- it breaks on a rewrite that preserves the
@@ -36,10 +35,8 @@ reasons; criterion 32 names the same comparison as one of its four tests, and
 both must pass.
 
 The later classes read the same file for the row the merge writes: criterion
-13's `sd-ship` half, and item B's clauses 7.18, 7.21 and 15.25. There is still
-no runner, so these too are claims about the text -- but three of them have a
-mechanical form that survives a rewrite, and those are the ones that carry the
-weight. A row written by hand rather than through `sd_db` is a pattern, not a
+13's `sd-ship` half, and item B's clauses 7.18, 7.21 and 15.25. These remain claims about the manual sequence text. Three have a
+mechanical form that survives a rewrite, and those carry the weight. A row written by hand rather than through `sd_db` is a pattern, not a
 sentence. A reconciliation that calls a merge is a `gh pr merge` span in a
 section that must hold none, checked with the same command parser that finds
 the real merge in step 6. A cancel that opens a pull request is a `gh pr
@@ -118,8 +115,8 @@ def sequence_section() -> str:
     return section(SKILL_TEXT, "## The sequence")
 
 
-def autonomous_section() -> str:
-    return section(SKILL_TEXT, "## The autonomous lane (R10-D1)")
+def executable_section() -> str:
+    return section(SKILL_TEXT, "## Executable interface")
 
 
 def reconcile_section() -> str:
@@ -470,7 +467,7 @@ class TheNeededByTrailer(unittest.TestCase):
 
 
 class TheReviewedHead(unittest.TestCase):
-    """Criterion 32: only a reviewed head, or a verified fix of it, ships."""
+    """Criterion 32: only a cleared reviewed head, or its verified fix, ships."""
 
     def merge_command(self) -> str:
         found = [c for c in commands(steps()[6]) if c.startswith("gh pr merge")]
@@ -481,7 +478,7 @@ class TheReviewedHead(unittest.TestCase):
         body = steps()[2]
         self.assertIn("diff", body)
         self.assertIn("since", body)
-        self.assertIn("passed", body)
+        self.assertIn("reviewed head", body)
 
     def test_the_skill_reads_that_cap_from_the_table_and_states_none(self) -> None:
         """The rule file owns the caps; a skill restating one is how the two
@@ -493,7 +490,7 @@ class TheReviewedHead(unittest.TestCase):
         self.assertNotIn(cap, SKILL_TEXT)
         self.assertIn(".claude/rules/sd-planning-adversarial-review.md", steps()[2])
 
-    def test_the_push_refuses_a_head_the_lane_has_not_passed(self) -> None:
+    def test_the_push_refuses_a_head_the_local_review_has_not_cleared(self) -> None:
         """One sentence carries all three, rather than the step between them.
 
         Step 3 also says that `--match-head-commit` refuses the same head at
@@ -506,12 +503,12 @@ class TheReviewedHead(unittest.TestCase):
         carried = [
             line
             for line in sentences(steps()[3])
-            if "refus" in line and "sha" in line and "passed" in line
+            if "refus" in line and "sha" in line and "cleared" in line
         ]
         self.assertTrue(
             carried,
-            "no sentence in step 3 refuses a head the lane has not passed "
-            "and names its sha",
+            "no sentence in step 3 refuses a head the local review has not cleared "
+            "and checks its sha",
         )
 
     def test_the_never_list_forbids_pushing_an_unseen_head(self) -> None:
@@ -549,26 +546,24 @@ class TheReviewedHead(unittest.TestCase):
         self.assertEqual(github.merged, MOVED)
 
 
-class TheLoopStopsAtPullRequestReady(unittest.TestCase):
-    """Criterion 32's last clause, on the lane that could break it.
+class TheAuthorStopsAtPullRequestReady(unittest.TestCase):
+    """The executable author phase cannot borrow the separate merge authority."""
 
-    The autonomous lane is the only part of `sd-ship` that runs without a
-    person watching, so it is the only part that could merge one. Its bound
-    is asserted as an absence -- no merge and no ready-for-review command
-    anywhere in the section -- because that survives a rewrite of the
-    paragraph around it.
-    """
-
-    def test_the_lane_issues_no_merge_and_no_ready_command(self) -> None:
-        for command in commands(autonomous_section()):
+    def test_prepare_stops_before_merge(self) -> None:
+        lane = executable_section()
+        prepare = lane.split("- `sd-ship prepare", 1)[1].split("\n- ", 1)[0]
+        self.assertIn("ready_to_send", prepare)
+        self.assertIn("never merges", prepare)
+        for command in commands(prepare):
             self.assertNotIn("pr merge", command, command)
-            self.assertNotIn("pr ready", command, command)
 
-    def test_the_bound_holds_where_nothing_else_would_stop_it(self) -> None:
-        lane = autonomous_section()
-        self.assertIn("draft", lane)
-        self.assertIn("never merges", lane)
-        self.assertIn("branch protection", lane)
+    def test_merge_is_a_separate_owned_assignment(self) -> None:
+        lane = executable_section()
+        self.assertIn("--run RUN-ID", lane)
+        self.assertIn("exclusive", lane)
+        self.assertIn("merge: auto", lane)
+        self.assertIn("An author assignment cannot use this authority", lane)
+        self.assertIn("enforcing protection", lane)
 
 
 class TheTwoRegistryReadersAgree(unittest.TestCase):
@@ -614,10 +609,10 @@ class TheRowTheMergeWrites(unittest.TestCase):
         self.assertIn("Delivers:", self.step)
         self.assertIn("Item:", self.step)
 
-    def test_the_write_goes_through_the_library_and_names_both_writers(
+    def test_the_write_goes_through_the_verified_library_operation(
         self,
     ) -> None:
-        for token in ("sd_db", "transition", "set_item_fields"):
+        for token in ("sd work deliver", "sd_db.progress.deliver_work", "current remote"):
             self.assertIn(token, self.step, f"step 7 never names {token}")
 
     def test_the_row_waits_for_the_remote_to_confirm_the_merge(self) -> None:
@@ -697,8 +692,7 @@ class TheRowTheMergeWrites(unittest.TestCase):
 
 
 class TheCancelPath(unittest.TestCase):
-    """Item B's clause 7.18. The cancel is the item screen's; what `sd-ship`
-    owes it is a `Closes:` on the next merge and nothing else at all."""
+    """Cancellation completes in the database without requiring another merge."""
 
     def setUp(self) -> None:
         self.step = steps()[7]
@@ -712,10 +706,10 @@ class TheCancelPath(unittest.TestCase):
     def test_the_cancel_touches_no_file_and_opens_no_pull_request(self) -> None:
         carried = sentences_with(self.step, "cancel", "no pull request")
         self.assertTrue(carried, "the cancel is not said to open no pull request")
-        for line in carried:
-            self.assertIn("touches no file", line)
+        self.assertTrue(sentences_with(self.step, "cancel", "touches no file"))
+        self.assertIn("does not wait for another merge", self.step)
 
-    def test_the_next_merge_carries_closes_for_it(self) -> None:
+    def test_an_associated_later_merge_can_record_closes(self) -> None:
         self.assertTrue(
             sentences_with(self.step, "cancel", "`Closes: <item>`"),
             "no merge is said to carry `Closes:` for a cancelled item",
@@ -806,8 +800,8 @@ class AKilledRunIsReconciledByTheNext(unittest.TestCase):
 
     def test_a_delivering_kill_reconciles_to_done_with_shipped_at(self) -> None:
         self.assertTrue(
-            sentences_with(self.reconcile, "`Delivers:`", "`done`", "`shipped_at`"),
-            "the delivering case does not reach `done` with the field",
+            sentences_with(self.reconcile, "`Delivers:`", "sd work deliver", "verify"),
+            "the delivering case does not use the verified completion operation",
         )
 
     def test_a_slice_kill_notes_the_squash_and_leaves_the_row_open(self) -> None:

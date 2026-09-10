@@ -1,8 +1,14 @@
 ---
 title: <one line, what this delivers>
-status: planning
 created: <YYYY-MM-DD>
 ---
+
+<!-- Template instruction: read .status-source in the selected work root
+(docs/work by default, or the root chosen with --work-dir) before writing this
+item. With `row`, keep status in the database and add no status field here.
+With `file` or no marker, preserve the legacy reader by adding `status: planning` to
+frontmatter. Report an unrecognized marker instead of choosing a source.
+Remove this instruction from the finished PRD. -->
 
 # PRD — <slug>
 

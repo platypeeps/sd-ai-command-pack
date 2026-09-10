@@ -846,7 +846,9 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # remaining half whose priced spans total 264 against step 1's 260. The halves
 # are the same size, the first is measured, and the second is funded slightly
 # above it. That is the shape the number should have.
-BIN_CAP = 18_550           # R11-D47: the same item, steps 2 through 7
+# Approved additional controls: docs/workflow-control-capacity.md. Keep this
+# capacity decision separate from the implementation when publishing.
+BIN_CAP = 20_745
 MIGRATE_CAP = 1_500        # temporary tools, outside the bin/ cap, deleted at steps 7 and 11
 # R11-D29, re-derived 2026-09-03 with the itemisation R11-D24's clause asks
 # for: 4,190 measured on `main`, 158 measured on the branch that carries the
@@ -996,6 +998,14 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
         ("2026-09-07", 17_250),
         ("2026-09-07", 18_000),
         ("2026-09-07", 18_550),
+        ("2026-09-08", 19_500),
+        ("2026-09-08", 20_050),
+        ("2026-09-09", 20_231),
+        ("2026-09-09", 20_246),
+        ("2026-09-09", 20_475),
+        ("2026-09-09", 20_731),
+        ("2026-09-09", 20_733),
+        ("2026-09-10", 20_745),
     ),
     "DASHBOARD_CAP": (
         ("2026-08-30", 2_500),

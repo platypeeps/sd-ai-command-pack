@@ -5,11 +5,32 @@ people see pull requests and merged commits, and nothing else the pack makes.
 Every default below serves that person. Anything that would show a personal
 process to someone else is off unless this file says otherwise.
 
+## Available controls
+
+`sd task` and the dashboard create and update ordinary tasks directly in the
+database, without a Git checkout, PRD or GitHub issue. `sd today` and `sd store
+items` use the same queries as Today and Backlog. Completion of an ordinary
+task is independent of code delivery. `sd work deliver` verifies delivery
+evidence; `sd work cancel --reason` records a cancellation without waiting for
+another merge. Artifact relinking preserves the item's identity and history.
+
+Writing uses shared stage and review-evidence checks through `sd writing` and
+the Writing screen. After the verified one-time cutover, stages, parking and
+publication metadata belong to the database; drafts and research stay in Git.
+The supported operational controls inspect existing launchd jobs and database
+assignments. Running an arbitrary agent command or terminating an unowned
+process is not a dashboard action.
+
+The automation policies below describe the intended development loop. They do
+not mean an autonomous queue runner, send box, one-click revert, or repository
+settings editor is installed. Consult the current command help and dashboard
+controls for executable operations.
+
 ## Two flows, one spine
 
-The spine is the **item**: one row in the local database, one screen on the
-dashboard, and the files in git the row points at. Every flow starts by
-creating or picking an item and ends by closing it.
+The spine is the **item**: one row in the local database and one screen on the
+dashboard, with optional files in Git. A small code change can proceed without
+creating an item or placeholder planning artifact.
 
 **Research.** Sources, understanding, brief, decisions, handoff or publish. The
 research kit lays out the repository; the item tracks what is open. You sit at
@@ -21,8 +42,9 @@ have allowed it. A repository merges unattended only when you set `merge: auto`
 on its row, once, from the dashboard, and only while the remote still answers
 that the repository is yours alone, asked again at every merge; there you
 review the result on the item
-screen after it lands, and revert is one action. Everywhere else the loop stops
-at pull-request-ready and the pull request waits in the send box.
+screen after it lands, and revert is one action. This unattended runner rule
+is separate from the assistant's active task permission under **Standing authorization**.
+Without either applicable authority, stop at pull-request-ready.
 
 The loop asks no questions while it runs. Where it would have asked, it decides,
 records the choice on the item as a proposal, and continues. You veto after. It
@@ -123,7 +145,9 @@ A shared repository is one where someone else also merges. In it:
   surface. `sd-review` and `sd-receive-review` never post.
 - No workflow files or repository settings unless the owner of that
   repository asked for them.
-- No merge. The loop stops at pull-request-ready.
+- No merge without task-specific or standing operator permission. Shared contributors
+  do not revoke that permission. Existing ownership and protection gates still
+  decide whether the pack can execute it; a refusal remains a stop.
 - No issue filed. `sd-suggest` writes a row everywhere; `sd suggest publish`
   files one when you run it, to the destination you name with `--to`.
 
@@ -132,37 +156,31 @@ A shared repository is one where someone else also merges. In it:
 Small change: branch, commit, `sd-review`, push, pull request, CI, merge.
 Eight commands, one local review, no artifacts.
 
-Change that earns a work item: `sd-plan` writes `prd.md` after asking three to
-five questions, or none when the loop runs unattended. Then the small-change
-path, with the two development review points. An item is not one pull
-request; it lands in as many as its slices need. Every merge `sd-ship`
-makes carries `Item: <item>` in its message, which ties the commit to
-the item and closes nothing: after it, whether `sd-ship` made it or you
-did, and a merge you make is confirmed by the runner's watch on the pull
-request or by the next `sd-ship` run here, the squash commit goes on a
-note, and the item stays open. The one
-merge that delivers carries `Delivers: <item>` as well: `sd-ship
---deliver`, the runner on a row you marked final, or your own hand in
-the merge message; for a hand merge without it, the item screen's
-`deliver` does the same after the fact. On that merge, and on no other,
-the row is `done`, nothing is written into a file, and the directory
-stays. A delivered item that got no `Delivers:` of its own, a hand merge
-you delivered after the fact or a cancel, is marked by the next merge
-message `sd-ship` writes here, or by one empty commit on its own branch
-when the triad never left it.
-A reader with no database asks git first: a `Delivers:` or `Closes:`
-commit on the default branch means delivered, an `Item:` commit alone
-means nothing, and a shallow clone that cannot tell says so and picks
-nothing. The branch itself never
-says `done`, so a merge that fails leaves the item open. Delete a `done`
-directory yourself, with `git rm -r`, when you want the listing short;
-nothing in the pack does. When the default branch moved while the pull
-request waited, `sd-ship` merges it in once, reviews the combined head
-once, spends no pass on it, waits for CI and merges; moved again, the run
-stops at `ready_to_send` and says so, and the next run makes the next
-update. A conflict ends the item `blocked` naming the files. In `guest`
-mode the mark is one empty commit on the fork's integration branch, where
-the triad lives, and nothing goes upstream.
+Change that earns a work item: `sd-plan` writes `prd.md` using the requirements
+already available and asks only for missing decisions. Then the small-change
+path runs with the applicable review points. An item can span several pull
+requests. `Item: <item>` associates a merge without closing the item;
+`Delivers: <item>` declares the delivering merge. Changes without an associated
+item omit those trailers and create no placeholder record.
+
+After the remote confirms the delivering merge, `sd work deliver <row-id>
+<full-commit-sha>` verifies the commit, default branch and delivery trailer. It
+records completion and the shipment time together. Repeating that operation
+preserves the original receipt. A missing trailer or unavailable remote leaves
+the claim unverified and reports the missing evidence; a bare merged branch or
+stale issue status cannot close the item.
+
+`sd work cancel <row-id> --reason TEXT` records cancellation immediately,
+without a status-file change or another pull request. It does not claim the
+work shipped. A later associated merge may carry `Closes: <item>` for context;
+that merge is not a prerequisite for database completion. Readers with no
+database can use explicit `Delivers:` or `Closes:` evidence to see that work is
+closed, while only `Delivers:` says it shipped. A shallow clone that cannot
+establish the evidence reports uncertainty.
+
+The item directory stays in place. Use `sd work relink <row-id> <path>` when an
+artifact moves: it preserves the row, notes and original source identity. No
+command automatically deletes or archives a completed item directory.
 
 ## Modes
 
@@ -200,6 +218,10 @@ suspends it with the reason shown.
 
 One file, read by the library, maps roles to providers. Skills name roles and
 never vendors.
+
+Standard and deep changes require two completed reviews. Cheap changes require
+one; skip requires none. Planning and challenged reviews retain their existing
+minimum of one review. Tier selection still follows repository policy.
 
     bills:
       anthropic: { cost: subscription }
@@ -251,9 +273,18 @@ shows them beside the bill, a `plan` bill reserves no dollars, and
 fallthrough skips it while either window reads zero; the two Baseten tools
 pin
 DeepSeek V4 Pro, whose 0813 build is the cheapest of Baseten's frontier
-reviewers. `max_tokens` is the same on all four because a review reply that
-needs more than sixteen thousand tokens is a review that should have been
-scoped. A pin is changed by editing this file, never by a page.
+reviewers. `max_tokens` bounds generated reasoning and the final answer together;
+exhausting it does not establish that the review subject was too large.
+URL entries can declare one optional control: `thinking: disabled|adaptive`
+or `reasoning_effort: none|low|high|max`. The client sends `thinking` as
+`{"type": "disabled"}` or `{"type": "adaptive"}`, and effort as a top-level
+string. Both registry readers validate and preserve these fields; omission
+retains the endpoint default. These values require support from the selected
+model: MiniMax-M3 supports disabled thinking, and Baseten's DeepSeek-V4-Pro-0813
+supports effort `none`. Lower reasoning can change finding quality; full
+subject coverage and the required reviewer count remain mandatory.
+Incomplete output still fails the review. A pin is changed by editing the
+registry file, never by a page.
 
 Adding a provider is an entry; adding money is a bill. Both role lines are
 read in order. `author` is picked when an assignment starts and never switched
@@ -267,7 +298,13 @@ refuses the review by name rather than being guessed. `reviewer` is the first en
 range's trailers carry, has budget left on its bill, and answers its preflight. A rate limit,
 a missing binary, a failed run or a timeout falls through to the next, and the
 run says which one reviewed and why the earlier ones did not. With none left,
-the review refuses by name rather than reading its own work. `vendor` is the
+the review refuses by name rather than reading its own work.
+MiniMax and Kimi can replace each other in either configured order when an
+attempt fails to complete. The chain continues until the required count completes
+or eligible entries run out. Neither provider has a reserved slot. A completed
+review with findings counts; it does not trigger a replacement. Consent, author
+exclusions and spending limits apply to every fallback, and earlier findings remain.
+`vendor` is the
 maker of the model, not the tool; `bill` is whose money. A bill with
 `cap_usd_month` is enforced per call: the library reserves each call's bound,
 prompt plus `max_tokens` at the entry's price, against the month's settled and
@@ -284,14 +321,36 @@ name. Copilot and Greptile are not entries: they post on the pull request, and
 this lane never posts.
 
 This file is the only list of providers. `sd-review` reads it through the
-library; `.github/sd-review.json` carries repository policy, paths and the
-severity floor, and names no provider and no chain. The `reviewer` line above
-is the chain, intersected with the repository's `reviewers` line in
-`CLAUDE.local.md`, the entries you have allowed to receive that repository's
-diff; the entry is the recipient and the line names the recipient beside the
-entry, so a second host for the same model is a second name to allow and a
-host moved under the same name is refused until you rewrite the line;
-without the line, no reviewer resolves.
+library. `.github/sd-review.json` carries repository policy, paths and severity;
+it names no provider chain. Effective authorization restricts the registry's
+reviewer chain before vendor, transport, availability and spending gates run.
+
+## Standing authorization
+
+Core settings use `sd config get|set|unset|list` and the existing atomic machine configuration writer.
+The file is `~/.config/sd-ai-command-pack/config.json`, honoring `XDG_CONFIG_HOME`.
+The reserved `sd` namespace declares two settings:
+
+- `sd.external_reviews`: `configured` permits private code and scoped review context to eligible configured providers.
+  It includes future registry entries; registry configuration chooses capability, while this explicit operator grant authorizes transmission.
+  `deny` vetoes all local allowances. Absence supplies no standing grant.
+- `sd.merge_authorization`: `controlled` permits assistant merges for active, in-scope PR work in repositories the user controls.
+  An explicit instruction to wait wins. `ask`, or absence, requires task-specific permission.
+  Shared contributors do not revoke permission, but the current sole-operator ownership gate may still refuse execution.
+
+Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
+These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.
+Review depth, author exclusions, spending limits, and the review table's automatic pass caps remain unchanged.
+The additional-review request still needs its separate explicit authorization when the automatic cap is spent.
+The upstream Trellis PR exception still requires permission for that specific PR.
+
+Review resolution is ordered: machine deny; present local restriction; configured standing policy; otherwise refusal.
+A local named list restricts recipients. An explicit empty list denies all; malformed local consent refuses.
+An absent local key inherits standing policy. `--explain` and review receipts identify the authorization source.
+Linked worktrees share the main checkout's local block; installer output and review receipts name that canonical path.
+Unreadable existing configuration paths refuse, including directories and dangling links.
+Ship receipts bind the external-review policy source and value; changing it invalidates the recorded review.
+Unrelated machine settings do not invalidate reviews.
 
 ## Overrides
 
@@ -303,20 +362,16 @@ The `CLAUDE.local.md` block carries these keys, and the pack reads no others.
     lint: <optional, same>
     reviewers: <entry@recipient pairs that may receive this repository's diff, e.g. claude@claude+3f9a1c2e, baseten@inference.baseten.co>
 
-`check`, `test` and `lint` run in that order and are each optional; a repository
-that spells everything as one command sets `check` alone. `reviewers` is
-consent: you write it, nothing derives it, it names entries because the entry
-is who receives the diff, and each entry carries its recipient, the host of a
-`url` entry, or the executable of a `start` entry with a fingerprint of its
-line and `env` names, so an entry edited to point elsewhere is refused until
-you rewrite the line; a `start` session is refused any variable whose value
-is a URL, and the tool's own configuration file is yours to keep; without
-the line no
-reviewer resolves for the
-repository. The installer asks for it once per repository when it writes the
-block, offering the enabled entries and taking none as an answer; it fills in
-no default, keeps your answer on every rerun, and a repository you skipped
-refuses its first review naming the key.
+`check`, `test` and `lint` run in that order and are optional; one combined command can use `check` alone.
+`reviewers` restricts the effective authorization described above. Each local entry binds its destination:
+a URL host, or an executable with a fingerprint of its command and declared environment names.
+A changed destination or fingerprint needs a changed local allowance. Standing `configured` policy follows the current registry instead.
+Transport restrictions and the operator's responsibility for tool configuration remain unchanged.
+
+The installer preserves an existing answer, including empty denial. Malformed existing blocks and unknown answers refuse without rewriting consent.
+Without local consent it inherits an explicit machine policy, or offers enabled recipients with no default grant.
+An explicit empty answer writes a durable empty restriction. Earlier installers erased some empty answers;
+missing historical keys cannot distinguish those answers from repositories never configured. Inspect them before granting standing policy.
 
 Everything under **Opt-in** above is asked for by name, in the moment, rather
 than switched on in a file. Naming it is already the whole cost, and a key that

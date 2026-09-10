@@ -19,6 +19,7 @@ import importlib.util
 import io
 import itertools
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -27,6 +28,7 @@ import sys
 import tempfile
 import unittest
 from typing import Any
+from unittest import mock
 
 from tests.test_sd_pr_state import BIN, SD_STATUS, ToolFixture, tree_digest
 
@@ -1017,6 +1019,27 @@ class IssueSectionTests(StatusFixture):
         self.assertTrue(result["issues"]["available"])
         self.assertEqual(len(result["issues"]["needs_you"]), 1)
 
+    def test_shared_database_supersedes_legacy_issue_cache_without_stalling_work(self) -> None:
+        import sd_db
+
+        self.with_github(pulls=[])
+        self.write_index([self.row("acme/widget", 99, ["assigned"])])
+        sd_db.initialise(home=self.home)
+        connection = sd_db.connect(home=self.home)
+        try:
+            sd_db.writes.upsert_shadow(
+                connection, tracker="github", repo="acme/widget", number=7,
+                url="https://github.com/acme/widget/issues/7", title="External context",
+                kind="issue", state="open")
+        finally:
+            connection.close()
+        result = self.report()
+        self.assertEqual(result["issues"]["source"], "database")
+        self.assertEqual(result["issues"]["freshness"]["state"], "never")
+        self.assertEqual([row["number"] for row in result["issues"]["other"]], [7])
+        self.assertEqual(result["issues"]["needs_you"], [])
+        self.assertFalse(any(row["check"].startswith("issue-") for row in result["actions"]))
+
 
 class ReadOnlyTests(StatusFixture):
     def test_nothing_under_the_temp_root_changes(self) -> None:
@@ -1728,6 +1751,146 @@ class BranchLandedTests(StatusFixture):
         )
 
 
+class RowWorkItemInventoryTests(InventoryFixture):
+    """Retired status files cannot be the repair for database-owned work."""
+
+    ITEM = "2026-09-05-alpha"
+
+    def setUp(self) -> None:
+        super().setUp()
+        import sd_db
+
+        self.db = sd_db
+        environment = mock.patch.dict(os.environ, {"HOME": str(self.home)})
+        environment.start()
+        self.addCleanup(environment.stop)
+        self.db.initialise(home=self.home)
+
+    def row_item(self, *, branch: str = "feature", missing: bool = False) -> pathlib.Path:
+        directory = self.item(self.ITEM, extra=f"branch: {branch}\n")
+        path = directory / "prd.md"
+        path.write_text(path.read_text().replace("status: planning\n", ""))
+        (directory.parent / ".status-source").write_text("row\n")
+        connection = self.db.connect(home=self.home)
+        try:
+            self.db.upsert_repo(connection, str(self.repo), status_source="row")
+            if not missing:
+                self.db.upsert_item(
+                    connection, source="docs/work",
+                    external_id=f"{self.repo}::docs/work/{self.ITEM}/prd.md",
+                    kind="work", title="alpha", status="in_progress", who="test",
+                    repo=str(self.repo), branch=branch,
+                )
+        finally:
+            connection.close()
+        return directory
+
+    def test_unmerged_feature_closing_trailer_is_not_already_merged(self) -> None:
+        self.branch("feature", land=False)
+        self.row_item()
+        self.git("checkout", "-q", "feature")
+        self.git("commit", "-q", "--allow-empty", "-m", f"Proposed delivery\n\nDelivers: {self.ITEM}")
+        result = self.inventory(protection=self.BLIND)
+        self.assertEqual([], self.by_check(result.rows, "branch-already-merged"))
+
+    def test_row_closing_history_is_read_once_per_default_ref(self) -> None:
+        self.git("commit", "-q", "--allow-empty", "-m", "Delivered item\n\nCloses: item-0")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        work = {"status_source": status.sd_lib.FROM_ROW, "items": [
+            {"path": f"docs/work/item-{index}", "slug": f"item-{index}",
+             "status": "in_progress", "branch": "main", "archived": False, "parked": False}
+            for index in range(40)]}
+        with mock.patch.object(status.sd_lib, "upstream", return_value=("origin", "main")), \
+                mock.patch.object(status.sd_lib, "git_output", wraps=status.sd_lib.git_output) as git_calls:
+            rows = status._work_rows(self.repo, work, self.TODAY, "main", status.Merged(None, ""), {})
+        walks = [call.args[0] for call in git_calls.call_args_list
+                 if call.args[0][0] == "log" and "--grep" in call.args[0]]
+        self.assertEqual([argv[-1] for argv in walks], ["main", "origin/main"])
+        self.assertEqual([row["key"] for row in self.by_check(rows, "branch-already-merged")], ["item-0"])
+
+    def test_quoted_closing_line_is_not_a_default_branch_trailer(self) -> None:
+        self.branch("feature", land=True)
+        self.row_item()
+        self.git("commit", "-q", "--allow-empty", "-m", f"Quoted example\n\nCloses: {self.ITEM}\n\nThis is an example, not a delivery.")
+        self.assertEqual([], self.by_check(self.inventory(protection=self.BLIND).rows, "branch-already-merged"))
+
+    def test_an_ordinary_slice_merge_does_not_close_a_row_owned_item(self) -> None:
+        self.branch("feature", land=True)
+        self.row_item()
+        result = self.inventory(protection=self.BLIND)
+        self.assertEqual([], self.by_check(result.rows, "branch-already-merged"))
+        self.assertNotIn("branch-already-merged", result.unchecked)
+
+    def test_an_open_row_needs_no_github_lookup_to_check_a_slice(self) -> None:
+        self.branch("feature", land=False)
+        self.row_item()
+        with mock.patch.object(status, "merged_pulls") as lookup:
+            result = self.inventory(protection=self.BLIND)
+        lookup.assert_not_called()
+        self.assertEqual([], self.by_check(result.rows, "branch-already-merged"))
+        self.assertNotIn("branch-already-merged", result.unchecked)
+
+    def test_a_closing_trailer_reconciles_the_row_without_rewriting_frontmatter(self) -> None:
+        self.branch("feature", land=True)
+        self.row_item()
+        self.git("commit", "-q", "--allow-empty", "-m", f"Deliver\n\nCloses: {self.ITEM}")
+        # SQLite mode=ro may maintain these two lock files for a WAL database.
+        # Main database bytes and every repository file still must be unchanged.
+        lock_files = {"home/.local/share/sd/sd.db-wal", "home/.local/share/sd/sd.db-shm"}
+
+        def snapshot():
+            return {path: value for path, value in tree_digest(self.base).items()
+                    if path not in lock_files}
+
+        before = snapshot()
+        result = self.inventory(protection=self.BLIND)
+        found = self.by_check(result.rows, "branch-already-merged")
+        self.assertEqual(1, len(found))
+        self.assertIn(f"Closes: {self.ITEM}", found[0]["detail"])
+        self.assertIn("database row", found[0]["suggest"])
+        self.assertNotIn("set status:", found[0]["suggest"])
+        self.assertEqual(before, snapshot())
+
+    def test_a_missing_database_row_keeps_its_identity_and_source_in_the_repair(self) -> None:
+        self.branch("feature", land=False)
+        self.row_item(missing=True)
+        found = self.by_check(self.inventory(protection=self.BLIND).rows, "status-unreadable")
+        self.assertEqual(1, len(found))
+        self.assertIn("database holds no docs/work row", found[0]["detail"])
+        self.assertIn(f"{self.repo}::docs/work/{self.ITEM}/prd.md", found[0]["detail"])
+        self.assertIn("database holds no docs/work row", found[0]["suggest"])
+        self.assertNotIn("frontmatter", found[0]["suggest"])
+
+    def test_an_unknown_git_fallback_keeps_the_failed_probe_and_its_repair(self) -> None:
+        self.branch("feature", land=False)
+        self.row_item()
+        with mock.patch.object(self.db, "connect", side_effect=FileNotFoundError("no database")), \
+             mock.patch.object(status.sd_lib, "delivered", return_value=status.sd_lib.Answer(
+                 status.sd_lib.UNKNOWN, "git fetch --unshallow"
+             )):
+            work = status.work_section(self.repo)
+            result = self.inventory(work=work, protection=self.BLIND)
+        found = self.by_check(result.rows, "status-unreadable")
+        self.assertEqual(1, len(found))
+        self.assertIn("cannot see whether", found[0]["detail"])
+        self.assertIn("git fetch --unshallow", found[0]["suggest"])
+        self.assertNotIn("database row", found[0]["suggest"])
+        self.assertNotIn("frontmatter", found[0]["suggest"])
+        self.assertEqual("unknown", work["items"][0]["status"])
+        checked = next(row for row in status.banner(result)["classes"]
+                       if row["check"] == "status-unreadable")
+        self.assertEqual(status.FINDINGS, checked["state"])
+
+    def test_an_invalid_marker_is_repaired_instead_of_inventing_file_authority(self) -> None:
+        directory = self.row_item(missing=True)
+        (directory.parent / ".status-source").write_text("broken\n")
+        found = self.by_check(self.inventory(protection=self.BLIND).rows, "status-unreadable")
+        self.assertEqual(1, len(found))
+        self.assertIn(".status-source says 'broken'", found[0]["detail"])
+        self.assertIn(".status-source", found[0]["suggest"])
+        self.assertNotIn("frontmatter", found[0]["suggest"])
+
+
 class BannerTests(InventoryFixture):
     """The three per-class states, and the one substring `prd.md:134` checks.
 
@@ -2207,6 +2370,7 @@ class ReportSectionTests(InventoryFixture):
             "residue": [],
             "issues": {"available": False, "reason": "no index",
                        "needs_you": [], "other": []},
+            "contributions": {"available": False, "reason": "no shared database", "rows": []},
         }
         stream = io.StringIO()
         status.render(result, stream)
@@ -2221,6 +2385,7 @@ class ReportSectionTests(InventoryFixture):
     #: for; the eight below keep the order they already had.
     ORDER = [
         "abnormalities", "pending", "next", "open threads", "work items",
+        "contributions (this repo, shared database order)",
         "open pull requests", "detected setup",
         "issues (this repo, from the index)", "protection",
         "resumable handoffs", "backends", "legacy residue",
@@ -2228,7 +2393,7 @@ class ReportSectionTests(InventoryFixture):
 
     # -- the skeleton -------------------------------------------------------
 
-    def test_twelve_headings_print_in_order_when_there_is_nothing_to_report(
+    def test_thirteen_headings_print_in_order_when_there_is_nothing_to_report(
         self,
     ) -> None:
         """The skeleton is fixed, so a missing section is a missing section.
@@ -2239,7 +2404,7 @@ class ReportSectionTests(InventoryFixture):
         """
         self.assertEqual(self.ORDER, self.headings(self.report()))
 
-    def test_the_same_twelve_print_in_the_same_order_with_findings(self) -> None:
+    def test_the_same_thirteen_print_in_the_same_order_with_findings(self) -> None:
         self.item("2026-08-01-alpha", status="in_progress")
         self.assertEqual(self.ORDER, self.headings(self.report()))
 
@@ -2556,5 +2721,3 @@ class ActionsCliTests(StatusFixture):
 
 if __name__ == "__main__":
     unittest.main()
-
-

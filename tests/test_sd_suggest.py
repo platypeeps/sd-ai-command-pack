@@ -28,7 +28,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -333,11 +335,16 @@ class WhatItRefuses(SuggestCase):
         self.assertEqual([], self.proposals())
 
     def test_add_refuses_an_item_the_database_has_never_seen(self):
-        """A directory with no row is a `sd-status` that has not run, and says so."""
+        """Missing import refuses capture; running a read-only report cannot repair it."""
         (self.root / sd_lib.WORK_DIR / "unseen").mkdir()
+        items_before = list(self.connection.execute("SELECT id FROM item"))
         with self.assertRaises(sd_handoff_rows.RowsRefusal) as raised:
             self.run_verb(sd_suggest.suggest_add, item="unseen", body="a thing")
-        self.assertIn("`sd-status`", str(raised.exception))
+        self.assertIn("Import the work item before recording a proposal", str(raised.exception))
+        self.assertIn("`sd-status` only reports", str(raised.exception))
+        self.assertEqual(items_before, list(self.connection.execute("SELECT id FROM item")))
+        self.assertEqual([], self.proposals())
+        self.assertEqual([], self.issue_calls())
 
     def test_publish_refuses_a_note_id_that_is_not_a_proposal(self):
         """A followup id is not a suggestion, and filing one would be a surprise."""
@@ -428,6 +435,174 @@ class TheShadowSync(SuggestCase):
         self.run_verb(sd_shadow.shadow_sync, strict=True)
         self.run_verb(sd_shadow.shadow_sync, strict=True)
         self.assertEqual(2, len(self.shadow_rows()))
+
+
+class TheShadowRecoveryArguments(unittest.TestCase):
+    """Bad recovery bounds must stop before the library or database is opened."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.command = load("sd_shadow_command", "sd")
+
+    def refuse_before_database(self, *options):
+        error = io.StringIO()
+        with patch.object(sd_handoff_rows, "library") as library, \
+                patch.object(sd_handoff_rows, "connect") as connect, \
+                contextlib.redirect_stderr(error):
+            code = self.command.main(["shadow", "sync", *options])
+        self.assertNotEqual(0, code, options)
+        self.assertNotIn("Traceback", error.getvalue())
+        library.assert_not_called()
+        connect.assert_not_called()
+        return error.getvalue()
+
+    def test_invalid_or_naive_timestamps_refuse_before_database_access(self):
+        for flag in ("--since", "--until"):
+            for value in ("2026-09-06", "2026-09-06T10:00:00", "2026-09-06 10:00:00Z",
+                          "2026-02-30T10:00:00Z", "2026-09-06T25:00:00Z",
+                          "2026-09-06T10:00:00+01:60", "2026-09-06T10:00:00+25:00",
+                          "not-a-time"):
+                with self.subTest(flag=flag, value=value):
+                    self.assertIn("timestamp", self.refuse_before_database(flag, value))
+
+    def test_invalid_limits_refuse_before_database_access(self):
+        cases = {
+            "--max-requests": ("0", "-1", "1.5", "nan", "inf", "bad"),
+            "--max-seconds": ("0", "-1", "nan", "inf", "-inf", "1e999", "bad"),
+        }
+        for flag, values in cases.items():
+            for value in values:
+                with self.subTest(flag=flag, value=value):
+                    self.assertIn("positive", self.refuse_before_database(f"{flag}={value}"))
+
+    def test_reversed_and_future_windows_refuse_before_database_access(self):
+        for options in (
+            ("--since", "2026-09-07T00:00:00Z", "--until", "2026-09-06T00:00:00Z"),
+            ("--since", "9999-01-01T00:00:00Z"),
+            ("--until", "9999-01-01T00:00:00Z"),
+        ):
+            with self.subTest(options=options):
+                self.refuse_before_database(*options)
+
+
+class TheShadowRecoveryWindow(SuggestCase):
+    """The real collector receives explicit controls and preserves its cursor contract."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.command = load("sd_shadow_window_command", "sd")
+
+    def command_sync(self, *options):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = self.command.main(["shadow", "sync", *options])
+        return code, output.getvalue()
+
+    def test_ordinary_sync_keeps_the_library_defaults(self):
+        self.environment(GH_SEARCH=json.dumps(TWO_OPEN_ISSUES))
+        with patch.object(sd_db, "sync_shadow", wraps=sd_db.sync_shadow) as sync:
+            code, _ = self.command_sync("--strict")
+        self.assertEqual(0, code)
+        self.assertEqual({}, sync.call_args.kwargs)
+        self.assertEqual(2, len(self.shadow_rows()))
+
+    def test_explicit_bounds_and_limits_reach_the_real_library(self):
+        self.environment(GH_SEARCH=json.dumps(TWO_OPEN_ISSUES))
+        with patch.object(sd_db, "sync_shadow", wraps=sd_db.sync_shadow) as sync:
+            code, _ = self.command_sync(
+                "--strict", "--since", "2026-09-06T12:00:00.750+02:00",
+                "--until", "2026-09-06T11:00:00.250Z",
+                "--max-requests", "4", "--max-seconds", "15.5")
+        self.assertEqual(0, code)
+        self.assertEqual({
+            "since": datetime(2026, 9, 6, 10, tzinfo=timezone.utc),
+            "now": datetime(2026, 9, 6, 11, tzinfo=timezone.utc),
+            "max_requests": 4, "max_seconds": 15.5,
+        }, sync.call_args.kwargs)
+        self.assertEqual(2, len(self.shadow_rows()))
+
+    def test_one_optional_limit_does_not_override_other_defaults(self):
+        self.environment(GH_SEARCH=json.dumps(TWO_OPEN_ISSUES))
+        with patch.object(sd_db, "sync_shadow", wraps=sd_db.sync_shadow) as sync:
+            code, _ = self.command_sync("--strict", "--max-requests", "4")
+        self.assertEqual(0, code)
+        self.assertEqual({"max_requests": 4}, sync.call_args.kwargs)
+
+    def test_saturated_single_second_window_fails_strict_and_holds_cursor(self):
+        from sd_db.shadow_sync import read_watermark
+
+        page = json.loads(json.dumps(TWO_OPEN_ISSUES))
+        page["data"]["search"]["issueCount"] = 1001
+        for node in page["data"]["search"]["nodes"]:
+            node["updatedAt"] = "2026-09-06T10:00:00Z"
+        self.environment(GH_SEARCH=json.dumps(page))
+        code, output = self.command_sync(
+            "--strict", "--since", "2026-09-06T10:00:00Z",
+            "--until", "2026-09-06T10:00:00Z")
+        self.assertEqual(1, code, output)
+        self.assertIn("coverage is incomplete", output)
+        self.assertIn("cursor held", output)
+        self.assertIsNone(read_watermark(self.connection))
+        self.assertEqual(2, len(self.shadow_rows()))
+
+    def test_request_exhaustion_fails_strict_and_keeps_partial_rows(self):
+        from sd_db.shadow_sync import read_watermark
+
+        self.environment(GH_SEARCH=json.dumps(TWO_OPEN_ISSUES))
+        code, output = self.command_sync("--strict", "--max-requests", "1")
+        self.assertEqual(1, code, output)
+        self.assertIn("cursor held", output)
+        self.assertIsNone(read_watermark(self.connection))
+        self.assertEqual(2, len(self.shadow_rows()))
+        self.assertEqual(1, len([call for call in self.gh_calls() if "graphql" in call]))
+
+    def test_time_exhaustion_fails_strict_without_moving_cursor(self):
+        from sd_db.shadow_sync import read_watermark
+
+        self.environment(GH_SEARCH=json.dumps(TWO_OPEN_ISSUES))
+        code, output = self.command_sync("--strict", "--max-seconds", "0.000000001")
+        self.assertEqual(1, code, output)
+        self.assertIn("cursor held", output)
+        self.assertIsNone(read_watermark(self.connection))
+        self.assertEqual([], [call for call in self.gh_calls() if "graphql" in call])
+
+    def test_complete_historical_window_retains_the_later_cursor(self):
+        from sd_db.shadow_sync import read_watermark
+
+        self.environment(GH_SEARCH=json.dumps(TWO_OPEN_ISSUES))
+        code, _ = self.command_sync("--strict")
+        self.assertEqual(0, code)
+        previous = read_watermark(self.connection)
+        code, output = self.command_sync(
+            "--strict", "--since", "2026-09-06T10:00:00Z",
+            "--until", "2026-09-06T11:00:00Z")
+        self.assertEqual(0, code, output)
+        self.assertIn("coverage completed", output)
+        self.assertIn("existing cursor retained", output)
+        self.assertNotIn("cursor moved", output)
+        self.assertEqual(previous, read_watermark(self.connection))
+
+    def test_complete_later_window_does_not_skip_an_uncovered_gap(self):
+        from sd_db.shadow_sync import read_watermark
+
+        page = json.loads(json.dumps(TWO_OPEN_ISSUES))
+        for node in page["data"]["search"]["nodes"]:
+            node["updatedAt"] = "2026-09-06T10:00:00Z"
+        self.environment(GH_SEARCH=json.dumps(page))
+        code, _ = self.command_sync(
+            "--strict", "--since", "2026-09-06T10:00:00Z",
+            "--until", "2026-09-06T10:00:00Z")
+        self.assertEqual(0, code)
+        previous = read_watermark(self.connection)
+        for node in page["data"]["search"]["nodes"]:
+            node["updatedAt"] = "2026-09-06T11:00:00Z"
+        self.environment(GH_SEARCH=json.dumps(page))
+        code, output = self.command_sync(
+            "--strict", "--since", "2026-09-06T11:00:00Z",
+            "--until", "2026-09-06T11:00:00Z")
+        self.assertEqual(0, code, output)
+        self.assertIn("existing cursor retained", output)
+        self.assertEqual(previous, read_watermark(self.connection))
 
 
 class TheRefusalReachesTheOperator(SuggestCase):

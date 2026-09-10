@@ -9,7 +9,7 @@
 
 One repository, one prefix, one machine-scope install. The pack renders its
 `sd-*` surfaces into the AI tools installed on a machine and gets out of the
-way — eleven commands, the `sd-help` catalog, and the skills they draw on. It
+way. `sd --help` and `sd-help` enumerate the installed commands and skills. It
 does not install anything into the repositories you work in.
 
 That last sentence is the design, not a summary of it. The previous version of
@@ -84,6 +84,70 @@ missing. Zero or all, never partial, is the rule; what the test asserts today
 is the zero half of it — no `sd-*` under any of the three candidate roots —
 because P1 has not passed and there is no all half to check yet.
 
+## Standing operator authorization
+
+The pack supports standing permission across consuming repositories. Installation grants neither permission for a new user.
+After that operator explicitly grants permission, record it through the existing configuration commands:
+
+```sh
+sd config set sd.external_reviews configured
+sd config set sd.merge_authorization controlled
+```
+
+These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOME` overrides the configuration root.
+`sd config get`, `list`, and `unset` inspect or remove settings. No personal grant ships in this repository.
+
+`configured` allows private code and scoped review context to the operator's eligible configured providers, including future entries.
+A local `reviewers` list restricts recipients; an explicit empty value denies review.
+Machine `sd.external_reviews deny` vetoes local consent. Missing machine policy requires explicit local consent.
+The installer preserves restrictions and refuses malformed answers. It cannot recover historical empty answers whose keys were erased.
+
+`controlled` permits the assistant to merge active, in-scope PR work in repositories the user controls.
+An explicit instruction to wait overrides it. `ask`, or an absent setting, requires task-specific permission.
+Ownership, review, CI, protection, and runner gates remain mandatory. This setting starts no background work.
+See [the workflow policy](WORKFLOW.md#standing-authorization) for resolution and limits.
+
+## Daily workflow
+
+The dashboard and CLI use the same `sd_db` operations from `system/local-sd-db`.
+Capture a task without a checkout or planning document:
+
+```bash
+sd task add "Investigate the delayed pipeline" --priority 1
+sd today
+sd task status 42 in_progress
+sd task note 42 --body "Reproduced with the staging input"
+sd task status 42 done
+```
+
+`sd store items --open` lists the backlog; `sd store item 42 --json` includes
+history and a revision that edits can require with `--if-revision`. Notes,
+priorities, due dates and task status save directly to the database. GitHub
+issues are optional external references, with their last successful sync shown
+separately from local progress.
+
+Repository work uses `sd work relink`, `sd work cancel`, and `sd work deliver`.
+Delivery verifies a full commit and its delivery trailer against the default
+branch before recording completion. Cancelling work requires a reason and
+completes immediately in the database. Neither operation writes a status file
+or creates a bookkeeping pull request.
+
+From the writing checkout, `sd writing list`, `sd writing readiness --piece
+YEAR/slug`, and `sd writing stage` share the dashboard's writing controls.
+Import and cutover have separate preview and verification commands. Once the
+repository uses rows, routine stage, parking and metadata changes leave content
+files untouched. See the writing pack's `.claude/reference/database-workflow.md`
+for review evidence and recovery commands.
+
+`sd jobs list` and `sd assignments list` show operational state. Job retry and
+cancellation require a recognized installed job and a fresh state check;
+unsupported controls explain why they are unavailable. Cancelling a queued
+assignment does not claim to terminate an independently running process.
+
+The current dashboard and its installation instructions live in
+`system/local-project-dashboard`. It binds to loopback; remote access requires
+an explicitly configured private HTTPS front door and operator identity.
+
 ## Install
 
 ```bash
@@ -151,7 +215,7 @@ deliberate act; every other surface, `sd-help` included, does not.
 
 **Runs as** says whether there is something to execute. `bin/` is a shipped
 entrypoint you can run; **prose** is a sequence an agent follows, with no
-runner behind it — the skill is the implementation. Seven of the twelve are
+runner behind it — the skill is the implementation. Six of the twelve are
 prose today, each saying so in its own "State of the tooling" section, and
 `tests/test_skill_frontmatter.py` fails if one of them ever names a `bin/`
 command without that sentence, or keeps the sentence after the command
@@ -162,7 +226,7 @@ arrives.
 | `sd-plan` | prose | Interview into a work item under `docs/work/`, review it, open its branch |
 | `sd-check` | `bin/` | Deterministic runner over the repo's own entrypoints |
 | `sd-review` | `bin/` | Local review on the exact diff; findings dispositioned locally, never posted |
-| `sd-ship` | prose | Verify, commit enumerated paths, push, open the PR, settle, squash-merge |
+| `sd-ship` | `bin/` | Review committed work, prepare its PR, verify merge authority, and reconcile delivery |
 | `sd-spec` | prose | Update `docs/spec/**` on the PR branch |
 | `sd-status` | `bin/` | Read-only: derived status, open PRs, branch-protection gaps and the states this repo accepts (`.github/sd-status.json`) |
 | `sd-deps` | prose | Batch-triage dependabot and renovate PRs |

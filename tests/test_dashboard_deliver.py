@@ -1,9 +1,8 @@
-"""The Work tab's `deliver`, which is the operator making a claim by hand.
+"""The legacy Work tab delegates to the shared delivery verifier.
 
-`sd-ship` leaves an item `in_progress` when the merge that shipped it carried
-no `Delivers:` trailer, and it is right to: reading a delivery out of the bare
-fact that a branch merged is how an item gets closed by a slice. The claim is
-missing, not the merge. This is where the operator supplies it.
+Delivery requires a full commit with the item's `Delivers:` trailer on the
+verified default branch. A button click without that evidence leaves the
+item open and explains the missing evidence.
 
 Every test here writes to a real `sd_db` under a `HOME` nothing else shares,
 because the thing being asserted is that a row moved. A double would assert
@@ -16,6 +15,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -52,7 +52,13 @@ class Fixture(unittest.TestCase):
         self.item = self.root / "docs" / "work" / ITEM
         self.item.mkdir(parents=True)
         (self.item / "prd.md").write_text("---\ntitle: A thing\n---\n", encoding="utf-8")
-        (self.root / ".git").mkdir()
+        for arguments in (("init", "-q", "-b", "main"),
+                          ("config", "user.name", "Test"),
+                          ("config", "user.email", "test@example.invalid"),
+                          ("add", "-A"),
+                          ("commit", "-qm", f"Deliver\n\nDelivers: {ITEM}")):
+            subprocess.run(["git", "-C", str(self.root), *arguments],
+                           check=True, capture_output=True)
 
     def identity(self, name: str = ITEM) -> str:
         """The row key, spelled out here rather than asked of the code."""
@@ -62,7 +68,7 @@ class Fixture(unittest.TestCase):
         sd_db.initialise(home=self.home)
         connection = sd_db.connect(home=self.home)
         self.addCleanup(connection.close)
-        sd_db.upsert_repo(connection, str(self.root))
+        sd_db.upsert_repo(connection, str(self.root), status_source="row")
         sd_db.upsert_item(
             connection,
             source=sd_lib.ITEM_ROW_SOURCE,
@@ -131,12 +137,20 @@ class TheWrite(Fixture):
 
         connection = self.seed()
         self.assertEqual(work.deliver(self.root, ITEM), "")
-        planted = "2001-01-01T00:00:00+00:00"
-        sd_db.writes.set_item_fields(
-            connection, self.row(connection)["id"], shipped_at=planted
-        )
-        self.assertEqual(work.deliver(self.root, ITEM), "")
-        self.assertEqual(self.row(connection)["shipped_at"], planted)
+        before = dict(self.row(connection))
+        notes = [dict(note) for note in sd_db.reads.item_notes(connection, before["id"])]
+        with mock.patch.object(sd_db.writes, "now", return_value="2099-01-01T00:00:00+00:00"):
+            self.assertEqual(work.deliver(self.root, ITEM), "")
+        self.assertEqual(dict(self.row(connection)), before)
+        self.assertEqual([dict(note) for note in sd_db.reads.item_notes(connection, before["id"])], notes)
+
+    def test_a_commit_without_delivery_evidence_cannot_complete_work(self) -> None:
+        connection = self.seed()
+        subprocess.run(["git", "-C", str(self.root), "commit", "--allow-empty", "-qm", "A slice"],
+                       check=True, capture_output=True)
+        self.assertIn("no Delivers trailer", work.deliver(self.root, ITEM))
+        self.assertEqual(self.row(connection)["status"], "in_progress")
+        self.assertIsNone(self.row(connection)["shipped_at"])
 
 
 class TheLabelResolves(Fixture):

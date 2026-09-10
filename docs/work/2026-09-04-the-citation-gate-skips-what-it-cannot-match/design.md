@@ -195,11 +195,11 @@ live defect.
 Before inventing an escape hatch, three were found in the tree.
 
 `bin/sd-docs-lint` carries two. Rule 7's `METAVARIABLE_RE`
-(`bin/sd-docs-lint:462`) exempts a reference by its **shape** — a token holding
+(`bin/sd-docs-lint:464`) exempts a reference by its **shape** — a token holding
 `YYYY`, `MM`, `DD` or `<` is a pattern and not a path — with the stated reason
 that "a new template invents no new exception, and a real path can never
-contain one". Rule 6's `LOG_HEADING_RE` (`bin/sd-docs-lint:335`) exempts by
-**region**: `item_citations` (`bin/sd-docs-lint:338`) stops reading at a `Log`
+contain one". Rule 6's `LOG_HEADING_RE` (`bin/sd-docs-lint:336`) exempts by
+**region**: `item_citations` (`bin/sd-docs-lint:339`) stops reading at a `Log`
 heading, because "a Log entry is a dated record of what a page said on the day
 it was reviewed, so its citations are quotations and not claims". That is
 question 3's distinction, already drawn, already implemented, for a different
@@ -429,7 +429,7 @@ and the elided path.
 
 Nothing outside `tests/test_doc_citations.py` and `docs/` changes. In
 particular `bin/sd-docs-lint` is not edited: rule 6's `CITATION_RE`
-(`bin/sd-docs-lint:306`) reads `.md` targets only, and rule 7 reads
+(`bin/sd-docs-lint:307`) reads `.md` targets only, and rule 7 reads
 `docs/work/` paths, so neither is the home for a rule about citations into
 code.
 
@@ -795,7 +795,7 @@ next step is a recorded baseline in the manner of rule 6's `.citations.tsv`,
 and that is a decision for after the first month of the census, not before it.
 
 **Rule 6 has the same disease and this item does not treat it.** `check_citations`
-(`bin/sd-docs-lint:404`) checks only items that carry a `.citations.tsv`, and
+(`bin/sd-docs-lint:405`) checks only items that carry a `.citations.tsv`, and
 its note reads "checked 25 citation(s) across 5 recorded item(s)" over a tree
 of 497 items. Four of those five manifests are empty, so all 25 rows come from
 one item, and a citation added after the recording is not checked by anything.

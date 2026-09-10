@@ -1,50 +1,28 @@
 #!/usr/bin/env python3
-"""Read-only status for the repository you are standing in.
+"""Read-only status for the repository enclosing cwd (R10-D6).
 
-There is no repo-path argument and no fleet walk (R10-D6): the repository is
-the one enclosing the current working directory, full stop. Sessions stick to
-their repos, and a status command that could be pointed anywhere is how a
-session stops sticking. The dashboard is the cross-repo view; this is not it.
+No repo-path argument or fleet walk; the dashboard owns cross-repository views.
+No repository, state-directory or cache writes. Derive from files, Git and GitHub.
 
-Nothing here is written. Not the repo, not the state directory, not a cache.
-Every section derives its answer at run time from the filesystem, from git, or
-from GitHub, because committed derived state is permanent staleness.
-
-Eight sections, in the order a human wants them:
-
+Eight sections:
   pack        the checkout these tools came from
-  work        derived item status from `docs/work` -- the `status:` line, or
-              the item's row where `docs/work/.status-source` says `row`, with
-              a surviving line named as stale and a `done` row no commit
-              closed named as unmarked -- counted; `--parked` lists
-              every parked item, read from their own frontmatter -- the age
-              sweep and the D2 bulk-park both write the field
-  prs         open pull requests, via the same code path as `sd-pr-state`
-  setup       mode and the detected check entrypoints
-  protection  branch-protection *enforcement*, gap by gap, plus the two r7
-              merge-settings flags
-  handoff     the pending local packet for this directory (read, never
-              consumed) and the Lane B carrier branches on origin
-  backends    which review backends are installed, names only
-  residue     legacy leftovers, each with the exact command that removes it
+  work        counted docs/work status from frontmatter or the authoritative row;
+              flag stale status lines and done rows without closing evidence;
+              --parked reads each item's own field, written by age sweep/D2 parking
+  prs         open pull requests through the sd-pr-state code path
+  setup       mode and detected check entrypoints
+  protection  actual enforcement gaps and both r7 merge-settings flags
+  handoff     this directory's pending packet, never consumed, and origin Lane B carriers
+  backends    installed review backend names only
+  residue     legacy leftovers with exact removal commands
 
-The protection section is the one that matters. The doctrine is that merge
-authority is GitHub branch protection *wherever protection is actually
-enforcing*; protection that exempts admins is prose, not authority, and a
-non-strict required check is a green tick on a base that moved. So this
-section reports enforcement state rather than mere presence, and every missing
-leg prints as a named gap. That is what makes the doctrine conditional in
-tooling instead of only in prose.
+Open-row closing contradictions require trailers reachable from local or remote default refs.
+Enforcing GitHub branch protection is merge authority; mere presence is insufficient.
+Report each missing enforcement condition, including admin exemptions and non-strict checks.
+Repository acknowledgements in .github/sd-status.json match observed facts, not gap IDs.
+Changed protection invalidates them; load_acknowledgements holds incident and deletion criteria.
 
-One kind of gap prints as accepted instead: a state the repository has looked
-at, decided to keep, and written down in `.github/sd-status.json`. The
-acknowledgement is keyed on the observed protection facts and not on the gap
-id, so it stops applying the moment the branch changes underneath it -- see
-`load_acknowledgements`, which carries the incident and the deletion criterion.
-
-A gap is a report, not a failure: this command exits 0 whether or not it found
-any. Exit 2 is reserved for an invocation or configuration fault, which prints
-a sentence and never a traceback.
+Exit 0 includes reported gaps. Exit 2 indicates invocation or configuration faults, explained without a traceback.
 """
 
 from __future__ import annotations
@@ -152,6 +130,7 @@ def pack_banner() -> dict[str, Any]:
 
 
 def work_section(root: pathlib.Path) -> dict[str, Any]:
+    source, _ = sd_lib.status_marker(root)
     items = sd_lib.work_items(root)
     counts: dict[str, int] = {}
     listed = []
@@ -173,6 +152,7 @@ def work_section(root: pathlib.Path) -> dict[str, Any]:
     parked = [entry for entry in listed if entry["parked"]]
     active = [entry for entry in listed if not entry["archived"]]
     return {
+        "status_source": source,
         "total": len(listed),
         "active": len(active),
         "counts": counts,
@@ -1008,6 +988,53 @@ def residue_section(root: pathlib.Path) -> list[dict[str, Any]]:
     return found
 
 
+def _database_issues(slug: str) -> dict[str, Any] | None:
+    """Prefer the shared database; an unreadable one never falls back to old data."""
+    try:
+        import sd_db
+        from sd_db.progress import tracker_freshness, tracker_items
+    except ImportError:
+        return None
+    if not sd_db.default_path().exists():
+        return None
+    try:
+        connection = sd_db.connect(write=False)
+        try:
+            rows = tracker_items(connection, tracker="github", repo=slug, state="open")
+            freshness = tracker_freshness(connection, "github")
+        finally:
+            connection.close()
+    except Exception as error:
+        return {"available": False, "reason": f"shared database unreadable: {error}",
+                "needs_you": [], "other": []}
+    return {"available": True, "reason": "", "source": "database",
+            "freshness": freshness, "needs_you": [], "other": rows}
+
+
+def contributions_section(root: pathlib.Path) -> dict[str, Any]:
+    """Read the shared contribution projection without collecting or opening a writer."""
+    try:
+        import sd_db
+        from sd_db import contributions
+    except ImportError:
+        return {"available": False, "reason": "shared contribution library is not installed", "rows": []}
+    if not sd_db.default_path().exists():
+        return {"available": False, "reason": "no shared database yet", "rows": []}
+    identities = [str(root)]
+    slug = pr_state.remote_slug(root)
+    if slug:
+        identities.append(slug)
+    try:
+        connection = sd_db.connect(write=False)
+        try:
+            rows = contributions.projection(connection, repo=identities)
+        finally:
+            connection.close()
+    except Exception as error:
+        return {"available": False, "reason": f"contributions unreadable: {error}", "rows": []}
+    return {"available": True, "reason": "", "source": "database", "rows": rows}
+
+
 def issues_section(root: pathlib.Path) -> dict[str, Any]:
     """Indexed issues for *this* repository, read and never collected.
 
@@ -1024,6 +1051,12 @@ def issues_section(root: pathlib.Path) -> dict[str, Any]:
     mapping that does not exist yet; inventing one here would be a config key
     with no decision behind it.
     """
+    slug = pr_state.remote_slug(root)
+    if slug is None:
+        return {"available": False, "reason": "no GitHub remote", "needs_you": [], "other": []}
+    shared = _database_issues(slug)
+    if shared is not None:
+        return shared
     if store is None:
         return {
             "available": False,
@@ -1031,10 +1064,7 @@ def issues_section(root: pathlib.Path) -> dict[str, Any]:
             "needs_you": [],
             "other": [],
         }
-    slug = pr_state.remote_slug(root)
     index = store.index_path()
-    if slug is None:
-        return {"available": False, "reason": "no GitHub remote", "needs_you": [], "other": []}
     if not index.exists():
         return {
             "available": False,
@@ -1042,7 +1072,7 @@ def issues_section(root: pathlib.Path) -> dict[str, Any]:
             "needs_you": [],
             "other": [],
         }
-    connection = store.connect(index)
+    connection = store.connect(index, write=False)
     try:
         rows = [
             row
@@ -1085,13 +1115,13 @@ class Class(NamedTuple):
 #: key)`, for the reason `action_id` states.
 CLASSES = (
     Class("branch-already-merged", "w", True, 10, "work item + git",
-          "a non-done item whose branch already landed in the default branch"),
+          "an open item with delivery evidence, or a landed branch in file mode"),
     Class("in-progress-without-branch", "w", True, 10, "work item",
           "status: in_progress with no branch: field to work on"),
     Class("branch-unresolvable", "w", True, 10, "work item + git",
           "a branch: field naming a ref no local or remote head carries"),
     Class("status-unreadable", "w", True, 10, "work item",
-          "an item whose prd.md will not yield a status"),
+          "an item whose authoritative source will not yield a status"),
     Class("unresolved-concern", "c", True, 20, "## Review ledger",
           "a review concern left open by its own ledger row"),
     Class("pr-check-failing", "p", True, 30, "open pull requests",
@@ -1238,7 +1268,7 @@ def actionable_inventory(
 ) -> Inventory:
     """Every addressable row this repository carries, ranked.
 
-    One producer, not three (C-3). A work item whose branch already merged is
+    One producer, not three (C-3). A work item with a delivery contradiction is
     an abnormality, the top pending row and an unaddressed followup at once;
     three independent producers would give that one fact three ids and three
     wordings. The sections are views over this list -- `abnormal` selects the
@@ -1260,6 +1290,9 @@ def actionable_inventory(
     """
     day = today or datetime.date.today()
     work = sections.get("work") or {}
+    source = work.get("status_source")
+    if source is None:
+        source, _ = sd_lib.status_marker(root)
     pulls = sections.get("pull_requests") or {}
     protection = sections.get("protection") or {}
     unchecked: dict[str, str] = {}
@@ -1267,7 +1300,7 @@ def actionable_inventory(
     rows += _work_rows(
         root, work, day,
         str(protection.get("default_branch") or "main"),
-        merged_pulls(root, protection),
+        merged_pulls(root, protection) if source == sd_lib.FROM_FILE else Merged(None, ""),
         unchecked,
     )
     rows += _step_rows(root, work)
@@ -1540,6 +1573,25 @@ def _changed(root: pathlib.Path, left: str, right: str) -> set[str]:
     )
     return {path for path in (listing or "").split("\n") if path}
 
+
+def _closing_items(root: pathlib.Path, refs: tuple[str, ...]) -> set[str]:
+    """Read each default ref once; the shared trailer parser decides closure."""
+    closed: set[str] = set()
+    grep = f"{sd_lib.DELIVERS_TRAILER}|{sd_lib.CLOSES_TRAILER}"
+    for ref in dict.fromkeys(refs):
+        raw = sd_lib.git_output(
+            ["log", "--format=%H%x1f%B%x1e", "-E", "--grep", grep, ref], root
+        ) or ""
+        for commit in raw.split("\x1e"):
+            message = commit.partition("\x1f")[2]
+            for line in message.splitlines():
+                name, _, value = line.rstrip().partition(" ")
+                item = value.strip()
+                if name in (sd_lib.DELIVERS_TRAILER, sd_lib.CLOSES_TRAILER) and item and sd_lib._closes(message, item):
+                    closed.add(item)
+    return closed
+
+
 def _work_rows(
     root: pathlib.Path,
     work: dict[str, Any],
@@ -1554,8 +1606,13 @@ def _work_rows(
     is closed by where it lives, and parked is a disposition rather than an
     open thread. Both exclusions are printed, in `EXCLUDED`.
 
-    `branch-already-merged` is asked only of a branch that resolves, in the
-    `elif` below and not a second `if`. A `branch:` naming no ref is already a
+    In row mode a slice merge says nothing about completion. Only an explicit
+    closing trailer in local default-branch history can contradict an open row.
+    No fetch or GitHub lookup is needed to find that positive evidence; the row remains
+    authoritative when local history has no closing trailer.
+
+    In file mode, `branch-already-merged` is asked only of a branch that
+    resolves, in the `elif` below and not a second `if`. A `branch:` naming no ref is already a
     finding of its own class, and `branch_landed` would answer `unknown` on
     it for a reason that has nothing to do with whether GitHub could be read
     -- marking the whole class unchecked, on every run, because one item
@@ -1563,6 +1620,16 @@ def _work_rows(
     banner's third state degrades into a second way of saying "something is
     wrong over there".
     """
+    source = work.get("status_source")
+    if source is None:
+        source, _ = sd_lib.status_marker(root)
+    closing_refs: tuple[str, ...] = ()
+    closing_items: set[str] | None = None
+    if source == sd_lib.FROM_ROW:
+        remote, local_default = sd_lib.upstream(root)
+        closing_refs = (local_default,)
+        if remote:
+            closing_refs += (f"{remote}/{local_default}",)
     heads = _branch_names(root)
     rows: list[dict[str, Any]] = []
     for entry in work.get("items") or []:
@@ -1572,10 +1639,26 @@ def _work_rows(
         slug, status, branch = entry["slug"], entry["status"], entry["branch"]
         where = entry["path"]
         if status == "unknown":
+            detail = (
+                "; ".join(entry.get("inconsistencies") or [])
+                or f"{where} yields no status this reader recognises"
+            )
+            if source == sd_lib.FROM_ROW:
+                repair = (
+                    f"resolve the status-source error for {item}: {detail}; "
+                    "then rerun sd-status"
+                )
+            elif source == sd_lib.FROM_FILE:
+                repair = f"give the frontmatter of {where}/prd.md a status: line"
+            else:
+                repair = (
+                    f"repair {sd_lib.WORK_DIR}/{sd_lib.STATUS_MARKER} from the "
+                    "repository's recorded status-source decision, then rerun sd-status"
+                )
             rows.append(_row(
                 "status-unreadable", item, slug,
-                f"{where} yields no status this reader recognises",
-                f"give the frontmatter of {where}/prd.md a status: line",
+                detail,
+                repair,
             ))
         if status == "in_progress" and not branch:
             rows.append(_row(
@@ -1589,7 +1672,7 @@ def _work_rows(
                 f"{where} names branch {branch}, which no local or remote head has",
                 f"fetch, or correct the branch: field in {where}/prd.md",
             ))
-        elif branch and status != "done":
+        elif branch and status not in ("done", "unknown") and source == sd_lib.FROM_FILE:
             answer = branch_landed(root, branch, default, merged.pulls)
             if answer == LANDED:
                 rows.append(_row(
@@ -1601,6 +1684,17 @@ def _work_rows(
                 unchecked.setdefault(
                     "branch-already-merged", merged.reason or answer.repair
                 )
+        if source == sd_lib.FROM_ROW and status not in ("done", "unknown"):
+            if closing_items is None:
+                closing_items = _closing_items(root, closing_refs)
+            if item in closing_items:
+                rows.append(_row(
+                    "branch-already-merged", item, slug,
+                    f"{where} is {status}, but local default-branch history carries "
+                    f"Closes: {item} or Delivers: {item}",
+                    f"reconcile the database row for {item} with its closing trailer, "
+                    "then rerun sd-status",
+                ))
         if status != "planning":
             continue
         age = _age_days(entry, today)
@@ -1987,6 +2081,10 @@ def _issue_rows(issues: dict[str, Any]) -> list[dict[str, Any]]:
     reason it states and `EXCLUDED` repeats.
     """
     rows: list[dict[str, Any]] = []
+    if issues.get("source") == "database":
+        # A cached open issue is context, not an instruction to close it or a
+        # blocker for local work. Explicit local tasks carry their own status.
+        return rows
     for check, found in (("issue-needs-you", issues.get("needs_you")),
                          ("issue-open", issues.get("other"))):
         for issue in found or []:
@@ -2129,6 +2227,7 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "backends": backends_section(root),
         "residue": residue_section(root),
         "issues": issues_section(root),
+        "contributions": contributions_section(root),
     }
     inventory = actionable_inventory(root, result)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
@@ -2380,6 +2479,7 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     _render_next(rows, write)
     _render_threads(rows, write)
     _render_work(result["work"], write)
+    _render_contributions(result.get("contributions"), write)
 
     write("\nopen pull requests\n")
     pr_state.render_pulls(result["pull_requests"], stream)
@@ -2409,11 +2509,36 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
         write(f"    remove: {entry['remove']}\n")
 
 
+def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:
+    write("\ncontributions (this repo, shared database order)\n")
+    if not section or not section["available"]:
+        write("  ! " + json.dumps(section["reason"] if section else "not collected", ensure_ascii=False) + "\n")
+        return
+    write("  external activity and dependency readiness do not complete local tasks\n")
+    if not section["rows"]:
+        write("  none recorded\n")
+    for row in section["rows"]:
+        # JSON string encoding prevents external metadata from injecting terminal
+        # controls or a second status heading. Ordering belongs to the library.
+        write(f"  [{row['lane']}] " + json.dumps(row["title"], ensure_ascii=False) + "\n")
+        for key in ("key", "item_id", "url", "local_status", "external_state", "reasons", "observed_at",
+                    "freshness", "blocked_on", "depends_on", "local_clone", "local_branch", "tested_commit",
+                    "evidence", "evidence_verified", "notification_state", "attention_sources"):
+            value = row.get(key)
+            if value is not None and value != [] and value != "":
+                write(f"    {key}: " + json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n")
+
+
 def _render_issues(issues: dict[str, Any], write: Any) -> None:
     write("\nissues (this repo, from the index)\n")
     if not issues["available"]:
         write(f"  ! {issues['reason']}\n")
         return
+    freshness = issues.get("freshness")
+    if freshness:
+        write(f"  external context: {freshness['state']}; last successful sync "
+              f"{freshness.get('last_success_at') or 'never'}\n")
+        write("  local work progress is independent; refresh with `sd shadow sync`\n")
     needs, other = issues["needs_you"], issues["other"]
     if not needs and not other:
         write("  none open\n")

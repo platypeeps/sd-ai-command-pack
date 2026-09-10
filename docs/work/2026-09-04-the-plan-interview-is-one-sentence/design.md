@@ -583,7 +583,7 @@ example of a bad citation written in the citation syntax is a trap left for
 `--record-citations`. Addressed: the number is prose now — and it was still
 *not* prose after the first repair, because this concern's own description
 quoted the bad form in the bad syntax. `CITATION_RE`
-(`bin/sd-docs-lint:306`) does not care that the match sits inside the
+(`bin/sd-docs-lint:307`) does not care that the match sits inside the
 paragraph explaining why it must not appear. Corrected in round 5 as C-36.
 
 **C-26 — an unbounded claim from one checkout's refs.** "No head anywhere has
@@ -699,7 +699,7 @@ the design now says that instead of borrowing a test's authority.
 
 **C-36 — C-25's repair was undone by C-25's own wording.** The concern says the
 bad citation "is prose now", while its description quoted the bad form in the
-backticked syntax that `CITATION_RE` (`bin/sd-docs-lint:306`) matches — the
+backticked syntax that `CITATION_RE` (`bin/sd-docs-lint:307`) matches — the
 trap re-laid inside the paragraph explaining it.
 
 **C-37 — a transcript bullet measured the file it is written in.** `wc -l` of

@@ -128,6 +128,22 @@ class LocalBlockTests(Fixture):
         (root / sd_lib.LOCAL_FILE_NAME).write_text("just notes\n", encoding="utf-8")
         self.assertEqual(sd_lib.local_block(root), {})
 
+    def test_existing_nonfile_local_paths_refuse_instead_of_looking_absent(self):
+        root = self.make_repo()
+        local = root / sd_lib.LOCAL_FILE_NAME
+        local.mkdir()
+        with self.assertRaises(sd_lib.ConfigError):
+            sd_lib.local_block(root)
+        local.rmdir()
+        local.symlink_to(root / "missing-target")
+        with self.assertRaises(sd_lib.ConfigError):
+            sd_lib.local_block(root)
+        self.assertTrue(local.is_symlink())
+        non_directory = root / "file"
+        non_directory.write_text("file")
+        with self.assertRaises(sd_lib.ConfigError):
+            sd_lib.local_block(non_directory)
+
     def test_scalars_comments_and_quotes(self) -> None:
         root = self.make_repo()
         self.write_local_block(
@@ -461,6 +477,32 @@ class SharedParserTests(unittest.TestCase):
         for label, text, expected in cases:
             with self.subTest(label):
                 self.assertEqual(sd_lib.parse_frontmatter(text), expected)
+
+
+class CorePolicyReadTests(Fixture):
+    def test_supplied_home_and_xdg_select_policy_without_inheriting_the_process(self):
+        one, two = self.tmp / "one", self.tmp / "two"
+        one_path = one / ".config" / sd_lib.CONFIG_RELATIVE_PATH
+        two_path = two / sd_lib.CONFIG_RELATIVE_PATH
+        for path, value in ((one_path, "deny"), (two_path, "configured")):
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({"config": {"sd": {"external_reviews": value}}}))
+        self.assertEqual(sd_lib.core_setting("external_reviews", {"HOME": str(one)}), "deny")
+        self.assertEqual(sd_lib.core_setting("external_reviews", {"HOME": str(one), "XDG_CONFIG_HOME": str(two)}), "configured")
+        self.assertIsNone(sd_lib.core_setting("external_reviews", {"HOME": str(self.tmp / "fresh")}))
+
+    def test_malformed_policy_never_becomes_a_grant(self):
+        env = {"HOME": str(self.tmp)}
+        path = self.tmp / ".config" / sd_lib.CONFIG_RELATIVE_PATH
+        path.parent.mkdir(parents=True)
+        for value in ({"config": []}, {"config": {"sd": []}},
+                      {"config": {"sd": {"external_reviews": None}}},
+                      {"config": {"sd": {"external_reviews": True}}},
+                      {"config": {"sd": {"external_reviews": "allow"}}}):
+            with self.subTest(value=value):
+                path.write_text(json.dumps(value))
+                with self.assertRaises(sd_lib.ConfigError):
+                    sd_lib.core_setting("external_reviews", env)
 
 
 if __name__ == "__main__":

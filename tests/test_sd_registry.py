@@ -21,6 +21,7 @@ import pathlib
 import shlex
 import sys
 import tempfile
+import types
 import unittest
 import unittest.mock
 import urllib.error
@@ -174,6 +175,75 @@ class TheTwoReadersAgree(unittest.TestCase):
         with self.assertRaises(sd_registry.RegistryError) as caught:
             sd_registry.read(SHIPPED, connection=object(), prefer_library=False)
         self.assertIn("sd_db is not installed", str(caught.exception))
+
+
+class TheReasoningControls(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = pathlib.Path(self.tmp.name) / "providers.yaml"
+        self.text = MINIMAL.replace("vendor: alpha,", "vendor: alpha, bill: free,").replace(
+            "vendor: beta,", "vendor: beta, bill: free, model: exact-model, max_tokens: 16384,")
+
+    def write(self, **controls: Any) -> pathlib.Path:
+        fields = "".join(f", {name}: {json.dumps(value)}" for name, value in controls.items())
+        self.path.write_text(self.text.replace("roles: [reviewer] }", "roles: [reviewer]" + fields + " }"))
+        return self.path
+
+    def test_both_readers_preserve_every_explicit_control(self) -> None:
+        for name, values in (("thinking", ("disabled", "adaptive")),
+                             ("reasoning_effort", ("none", "low", "high", "max"))):
+            for value in values:
+                with self.subTest(name=name, value=value):
+                    path = self.write(**{name: value})
+                    standalone = sd_registry.read(path, prefer_library=False)
+                    shared = sd_registry.read(path)
+                    self.assertEqual(standalone.providers, shared.providers)
+                    self.assertEqual(getattr(shared.providers["two"], name), value)
+
+    def test_invalid_or_conflicting_controls_refuse_in_both_readers(self) -> None:
+        cases = ({"thinking": value} for value in (True, 1, [], {}, "enabled"))
+        cases = [*cases, *({"reasoning_effort": value} for value in (False, 1, [], {}, "medium")),
+                 {"thinking": "disabled", "reasoning_effort": "none"}]
+        for controls in cases:
+            for prefer in (True, False):
+                with self.subTest(controls=controls, prefer_library=prefer):
+                    with self.assertRaises(sd_registry.RegistryError):
+                        sd_registry.read(self.write(**controls), prefer_library=prefer)
+
+    def test_process_entries_cannot_declare_url_controls(self) -> None:
+        self.text = self.text.replace('url: "http://localhost:2/v1"', 'start: "two -p", reader: claude-json')
+        for name, value in (("thinking", "disabled"), ("reasoning_effort", "none")):
+            for prefer in (True, False):
+                with self.assertRaises(sd_registry.RegistryError):
+                    sd_registry.read(self.write(**{name: value}), prefer_library=prefer)
+
+    def test_old_library_remains_compatible_without_controls_but_cannot_drop_them(self) -> None:
+        source = sd_registry.read_file(self.write())
+        old = types.SimpleNamespace(**{**vars(source), "providers": {
+            name: types.SimpleNamespace(**{key: value for key, value in vars(provider).items()
+                                          if key not in ("thinking", "reasoning_effort")})
+            for name, provider in source.providers.items()}})
+        module = types.SimpleNamespace(read=lambda *args, **kwargs: old, RegistryError=sd_registry.RegistryError)
+        with unittest.mock.patch.object(sd_registry, "library", return_value=module):
+            self.assertEqual(sd_registry.read(self.path).providers, source.providers)
+            for name, value in (("thinking", "disabled"), ("reasoning_effort", "none")):
+                with self.assertRaisesRegex(sd_registry.RegistryError, "cannot preserve reasoning controls"):
+                    sd_registry.read(self.write(**{name: value}))
+
+    def test_request_options_change_only_the_declared_top_level_fields(self) -> None:
+        prompt = "full diff\n" + "unchanged subject " * 10000
+        for controls, additions in (({}, {}), ({"thinking": "disabled"}, {"thinking": {"type": "disabled"}}),
+                                    ({"reasoning_effort": "none"}, {"reasoning_effort": "none"})):
+            provider = sd_registry.read(self.write(**controls)).providers["two"]
+            provider = sd_registry.Provider(**{**vars(provider), "env": ("OWN_KEY",)})
+            with unittest.mock.patch.object(sd_registry._OPENER, "open", return_value=_Answer("{}")) as opened:
+                sd_registry.chat_completion(provider, prompt, {"OWN_KEY": "fixture"}, 30)
+            request = opened.call_args.args[0]
+            self.assertEqual(json.loads(request.data), {"model": "exact-model", "max_tokens": 16384,
+                "messages": [{"role": "user", "content": prompt}], **additions})
+            self.assertEqual(request.full_url, "http://localhost:2/v1/chat/completions")
+            self.assertEqual(request.get_header("Authorization"), "Bearer fixture")
 
 
 class TheRefusals(unittest.TestCase):
@@ -574,7 +644,7 @@ class WhatConsentRefuses(unittest.TestCase):
 
     def test_an_entry_the_line_does_not_name(self) -> None:
         message = self.refusal("kimi", "codex@codex")
-        self.assertIn("not on the repository's 'reviewers' line", message)
+        self.assertIn("not allowed by the effective review authorization", message)
 
     def test_a_url_host_edited_to_another_host_names_both(self) -> None:
         message = self.refusal("baseten", "baseten@inference.baseten.co.evil")
@@ -936,8 +1006,8 @@ class _Answer:
     def __init__(self, body: str) -> None:
         self.body = body.encode("utf-8")
 
-    def read(self) -> bytes:
-        return self.body
+    def read(self, size: int = -1) -> bytes:
+        return self.body if size < 0 else self.body[:size]
 
     def __enter__(self) -> "_Answer":
         return self
@@ -980,11 +1050,11 @@ class Wire(unittest.TestCase):
             env=("ENTRY_KEY",),
         )
 
-    def call(self, provider: Any, **env: str) -> tuple[int, str, str, bool]:
+    def call(self, provider: Any, **env: str) -> tuple[int, str, str, bool, int | None]:
         return sd_registry.chat_completion(provider, "prompt", env, 30)
 
     def test_the_request_is_the_one_the_entry_describes(self) -> None:
-        code, stdout, stderr, launched = self.call(self.entry(), ENTRY_KEY="secret")
+        code, stdout, stderr, launched, _ = self.call(self.entry(), ENTRY_KEY="secret")
         self.assertEqual((code, stderr, launched), (0, "", True))
         self.assertIn("choices", stdout)
         request = self.sent[0]
@@ -1002,7 +1072,7 @@ class Wire(unittest.TestCase):
         """The hole this closes. `recipient()` compares `netloc`, which carries
         no scheme, so this edit passes `refuse_allowance` in silence -- and
         would put the diff on the wire in the clear."""
-        code, _, stderr, launched = self.call(
+        code, _, stderr, launched, _ = self.call(
             self.entry("http://api.example.test/v1"), ENTRY_KEY="secret"
         )
         self.assertEqual((code, launched), (1, False))
@@ -1041,7 +1111,7 @@ class Wire(unittest.TestCase):
         self.assertIsNotNone(sd_registry.refuse_cleartext(self.entry("ftp://api.example.test/v1")))
 
     def test_a_missing_key_sends_nothing_and_never_reads_as_a_quota_stop(self) -> None:
-        code, _, stderr, launched = self.call(self.entry())
+        code, _, stderr, launched, _ = self.call(self.entry())
         self.assertEqual((code, launched), (1, False))
         self.assertIn("ENTRY_KEY", stderr)
         self.assertEqual(self.sent, [])
@@ -1051,7 +1121,7 @@ class Wire(unittest.TestCase):
             "https://api.example.test/v1/chat/completions", 429, "Too Many Requests",
             {}, io.BytesIO(b"slow down"),
         )
-        code, _, stderr, launched = self.call(self.entry(), ENTRY_KEY="secret")
+        code, _, stderr, launched, _ = self.call(self.entry(), ENTRY_KEY="secret")
         self.assertEqual((code, launched), (429, True))
         self.assertIn("HTTP 429", stderr)
         markers = [m for m in sd_review_markers() if m in stderr.lower()]
@@ -1061,7 +1131,7 @@ class Wire(unittest.TestCase):
         # The message says 429 on purpose: `launched=False` is read first, so a
         # connection that never happened cannot be reported as a quota stop.
         self.answer = urllib.error.URLError("connection refused after 429 tries")
-        code, _, stderr, launched = self.call(self.entry(), ENTRY_KEY="secret")
+        code, _, stderr, launched, _ = self.call(self.entry(), ENTRY_KEY="secret")
         self.assertEqual((code, launched), (1, False))
         self.assertIn("connection refused", stderr)
 
@@ -1194,6 +1264,44 @@ class TheSchemeIsAConsentQuestion(unittest.TestCase):
         registry = sd_registry.read_file(SHIPPED)
         exo = registry.providers["exo"]
         self.assertIsNone(sd_registry.refuse_allowance(exo, sd_registry.recipient(exo)))
+
+
+class StandingReviewConsentTests(unittest.TestCase):
+    def test_machine_policy_and_local_presence_resolve_without_widening_restrictions(self):
+        registry = sd_registry.read_file(SHIPPED)
+        allowed, source = sd_registry.resolve_consent(registry, None, "configured")
+        self.assertEqual(source, "machine-configured")
+        self.assertEqual(allowed, {p.name: sd_registry.recipient(p) for p in registry.order("reviewer")})
+        self.assertEqual(sd_registry.resolve_consent(registry, "", "configured"), ({}, "repository"))
+        local = str(next(iter(allowed.values())))
+        self.assertEqual(sd_registry.resolve_consent(registry, local, "configured")[0], sd_registry.parse_consent(local))
+        self.assertEqual(sd_registry.resolve_consent(registry, local, "deny"), ({}, "machine-deny"))
+        for policy, line in ((None, None), ("configured", "broken"), ("wrong", None)):
+            with self.subTest(policy=policy, line=line), self.assertRaises(sd_registry.ConsentRefusal):
+                sd_registry.resolve_consent(registry, line, policy)
+
+    def test_new_configured_providers_still_obey_vendor_bill_reader_and_transport_guards(self):
+        from dataclasses import replace
+
+        registry = sd_registry.read_file(SHIPPED)
+        template = next(p for p in registry.order("reviewer") if p.url and p.enabled)
+        entry = replace(template, name="future-reviewer", vendor="future-vendor", ranks={"reviewer": 999})
+        registry.providers[entry.name] = entry
+        consent, _ = sd_registry.resolve_consent(registry, None, "configured")
+        self.assertIn(entry.name, consent)
+        self.assertEqual(sd_registry.pick(registry, entry.name, consent=consent), entry)
+        for overrides in ({"author_vendors": (entry.vendor,)}, {"capped_bills": (entry.bill,)}):
+            with self.subTest(overrides=overrides), self.assertRaises(sd_registry.ConsentRefusal):
+                sd_registry.pick(registry, entry.name, consent=consent, **overrides)
+        registry.providers[entry.name] = replace(entry, enabled=False)
+        self.assertNotIn(entry.name, sd_registry.resolve_consent(registry, None, "configured")[0])
+        with self.assertRaises(sd_registry.RegistryError):
+            sd_registry.pick(registry, entry.name, consent=consent)
+        for changes in ({"url": "http://external.example/v1"}, {"url": None, "start": "future-cli", "reader": "unknown-reader"}):
+            registry.providers[entry.name] = replace(entry, **changes)
+            consent, _ = sd_registry.resolve_consent(registry, None, "configured")
+            with self.subTest(changes=changes), self.assertRaises(sd_registry.ConsentRefusal):
+                sd_registry.pick(registry, entry.name, consent=consent, readers=("codex-json",))
 
 
 if __name__ == "__main__":

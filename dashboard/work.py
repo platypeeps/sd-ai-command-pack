@@ -36,6 +36,7 @@ is not frozen anywhere that would have to be kept in step.
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from pathlib import Path
 
@@ -54,6 +55,7 @@ from .collect import discover_checkouts
 # into `unknown`. Routing the whole read through `sd_lib.work_items` was tried
 # and dropped for exactly that.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bin"))
+import sd_handoff_rows  # noqa: E402
 import sd_lib  # noqa: E402
 
 # Read far enough to clear the frontmatter and no further. These files are
@@ -225,53 +227,23 @@ def collect_work(root: Path) -> dict:
 #: on this page; the note says so rather than naming a program, because the
 #: claim being recorded is theirs and not the dashboard's.
 DELIVERED_BY = "dashboard"
-DELIVERED_WHY = "delivered from the dashboard after a merge that carried no trailer"
 
 
 def deliver(repo: Path, name: str) -> str:
-    """One item's row to `done` with `shipped_at`; `""` when the write landed.
-
-    The control for the case `skills/sd-ship/SKILL.md` calls a hand merge: the
-    branch merged, the message carried no `Delivers:`, so nothing on the
-    default branch claims the item and the row stays `in_progress`. The
-    operator is the claim, after the fact, and this is where they make it.
-
-    The write goes to `sd_db` directly, as `bin/sd_install.py` does, and not
-    through `sd_lib.Rows` -- that opens read-only and exists so that reading
-    sixty-four rows costs one connection, which is not this. The row's *key*
-    still comes from `sd_lib`, so the format both sides agree on has exactly
-    one definition.
-
-    A sentence back rather than a raise. The caller is an HTTP handler whose
-    one job is to say what happened, and answering 200 to a write that never
-    landed is the failure this whole tab was fixed for once already.
-    """
-    try:
-        import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
-    except ImportError as error:
-        return f"sd_db is not installed here: {error}"
+    """Compatibility control: verify HEAD, or name the explicit CLI remedy."""
     identity = sd_lib.external_id(repo, repo / name)
     try:
-        connection = sd_db.connect(write=True)
-    except Exception as error:
-        return f"sd_db could not open the database: {error}"
-    try:
-        row = sd_db.writes.item_by_external(
-            connection, sd_lib.ITEM_ROW_SOURCE, identity)
-        if row is None:
-            return f"the database holds no row for {identity}"
-        # No transaction of our own: `transition` opens one, and writes the
-        # status and its single note inside it. `shipped_at` is when the item
-        # shipped and not when the button was last pressed, so a row already
-        # `done` -- which `transition` reports by returning the target back --
-        # keeps the moment it has, exactly as a second merge does.
-        was = sd_db.writes.transition(connection, row["id"], "done",
-                                      who=DELIVERED_BY, reason=DELIVERED_WHY)
-        if was != "done":
-            sd_db.writes.set_item_fields(
-                connection, row["id"], shipped_at=sd_db.writes.now())
+        sd_db = sd_handoff_rows.library()
+        from sd_db.progress import deliver_work
+
+        with contextlib.closing(sd_db.connect(write=True)) as connection:
+            row = sd_db.writes.item_by_external(connection, sd_lib.ITEM_ROW_SOURCE, identity)
+            if row is None:
+                return f"the database holds no row for {identity}"
+            commit = sd_lib.git_output(["rev-parse", "--verify", "HEAD^{commit}"], repo)
+            if commit is None:
+                return f"delivery needs a verified commit; run sd work deliver {row['id']} <full-commit-sha>"
+            deliver_work(connection, row["id"], commit, who=DELIVERED_BY)
     except Exception as error:
         return f"the row for {identity} was not written: {error}"
-    finally:
-        connection.close()
     return ""

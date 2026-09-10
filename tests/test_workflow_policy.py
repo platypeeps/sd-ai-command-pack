@@ -246,5 +246,22 @@ class DeletedLane(unittest.TestCase):
         self.assertEqual(rows, [])
 
 
+class StandingAuthorizationInventory(unittest.TestCase):
+    def test_core_settings_are_documented_without_shipping_a_personal_grant(self):
+        for relative in ("WORKFLOW.md", "README.md", "AGENTS.md"):
+            text = (REPO_ROOT / relative).read_text()
+            for key in sd_lib.CORE_CONFIG:
+                with self.subTest(path=relative, key=key):
+                    self.assertIn(f"sd.{key}", text)
+        ship = (REPO_ROOT / "skills/sd-ship/SKILL.md").read_text()
+        review = (REPO_ROOT / "skills/sd-review/SKILL.md").read_text()
+        self.assertIn("sd.merge_authorization", ship)
+        self.assertIn("explicitly say wait", ship)
+        self.assertIn("sd.external_reviews", review)
+        self.assertNotIn("- No merge. The loop stops", WORKFLOW.read_text())
+        self.assertNotIn("external_reviews", sd_install.DEFAULT_BLOCK_BODY)
+        self.assertNotIn("merge_authorization", sd_install.DEFAULT_BLOCK_BODY)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""The pack's service surface for plugins, stores and config.
+"""The pack's service surface for workflow, plugins, stores and config.
 
-Today `sd` carries four verb groups: `plugin`, `store`, `config` and `sweep`.
-`sweep` arrived ahead of the other three because it had a consumer already:
-D2's one-time park drained the backlog and the 45-day rule that keeps it
-drained had nothing to run it.
+`sd today`, `sd task`, `sd work`, and `sd writing` use the same database
+operations as the dashboard. Ordinary task progress needs no repository or
+GitHub issue. Code delivery records verified commit evidence separately.
 
-`sd store` reads the vault, and reads it every time. The vault is the
-system-of-record (R5-D1) and SQLite is an index for observability, never a
-source, so a note written by hand or by Obsidian is visible to the next
-`sd store list` with nothing to sync in between. Where a kind is kept comes
+`sd store items` reads workflow rows. `sd store list` reads plugin artifacts
+from their configured store, including the vault; a note written by hand or
+by Obsidian is visible to the next listing without synchronization.
+Where a plugin artifact kind is kept comes
 from the manifest's `store` block -- a sibling of `dashboard`, not a ninth
 `kinds.*` key, because the eight describe what a kind *is* and none of that
 changes when the same kind is kept somewhere else.
@@ -77,14 +76,19 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import sd_codex  # noqa: E402
+import sd_controls  # noqa: E402
 import sd_handoff_rows  # noqa: E402
 import sd_lib  # noqa: E402
+import sd_operations  # noqa: E402
 import sd_registry  # noqa: E402
 import sd_restore  # noqa: E402
+import sd_runner  # noqa: E402
 import sd_shadow  # noqa: E402
 import sd_skill  # noqa: E402
 import sd_suggest  # noqa: E402
 import sd_sweep  # noqa: E402
+import sd_work  # noqa: E402
+import sd_writing  # noqa: E402
 
 MANIFEST_NAME = "sd-plugin.json"
 LOCK_NAME = "sd-plugin.lock"
@@ -996,14 +1000,10 @@ SETTINGS_KEY = "config"
 
 
 def declared_config(prefix: str) -> tuple[dict[str, dict[str, str]], pathlib.Path]:
-    """What `prefix` says it accepts, read from its manifest now.
+    """Read core declarations or a registered plugin manifest. Unknown prefixes refuse."""
 
-    Resolving through the registry rather than taking the prefix on trust is
-    what makes a typo a refusal: `sd config set sdww.google_account x` names a
-    plugin that is not registered, and without this it would write a setting
-    into a namespace nothing will ever read.
-    """
-
+    if prefix == "sd":
+        return sd_lib.CORE_CONFIG, pathlib.Path(sd_lib.__file__)
     roots = registry(sd_lib.machine_config())
     known = registered(roots)
     if prefix not in known:
@@ -2914,7 +2914,7 @@ def build_parser() -> argparse.ArgumentParser:
                            " this whenever the text carries backticks, which a"
                            " shell would run")
     part.set_defaults(handler=store_set_section)
-    config = groups.add_parser("config", help="read and write a plugin's declared settings")
+    config = groups.add_parser("config", help="read and write declared core or plugin settings")
     setting_verbs = config.add_subparsers(dest="verb", required=True)
 
     getter = setting_verbs.add_parser("get", help="print one setting, or refuse with the remedy")
@@ -2974,7 +2974,11 @@ def build_parser() -> argparse.ArgumentParser:
         "sync", help="collect the tracker's open issues and write shadow rows")
     syncer.add_argument(
         "--strict", action="store_true",
-        help="exit non-zero when the cursor could not move")
+        help="exit non-zero when the requested window is not fully covered")
+    syncer.add_argument("--since", type=sd_shadow.timestamp, help="inclusive recovery start, with timezone")
+    syncer.add_argument("--until", type=sd_shadow.timestamp, help="inclusive recovery end, with timezone; no future times")
+    syncer.add_argument("--max-requests", type=sd_shadow.positive_requests, help="positive request budget (library default when omitted)")
+    syncer.add_argument("--max-seconds", type=sd_shadow.positive_seconds, help="positive finite time budget (library default when omitted)")
     syncer.set_defaults(handler=sd_shadow.shadow_sync)
 
     skill = groups.add_parser(
@@ -3009,6 +3013,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="move an installed skill back to contrib/, in a pull request")
     demoter.add_argument("name", help="a directory under skills/")
     demoter.set_defaults(handler=sd_skill.skill_demote)
+    for skill_parser in (trier, skill_lister, promoter, demoter):
+        skill_parser.add_argument("--json", action="store_true")
+        if skill_parser is not skill_lister:
+            skill_parser.add_argument("--if-revision")
+    sd_skill.register_extra(trying)
 
     # The nightly. It lives under `skill` and not at the top level because
     # what it produces is the trial's evidence, and an operator looking for
@@ -3034,6 +3043,8 @@ def build_parser() -> argparse.ArgumentParser:
         "reimport",
         help="reconcile one repository whose source authority the snapshot cannot prove")
     reimporter.add_argument("repository", help="the repository's path, as the repo table holds it")
+    reimporter.add_argument("--dry-run", action="store_true", help="preview recoverable rows without changing them (the default)")
+    reimporter.add_argument("--if-fingerprint", help="required to apply; sources and rows must still match this preview fingerprint")
     reimporter.set_defaults(handler=sd_restore.reimport)
 
     resumer = settling.add_parser(
@@ -3049,13 +3060,24 @@ def build_parser() -> argparse.ArgumentParser:
         "entry", help=f"a registry entry, or `{sd_lib.HUMAN_AUTHOR}` for the operator")
     attributer.set_defaults(handler=cmd_attribute)
 
+    sd_work.register(groups, kept)
+    sd_writing.register(groups)
+    sd_operations.register(groups)
+    sd_controls.register(groups)
+    sd_runner.register(groups)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
+    if argv is None:
+        argv = sys.argv[1:]
     try:
-        args = parser.parse_args(argv)
+        # The shared command parser owns every option, including leading flags.
+        if argv[:2] == ["runner", "commands"]:
+            args = argparse.Namespace(handler=sd_runner.commands, palette_args=argv[2:])
+        else:
+            args = parser.parse_args(argv)
     except SystemExit as exit_code:
         return 2 if exit_code.code else 0
     try:
@@ -3076,6 +3098,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"sd: {refusal}", file=sys.stderr)
         return 1
     except sd_handoff_rows.RowsRefusal as refusal:
+        print(f"sd: {refusal}", file=sys.stderr)
+        return 1
+    except sd_work.WorkRefusal as refusal:
         print(f"sd: {refusal}", file=sys.stderr)
         return 1
     except UsageError as error:

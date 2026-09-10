@@ -19,6 +19,7 @@ import pathlib
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import unittest
 import unittest.mock
@@ -535,6 +536,10 @@ class Live:
         self.case = case
 
     def __enter__(self) -> "Live":
+        self.scratch = tempfile.TemporaryDirectory()
+        self.cache_patch = unittest.mock.patch.dict(
+            os.environ, {"XDG_CACHE_HOME": self.scratch.name})
+        self.cache_patch.start()
         self.patch = unittest.mock.patch.object(plugins, "catalog", lambda: ([], ""))
         self.patch.start()
         handler = server.make_handler(server.Cache(REPO_ROOT / "missing"), "// none")
@@ -549,6 +554,8 @@ class Live:
         self.httpd.server_close()
         self.thread.join(timeout=5)
         self.patch.stop()
+        self.cache_patch.stop()
+        self.scratch.cleanup()
 
     def request(self, method: str, path: str, body: bytes = b"",
                 headers: dict | None = None, host: str | None = None):

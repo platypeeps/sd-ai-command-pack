@@ -64,9 +64,10 @@ class FakeRunner:
         env: Mapping[str, str],
         cwd: pathlib.Path,
         timeout: int,
+        input_text: str | None = None,
     ) -> Any:
         self.calls.append(
-            {"argv": list(argv), "env": dict(env), "cwd": pathlib.Path(cwd), "timeout": timeout}
+            {"argv": list(argv), "env": dict(env), "cwd": pathlib.Path(cwd), "timeout": timeout, "stdin": input_text}
         )
         program = pathlib.Path(argv[0]).name
         if program.startswith("python") or argv[-1] == "--json" and "sd-check" in " ".join(argv):
@@ -290,7 +291,7 @@ class ReaderTests(ReviewFixture):
     def test_an_unimplemented_reader_is_not_run_and_names_itself(self) -> None:
         runner = FakeRunner()
         outcome = sd_review.run_provider(
-            self.provider(reader="claude-json"),
+            self.provider(reader="unimplemented-json"),
             pathlib.Path("/nonexistent"),
             sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""),
             "prompt",
@@ -299,7 +300,7 @@ class ReaderTests(ReviewFixture):
             60,
         )
         self.assertEqual(outcome.status, sd_review.NOT_RUN)
-        self.assertIn("claude-json", outcome.detail)
+        self.assertIn("unimplemented-json", outcome.detail)
         self.assertEqual(runner.calls, [], "an unreadable provider is not started")
 
     def test_a_url_entry_does_not_borrow_a_start_entry_s_words(self) -> None:
@@ -335,7 +336,7 @@ class ReaderTests(ReviewFixture):
         """The chain marks it, the dry run plans it, the run reports it. Each
         had its own sentence, and two of the three were wrong about the same
         case, so fixing one left the others saying the old thing."""
-        provider = self.provider(reader="claude-json")
+        provider = self.provider(reader="unimplemented-json")
         expected = sd_review.sd_registry.refuse_reader(provider, sd_review.READERS)
         self.assertIsNotNone(expected)
         planned = sd_review._planned([provider], pathlib.Path("/nonexistent"), "prompt")
@@ -391,7 +392,7 @@ class ReaderTests(ReviewFixture):
         hardcoded `codex` would silently review with the wrong binary."""
 
         argv = sd_review.codex_argv(
-            pathlib.Path("/repo"), pathlib.Path("/work"), "prompt", "wrapped codex exec"
+            pathlib.Path("/repo"), pathlib.Path("/work"), "wrapped codex exec"
         )
         self.assertEqual(argv[:3], ["wrapped", "codex", "exec"])
         self.assertIn("--sandbox", argv)
@@ -507,7 +508,8 @@ class ParseTests(unittest.TestCase):
             )
         )
         assert flat is not None
-        self.assertEqual(flat[0]["path"], "a.py")
+        self.assertEqual(flat.findings[0]["path"], "a.py")
+        self.assertEqual(flat.error, "")
         nested = sd_review.parse_findings(
             json.dumps(
                 {
@@ -523,25 +525,30 @@ class ParseTests(unittest.TestCase):
             )
         )
         assert nested is not None
-        self.assertEqual(nested[0], {"path": "b.py", "line": 9, "severity": "low", "summary": "t", "family": "testing"})
+        self.assertEqual(nested.findings[0], {"path": "b.py", "line": 9, "severity": "low", "summary": "t", "family": "testing"})
+        self.assertIn("schema", nested.error)
 
     def test_non_json_and_wrong_shapes_are_not_findings(self) -> None:
         self.assertIsNone(sd_review.parse_findings("boom"))
         self.assertIsNone(sd_review.parse_findings(""))
         self.assertIsNone(sd_review.parse_findings(json.dumps({"issues": []})))
 
-    def test_a_finding_missing_its_path_is_dropped_not_invented(self) -> None:
+    def test_a_finding_missing_its_path_is_incomplete_not_clean(self) -> None:
         parsed = sd_review.parse_findings(json.dumps({"findings": [{"summary": "s"}]}))
-        self.assertEqual(parsed, [])
+        self.assertEqual(parsed.findings[0]["path"], "<unknown>")
+        self.assertIn("schema", parsed.error)
 
-    def test_findings_are_capped(self) -> None:
+    def test_excess_findings_are_bounded_and_omissions_block_completion(self) -> None:
         many = [
             {"path": "a", "line": None, "severity": "low", "summary": str(index), "family": "f"}
             for index in range(sd_review.MAX_FINDINGS + 10)
         ]
         parsed = sd_review.parse_findings(json.dumps({"findings": many}))
         assert parsed is not None
-        self.assertEqual(len(parsed), sd_review.MAX_FINDINGS)
+        self.assertEqual(len(parsed.findings), sd_review.MAX_FINDINGS)
+        self.assertIn("omitted", parsed.findings[-1]["summary"])
+        self.assertEqual(parsed.findings[-1]["severity"], "high")
+        self.assertIn("limits", parsed.error)
 
 
 class ClassifyTests(unittest.TestCase):
@@ -612,7 +619,7 @@ class PipelineTests(ReviewFixture):
         self.assertEqual(result["findings"][0]["disposition"], "blocking")
         self.assertEqual(result["findings"][0]["backend"], "codex")
 
-    def test_a_rate_limited_provider_stops_the_chain_and_names_the_rest(self) -> None:
+    def test_a_rate_limited_provider_falls_through_and_reports_the_shortfall(self) -> None:
         root = self.make_repo()
         self.prepare(root)
         runner = FakeRunner(
@@ -626,9 +633,10 @@ class PipelineTests(ReviewFixture):
         self.assertEqual(result["status"], "rate_limited")
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["codex"], sd_review.RATE_LIMITED)
-        self.assertEqual(statuses["second"], sd_review.NOT_RUN)
-        self.assertEqual(sorted(result["remaining"]), ["codex", "second"])
-        self.assertNotIn("second", [pathlib.Path(call["argv"][0]).name for call in runner.calls])
+        self.assertEqual(statuses["second"], sd_review.CLEAN)
+        self.assertEqual(result["remaining"], ["codex"])
+        self.assertEqual(result["reviewed_by"], ["second"])
+        self.assertEqual((result["completed_reviews"], result["requested_reviews"]), (1, 2))
 
     def test_an_unavailable_provider_lets_the_chain_continue(self) -> None:
         root = self.make_repo()
@@ -644,7 +652,8 @@ class PipelineTests(ReviewFixture):
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["codex"], sd_review.UNAVAILABLE)
         self.assertEqual(statuses["second"], sd_review.CLEAN)
-        self.assertEqual(result["status"], "clean")
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual((result["completed_reviews"], result["requested_reviews"]), (1, 2))
 
     def test_every_provider_unavailable_is_not_a_clean_review(self) -> None:
         root = self.make_repo()
@@ -691,7 +700,7 @@ class PipelineTests(ReviewFixture):
         challenged = self.run_review(root, runner, dry_run=True, challenge=True)
         self.assertEqual(set(plain["providers"]) <= set(challenged["providers"]), True)
         prompt = " ".join(
-            row["argv"][-1] for row in challenged["planned_invocations"] if row["would_run"]
+            row["stdin"] for row in challenged["planned_invocations"] if row["would_run"]
         )
         self.assertIn("Argue against the approach itself", prompt)
 
@@ -701,7 +710,7 @@ class PipelineTests(ReviewFixture):
         self.local_block(root, "check: make check")
         result = self.run_review(root, FakeRunner(), dry_run=True)
         self.assertTrue(result["local_block_prepended"])
-        prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["argv"][-1]
+        prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["stdin"]
         self.assertIn("check: make check", prompt)
         self.assertTrue(prompt.startswith("Repository-local conventions"))
 
@@ -715,7 +724,7 @@ class PipelineTests(ReviewFixture):
             cwd=str(root), check=True, capture_output=True
         )
         result = self.run_review(root, FakeRunner(), dry_run=True, scope="branch")
-        prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["argv"][-1]
+        prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["stdin"]
         self.assertIn(f"{result['subject']['base']}..{result['subject']['head']}", prompt)
 
     def test_a_docs_only_change_routes_to_skip_and_asks_nobody(self) -> None:
@@ -917,16 +926,16 @@ class DepthCountsProvidersThatCanAnswerTests(ReviewFixture):
         )
 
     def test_an_unimplemented_reader_is_ineligible_and_says_why(self) -> None:
-        rows = self.explained(self.registry_with("claude-json", "codex-json"), 2)["chain"]
+        rows = self.explained(self.registry_with("unimplemented-json", "codex-json"), 2)["chain"]
         self.assertFalse(rows[0]["eligible"])
-        self.assertIn("claude-json", rows[0]["reason"])
+        self.assertIn("unimplemented-json", rows[0]["reason"])
         self.assertTrue(rows[1]["eligible"], rows[1]["reason"])
 
     def test_it_does_not_consume_a_depth_slot(self) -> None:
         """The defect in one assertion: with an unrunnable entry ahead of a
         runnable one, the run still picks the one that can answer."""
 
-        result = self.explained(self.registry_with("claude-json", "codex-json"), 2)
+        result = self.explained(self.registry_with("unimplemented-json", "codex-json"), 2)
         self.assertGreaterEqual(result["route"]["depth"], 1)
         self.assertEqual(result["providers"][:1], ["p1"], result["chain"])
 
@@ -935,7 +944,7 @@ class DepthCountsProvidersThatCanAnswerTests(ReviewFixture):
         `run_provider` does not implement would mark an entry eligible and then
         refuse it at the run, which is the hole this closes reopened."""
 
-        self.assertEqual(sd_review.READERS, ("codex-json",))
+        self.assertEqual(sd_review.READERS, ("codex-json", "claude-json"))
 
 
 class AnEmptyChainThatWantedReviewersTests(ReviewFixture):
@@ -977,7 +986,7 @@ class AnEmptyChainThatWantedReviewersTests(ReviewFixture):
         stream = io.StringIO()
         sd_review.render(result, stream)
         printed = stream.getvalue()
-        self.assertIn("no reviewer was available:", printed)
+        self.assertIn("not enough reviewers were available:", printed)
         self.assertIn("reviewers", printed)
         self.assertIn("unavailable", printed)
 
@@ -1350,6 +1359,15 @@ class TheUrlEntryRunsTests(ReviewFixture):
         self.assertEqual(len(client.sent), 1)
         self.assertIn("Review", client.sent[0]["prompt"])
 
+    def test_incomplete_url_diagnostics_survive_the_fallback_receipt(self) -> None:
+        client = FakeClient(default=chat_answer("", reasoning_content="rate_limit private-marker"))
+        result = self.run_review(client)
+        first = result["outcomes"][0]
+        self.assertEqual(first["status"], sd_review.UNAVAILABLE)
+        self.assertEqual(first["diagnostic"]["category"], "reasoning_only")
+        self.assertNotIn("private-marker", json.dumps(first))
+        self.assertEqual(result["reviewed_by"], ["second"])
+
     def test_findings_come_back_through_the_same_reader(self) -> None:
         client = FakeClient(
             {
@@ -1382,12 +1400,12 @@ class TheUrlEntryRunsTests(ReviewFixture):
         }
         self.assertEqual(statuses["remote"], sd_review.CLEAN)
 
-    def test_a_429_is_a_rate_limit_and_stops_the_chain(self) -> None:
+    def test_a_429_falls_through_and_reports_insufficient_reviews(self) -> None:
         client = FakeClient({"remote": (429, "", "HTTP 429 from remote: slow down", True)})
         result = self.run_review(client)
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["remote"], sd_review.RATE_LIMITED)
-        self.assertEqual(statuses["second"], sd_review.NOT_RUN)
+        self.assertEqual(statuses["second"], sd_review.CLEAN)
         self.assertEqual(result["status"], "rate_limited")
 
     def test_a_connection_error_is_unavailable_and_the_chain_continues(self) -> None:
@@ -1399,7 +1417,7 @@ class TheUrlEntryRunsTests(ReviewFixture):
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["remote"], sd_review.UNAVAILABLE)
         self.assertEqual(statuses["second"], sd_review.CLEAN)
-        self.assertEqual(result["status"], "clean")
+        self.assertEqual(result["status"], "unavailable")
 
     def test_a_host_that_moved_refuses_naming_both_and_sends_nothing(self) -> None:
         client = FakeClient()
@@ -1527,6 +1545,147 @@ class ScopeProvidersOverASkipTier(unittest.TestCase):
 
         for scope in sd_review.FLOOR_SCOPES:
             self.assertIn(scope, sd_review.SCOPES, f"{scope!r} is not a scope")
+
+
+class StandingReviewPolicyTests(ReviewFixture):
+    def policy(self, value):
+        path = self.registry_home / ".config" / sd_review.sd_lib.CONFIG_RELATIVE_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"config": {"sd": {"external_reviews": value}}}))
+        return str(path)
+
+    def test_two_consumers_inherit_one_policy_and_explain_matches_actual_canned_review(self):
+        policy_path = self.policy("configured")
+        for name in ("one", "two"):
+            root = self.make_repo(name)
+            (root / "CLAUDE.local.md").unlink()
+            (root / "src.py").write_text("x = 1\n")
+            runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+            args = namespace(provider="second", explain=True)
+            explained = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+            self.assertEqual(explained["authorization"]["source"], "machine-configured")
+            self.assertEqual(explained["authorization"]["path"], policy_path)
+            self.assertEqual(explained["providers"], ["second"])
+            args.explain = False
+            actual = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+            self.assertEqual(actual["authorization"], explained["authorization"])
+            self.assertEqual(actual["status"], "clean")
+            self.assertEqual(actual["reviewed_by"], ["second"])
+
+    def test_linked_worktree_reports_the_main_checkout_consent_path(self):
+        self.policy("configured")
+        root = self.make_repo()
+        linked = self.tmp / "linked"
+        subprocess.run(["git", "worktree", "add", "--detach", str(linked), "HEAD"], cwd=root, check=True, capture_output=True)
+        (linked / "src.py").write_text("x = 1\n")
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        result = sd_review.review(linked, namespace(explain=True), runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(result["authorization"]["source"], "repository")
+        self.assertEqual(result["authorization"]["path"], str(root / "CLAUDE.local.md"))
+
+    def test_configured_policy_cannot_inherit_through_existing_unreadable_local_path(self):
+        self.policy("configured")
+        root = self.make_repo()
+        local = root / "CLAUDE.local.md"
+        local.unlink()
+        local.mkdir()
+        (root / "src.py").write_text("x = 1\n")
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        with self.assertRaises(sd_review.sd_lib.ConfigError):
+            sd_review.review(root, namespace(), runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(runner.calls, [])
+
+    def test_local_empty_and_machine_denial_send_nothing(self):
+        root = self.make_repo()
+        policy_path = self.policy("configured")
+        self.local_block(root, "reviewers: \"\"")
+        (root / "src.py").write_text("x = 1\n")
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        result = sd_review.review(root, namespace(), runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(result["providers"], [])
+        self.assertEqual(result["authorization"]["source"], "repository")
+        self.assertEqual(result["authorization"]["path"], str(root / "CLAUDE.local.md"))
+        self.assertEqual(result["completed_reviews"], 0)
+        self.local_block(root)
+        result = sd_review.review(root, namespace(explain=True), runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(result["authorization"], {"source": "repository", "policy": "configured", "path": str(root / "CLAUDE.local.md")})
+        self.policy("deny")
+        result = sd_review.review(root, namespace(), runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(result["providers"], [])
+        self.assertEqual(result["authorization"]["source"], "machine-deny")
+        self.assertEqual(result["authorization"]["path"], policy_path)
+        self.assertEqual(result["completed_reviews"], 0)
+
+
+class TimingPlanTests(ReviewFixture):
+    def planned(self, count=4, depth="deep", timeout=1800):
+        root = self.make_repo()
+        (root / "src.py").write_text("x=1\n")
+        (root / ".github").mkdir()
+        (root / ".github/sd-review.json").write_text(json.dumps({"default_tier": depth}))
+        registry = self.registry_home / ".local/share/sd/providers.yaml"
+        entries = [f"p{index}" for index in range(count)]
+        registry.write_text("bills:\n  fixture: {cost: subscription}\nproviders:\n"
+            + "".join(f"  {name}: {{start: '{name} exec', vendor: '{name}', bill: fixture, roles: [reviewer], reader: claude-json}}\n" for name in entries)
+            + "roles:\n  author: []\n  reviewer: [" + ", ".join(entries) + "]\n")
+        (root / "CLAUDE.local.md").write_text("<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\nreviewers: "
+            + ", ".join(f"{name}@{name}" for name in entries) + "\n<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n")
+        runner = FakeRunner()
+        args = namespace(explain=True, timeout=timeout)
+        report = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(runner.calls, [])
+        return root, args, report
+
+    def test_all_fallbacks_receive_an_allowance_without_changing_depth(self):
+        root, args, planned = self.planned()
+        self.assertEqual(planned["requested_reviews"], 2)
+        self.assertEqual(planned["fallback_candidates"], ["p2", "p3"])
+        self.assertEqual(planned["timing"]["execution_seconds"], 12600)
+        self.assertEqual([row["name"] for row in planned["timing"]["candidates"]], ["p0", "p1", "p2", "p3"])
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""), "p0": sd_review.Completed(127, "", "missing", False)},
+                            default=sd_review.Completed(0, json.dumps({"type": "result", "subtype": "success", "structured_output": {"findings": []}}), ""))
+        args.explain = False
+        args.expected_timing = sd_review.hashlib.sha256(json.dumps(planned["timing"], sort_keys=True).encode()).hexdigest()
+        actual = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(len(runner.calls), 4)
+        self.assertEqual(actual["timing"], planned["timing"])
+        self.assertEqual(actual["completed_reviews"], 2)
+        self.assertEqual(actual["requested_reviews"], 2)
+        self.assertEqual(actual["reviewed_by"], ["p1", "p2"])
+
+    def test_timeout_change_refuses_before_check_or_provider(self):
+        root, args, report = self.planned(count=2, depth="standard", timeout=90)
+        args.explain = False
+        args.expected_timing = sd_review.hashlib.sha256(json.dumps(report["timing"], sort_keys=True).encode()).hexdigest()
+        args.timeout = 91
+        runner = FakeRunner()
+        with self.assertRaisesRegex(sd_review.Refusal, "timing inputs changed"):
+            sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(runner.calls, [])
+
+    def test_candidate_identity_drift_refuses_even_when_count_is_unchanged(self):
+        root, args, report = self.planned(count=2, depth="standard")
+        args.explain = False
+        args.expected_timing = sd_review.hashlib.sha256(json.dumps(report["timing"], sort_keys=True).encode()).hexdigest()
+        registry = self.registry_home / ".local/share/sd/providers.yaml"
+        registry.write_text(registry.read_text().replace("p0", "replacement"))
+        local = root / "CLAUDE.local.md"
+        local.write_text(local.read_text().replace("p0", "replacement"))
+        runner = FakeRunner()
+        with self.assertRaisesRegex(sd_review.Refusal, "timing inputs changed"):
+            sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(runner.calls, [])
+
+    def test_only_timing_inputs_are_bound(self):
+        root, args, report = self.planned(count=1, depth="cheap")
+        args.explain = False
+        args.expected_timing = sd_review.hashlib.sha256(json.dumps(report["timing"], sort_keys=True).encode()).hexdigest()
+        args.challenge = True
+        runner = FakeRunner({"sd-check": sd_review.Completed(1, "{}", "fixture gate failure")})
+        actual = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(actual["timing"], report["timing"])
+        self.assertEqual(actual["status"], "gate_failed")
+        self.assertEqual(len(runner.calls), 1)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,7 @@
 """Shared detection and derivation for the sd-* tools under bin/.
 
-Every question this module answers, it answers from the repository itself: the
-git worktree you are standing in, the tracked artifacts under `docs/work`, the
-repo's own check entrypoints. Nothing is read from stored state, because stored
-state is state that goes stale without telling anyone.
+Repository state is derived from Git, work artifacts, and check entrypoints.
+Operator policy comes from the current machine configuration, read on demand.
 
 Stdlib only, Python 3.10+, no network. A caller that cannot proceed gets a
 `ConfigError` carrying a sentence a human can act on, never a traceback.
@@ -26,6 +24,12 @@ LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
 LOCAL_BLOCK_END = "<!-- SD-AI-COMMAND-PACK:LOCAL:END -->"
 
 CONFIG_RELATIVE_PATH = pathlib.Path("sd-ai-command-pack") / "config.json"
+CORE_CONFIG = {
+    "external_reviews": {"pattern": "configured|deny",
+                         "description": "Standing private-code/context review authorization; unset uses local consent."},
+    "merge_authorization": {"pattern": "controlled|ask",
+                            "description": "Assistant merge permission for active controlled-repo work; unset asks, explicit wait wins."},
+}
 
 WORK_DIR = "docs/work"
 ARCHIVE_DIR = "archive"
@@ -37,10 +41,8 @@ DEFAULT_MODE = "full"
 #: The three names every repository is asked about, in the order they run.
 CHECK_NAMES = ("check", "test", "lint")
 
-#: Consent, not policy: the registry entries a repository allows to receive
-#: its diff. The installer asks for it once and writes the key; nothing
-#: derives the value. Named here so the installer's block, `WORKFLOW.md` and
-#: the test that compares them all read one source.
+#: Optional repository restriction, overriding standing operator review consent.
+#: Shared by the installer, runtime reader, and workflow inventory check.
 CONSENT_KEY = "reviewers"
 
 GIT_TIMEOUT_SECONDS = 15
@@ -242,19 +244,31 @@ def local_block(root: pathlib.Path) -> dict[str, str]:
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return {}
-    except (IsADirectoryError, NotADirectoryError):
+        if path.is_symlink():
+            raise ConfigError(f"cannot read dangling local configuration link: {path}") from None
         return {}
     except (OSError, UnicodeDecodeError) as error:
         raise ConfigError(f"cannot read {path}: {error}") from None
     return parse_local_block(text, str(path))
 
 
-def machine_config_path() -> pathlib.Path:
-    """`~/.config/sd-ai-command-pack/config.json`, honouring `XDG_CONFIG_HOME`."""
-    base = os.environ.get("XDG_CONFIG_HOME") or ""
-    home = pathlib.Path(base) if base else pathlib.Path.home() / ".config"
+def machine_config_path(environ: dict[str, str] | None = None) -> pathlib.Path:
+    """Read the supplied operator's XDG/HOME, or the current environment."""
+    env = os.environ if environ is None else environ
+    home = pathlib.Path(env.get("XDG_CONFIG_HOME") or pathlib.Path(env.get("HOME") or pathlib.Path.home()) / ".config")
     return home / CONFIG_RELATIVE_PATH
+
+
+def core_setting(key: str, environ: dict[str, str] | None = None) -> str | None:
+    """Validated standing user policy; absence grants no new permission."""
+    config = machine_config(machine_config_path(environ)).get("config", {})
+    mine = config.get("sd", {}) if isinstance(config, dict) else None
+    if not isinstance(mine, dict):
+        raise ConfigError("machine config config.sd must be an object")
+    value = mine.get(key)
+    if key in mine and (not isinstance(value, str) or not re.fullmatch(CORE_CONFIG[key]["pattern"], value)):
+        raise ConfigError(f"invalid sd.{key} policy")
+    return value
 
 
 def machine_config(path: pathlib.Path | None = None) -> dict[str, object]:
@@ -550,6 +564,8 @@ class Rows:
         self.problem = ""
         self._connection: Any = None
         self._read: Any = None
+        self._artifact_read: Any = None
+        self._completion_read: Any = None
         try:
             import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
         except ImportError as error:
@@ -577,6 +593,13 @@ class Rows:
             self.problem = f"sd_db could not open the database: {error}"
             return
         self._read = sd_db.writes.item_by_external
+        try:
+            from sd_db.progress import completion_record, item_for_artifact
+        except ImportError:
+            pass  # Older installations retain their original identity reader.
+        else:
+            self._artifact_read = item_for_artifact
+            self._completion_read = completion_record
         self.opened = True
 
     def external_id(self, item_dir: pathlib.Path) -> str:
@@ -589,7 +612,7 @@ class Rows:
             return "", ""
         identity = self.external_id(item_dir)
         try:
-            row = self._read(self._connection, ITEM_ROW_SOURCE, identity)
+            row = self.item(item_dir)
         except Exception as error:
             return "", f"the row for {identity} could not be read: {error}"
         if row is None:
@@ -599,6 +622,19 @@ class Rows:
             return "", (f"the row for {identity} says status {said!r}, which is not "
                         f"one of {', '.join(ROW_STATUSES)}")
         return said, ""
+
+    def item(self, item_dir: pathlib.Path) -> Any:
+        """Resolve a current artifact link without changing the row's identity."""
+        if self._artifact_read is not None:
+            relative = (item_dir / "prd.md").relative_to(_root_of(item_dir)).as_posix()
+            return self._artifact_read(self._connection, self.base, relative)
+        return self._read(self._connection, ITEM_ROW_SOURCE, self.external_id(item_dir))
+
+    def completed(self, item_dir: pathlib.Path) -> bool:
+        if self._completion_read is None:
+            return False
+        row = self.item(item_dir)
+        return row is not None and self._completion_read(row) is not None
 
     def close(self) -> None:
         if self._connection is not None:
@@ -731,7 +767,8 @@ def _from_row(
             f"{prd}: its `status:` line says {line!r} where the row says {said!r}; "
             f"the line is stale"
         )
-    if said == "done" and delivered(statuses.root, item_dir.name) != YES:
+    recorded = statuses.rows is not None and statuses.rows.completed(item_dir)
+    if said == "done" and not recorded and delivered(statuses.root, item_dir.name) != YES:
         problems.append(
             f"{prd}: the row is done and no commit carries {DELIVERS_TRAILER} or "
             f"{CLOSES_TRAILER} for {item_dir.name}; the item is unmarked"
@@ -748,6 +785,9 @@ def _status_report(
     archived = _is_archived(item_dir)
     prd = item_dir / "prd.md"
     if archived:
+        if statuses.source == FROM_ROW and statuses.rows is not None and statuses.rows.opened:
+            report = _from_row(item_dir, prd, fields, problems, statuses)
+            return StatusReport(report.status, True, report.inconsistencies)
         return StatusReport("done", True, tuple(problems))
 
     if not statuses.source:
@@ -1177,7 +1217,12 @@ def author_vendors(root: pathlib.Path, base: str, head: str) -> tuple[str, ...]:
             f"`sd attribute {untagged[-1][:12]} <entry>`."
         )
     vendors = []
-    for sha, value in said.items():
+    claims = list(said.items())
+    for sha, message in commit_messages(root, base, head):
+        claims.extend((sha, line[len(AUTHORED_TRAILER):].strip())
+                      for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()
+                      if line.startswith(AUTHORED_TRAILER))
+    for sha, value in claims:
         if value == HUMAN_AUTHOR:
             continue
         entry, separator, vendor = value.partition("/")

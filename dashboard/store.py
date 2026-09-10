@@ -78,13 +78,18 @@ def index_path(environ: dict[str, str] | None = None) -> Path:
     return home / "sd-ai-command-pack" / "index.sqlite"
 
 
-def connect(path: Path | None = None) -> sqlite3.Connection:
-    """Open (creating if needed) and apply the schema.
+def connect(path: Path | None = None, *, write: bool = True) -> sqlite3.Connection:
+    """Open the index; create it and apply the schema when writes are enabled.
 
-    `IF NOT EXISTS` throughout, so this is safe to call on every collect and
-    there is no separate "init" step somebody can forget to run.
+    Read-only connections require an existing, initialized index. Schema
+    statements use `IF NOT EXISTS`, so every writable collect can apply them.
     """
     target = index_path() if path is None else path
+    if not write:
+        connection = sqlite3.connect(target.resolve().as_uri() + "?mode=ro", uri=True)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only=ON")
+        return connection
     target.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(str(target))
     connection.row_factory = sqlite3.Row
