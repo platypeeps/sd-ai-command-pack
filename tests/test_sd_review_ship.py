@@ -103,7 +103,7 @@ class FixReviewTests(ReviewFixture):
         for oversized in ("report", "source"):
             if oversized == "source":
                 row["summary"] = "original blocker"
-                (root / "src.py").write_text("x" * (sd_review.MAX_OUTPUT_BYTES + 1))
+                self.commit(root, "src.py", "x" * (sd_review.MAX_OUTPUT_BYTES + 1))
             report.write_text(json.dumps(prior))
             for explain in (True, False):
                 runner = FakeRunner()
@@ -111,6 +111,94 @@ class FixReviewTests(ReviewFixture):
                     sd_review.review(root, namespace(scope="branch", resume_report=str(report), explain=explain),
                                      runner, self.environment(), self.chatgpt_home())
                 self.assertEqual(runner.calls, [])
+
+    def test_prior_findings_never_open_untracked_or_git_metadata_sources(self):
+        root, first = self.branch()
+        report = self.tmp / "prior.json"
+        for name in (".env", ".git/fixture-marker"):
+            marker = "harmless-untracked-fixture-" + name
+            (root / name).write_text(marker)
+            row = {"path": name, "line": 1, "disposition": "blocking", "summary": "model-selected path"}
+            report.write_text(json.dumps({"scope": "branch", "subject": {"head": first},
+                                          "findings": [row], "authored_with": []}))
+            runner = FakeRunner()
+            with self.subTest(path=name):
+                try:
+                    sd_review.review(root, namespace(scope="branch", resume_report=str(report)), runner,
+                                     self.environment(), self.chatgpt_home())
+                except sd_review.UsageError as error:
+                    self.assertIn("tracked regular file", str(error))
+                else:
+                    self.fail(f"unsafe source entered reviewer prompt: {marker in json.dumps(runner.calls, default=str)}")
+                self.assertEqual(runner.calls, [])
+
+    def test_prior_source_uses_exact_committed_regular_blob_not_worktree_replacement(self):
+        root, first = self.branch()
+        report = self.tmp / "prior.json"
+        row = {"path": "src.py", "line": 1, "disposition": "blocking", "summary": "original finding"}
+        report.write_text(json.dumps({"scope": "branch", "subject": {"head": first},
+                                      "findings": [row], "authored_with": []}))
+        marker = "harmless-uncommitted-replacement"
+        (root / ".env").write_text(marker)
+        for replacement in ("dirty", "symlink"):
+            (root / "src.py").unlink()
+            if replacement == "symlink":
+                (root / "src.py").symlink_to(root / ".env")
+            else:
+                (root / "src.py").write_text(marker)
+            runner = FakeRunner()
+            with self.subTest(replacement=replacement):
+                sd_review.review(root, namespace(scope="branch", resume_report=str(report)), runner,
+                                 self.environment(), self.chatgpt_home())
+                handed = json.dumps(runner.calls, default=str)
+                self.assertIn("the_original_defect = True", handed)
+                self.assertNotIn(marker, handed)
+
+    def test_prior_source_refuses_committed_symlinks_and_directories(self):
+        root, first = self.branch()
+        (root / "linked.py").symlink_to("src.py")
+        (root / "folder").mkdir()
+        self.commit(root, "folder/child.py", "child = True\n")
+        subprocess.run(["git", "add", "linked.py"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "link\n\nAuthored-with: human"], cwd=root, check=True, capture_output=True)
+        report = self.tmp / "prior.json"
+        for name in ("linked.py", "folder"):
+            report.write_text(json.dumps({"scope": "branch", "subject": {"head": first}, "authored_with": [],
+                                          "findings": [{"path": name, "disposition": "blocking", "summary": "finding"}]}))
+            runner = FakeRunner()
+            with self.subTest(path=name), self.assertRaisesRegex(sd_review.UsageError, "tracked regular file"):
+                sd_review.review(root, namespace(scope="branch", resume_report=str(report)), runner,
+                                 self.environment(), self.chatgpt_home())
+            self.assertEqual(runner.calls, [])
+
+    def test_deleted_prior_source_keeps_raw_finding_and_absence_marker(self):
+        root, first = self.branch()
+        subprocess.run(["git", "rm", "src.py"], cwd=root, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "remove\n\nAuthored-with: human"], cwd=root, check=True, capture_output=True)
+        findings = [{"path": "src.py", "disposition": "blocking", "summary": "original blocker"}]
+        report = self.tmp / "prior.json"
+        original = json.dumps({"scope": "branch", "subject": {"head": first}, "authored_with": [], "findings": findings})
+        report.write_text(original)
+        runner = FakeRunner()
+        sd_review.review(root, namespace(scope="branch", resume_report=str(report)), runner,
+                         self.environment(), self.chatgpt_home())
+        prompt = next(call["stdin"] for call in runner.calls if call["argv"][0] == "codex")
+        self.assertIn("[file absent at current HEAD]", prompt)
+        recovered, _ = json.JSONDecoder().raw_decode(prompt.split("Prior findings:\n", 1)[1])
+        self.assertEqual(recovered, findings)
+        self.assertEqual(report.read_text(), original)
+
+    def test_prior_blob_read_failure_refuses_before_check_or_provider(self):
+        root, first = self.branch()
+        report = self.tmp / "prior.json"
+        report.write_text(json.dumps({"scope": "branch", "subject": {"head": first}, "authored_with": [],
+                                      "findings": [{"path": "src.py", "disposition": "blocking", "summary": "finding"}]}))
+        runner = FakeRunner()
+        with patch.object(sd_review, "subprocess_runner", return_value=sd_review.Completed(1, "", "fixture failure")), \
+                self.assertRaisesRegex(sd_review.UsageError, "cannot read prior finding source"):
+            sd_review.review(root, namespace(scope="branch", resume_report=str(report)), runner,
+                             self.environment(), self.chatgpt_home())
+        self.assertEqual(runner.calls, [])
 
     def test_history_over_64k_preserves_every_raw_finding_and_provenance(self):
         root, first = self.branch()
@@ -132,7 +220,7 @@ class FixReviewTests(ReviewFixture):
                 result = sd_review.review(root, namespace(scope="branch", **kwargs), runner,
                                           self.environment(), self.chatgpt_home())
                 self.assertEqual(result["status"], "clean")
-                prompts = [call["argv"][-1] for call in runner.calls if call["argv"][0] == "codex"]
+                prompts = [call["stdin"] for call in runner.calls if call["argv"][0] == "codex"]
                 self.assertEqual(len(prompts), 1)
                 self.assertIn("Prior findings:\n" + evidence, prompts[0])
                 recovered, _ = json.JSONDecoder().raw_decode(prompts[0].split("Prior findings:\n", 1)[1])
@@ -165,7 +253,7 @@ class FixReviewTests(ReviewFixture):
         findings = [{"path": name, "disposition": "blocking", "summary": "unchanged blocker"}
                     for name in ("src.py", "other.py")]
         for finding in findings:
-            (root / finding["path"]).write_text("x" * (sd_review.MAX_OUTPUT_BYTES // 2))
+            self.commit(root, finding["path"], "x" * (sd_review.MAX_OUTPUT_BYTES // 2))
         report.write_text(json.dumps({"scope": "branch", "subject": {"head": first},
                                       "findings": findings, "authored_with": []}))
         for explain in (True, False):

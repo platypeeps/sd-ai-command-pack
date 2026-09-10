@@ -64,9 +64,10 @@ class FakeRunner:
         env: Mapping[str, str],
         cwd: pathlib.Path,
         timeout: int,
+        input_text: str | None = None,
     ) -> Any:
         self.calls.append(
-            {"argv": list(argv), "env": dict(env), "cwd": pathlib.Path(cwd), "timeout": timeout}
+            {"argv": list(argv), "env": dict(env), "cwd": pathlib.Path(cwd), "timeout": timeout, "stdin": input_text}
         )
         program = pathlib.Path(argv[0]).name
         if program.startswith("python") or argv[-1] == "--json" and "sd-check" in " ".join(argv):
@@ -391,7 +392,7 @@ class ReaderTests(ReviewFixture):
         hardcoded `codex` would silently review with the wrong binary."""
 
         argv = sd_review.codex_argv(
-            pathlib.Path("/repo"), pathlib.Path("/work"), "prompt", "wrapped codex exec"
+            pathlib.Path("/repo"), pathlib.Path("/work"), "wrapped codex exec"
         )
         self.assertEqual(argv[:3], ["wrapped", "codex", "exec"])
         self.assertIn("--sandbox", argv)
@@ -699,7 +700,7 @@ class PipelineTests(ReviewFixture):
         challenged = self.run_review(root, runner, dry_run=True, challenge=True)
         self.assertEqual(set(plain["providers"]) <= set(challenged["providers"]), True)
         prompt = " ".join(
-            row["argv"][-1] for row in challenged["planned_invocations"] if row["would_run"]
+            row["stdin"] for row in challenged["planned_invocations"] if row["would_run"]
         )
         self.assertIn("Argue against the approach itself", prompt)
 
@@ -709,7 +710,7 @@ class PipelineTests(ReviewFixture):
         self.local_block(root, "check: make check")
         result = self.run_review(root, FakeRunner(), dry_run=True)
         self.assertTrue(result["local_block_prepended"])
-        prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["argv"][-1]
+        prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["stdin"]
         self.assertIn("check: make check", prompt)
         self.assertTrue(prompt.startswith("Repository-local conventions"))
 
@@ -723,7 +724,7 @@ class PipelineTests(ReviewFixture):
             cwd=str(root), check=True, capture_output=True
         )
         result = self.run_review(root, FakeRunner(), dry_run=True, scope="branch")
-        prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["argv"][-1]
+        prompt = [row for row in result["planned_invocations"] if row["would_run"]][0]["stdin"]
         self.assertIn(f"{result['subject']['base']}..{result['subject']['head']}", prompt)
 
     def test_a_docs_only_change_routes_to_skip_and_asks_nobody(self) -> None:

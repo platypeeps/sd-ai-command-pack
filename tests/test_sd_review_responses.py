@@ -241,7 +241,7 @@ class URLDiagnostics(ReviewFixture):
         provider = sd_review.sd_registry.Provider(name="fixture", vendor="fixture", bill="free",
             start="fixture exec", reader="codex-json")
 
-        def reply(argv, env, cwd, timeout):
+        def reply(argv, env, cwd, timeout, input_text=None):
             target = pathlib.Path(argv[argv.index("--output-last-message") + 1])
             target.write_text(content)
             return sd_review.Completed(0, "", "")
@@ -261,7 +261,7 @@ class URLDiagnostics(ReviewFixture):
             self.assertNotEqual(path.name, sd_review.CODEX_ANSWER_FILE)
             return original(path, *args, **kwargs)
 
-        def reply(argv, env, cwd, timeout):
+        def reply(argv, env, cwd, timeout, input_text=None):
             target = pathlib.Path(argv[argv.index("--output-last-message") + 1])
             target.write_text("x" * 101)
             return sd_review.Completed(0, "", "")

@@ -12,8 +12,10 @@ intention that never reaches `subprocess` bills the account anyway.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
+import sys
 import unittest
 from typing import Any
 
@@ -25,6 +27,29 @@ def write_auth(home: pathlib.Path, payload: Any) -> pathlib.Path:
     text = payload if isinstance(payload, str) else json.dumps(payload)
     (home / "auth.json").write_text(text, encoding="utf-8")
     return home
+
+
+class StdinTransportTests(ReviewFixture):
+    def test_large_prompt_reaches_real_local_child_unchanged_through_stdin(self) -> None:
+        program = self.tmp / "codex_protocol_fixture.py"
+        receipt = self.tmp / "stdin-receipt.json"
+        program.write_text("import hashlib,json,sys\nfrom pathlib import Path\n"
+            "data=sys.stdin.read() if sys.argv[-1]=='-' else sys.argv[-1]\n"
+            f"Path({str(receipt)!r}).write_text(json.dumps({{'bytes':len(data.encode()),'sha256':hashlib.sha256(data.encode()).hexdigest(),'last_arg':sys.argv[-1] if sys.argv[-1]=='-' else 'prompt-in-argv'}}))\n"
+            "print('{\"findings\": []}')\n")
+        prompt = "fixture-é-" * 100000
+        self.assertLess(len(prompt.encode()), sd_review.MAX_OUTPUT_BYTES)
+        provider = sd_review.sd_registry.Provider(name="fixture", vendor="openai", bill="fixture",
+            reader="codex-json", start=f"{sys.executable} {program}")
+        outcome = sd_review.run_provider(provider, self.tmp,
+            sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""), prompt,
+            sd_review.subprocess_runner, self.environment(), 10, self.chatgpt_home())
+        self.assertEqual(outcome.status, sd_review.CLEAN, outcome.detail)
+        self.assertEqual(json.loads(receipt.read_text()), {"bytes":len(prompt.encode()),
+            "sha256":hashlib.sha256(prompt.encode()).hexdigest(), "last_arg":"-"})
+        self.assertNotIn(prompt, outcome.argv)
+        self.assertEqual(outcome.diagnostic, {"prompt_transport": "stdin", "prompt_bytes": len(prompt.encode()),
+                         "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest()})
 
 
 class PreflightTests(ReviewFixture):

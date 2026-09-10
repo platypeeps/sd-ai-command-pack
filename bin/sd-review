@@ -37,7 +37,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Any, Callable, Mapping, NamedTuple, Sequence, TextIO
+from typing import Any, Mapping, NamedTuple, Protocol, Sequence, TextIO
 
 _BIN = str(pathlib.Path(__file__).resolve().parent)
 if _BIN not in sys.path:
@@ -528,7 +528,9 @@ class Completed(NamedTuple):
     launched: bool = True
 
 
-Runner = Callable[[Sequence[str], Mapping[str, str], pathlib.Path, int], Completed]
+class Runner(Protocol):
+    def __call__(self, argv: Sequence[str], env: Mapping[str, str], cwd: pathlib.Path,
+                 timeout: int, input_text: str | None = None) -> Completed: ...
 
 
 def subprocess_runner(
@@ -536,6 +538,7 @@ def subprocess_runner(
     env: Mapping[str, str],
     cwd: pathlib.Path,
     timeout: int,
+    input_text: str | None = None,
 ) -> Completed:
     """The only place this file starts a process. Tests inject their own."""
 
@@ -545,6 +548,7 @@ def subprocess_runner(
             cwd=str(cwd),
             env=dict(env),
             capture_output=True,
+            input=input_text,
             text=True,
             timeout=timeout,
             check=False,
@@ -654,7 +658,7 @@ URL_OUTPUT_CONTRACT = (
 
 
 def codex_argv(
-    root: pathlib.Path, workdir: pathlib.Path, prompt: str, start: str = "codex exec"
+    root: pathlib.Path, workdir: pathlib.Path, start: str = "codex exec"
 ) -> list[str]:
     """The hardened codex invocation, carried over in intent from review-local.py.
 
@@ -685,7 +689,7 @@ def codex_argv(
         str(workdir / CODEX_SCHEMA_FILE),
         "--output-last-message",
         str(workdir / CODEX_ANSWER_FILE),
-        prompt,
+        "-",
     ]
 
 
@@ -1045,15 +1049,17 @@ def run_provider(
             (workdir / CODEX_SCHEMA_FILE).write_text(
                 json.dumps(CODEX_OUTPUT_SCHEMA), encoding="utf-8"
             )
-            argv = codex_argv(root, workdir, prompt, provider.start or "")
-            result = runner(argv, child, root, timeout)
+            argv = codex_argv(root, workdir, provider.start or "")
+            result = runner(argv, child, root, timeout, prompt)
             answer = workdir / CODEX_ANSWER_FILE
             if answer.is_file():
                 with answer.open("rb") as stream:
                     text = stream.read(MAX_OUTPUT_BYTES + 1).decode("utf-8", "replace")
             else:
                 text = result.stdout
-        return _answer(provider.name, result, parse_findings(text), argv, removed)
+        return _answer(provider.name, result, parse_findings(text), argv, removed)._replace(
+            diagnostic={"prompt_transport": "stdin", "prompt_bytes": len(prompt.encode()),
+                        "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest()})
 
     # Keep a missing implementation nonpassing if READERS ever gains a name.
     return _outcome(
@@ -1321,10 +1327,22 @@ def review(
             if path.is_absolute() or ".." in path.parts or not (root / path).resolve().is_relative_to(root.resolve()):
                 raise UsageError("prior blocking finding path is outside this repository")
             target = root / path
+            entry = _git(root, ["ls-tree", "-z", "-l", subject.head, "--", f":(literal){name}"])
+            if entry is None:
+                raise UsageError("cannot inspect prior finding source at current HEAD")
             current = "[file absent at current HEAD]"
-            if target.is_file():
-                with target.open("r", encoding="utf-8") as source_file:
-                    current = source_file.read(MAX_OUTPUT_BYTES + 1)
+            if entry:
+                fields = entry.split("\t", 1)[0].split()
+                if len(fields) != 4 or fields[0] not in ("100644", "100755") or fields[1] != "blob":
+                    raise UsageError("prior finding source must be a tracked regular file")
+                if int(fields[3]) > MAX_OUTPUT_BYTES:
+                    raise UsageError("fix verification evidence exceeds the bounded input")
+                blob = subprocess_runner(["git", "cat-file", "blob", fields[2]], env, root, sd_lib.GIT_TIMEOUT_SECONDS)
+                if blob.exit_code:
+                    raise UsageError("cannot read prior finding source at current HEAD")
+                current = blob.stdout
+            elif target.exists() or target.is_symlink():
+                raise UsageError("prior finding source must be a tracked regular file")
             prompt += f"\nCurrent source for prior finding {name}:\n{current}\n"
             if len(prompt.encode()) > MAX_OUTPUT_BYTES:
                 raise UsageError("fix verification evidence exceeds the bounded input")
@@ -1434,9 +1452,10 @@ def _planned(
             reason = f"{provider.name} names no program to start ({start!r})"
         workdir = pathlib.Path("<attempt-dir>")
         argv = [] if reason or provider.url else (claude_argv(workdir, start)
-                if provider.reader == "claude-json" else codex_argv(root, workdir, prompt, start))
+                if provider.reader == "claude-json" else codex_argv(root, workdir, start))
         target = f"POST {sd_registry.endpoint(provider)}" if provider.url else ""
-        planned.append({"backend": provider.name, "argv": argv, "endpoint": target, "would_run": not reason, "reason": reason or ""})
+        planned.append({"backend": provider.name, "argv": argv, "endpoint": target, "would_run": not reason, "reason": reason or "",
+                        "stdin": prompt if argv and provider.reader == "codex-json" else None})
     return planned
 
 

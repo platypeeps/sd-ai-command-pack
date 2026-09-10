@@ -3768,10 +3768,10 @@ from a number the operator types.
     (`bin/sd_setup_github.py:188-260`, 73) with `resolve_pin`
     (`bin/sd_setup_github.py:77-95`, 19) and `action_reference`
     (`bin/sd_setup_github.py:98-111`, 14). So does the `url` client's
-    now-spent analogue: `codex_argv` (`bin/sd-review:642-675`, 34),
-    `subprocess_runner` (`bin/sd-review:533-557`, 23), `_finding`
-    (`bin/sd-review:736-770`, 37) and `parse_findings`
-    (`bin/sd-review:798-824`, 20) still total 114. Its transport line was if
+    now-spent analogue: `codex_argv` (`bin/sd-review:660-693`, 34),
+    `subprocess_runner` (`bin/sd-review:536-562`, 23), `_finding`
+    (`bin/sd-review:754-788`, 37) and `parse_findings`
+    (`bin/sd-review:827-873`, 20) still total 114. Its transport line was if
     anything generous — the one built stdlib-HTTP transport in `bin/`,
     `read_source` (`bin/sd-skill-adopt:347-365`), is 19.
   - **119, reserved, in-flight discovery.** The predicate crosses one seam:
