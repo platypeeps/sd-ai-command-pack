@@ -11,6 +11,7 @@ import sys
 from typing import Any
 
 from sd_db import connect, initialise, read_registry, seed
+
 from tests.test_sd_review import (
     FakeClient,
     FakeRunner,
