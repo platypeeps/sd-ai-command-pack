@@ -11,11 +11,11 @@ import sys
 from typing import Any
 
 from sd_db import connect, initialise, read_registry, seed
-
 from tests.test_sd_review import (
     FakeClient,
     FakeRunner,
     ReviewFixture,
+    chat_answer,
     namespace,
     sd_review,
 )
@@ -40,6 +40,64 @@ class ReviewRunFixture(ReviewFixture):
 
 
 class FallbackTests(ReviewRunFixture):
+    def alternatives(self, root: pathlib.Path, first: str, second: str) -> None:
+        registry = self.registry_home / ".local/share/sd/providers.yaml"
+        registry.write_text("bills:\n  fixture: {cost: subscription}\nproviders:\n"
+            "  claude: {start: 'claude exec', vendor: anthropic, bill: fixture, roles: [reviewer], reader: claude-json}\n"
+            + "".join(f"  {name}: {{url: 'https://{name}.example.test/v1', model: fixture, vendor: {name}, "
+                      "bill: fixture, roles: [reviewer], env: [REMOTE_KEY]}\n" for name in (first, second))
+            + f"roles:\n  author: []\n  reviewer: [claude, {first}, {second}]\n")
+        (root / "CLAUDE.local.md").write_text("<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\n"
+            f"reviewers: claude@claude, {first}@{first}.example.test, {second}@{second}.example.test\n"
+            "<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n")
+
+    def review_alternatives(self, root: pathlib.Path, client: FakeClient) -> dict[str, Any]:
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")}, default=sd_review.Completed(
+            0, json.dumps({"type": "result", "subtype": "success", "structured_output": {"findings": []}}), ""))
+        return sd_review.review(root, namespace(), runner, self.environment(REMOTE_KEY="fixture"), client=client)
+
+    def test_minimax_and_kimi_replace_each_other_until_two_reviews_complete(self) -> None:
+        root = self.prepare("deep")
+        for first, second in (("minimax", "kimi"), ("kimi", "minimax")):
+            with self.subTest(order=(first, second)):
+                self.alternatives(root, first, second)
+                client = FakeClient({first: (1, "", "transport failed", True)})
+                result = self.review_alternatives(root, client)
+                self.assertEqual(result["status"], "clean")
+                self.assertEqual((result["requested_reviews"], result["completed_reviews"]), (2, 2))
+                self.assertEqual(result["reviewed_by"], ["claude", second])
+                self.assertEqual([row["provider"] for row in client.sent], [first, second])
+                self.assertEqual([row["backend"] for row in result["outcomes"]], ["claude", first, second])
+
+    def test_successful_alternative_stops_without_calling_its_fallback(self) -> None:
+        root = self.prepare("deep")
+        for first, second in (("minimax", "kimi"), ("kimi", "minimax")):
+            with self.subTest(order=(first, second)):
+                self.alternatives(root, first, second)
+                client = FakeClient()
+                result = self.review_alternatives(root, client)
+                self.assertEqual(result["status"], "clean")
+                self.assertEqual(result["reviewed_by"], ["claude", first])
+                self.assertEqual([row["provider"] for row in client.sent], [first])
+
+    def test_failed_alternative_keeps_adverse_findings_after_clean_fallback(self) -> None:
+        root = self.prepare("deep")
+        self.alternatives(root, "minimax", "kimi")
+        response = chat_answer(finding())
+        result = self.review_alternatives(root, FakeClient({"minimax": (1, response[1], "transport failed", True)}))
+        self.assertEqual(result["status"], "blocking")
+        self.assertEqual(result["reviewed_by"], ["claude", "kimi"])
+        self.assertEqual(result["findings"][0]["backend"], "minimax")
+
+    def test_one_completed_review_does_not_satisfy_the_two_review_standard(self) -> None:
+        root = self.prepare("deep")
+        self.alternatives(root, "minimax", "kimi")
+        result = self.review_alternatives(root, FakeClient({
+            name: (1, "", "transport failed", True) for name in ("minimax", "kimi")}))
+        self.assertEqual((result["requested_reviews"], result["completed_reviews"]), (2, 1))
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["reviewed_by"], ["claude"])
+
     def test_each_availability_failure_uses_the_next_entry_and_records_it(self) -> None:
         root = self.prepare()
         failures = [sd_review.Completed(429, "", "HTTP 429"),

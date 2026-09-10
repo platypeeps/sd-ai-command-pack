@@ -1637,8 +1637,8 @@ class TimingPlanTests(ReviewFixture):
 
     def test_all_fallbacks_receive_an_allowance_without_changing_depth(self):
         root, args, planned = self.planned()
-        self.assertEqual(planned["requested_reviews"], 3)
-        self.assertEqual(planned["fallback_candidates"], ["p3"])
+        self.assertEqual(planned["requested_reviews"], 2)
+        self.assertEqual(planned["fallback_candidates"], ["p2", "p3"])
         self.assertEqual(planned["timing"]["execution_seconds"], 12600)
         self.assertEqual([row["name"] for row in planned["timing"]["candidates"]], ["p0", "p1", "p2", "p3"])
         runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""), "p0": sd_review.Completed(127, "", "missing", False)},
@@ -1646,10 +1646,11 @@ class TimingPlanTests(ReviewFixture):
         args.explain = False
         args.expected_timing = sd_review.hashlib.sha256(json.dumps(planned["timing"], sort_keys=True).encode()).hexdigest()
         actual = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
-        self.assertEqual(len(runner.calls), 5)
+        self.assertEqual(len(runner.calls), 4)
         self.assertEqual(actual["timing"], planned["timing"])
-        self.assertEqual(actual["completed_reviews"], 3)
-        self.assertEqual(actual["requested_reviews"], 3)
+        self.assertEqual(actual["completed_reviews"], 2)
+        self.assertEqual(actual["requested_reviews"], 2)
+        self.assertEqual(actual["reviewed_by"], ["p1", "p2"])
 
     def test_timeout_change_refuses_before_check_or_provider(self):
         root, args, report = self.planned(count=2, depth="standard", timeout=90)

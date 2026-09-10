@@ -219,6 +219,10 @@ suspends it with the reason shown.
 One file, read by the library, maps roles to providers. Skills name roles and
 never vendors.
 
+Standard and deep changes require two completed reviews. Cheap changes require
+one; skip requires none. Planning and challenged reviews retain their existing
+minimum of one review. Tier selection still follows repository policy.
+
     bills:
       anthropic: { cost: subscription }
       openai:    { cost: subscription }
@@ -294,7 +298,13 @@ refuses the review by name rather than being guessed. `reviewer` is the first en
 range's trailers carry, has budget left on its bill, and answers its preflight. A rate limit,
 a missing binary, a failed run or a timeout falls through to the next, and the
 run says which one reviewed and why the earlier ones did not. With none left,
-the review refuses by name rather than reading its own work. `vendor` is the
+the review refuses by name rather than reading its own work.
+MiniMax and Kimi can replace each other in either configured order when an
+attempt fails to complete. The chain continues until the required count completes
+or eligible entries run out. Neither provider has a reserved slot. A completed
+review with findings counts; it does not trigger a replacement. Consent, author
+exclusions and spending limits apply to every fallback, and earlier findings remain.
+`vendor` is the
 maker of the model, not the tool; `bill` is whose money. A bill with
 `cap_usd_month` is enforced per call: the library reserves each call's bound,
 prompt plus `max_tokens` at the entry's price, against the month's settled and

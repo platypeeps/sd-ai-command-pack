@@ -10,12 +10,9 @@ The policy is data on purpose. Which categories exist, which paths are sensitive
 and which tier each category starts at are per-repository choices; the rules for
 combining them are not.
 
-**It no longer says who reviews.** A tier used to name a provider chain, and the
-policy carried the table; criterion 6 moves every provider name into the
-registry, so a tier now says only how many reviewers off that chain a change
-earns. The counts in ``TIER_DEPTH`` are the lengths of the rows the deleted
-table carried, so a change is read by as many providers as it was before -- what
-changed is that the policy no longer gets to say which.
+**It does not say who reviews.** The registry names the ordered provider chain;
+the tier says how many completed reviewers the change requires. Standard and
+deep changes require two; cheap changes require one and skip requires none.
 
 Policy shape (every key optional unless noted)::
 
@@ -41,13 +38,9 @@ from typing import Any, Mapping, NamedTuple, Sequence
 DEFAULT_TIER_ORDER: tuple[str, ...] = ("skip", "cheap", "standard", "deep")
 DEFAULT_LARGE_CHANGE_LINES = 800
 
-#: How many reviewers off the chain each tier earns. Read off the deleted
-#: provider table's own rows -- ``skip`` named none, ``cheap`` one, ``standard``
-#: two, ``deep`` three -- so the depth a change gets is unchanged and only the
-#: naming of who provides it has moved. A tier this does not name gets one,
-#: because a repository may declare its own ``tier_order`` and a tier that
-#: reviews nothing would be a silent hole rather than a policy.
-TIER_DEPTH: dict[str, int] = {"skip": 0, "cheap": 1, "standard": 2, "deep": 3}
+#: Standard and deep share the two-review requirement. An unknown custom tier
+#: gets one reviewer rather than silently allowing unreviewed changes.
+TIER_DEPTH: dict[str, int] = {"skip": 0, "cheap": 1, "standard": 2, "deep": 2}
 DEFAULT_DEPTH = 1
 
 

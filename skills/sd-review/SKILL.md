@@ -29,6 +29,14 @@ The provider preflight below uses a separate synthetic probe.
 4. **Findings are dispositioned here**, against this repository's severity
    floor, and printed.
 
+`standard` and `deep` require two completed independent reviewers.
+`cheap` requires one; `skip` requires none, subject to the existing planning and challenge floor.
+MiniMax and Kimi can replace each other in configured chain order when an attempt cannot complete.
+Only consented, eligible entries can run, within the operator's authorized spending allowance.
+A completed adverse review counts and retains its findings; it does not trigger a replacement.
+Each chain stops when its required depth completes.
+One completion cannot satisfy a two-review requirement.
+
 `--scope planning` is the development flow's *prd and design* review point;
 `--scope branch` before a push is *code, before merge*. Both caps are those
 rows' in `.claude/rules/sd-planning-adversarial-review.md`, and this tool
