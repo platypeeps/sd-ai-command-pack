@@ -1,6 +1,6 @@
 ---
 title: the pack has no answer to "write the test first", and one skill contradicts it
-branch: feat/sd-tdd-test-first
+branch: main
 created: 2026-09-05
 ---
 
