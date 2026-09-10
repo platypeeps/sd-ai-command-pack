@@ -1050,11 +1050,11 @@ class Wire(unittest.TestCase):
             env=("ENTRY_KEY",),
         )
 
-    def call(self, provider: Any, **env: str) -> tuple[int, str, str, bool]:
+    def call(self, provider: Any, **env: str) -> tuple[int, str, str, bool, int | None]:
         return sd_registry.chat_completion(provider, "prompt", env, 30)
 
     def test_the_request_is_the_one_the_entry_describes(self) -> None:
-        code, stdout, stderr, launched = self.call(self.entry(), ENTRY_KEY="secret")
+        code, stdout, stderr, launched, _ = self.call(self.entry(), ENTRY_KEY="secret")
         self.assertEqual((code, stderr, launched), (0, "", True))
         self.assertIn("choices", stdout)
         request = self.sent[0]
@@ -1072,7 +1072,7 @@ class Wire(unittest.TestCase):
         """The hole this closes. `recipient()` compares `netloc`, which carries
         no scheme, so this edit passes `refuse_allowance` in silence -- and
         would put the diff on the wire in the clear."""
-        code, _, stderr, launched = self.call(
+        code, _, stderr, launched, _ = self.call(
             self.entry("http://api.example.test/v1"), ENTRY_KEY="secret"
         )
         self.assertEqual((code, launched), (1, False))
@@ -1111,7 +1111,7 @@ class Wire(unittest.TestCase):
         self.assertIsNotNone(sd_registry.refuse_cleartext(self.entry("ftp://api.example.test/v1")))
 
     def test_a_missing_key_sends_nothing_and_never_reads_as_a_quota_stop(self) -> None:
-        code, _, stderr, launched = self.call(self.entry())
+        code, _, stderr, launched, _ = self.call(self.entry())
         self.assertEqual((code, launched), (1, False))
         self.assertIn("ENTRY_KEY", stderr)
         self.assertEqual(self.sent, [])
@@ -1121,7 +1121,7 @@ class Wire(unittest.TestCase):
             "https://api.example.test/v1/chat/completions", 429, "Too Many Requests",
             {}, io.BytesIO(b"slow down"),
         )
-        code, _, stderr, launched = self.call(self.entry(), ENTRY_KEY="secret")
+        code, _, stderr, launched, _ = self.call(self.entry(), ENTRY_KEY="secret")
         self.assertEqual((code, launched), (429, True))
         self.assertIn("HTTP 429", stderr)
         markers = [m for m in sd_review_markers() if m in stderr.lower()]
@@ -1131,7 +1131,7 @@ class Wire(unittest.TestCase):
         # The message says 429 on purpose: `launched=False` is read first, so a
         # connection that never happened cannot be reported as a quota stop.
         self.answer = urllib.error.URLError("connection refused after 429 tries")
-        code, _, stderr, launched = self.call(self.entry(), ENTRY_KEY="secret")
+        code, _, stderr, launched, _ = self.call(self.entry(), ENTRY_KEY="secret")
         self.assertEqual((code, launched), (1, False))
         self.assertIn("connection refused", stderr)
 

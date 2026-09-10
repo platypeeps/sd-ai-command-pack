@@ -6,7 +6,8 @@ disable-model-invocation: true
 
 # sd-review
 
-`bin/sd-review` is four steps and no more:
+Ordinary `bin/sd-review` reviews run four steps.
+The provider preflight below uses a separate synthetic probe.
 
 1. **`sd-check`** runs the repository's own deterministic gate. A failing gate
    is a failing review — no model is asked to guess at a change that does not
@@ -87,6 +88,32 @@ Every transport validates the same declared findings schema. Malformed or
 oversized responses do not count toward review depth, but usable findings are
 retained, including blockers beyond the output count limit and findings with
 an unknown location. A clean fallback cannot erase that evidence.
+
+## Provider recovery preflight
+
+`sd-review --preflight --provider NAME --explain --json` resolves one URL provider without calling it.
+It applies current consent, enabled-state, credential, transport, and committed branch authorship guards.
+Without `--explain`, it sends one fixed synthetic schema probe. No repository source or local conventions are sent.
+This is one provider call, subject to the operator's remaining spending allowance. It never retries or selects a fallback.
+It runs no repository check and cannot replace the ordinary deterministic gate or exact-head review.
+Review modifiers, CLI providers, and `--dry-run` refuse; use `--explain` for zero calls.
+
+The receipt has `operation` and `scope` equal to `provider_preflight`, with zero requested and completed reviews.
+`preflight_passed` requires the requested empty findings response, not just any schema-valid answer.
+It proves neither review coverage nor the serving model's identity.
+`preflight_failed` exits 5. `preflight_planned` under `--explain` makes no recovery claim.
+
+URL diagnostics retain the configured provider, vendor, model, host, options, prompt digest, and observed HTTP status.
+They distinguish transport, HTTP, API, envelope, completion, and schema failures.
+Sanitized responses retain fixed-key structure, types, byte counts, digests, and bounded numeric usage.
+Arbitrary content, reasoning, model identifiers, error messages, headers, and credentials are not copied into diagnostics.
+The returned model is compared with the requested model; absence or mismatch remains explicit.
+These projections cannot reconstruct a discarded raw response. Historical bodies cannot be recovered from their hashes.
+
+MiniMax/Kimi recovery requires both named providers to pass preflight, followed by one complete multi-provider review.
+Local fixtures do not satisfy that live acceptance. No provider call is permitted when the authorized allowance is spent.
+Until live acceptance passes, an authorized exact-head `--scope branch --provider claude` review is the temporary mitigation.
+That single-provider result does not waive the shipping workflow's required depth or review gates.
 
 ## The `codex-json` entry is subscription-only (R10-D4)
 

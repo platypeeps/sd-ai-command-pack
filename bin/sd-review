@@ -978,10 +978,20 @@ def run_provider(
             material = review_material(root, subject) if subject.paths else ""
         except Refusal as error:
             return _outcome(provider.name, REFUSED, str(error))
-        result = Completed(*client(provider, f"{prompt}\nSchema: {json.dumps(CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{material}{URL_OUTPUT_CONTRACT}", provider_env, timeout))
+        request_prompt = f"{prompt}\nSchema: {json.dumps(CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{material}{URL_OUTPUT_CONTRACT}"
+        response = client(provider, request_prompt, provider_env, timeout)
+        result = Completed(*response[:4])
         text, diagnostic = sd_registry.url_response(result.stdout)
         diagnostic["transport_exit_code"] = result.exit_code
-        diagnostic["http_status"] = result.exit_code if 100 <= result.exit_code <= 599 else None
+        diagnostic["http_status"] = response[4] if len(response) == 5 else result.exit_code if 100 <= result.exit_code <= 599 else None
+        diagnostic["request"] = {"provider": provider.name, "vendor": provider.vendor, "model": provider.model,
+            "host": sd_registry.urlsplit(provider.url).hostname, "max_tokens": provider.max_tokens,
+            "thinking": provider.thinking, "reasoning_effort": provider.reasoning_effort,
+            "prompt_bytes": len(request_prompt.encode()), "prompt_sha256": hashlib.sha256(request_prompt.encode()).hexdigest(),
+            "scope": subject.scope, "head": subject.head}
+        model = diagnostic["sanitized_response"].get("model", {})
+        diagnostic["model_matches_requested"] = (model.get("sha256") == hashlib.sha256((provider.model or "").encode()).hexdigest()
+                                                  if model.get("type") == "string" else None)
         diagnostic["response_received"] = result.launched
         parsed = oversized_findings() if diagnostic["category"] == "response_limit" else parse_findings(text, diagnostic, allow_json_fence=True)
         if parsed is not None and diagnostic["category"] in ("truncated", "incomplete_finish"):
@@ -992,6 +1002,11 @@ def run_provider(
             diagnostic["validation_error"] = parsed.error
         # Model content is not transport evidence, even when parsing failed.
         outcome = _answer(provider.name, result._replace(stdout=""), parsed)
+        diagnostic["failure_stage"] = ("transport" if not result.launched else
+            "http" if diagnostic["http_status"] is not None and diagnostic["http_status"] >= 300 else
+            "completion" if diagnostic["category"] in ("response_limit", "truncated", "incomplete_finish") else
+            "api" if diagnostic["category"] == "api_error" else "envelope" if not text else
+            "transport" if result.exit_code else "schema" if parsed is None or parsed.error else None)
         return outcome._replace(diagnostic=diagnostic)
 
     if provider.reader == "claude-json":
@@ -1133,9 +1148,13 @@ def review(
 ) -> dict[str, Any]:
     """The pipeline. Returns one result object; prints nothing."""
 
+    preflight = bool(getattr(args, "preflight", False))
+    if preflight and (not args.provider or args.scope not in ("worktree", "branch") or any(
+            getattr(args, name, None) for name in ("base", "verify_report", "resume_report", "item", "draft", "challenge", "dry_run", "expected_timing"))):
+        raise UsageError("--preflight requires --provider and cannot combine with review modifiers; use --explain for zero calls")
     policy, source = load_policy(root)
     item = getattr(args, "item", None)
-    subject = resolve_subject(root, args.scope, item, getattr(args, "base", None))
+    subject = resolve_subject(root, "branch" if preflight else args.scope, item, getattr(args, "base", None))
     plan = sd_route.route(subject.paths, subject.lines, args.draft, policy)
     # Read from the home this run was handed, not from the process's, so a run
     # given a different environment reads that operator's pins. A missing
@@ -1283,6 +1302,8 @@ def review(
         "dry_run": bool(args.dry_run),
     }
 
+    if preflight:
+        return provider_preflight(result, chosen, root, subject, runner, env, args, client)
     expected_timing = getattr(args, "expected_timing", None)
     if expected_timing is not None and expected_timing != hashlib.sha256(json.dumps(timing, sort_keys=True).encode()).hexdigest():
         raise Refusal("review timing inputs changed; explain again before dispatch")
@@ -1372,6 +1393,32 @@ def review(
     return result
 
 
+def provider_preflight(result: dict[str, Any], chosen: Sequence[sd_registry.Provider], root: pathlib.Path,
+                       subject: Subject, runner: Runner, env: Mapping[str, str], args: argparse.Namespace,
+                       client: sd_registry.Client) -> dict[str, Any]:
+    """One explicit synthetic URL probe; never a reviewed-branch receipt."""
+    if chosen and not chosen[0].url:
+        raise UsageError("--preflight supports one URL provider, not a provider CLI")
+    result.update(operation="provider_preflight", scope="provider_preflight", requested_reviews=0,
+                  completed_reviews=0, reviewed_by=[], status="preflight_planned", probe_calls=0)
+    provider = chosen[0] if chosen else None
+    refusal = (sd_registry.refuse_cleartext(provider) or
+               (f"{provider.name} has no declared credential value" if not provider.env or not env.get(provider.env[0]) else None)) if provider else "no eligible provider"
+    result["probe_refusal"] = refusal
+    if args.explain:
+        return result
+    prompt = 'Protocol preflight only. No repository is supplied or reviewed. Return exactly {"findings": []}.'
+    assert provider is not None
+    outcome = (_outcome(provider.name, REFUSED, refusal) if refusal else
+               run_provider(provider, root, subject._replace(paths=(), lines=0), prompt, runner, env, args.timeout, client=client))
+    result["probe_calls"] = 0 if outcome.status in (REFUSED, NOT_RUN) else 1
+    result["outcomes"] = [{"backend": outcome.backend, "status": outcome.status, "detail": outcome.detail,
+                           "findings": len(outcome.findings), "diagnostic": outcome.diagnostic}]
+    result["protocol_error"] = "synthetic preflight expected an empty findings list" if outcome.findings else None
+    result["status"] = "preflight_passed" if outcome.status == CLEAN and not outcome.findings else "preflight_failed"
+    return result
+
+
 def _planned(
     chosen: Sequence[sd_registry.Provider], root: pathlib.Path, prompt: str
 ) -> list[dict[str, Any]]:
@@ -1414,6 +1461,7 @@ STATUS_EXIT = {
     "refused": EXIT_REFUSED,
     "unavailable": EXIT_GATE,
     "gate_failed": EXIT_GATE,
+    "preflight_failed": EXIT_GATE,
 }
 
 
@@ -1421,6 +1469,13 @@ STATUS_EXIT = {
 
 def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write = stream.write
+    if result.get("operation") == "provider_preflight":
+        write(f"Provider preflight: {result['status']}; {result['probe_calls']} probe call(s), no branch review.\n")
+        for outcome in result["outcomes"]:
+            write(f"{outcome['backend']}: {outcome['detail']}\n")
+        if result.get("protocol_error"):
+            write(f"{result['protocol_error']}\n")
+        return
     subject = result["subject"]
     route = result["route"]
     write(f"sd-review: {result['repo']}\n")
@@ -1531,6 +1586,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="review with this one registry entry instead of the tier's share of the chain",
     )
     parser.add_argument("--item", default=None, metavar="NAME", help="planning scope only: review the one active work item whose directory is NAME")
+    parser.add_argument("--preflight", action="store_true", help="one synthetic URL schema probe with --provider; counts as a provider call, not a review")
     parser.add_argument("--explain", action="store_true", help="print the routing decision and why, then exit without running anything")
     parser.add_argument("--dry-run", action="store_true", help="print the exact invocations, run nothing")
     parser.add_argument("--json", action="store_true", help="emit one machine-readable object")

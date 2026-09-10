@@ -299,3 +299,79 @@ class WireBounds(unittest.TestCase):
             self.assertNotEqual(result[0], 0)
             self.assertNotIn("private-prompt-marker", result[2])
             self.assertNotIn("credential-marker", result[2])
+
+
+class RecoveryDiagnostics(ReviewFixture):
+    run_response = URLDiagnostics.run_response
+    envelope = URLDiagnostics.envelope
+
+    def test_projection_preserves_identity_without_arbitrary_model_or_error_text(self):
+        secret = "secret-credential-and-source-marker"
+        payload = self.envelope('{"findings": []}', reasoning_content=secret)
+        payload.update(model=secret, usage={"prompt_tokens": 12, "completion_tokens": 3,
+                       "total_tokens": 15, "private": secret})
+        outcome = self.run_response(payload)
+        diagnostic = outcome.diagnostic
+        self.assertNotIn(secret, json.dumps(diagnostic))
+        safe = diagnostic["sanitized_response"]
+        self.assertEqual(safe["model"]["sha256"], hashlib.sha256(secret.encode()).hexdigest())
+        self.assertEqual(safe["message"]["reasoning_content"]["bytes"], len(secret))
+        self.assertEqual(safe["usage"], {"prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15})
+        self.assertFalse(diagnostic["model_matches_requested"])
+        failed = self.run_response({"error": {"code": secret, "type": secret, "message": secret}}, 401, "HTTP 401")
+        self.assertNotIn(secret, json.dumps(failed.diagnostic))
+        self.assertEqual(set(failed.diagnostic["sanitized_response"]["error"]), {"code", "type", "message"})
+
+    def test_usage_rejects_booleans_negative_strings_and_huge_values(self):
+        payload = self.envelope('{"findings": []}')
+        for invalid in (True, -1, "12", 10**13, None, {}):
+            payload["usage"] = dict.fromkeys(("prompt_tokens", "completion_tokens", "total_tokens"), invalid)
+            self.assertEqual(self.run_response(payload).diagnostic["sanitized_response"]["usage"], {})
+
+    def test_transport_http_envelope_completion_and_schema_are_distinct(self):
+        cases = [((1, "", "connection refused", False), "transport"),
+                 ((401, '{"error":{"message":"private"}}', "HTTP 401", True), "http"),
+                 ((429, "{}", "HTTP 429", True), "http"),
+                 ((503, "{}", "HTTP 503", True), "http"),
+                 ((0, '{"error":{"message":"private"}}', "", True), "api"),
+                 ((0, "not JSON", "", True), "envelope"),
+                 ((0, json.dumps(self.envelope('{"findings": []}', "length")), "", True), "completion"),
+                 ((0, json.dumps(self.envelope('{}')), "", True), "schema")]
+        for response, stage in cases:
+            provider = sd_review.sd_registry.Provider(name="fixture", vendor="fixture", bill="fixture",
+                url="https://fixture.invalid/v1", model="fixture-model", env=("KEY",))
+            outcome = sd_review.run_provider(provider, self.tmp,
+                sd_review.Subject("branch", "a" * 40, "b" * 40, (), 0, ""), "synthetic", FakeRunner(),
+                {"KEY": "secret"}, 1, client=FakeClient(default=response))
+            self.assertEqual(outcome.diagnostic["failure_stage"], stage, response)
+            self.assertNotIn(outcome.status, (sd_review.CLEAN, sd_review.FINDINGS))
+
+    def test_actual_http_status_requested_model_and_prompt_digest_survive(self):
+        registry = sd_review.sd_registry
+        provider = registry.Provider(name="fixture", vendor="vendor", bill="fixture",
+            url="https://fixture.invalid/v1", model="fixture-model", env=("KEY",))
+        payload = self.envelope('{"findings": []}')
+        payload["model"] = "fixture-model"
+        class Response(io.BytesIO):
+            status = 201
+        body = json.dumps(payload).encode()
+        with mock.patch.object(registry._OPENER, "open", return_value=Response(body)) as opened:
+            outcome = sd_review.run_provider(provider, self.tmp,
+                sd_review.Subject("branch", "a" * 40, "b" * 40, (), 0, ""), "synthetic", FakeRunner(), {"KEY": "secret"}, 1)
+        diagnostic = outcome.diagnostic
+        sent = json.loads(opened.call_args.args[0].data)["messages"][0]["content"]
+        self.assertEqual(diagnostic["http_status"], 201)
+        self.assertEqual(diagnostic["request"]["model"], "fixture-model")
+        self.assertEqual(diagnostic["request"]["head"], "b" * 40)
+        self.assertEqual(diagnostic["request"]["prompt_sha256"], hashlib.sha256(sent.encode()).hexdigest())
+        self.assertTrue(diagnostic["model_matches_requested"])
+        self.assertIsNone(diagnostic["failure_stage"])
+        self.assertNotIn("secret", json.dumps(diagnostic))
+
+    def test_invalid_and_oversized_response_projection_stays_bounded_and_private(self):
+        for body in ("private-marker", "private-marker" * 10000):
+            with mock.patch.object(sd_review.sd_registry, "MAX_RESPONSE_BYTES", 100):
+                outcome = self.run_response(body)
+            self.assertNotIn("private-marker", json.dumps(outcome.diagnostic))
+            self.assertLess(len(json.dumps(outcome.diagnostic)), 2000)
+            self.assertEqual(outcome.diagnostic["sanitized_response"]["body"]["bytes"], len(body.encode()))

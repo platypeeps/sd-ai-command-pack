@@ -1014,7 +1014,8 @@ def refuse_cleartext(provider: Provider) -> str | None:
 #: The second seam `bin/sd-review` injects, beside its runner. A test hands in
 #: a recorder and asserts on what left -- including, for a refused entry, that
 #: nothing did.
-Client = Callable[[Provider, str, Mapping[str, str], int], tuple[int, str, str, bool]]
+ClientResult = tuple[int, str, str, bool] | tuple[int, str, str, bool, int | None]
+Client = Callable[[Provider, str, Mapping[str, str], int], ClientResult]
 
 
 def endpoint(provider: Provider) -> str:
@@ -1040,20 +1041,21 @@ def chat_completion(
     prompt: str,
     environ: Mapping[str, str],
     timeout: int,
-) -> tuple[int, str, str, bool]:
+) -> tuple[int, str, str, bool, int | None]:
     """POST one review through the injected OpenAI-compatible transport.
 
     Return Completed-compatible fields without importing sd-review: raw body
-    in stdout, status-only HTTP errors in stderr. A missing response sets
+    in stdout, status-only HTTP errors in stderr, observed HTTP status last.
+    A missing response sets
     launched=False; an HTTP429 response remains distinct from connection failure.
     """
     refusal = refuse_cleartext(provider)
     if refusal is not None:
-        return (1, "", refusal, False)
+        return (1, "", refusal, False, None)
     name = provider.env[0] if provider.env else ""
     key = environ.get(name, "")
     if not key:
-        return (1, "", f"{provider.name} has no value for {name or 'any key'}", False)
+        return (1, "", f"{provider.name} has no value for {name or 'any key'}", False, None)
     request_body: dict[str, Any] = {"model": provider.model, "max_tokens": provider.max_tokens,
                             "messages": [{"role": "user", "content": prompt}]}
     if provider.thinking is not None:
@@ -1070,18 +1072,20 @@ def chat_completion(
     )
     try:
         with _OPENER.open(request, timeout=timeout) as answer:
+            status = getattr(answer, "status", None)
+            status = status if type(status) is int and 100 <= status <= 599 else None
             body = answer.read(MAX_RESPONSE_BYTES + 1)
             if len(body) > MAX_RESPONSE_BYTES:
-                return (1, body.decode("utf-8", "replace"), "response exceeds the declared byte limit", True)
-            return (0, body.decode("utf-8", "replace"), "", True)
+                return (1, body.decode("utf-8", "replace"), "response exceeds the declared byte limit", True, status)
+            return (0, body.decode("utf-8", "replace"), "", True, status)
     except urllib.error.HTTPError as error:
         with error:
             body = error.read(MAX_RESPONSE_BYTES + 1).decode("utf-8", "replace")
-        return (error.code, body, f"HTTP {error.code} from {provider.name}", True)
+        return (error.code, body, f"HTTP {error.code} from {provider.name}", True, error.code)
     except OSError as error:
         # `URLError` and a timeout are both `OSError`; neither is an answer, so
         # neither may read as a quota stop however the message is worded.
-        return (1, "", f"{provider.name}: {error}", False)
+        return (1, "", f"{provider.name}: {error}", False, None)
 
 
 # Inline thinking: strip every block, case-insensitively, allowing opening
@@ -1092,6 +1096,16 @@ def chat_completion(
 _THINK = re.compile(r"<think\b[^>]*>.*?(?:</think\s*>|\Z)", re.DOTALL | re.IGNORECASE)
 
 
+def response_value(value: Any) -> dict[str, Any]:
+    """Preserve response shape and identity without arbitrary provider text."""
+    if isinstance(value, str):
+        encoded = value.encode("utf-8", "surrogatepass")
+        return {"type": "string", "bytes": len(encoded), "sha256": hashlib.sha256(encoded).hexdigest()}
+    return {"type": "null" if value is None else "boolean" if type(value) is bool else
+            "number" if type(value) in (int, float) else "array" if isinstance(value, list) else
+            "object" if isinstance(value, dict) else "other"}
+
+
 def url_response(body: str) -> tuple[str, dict[str, Any]]:
     """Read bounded response structure; diagnostics never contain model text."""
     encoded = body.encode("utf-8")
@@ -1099,6 +1113,7 @@ def url_response(body: str) -> tuple[str, dict[str, Any]]:
         "response_text_bytes": len(encoded),
         "response_text_sha256": hashlib.sha256(encoded).hexdigest(),
         "category": "invalid_envelope",
+        "sanitized_response": {"body": response_value(body)},
     }
     if len(encoded) > MAX_RESPONSE_BYTES:
         diagnostic["category"] = "response_limit"
@@ -1111,14 +1126,21 @@ def url_response(body: str) -> tuple[str, dict[str, Any]]:
         return "", diagnostic
     if not isinstance(payload, dict):
         return "", diagnostic
+    safe = diagnostic["sanitized_response"]
+    safe["model"] = response_value(payload.get("model"))
+    usage = payload.get("usage")
+    safe["usage"] = {key: usage[key] for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+                     if isinstance(usage, dict) and type(usage.get(key)) is int and 0 <= usage[key] <= 10**12}
     if payload.get("error") is not None:
         diagnostic["category"] = "api_error"
         error = payload["error"]
         diagnostic["error_fields"] = [key for key in ("code", "type", "message") if isinstance(error, dict) and key in error]
+        safe["error"] = {key: response_value(error[key]) for key in diagnostic["error_fields"]}
         return "", diagnostic
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
         return "", diagnostic
+    safe["choices"] = len(choices)
     first = choices[0]
     reason = first.get("finish_reason")
     diagnostic["finish_reason"] = reason if reason in (None, "stop", "length", "content_filter", "tool_calls", "function_call") else "other"
@@ -1126,8 +1148,9 @@ def url_response(body: str) -> tuple[str, dict[str, Any]]:
     if not isinstance(message, dict):
         return "", diagnostic
     content, reasoning = message.get("content"), message.get("reasoning_content")
-    diagnostic["content_bytes"] = len(content.encode("utf-8")) if isinstance(content, str) else 0
-    diagnostic["reasoning_bytes"] = len(reasoning.encode("utf-8")) if isinstance(reasoning, str) else 0
+    safe["message"] = {"content": response_value(content), "reasoning_content": response_value(reasoning)}
+    diagnostic["content_bytes"] = safe["message"]["content"].get("bytes", 0)
+    diagnostic["reasoning_bytes"] = safe["message"]["reasoning_content"].get("bytes", 0)
     text = _THINK.sub("", content).strip() if isinstance(content, str) else ""
     diagnostic["content_format"] = "fenced" if text.startswith("```") else "text"
     if reason == "length":
