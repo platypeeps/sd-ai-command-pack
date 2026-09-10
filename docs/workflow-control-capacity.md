@@ -192,3 +192,26 @@ Its runtime remains within the previous ceilings: 20,475 total lines and 1,911 r
 Implementation follows on the same delivery branch under the existing closeout exception.
 All existing inventory, test, lint, security, review, and merge checks remain required.
 This capacity record neither proves live provider recovery nor grants additional provider calls.
+
+## Review planning and installed-schema guards, 2026-09-09
+
+The latest review exposed two failures in `0dc1be4cfe6f319224187a88ef0cd82d524298a7`.
+Shipping reserved a review pass when eligible reviewers could not meet the requested depth.
+An unreadable committed schema raised `TypeError` instead of returning the installed-library preservation refusal.
+
+| Tracked component | Baseline lines | Corrected lines | Change |
+| --- | ---: | ---: | ---: |
+| `bin/sd-ship` | 725 | 727 | +2 |
+| `bin/sd_library_guard.py` | 44 | 44 | 0 |
+| Other 39 `bin/` files | 19,962 | 19,962 | 0 |
+| Total | 20,731 | 20,733 | +2 |
+
+The two added lines require a positive integer review depth and sufficient eligible candidates before reservation.
+The schema guard handles the existing Git callback's missing-result value without adding lines.
+Set `BIN_CAP` to 20,733 for this measured correction, with zero reserve across the same 41 runtime files.
+The review lane remains at its unchanged 1,967-line ceiling.
+
+The preparatory commit contains this record, `BIN_CAP`, and its appended history entry.
+Implementation follows on the same delivery branch under the existing closeout exception.
+All existing validation, review, reservation-history, and merge requirements remain enforced.
+This capacity correction grants no additional provider calls.
