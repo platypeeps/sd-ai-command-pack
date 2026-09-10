@@ -128,3 +128,38 @@ Malformed or failed planning retains bounded stream tails and hashes, so its exa
 No review-history truncation, numeric review allowance, provider selection, or automatic cap changes.
 The coordinator approved this measured correction within the existing closeout scope.
 The capacity commit precedes its implementation; required validation and external review still govern delivery.
+
+## Evidence-backed acceptance and advisory routing, 2026-09-09
+
+The user approved evidence-backed disposition acceptance and correction of Dependabot issue #799.
+The remaining review-reliability work also adds a final compact output contract for URL reviewers.
+This reservation uses the combined implementation against `f6a78c8edf428e2b480614bf90ad12e58c75e465`.
+
+| Tracked component | Baseline lines | Combined lines | Change |
+| --- | ---: | ---: | ---: |
+| `bin/sd-ship` | 695 | 725 | +30 |
+| `bin/sd_ship_dispositions.py` | 0 | 175 | +175 |
+| `bin/sd-review` | 1,561 | 1,585 | +24 |
+| Other 38 `bin/` files | 17,990 | 17,990 | 0 |
+| Total | 20,246 | 20,475 | +229 |
+
+The acceptance helper binds explicit decisions to the exact head, raw findings, review history, tools, policy, and evidence.
+It appends separate receipts and preserves every raw review and spent reservation.
+Publication still requires complete review coverage, passing checks, and the existing merge guards.
+The shipping changes also prevent advisory unknown-authorship results from consuming a provider reservation.
+
+The reviewer adds eleven lines for advisory authorship reporting and thirteen lines for the final URL output contract.
+Advisory routing selects no provider when attribution is unknown; actual reviews still refuse.
+The URL contract follows the complete unchanged source and history input.
+It requests compact findings without changing parsing, completion requirements, or provider selection.
+Its effect on live provider truncation remains unverified until an authorized review runs.
+
+Set `BIN_CAP` to 20,475 and the review-lane ceiling to 1,911.
+The inventory contains 41 runtime files, including the new helper, and includes no additional reserve.
+The review lane remains `sd-review` plus the unchanged 326-line GitHub module.
+No dashboard ceiling, shared-core exemption, file-enumeration rule, or numeric review allowance changes.
+
+This preparatory commit changes only this record, both ceilings, and the appended ceiling history entry.
+Its runtime remains at 20,246 bin lines and 1,887 review-lane lines, within the previous ceilings.
+Implementation follows on the same delivery branch under the existing closeout exception.
+The capacity decision does not establish correctness, accept any finding, or authorize further paid reviews.
