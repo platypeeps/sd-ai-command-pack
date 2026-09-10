@@ -1,7 +1,7 @@
 ---
 title: sd-status answers "is anything wrong" before it answers anything else
 created: 2026-09-04
-branch: feat/sd-status-actions-flag
+branch: main
 ---
 
 # PRD — sd-status answers "is anything wrong" first
