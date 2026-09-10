@@ -1182,6 +1182,7 @@ roles:
 
     def assert_insufficient_reviewers_refuse(self, count):
         import sd_registry
+
         from tests.test_sd_review import sd_review
         registry = sd_registry.read_file(self.database.parent / "providers.yaml")
         consent = str(sd_registry.recipient(registry.providers["reviewer"])) if count else ""
