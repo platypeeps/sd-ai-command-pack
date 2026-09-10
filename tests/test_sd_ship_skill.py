@@ -467,7 +467,7 @@ class TheNeededByTrailer(unittest.TestCase):
 
 
 class TheReviewedHead(unittest.TestCase):
-    """Criterion 32: only a reviewed head, or a verified fix of it, ships."""
+    """Criterion 32: only a cleared reviewed head, or its verified fix, ships."""
 
     def merge_command(self) -> str:
         found = [c for c in commands(steps()[6]) if c.startswith("gh pr merge")]
@@ -478,7 +478,7 @@ class TheReviewedHead(unittest.TestCase):
         body = steps()[2]
         self.assertIn("diff", body)
         self.assertIn("since", body)
-        self.assertIn("passed", body)
+        self.assertIn("reviewed head", body)
 
     def test_the_skill_reads_that_cap_from_the_table_and_states_none(self) -> None:
         """The rule file owns the caps; a skill restating one is how the two
@@ -490,7 +490,7 @@ class TheReviewedHead(unittest.TestCase):
         self.assertNotIn(cap, SKILL_TEXT)
         self.assertIn(".claude/rules/sd-planning-adversarial-review.md", steps()[2])
 
-    def test_the_push_refuses_a_head_the_lane_has_not_passed(self) -> None:
+    def test_the_push_refuses_a_head_the_local_review_has_not_cleared(self) -> None:
         """One sentence carries all three, rather than the step between them.
 
         Step 3 also says that `--match-head-commit` refuses the same head at
@@ -503,12 +503,12 @@ class TheReviewedHead(unittest.TestCase):
         carried = [
             line
             for line in sentences(steps()[3])
-            if "refus" in line and "sha" in line and "passed" in line
+            if "refus" in line and "sha" in line and "cleared" in line
         ]
         self.assertTrue(
             carried,
-            "no sentence in step 3 refuses a head the lane has not passed "
-            "and names its sha",
+            "no sentence in step 3 refuses a head the local review has not cleared "
+            "and checks its sha",
         )
 
     def test_the_never_list_forbids_pushing_an_unseen_head(self) -> None:
