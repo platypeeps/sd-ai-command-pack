@@ -201,7 +201,7 @@ def _bound(args: ast.arguments, body: list[ast.stmt]) -> frozenset[str]:
     """
 
     names = set()
-    for node in [*ast.walk(args), *_no_lambdas(body)]:
+    for node in [*ast.walk(args), *_outside_nested_scopes(body)]:
         if isinstance(node, ast.arg):
             names.add(node.arg)
         elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
@@ -217,10 +217,10 @@ def _bound(args: ast.arguments, body: list[ast.stmt]) -> frozenset[str]:
     return frozenset(names)
 
 
-def _no_lambdas(body: list[ast.stmt]) -> list[ast.AST]:
-    """Every node in `body`, minus whatever a nested `lambda` binds.
+def _outside_nested_scopes(body: list[ast.stmt]) -> list[ast.AST]:
+    """Every node in `body`, minus everything a nested scope binds.
 
-    A lambda's parameters are bound *inside the lambda*, not in the function
+    A nested scope's parameters are bound *inside it*, not in the function
     holding it. Collected into one flat set they leak: a body containing
     `lambda json: ...` marks `json` bound, and `Alpha` then renames the
     function's own free `json.dumps` too -- so two functions differing only in
@@ -228,18 +228,28 @@ def _no_lambdas(body: list[ast.stmt]) -> list[ast.AST]:
     That is a false positive, and this check's whole claim is that the copy
     fails while the original does not.
 
+    Every binding scope, not just `lambda`. An earlier fix stopped at lambdas
+    on the reasoning that `_strip_nested` had already blanked nested `def`
+    bodies -- but it blanks the *body* and leaves the signature, so
+    `def inner(json): ...` leaked `json` by exactly the route the lambda did.
+    `Detectors` covers both spellings now, because fixing one vehicle for a
+    bug and not the other is how this one survived a review round.
+
     The cost is a false negative in the other direction: a copy that renamed
-    only a lambda parameter no longer matches its original. Between the two,
+    only a nested parameter no longer matches its original. Between the two,
     missing a copy is the safe failure and naming an innocent function a copy
-    is not. Nested `def` bodies do not need this -- `_strip_nested` has already
-    replaced them with `pass` -- but a lambda is an expression and survives.
+    is not.
     """
 
     found: list[ast.AST] = []
     stack: list[ast.AST] = list(body)
     while stack:
         node = stack.pop()
-        if isinstance(node, ast.Lambda):
+        if isinstance(node, (ast.Lambda,) + SCOPES):
+            # The header still executes out here, and `_own` charges its
+            # complexity to this function -- but a default or an annotation
+            # binds nothing in this scope, so nothing in it belongs in the
+            # bound set.
             continue
         found.append(node)
         stack.extend(ast.iter_child_nodes(node))
@@ -423,7 +433,13 @@ def _own(function: ast.AST):
     be moved into a nested header to duck this ceiling.
     """
 
-    stack = list(ast.iter_child_nodes(function))
+    # The body, not every child. A function's own decorators, defaults and
+    # annotations run where the `def` sits -- in its *enclosing* scope, which
+    # charges them through `_header` when it walks past this definition.
+    # Starting from all children charged them here as well, so one `if` in a
+    # nested default scored on both functions and the wrong one could be the
+    # one pushed over the ceiling.
+    stack: list[ast.AST] = list(getattr(function, "body", []))
     while stack:
         node = stack.pop()
         yield node
@@ -666,12 +682,34 @@ CLONES = frozenset({
 class CodeHealth(unittest.TestCase):
     """Per-function ceilings, none of which move when a feature is added."""
 
+    @classmethod
+    def setUpClass(cls):
+        """Refuse to measure at all if the corpus could not be read.
+
+        `test_the_corpus_is_complete` states the full comparison, but it
+        cannot be the thing that runs first: `unittest` sorts methods
+        alphabetically, so `test_every_baseline_entry_still_earns_its_place`
+        and every `test_no_*` check run ahead of anything named `test_the_*`.
+        A file that would not parse therefore produced a partial `units()`,
+        and the ceilings reported their own confusing failures against it
+        before the check that could name the unreadable path ever ran.
+
+        Ordering by renaming the method would work until somebody renamed it
+        back. This runs before every method in the class by construction.
+        """
+
+        units()
+        if BROKEN:
+            raise unittest.SkipTest(
+                "the corpus could not be read, so no ceiling below means "
+                f"anything: {BROKEN}")
+
     def test_the_corpus_is_complete(self):
         """The measurement must fail loudly rather than pass on a smaller corpus.
 
         A check whose enumeration quietly matches less than it should reports
         success forever, and that is the one failure mode a ceiling cannot
-        survive -- so it is asserted before any ceiling is.
+        survive. `setUpClass` above holds the ordering-safe half of this.
 
         The comparison is against a fresh `git ls-files`, not against a
         remembered count. A floor like "more than twenty files" would let the
@@ -681,9 +719,15 @@ class CodeHealth(unittest.TestCase):
 
         found = units()
         self.assertEqual(BROKEN, [], "files the walk could not read or parse")
+        # Through `_is_migration_tool`, never a second spelling of it. This
+        # line read `path.name.startswith("migrate-")` until 2026-09-11, while
+        # `sources()` had already been narrowed to `bin/` -- so a future
+        # `dashboard/migrate-*.py` would be in the corpus and absent from the
+        # set the corpus is checked against, and this test would fail for a
+        # file that belongs. One predicate, one place.
         expected = {
             path for path in tracked("bin", "dashboard")
-            if not path.name.startswith("migrate-")
+            if not _is_migration_tool(path)
             if path.suffix == ".py" or _is_python_script(path)
         }
         self.assertEqual(set(sources()), expected,
@@ -824,7 +868,14 @@ class CodeHealth(unittest.TestCase):
             unit.key for unit in units()
             if not unit.name.startswith("_") and unit.name in _ambiguous()
         )
-        self.assertLessEqual(len(blind), AMBIGUOUS_CEILING, _explain(
+        # Exactly, not at most. The docstring calls this downward-only, and
+        # `assertLessEqual` did not enforce that half: a cleanup that renamed
+        # a duplicate could shrink the population while the constant stayed at
+        # its old value forever, which is the stale-record shape
+        # `test_every_baseline_entry_still_earns_its_place` exists to stop for
+        # the other baselines. Equality makes the record move with the thing
+        # it records, in the same change.
+        self.assertEqual(len(blind), AMBIGUOUS_CEILING, _explain(
             "unreachable by the dead-code check, against a ceiling of",
             AMBIGUOUS_CEILING,
             [(key, "shares its name", key.split("::")[0]) for key in blind],
@@ -1049,6 +1100,41 @@ class Detectors(unittest.TestCase):
                 return yaml.dumps(rows)
             """)["f"]
         self.assertNotEqual(first.digest, second.digest)
+
+    def test_a_nested_def_parameter_does_not_bind_an_outer_free_name(self):
+        # The same leak as the lambda case, through a different door. The
+        # first fix stopped at `lambda` because `_strip_nested` had already
+        # blanked nested `def` bodies -- but it blanks the body and leaves the
+        # signature, so the parameter was still there to be collected. Both
+        # spellings are covered now, and neither may be dropped without this
+        # going red.
+        first = measure("""
+            def f(rows):
+                def inner(json):
+                    return json
+                return json.dumps(rows)
+            """)["f"]
+        second = measure("""
+            def f(rows):
+                def inner(yaml):
+                    return yaml
+                return yaml.dumps(rows)
+            """)["f"]
+        self.assertNotEqual(first.digest, second.digest)
+
+    def test_a_nested_default_is_charged_once(self):
+        # It executes once, where the `def` sits. `_own` starting from every
+        # child of the function charged it to the nested function as well, so
+        # a branchy default scored on two units and either one could be the
+        # one pushed over the ceiling.
+        units_by_name = measure("""
+            def f(flag):
+                def inner(x=(1 if flag else 2)):
+                    return x
+                return inner
+            """)
+        self.assertEqual(units_by_name["f"].score, 2, "the enclosing scope")
+        self.assertEqual(units_by_name["f.inner"].score, 1, "not the nested one")
 
     def test_a_renamed_local_is_still_the_same_function(self):
         # The whole point of the digest: a copy-paste that renamed its locals
