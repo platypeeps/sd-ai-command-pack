@@ -128,7 +128,7 @@ class DocCitationTests(unittest.TestCase):
 
         live = [d for d in REPO_ROOT.glob("docs/**/*.md") if "archive" not in d.parts]
         self.assertNotEqual(live, [], "the document tree was not reached at all")
-        self.assertNotEqual(anchored_citations(), [], "no anchored citation was compared")
+        self.assertTrue(anchored_citations() or stable_source_citations(REPO_ROOT), "no citation was compared")
 
     def test_a_citation_cannot_send_this_test_outside_the_checkout(self) -> None:
         """A citation is a string in a document, and this test opens what it names.
@@ -153,6 +153,153 @@ class DocCitationTests(unittest.TestCase):
 
         self.assertTrue(PAIR.search("`status_filter` (`bin/sd:1378`)"))
         self.assertIsNone(PAIR.search("`status_filter` is reported by `bin/sd:1378`"))
+
+
+# An explicit declaration locator carries no line claim. Keep the existing
+# path:line rule above strict; only this spelling survives line movement.
+STABLE_SOURCE = re.compile(r"`source:([A-Za-z0-9_./-]+)::([A-Za-z_][A-Za-z0-9_]*)`")
+
+
+def stable_source_citations(root: pathlib.Path) -> list[tuple[pathlib.Path, str, str]]:
+    """Explicit source:path::symbol locators; existing pytest node IDs are untouched."""
+    found = []
+    for doc in sorted(root.glob("docs/**/*.md")):
+        if "archive" not in doc.parts:
+            found.extend((doc, path, symbol) for path, symbol in
+                         STABLE_SOURCE.findall(doc.read_text(encoding="utf-8")))
+    return found
+
+
+def source_declaration_error(root: pathlib.Path, path: str, symbol: str) -> str | None:
+    """Resolve a Python top-level declaration without reading outside the checkout.
+
+    Functions, classes and assigned names are declarations; comments, strings
+    and call sites cannot keep a deleted definition's citation passing. This
+    also handles extensionless Python entrypoints such as bin/sd-docs-lint.
+    """
+    import ast
+
+    try:
+        target = (root / path).resolve()
+        if not target.is_relative_to(root.resolve()):
+            return None  # Preserve the line rule's containment exclusion.
+        if not target.is_file():
+            return f"{path}: target is missing"
+        tree = ast.parse(target.read_text(encoding="utf-8"), filename=path)
+    except (OSError, UnicodeError, SyntaxError) as error:
+        return f"{path}: cannot read a Python source declaration: {error}"
+
+    declarations = 0
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            declarations += node.name == symbol
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            declarations += sum(
+                isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store) and name.id == symbol
+                for target in targets for name in ast.walk(target)
+            )
+    if declarations != 1:
+        return f"{path}::{symbol}: expected one top-level declaration, found {declarations}"
+    return None
+
+
+class StableSourceCitationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        import tempfile
+
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = pathlib.Path(temporary.name)
+        self.target = self.root / "bin" / "tool"
+        self.target.parent.mkdir()
+        self.target.write_text("def render():\n    pass\n", encoding="utf-8")
+
+    def test_inserted_lines_do_not_break_a_declaration_locator(self) -> None:
+        self.assertIsNone(source_declaration_error(self.root, "bin/tool", "render"))
+        self.target.write_text("# inserted\n" * 100 + self.target.read_text(), encoding="utf-8")
+        self.assertIsNone(source_declaration_error(self.root, "bin/tool", "render"))
+
+    def test_deleted_renamed_or_comment_only_symbols_fail(self) -> None:
+        for source in (
+            "", "def renamed():\n    pass\n", "# def render():\ntext = 'render'\n", "render()\n"
+        ):
+            with self.subTest(source=source):
+                self.target.write_text(source, encoding="utf-8")
+                self.assertIn(
+                    "found 0", source_declaration_error(self.root, "bin/tool", "render") or ""
+                )
+
+    def test_duplicate_declarations_fail_as_ambiguous(self) -> None:
+        self.target.write_text(self.target.read_text() * 2, encoding="utf-8")
+        self.assertIn(
+            "found 2", source_declaration_error(self.root, "bin/tool", "render") or ""
+        )
+
+    def test_constants_and_classes_are_declarations(self) -> None:
+        self.target.write_text("LIMIT = 2\nLABEL: str = 'name'\nclass Reader:\n    pass\n")
+        for symbol in ("LIMIT", "LABEL", "Reader"):
+            with self.subTest(symbol=symbol):
+                self.assertIsNone(source_declaration_error(self.root, "bin/tool", symbol))
+
+    def test_missing_inside_target_fails(self) -> None:
+        self.assertIn(
+            "target is missing",
+            source_declaration_error(self.root, "bin/missing", "render") or "",
+        )
+
+    def test_outside_targets_are_never_opened(self) -> None:
+        from unittest import mock
+
+        link = self.root / "escape"
+        link.symlink_to(self.root.parent / "outside.py")
+        with mock.patch.object(pathlib.Path, "read_text", side_effect=AssertionError("opened")):
+            for path in (str(self.root.parent / "outside.py"), "../outside.py", "escape"):
+                with self.subTest(path=path):
+                    self.assertIsNone(source_declaration_error(self.root, path, "render"))
+
+    def test_only_explicit_locators_are_scanned_and_archives_stay_excluded(self) -> None:
+        docs = self.root / "docs"
+        archive = docs / "archive"
+        archive.mkdir(parents=True)
+        (docs / "current.md").write_text(
+            "`render` (`source:bin/tool::render`) and `gh` (`GH_RECORDER`)\n"
+            "`render` (`bin/tool:1`) and `tests/missing.py::test_historical`\n", encoding="utf-8"
+        )
+        (archive / "old.md").write_text("`source:bin/missing::gone`\n", encoding="utf-8")
+        self.assertEqual(
+            stable_source_citations(self.root), [(docs / "current.md", "bin/tool", "render")]
+        )
+
+    def test_existing_line_citations_still_reject_line_movement(self) -> None:
+        from unittest import mock
+
+        docs = self.root / "docs"
+        docs.mkdir()
+        (docs / "current.md").write_text("`render` (`bin/tool:1`)\n", encoding="utf-8")
+        self.target.write_text("# inserted\n" * 100 + self.target.read_text(), encoding="utf-8")
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root}):
+            with self.assertRaisesRegex(AssertionError, "is not at"):
+                DocCitationTests().test_every_anchored_citation_names_its_symbol_at_the_cited_line()
+
+    def test_scan_control_accepts_a_corpus_using_only_stable_locators(self) -> None:
+        from unittest import mock
+
+        docs = self.root / "docs"
+        docs.mkdir()
+        (docs / "current.md").write_text("`source:bin/tool::render`\n", encoding="utf-8")
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root}):
+            self.assertEqual(anchored_citations(), [])
+            DocCitationTests().test_the_scan_reaches_the_documents()
+
+    def test_every_explicit_source_locator_resolves_in_the_live_corpus(self) -> None:
+        citations = stable_source_citations(REPO_ROOT)
+        failures = []
+        for doc, path, symbol in citations:
+            problem = source_declaration_error(REPO_ROOT, path, symbol)
+            if problem:
+                failures.append(f"{doc.relative_to(REPO_ROOT)}: {problem}")
+        self.assertEqual(failures, [], "\n".join(failures))
 
 
 if __name__ == "__main__":

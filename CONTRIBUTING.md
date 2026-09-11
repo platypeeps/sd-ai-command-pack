@@ -193,6 +193,13 @@ macOS leg is restored.
 
 ## Repository Conventions
 
+- For a Python function, class or module-level assignment in living
+  documentation, prefer a stable source reference such as
+  `source:bin/sd-docs-lint::check_pr_link`. The citation check resolves the declaration
+  in that file, so inserting unrelated lines does not require a documentation
+  edit. Use `path:line` when the claim concerns a particular line; those
+  references are still checked strictly. Keep historical references tied to
+  the version they describe.
 - Claude permissions split by what they describe. A rule about *this machine* —
   a path only you have, a tool only you installed — goes in the ignored
   `.claude/settings.local.json`. A rule about *this repository's workflow* —
