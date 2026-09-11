@@ -14,7 +14,7 @@ progress belongs to the database.
 
 | Need | Control |
 | --- | --- |
-| Capture work without a repository or PRD | Today, or `sd task add "Title"` |
+| Capture work without a PRD | Today, or `sd task add "Title"` — it takes the registered checkout enclosing cwd; `--no-repo` files one that belongs to none |
 | Prioritize, schedule, add details | Item screen, or `sd task edit ID` |
 | Change task status | Item screen, or `sd task status ID STATUS` |
 | Record and resolve a followup | Item notes, or `sd task note ID --kind followup --body TEXT` / `sd task resolve NOTE_ID` |

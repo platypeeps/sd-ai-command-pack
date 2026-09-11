@@ -1,7 +1,8 @@
 """Task controls and workspace reads, backed by the dashboard's operations.
 
-These verbs do not need a checkout. ``--here`` explicitly associates a new
-task with the registered repository containing the current directory.
+These verbs do not need a checkout. A new task takes the repository enclosing
+the current directory by default; ``--no-repo`` files one that belongs to no
+checkout, and ``--here`` refuses rather than filing a repo-less task.
 """
 
 from __future__ import annotations
@@ -20,6 +21,45 @@ import sd_lib
 
 class WorkRefusal(Exception):
     """A workflow operation was refused without changing its state."""
+
+
+def _task_repo(args: argparse.Namespace, connection: Any) -> str | None:
+    """Which checkout a new task owns, defaulting to the one enclosing cwd.
+
+    Filing from inside a checkout and getting no repository is the mistake
+    ``--here`` existed to prevent, and a flag nobody remembers prevents
+    nothing: 41 of the rows it guards were filed without it. So the enclosing
+    repository is the default and the flags are the two exceptions --
+    ``--no-repo`` for work that belongs to no checkout, ``--here`` to refuse
+    rather than file a repo-less task by accident.
+
+    Two things make the default narrower than "whatever cwd is in".
+
+    A linked worktree resolves to its main checkout. The worktree is a
+    temporary path and the row outlives it, so storing the worktree would
+    name a directory that is gone by the time anyone reads the row.
+
+    An unregistered checkout falls back to no repository rather than
+    refusing. `capture_task` rejects a repo the `repo` table does not carry,
+    so a default that passed cwd through unconditionally would turn
+    `sd task add` from a verb that works anywhere into one that fails in
+    every checkout nobody has registered. A default may not break the
+    command; only an explicit `--here` gets to refuse, and it says which of
+    the two reasons applied.
+    """
+    if args.no_repo:
+        return None
+    root = sd_lib.repo_root()
+    if root is None:
+        if args.here:
+            raise WorkRefusal("--here requires a Git checkout")
+        return None
+    repo = str(sd_lib.main_worktree_root(root))
+    if connection.execute("SELECT 1 FROM repo WHERE path = ?", (repo,)).fetchone():
+        return repo
+    if args.here:
+        raise WorkRefusal(f"--here: {repo} is not a registered repository")
+    return None
 
 
 def _library():
@@ -202,15 +242,9 @@ def run(args: argparse.Namespace) -> int:
         elif action == "item":
             result = workflow.item_state(connection, args.item)
         elif action == "add":
-            repo = None
-            if args.here:
-                root = sd_lib.repo_root()
-                if root is None:
-                    raise WorkRefusal("--here requires a Git checkout")
-                repo = str(root.resolve())
             result = workflow.capture_task(
                 connection, title=args.title, body=args.body, priority=args.priority,
-                due=args.due, repo=repo, who=who,
+                due=args.due, repo=_task_repo(args, connection), who=who,
             )
         elif action == "edit":
             changes = {field: getattr(args, field) for field in
@@ -418,7 +452,11 @@ def register(groups: Any, store: Any) -> None:
     add.add_argument("--body", default="")
     add.add_argument("--priority", type=int, choices=range(1, 5))
     add.add_argument("--due", help="YYYY-MM-DD")
-    add.add_argument("--here", action="store_true", help="associate with this registered checkout")
+    where = add.add_mutually_exclusive_group()
+    where.add_argument("--here", action="store_true",
+                       help="refuse unless this is a checkout (one is used by default)")
+    where.add_argument("--no-repo", action="store_true",
+                       help="file a task that belongs to no checkout")
     _output(add, "add")
 
     edit = verbs.add_parser("edit", help="change a task's details")
