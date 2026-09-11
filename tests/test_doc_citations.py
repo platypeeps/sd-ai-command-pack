@@ -42,9 +42,11 @@ inconvenient:
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -77,13 +79,37 @@ def is_inside_repo(target: pathlib.Path) -> bool:
     return resolved.is_file() and resolved.is_relative_to(REPO_ROOT.resolve())
 
 
+def contained(root: pathlib.Path, documents) -> list[pathlib.Path]:
+    """The documents this test will open: real files inside `root`, archives out.
+
+    `is_inside_repo` guards the file a citation *names*. This guards the file
+    the citation is *in*, which nothing was watching. `glob` returns a symlink
+    as readily as a regular file and `read_text` follows it, so a tracked
+    `docs/current.md -> /etc/passwd` would have CI read a file of the
+    document tree's choosing -- the same hole, entered from the other side.
+
+    Resolved before the containment test, because an unresolved path compares
+    as relative to the root while pointing anywhere at all.
+    """
+    base = root.resolve()
+    kept = []
+    for doc in documents:
+        if "archive" in doc.parts:
+            continue
+        try:
+            resolved = doc.resolve()
+        except OSError:
+            continue
+        if resolved.is_file() and resolved.is_relative_to(base):
+            kept.append(doc)
+    return kept
+
+
 def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int]]:
     """Every symbol-anchored citation in a live document, enumerated from disk."""
 
     found = []
-    for doc in sorted(REPO_ROOT.glob("docs/**/*.md")):
-        if "archive" in doc.parts:
-            continue
+    for doc in contained(REPO_ROOT, sorted(REPO_ROOT.glob("docs/**/*.md"))):
         # Newlines flattened: a citation routinely wraps away from its symbol.
         flat = doc.read_text(encoding="utf-8").replace("\n", " ")
         for match in PAIR.finditer(flat):
@@ -171,10 +197,9 @@ def stable_source_citations(root: pathlib.Path) -> list[tuple[pathlib.Path, str,
     documents = sorted(root.glob("docs/**/*.md"))
     documents += [root / name for name in ROOT_DOCUMENTS if (root / name).is_file()]
     found = []
-    for doc in documents:
-        if "archive" not in doc.parts:
-            found.extend((doc, path, symbol) for path, symbol in
-                         STABLE_SOURCE.findall(doc.read_text(encoding="utf-8")))
+    for doc in contained(root, documents):
+        found.extend((doc, path, symbol) for path, symbol in
+                     STABLE_SOURCE.findall(doc.read_text(encoding="utf-8")))
     return found
 
 
@@ -197,18 +222,28 @@ def source_declaration_error(root: pathlib.Path, path: str, symbol: str) -> str 
     except (OSError, UnicodeError, SyntaxError) as error:
         return f"{path}: cannot read a Python source declaration: {error}"
 
+    # Module level, then one level into each class. A test method is a
+    # declaration a document cites by name as readily as a function is, and
+    # `TestCase` puts every one of them inside a class. Not deeper: a name
+    # defined inside a function body is a local, and a citation to one is a
+    # claim about an implementation detail that has no stable identity.
+    bodies = [tree.body]
+    bodies += [node.body for node in tree.body if isinstance(node, ast.ClassDef)]
     declarations = 0
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            declarations += node.name == symbol
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            declarations += sum(
-                isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store) and name.id == symbol
-                for target in targets for name in ast.walk(target)
-            )
+    for body in bodies:
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                declarations += node.name == symbol
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                declarations += sum(
+                    isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store)
+                    and name.id == symbol
+                    for target in targets for name in ast.walk(target)
+                )
     if declarations != 1:
-        return f"{path}::{symbol}: expected one top-level declaration, found {declarations}"
+        return (f"{path}::{symbol}: expected one declaration at module or class "
+                f"level, found {declarations}")
     return None
 
 
@@ -299,6 +334,32 @@ class StableSourceCitationTests(unittest.TestCase):
             "found 0",
             source_declaration_error(self.root, "bin/tool", "deleted") or "",
         )
+
+    def test_a_symlinked_document_is_never_read(self) -> None:
+        """The document is an input too, not only the file its citation names.
+
+        `glob` returns a symlink as readily as a file and `read_text` follows
+        it, so without this a tracked `docs/current.md` could point anywhere
+        and have CI read it. Asserted on both walks, because both glob the
+        same tree.
+        """
+
+        docs = self.root / "docs"
+        docs.mkdir()
+        outside = self.root.parent / f"outside-{os.getpid()}.md"
+        outside.write_text(
+            "`source:bin/tool::render` and `render` (`bin/tool:1`)\n", encoding="utf-8"
+        )
+        self.addCleanup(outside.unlink)
+        (docs / "escape.md").symlink_to(outside)
+        (docs / "real.md").write_text("`source:bin/tool::render`\n", encoding="utf-8")
+
+        collected = stable_source_citations(self.root)
+        self.assertEqual([doc for doc, _, _ in collected], [docs / "real.md"])
+        self.assertEqual(contained(self.root, [docs / "escape.md"]), [])
+
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root}):
+            self.assertEqual(anchored_citations(), [])
 
     def test_existing_line_citations_still_reject_line_movement(self) -> None:
         from unittest import mock

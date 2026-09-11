@@ -45,13 +45,12 @@ The exclusions are not silent because anyone argued for silence. They are
 silent because the enumeration is a **filter chain rather than a
 classification**, and the only control over it is a non-emptiness assertion.
 
-`anchored_citations` (`tests/test_doc_citations.py:80`) is a loop whose every
+`anchored_citations` (`source:tests/test_doc_citations.py::anchored_citations`) is a loop whose every
 rejection is a `continue` into the next iteration. Nothing accumulates. The
 list it returns holds survivors and carries no record of the population it was
 drawn from, so no caller can ask how many were dropped, and none does.
 
-The control is `test_the_scan_reaches_the_documents`
-(`tests/test_doc_citations.py:117`). Its own docstring explains, correctly, why
+The control is `test_the_scan_reaches_the_documents` (`source:tests/test_doc_citations.py::test_the_scan_reaches_the_documents`). Its own docstring explains, correctly, why
 it must not assert a count: "asserting *how many* citations exist makes the
 control fail whenever the prose is reorganised". So it asserts two
 non-emptinesses instead — the document list is not empty, and the citation list
@@ -124,7 +123,7 @@ rather than on a fixture.
 
 **The marker read is line-aware, and the flattening does not prevent it.**
 `anchored_citations` flattens with `.replace("\n", " ")`
-(`tests/test_doc_citations.py:88`), which a reviewer read as making 0.71.34's
+(`tests/test_doc_citations.py:114`), which a reviewer read as making 0.71.34's
 "same line" rule unimplementable. It does not: the substitution is one
 character for one character, so offsets in the flattened text are offsets in
 the original. `marker_after()` matches against the flattened text and then
@@ -162,15 +161,14 @@ its coverage is the absence of a failure.
 
 ### Criterion 1: the two questions inside one `continue`
 
-`is_inside_repo` (`tests/test_doc_citations.py:70`) returns
+`is_inside_repo` (`source:tests/test_doc_citations.py::is_inside_repo`) returns
 `resolved.is_file() and resolved.is_relative_to(REPO_ROOT.resolve())`. The
 second conjunct is the security refusal the PRD defends and it must stay
 exactly as it is. The first is a staleness test wearing the refusal's clothes.
 
 They separate into `is_under_repo(target)` — containment only, **keeping the
 `resolve()`**, and the sole
-subject of `test_a_citation_cannot_send_this_test_outside_the_checkout`
-(`tests/test_doc_citations.py:133`) — and a plain `target.is_file()` at the
+subject of `test_a_citation_cannot_send_this_test_outside_the_checkout` (`source:tests/test_doc_citations.py::test_a_citation_cannot_send_this_test_outside_the_checkout`) — and a plain `target.is_file()` at the
 call site. A path that is not under the checkout is dropped as
 `escapes-checkout`, silently and forever. A path that is under the checkout and
 is not a file is `target-missing`, and `target-missing` fails.
@@ -287,8 +285,7 @@ The two failures are not stale citations. They are citations whose anchor is
 the token to their **right**, in a list where the punctuation separates items.
 A left-scanning regex takes the tail of the previous list item as the anchor
 and reports a symbol that was never claimed to be there. That is the
-mis-attribution `test_prose_between_a_symbol_and_a_citation_breaks_the_anchor`
-(`tests/test_doc_citations.py:146`) was written to prevent, arriving through
+mis-attribution `test_prose_between_a_symbol_and_a_citation_breaks_the_anchor` (`source:tests/test_doc_citations.py::test_prose_between_a_symbol_and_a_citation_breaks_the_anchor`) was written to prevent, arriving through
 punctuation instead of through prose.
 
 So the widening is narrowed by a discriminator that the same measurement
@@ -392,7 +389,7 @@ not half-checked, it is invisible, and it lands in `no-adjacent-anchor` with
 everything else the anchor patterns never see. 13 in the live corpus at
 `405a9106` and 51 archived; the count was right and the behaviour was not.
 
-**The anchor, via `is_symbol`.** `SYMBOL` (`tests/test_doc_citations.py:54`)
+**The anchor, via `is_symbol`.** `SYMBOL` (`source:tests/test_doc_citations.py::SYMBOL`)
 admits no hyphen, so every kebab-case name in this repository —
 `sd-review`, `sd-docs-lint`, `sd-status` — is not a symbol and every citation
 anchored to one is declined. 7 declined this way in the live corpus, 110 under
@@ -404,8 +401,7 @@ silently dropped. That is deliberate and it is decision D5 below.
 
 ### What this breaks in the existing suite
 
-`test_a_citation_cannot_send_this_test_outside_the_checkout`
-(`tests/test_doc_citations.py:133`) asserts
+`test_a_citation_cannot_send_this_test_outside_the_checkout` (`source:tests/test_doc_citations.py::test_a_citation_cannot_send_this_test_outside_the_checkout`) asserts
 `assertFalse(is_inside_repo(REPO_ROOT / "no-such-file-here.md"))`. Under the
 split that predicate becomes `is_under_repo`, which answers **true** for that
 path — it is under the checkout, it is merely absent. The assertion inverts.
@@ -413,13 +409,12 @@ This is not a regression to be repaired: it is the conflation criterion 1 names,
 written down as a test, and the test that replaces it asserts both halves
 separately.
 
-`test_the_scan_reaches_the_documents` (`tests/test_doc_citations.py:117`)
+`test_the_scan_reaches_the_documents` (`source:tests/test_doc_citations.py::test_the_scan_reaches_the_documents`)
 keeps its two non-emptiness assertions and its docstring's reasoning, and gains
 the conservation assertion. It does not gain a count, for the reason its own
 docstring already gives.
 
-`test_prose_between_a_symbol_and_a_citation_breaks_the_anchor`
-(`tests/test_doc_citations.py:146`) is untouched. `PAREN_PAIR` is a second
+`test_prose_between_a_symbol_and_a_citation_breaks_the_anchor` (`source:tests/test_doc_citations.py::test_prose_between_a_symbol_and_a_citation_breaks_the_anchor`) is untouched. `PAREN_PAIR` is a second
 pattern rather than an edit to `PAIR`, so the anchoring rule that test defends
 is not weakened, and the two fixtures in it keep meaning what they meant.
 
@@ -427,7 +422,10 @@ The module docstring is rewritten. Its four-bullet list of deliberate skips is
 correct as far as it goes and stops before the corpus glob, the corpus census
 and the elided path.
 
-Nothing outside `tests/test_doc_citations.py` and `docs/` changes. In
+Nothing outside `tests/test_doc_citations.py`, `docs/` and `CONTRIBUTING.md`
+changes. `CONTRIBUTING.md` is where the convention is written down, which is
+also why it joined the checked corpus: the worked example every reader copies
+was the one citation nothing resolved. In
 particular `bin/sd-docs-lint` is not edited: rule 6's `CITATION_RE`
 (`source:bin/sd-docs-lint::CITATION_RE`) reads `.md` targets only, and rule 7 reads
 `docs/work/` paths, so neither is the home for a rule about citations into
@@ -694,8 +692,7 @@ the corrected values there, and concluded the defect never existed and the
 paragraph should be deleted. It existed: `git show 405a9106:.../prd.md | grep
 -n 'test_doc_citations.py:'` prints the four early values, and the paragraph is
 kept in the past tense because criterion 3 asks for the correction to be
-recorded rather than merely made. All four passed, because `WINDOW`
-(`tests/test_doc_citations.py:61`) is 2 and forgives an offset of one. They are
+recorded rather than merely made. All four passed, because `WINDOW` (`source:tests/test_doc_citations.py::WINDOW`) is 2 and forgives an offset of one. They are
 corrected in `prd.md` as part of this plan, and the fact that a gate against
 stale line numbers tolerates every one of them is worth leaving on the record
 next to `WINDOW`'s comment, which argues for exactly that tolerance.
@@ -737,8 +734,7 @@ draft took a free-text reason, which made `quoted` the one marker in the design
 that could never be wrong — the exact shape D4 rejects one paragraph above, and
 a reviewer was right to say the principle was stated and not applied. The form
 is `[quoted: <path:line>]`, and the gate asserts that the quoted citation's own
-text appears at that line of that file. A page quoting `` `is_symbol`
-(`tests/test_doc_citations.py:64`) `` as an example of the shape writes
+text appears at that line of that file. A page quoting `` `is_symbol` (`source:tests/test_doc_citations.py::is_symbol`) `` as an example of the shape writes
 `[quoted: tests/test_doc_citations.py:64]` after it, and if the example is
 moved or the line changes, the quotation fails like any other claim. This costs
 nothing over the free-text form — it is the same grammar, the same
