@@ -21,6 +21,7 @@ import importlib.machinery
 import importlib.util
 import io
 import json
+import sqlite3
 import sys
 import unittest
 from pathlib import Path
@@ -109,12 +110,13 @@ def run(argv: list[str], **seams) -> tuple[int, str, str]:
 
 
 class ReferenceParsingTests(unittest.TestCase):
-    def test_an_unreadable_reference_names_both_spellings(self) -> None:
+    def test_an_unreadable_reference_names_every_spelling(self) -> None:
         code, out, err = run(["ref", "nonsense"])
         self.assertEqual(code, 2)
         self.assertEqual(out, "")
         self.assertIn("gh:owner/repo#123", err)
         self.assertIn("jira:KEY-123", err)
+        self.assertIn("sd:123", err)
 
     def test_half_matching_references_are_refused(self) -> None:
         """Anchored patterns: a reference that nearly parses must not part-parse.
@@ -277,6 +279,88 @@ class TemplateFitTests(unittest.TestCase):
         template = (REPO_ROOT / "skills/sd-plan/templates/prd.md").read_text(encoding="utf-8")
         self.assertIn("## References", template)
         self.assertTrue(out.startswith("- ["), out)
+
+
+def sd_store(rows: list[dict]):
+    """An `opener` over a temporary database holding exactly `rows`."""
+
+    def opener():
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        connection.execute(
+            "CREATE TABLE item (id INTEGER PRIMARY KEY, kind TEXT, title TEXT,"
+            " status TEXT, updated_at TEXT)")
+        for row in rows:
+            connection.execute(
+                "INSERT INTO item (id, kind, title, status, updated_at)"
+                " VALUES (:id, :kind, :title, :status, :updated_at)", row)
+        return None, connection
+
+    return opener
+
+
+SD_ROW = {
+    "id": 455,
+    "kind": "task",
+    "title": "sd-status ages an item by its birth date",
+    "status": "planning",
+    "updated_at": "2026-09-11T15:20:36+00:00",
+}
+
+
+class SdReferenceTests(unittest.TestCase):
+    """The third scheme: a row in the shared database rather than a tracker."""
+
+    def test_an_item_renders_the_citation_block(self) -> None:
+        code, out, err = run(["ref", "sd:455"], opener=sd_store([SD_ROW]))
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+        self.assertEqual(
+            out.strip(),
+            "- sd:455 — sd-status ages an item by its birth date"
+            " (planning task, updated 2026-09-11)")
+
+    def test_the_citation_carries_no_link(self) -> None:
+        """A local row has nowhere to point, and a fake href is worse than none.
+
+        The two remote schemes render `- [label](url)`. A reader who can click
+        one reasonably expects to be able to click them all, so the absence has
+        to be deliberate and tested rather than an oversight nobody noticed.
+        """
+
+        _, out, _ = run(["ref", "sd:455"], opener=sd_store([SD_ROW]))
+        self.assertNotIn("](", out)
+        self.assertNotIn("http", out)
+
+    def test_an_absent_item_exits_one_and_prints_nothing(self) -> None:
+        code, out, err = run(["ref", "sd:999"], opener=sd_store([SD_ROW]))
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("999", err)
+
+    def test_a_store_that_cannot_be_opened_exits_two(self) -> None:
+        """1 and 2 stay distinct: a typo must not look like a missing library."""
+
+        def broken():
+            raise RuntimeError("the installed sd_db lacks workflow controls")
+
+        code, out, err = run(["ref", "sd:455"], opener=broken)
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+        self.assertIn("sd_db", err)
+
+    def test_half_matching_sd_references_are_refused(self) -> None:
+        for reference in ("sd:", "sd:12x", "sd:-4", "sd:1.2", "sd:abc"):
+            with self.subTest(reference=reference):
+                code, out, _ = run(["ref", reference], opener=sd_store([SD_ROW]))
+                self.assertEqual(code, 2)
+                self.assertEqual(out, "")
+
+    def test_an_item_with_no_title_still_renders(self) -> None:
+        row = dict(SD_ROW, title=None, status=None, kind=None, updated_at=None)
+        code, out, _ = run(["ref", "sd:455"], opener=sd_store([row]))
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "- sd:455 — (no title) (status unknown item)")
 
 
 class SharedStateRuleTests(unittest.TestCase):

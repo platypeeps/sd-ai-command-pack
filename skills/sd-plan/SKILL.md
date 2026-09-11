@@ -88,6 +88,7 @@ leave unrelated work items where they are.
 | `--work-dir` | Work root other than `docs/work` |
 | `--worktree` | Create the branch in its own git worktree (one writer per checkout) |
 | `--from gh:owner/repo#123` / `--from jira:KEY-123` | Seed `## References` from a tracker item, resolved by `sd-trackers ref` |
+| `--from sd:123` | Seed the interview and `## References` from a row in the shared database |
 | `--from-suggestion` | Reserved: seed from a local proposal note; not implemented |
 | `--from-proposal` | Seed from a skill proposal |
 
@@ -99,6 +100,7 @@ says rather than what anyone remembered:
 ```bash
 sd-trackers ref gh:openai/whisper#42
 sd-trackers ref jira:ABC-45
+sd-trackers ref sd:455
 ```
 
 It prints one bullet — the link, the title, the state, and the date the item
@@ -106,13 +108,50 @@ last moved — which goes verbatim under the PRD's `## References` heading, the
 one the template already ships. Under `--decision`, where the template has no
 such heading, add it above the bullet.
 
+### `sd:<id>` seeds the interview too
+
+The two remote schemes seed a citation and nothing else, deliberately: an
+issue's prose copied into a work item is stale the moment somebody edits the
+issue. `sd:` is different, because the row is not somewhere else. It is in the
+same database this item will be registered in, and the person who wrote it is
+the person planning now.
+
+So read the row before the interview and use it:
+
+```bash
+sd store item 455 --json
+```
+
+- **`title`** is the item's opening line. Do not re-ask for it.
+- **`body`** is what the filer already said. Treat it as the answer to "what
+  is wrong", and interview for what it does *not* settle — scope, the
+  acceptance criteria, what is out of scope — rather than from a blank page.
+- **`repo`** is the repository the row belongs to. It is something to check
+  against, never somewhere to go: the repository is still the one enclosing
+  cwd, and `Never accept a repo path` below holds here too. When the row names
+  a repository and it is not this checkout, stop and print both paths. The
+  user moves, or says which one is right; a plan written into the checkout the
+  agent chose is the failure that rule exists to prevent.
+
+The citation still goes under `## References`, and it carries no link: the row
+lives in this machine's database, so `sd:455` and `sd store item 455` are the
+whole reference. A URL there would look checkable and resolve nowhere.
+
+**The row is not the plan.** Seeding is a starting point, not permission to
+skip the interview — a one-line row does not become a PRD by being read
+aloud.
+
 Read the exit code before pasting. **1** means the tracker was asked and the
-reference did not resolve — no such issue, a repository you cannot see, or an
-answer this could not read. **2** means it could not be asked at all: `gh`
-missing or unauthenticated, the Jira variables unset, or a reference that does
-not parse. Neither is a licence to hand-write a
-citation: an unresolvable reference is a question for the user, and a made-up
-link in a work item outlives the session that invented it.
+reference did not resolve — no such issue or item, a repository you cannot
+see, or an answer this could not read. **2** means it could not be asked at
+all: `gh` missing or unauthenticated, the Jira variables unset, a database
+this machine cannot open or read, or a reference that does not parse. The
+line between them matters most for `sd:`, where both ends are local: a typo in
+an id exits 1, and an unprovisioned or unreadable store exits 2. Reading the
+second as the first would report a machine that was never asked as an item
+that does not exist. Neither is a licence to hand-write a citation: an
+unresolvable reference is a question for the user, and a made-up link in a
+work item outlives the session that invented it.
 
 The issue's own text stays in the issue. Cite the link, read the issue for the
 interview, and leave its prose where it will still be current next month.

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Resolve one tracker reference into the block a work item cites it with.
 
-`sd-plan --from gh:o/r#N|jira:KEY` is a *seeding* path: it turns a reference
-someone typed into the `## References` section of a new work item. `sd-plan`
+`sd-plan --from gh:o/r#N|jira:KEY|sd:N` is a *seeding* path: it turns a
+reference someone typed into the `## References` section of a new work item.
+`sd-plan`
 has no `bin/` half -- the procedure is carried out by the agent -- so the
 resolution has to be callable from somewhere, and a resolution described only
 in prose is a resolution that drifts into "look it up and write something
@@ -18,9 +19,15 @@ The tracker clients live under `dashboard/` because the index was their first
 consumer. They are moved by nothing here: a second caller is a reason to import
 a module, not to relocate it.
 
+`sd:` is the third scheme and the odd one: the shared database is not remote,
+so it has no client under `dashboard/` and its citation carries no link. A row
+is followed with `sd store item <id>`, not with a URL, and inventing one that
+resolves nowhere would make the bullet look checkable when it is not.
+
 Exit codes: 0 resolved; 1 the tracker was asked and the reference did not
-resolve -- no such issue, or an answer this could not read; 2 it could not be
-asked at all -- an unparseable reference, or a tracker that is not configured.
+resolve -- no such issue or item, or an answer this could not read; 2 it could
+not be asked at all -- an unparseable reference, a tracker that is not
+configured, or a database this machine cannot open.
 """
 
 from __future__ import annotations
@@ -42,8 +49,16 @@ GH_REF = re.compile(r"^gh:([\w.-]+)/([\w.-]+)#(\d+)$")
 # accepted and upper-cased: the tracker is case-insensitive about keys and
 # refusing `abc-1` would be pedantry with no safety behind it.
 JIRA_REF = re.compile(r"^jira:([A-Za-z][A-Za-z0-9_]*)-(\d+)$")
+# An item id in the shared database. Digits only: ids are assigned by the
+# database and nothing else is a reference to one.
+SD_REF = re.compile(r"^sd:(\d+)$")
 
-SPELLINGS = "gh:owner/repo#123 or jira:KEY-123"
+#: The third tracker is the shared database itself. It has no client under
+#: `dashboard/` because it is not remote -- the rows are on this machine, read
+#: through the same `sd_db` the rest of the pack talks to.
+SD_TRACKER = "sd"
+
+SPELLINGS = "gh:owner/repo#123, jira:KEY-123 or sd:123"
 
 
 def render(row: dict) -> str:
@@ -57,6 +72,15 @@ def render(row: dict) -> str:
     stale the first time somebody edits the issue, and the link is already
     there to carry it.
     """
+    if row["tracker"] == SD_TRACKER:
+        # No link, because there is nowhere to link to. The row lives in this
+        # machine's database; a `#`-href or a made-up dashboard URL would be a
+        # citation that looks checkable and is not. The id is the whole
+        # reference, and `sd store item <id>` is how a reader follows it.
+        tail = f"{row['state'] or 'status unknown'} {row['kind'] or 'item'}"
+        moved = (row["updated_at"] or "")[:10]
+        return (f"- sd:{row['number']} — {row['title'] or '(no title)'}"
+                f" ({tail}" + (f", updated {moved}" if moved else "") + ")")
     if row["tracker"] == github.TRACKER:
         label = f"{row['repo']}#{row['number']}"
     else:
@@ -93,10 +117,61 @@ def resolve_jira(key: str, transport=None, environ=None) -> tuple[dict | None, s
     return row, "", 0
 
 
+def resolve_sd(item: int, opener=None) -> tuple[dict | None, str, int]:
+    """One row from the shared database, in the shape `render` expects.
+
+    The exit codes keep the meaning the remote halves gave them, and the line
+    between them is the same line: 2 is "could not be asked" -- the library is
+    not installed, or the database is not reachable -- and 1 is "asked, and
+    there is no such item". Collapsing them would make a typo in an id look
+    like an unprovisioned machine.
+
+    `opener` is the seam the suite injects, matching `runner` and `transport`
+    above. It returns the `(sd_db, connection)` pair so a test can hand over a
+    temporary database without this reaching for the real one.
+    """
+    try:
+        sd_db, connection = (opener or _open_store)()
+    except Exception as error:  # noqa: BLE001 - any failure here is "cannot ask"
+        return None, str(error), 2
+    try:
+        row = connection.execute(
+            "SELECT id, kind, title, status, updated_at FROM item WHERE id = ?",
+            (item,),
+        ).fetchone()
+        if row is None:
+            return None, f"no item {item}", 1
+        return {
+            "tracker": SD_TRACKER,
+            "number": row["id"],
+            "kind": row["kind"],
+            "title": row["title"],
+            "state": row["status"],
+            "updated_at": row["updated_at"],
+            "url": "",
+            "repo": "",
+        }, "", 0
+    except Exception as error:  # noqa: BLE001 - a read that failed is not a miss
+        return None, str(error), 2
+    finally:
+        connection.close()
+
+
+def _open_store():
+    """The real store, opened read-only through the pack's own loader."""
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import sd_handoff_rows
+
+    sd_db = sd_handoff_rows.library()
+    return sd_db, sd_handoff_rows.connect(sd_db, write=False)
+
+
 def cmd_ref(args: argparse.Namespace, out, err) -> int:
     reference = args.reference.strip()
     github_match = GH_REF.match(reference)
     jira_match = JIRA_REF.match(reference)
+    sd_match = SD_REF.match(reference)
     if github_match:
         owner, repo, number = github_match.groups()
         row, problem, code = resolve_github(owner, repo, int(number), args.runner)
@@ -105,6 +180,8 @@ def cmd_ref(args: argparse.Namespace, out, err) -> int:
         row, problem, code = resolve_jira(
             f"{project.upper()}-{number}", args.transport, args.environ
         )
+    elif sd_match:
+        row, problem, code = resolve_sd(int(sd_match.group(1)), args.opener)
     else:
         print(f"cannot read {reference!r} as a reference; expected {SPELLINGS}", file=err)
         return 2
@@ -131,8 +208,9 @@ def main(
     runner=None,
     transport=None,
     environ=None,
+    opener=None,
 ) -> int:
-    """`runner`, `transport` and `environ` are the test seams the clients take.
+    """`runner`, `transport`, `environ` and `opener` are the test seams.
 
     Kept off the parser deliberately: they are injected by the suite, never
     typed, and an argument that exists only for tests is an argument an
@@ -140,6 +218,7 @@ def main(
     """
     args = build_parser().parse_args(sys.argv[1:] if argv is None else argv)
     args.runner, args.transport, args.environ = runner, transport, environ
+    args.opener = opener
     return int(args.handler(args, out, err))
 
 
