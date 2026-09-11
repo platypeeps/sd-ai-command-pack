@@ -28,7 +28,7 @@ Identify it in the README table and Notion parent page.
 Keep the source filename and existing Notion page identity.
 For multiple tracks, choose an overview that directs readers to each track.
 
-Before publishing, check all configured documents for missing, duplicate, or mismatched main-document titles.
+Before publishing, check the configured documents for missing, duplicate, or mismatched main-document titles.
 Read back the Notion title and entry links after publication.
 Follow the full standard's **Main document — START HERE** section.
 

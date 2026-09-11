@@ -59,7 +59,10 @@ a document.
    Match its Markdown H1, rendered `title` and `h1`, and Notion page title.
    Link it near the README's top and identify it in the README table and Notion parent.
    Keep its source filename and existing Notion page identity.
-   Before publishing, check all documents for missing, duplicate, or mismatched main-document titles.
+   Before publishing, check the configured documents — the standard's scope, not
+   the whole tree — for missing, duplicate, or mismatched main-document titles.
+   `90-scratch/` holds superseded drafts that are never cited and never mirrored;
+   one still carrying an old `START HERE — ` H1 is not a duplicate.
 2. Write or edit through the file tools, never the shell. The reasons and the one
    standing exception are in `references/subagent-dispatch.md`.
 3. Keep the document's shape: H1, provenance paragraph, `---`, numbered `##`
