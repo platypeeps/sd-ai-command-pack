@@ -24,14 +24,14 @@ recalled:
 | span | lines | analogue |
 |---|---|---|
 | `Citation` record and the closed `REASONS` vocabulary | 16 | `ITEM_STATUSES` (`bin/sd-docs-lint:57`) and the three tuples under it are one line each, plus a six-field record, `TOKEN` and `SEPARATED_PAIR` written out, and the comment that says why the nine-name vocabulary is closed |
-| `classify()` | 32 | `check_work_references` (`bin/sd-docs-lint:467`) is 41 for walk-a-corpus, skip-with-a-named-reason, count, report; this is the same job without its git call and without `METAVARIABLE_RE`'s branch |
+| `classify()` | 32 | `check_work_references` (`source:bin/sd-docs-lint::check_work_references`) is 41 for walk-a-corpus, skip-with-a-named-reason, count, report; this is the same job without its git call and without `METAVARIABLE_RE`'s branch |
 | `anchored_citations()` as a thin filter over it | 5 | it is 23 today and becomes a comprehension the existing assertion calls |
-| `census()` | 10 | the accumulate-and-note half of `check_citations` (`bin/sd-docs-lint:405`), which is about 10 of its 52 |
-| the conservation test | 20 | `test_the_scan_reaches_the_documents` (`tests/test_doc_citations.py:117`) is 15, most of it the docstring saying why it is not a count; this one needs the same paragraph and one more assertion |
-| `is_under_repo` split and the missing-target failure | 18 | `is_inside_repo` (`tests/test_doc_citations.py:70`) is 8 and becomes 6; the new assertion is shaped like `test_every_anchored_citation_names_its_symbol_at_the_cited_line`, which is 10 |
-| the marker regexes and `marker_after()` | 17 | `anchor_line` (`bin/sd-docs-lint:370`) is 15 for a small positional read whose docstring carries the reason |
-| the two marker tests | 26 | `test_a_citation_cannot_send_this_test_outside_the_checkout` (`tests/test_doc_citations.py:133`) is 12 for four fixture assertions; these are seven across two tests |
-| `PAREN_PAIR` and its fixtures | 20 | `test_prose_between_a_symbol_and_a_citation_breaks_the_anchor` (`tests/test_doc_citations.py:146`) is 10 for two; five assertions plus the pattern and the comment that says why it needs a parenthesis on both ends |
+| `census()` | 10 | the accumulate-and-note half of `check_citations` (`source:bin/sd-docs-lint::check_citations`), which is about 10 of its 52 |
+| the conservation test | 20 | `test_the_scan_reaches_the_documents` (`source:tests/test_doc_citations.py::test_the_scan_reaches_the_documents`) is 15, most of it the docstring saying why it is not a count; this one needs the same paragraph and one more assertion |
+| `is_under_repo` split and the missing-target failure | 18 | `is_inside_repo` (`source:tests/test_doc_citations.py::is_inside_repo`) is 8 and becomes 6; the new assertion is shaped like `test_every_anchored_citation_names_its_symbol_at_the_cited_line`, which is 10 |
+| the marker regexes and `marker_after()` | 17 | `anchor_line` (`source:bin/sd-docs-lint::anchor_line`) is 15 for a small positional read whose docstring carries the reason |
+| the two marker tests | 26 | `test_a_citation_cannot_send_this_test_outside_the_checkout` (`source:tests/test_doc_citations.py::test_a_citation_cannot_send_this_test_outside_the_checkout`) is 12 for four fixture assertions; these are seven across two tests |
+| `PAREN_PAIR` and its fixtures | 20 | `test_prose_between_a_symbol_and_a_citation_breaks_the_anchor` (`source:tests/test_doc_citations.py::test_prose_between_a_symbol_and_a_citation_breaks_the_anchor`) is 10 for two; five assertions plus the pattern and the comment that says why it needs a parenthesis on both ends |
 | the module docstring | 40 | it is 41 today and lists four deliberate skips; it must list five silencers, two markers and three named-and-counted shapes |
 | the three counted-not-resolved reasons | 9 | three vocabulary entries and the branches that assign them |
 | the token partition rule and its comment | 6 | one loop keyed on token offset rather than on anchor-citation pairs, plus the four-line comment recording that 4 of 7 live `PAREN_PAIR` matches contain two tokens |
