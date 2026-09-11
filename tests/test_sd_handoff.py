@@ -317,6 +317,37 @@ class ShowTests(HandoffFixture):
         self.assertIn("no handoff packet is pending", result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_something_other_than_a_packet_at_the_path_says_so(self) -> None:
+        """`is_file` is false for four states; only one of them is "nothing".
+
+        A directory, a broken symlink or a fifo at the packet path is a thing
+        standing in the packet's way, and it has to be removed before any
+        handoff can be written here. Reported as "nothing pending", a reader
+        goes looking for a packet that was never written.
+        """
+
+        path = self.packet_path(self.repo)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for label, make in (
+            ("directory", lambda: path.mkdir()),
+            ("broken symlink", lambda: path.symlink_to(path.parent / "absent")),
+            ("fifo", lambda: os.mkfifo(path)),
+        ):
+            with self.subTest(kind=label):
+                make()
+                try:
+                    result = self.run_handoff("--show")
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn("is not a regular file", result.stderr)
+                    self.assertNotIn("no handoff packet is pending", result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertEqual(result.stdout, "")
+                finally:
+                    if path.is_dir() and not path.is_symlink():
+                        path.rmdir()
+                    else:
+                        path.unlink()
+
     def test_show_reports_an_unreadable_packet_without_a_traceback(self) -> None:
         self.run_handoff("--summary", "s")
         self.packet_path(self.repo).write_text("{ not json", encoding="utf-8")

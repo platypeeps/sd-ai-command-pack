@@ -356,6 +356,17 @@ def human(packet: dict) -> str:
 
 def show(path: Path, root: str, as_json: bool, out) -> int:
     if not path.is_file():
+        # `is_file` is false for an empty directory, a broken symlink and a
+        # fifo as readily as for nothing at all, and only the last of those
+        # means no packet is pending. Told the other three are "nothing", a
+        # reader goes looking for a packet that was never written instead of
+        # for the thing standing in its place -- which they have to remove
+        # before any packet can be written here again.
+        if os.path.lexists(path):
+            raise Refusal(
+                f"{path} exists but is not a regular file, so it is not a "
+                f"handoff packet for {root}; remove or rename it, and the "
+                "next handoff can be written")
         raise Refusal(f"no handoff packet is pending for {root}")
     try:
         pending = json.loads(path.read_text(encoding="utf-8"))
