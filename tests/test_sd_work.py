@@ -176,7 +176,7 @@ class WorkRegister(unittest.TestCase):
         self.assertEqual(row["status"], "planning")
         self.assertEqual(row["repo"], str(self.root))
         self.assertEqual(row["path"], path)
-        self.assertEqual(row["branch"], "main")
+        self.assertEqual(row["branch"], "origin/main")
         # The commit is read from git, not asserted by the caller.
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(self.root),
                               capture_output=True, text=True, check=True).stdout.strip()
@@ -196,6 +196,42 @@ class WorkRegister(unittest.TestCase):
         self.assertFalse(again["created"])
         self.assertEqual(first["item"]["id"], again["item"]["id"])
         self.assertIn("already registered", self.call("work", "register", path).stdout)
+
+    def test_the_row_records_the_landing_branch_not_the_one_checked_out(self):
+        """Registration happens before the work branch exists.
+
+        `sd-plan` writes the plan at step 2 and branches at step 6, so the
+        branch checked out while registering is whatever the planner was
+        standing on -- and on a detached checkout `--abbrev-ref HEAD` is the
+        literal string `HEAD`. Neither is the branch this work lands on.
+        """
+
+        self.git("checkout", "-q", "-b", "some-other-work")
+        path = self.item()
+        state = json.loads(self.call("work", "register", path, "--json").stdout)
+        self.assertEqual(state["item"]["branch"], "origin/main")
+        self.git("checkout", "-q", "--detach")
+        detached = json.loads(
+            self.call("work", "register", self.item("second"), "--json").stdout)
+        self.assertEqual(detached["item"]["branch"], "origin/main")
+
+    def test_a_path_that_is_not_a_prd_is_refused_by_the_rule_it_breaks(self):
+        """The shape is the library's rule; this proves the sentence arrives.
+
+        `docs/work/<item>/prd.md` is what every reader keys on, so a row
+        pointing anywhere else is a row nothing finds. The check lives in
+        `register_work_item`; what this pins is that it reaches the caller as
+        a refusal and an exit code rather than as a traceback.
+        """
+
+        stray = self.root / "docs" / "work" / "2026-09-11-a-thing"
+        stray.mkdir(parents=True)
+        (stray / "design.md").write_text(
+            "---\ntitle: A thing to do\ncreated: 2026-09-11\n---\n\nBody.\n")
+        refused = self.call(
+            "work", "register", "docs/work/2026-09-11-a-thing/design.md", code=1)
+        self.assertIn("docs/work/<item>/prd.md", refused.stderr)
+        self.assertNotIn("Traceback", refused.stderr)
 
     def test_an_uncommitted_folder_registers_with_no_source_commit(self):
         """Planning writes the folder before anybody commits it."""
@@ -246,7 +282,8 @@ class WorkRegister(unittest.TestCase):
 
         self.assertEqual(
             sd_work.REGISTER_NEEDS,
-            (("workflow", "register_work_item"), ("repos", "registered_for")))
+            (("workflow", "register_work_item"), ("repos", "registered_for"),
+             ("sources.docs_work", "default_branch")))
         for module_name, attribute in sd_work.REGISTER_NEEDS:
             module = importlib.import_module(f"sd_db.{module_name}")
             with self.subTest(missing=attribute):

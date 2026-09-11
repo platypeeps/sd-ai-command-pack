@@ -39,16 +39,25 @@ def _library():
 #:
 #: The import above cannot stand in for this. `sd_db.workflow` has existed for
 #: a long time and imports cleanly on every build; `register_work_item` is new
-#: inside it. Checking only that the module arrived would turn a stale library
-#: into an `AttributeError` raised from the middle of an open write
-#: transaction -- a traceback, at the one moment this file is careful never to
-#: produce one. Named, both of them, so the remedy is a sentence rather than a
-#: stack.
-REGISTER_NEEDS = (("workflow", "register_work_item"), ("repos", "registered_for"))
+#: inside it. Checking only that the module arrived would let a stale library
+#: reach the call and fail there as an `AttributeError` -- a traceback, in a
+#: verb that is careful never to produce one, and naming a Python attribute
+#: rather than the install that is behind. Named, all three, so the remedy is
+#: a sentence instead of a stack.
+REGISTER_NEEDS = (
+    ("workflow", "register_work_item"),
+    ("repos", "registered_for"),
+    ("sources.docs_work", "default_branch"),
+)
 
 
 def _register_library(sd_db):
-    """The two modules `register` writes through, or a refusal naming the gap."""
+    """The three modules `register` reads and writes through, or a refusal.
+
+    Checked before the first of them is called, so a machine carrying a build
+    that predates the verb is told which install to fix rather than which
+    attribute was absent.
+    """
 
     import importlib  # noqa: PLC0415 - only this verb needs it
 
@@ -72,7 +81,7 @@ def _register_library(sd_db):
             "installer (`sd-install`), which provisions it from the `system` "
             "checkout at its tag, then run this again."
         )
-    return found["workflow"], found["repos"]
+    return tuple(found[name] for name, _ in REGISTER_NEEDS)
 
 
 def _frontmatter(prd: pathlib.Path) -> tuple[str, str]:
@@ -108,12 +117,14 @@ def _register(sd_db, connection, args, who: str) -> Any:
     flags beyond the path.
 
     There is no repository argument, for the reason `sd-status` has none
-    (R10-D6): the repository is the one enclosing the working directory. A row
-    whose path resolved against a checkout the caller was not standing in
-    would name a file nobody can read.
+    (R10-D6): the checkout is the one enclosing the working directory, and the
+    path is relative to it. A row whose path resolved against a checkout the
+    caller was not standing in would name a file nobody can read. Which *row*
+    that checkout belongs to is a further question, answered below by its
+    origin rather than by its place on this disk.
     """
 
-    workflow, repos = _register_library(sd_db)
+    workflow, repos, docs_work = _register_library(sd_db)
     root = sd_lib.repo_root()
     if root is None:
         raise WorkRefusal("register requires a Git checkout")
@@ -132,9 +143,17 @@ def _register(sd_db, connection, args, who: str) -> Any:
     repo = repos.registered_for(connection, str(root), origin or None)
     commit = sd_lib.git_output(
         ["log", "-1", "--format=%H", "--", relative], root)
+    # The branch the work will land on, read from `origin/HEAD`, and never the
+    # one that happens to be checked out. Registration comes before the work
+    # branch exists (`sd-plan` writes the plan at step 2 and branches at step
+    # 6), so the checked-out branch is whatever the planner was standing on --
+    # `main`, or some unrelated feature branch, or the literal string `HEAD`
+    # on a detached checkout. The library's own reader answers it, so a folder
+    # registered here and one registered by `sd-db work register` get the same
+    # row rather than two spellings of the branch.
     return workflow.register_work_item(
         connection, repo=repo, path=relative, title=title, created_at=created,
-        branch=sd_lib.git_output(["rev-parse", "--abbrev-ref", "HEAD"], root),
+        branch=docs_work.default_branch(root),
         source_commit=commit or None, who=who,
     )
 
