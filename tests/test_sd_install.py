@@ -1514,6 +1514,89 @@ class StatusTests(InstallerHarness):
         )
         self.assertIn("checkout is dirty", self._status_of(checkout))
 
+    def _bin_with(self, *names: str) -> Path:
+        """A checkout whose `bin/` holds the named executables and nothing else."""
+        checkout = self.home / "probe-checkout"
+        (checkout / "bin").mkdir(parents=True, exist_ok=True)
+        for name in names:
+            target = checkout / "bin" / name
+            target.write_text("#!/bin/sh\n", encoding="utf-8")
+            target.chmod(0o755)
+        return checkout
+
+    def test_command_report_says_how_to_invoke_when_bin_is_not_on_path(self):
+        checkout = self._bin_with("sd-handoff", "sd-review")
+        report = sd_install.command_report(checkout, {"PATH": ""})
+        self.assertIn("2 in bin/", report)
+        self.assertIn("not on PATH", report)
+        self.assertIn("bin/sd-handoff", report)
+
+    def test_command_report_notices_bin_on_path(self):
+        checkout = self._bin_with("sd-handoff")
+        report = sd_install.command_report(
+            checkout, {"PATH": str(checkout / "bin")}
+        )
+        self.assertIn("on PATH from this checkout", report)
+        self.assertNotIn("not on PATH", report)
+
+    def test_command_report_names_a_command_shadowed_by_another_install(self):
+        checkout = self._bin_with("sd-handoff")
+        other = self.home / "other" / "bin"
+        other.mkdir(parents=True)
+        stale = other / "sd-handoff"
+        stale.write_text("#!/bin/sh\n", encoding="utf-8")
+        stale.chmod(0o755)
+        report = sd_install.command_report(checkout, {"PATH": str(other)})
+        self.assertIn("not on PATH", report)
+        self.assertIn("shadowed by another install", report)
+        self.assertIn("sd-handoff", report)
+
+    def test_command_report_does_not_call_a_symlink_home_a_shadow(self):
+        """A link in another `bin` pointing back here is this checkout's command.
+
+        `~/bin/common/sd-handoff -> <checkout>/bin/sd-handoff` is how a hand-made
+        install reaches these commands. Resolving the directory rather than the
+        executable reports that as a competing install, which it is not.
+        """
+        checkout = self._bin_with("sd-handoff")
+        other = self.home / "common"
+        other.mkdir(parents=True)
+        (other / "sd-handoff").symlink_to(checkout / "bin" / "sd-handoff")
+        report = sd_install.command_report(checkout, {"PATH": str(other)})
+        self.assertNotIn("shadowed", report)
+
+    def test_command_report_counts_the_dispatcher_and_not_the_modules(self):
+        checkout = self._bin_with("sd", "sd-handoff")
+        module = checkout / "bin" / "sd_lib.py"
+        module.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+        module.chmod(0o755)
+        report = sd_install.command_report(checkout, {"PATH": ""})
+        self.assertIn("2 in bin/", report)
+        self.assertIn("invoke by path (bin/sd)", report)
+
+    def test_command_report_does_not_call_a_linked_command_its_own_shadow(self):
+        """A command that is itself a link inside `bin/` resolves past its name."""
+        checkout = self._bin_with("sd_handoff_impl.py")
+        (checkout / "bin" / "sd-handoff").symlink_to("sd_handoff_impl.py")
+        report = sd_install.command_report(
+            checkout, {"PATH": str(checkout / "bin")}
+        )
+        self.assertIn("on PATH from this checkout", report)
+        self.assertNotIn("shadowed", report)
+
+    def test_command_report_on_a_checkout_with_no_commands(self):
+        checkout = self.home / "empty-checkout"
+        (checkout / "bin").mkdir(parents=True)
+        self.assertEqual(
+            sd_install.command_report(checkout, {"PATH": ""}),
+            "commands: none in bin/",
+        )
+
+    def test_status_reports_the_calling_convention(self):
+        self.install()
+        _, output = self.run_cli("--status")
+        self.assertIn("commands:", output)
+
     def test_status_names_legacy_residue(self):
         legacy = self.home / ".agents" / "skills" / "sd-old" / "SKILL.md"
         legacy.parent.mkdir(parents=True)

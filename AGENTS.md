@@ -53,6 +53,24 @@ Shared contributors do not revoke user permission, but existing ownership gates 
   item, `prd.md` plus `design.md`/`implement.md` when warranted. That directory
   is the whole tracked footprint of the workflow.
 
+## Calling Convention
+
+The pack's executables live in `bin/` and are invoked by path, relative to the
+checkout: `bin/sd`, `bin/sd-status`, `bin/sd-review`. That is how the
+installed hooks invoke them, and it is the only convention the repository
+supports.
+
+The installer renders surfaces -- skills, agents, companions, hooks -- and links
+no executable anywhere. So `installed.json` is a receipt for those surfaces, not
+evidence that any command resolves in a shell, and an absent binary in it is not
+a partial install. Where `sd` or `sd-research-kit` do resolve on a machine, a
+hand-made symlink under `~/bin/common` points back into a checkout; the install
+did not put it there and does not know about it.
+
+To see what holds on the machine in front of you, run the installer's status
+command rather than reading a list: its `commands:` line enumerates `bin/` and
+`PATH` at runtime, and says whether a command resolves elsewhere.
+
 <!-- SD-AI-COMMAND-PACK:ROUTING:START -->
 ## Canonical Entry Points
 
