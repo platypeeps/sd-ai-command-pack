@@ -31,12 +31,15 @@ the cap's ratchet, which could only rise.
 
 import ast
 import collections
+import copy
 import functools
 import hashlib
+import io
 import itertools
 import pathlib
 import re
 import subprocess
+import tokenize
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -127,7 +130,12 @@ def _is_python_script(path: pathlib.Path) -> bool:
         with path.open("rb") as handle:
             first = handle.readline(4096)
     except OSError:
-        return False
+        # Included, not dropped. `sources()` and the corpus test ask this same
+        # question, so answering "not Python" for a file nobody could open
+        # removes it from both sides at once and the sets still match -- the
+        # file vanishes and the fail-closed contract reports nothing. Saying
+        # yes sends it to the parse, which records it in `BROKEN`.
+        return True
     return first[:2] == b"#!" and b"python" in first
 
 
@@ -234,6 +242,27 @@ def _elif_chain(node: ast.If) -> list[ast.If]:
 #: nobody -- `sorted(rows, key=lambda r: r.a if r.b else r.c)` would score 1.
 #: A lambda is part of the expression that contains it.
 SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def _strip_nested(body: list[ast.stmt]) -> list[ast.stmt]:
+    """`body` with every nested scope's own body replaced by `pass`.
+
+    `_own` stops at a nested scope because `_walk` measures it separately, and
+    length and the clone digest have to agree with that or the file says two
+    things. Rendering the whole body charged `make_handler` for the 105 lines
+    of the `Handler` it builds, while `Handler.do_POST` was measured again at
+    42 -- so adding a method to the nested class grew the outer function's
+    score, and lifting code into a local helper could never shrink it.
+
+    The `def` line and its decorators stay: those belong to this function.
+    """
+
+    owned = copy.deepcopy(body)
+    for statement in owned:
+        for node in ast.walk(statement):
+            if isinstance(node, SCOPES):
+                node.body = [ast.Pass()]
+    return owned
 
 
 def _own(function: ast.AST):
@@ -366,17 +395,21 @@ def _walk(scope: ast.AST, relative: str, prefix: tuple[str, ...]) -> list[Unit]:
                     and isinstance(statement.value.value, str))
         ]
         found.extend(_walk(node, relative, prefix + (node.name,)))
-        if not body:
-            continue
-        nodes = sum(1 for statement in body for _ in ast.walk(statement))
+        # A function whose only statement is a docstring still gets a unit.
+        # Skipping it let `Handler.log_message` out of every check at once --
+        # dead-code, duplicate and baseline alike -- and the corpus test could
+        # not see the hole, because it proves the file was parsed, not that
+        # every function in it was measured.
+        owned = _strip_nested(body)
+        nodes = sum(1 for statement in owned for _ in ast.walk(statement))
         # One `Alpha` for the whole body, never one per statement. Renaming
         # each statement in isolation restarts the counter, so `foo(x); bar(y)`
         # and `foo(x); bar(x)` both normalize to `v1(v2); v1(v2)` and two
         # unrelated functions collide. Numbering across the body is what makes
         # the digest mean "same shape, same data flow".
-        rendered = ast.unparse(ast.Module(body=body, type_ignores=[]))
+        rendered = ast.unparse(ast.Module(body=owned, type_ignores=[]))
         normalized = ast.dump(
-            Alpha(_bound(node.args, body)).visit(ast.parse(rendered)))
+            Alpha(_bound(node.args, owned)).visit(ast.parse(rendered)))
         found.append(Unit(
             key=f"{relative}::{name}",
             path=relative,
@@ -442,9 +475,8 @@ LONG = frozenset({
     "bin/sd_work.py::register",  # 58
     "bin/sd_work.py::run",  # 54
     "bin/sd_writing.py::register",  # 57
-    "bin/sd_writing.py::run",  # 86
-    "dashboard/plugins.py::bounded_run",  # 91
-    "dashboard/server.py::make_handler",  # 105
+    "bin/sd_writing.py::run",  # 83
+    "dashboard/plugins.py::bounded_run",  # 67
 })
 
 DEEP: frozenset[str] = frozenset()
@@ -455,6 +487,7 @@ DEEP: frozenset[str] = frozenset()
 #: anywhere. This is the whole exemption list; it is not a place to put a
 #: function nobody could find a caller for.
 DYNAMIC = frozenset({
+    "dashboard/markup.py::Filter.handle_comment",
     "dashboard/markup.py::Filter.handle_data",
     "dashboard/markup.py::Filter.handle_endtag",
     "dashboard/markup.py::Filter.handle_startendtag",
@@ -605,24 +638,13 @@ class CodeHealth(unittest.TestCase):
             if not unit.name.startswith("_") and unit.key not in DYNAMIC
             and unit.name not in _ambiguous()
         }
-        # This file is excluded from the haystack on purpose. Listing a name
-        # in `DYNAMIC` above would otherwise be a second occurrence of it, so
-        # the act of exempting a function would also be the evidence that it
-        # needed no exemption -- and removing the entry would not bring the
-        # failure back.
-        haystack = "\n".join(
-            path.read_text(encoding="utf-8", errors="replace")
-            for path in tracked("bin", "dashboard", "tests", "skills", "docs",
-                                ".github", ".claude", "*.md")
-            if path != pathlib.Path(__file__).resolve()
-        )
         # Whole identifiers, not substrings. Counting substrings made 77 names
         # permanently unreportable because a longer name contained them --
         # `add` inside `add_row`, `check` inside `check_url` -- so the check
         # could never fire on them at all. `.github` and `.claude` are in the
         # pathspec because a function reached only from a workflow or a hook
         # is referenced, not dead.
-        seen = collections.Counter(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", haystack))
+        seen = _references()
         located = {unit.key: _where(unit) for unit in units()}
         dead = sorted(key for key, name in defined.items() if seen[name] <= 1)
         self.assertEqual(dead, [], _explain(
@@ -689,6 +711,45 @@ class CodeHealth(unittest.TestCase):
                 stale.append(f"{key} no longer exists; drop it from DYNAMIC")
         self.assertEqual(stale, [], "\n".join(
             ["Fixed debt is still listed as debt. Delete these entries:", *stale]))
+
+
+@functools.cache
+def _references() -> collections.Counter:
+    """How often each identifier is written across the repository.
+
+    Python files are tokenised and their strings and comments dropped, so a
+    function's own docstring is not evidence that something reaches it: an
+    orphan whose docstring opens with its own name counted twice and passed.
+    Prose files are counted whole, because naming a tool in a skill doc *is* a
+    reference to it.
+    A file that will not tokenise falls back to the plain scan rather than
+    contributing nothing.
+
+    This module is excluded from both. Listing a name in `DYNAMIC` would
+    otherwise be a second occurrence of it, so the act of exempting a function
+    would also be the evidence that it needed no exemption -- and deleting the
+    entry would not bring the failure back.
+    """
+
+    me = pathlib.Path(__file__).resolve()
+    words = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+    seen: collections.Counter = collections.Counter()
+    for path in tracked("bin", "dashboard", "tests", "skills", "docs",
+                        ".github", ".claude", "*.md"):
+        if path == me:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if path.suffix != ".py" and not _is_python_script(path):
+            seen.update(words.findall(text))
+            continue
+        try:
+            seen.update(
+                token.string for token in tokenize.generate_tokens(
+                    io.StringIO(text).readline)
+                if token.type == tokenize.NAME)
+        except (tokenize.TokenError, SyntaxError, IndentationError):
+            seen.update(words.findall(text))
+    return seen
 
 
 @functools.cache
