@@ -1,0 +1,52 @@
+name: sd docs gate
+description: >-
+  Run the research kit's mechanical checks against the repository the workflow
+  is in. Reads the checkout, writes nothing to it, and requests no reviewer.
+
+inputs:
+  verbs:
+    description: >-
+      Which `sd-research-kit` verbs to run, in order, space separated. Only
+      read-only verbs are accepted; `render` writes and is refused.
+    required: false
+    default: review checklinks
+
+runs:
+  using: composite
+  steps:
+    - name: Run the research kit
+      shell: bash
+      env:
+        # Interpolating an input straight into `run:` is how a workflow gets a
+        # shell injection; it arrives as an environment variable instead.
+        SD_DOCS_GATE_VERBS: ${{ inputs.verbs }}
+      run: |
+        set -euo pipefail
+        # The kit lives beside this action, outside the workspace. That matters
+        # for `checklinks`, which walks the tree it is standing in: a consumer
+        # that checked the pack out into its own workspace had to move it
+        # afterwards, or the pack's own markdown landed in the report.
+        kit="${GITHUB_ACTION_PATH}/../../bin/sd-research-kit"
+        if [ ! -f "${kit}" ]; then
+          echo "sd docs gate: no sd-research-kit beside this action (${kit})" >&2
+          exit 1
+        fi
+        # An allow-list, not a filter: an unknown verb stops the run rather than
+        # being skipped, because a gate that silently ran nothing is the failure
+        # this action exists to avoid. `render` is excluded deliberately; it
+        # writes, and this action promises it does not.
+        for verb in ${SD_DOCS_GATE_VERBS}; do
+          case "${verb}" in
+            review|checklinks|pins|conventions) ;;
+            *) echo "sd docs gate: refusing unknown or writing verb '${verb}'" >&2; exit 1 ;;
+          esac
+        done
+        status=0
+        for verb in ${SD_DOCS_GATE_VERBS}; do
+          echo "::group::sd-research-kit ${verb}"
+          # Every verb is run even when an earlier one fails, so one report
+          # names every problem instead of only the first.
+          python3 "${kit}" "${verb}" || status=1
+          echo "::endgroup::"
+        done
+        exit "${status}"
