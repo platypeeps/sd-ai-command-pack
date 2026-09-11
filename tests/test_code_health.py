@@ -644,7 +644,6 @@ LONG = frozenset({
     "bin/sd_install.py::cmd_user",  # 64
     "bin/sd_install.py::main",  # 63
     "bin/sd_work.py::register",  # 58
-    "bin/sd_work.py::run",  # 54
     "bin/sd_writing.py::register",  # 57
     "bin/sd_writing.py::run",  # 83
     "dashboard/plugins.py::bounded_run",  # 67
