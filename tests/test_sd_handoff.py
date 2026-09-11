@@ -1,20 +1,26 @@
 """Fixtures for bin/sd-handoff: the writer half of the local handoff lane.
 
-Every test runs the real executable in a subprocess against a real `git init`
-repository under a temporary directory, with HOME redirected so no test can
-reach the operator's `~/.local/state`.
+Tests use a real `git init` repository under a temporary directory, with HOME
+redirected so no test can reach the operator's `~/.local/state`. Most run the
+real executable; failure tests import it to inject deterministic filesystem errors.
 """
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
+import errno
 import hashlib
+import importlib.machinery
+import importlib.util
+import io
 import json
 import os
 import pathlib
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 HANDOFF = REPO_ROOT / "bin" / "sd-handoff"
@@ -318,6 +324,106 @@ class ShowTests(HandoffFixture):
         self.assertEqual(result.returncode, 1)
         self.assertIn("not readable JSON", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
+
+
+class ClaimFailureTests(HandoffFixture):
+    """Filesystem errors must retain their cause and leave the packet pending."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        loader = importlib.machinery.SourceFileLoader("sd_handoff", str(HANDOFF))
+        spec = importlib.util.spec_from_file_location(
+            "sd_handoff", str(HANDOFF), loader=loader
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.module = module
+        written = self.run_handoff("--summary", "still pending")
+        self.assertEqual(written.returncode, 0, written.stderr)
+        self.path = self.packet_path(self.repo)
+        self.body = self.path.read_bytes()
+
+    def show_failure(self, expected: str) -> None:
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            mock.patch.dict(os.environ, self.env(self.repo), clear=True),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            code = self.module.main(["--show", "--json"])
+        self.assertEqual(code, 1)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn(expected, err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
+        if expected != "taken by another session":
+            self.assertNotIn("taken by another session", err.getvalue())
+
+    def assert_packet_pending(self) -> None:
+        self.assertEqual(self.path.read_bytes(), self.body)
+        self.assertIsNone(self.packet()["consumed"])
+        self.assertEqual(list(self.path.parent.iterdir()), [self.path])
+
+    def test_rename_errors_report_the_os_reason_and_preserve_the_packet(self) -> None:
+        for number in (errno.EACCES, errno.EPERM, errno.EIO):
+            with self.subTest(errno=number):
+                failure = OSError(number, os.strerror(number), str(self.path))
+                with mock.patch.object(self.module.os, "rename", side_effect=failure):
+                    self.show_failure(f"{type(failure).__name__}: {failure}")
+                self.assert_packet_pending()
+
+    def test_reread_errors_report_the_os_reason_and_preserve_the_packet(self) -> None:
+        for number in (errno.EACCES, errno.EPERM, errno.EIO):
+            with self.subTest(errno=number):
+                failure = OSError(number, os.strerror(number), str(self.path))
+                with mock.patch.object(
+                    self.module.Path, "read_text",
+                    side_effect=[self.body.decode("utf-8"), failure],
+                ):
+                    self.show_failure(f"{type(failure).__name__}: {failure}")
+                self.assert_packet_pending()
+
+    def test_file_taken_before_rename_still_reports_another_session(self) -> None:
+        winner = self.path.with_suffix(".winner")
+        rename = os.rename
+
+        def take_packet(source, destination) -> None:
+            rename(source, winner)
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(source))
+
+        with mock.patch.object(self.module.os, "rename", side_effect=take_packet):
+            self.show_failure("taken by another session")
+        self.assertFalse(self.path.exists())
+        self.assertEqual(winner.read_bytes(), self.body)
+
+    def test_file_taken_before_reread_still_reports_another_session(self) -> None:
+        winner = self.path.with_suffix(".winner")
+        read_text = pathlib.Path.read_text
+        reads = 0
+
+        def take_packet(path, *args, **kwargs):
+            nonlocal reads
+            reads += 1
+            if reads == 2:
+                os.rename(path, winner)
+            return read_text(path, *args, **kwargs)
+
+        with mock.patch.object(self.module.Path, "read_text", new=take_packet):
+            self.show_failure("taken by another session")
+        self.assertFalse(self.path.exists())
+        self.assertEqual(winner.read_bytes(), self.body)
+
+    def test_malformed_reread_reports_invalid_json_and_preserves_the_packet(self) -> None:
+        for content, reason in (
+            ("{ not json", "not readable JSON"),
+            ("[]", "not a JSON object"),
+        ):
+            with self.subTest(content=content):
+                with mock.patch.object(
+                    self.module.Path, "read_text",
+                    side_effect=[self.body.decode("utf-8"), content],
+                ):
+                    self.show_failure(reason)
+                self.assert_packet_pending()
 
 
 class UsageTests(HandoffFixture):

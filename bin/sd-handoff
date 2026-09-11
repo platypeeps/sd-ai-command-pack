@@ -263,21 +263,24 @@ def write_packet(path: Path, body: bytes) -> None:
 
 
 def claim(path: Path) -> dict | None:
-    """Read a packet and take exclusive ownership of it, or return None.
+    """Read and claim a packet; return None only if the source disappeared.
 
     The claim is the rename: two readers racing in one directory both try to
-    move the same source file away, and only the first can succeed.
+    move the same source file away, and only the first can succeed. Other
+    filesystem errors must reach main() with their actual cause intact.
     """
     try:
         packet = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return None
+    except ValueError:
+        raise Refusal(f"the handoff packet at {path} is not readable JSON") from None
     if not isinstance(packet, dict):
-        return None
+        raise Refusal(f"the handoff packet at {path} is not a JSON object")
     claimed = path.with_name(path.name + f".claim.{os.getpid()}")
     try:
         os.rename(path, claimed)
-    except OSError:
+    except FileNotFoundError:
         return None
     packet["consumed"] = now_iso()
     try:
