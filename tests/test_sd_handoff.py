@@ -412,6 +412,43 @@ class ClaimFailureTests(HandoffFixture):
         self.assertFalse(self.path.exists())
         self.assertEqual(winner.read_bytes(), self.body)
 
+    def test_a_removed_directory_is_not_reported_as_a_rival_session(self) -> None:
+        """Both causes raise one FileNotFoundError; only one of them is a race.
+
+        A reader whose state directory was wiped was told another session
+        took the packet -- a process that never existed, and a packet
+        reported as consumed when it was deleted. Asserted at both sites the
+        error can come from: the re-read and the rename.
+        """
+
+        read_text = pathlib.Path.read_text
+        reads = 0
+
+        def wipe_before_rename(path, *args, **kwargs):
+            nonlocal reads
+            reads += 1
+            text = read_text(path, *args, **kwargs)
+            if reads == 2:
+                os.unlink(self.path)
+                os.rmdir(self.path.parent)
+            return text
+
+        with mock.patch.object(self.module.Path, "read_text", new=wipe_before_rename):
+            self.show_failure("no longer exists")
+        self.assertFalse(self.path.parent.exists())
+
+        self.path.parent.mkdir(parents=True)
+        self.path.write_bytes(self.body)
+
+        def wipe_before_reread(path, *args, **kwargs):
+            if path == self.path and self.path.exists():
+                os.unlink(self.path)
+                os.rmdir(self.path.parent)
+            return read_text(path, *args, **kwargs)
+
+        with mock.patch.object(self.module.Path, "read_text", new=wipe_before_reread):
+            self.show_failure("no longer exists")
+
     def test_malformed_reread_reports_invalid_json_and_preserves_the_packet(self) -> None:
         for content, reason in (
             ("{ not json", "not readable JSON"),
