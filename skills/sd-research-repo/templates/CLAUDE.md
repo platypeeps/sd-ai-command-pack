@@ -18,6 +18,20 @@ or read it in the pack at `skills/sd-research-repo/references/conventions.md`.
 
 Use only the directories this repo needs; do not invent new ones.
 
+## Main document — START HERE
+
+Choose exactly one main document titled `START HERE — <descriptive project or decision title>`.
+Apply this during setup and the next update to an existing project.
+Match its Markdown H1, `research.conf.py` `title` and `h1`, and Notion page title.
+Link the Notion mirror near the README's top; use the source link until publication.
+Identify it in the README table and Notion parent page.
+Keep the source filename and existing Notion page identity.
+For multiple tracks, choose an overview that directs readers to each track.
+
+Before publishing, check the configured documents for missing, duplicate, or mismatched main-document titles.
+Read back the Notion title and entry links after publication.
+Follow the full standard's **Main document — START HERE** section.
+
 ## Documents
 
 Every document opens with an H1, a provenance paragraph, then `---`:

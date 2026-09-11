@@ -44,6 +44,32 @@ Type prefixes carry meaning:
 - `REVIEW-` assesses something someone else produced; `BRIEF-` argues a position
   of our own.
 
+## Main document — START HERE
+
+Every research project has exactly one main document for readers entering the document set.
+Use the title `START HERE — <descriptive project or decision title>`.
+Choose the document that explains scope, current conclusions, decisions, and where supporting evidence lives.
+For multiple research tracks, use an overview that directs readers to each track.
+
+- Apply this convention during project setup and the next update to an existing project.
+- Use the same title in the Markdown H1, `research.conf.py` `title` and `h1`, and the Notion page title.
+- Put a prominent **Start here** link near the top of the README.
+  Link the Notion mirror when published; otherwise, link the Markdown source.
+- Identify the main document in the README document table and the Notion parent page.
+- Keep the existing source filename, type prefix, Notion page ID, URL, icon, and parent.
+  The title identifies the document's role.
+- If another document takes this role, move the `START HERE — ` title marker to the
+  new one, strike it from the old one, and update all entry links.
+  Rename no file and re-parent no Notion page: a role change edits titles and
+  links only, never a filename, a type prefix, or a Notion page identity.
+  Exactly one document carries the `START HERE — ` marker.
+
+Before publishing, enumerate all configured documents and check their H1s and rendered titles.
+Require exactly one matching main document across those surfaces.
+Read back its Notion title, README links, and parent reference after publication.
+Missing, duplicate, or mismatched titles fail this manual review.
+`sd-research-kit review` does not currently enforce this title convention.
+
 ## Documents
 
 Every document opens with an H1, a provenance paragraph, then `---`:
