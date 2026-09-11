@@ -1,20 +1,26 @@
 """Fixtures for bin/sd-handoff: the writer half of the local handoff lane.
 
-Every test runs the real executable in a subprocess against a real `git init`
-repository under a temporary directory, with HOME redirected so no test can
-reach the operator's `~/.local/state`.
+Tests use a real `git init` repository under a temporary directory, with HOME
+redirected so no test can reach the operator's `~/.local/state`. Most run the
+real executable; failure tests import it to inject deterministic filesystem errors.
 """
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
+import errno
 import hashlib
+import importlib.machinery
+import importlib.util
+import io
 import json
 import os
 import pathlib
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 HANDOFF = REPO_ROOT / "bin" / "sd-handoff"
@@ -311,6 +317,37 @@ class ShowTests(HandoffFixture):
         self.assertIn("no handoff packet is pending", result.stderr)
         self.assertEqual(result.stdout, "")
 
+    def test_something_other_than_a_packet_at_the_path_says_so(self) -> None:
+        """`is_file` is false for four states; only one of them is "nothing".
+
+        A directory, a broken symlink or a fifo at the packet path is a thing
+        standing in the packet's way, and it has to be removed before any
+        handoff can be written here. Reported as "nothing pending", a reader
+        goes looking for a packet that was never written.
+        """
+
+        path = self.packet_path(self.repo)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for label, make in (
+            ("directory", lambda: path.mkdir()),
+            ("broken symlink", lambda: path.symlink_to(path.parent / "absent")),
+            ("fifo", lambda: os.mkfifo(path)),
+        ):
+            with self.subTest(kind=label):
+                make()
+                try:
+                    result = self.run_handoff("--show")
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn("is not a regular file", result.stderr)
+                    self.assertNotIn("no handoff packet is pending", result.stderr)
+                    self.assertNotIn("Traceback", result.stderr)
+                    self.assertEqual(result.stdout, "")
+                finally:
+                    if path.is_dir() and not path.is_symlink():
+                        path.rmdir()
+                    else:
+                        path.unlink()
+
     def test_show_reports_an_unreadable_packet_without_a_traceback(self) -> None:
         self.run_handoff("--summary", "s")
         self.packet_path(self.repo).write_text("{ not json", encoding="utf-8")
@@ -318,6 +355,143 @@ class ShowTests(HandoffFixture):
         self.assertEqual(result.returncode, 1)
         self.assertIn("not readable JSON", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
+
+
+class ClaimFailureTests(HandoffFixture):
+    """Filesystem errors must retain their cause and leave the packet pending."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        loader = importlib.machinery.SourceFileLoader("sd_handoff", str(HANDOFF))
+        spec = importlib.util.spec_from_file_location(
+            "sd_handoff", str(HANDOFF), loader=loader
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.module = module
+        written = self.run_handoff("--summary", "still pending")
+        self.assertEqual(written.returncode, 0, written.stderr)
+        self.path = self.packet_path(self.repo)
+        self.body = self.path.read_bytes()
+
+    def show_failure(self, expected: str) -> None:
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            mock.patch.dict(os.environ, self.env(self.repo), clear=True),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            code = self.module.main(["--show", "--json"])
+        self.assertEqual(code, 1)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn(expected, err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
+        if expected != "taken by another session":
+            self.assertNotIn("taken by another session", err.getvalue())
+
+    def assert_packet_pending(self) -> None:
+        self.assertEqual(self.path.read_bytes(), self.body)
+        self.assertIsNone(self.packet()["consumed"])
+        self.assertEqual(list(self.path.parent.iterdir()), [self.path])
+
+    def test_rename_errors_report_the_os_reason_and_preserve_the_packet(self) -> None:
+        for number in (errno.EACCES, errno.EPERM, errno.EIO):
+            with self.subTest(errno=number):
+                failure = OSError(number, os.strerror(number), str(self.path))
+                with mock.patch.object(self.module.os, "rename", side_effect=failure):
+                    self.show_failure(f"{type(failure).__name__}: {failure}")
+                self.assert_packet_pending()
+
+    def test_reread_errors_report_the_os_reason_and_preserve_the_packet(self) -> None:
+        for number in (errno.EACCES, errno.EPERM, errno.EIO):
+            with self.subTest(errno=number):
+                failure = OSError(number, os.strerror(number), str(self.path))
+                with mock.patch.object(
+                    self.module.Path, "read_text",
+                    side_effect=[self.body.decode("utf-8"), failure],
+                ):
+                    self.show_failure(f"{type(failure).__name__}: {failure}")
+                self.assert_packet_pending()
+
+    def test_file_taken_before_rename_still_reports_another_session(self) -> None:
+        winner = self.path.with_suffix(".winner")
+        rename = os.rename
+
+        def take_packet(source, destination) -> None:
+            rename(source, winner)
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(source))
+
+        with mock.patch.object(self.module.os, "rename", side_effect=take_packet):
+            self.show_failure("taken by another session")
+        self.assertFalse(self.path.exists())
+        self.assertEqual(winner.read_bytes(), self.body)
+
+    def test_file_taken_before_reread_still_reports_another_session(self) -> None:
+        winner = self.path.with_suffix(".winner")
+        read_text = pathlib.Path.read_text
+        reads = 0
+
+        def take_packet(path, *args, **kwargs):
+            nonlocal reads
+            reads += 1
+            if reads == 2:
+                os.rename(path, winner)
+            return read_text(path, *args, **kwargs)
+
+        with mock.patch.object(self.module.Path, "read_text", new=take_packet):
+            self.show_failure("taken by another session")
+        self.assertFalse(self.path.exists())
+        self.assertEqual(winner.read_bytes(), self.body)
+
+    def test_a_removed_directory_is_not_reported_as_a_rival_session(self) -> None:
+        """Both causes raise one FileNotFoundError; only one of them is a race.
+
+        A reader whose state directory was wiped was told another session
+        took the packet -- a process that never existed, and a packet
+        reported as consumed when it was deleted. Asserted at both sites the
+        error can come from: the re-read and the rename.
+        """
+
+        read_text = pathlib.Path.read_text
+        reads = 0
+
+        def wipe_before_rename(path, *args, **kwargs):
+            nonlocal reads
+            reads += 1
+            text = read_text(path, *args, **kwargs)
+            if reads == 2:
+                os.unlink(self.path)
+                os.rmdir(self.path.parent)
+            return text
+
+        with mock.patch.object(self.module.Path, "read_text", new=wipe_before_rename):
+            self.show_failure("no longer exists")
+        self.assertFalse(self.path.parent.exists())
+
+        self.path.parent.mkdir(parents=True)
+        self.path.write_bytes(self.body)
+
+        def wipe_before_reread(path, *args, **kwargs):
+            if path == self.path and self.path.exists():
+                os.unlink(self.path)
+                os.rmdir(self.path.parent)
+            return read_text(path, *args, **kwargs)
+
+        with mock.patch.object(self.module.Path, "read_text", new=wipe_before_reread):
+            self.show_failure("no longer exists")
+
+    def test_malformed_reread_reports_invalid_json_and_preserves_the_packet(self) -> None:
+        for content, reason in (
+            ("{ not json", "not readable JSON"),
+            ("[]", "not a JSON object"),
+        ):
+            with self.subTest(content=content):
+                with mock.patch.object(
+                    self.module.Path, "read_text",
+                    side_effect=[self.body.decode("utf-8"), content],
+                ):
+                    self.show_failure(reason)
+                self.assert_packet_pending()
 
 
 class UsageTests(HandoffFixture):

@@ -262,22 +262,51 @@ def write_packet(path: Path, body: bytes) -> None:
 # ------------------------------------------------------------------- --show
 
 
+def lost_the_race(path: Path) -> None:
+    """Refuse if an ENOENT on `path` was the directory going away, not a rival.
+
+    `read_text` and `os.rename` raise the same FileNotFoundError whether
+    another reader claimed the packet a microsecond earlier or the state
+    directory was removed underneath both of them. Only the first is a race,
+    and only the first is somebody else's doing. Reporting a wiped directory
+    as a rival session sends the reader looking for a process that never
+    existed, and tells them their packet was consumed when it was deleted --
+    two wrong facts about what happened to their work.
+
+    A surviving parent means the file alone went, which is the race. This is
+    a report, so it is read after the failure and not before it: a check that
+    ran first would be a guess about a directory that can vanish between the
+    guess and the call.
+    """
+    if not path.parent.is_dir():
+        raise Refusal(
+            f"the handoff directory {path.parent} no longer exists, so the "
+            f"packet at {path} could not be claimed; nothing took it, the "
+            "directory holding it was removed")
+
+
 def claim(path: Path) -> dict | None:
-    """Read a packet and take exclusive ownership of it, or return None.
+    """Read and claim a packet; return None only if the source disappeared.
 
     The claim is the rename: two readers racing in one directory both try to
-    move the same source file away, and only the first can succeed.
+    move the same source file away, and only the first can succeed. Other
+    filesystem errors must reach main() with their actual cause intact, and a
+    vanished directory is told apart from a lost race by `lost_the_race`.
     """
     try:
         packet = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except FileNotFoundError:
+        lost_the_race(path)
         return None
+    except ValueError:
+        raise Refusal(f"the handoff packet at {path} is not readable JSON") from None
     if not isinstance(packet, dict):
-        return None
+        raise Refusal(f"the handoff packet at {path} is not a JSON object")
     claimed = path.with_name(path.name + f".claim.{os.getpid()}")
     try:
         os.rename(path, claimed)
-    except OSError:
+    except FileNotFoundError:
+        lost_the_race(path)
         return None
     packet["consumed"] = now_iso()
     try:
@@ -327,11 +356,32 @@ def human(packet: dict) -> str:
 
 def show(path: Path, root: str, as_json: bool, out) -> int:
     if not path.is_file():
+        # `is_file` is false for an empty directory, a broken symlink and a
+        # fifo as readily as for nothing at all, and only the last of those
+        # means no packet is pending. Told the other three are "nothing", a
+        # reader goes looking for a packet that was never written instead of
+        # for the thing standing in its place -- which they have to remove
+        # before any packet can be written here again.
+        if os.path.lexists(path):
+            raise Refusal(
+                f"{path} exists but is not a regular file, so it is not a "
+                f"handoff packet for {root}; remove or rename it, and the "
+                "next handoff can be written")
         raise Refusal(f"no handoff packet is pending for {root}")
     try:
         pending = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except FileNotFoundError:
+        # It was a file one line ago. Either a rival claimed it in between or
+        # the directory went away; `lost_the_race` separates those, and
+        # neither of them is unreadable JSON.
+        lost_the_race(path)
+        raise Refusal(
+            f"the handoff packet for {root} was taken by another session") from None
+    except ValueError:
         raise Refusal(f"the handoff packet for {root} is not readable JSON") from None
+    # Every other OSError -- a permission, an EIO, a directory in the packet's
+    # place -- reaches main() with its cause intact. Calling those "not
+    # readable JSON" named the one thing that was not wrong with them.
     if not isinstance(pending, dict):
         raise Refusal(f"the handoff packet for {root} is not a JSON object")
     if pending.get("consumed"):
