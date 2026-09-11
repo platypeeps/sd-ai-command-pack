@@ -4040,7 +4040,7 @@ from a number the operator types.
       (`bin/sd_registry.py:256-295`, 38) is the one built instance of turning
       `sd_db` rows into this pack's frozen dataclasses. The file side it must
       parallel is `_status_report` (`bin/sd_lib.py:779-807`, 26) with
-      `status_report` (`bin/sd_lib.py:812-828`, 17), and the row side has to answer one
+      `status_report` (`source:bin/sd_lib.py::status_report`, 17), and the row side has to answer one
       question more than either — whether a line found beside the row is
       stale — so the larger analogue is the honest one.
     - `sd_lib.delivered`, from git alone — **50**. Criterion 13 requires that
@@ -4048,7 +4048,7 @@ from a number the operator types.
       `sd_lib.delivered` and nothing else, and that it answers from a merge
       commit's `Item:` and `Delivers:` trailers. The built trailer scan is
       `attribution` (`bin/sd_lib.py:1153-1186`, 34) with `_in_range`
-      (`bin/sd_lib.py:1175-1190`, 16). `author_vendors` (32) is *not*
+      (`source:bin/sd_lib.py::_in_range`, 16). `author_vendors` (32) is *not*
       re-reserved: it maps authors onto vendors and `delivered` has no
       equivalent of that.
     - `bin/sd-status`'s row read and its stale line — **38**.
@@ -4098,10 +4098,10 @@ from a number the operator types.
       return that switches three checks off is its spine
       (`bin/sd-docs-lint:146`) and replacing it is not an edit at the edge.
     - rule 7, criterion 33's dangling-reference scan — **73**.
-      `check_citations` (`bin/sd-docs-lint:396-447`, 52) with
-      `resolve_citation` (`bin/sd-docs-lint:307-324`, 18) is the built rule of
+      `check_citations` (`source:bin/sd-docs-lint::check_citations`, 52) with
+      `resolve_citation` (`source:bin/sd-docs-lint::resolve_citation`, 18) is the built rule of
       this shape — enumerate references, resolve each, report the ones that do
-      not — plus 3 for the call in `run` (`bin/sd-docs-lint:500-522`).
+      not — plus 3 for the call in `run` (`source:bin/sd-docs-lint::run`).
     - the `sd_db` installer step — **19**, and not the 38 it looks like.
       `prd.md:1538-1544` reads as unbuilt scope and is not: `system_checkout`
       (`bin/sd_install.py:1194-1203`, 10), `library_source` (`:1206-1207`, 2),

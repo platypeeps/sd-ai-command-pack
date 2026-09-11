@@ -45,8 +45,7 @@ while `make check` passed green each time. Every other citation in that same fil
 was caught on the first run. The gate was working; that one line was invisible to
 it, and nothing distinguished "checked and correct" from "never looked at".
 
-`PAIR` is anchored deliberately — `test_prose_between_a_symbol_and_a_citation_breaks_the_anchor`
-(`tests/test_doc_citations.py:146-155`) asserts that a symbol and a citation
+`PAIR` is anchored deliberately — `test_prose_between_a_symbol_and_a_citation_breaks_the_anchor` (`source:tests/test_doc_citations.py::test_prose_between_a_symbol_and_a_citation_breaks_the_anchor`) asserts that a symbol and a citation
 separated by prose do *not* match, so the anchoring is a design decision with a
 test defending it, not an oversight. What has no test is the case where a real
 citation is written in a shape the anchor rejects.
@@ -62,7 +61,7 @@ That is false, and review said so. It was written from the 24-citation grep
 without checking what the gate does with each one. Measured:
 
 - 21 are under `docs/**/archive/**`, which
-  `anchored_citations` (`tests/test_doc_citations.py:80-102`) skips by path part
+  `anchored_citations` (`source:tests/test_doc_citations.py::anchored_citations`) skips by path part
   regardless of regex.
 - 1 is in `CHANGELOG.md`, which the corpus glob never reaches.
 - 1 names a file deleted with the retired stack, which `is_inside_repo` skips.
@@ -87,8 +86,7 @@ The interesting silencer is the third, not the fourth.
 
 `is_inside_repo` exists for a real reason, stated in its own comment: `REPO_ROOT / path`
 follows `..` out of the tree, so an edit to any document under `docs/` could make
-CI read a file of its choosing, and `test_a_citation_cannot_send_this_test_outside_the_checkout`
-(`tests/test_doc_citations.py:133-144`) defends that. It must stay.
+CI read a file of its choosing, and `test_a_citation_cannot_send_this_test_outside_the_checkout` (`source:tests/test_doc_citations.py::test_a_citation_cannot_send_this_test_outside_the_checkout`) defends that. It must stay.
 
 But it answers two questions with one `continue`. *"This path escapes the
 checkout"* is a security refusal and should be silent. *"This path is inside the
@@ -124,7 +122,7 @@ and reports neither.
    not by an argument anyone wrote down.
 6. `make check` green, and the number of citations actually *validated* is
    reported rather than assumed — the control test
-   `test_the_scan_reaches_the_documents` (`tests/test_doc_citations.py:117-131`)
+   `test_the_scan_reaches_the_documents` (`source:tests/test_doc_citations.py::DocCitationTests`)
    already exists for this reason and asserts only that the count is non-zero.
 
 ## Open questions
