@@ -88,6 +88,7 @@ leave unrelated work items where they are.
 | `--work-dir` | Work root other than `docs/work` |
 | `--worktree` | Create the branch in its own git worktree (one writer per checkout) |
 | `--from gh:owner/repo#123` / `--from jira:KEY-123` | Seed `## References` from a tracker item, resolved by `sd-trackers ref` |
+| `--from sd:123` | Seed the interview and `## References` from a row in the shared database |
 | `--from-suggestion` | Reserved: seed from a local proposal note; not implemented |
 | `--from-proposal` | Seed from a skill proposal |
 
@@ -99,12 +100,43 @@ says rather than what anyone remembered:
 ```bash
 sd-trackers ref gh:openai/whisper#42
 sd-trackers ref jira:ABC-45
+sd-trackers ref sd:455
 ```
 
 It prints one bullet — the link, the title, the state, and the date the item
 last moved — which goes verbatim under the PRD's `## References` heading, the
 one the template already ships. Under `--decision`, where the template has no
 such heading, add it above the bullet.
+
+### `sd:<id>` seeds the interview too
+
+The two remote schemes seed a citation and nothing else, deliberately: an
+issue's prose copied into a work item is stale the moment somebody edits the
+issue. `sd:` is different, because the row is not somewhere else. It is in the
+same database this item will be registered in, and the person who wrote it is
+the person planning now.
+
+So read the row before the interview and use it:
+
+```bash
+sd store item 455 --json
+```
+
+- **`title`** is the item's opening line. Do not re-ask for it.
+- **`body`** is what the filer already said. Treat it as the answer to "what
+  is wrong", and interview for what it does *not* settle — scope, the
+  acceptance criteria, what is out of scope — rather than from a blank page.
+- **`repo`** is the repository the row belongs to. If it names one, that is the
+  checkout to plan in, and a mismatch with the current directory is worth
+  raising before writing anything.
+
+The citation still goes under `## References`, and it carries no link: the row
+lives in this machine's database, so `sd:455` and `sd store item 455` are the
+whole reference. A URL there would look checkable and resolve nowhere.
+
+**The row is not the plan.** Seeding is a starting point, not permission to
+skip the interview — a one-line row does not become a PRD by being read
+aloud.
 
 Read the exit code before pasting. **1** means the tracker was asked and the
 reference did not resolve — no such issue, a repository you cannot see, or an
