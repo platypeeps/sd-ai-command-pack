@@ -43,18 +43,35 @@ create a PRD just to record routine progress or work already merged.
    `status: planning` for the legacy reader. Report an
    unrecognized marker instead of falling back. Do not recreate retired
    frontmatter from a template.
-3. **Review the plan.** Run `sd-review --scope planning`, which resolves the
+3. **Register the row**, when the item is under `docs/work` and that root's
+   `.status-source` says `row`. Run `sd work register docs/work/<item>/prd.md`
+   as soon as the file exists. Under a `--work-dir` root the step does not
+   apply and the command will refuse: a row's identity is
+   `<checkout>::docs/work/<item>/prd.md`, and every reader keys on it, so
+   there is no row shape for an item that lives somewhere else. Say the item
+   is unregistered rather than inventing one. The
+   retirement handed status to the database and took the importer away with
+   it, so a folder written after the cutover has a `prd.md` and no row, which
+   is the state `sd-status` reports as `status-unreadable`. Registering is
+   idempotent: a second call prints `already registered` and changes nothing,
+   so re-running it on an item that already has a row is safe. The row takes
+   its name and its date from the file's `title:` and `created:`, which must
+   both be present. With `file` or no marker, skip this step — the `status:`
+   field is the record there, and a row beside it would be a second answer to
+   one question. `sd work register` refuses such a repository by name, so the
+   step cannot create that state by mistake.
+4. **Review the plan.** Run `sd-review --scope planning`, which resolves the
    active `planning`/`in_progress` item's `prd.md`/`design.md`/`implement.md`
    and routes them to the reviewer the registry gives. This is the development
    flow's *prd and design* review point; its cap is that row's in
    `.claude/rules/sd-planning-adversarial-review.md`. Record the findings
    under a `## Review` heading in the item.
-4. **Promote.** `planning → ready` only when acceptance criteria are present
+5. **Promote.** `planning → ready` only when acceptance criteria are present
    and **no open `BLOCKING` line remains**. An unresolved blocking concern is a
    stop, not a note. In a checkout using row status, write the transition
    through `sd_db`; a missing item row is reported as missing, never replaced
    by a status field or a GitHub issue.
-5. **Branch.** Create the branch and record it as `branch:` in the PRD
+6. **Branch.** Create the branch and record it as `branch:` in the PRD
    frontmatter when work starts. An `in_progress` item still needs a branch
    (`sd-docs-lint` rule 2); in a checkout using row status, the status itself
    remains on the row.
@@ -132,6 +149,6 @@ out by the agent. `sd-review`, `sd-check`, `sd-status`, `sd-handoff`,
 `sd suggest add` can record a proposal on an existing imported work item, but
 `--from-suggestion` and `--from-proposal` have no resolution path yet. Do not
 invent one. `sd task add` captures a standalone task; it does not create or
-import a planning artifact. An artifact whose row has not been imported needs
-that prerequisite resolved before row-backed planning can continue.
-`sd-status` only reports; it does not import the item.
+import a planning artifact. `sd work register` is the one command that makes
+the row for an artifact already on disk; `sd-status` only reports, and never
+registers the item it is complaining about.

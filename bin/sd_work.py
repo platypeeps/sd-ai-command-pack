@@ -10,6 +10,7 @@ import argparse
 import getpass
 import json
 import os
+import pathlib
 import stat
 from typing import Any
 
@@ -33,6 +34,130 @@ def _library():
     return sd_db, workflow
 
 
+#: What `register` calls that a build predating it does not carry, as
+#: `(module suffix, attribute)`.
+#:
+#: The import above cannot stand in for this. `sd_db.workflow` has existed for
+#: a long time and imports cleanly on every build; `register_work_item` is new
+#: inside it. Checking only that the module arrived would let a stale library
+#: reach the call and fail there as an `AttributeError` -- a traceback, in a
+#: verb that is careful never to produce one, and naming a Python attribute
+#: rather than the install that is behind. Named, all three, so the remedy is
+#: a sentence instead of a stack.
+REGISTER_NEEDS = (
+    ("workflow", "register_work_item"),
+    ("repos", "registered_for"),
+    ("sources.docs_work", "default_branch"),
+)
+
+
+def _register_library(sd_db):
+    """The three modules `register` reads and writes through, or a refusal.
+
+    Checked before the first of them is called, so a machine carrying a build
+    that predates the verb is told which install to fix rather than which
+    attribute was absent.
+    """
+
+    import importlib  # noqa: PLC0415 - only this verb needs it
+
+    found = {}
+    missing = []
+    for module_name, attribute in REGISTER_NEEDS:
+        try:
+            module = importlib.import_module(f"sd_db.{module_name}")
+        except ImportError:
+            missing.append(f"sd_db.{module_name}")
+            continue
+        if not hasattr(module, attribute):
+            missing.append(f"sd_db.{module_name}.{attribute}")
+            continue
+        found[module_name] = module
+    if missing:
+        raise WorkRefusal(
+            "the installed sd_db cannot register work items; it is missing "
+            + ", ".join(missing)
+            + ". Install the current system/local-sd-db build with the pack's "
+            "installer (`sd-install`), which provisions it from the `system` "
+            "checkout at its tag, then run this again."
+        )
+    return tuple(found[name] for name, _ in REGISTER_NEEDS)
+
+
+def _frontmatter(prd: pathlib.Path) -> tuple[str, str]:
+    """`title:` and `created:`, or a refusal naming the file and what it lacks."""
+
+    try:
+        from sd_db.sources.frontmatter import FrontmatterError  # noqa: PLC0415
+        from sd_db.sources.frontmatter import read as read_frontmatter  # noqa: PLC0415
+    except ImportError as error:
+        raise WorkRefusal(
+            "the installed sd_db cannot read work-item frontmatter; install "
+            "the current system/local-sd-db build"
+        ) from error
+    try:
+        front, _ = read_frontmatter(prd.read_text(encoding="utf-8"))
+    except (FrontmatterError, OSError, UnicodeError) as failure:
+        raise WorkRefusal(f"{prd}: {failure}") from failure
+    title, created = front.get("title"), front.get("created")
+    if not title or not created:
+        raise WorkRefusal(
+            f"{prd} needs `title:` and `created:` in its frontmatter; "
+            "the row takes its name and its date from the file, not from you")
+    return str(title), str(created)
+
+
+def _register(sd_db, connection, args, who: str) -> Any:
+    """Make the row that owns a `docs/work` folder already on disk.
+
+    The folder is the input and git is the rest of it: the title and date come
+    from the frontmatter, the branch and commit from the checkout, and the
+    status is always `planning`, because an item nobody has started is what a
+    new folder is. Nothing here decides anything, which is why it takes no
+    flags beyond the path.
+
+    There is no repository argument, for the reason `sd-status` has none
+    (R10-D6): the checkout is the one enclosing the working directory, and the
+    path is relative to it. A row whose path resolved against a checkout the
+    caller was not standing in would name a file nobody can read. Which *row*
+    that checkout belongs to is a further question, answered below by its
+    origin rather than by its place on this disk.
+    """
+
+    workflow, repos, docs_work = _register_library(sd_db)
+    root = sd_lib.repo_root()
+    if root is None:
+        raise WorkRefusal("register requires a Git checkout")
+    prd = (root / args.path).resolve()
+    try:
+        relative = prd.relative_to(root).as_posix()
+    except ValueError:
+        raise WorkRefusal(f"{args.path} is outside {root}") from None
+    if not prd.is_file():
+        raise WorkRefusal(f"no file at {prd}")
+    title, created = _frontmatter(prd)
+    # The repository this checkout *is*, not the directory it sits in. A
+    # runner clone carries the same files at another path, and resolving by
+    # path alone refuses every run made from one.
+    origin = sd_lib.git_output(["remote", "get-url", "origin"], root)
+    repo = repos.registered_for(connection, str(root), origin or None)
+    commit = sd_lib.git_output(
+        ["log", "-1", "--format=%H", "--", relative], root)
+    # The branch the work will land on, read from `origin/HEAD`, and never the
+    # one that happens to be checked out. Registration comes before the work
+    # branch exists (`sd-plan` writes the plan at step 2 and branches at step
+    # 6), so the checked-out branch is whatever the planner was standing on --
+    # `main`, or some unrelated feature branch, or the literal string `HEAD`
+    # on a detached checkout. The library's own reader answers it, so a folder
+    # registered here and one registered by `sd-db work register` get the same
+    # row rather than two spellings of the branch.
+    return workflow.register_work_item(
+        connection, repo=repo, path=relative, title=title, created_at=created,
+        branch=docs_work.default_branch(root),
+        source_commit=commit or None, who=who,
+    )
+
+
 def _emit(value: Any, *, machine: bool) -> None:
     if machine:
         print(json.dumps(value, ensure_ascii=False))
@@ -45,6 +170,12 @@ def _emit(value: Any, *, machine: bool) -> None:
         due = f" · due {row['due']}" if row.get("due") else ""
         print(f"#{row['id']}  {row['status']}  {row['title']}{priority}{due}")
     if isinstance(value, dict):
+        # `register` is the one verb that can do nothing and still succeed.
+        # Registering twice is deliberately not an error -- the unique index
+        # makes the second call safe -- but a caller who cannot tell the two
+        # apart will read "here is the row" as "I just made it".
+        if value.get("created") is False:
+            print("already registered; nothing changed")
         for note in value.get("notes", []):
             resolved = " · resolved" if note.get("resolved_at") else ""
             print(f"  note #{note['id']} · {note['kind']}{resolved}: {note['body']}")
@@ -104,6 +235,8 @@ def run(args: argparse.Namespace) -> int:
         elif action == "resolve":
             result = workflow.resolve_item_note(
                 connection, args.note, who=who, expected_revision=revision)
+        elif action == "register":
+            result = _register(sd_db, connection, args, who)
         elif action in {"relink", "cancel", "deliver"}:
             import sd_db.progress as progress
 
@@ -327,6 +460,12 @@ def register(groups: Any, store: Any) -> None:
     cancel.add_argument("item", type=int)
     cancel.add_argument("--reason", required=True)
     _output(cancel, "cancel", revision=True)
+    register_verb = working.add_parser(
+        "register", help="make the row that owns a docs/work folder on disk")
+    register_verb.add_argument(
+        "path", help="docs/work/<item>/prd.md, relative to the repository")
+    _output(register_verb, "register")
+
     deliver = working.add_parser("deliver", help="verify a delivery commit and complete its item")
     deliver.add_argument("item", type=int)
     deliver.add_argument("commit", help="full commit SHA carrying the item's Delivers trailer")
