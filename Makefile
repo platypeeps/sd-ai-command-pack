@@ -30,10 +30,11 @@ test:
 # lint-clean locally and unlinted in CI. Derive it, do not duplicate it.
 #
 # `bin/` is enumerated from the index rather than listed, for the same reason
-# the LOC caps are: a hand-written list cannot see the file somebody adds next
-# month, and that file is then lint-clean by never having been linted. The list
-# here was that trap in miniature until 2026-08-31 -- it had already been named
-# as one in tests/test_loc_caps.py's docstring. Everything tracked under `bin/`
+# tests/test_code_health.py enumerates: a hand-written list cannot see the file
+# somebody adds next month, and that file is then lint-clean by never having
+# been linted. The list here was that trap in miniature until 2026-08-31, and
+# tests/test_loc_caps.py's docstring had already named it as one.
+# Everything tracked under `bin/`
 # is Python (tests/test_no_shipped_shell.py enforces it), so a non-Python file
 # arriving there fails lint loudly, which is the right direction to fail.
 LINT_BIN := $(shell git ls-files -- bin)

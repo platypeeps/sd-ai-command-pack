@@ -326,6 +326,14 @@ class LineBudgetTests(unittest.TestCase):
     # covering it. `test_the_migration_tools_stay_under_theirs` below is still
     # a duplicate of `test_loc_caps.py`, currently in agreement, which is
     # exactly the state the bin ceiling was in before it drifted.
+    #
+    # What replaced the `bin/` ceiling is `tests/test_code_health.py`, and it
+    # is deliberately not a number this file could hold a second copy of: its
+    # ceilings are per function, so nothing here aggregates to a total that
+    # could drift from one. The three line-count ceilings left in the
+    # repository are the lane total above, the migration ceiling checked by
+    # `test_the_migration_tools_stay_under_theirs` below, and the caps
+    # `tests/test_loc_caps.py` still keeps.
 
     def test_the_shared_core_exemption_names_files_that_exist(self) -> None:
         # The one hand-written name in the lane's derivation. A rename that

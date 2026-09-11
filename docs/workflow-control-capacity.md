@@ -322,3 +322,27 @@ This preparatory change touches nothing under `bin/`, so it lands in the shape
 R11-D24 asks for, against a tree the retired cap still passes at exactly
 20,803 of 20,803. All behavioral, inventory, native, external-review and merge
 gates remain enforced.
+
+## 2026-09-11: `bin/` gets a successor mechanism, and this record closes
+
+R11-D48 above retired the `bin/` ceiling and left no successor. This entry
+records the successor: `tests/test_code_health.py`, five ceilings that apply
+per function rather than per directory -- cyclomatic complexity, statement
+length, nesting depth, structural duplicate pairs and unreferenced public
+functions.
+
+The two entries are one decision in two commits, and the order matters. R11-D48
+had to stand on its own argument, because "the cap never refused anything" is
+true whether or not anything replaces it. Nothing here weakens it.
+
+This document closes with this entry. Every record above it exists because a
+directory total had to be raised before a feature could land, and R11-D24's
+clause made each raise its own serialised pull request. The new ceilings do not
+move when a feature is added -- that is the single property they were chosen
+for -- so there is no number to raise and no preparatory record to write. A
+function that exceeds one of them is over its ceiling because of how it is
+written, which is a review question, not a capacity question.
+
+What the file still governs: `MIGRATE_CAP`, the three dashboard constants, and
+the review lane's 1,986, none of which R11-D48 retired and none of which this
+change touches.
