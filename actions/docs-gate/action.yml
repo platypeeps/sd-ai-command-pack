@@ -3,6 +3,9 @@ description: >-
   Run the research kit's mechanical checks against the repository the workflow
   is in. Reads the checkout, writes nothing to it, and requests no reviewer.
 
+  Executes `research.conf.py` from that checkout, so use it only where the
+  checked-out code is trusted. See the README.
+
 inputs:
   verbs:
     description: >-
@@ -35,12 +38,21 @@ runs:
         # being skipped, because a gate that silently ran nothing is the failure
         # this action exists to avoid. `render` is excluded deliberately; it
         # writes, and this action promises it does not.
+        count=0
         for verb in ${SD_DOCS_GATE_VERBS}; do
           case "${verb}" in
-            review|checklinks|pins|conventions) ;;
+            review|checklinks|pins|conventions) count=$((count + 1)) ;;
             *) echo "sd docs gate: refusing unknown or writing verb '${verb}'" >&2; exit 1 ;;
           esac
         done
+        # An empty or whitespace-only input word-splits to nothing, so both
+        # loops would run zero times and the step would exit 0 having checked
+        # nothing at all -- the exact failure the allow-list above refuses to
+        # make. It is refused here too.
+        if [ "${count}" -eq 0 ]; then
+          echo "sd docs gate: 'verbs' names no check, so this gate would report a pass on nothing" >&2
+          exit 1
+        fi
         status=0
         for verb in ${SD_DOCS_GATE_VERBS}; do
           echo "::group::sd-research-kit ${verb}"
