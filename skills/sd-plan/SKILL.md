@@ -139,12 +139,16 @@ skip the interview — a one-line row does not become a PRD by being read
 aloud.
 
 Read the exit code before pasting. **1** means the tracker was asked and the
-reference did not resolve — no such issue, a repository you cannot see, or an
-answer this could not read. **2** means it could not be asked at all: `gh`
-missing or unauthenticated, the Jira variables unset, or a reference that does
-not parse. Neither is a licence to hand-write a
-citation: an unresolvable reference is a question for the user, and a made-up
-link in a work item outlives the session that invented it.
+reference did not resolve — no such issue or item, a repository you cannot
+see, or an answer this could not read. **2** means it could not be asked at
+all: `gh` missing or unauthenticated, the Jira variables unset, a database
+this machine cannot open or read, or a reference that does not parse. The
+line between them matters most for `sd:`, where both ends are local: a typo in
+an id exits 1, and an unprovisioned or unreadable store exits 2. Reading the
+second as the first would report a machine that was never asked as an item
+that does not exist. Neither is a licence to hand-write a citation: an
+unresolvable reference is a question for the user, and a made-up link in a
+work item outlives the session that invented it.
 
 The issue's own text stays in the issue. Cite the link, read the issue for the
 interview, and leave its prose where it will still be current next month.
