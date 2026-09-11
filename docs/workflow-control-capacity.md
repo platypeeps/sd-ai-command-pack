@@ -280,3 +280,45 @@ Its runtime remains at 20,745 bin lines, within the old ceiling.
 Implementation follows in a separate pull request stacked on this one.
 All behavioral, inventory, native, external-review, and merge gates remain enforced.
 This capacity decision neither proves implementation correctness nor increases the provider-call allowance.
+
+## R11-D48, 2026-09-11: the `bin/` ceiling is retired
+
+`BIN_CAP` is deleted, along with its derivation chain and
+`test_bin_stays_under_its_ceiling`. `bin/` now has no line-count ceiling and no
+successor mechanism. This is a removal, not a raise, and it is the last entry
+this document will carry for that ceiling.
+
+The record it is argued from is `CEILING_HISTORY["BIN_CAP"]`, which is kept in
+`tests/test_loc_caps.py` after the constant is gone:
+
+| | |
+| --- | --- |
+| Recorded values | 21 |
+| First | 8,000 on 2026-08-30 |
+| Last | 20,803 on 2026-09-10 |
+| Span | 11 days |
+| Downward moves | 0 |
+| Refusals | 0 |
+
+R11-D41 read the first nine of those on 2026-09-06 and kept the gate,
+reasoning that a ceiling which only reports is what the retired stack had.
+Twelve further raises have not changed the answer: the gate has still never
+returned "no". What it has returned is cost — R11-D24's clause forbids raising
+a cap in the pull request that crossed it, so every raise is a serialised
+preparatory pull request of its own, and R11-D38 alone cost an agent
+twenty-two minutes and blocked four units of work behind it.
+
+A control that has never refused is not bounding anything; it is charging for
+the paperwork of agreeing. The clause is what made that charge compulsory, so
+the way to stop paying it is to remove the cap rather than to keep the cap and
+waive the clause.
+
+Not retired, and not to be read as covered by this: `MIGRATE_CAP`;
+`DASHBOARD_CAP`, `DASHBOARD_CODE_CAP` and `DASHBOARD_CODE_SLACK`, which have a
+code/prose split and a payable-in-kind rule that `bin/` never had; and the
+review lane's ceiling of 1,986 in `tests/test_sd_review_boundary.py`.
+
+This preparatory change touches nothing under `bin/`, so it lands in the shape
+R11-D24 asks for, against a tree the retired cap still passes at exactly
+20,803 of 20,803. All behavioral, inventory, native, external-review and merge
+gates remain enforced.
