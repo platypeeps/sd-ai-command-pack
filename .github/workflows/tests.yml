@@ -153,6 +153,12 @@ jobs:
       - name: Mypy (pack Python)
         run: python3 -m mypy $(make -s lint-mypy-paths)
 
+      # The docs lint runs here and not in the unittest job: the tests lint
+      # fixture repositories they build, never this checkout's own docs/work.
+      # It reads sd_lib and the tree, so the lint job's dependencies suffice.
+      - name: Docs lint (docs/work, docs/spec, docs/decisions)
+        run: python3 bin/sd-docs-lint
+
   bash32:
     name: bash 3.2 syntax
     runs-on: ubuntu-latest

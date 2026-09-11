@@ -246,7 +246,7 @@ arrives.
 
 ```bash
 make setup   # once
-make check   # test + lint + audit
+make check   # test + lint + audit + docs-lint
 ```
 
 CI is four jobs, named here as branch protection sees them:

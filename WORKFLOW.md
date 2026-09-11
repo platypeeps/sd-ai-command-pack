@@ -70,7 +70,10 @@ These run without being asked.
   it, the dashboard sets it in one
   action on a repository you own, and an unattended merge into a branch
   that is not refuses naming the setting.
-- `make check` runs `sd-docs-lint` rules 1 to 4 whenever `docs/work/` exists.
+- `make check` and the pack's `lint` CI job run `sd-docs-lint` against the
+  checkout's own `docs/work/`, `docs/spec/` and `docs/decisions/`.
+  `sd-ship` runs it again at delivery time. A consumer copies the one CI
+  step from `.github/workflows/tests.yml`; nothing runs it there otherwise.
 - A commit to the pack, the system repository or the writing repository names
   what needed it: `Needed-by: <item id>` or `Needed-by: cost | efficiency |
   visibility`. `sd-ship` warns when the trailer is missing and ships anyway.
