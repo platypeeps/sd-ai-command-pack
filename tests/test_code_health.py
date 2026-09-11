@@ -353,10 +353,15 @@ def units() -> tuple[Unit, ...]:
         relative = path.relative_to(REPO_ROOT).as_posix()
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
-        except (SyntaxError, OSError) as failure:
-            # Never `continue`. Skipping the file would drop every function in
-            # it from every ceiling at once, and the suite would go green on a
-            # smaller corpus without saying so.
+        except (SyntaxError, OSError, UnicodeDecodeError) as failure:
+            # Never `continue` without recording. Skipping the file would drop
+            # every function in it from every ceiling at once, and the suite
+            # would go green on a smaller corpus without saying so.
+            #
+            # `UnicodeDecodeError` is named because it is a `ValueError`, not
+            # an `OSError` -- a tracked file with a non-UTF-8 encoding would
+            # otherwise raise straight out of the walk, which fails the run but
+            # as a traceback rather than as the one sentence this promises.
             BROKEN.append(f"{relative}: {failure}")
             continue
         PARSED.add(relative)
