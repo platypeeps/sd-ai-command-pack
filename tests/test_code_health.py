@@ -1,14 +1,19 @@
 """What `bin/` and `dashboard/` may not become, measured instead of asserted.
 
-This replaces `tests/test_loc_caps.py`, which capped total lines per directory.
-That cap was raised eighteen times in eleven days and lowered never, while
-`bin/` grew from 8,000 lines to 20,803 -- so it never once said no. It could
-not: every capability adds lines, and refusing the lines means refusing the
-capability. A number that must be raised to let work proceed is a record of
-growth wearing the costume of a limit.
+This replaces one check, not one file: `BIN_CAP` in `tests/test_loc_caps.py`,
+which capped total lines under `bin/`. That file survives and still enforces
+the `migrate-*` and dashboard ceilings; only the `bin/` total is retired here.
 
-Worse, it charged for prose. `bin/` measures 20,832 lines today, of which
-13,144 carry code and 7,688 are docstring, comment or blank. House style puts
+That cap was raised eighteen times in eleven days and lowered never, while
+`bin/` grew from 8,000 lines to the 20,803 it was retired at -- so it never
+once said no. It could not: every capability adds lines, and refusing the lines
+means refusing the capability. A number that must be raised to let work proceed
+is a record of growth wearing the costume of a limit.
+
+Worse, it charged for prose. `bin/` measures 20,832 lines today -- already 29
+past the figure it was retired at, from work that landed in the days between,
+and nothing counts them now. Of those, 13,144 carry code and 7,688 are
+docstring, comment or blank. House style puts
 design reasoning in docstrings, so under a line cap explaining costs exactly
 what implementing costs, and the one time the cap actually bound, what got
 deleted was an explanation (`dashboard/` at 3,999 of 4,000, prose trimmed to
@@ -19,7 +24,7 @@ is added**. Adding a command adds functions; it does not make existing
 functions branchier, or deeper, or duplicated. A ceiling on those can hold for
 years without a raise, which is what separates a limit from a ledger. The
 evidence that the distinction is real is in the shape of the growth itself --
-between 2026-09-01 and 2026-09-11 `bin/` went 7,947 to 20,803 lines, but
+between 2026-09-01 and 2026-09-11 `bin/` went 7,947 to 20,832 lines, but
 top-level definitions went 273 to 618. Nearly all of that 2.6x is more
 functions, not fatter ones, and no check here fires on it.
 
@@ -40,6 +45,8 @@ import itertools
 import pathlib
 import re
 import subprocess
+import tempfile
+import textwrap
 import tokenize
 import unittest
 
@@ -376,6 +383,25 @@ def _strip_nested(body: list[ast.stmt]) -> list[ast.stmt]:
     return owned
 
 
+def _header(node: ast.AST) -> list[ast.AST]:
+    """The parts of a nested `def` or `class` the enclosing scope evaluates.
+
+    Decorators, the argument list with its defaults and annotations, a return
+    annotation, and a class's bases and keywords. Not the body, and not the
+    name: those belong to the nested scope, which is measured separately.
+    """
+
+    parts: list[ast.AST] = list(node.decorator_list)
+    if isinstance(node, ast.ClassDef):
+        parts.extend(node.bases)
+        parts.extend(node.keywords)
+        return parts
+    parts.extend(ast.iter_child_nodes(node.args))
+    if node.returns is not None:
+        parts.append(node.returns)
+    return parts
+
+
 def _own(function: ast.AST):
     """Nodes belonging to this function, stopping at each nested scope's body.
 
@@ -388,6 +414,13 @@ def _own(function: ast.AST):
     lexically the *outer* function's -- they run when the `def` is reached, not
     when the nested function is called -- so the walk descends into those and
     stops only at the body.
+
+    "Header" is every field evaluated at the `def` or `class` statement, which
+    is more than the argument list: a return annotation and a class's bases and
+    keywords run there too. Listing only decorators and `args` left
+    `def inner() -> factory(flag)` and `class C(factory(flag))` uncharged to
+    anybody, since a nested class gets no `Unit` of its own -- so a branch could
+    be moved into a nested header to duck this ceiling.
     """
 
     stack = list(ast.iter_child_nodes(function))
@@ -395,9 +428,7 @@ def _own(function: ast.AST):
         node = stack.pop()
         yield node
         if isinstance(node, SCOPES):
-            stack.extend(node.decorator_list)
-            if not isinstance(node, ast.ClassDef):
-                stack.extend(ast.iter_child_nodes(node.args))
+            stack.extend(_header(node))
         else:
             stack.extend(ast.iter_child_nodes(node))
 
@@ -426,7 +457,15 @@ def complexity(function: ast.AST) -> int:
     return score
 
 
-NESTS = (ast.If, ast.For, ast.While, ast.With, ast.Try, ast.AsyncFor, ast.AsyncWith)
+# Every statement that opens an indented block, because the measure is the
+# indentation a reader has to hold, not the kind of statement that caused it.
+# `match` and `except*` were missing here until 2026-09-11: both indent, so a
+# real sixth level could sit inside a `case` or an `except*` arm and read as
+# five. `match` is the load-bearing one -- `complexity` already charges for
+# each `case`, so leaving it out of the depth measure made the two disagree
+# about the same statement.
+NESTS = (ast.If, ast.For, ast.While, ast.With, ast.Try, ast.TryStar,
+         ast.AsyncFor, ast.AsyncWith, ast.Match)
 
 
 def depth(node: ast.AST, level: int = 0) -> int:
@@ -856,7 +895,15 @@ def _references() -> collections.Counter:
                         ".github", ".claude", "*.md"):
         if path == me:
             continue
-        text = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            # The corpus walk already records an unreadable tracked file in
+            # BROKEN, and `test_the_corpus_is_complete` names it with its
+            # path. Raising here instead would lose that diagnostic: this
+            # test sorts first, so a bare OSError would abort the run before
+            # the check that explains what is wrong ever gets to speak.
+            continue
         if path.suffix != ".py" and not _is_python_script(path):
             seen.update(words.findall(text))
             continue
@@ -903,6 +950,212 @@ def _explain(verb, ceiling, over, remedy: str) -> str:
         f"right, add the entry to the baseline in the same change, with the "
         f"reason in the commit message."
     )
+
+
+def measure(source: str) -> dict[str, Unit]:
+    """Every function in `source`, measured by the production walk.
+
+    Through `_walk` rather than beside it. A fixture that re-derived span or
+    digest would be a second copy of the pipeline, and the first thing a second
+    copy does is stop agreeing with the first -- which is the failure this
+    module exists to argue against, so it is not one to commit here.
+    """
+
+    return {
+        unit.key.split("::", 1)[1]: unit
+        for unit in _walk(ast.parse(textwrap.dedent(source)), "<fixture>", ())
+    }
+
+
+class Detectors(unittest.TestCase):
+    """That each measure answers the question it claims, on known inputs.
+
+    Every test above this point runs the detectors over the corpus as it
+    stands, and the corpus passes. That proves nothing about the detectors: a
+    measure that returned zero for everything would pass all eight, because
+    zero is under every ceiling. These are the cases that separate a working
+    check from a check that cannot fail -- each one a shape that slipped
+    through a real review round of this file.
+    """
+
+    def test_an_elif_chain_is_one_level_and_a_nested_if_is_not(self):
+        # Python builds `elif` as an `If` in the previous one's `orelse`, so a
+        # flat dispatch reads to a naive walker as one level per arm.
+        chain = measure("""
+            def f(x):
+                if x == 1:
+                    return 'a'
+                elif x == 2:
+                    return 'b'
+                elif x == 3:
+                    return 'c'
+            """)["f"]
+        nested = measure("""
+            def f(x):
+                if x == 1:
+                    return 'a'
+                else:
+                    if x == 2:
+                        return 'b'
+                    else:
+                        if x == 3:
+                            return 'c'
+            """)["f"]
+        self.assertEqual(chain.nest, 1, "an elif chain is one indented block")
+        self.assertEqual(nested.nest, 3, "else-nested ifs are three")
+        # Both are three decisions, though. Depth and complexity disagree about
+        # this pair on purpose: one measures indentation, the other branches.
+        self.assertEqual(chain.score, nested.score)
+
+    def test_match_and_except_star_are_counted_as_indentation(self):
+        for label, source in (
+            ("match", """
+                def f(x):
+                    match x:
+                        case 1:
+                            if x:
+                                return 1
+                """),
+            ("except*", """
+                def f(x):
+                    try:
+                        return 1
+                    except* OSError:
+                        if x:
+                            return 2
+                """),
+        ):
+            with self.subTest(block=label):
+                self.assertEqual(measure(source)["f"].nest, 2, label)
+
+    def test_a_lambda_parameter_does_not_bind_an_outer_free_name(self):
+        # Each function shadows the very module it calls, and they call
+        # different ones. If a lambda's parameter enters the enclosing bound
+        # set, `Alpha` renames `json` in the first and `yaml` in the second to
+        # the same slot, the two collapse to one digest, and two unrelated
+        # functions are reported as copies of each other.
+        #
+        # Shadowing matters: with `lambda json:` in both and the call sites
+        # differing, the digests differ whether or not the bug is present, so
+        # that pairing cannot tell the two implementations apart.
+        first = measure("""
+            def f(rows):
+                pick = lambda json: json
+                return json.dumps(rows)
+            """)["f"]
+        second = measure("""
+            def f(rows):
+                pick = lambda yaml: yaml
+                return yaml.dumps(rows)
+            """)["f"]
+        self.assertNotEqual(first.digest, second.digest)
+
+    def test_a_renamed_local_is_still_the_same_function(self):
+        # The whole point of the digest: a copy-paste that renamed its locals
+        # has to stay visible. Each pair below binds through a different AST
+        # field, and each field was missed at some point.
+        pairs = {
+            "parameter": ("def f(alpha):\n    return alpha + 1\n",
+                          "def f(beta):\n    return beta + 1\n"),
+            "except-as": ("def f(p):\n    try:\n        return open(p)\n"
+                          "    except OSError as first:\n        return first\n",
+                          "def f(p):\n    try:\n        return open(p)\n"
+                          "    except OSError as second:\n        return second\n"),
+            "import-as": ("def f():\n    import json as codec\n"
+                          "    return codec.dumps({})\n",
+                          "def f():\n    import json as writer\n"
+                          "    return writer.dumps({})\n"),
+            "match-as": ("def f(x):\n    match x:\n        case [1, *rest]:\n"
+                         "            return rest\n",
+                         "def f(x):\n    match x:\n        case [1, *tail]:\n"
+                         "            return tail\n"),
+        }
+        for field, (left, right) in pairs.items():
+            with self.subTest(binding=field):
+                self.assertEqual(measure(left)["f"].digest,
+                                 measure(right)["f"].digest)
+
+    def test_a_different_free_name_is_a_different_function(self):
+        # The other half of the same rule. A digest that ignored free names
+        # would call every two-line wrapper in the repository a clone.
+        self.assertNotEqual(
+            measure("def f(x):\n    return alpha(x)\n")["f"].digest,
+            measure("def f(x):\n    return beta(x)\n")["f"].digest)
+
+    def test_only_the_first_statement_is_a_docstring(self):
+        # Bare literals after the docstring are statements. Dropping them all
+        # let a function pad itself under the length ceiling with prose.
+        padded = measure("""
+            def f(x):
+                \"\"\"doc\"\"\"
+                y = x + 1
+                'pad'
+                'pad'
+                'pad'
+                return y
+            """)["f"]
+        self.assertEqual(padded.span, 5)
+
+    def test_a_nested_header_is_charged_to_the_enclosing_function(self):
+        # A nested `def` runs its decorators, defaults, annotations and a
+        # class's bases where the `def` sits -- so a branch moved there is the
+        # outer function's, and must not become nobody's.
+        for label, source in (
+            ("return annotation", """
+                def f(flag):
+                    def inner() -> (int if flag else str):
+                        return 1
+                    return inner
+                """),
+            ("class base", """
+                def f(flag):
+                    class C(Alpha if flag else Beta):
+                        pass
+                    return C
+                """),
+            ("default argument", """
+                def f(flag):
+                    def inner(x=(1 if flag else 2)):
+                        return x
+                    return inner
+                """),
+        ):
+            with self.subTest(header=label):
+                self.assertEqual(measure(source)["f"].score, 2, label)
+
+    def test_a_nested_body_is_not_charged_to_the_enclosing_function(self):
+        # The complement. Otherwise simplifying a factory cannot clear a score
+        # that belongs to the function it returns.
+        outer = measure("""
+            def f(rows):
+                def inner(x):
+                    if x:
+                        if x > 1:
+                            return 1
+                    return 0
+                return inner
+            """)
+        self.assertEqual(outer["f"].score, 1)
+        self.assertEqual(outer["f"].nest, 0)
+        self.assertEqual(outer["f.inner"].score, 3)
+
+    def test_the_migration_exception_is_scoped_to_bin(self):
+        self.assertTrue(_is_migration_tool(REPO_ROOT / "bin/migrate-rows"))
+        self.assertFalse(
+            _is_migration_tool(REPO_ROOT / "dashboard/migrate-store.py"))
+        self.assertFalse(_is_migration_tool(REPO_ROOT / "bin/sd_lib.py"))
+
+    def test_an_overlong_shebang_stays_in_the_corpus(self):
+        # Fail closed. A file whose first line outran the read window used to
+        # be classified "not Python" and leave every check in silence.
+        with tempfile.TemporaryDirectory() as home:
+            probe = pathlib.Path(home) / "entrypoint"
+            probe.write_bytes(
+                b"#!/usr/bin/env -S " + b"x" * SHEBANG_LIMIT + b" python3\n")
+            self.assertTrue(_is_python_script(probe))
+            plain = pathlib.Path(home) / "notes"
+            plain.write_bytes(b"just text\n")
+            self.assertFalse(_is_python_script(plain))
 
 
 if __name__ == "__main__":  # pragma: no cover
