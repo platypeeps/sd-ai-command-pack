@@ -160,10 +160,18 @@ class DocCitationTests(unittest.TestCase):
 STABLE_SOURCE = re.compile(r"`source:([A-Za-z0-9_./-]+)::([A-Za-z_][A-Za-z0-9_]*)`")
 
 
+#: Living documents that sit above `docs/`. `CONTRIBUTING.md` is where the
+#: convention itself is written down, example included, so a corpus that skips
+#: it would let the one citation every reader copies rot first and unnoticed.
+ROOT_DOCUMENTS = ("CONTRIBUTING.md",)
+
+
 def stable_source_citations(root: pathlib.Path) -> list[tuple[pathlib.Path, str, str]]:
     """Explicit source:path::symbol locators; existing pytest node IDs are untouched."""
+    documents = sorted(root.glob("docs/**/*.md"))
+    documents += [root / name for name in ROOT_DOCUMENTS if (root / name).is_file()]
     found = []
-    for doc in sorted(root.glob("docs/**/*.md")):
+    for doc in documents:
         if "archive" not in doc.parts:
             found.extend((doc, path, symbol) for path, symbol in
                          STABLE_SOURCE.findall(doc.read_text(encoding="utf-8")))
@@ -269,6 +277,27 @@ class StableSourceCitationTests(unittest.TestCase):
         (archive / "old.md").write_text("`source:bin/missing::gone`\n", encoding="utf-8")
         self.assertEqual(
             stable_source_citations(self.root), [(docs / "current.md", "bin/tool", "render")]
+        )
+
+    def test_root_documents_are_scanned_beside_the_docs_tree(self) -> None:
+        """`CONTRIBUTING.md` states the convention, so its own example must resolve.
+
+        Scoping the corpus to `docs/**` would leave the citation every reader
+        copies as the only one nothing checks.
+        """
+
+        docs = self.root / "docs"
+        docs.mkdir()
+        (docs / "current.md").write_text("`source:bin/tool::render`\n", encoding="utf-8")
+        contributing = self.root / "CONTRIBUTING.md"
+        contributing.write_text("prefer `source:bin/tool::render`\n", encoding="utf-8")
+        self.assertIn(
+            (contributing, "bin/tool", "render"), stable_source_citations(self.root)
+        )
+        contributing.write_text("prefer `source:bin/tool::deleted`\n", encoding="utf-8")
+        self.assertIn(
+            "found 0",
+            source_declaration_error(self.root, "bin/tool", "deleted") or "",
         )
 
     def test_existing_line_citations_still_reject_line_movement(self) -> None:
