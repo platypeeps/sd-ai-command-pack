@@ -126,9 +126,12 @@ sd store item 455 --json
 - **`body`** is what the filer already said. Treat it as the answer to "what
   is wrong", and interview for what it does *not* settle — scope, the
   acceptance criteria, what is out of scope — rather than from a blank page.
-- **`repo`** is the repository the row belongs to. If it names one, that is the
-  checkout to plan in, and a mismatch with the current directory is worth
-  raising before writing anything.
+- **`repo`** is the repository the row belongs to. It is something to check
+  against, never somewhere to go: the repository is still the one enclosing
+  cwd, and `Never accept a repo path` below holds here too. When the row names
+  a repository and it is not this checkout, stop and print both paths. The
+  user moves, or says which one is right; a plan written into the checkout the
+  agent chose is the failure that rule exists to prevent.
 
 The citation still goes under `## References`, and it carries no link: the row
 lives in this machine's database, so `sd:455` and `sd store item 455` are the
