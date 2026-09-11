@@ -111,8 +111,10 @@ class TaskCLI(unittest.TestCase):
         """A real checkout, because the repository is resolved by asking git."""
         root = self.home / name
         root.mkdir()
-        run = lambda *a: subprocess.run(["git", *a], cwd=str(root), check=True,
-                                        capture_output=True, text=True)
+        def run(*args):
+            return subprocess.run(["git", *args], cwd=str(root), check=True,
+                                  capture_output=True, text=True)
+
         run("init", "-q", "-b", "main")
         run("config", "user.email", "t@example.com")
         run("config", "user.name", "T")
