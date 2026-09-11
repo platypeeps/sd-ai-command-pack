@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 
 import sd_db  # noqa: E402
+import sd_db.repos  # noqa: E402
 import sd_work  # noqa: E402
 from sd_db.workflow import NOTE_KINDS  # noqa: E402
 
@@ -105,6 +106,60 @@ class TaskCLI(unittest.TestCase):
         self.call("task", "add", "Not another task", "--kind", "proposal", code=2)
         rows = json.loads(self.call("store", "items", "--json").stdout)
         self.assertEqual([row["id"] for row in rows], [state["item"]["id"]])
+
+    def _checkout(self, name):
+        """A real checkout, because the repository is resolved by asking git."""
+        root = self.home / name
+        root.mkdir()
+        run = lambda *a: subprocess.run(["git", *a], cwd=str(root), check=True,
+                                        capture_output=True, text=True)
+        run("init", "-q", "-b", "main")
+        run("config", "user.email", "t@example.com")
+        run("config", "user.name", "T")
+        (root / "README.md").write_text("x\n")
+        run("add", "README.md")
+        run("commit", "-qm", "first")
+        return root
+
+    def test_a_new_task_takes_the_repository_it_was_filed_from(self):
+        """The default is cwd's registered checkout, and never a refusal.
+
+        Two cases carry the design. A linked worktree resolves to its main
+        checkout, because `--show-toplevel` names the temporary worktree,
+        which is deleted long before anyone reads the row back. An
+        unregistered checkout falls back to no repository: `capture_task`
+        rejects an unregistered path, so a default that passed cwd through
+        would make the verb fail everywhere it used to work.
+        """
+        root = self._checkout("project")
+
+        unregistered = json.loads(
+            self.call("task", "add", "Before registering", "--json", cwd=root).stdout)
+        self.assertIsNone(unregistered["item"]["repo"])
+        self.assertIn("not a registered repository",
+                      self.call("task", "add", "Insisting", "--here", cwd=root, code=1).stderr)
+
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.repos.add(connection, root, home=self.home)
+
+        filed = json.loads(self.call("task", "add", "Inside", "--json", cwd=root).stdout)
+        self.assertEqual(filed["item"]["repo"], str(root.resolve()))
+
+        linked = self.home / "linked"
+        subprocess.run(["git", "worktree", "add", "-q", "-b", "side", str(linked)],
+                       cwd=str(root), check=True, capture_output=True, text=True)
+        from_worktree = json.loads(
+            self.call("task", "add", "From a worktree", "--json", cwd=linked).stdout)
+        self.assertEqual(from_worktree["item"]["repo"], str(root.resolve()))
+
+        opted_out = json.loads(
+            self.call("task", "add", "Neither", "--no-repo", "--json", cwd=root).stdout)
+        self.assertIsNone(opted_out["item"]["repo"])
+
+        outside = json.loads(self.call("task", "add", "Outside", "--json").stdout)
+        self.assertIsNone(outside["item"]["repo"])
+
+        self.call("task", "add", "Both", "--here", "--no-repo", cwd=root, code=2)
 
     def test_refusals_and_usage_have_distinct_exit_codes(self):
         self.assertIn("no item", self.call("store", "item", 9999, code=1).stderr)
