@@ -321,6 +321,44 @@ class AcknowledgementTests(unittest.TestCase):
             (root / ".github" / "sd-status.json").write_text(body, encoding="utf-8")
             return status.load_acknowledgements(root)
 
+    def test_the_schema_and_the_readers_vocabulary_name_the_same_facts(self) -> None:
+        """Two recitations of one list, so this enumerates both rather than a third.
+
+        `ACKNOWLEDGED_FACTS` decides what the reader accepts and the schema
+        decides what an editor is told to write. They are separate files, so a
+        fact added to one drifts from the other silently -- and the failure is
+        the bad kind: the schema offers a key the loader rejects, or the loader
+        accepts a key no author knows exists. Nothing here writes the expected
+        list down; both sides are read from their own source.
+        """
+        schema = json.loads(
+            (BIN.parent / ".github" / "sd-status.schema.json").read_text(encoding="utf-8")
+        )
+        state = schema["properties"]["accepted_gaps"]["items"]["properties"]["state"]
+        self.assertEqual(sorted(state["properties"]), sorted(status.ACKNOWLEDGED_FACTS))
+        # `additionalProperties: false` is what makes the schema half of this
+        # agreement binding; without it the schema would accept anything and
+        # only the loader would object, one commit later.
+        self.assertIs(state["additionalProperties"], False)
+
+    def test_absent_protection_is_a_distinct_observed_state_from_empty_protection(self) -> None:
+        """The fact that separates "no object" from "an object enforcing nothing".
+
+        Both reduce every other fact to the same falsy value, so without this
+        one the two branch states are indistinguishable to an acknowledgement
+        -- and they are not the same branch: one can be pushed to freely, the
+        other has a protection object someone can tighten.
+        """
+        self.assertFalse(status._observed_state(None)["branch_protection"])
+        self.assertTrue(status._observed_state({})["branch_protection"])
+        absent = status._observed_state(None)
+        empty = status._observed_state({})
+        self.assertNotEqual(absent, empty)
+        # ... and they differ in exactly that one fact, which is the point:
+        # the other four genuinely are constants on both.
+        differing = [key for key in absent if absent[key] != empty[key]]
+        self.assertEqual(differing, ["branch_protection"])
+
     def test_a_matching_acknowledgement_moves_the_finding_out_of_the_gaps(self) -> None:
         still_open, accepted = self.split(self.enforcing(), [self.ZERO_APPROVALS])
         self.assertEqual(still_open, [])
@@ -651,6 +689,75 @@ class ProtectionSectionTests(StatusFixture):
         completed = self.run_tool(SD_STATUS)
         self.assertIn("GAP [reviews] no pull-request review is required", completed.stdout)
         self.assertIn("no longer matches the live protection state", completed.stdout)
+
+    UNPROTECTED = {
+        "id": "unprotected",
+        "state": {"branch_protection": False},
+        "because": "sole operator, and no CI checks exist for protection to require",
+        "since": "2026-09-11",
+        "until": "a second account with push rights exists",
+    }
+
+    def test_an_accepted_unprotected_branch_prints_as_accepted(self) -> None:
+        """The 404 branch returned before it ever applied the file.
+
+        `unprotected` is the only gap a repository with no protection can be
+        told about, so it is the one a repository that has decided against
+        protection most needs to accept -- and it was the single finding the
+        acknowledgement path could not reach. The file was read and its path
+        was reported in `detail`, which is what made the omission look like a
+        working feature: nothing was ever matched against it.
+        """
+        self.acknowledge(self.UNPROTECTED)
+        self.with_github(pulls=[], protection=None)
+        section = self.report()["protection"]
+        self.assertEqual(section["gaps"], [])
+        self.assertEqual([entry["id"] for entry in section["accepted"]], ["unprotected"])
+        # Accepted is not protected. A consumer reading `protected` still gets
+        # the fact about the branch, whatever the repository decided about it.
+        self.assertFalse(section["protected"])
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn(
+            "ok  [unprotected] accepted 2026-09-11: sole operator", completed.stdout
+        )
+        self.assertIn("until a second account with push rights exists", completed.stdout)
+
+    def test_an_unprotected_acknowledgement_naming_protection_does_not_apply(self) -> None:
+        """`branch_protection` is a real pin here, and the other four cannot be.
+
+        Every other fact in the vocabulary reduces a protection object. On this
+        branch there is no object, so all four are constants whatever the
+        branch looks like -- an entry pinning only those accepts the id
+        unconditionally, which is the shape the non-empty `state` rule exists
+        to forbid. `branch_protection` is the one fact that can be wrong here,
+        so it is the one that can go stale.
+        """
+        self.acknowledge(dict(self.UNPROTECTED, state={"branch_protection": True}))
+        self.with_github(pulls=[], protection=None)
+        section = self.report()["protection"]
+        self.assertEqual(section["accepted"], [])
+        self.assertEqual([gap["id"] for gap in section["gaps"]], ["unprotected"])
+        completed = self.run_tool(SD_STATUS)
+        self.assertIn("GAP [unprotected]", completed.stdout)
+        self.assertIn("no longer matches the live protection state", completed.stdout)
+
+    def test_a_broken_acknowledgement_file_still_fails_closed_when_unprotected(self) -> None:
+        """Failing closed has to hold on this branch too, not just the other one.
+
+        A malformed file accepts nothing anywhere; the risk is that the branch
+        which never applied acknowledgements also never reported why, leaving
+        `unprotected` printing with no hint that the file meant to accept it.
+        """
+        directory = self.repo / ".github"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "sd-status.json").write_text("[]", encoding="utf-8")
+        self.with_github(pulls=[], protection=None)
+        section = self.report()["protection"]
+        self.assertEqual(
+            [gap["id"] for gap in section["gaps"]], ["acknowledgements", "unprotected"]
+        )
+        self.assertEqual(section["accepted"], [])
 
     def test_an_unreadable_acknowledgement_file_is_itself_a_gap(self) -> None:
         directory = self.repo / ".github"
