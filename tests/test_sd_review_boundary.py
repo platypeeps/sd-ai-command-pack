@@ -319,11 +319,13 @@ class LineBudgetTests(unittest.TestCase):
     # re-derived it at 14,000 and updated `tests/test_loc_caps.py` and
     # `tests/test_verb_inventory.py`, but not this third copy, which sat 6,000
     # lines below the governing number until the next change to `bin/` tripped
-    # it. One cap, one place: `test_loc_caps.py::BIN_CAP`, which enumerates
-    # from `git ls-files` rather than from the directory and so cannot count a
-    # stray `__pycache__` entry. `test_the_migration_tools_stay_under_theirs`
-    # below is the same duplication, currently in agreement -- which is exactly
-    # the state the bin ceiling was in before it drifted.
+    # it. One cap, one place was the answer then; R11-D48 has since retired the
+    # `bin/` ceiling outright, so there is no governing number to drift from and
+    # nothing here to re-add. **The lane ceiling above is a different number
+    # with a different record and is NOT retired** -- do not read R11-D48 as
+    # covering it. `test_the_migration_tools_stay_under_theirs` below is still
+    # a duplicate of `test_loc_caps.py`, currently in agreement, which is
+    # exactly the state the bin ceiling was in before it drifted.
 
     def test_the_shared_core_exemption_names_files_that_exist(self) -> None:
         # The one hand-written name in the lane's derivation. A rename that
