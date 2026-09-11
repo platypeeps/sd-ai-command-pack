@@ -43,8 +43,13 @@ create a PRD just to record routine progress or work already merged.
    `status: planning` for the legacy reader. Report an
    unrecognized marker instead of falling back. Do not recreate retired
    frontmatter from a template.
-3. **Register the row**, when the work root's `.status-source` says `row`.
-   Run `sd work register <work>/prd.md` as soon as the file exists. The
+3. **Register the row**, when the item is under `docs/work` and that root's
+   `.status-source` says `row`. Run `sd work register docs/work/<item>/prd.md`
+   as soon as the file exists. Under a `--work-dir` root the step does not
+   apply and the command will refuse: a row's identity is
+   `<checkout>::docs/work/<item>/prd.md`, and every reader keys on it, so
+   there is no row shape for an item that lives somewhere else. Say the item
+   is unregistered rather than inventing one. The
    retirement handed status to the database and took the importer away with
    it, so a folder written after the cutover has a `prd.md` and no row, which
    is the state `sd-status` reports as `status-unreadable`. Registering is

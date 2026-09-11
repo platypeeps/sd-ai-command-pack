@@ -126,7 +126,11 @@ priorities, due dates and task status save directly to the database. GitHub
 issues are optional external references, with their last successful sync shown
 separately from local progress.
 
-Repository work uses `sd work relink`, `sd work cancel`, and `sd work deliver`.
+Repository work uses `sd work register`, `sd work relink`, `sd work cancel`,
+and `sd work deliver`. `sd work register docs/work/<item>/prd.md` makes the row
+that owns a planning folder already on disk, reading its title and date from
+the file's own frontmatter; it applies only where the repository's status
+source is the database, and refuses a repository whose files still own status.
 Delivery verifies a full commit and its delivery trailer against the default
 branch before recording completion. Cancelling work requires a reason and
 completes immediately in the database. Neither operation writes a status file

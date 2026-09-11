@@ -242,13 +242,28 @@ class WorkRegister(unittest.TestCase):
         self.assertIsNone(state["item"]["source_commit"])
 
     def test_frontmatter_without_a_title_or_date_is_refused(self):
-        folder = self.root / "docs" / "work" / "2026-09-11-bare"
-        folder.mkdir(parents=True)
-        (folder / "prd.md").write_text("---\ncreated: 2026-09-11\n---\n\nBody.\n")
-        refused = self.call("work", "register", "docs/work/2026-09-11-bare/prd.md",
-                            code=1)
-        self.assertIn("title:", refused.stderr)
-        self.assertNotIn("Traceback", refused.stderr)
+        """Both halves, because the row takes both from the file.
+
+        A date is not decoration here: `created_at` is what the item is aged
+        by, and `register_work_item` refuses one that is not a real date.
+        """
+
+        cases = {
+            "no-title": "---\ncreated: 2026-09-11\n---\n\nBody.\n",
+            "no-date": "---\ntitle: A thing to do\n---\n\nBody.\n",
+            "neither": "---\nowner: someone\n---\n\nBody.\n",
+        }
+        for name, text in cases.items():
+            with self.subTest(missing=name):
+                folder = self.root / "docs" / "work" / f"2026-09-11-{name}"
+                folder.mkdir(parents=True)
+                (folder / "prd.md").write_text(text)
+                refused = self.call(
+                    "work", "register", f"docs/work/2026-09-11-{name}/prd.md",
+                    code=1)
+                self.assertIn("title:", refused.stderr)
+                self.assertIn("created:", refused.stderr)
+                self.assertNotIn("Traceback", refused.stderr)
 
     def test_a_path_outside_the_repository_is_refused(self):
         refused = self.call("work", "register", "../escape/prd.md", code=1)
@@ -293,6 +308,31 @@ class WorkRegister(unittest.TestCase):
                         sd_work._register_library(sd_db)
                 self.assertIn(attribute, str(refusal.exception))
                 self.assertIn("sd-install", str(refusal.exception))
+
+    def test_the_stale_library_refusal_reaches_the_command_line(self):
+        """The helper exception is not the contract; the exit code is.
+
+        `bin/sd` maps `WorkRefusal` to 1 and reserves 2 for usage, so a
+        machine carrying an old build gets the same "this is a refusal"
+        signal as a bad path -- a sentence on stderr, and no traceback.
+        The attribute is removed in the child, before `sd_work` looks for it.
+        """
+
+        shim = self.home / "shim"
+        shim.mkdir()
+        (shim / "sitecustomize.py").write_text(
+            "import sd_db.workflow\n"
+            "del sd_db.workflow.register_work_item\n")
+        environment = {**self.environment,
+                       "PYTHONPATH": f"{shim}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"}
+        path = self.item()
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "bin" / "sd"), "work", "register", path],
+            cwd=str(self.root), env=environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("register_work_item", result.stderr)
+        self.assertIn("sd-install", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,7 @@ progress belongs to the database.
 | Change task status | Item screen, or `sd task status ID STATUS` |
 | Record and resolve a followup | Item notes, or `sd task note ID --kind followup --body TEXT` / `sd task resolve NOTE_ID` |
 | See the same inventory as the dashboard | `sd today --json`, `sd store items --json` |
+| Register a planning folder as a row (row-status repositories only) | `sd work register docs/work/<item>/prd.md` |
 | Relink a moved work artifact | Item screen, or `sd work relink ID PATH` |
 | Cancel repository work | Item screen, or `sd work cancel ID --reason TEXT` |
 | Record verified code delivery | `sd work deliver ID FULL_COMMIT_SHA` |
