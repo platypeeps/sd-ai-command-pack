@@ -58,8 +58,11 @@ For multiple research tracks, use an overview that directs readers to each track
 - Identify the main document in the README document table and the Notion parent page.
 - Keep the existing source filename, type prefix, Notion page ID, URL, icon, and parent.
   The title identifies the document's role.
-- If another document takes this role, move the prefix and update all entry links.
-  Exactly one document keeps the prefix.
+- If another document takes this role, move the `START HERE — ` title marker to the
+  new one, strike it from the old one, and update all entry links.
+  Rename no file and re-parent no Notion page: a role change edits titles and
+  links only, never a filename, a type prefix, or a Notion page identity.
+  Exactly one document carries the `START HERE — ` marker.
 
 Before publishing, enumerate all configured documents and check their H1s and rendered titles.
 Require exactly one matching main document across those surfaces.
