@@ -7,11 +7,12 @@ not: every capability adds lines, and refusing the lines means refusing the
 capability. A number that must be raised to let work proceed is a record of
 growth wearing the costume of a limit.
 
-Worse, it charged for prose. Of 20,806 lines in `bin/`, 12,414 are code and
-8,392 are docstring, comment or blank. House style puts design reasoning in
-docstrings, so under a line cap explaining costs exactly what implementing
-costs, and the one time the cap actually bound, what got deleted was an
-explanation (`dashboard/` at 3,999 of 4,000, prose trimmed to pay for code).
+Worse, it charged for prose. `bin/` measures 20,832 lines today, of which
+13,144 carry code and 7,688 are docstring, comment or blank. House style puts
+design reasoning in docstrings, so under a line cap explaining costs exactly
+what implementing costs, and the one time the cap actually bound, what got
+deleted was an explanation (`dashboard/` at 3,999 of 4,000, prose trimmed to
+pay for code).
 
 The checks here were chosen for one property: **they do not move when a feature
 is added**. Adding a command adds functions; it does not make existing
@@ -70,6 +71,11 @@ DEPTH_CEILING = 5
 #: anything: two three-line wrappers that agree are not a copy-paste problem.
 CLONE_FLOOR = 25
 
+#: How much of a suffix-less entry point is read to find its shebang. A cap
+#: so a binary is not read to its end; reaching it without a newline means the
+#: line was not seen, which `_is_python_script` treats as "maybe", not "no".
+SHEBANG_LIMIT = 4096
+
 #: How many public functions the dead-code check cannot speak for, because
 #: another function in the corpus carries the same name. Downward only.
 AMBIGUOUS_CEILING = 155
@@ -113,8 +119,34 @@ def sources() -> tuple[pathlib.Path, ...]:
     return tuple(
         path for path in tracked("bin", "dashboard")
         if path.suffix == ".py" or _is_python_script(path)
-        if not path.name.startswith("migrate-")
+        if not _is_migration_tool(path)
     )
+
+
+def _has_docstring(node: ast.AST) -> bool:
+    """Whether `node.body[0]` is the docstring, by the rule Python itself uses."""
+
+    body = getattr(node, "body", None)
+    if not body:
+        return False
+    first = body[0]
+    return (isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str))
+
+
+def _is_migration_tool(path: pathlib.Path) -> bool:
+    """`bin/migrate-*`, and only there, because that is what still has a cap.
+
+    The exception is inherited from `MIGRATE_CAP`, which governs `bin/migrate-*`
+    alone (`tests/test_loc_caps.py`). Keyed on the basename instead, it would
+    also drop a future `dashboard/migrate-*.py` -- and drop it from `sources()`
+    and from `expected` at once, so the corpus test would compare two sets that
+    agree about a file neither of them holds. That is the fail-open shape this
+    module exists to avoid, so the directory is part of the predicate.
+    """
+
+    return path.parent.name == "bin" and path.name.startswith("migrate-")
 
 
 def _is_python_script(path: pathlib.Path) -> bool:
@@ -128,7 +160,7 @@ def _is_python_script(path: pathlib.Path) -> bool:
 
     try:
         with path.open("rb") as handle:
-            first = handle.readline(4096)
+            first = handle.readline(SHEBANG_LIMIT)
     except OSError:
         # Included, not dropped. `sources()` and the corpus test ask this same
         # question, so answering "not Python" for a file nobody could open
@@ -136,7 +168,16 @@ def _is_python_script(path: pathlib.Path) -> bool:
         # file vanishes and the fail-closed contract reports nothing. Saying
         # yes sends it to the parse, which records it in `BROKEN`.
         return True
-    return first[:2] == b"#!" and b"python" in first
+    if first[:2] != b"#!":
+        return False
+    if b"python" in first:
+        return True
+    # The cap was reached with no newline, so this is a prefix and not the
+    # line. "No python in the part I read" is not "not a Python script", and
+    # answering no here would drop the file from `sources()` and `expected`
+    # together -- the same silent vanishing `_is_migration_tool` guards
+    # against. Hand it to the parse instead and let `BROKEN` speak.
+    return len(first) == SHEBANG_LIMIT and not first.endswith(b"\n")
 
 
 def _bound(args: ast.arguments, body: list[ast.stmt]) -> frozenset[str]:
@@ -153,15 +194,49 @@ def _bound(args: ast.arguments, body: list[ast.stmt]) -> frozenset[str]:
     """
 
     names = set()
-    for statement in [*ast.walk(args), *body]:
-        for node in ast.walk(statement):
-            if isinstance(node, ast.arg):
-                names.add(node.arg)
-            elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
-                names.add(node.id)
-            elif isinstance(node, ast.ExceptHandler) and node.name:
-                names.add(node.name)
+    for node in [*ast.walk(args), *_no_lambdas(body)]:
+        if isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.alias) and node.asname:
+            names.add(node.asname)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
     return frozenset(names)
+
+
+def _no_lambdas(body: list[ast.stmt]) -> list[ast.AST]:
+    """Every node in `body`, minus whatever a nested `lambda` binds.
+
+    A lambda's parameters are bound *inside the lambda*, not in the function
+    holding it. Collected into one flat set they leak: a body containing
+    `lambda json: ...` marks `json` bound, and `Alpha` then renames the
+    function's own free `json.dumps` too -- so two functions differing only in
+    which module they call normalize to one digest and get reported as copies.
+    That is a false positive, and this check's whole claim is that the copy
+    fails while the original does not.
+
+    The cost is a false negative in the other direction: a copy that renamed
+    only a lambda parameter no longer matches its original. Between the two,
+    missing a copy is the safe failure and naming an innocent function a copy
+    is not. Nested `def` bodies do not need this -- `_strip_nested` has already
+    replaced them with `pass` -- but a lambda is an expression and survives.
+    """
+
+    found: list[ast.AST] = []
+    stack: list[ast.AST] = list(body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.Lambda):
+            continue
+        found.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return found
 
 
 class Alpha(ast.NodeTransformer):
@@ -204,10 +279,46 @@ class Alpha(ast.NodeTransformer):
 
     def visit_arg(self, node: ast.arg) -> ast.arg:
         node.arg = self._rename(node.arg)
+        self.generic_visit(node)
         return node
 
     def visit_Constant(self, node: ast.Constant) -> ast.Constant:
         return ast.copy_location(ast.Constant(value="K"), node)
+
+    # Four bindings Python stores as plain strings rather than as `Name`
+    # nodes. `_bound` collects them, so without these the name is renamed
+    # everywhere it is *used* and left alone where it is *bound* -- one
+    # function ends up with `except X as e: return v1`, and a copy that
+    # renamed `e` still fails to match. Each is the binding half of a name
+    # `_rename` already knows.
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> ast.ExceptHandler:
+        if node.name:
+            node.name = self._rename(node.name)
+        self.generic_visit(node)
+        return node
+
+    def visit_alias(self, node: ast.alias) -> ast.alias:
+        if node.asname:
+            node.asname = self._rename(node.asname)
+        return node
+
+    def visit_MatchAs(self, node: ast.MatchAs) -> ast.MatchAs:
+        if node.name:
+            node.name = self._rename(node.name)
+        self.generic_visit(node)
+        return node
+
+    def visit_MatchStar(self, node: ast.MatchStar) -> ast.MatchStar:
+        if node.name:
+            node.name = self._rename(node.name)
+        return node
+
+    def visit_MatchMapping(self, node: ast.MatchMapping) -> ast.MatchMapping:
+        if node.rest:
+            node.rest = self._rename(node.rest)
+        self.generic_visit(node)
+        return node
 
 
 def _elif_chain(node: ast.If) -> list[ast.If]:
@@ -393,12 +504,12 @@ def _walk(scope: ast.AST, relative: str, prefix: tuple[str, ...]) -> list[Unit]:
             found.extend(_walk(node, relative, prefix))
             continue
         name = ".".join(prefix + (node.name,))
-        body = [
-            statement for statement in node.body
-            if not (isinstance(statement, ast.Expr)
-                    and isinstance(statement.value, ast.Constant)
-                    and isinstance(statement.value.value, str))
-        ]
+        # The docstring is the *first* statement and nothing else. Dropping
+        # every bare string in the body instead let a function pad itself
+        # under the length ceiling with literals -- and shrank its clone
+        # digest by the same statements, so two functions could be made to
+        # match by adding prose to one of them.
+        body = node.body[1:] if _has_docstring(node) else list(node.body)
         found.extend(_walk(node, relative, prefix + (node.name,)))
         # A function whose only statement is a docstring still gets a unit.
         # Skipping it let `Handler.log_message` out of every check at once --
@@ -569,7 +680,9 @@ class CodeHealth(unittest.TestCase):
         The docstring is not counted, which is the whole break from the old
         cap: explaining is free here, and only the code is charged. Unlike
         that cap this is per function, so writing a new one costs nothing.
-        Only letting one grow past 80 statements does.
+        Only letting one grow past the ceiling above does. The number is not
+        repeated here, because a second copy of it is the drift this module
+        exists to argue against.
         """
 
         over = sorted(
