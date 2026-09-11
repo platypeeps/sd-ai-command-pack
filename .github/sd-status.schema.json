@@ -29,6 +29,10 @@
             "minProperties": 1,
             "description": "The observed protection facts this acceptance is conditional on. Every fact listed must equal the live one or the entry does not apply and the gap prints, saying an acknowledgement exists and no longer matches. Must not be empty: an entry with no facts would accept the id whatever the branch looked like. Unknown fact names are rejected at load time rather than quietly matching nothing.",
             "properties": {
+              "branch_protection": {
+                "type": "boolean",
+                "description": "Whether the default branch has a protection object at all. The `unprotected` gap is emitted only when it does not, and every other fact here reduces that object -- so on that branch the other four are constants and an entry pinning only those would accept the id whatever the branch looked like. This is the fact an `unprotected` acceptance pins, and the one that stops it applying the moment protection is turned on."
+              },
               "required_pull_request_reviews": {
                 "type": "boolean",
                 "description": "Whether the `required_pull_request_reviews` object exists at all. This is the fact that separates 'a pull request is required and asks for no approvals' from 'nothing requires a pull request', which are the same gap id and opposite states."

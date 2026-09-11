@@ -432,7 +432,15 @@ ACKNOWLEDGEMENT_RELATIVE_PATH = pathlib.Path(".github") / "sd-status.json"
 #: acknowledgement keyed on the id alone would accept the first while meaning
 #: the second, which is how a suppression becomes a hole. A key outside this
 #: tuple is rejected at load time rather than quietly matching nothing.
+#:
+#: `branch_protection` is the same move one level up. The other four reduce a
+#: protection *object*, so on a branch that has none they are all constants --
+#: an `unprotected` entry pinning only those would accept the id whatever the
+#: branch looked like, which is the shape the non-empty `state` rule forbids.
+#: This is the fact that can be wrong there, and therefore the one that can go
+#: stale.
 ACKNOWLEDGED_FACTS = (
+    "branch_protection",
     "enforce_admins",
     "required_approving_review_count",
     "required_pull_request_reviews",
@@ -440,18 +448,26 @@ ACKNOWLEDGED_FACTS = (
 )
 
 
-def _observed_state(protection: dict[str, Any]) -> dict[str, Any]:
+def _observed_state(protection: dict[str, Any] | None) -> dict[str, Any]:
     """The live protection object reduced to the facts an acknowledgement pins.
 
     `required_pull_request_reviews` is a boolean here on purpose: what the
     acknowledgement has to be able to say is *whether the object exists*, which
     is the difference between "a pull request is required and asks for no
     approvals" and "nothing requires a pull request".
+
+    `protection` is `None` when the branch has no protection at all, and
+    `branch_protection` is that same existence question asked of the object as
+    a whole. Taking `None` rather than `{}` is deliberate: an empty dict is a
+    protection object that enforces nothing, which is a different branch state
+    from having no object, and the two must not reduce to the same facts.
     """
-    reviews = protection.get("required_pull_request_reviews")
-    admins = protection.get("enforce_admins") or {}
-    checks = protection.get("required_status_checks") or {}
+    protection = protection if isinstance(protection, dict) else None
+    reviews = (protection or {}).get("required_pull_request_reviews")
+    admins = (protection or {}).get("enforce_admins") or {}
+    checks = (protection or {}).get("required_status_checks") or {}
     return {
+        "branch_protection": protection is not None,
         "enforce_admins": (
             bool(admins.get("enabled")) if isinstance(admins, dict) else bool(admins)
         ),
@@ -781,17 +797,30 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
     )
     if not isinstance(protection, dict):
         # 404 is the answer, not an outage: this branch has no protection.
+        #
+        # This branch used to return here, one line before the acknowledgements
+        # it had already loaded were applied -- so `unprotected`, the only
+        # finding a repository with no protection can ever be told about, was
+        # the one finding `.github/sd-status.json` could not accept. The file
+        # was read and its path was reported in `detail`, which is precisely
+        # what made the omission read as a working feature.
         result["protected"] = False
-        result["gaps"] = unreadable + [
-            {
-                "id": "unprotected",
-                "gap": (
-                    f"{default_branch} has no branch protection at all: nothing that "
-                    "can push is stopped by anything, and no local lane can supply the "
-                    "authority the config does not"
-                ),
-            }
-        ]
+        still_open, accepted = _apply_acknowledgements(
+            [
+                {
+                    "id": "unprotected",
+                    "gap": (
+                        f"{default_branch} has no branch protection at all: nothing "
+                        "that can push is stopped by anything, and no local lane can "
+                        "supply the authority the config does not"
+                    ),
+                }
+            ],
+            _observed_state(None),
+            acknowledgements,
+        )
+        result["gaps"] = unreadable + still_open
+        result["accepted"] = accepted
         result["detail"]["read_error"] = error
         return result
     result["protected"] = True
