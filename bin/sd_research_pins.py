@@ -32,7 +32,22 @@ REMOTE = re.compile(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$")
 
 SKIP_DIRS = {"build", ".git", "node_modules", "__pycache__"}
 FILE_SUFFIXES = {".md", ".py", ".rs", ".ts", ".js", ".json", ".toml", ".yaml", ".yml"}
-SEARCH_ROOT = Path(os.path.expanduser("~/repos"))
+
+
+def search_root() -> Path:
+    """`~/repos` -- the same directory, resolved when it is asked for.
+
+    This was a module constant, and the home it named was frozen into the
+    import. A run never noticed: one process, one home, and the answer is the
+    same either way. What could not be done was to ask the question of any
+    other directory. `build_index` takes no argument for the sibling side, so
+    the only tree it would ever walk was whatever the developer happened to
+    have cloned, and no test could exercise it against a tree it controls.
+
+    A function is the whole fix. `pins` still reaches the real `~/repos`, and
+    a caller that has its own tree can name it.
+    """
+    return Path(os.path.expanduser("~/repos"))
 
 
 def git(repo, *args):
@@ -85,12 +100,18 @@ def collect_pins(repo):
     return found
 
 
-def build_index(repo):
-    """Map owner/name and bare name to a checkout, for vendored and sibling clones."""
+def build_index(repo, siblings=None):
+    """Map owner/name and bare name to a checkout, for vendored and sibling clones.
+
+    `siblings` is the tree the sibling clones live under, `~/repos` when the
+    caller does not say. It is a parameter so that the tree can be one a test
+    built, rather than one the machine happens to carry.
+    """
     index: dict[str, Path] = {}
     roots = list((Path(repo) / "vendor").glob("*"))
-    if SEARCH_ROOT.is_dir():
-        roots += list(SEARCH_ROOT.glob("*/*"))
+    outside = search_root() if siblings is None else Path(siblings)
+    if outside.is_dir():
+        roots += list(outside.glob("*/*"))
     for path in roots:
         if not (path / ".git").exists():
             continue
