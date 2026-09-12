@@ -20,7 +20,10 @@ why these are the tests that exist and not others:
   seconds after it started, leaving the live run to combine data that was no
   longer there -- the "no data collected" failure over a passing suite;
 * a publish that could not write the root reported the tests' own exit status,
-  handing the next reader a stale log under a zero exit;
+  handing the next reader a stale log under a zero exit -- once per destructive
+  step, since the three guards are independent;
+* a launcher that died while the shard logs were being concatenated, after the
+  shards themselves were done, left an orphan that published anyway;
 * a signal delivered while the root was being rewritten left it holding the old
   shards deleted and the new ones never moved in.
 
@@ -107,7 +110,35 @@ def _widen_publish_window(harness):
     harness.write_text("".join(lines))
 
 
-def _build_fixture(root, widen_publish=False):
+CONCAT_ANCHOR = 'for module in "${modules[@]}"; do'
+CONCAT_SENTINEL = ".harness-assembling"
+
+
+def _widen_assembly_window(harness):
+    """Hold the log-assembly step open, in this copy of the script only.
+
+    Between the shard `wait` and the publish the script concatenates the shard
+    logs, and a launcher that dies in there leaves an orphan that goes on to
+    write the shared root files -- which is why the watchdog stand-down sits
+    after this loop and not before it. That placement had no regression guard:
+    moving the stand-down back up left the whole suite green.
+
+    The inserted sentinel is what the test waits on, so the kill lands inside
+    the window instead of near it, and a missing anchor raises rather than
+    no-oping.
+    """
+    lines = harness.read_text().splitlines(keepends=True)
+    anchors = [i for i, line in enumerate(lines) if line.startswith(CONCAT_ANCHOR)]
+    if len(anchors) != 1:
+        raise AssertionError(
+            f"expected exactly one log-assembly loop to widen, found {len(anchors)}: "
+            "the assembly step moved, and this test would otherwise assert nothing"
+        )
+    lines.insert(anchors[0], f': > "$REPO_ROOT/{CONCAT_SENTINEL}"\nsleep 10\n')
+    harness.write_text("".join(lines))
+
+
+def _build_fixture(root, widen_publish=False, widen_assembly=False):
     """A throwaway repo root the real `run-tests.sh` can be run against.
 
     The harness derives its own root from `BASH_SOURCE`, so a copy of it under
@@ -120,6 +151,8 @@ def _build_fixture(root, widen_publish=False):
     shutil.copy2(HARNESS, harness)
     if widen_publish:
         _widen_publish_window(harness)
+    if widen_assembly:
+        _widen_assembly_window(harness)
 
     tests = root / "tests"
     (tests / "coverage_sitecustomize").mkdir(parents=True)
@@ -161,12 +194,22 @@ def _process_rows():
         text=True,
         check=False,
     )
+    if proc.returncode != 0:
+        # A `ps` that failed would otherwise read as an empty process table,
+        # which makes every pid look dead and every orphan assertion below pass
+        # without having observed anything.
+        raise RuntimeError(
+            f"ps exited {proc.returncode} and the process table cannot be read: "
+            f"{proc.stderr.strip()!r}"
+        )
     rows = {}
     for line in proc.stdout.splitlines():
         fields = line.split()
         if len(fields) >= 2 and fields[0].isdigit() and fields[1].isdigit():
             state = fields[2] if len(fields) >= 3 else ""
             rows[int(fields[0])] = (int(fields[1]), state)
+    if not rows:
+        raise RuntimeError("ps returned no usable rows; the process table is unreadable")
     return rows
 
 
@@ -318,17 +361,81 @@ class InFlightIsolationTests(unittest.TestCase):
 
 
 class PublishFailureTests(unittest.TestCase):
-    """A publish that cannot land must not report the tests' success."""
+    """A publish that cannot land must not report the tests' success.
 
-    def test_a_publish_that_cannot_land_is_not_reported_as_success(self):
-        # The failure is arranged by putting a *directory* where the log has to
-        # be written, not by making the root read-only: a suite running as root
-        # ignores directory permissions, and skipping the test there is not an
-        # option -- `make test` fails the gate on any skipped test. A directory
-        # refuses `cat >` for every user.
+    One case per destructive step, because the guards are independent: a test
+    that only breaks the last of them leaves the other two free to lose their
+    `|| publish_status=1` in a later edit with the suite still green.
+
+    None of the three depends on file permissions. A suite running as root
+    ignores them, and skipping there is not available either -- `make test`
+    fails the gate on any skipped test -- so the failures are arranged with a
+    directory where a file has to be written, which refuses every user, and with
+    a failing `mv` on PATH.
+    """
+
+    def _run(self, root, script, env=None):
+        return subprocess.run(
+            ["bash", str(script)],
+            capture_output=True,
+            text=True,
+            env=env or _fixture_env(HARNESS_FIXTURE_SLEEP="0"),
+            check=False,
+        )
+
+    def _assert_reported(self, result):
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("could not publish this run's results", result.stderr)
+
+    def test_a_clearing_step_that_fails_is_reported(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             script = _build_fixture(root)
+            # `rm -f` refuses a directory for every user, root included.
+            (root / ".coverage").mkdir()
+            self._assert_reported(self._run(root, script))
+
+    def test_a_move_that_fails_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            # The shard names carry a pid and a random suffix, so the move
+            # cannot be blocked by preparing its destination, and within one
+            # filesystem it is a rename that permissions do not stop under root.
+            # A failing `mv` earlier on PATH is the portable way in. The sentinel
+            # is asserted so that a script which stopped calling `mv` -- or
+            # called it by absolute path -- fails here instead of passing.
+            shim_dir = root / "shim"
+            shim_dir.mkdir()
+            sentinel = root / "mv-was-called"
+            shim = shim_dir / "mv"
+            shim.write_text(f'#!/bin/sh\n: > "{sentinel}"\nexit 1\n')
+            shim.chmod(0o755)
+            env = _fixture_env(HARNESS_FIXTURE_SLEEP="0")
+            env["PATH"] = f"{shim_dir}:{env['PATH']}"
+
+            self._assert_reported(self._run(root, script, env))
+            self.assertTrue(sentinel.exists(), "the failing `mv` was never called")
+
+    def test_a_log_write_that_fails_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            (root / "unittest-output.log").mkdir()
+            self._assert_reported(self._run(root, script))
+
+
+class AssemblyWindowTests(unittest.TestCase):
+    """A launcher that dies while the log is being assembled leaves no orphan."""
+
+    def test_a_launcher_dying_during_assembly_publishes_nothing(self):
+        # The window between the shard `wait` and the publish is why the
+        # watchdog stand-down sits after the assembly loop rather than before
+        # it. Nothing asserted that until now: moving the stand-down back up to
+        # the shard `wait` left every other test in this module green.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root, widen_assembly=True)
             env = _fixture_env(HARNESS_FIXTURE_SLEEP="0")
 
             first = subprocess.run(
@@ -340,18 +447,56 @@ class PublishFailureTests(unittest.TestCase):
             )
             self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
 
-            (root / "unittest-output.log").unlink()
-            (root / "unittest-output.log").mkdir()
+            # A marker the orphan would erase by publishing over it.
+            published = root / "unittest-output.log"
+            marker = "PREVIOUS COMPLETE RUN\n" + published.read_text()
+            published.write_text(marker)
 
-            blocked = subprocess.run(
-                ["bash", str(script)],
-                capture_output=True,
-                text=True,
+            # The first run left one behind; waiting on a stale sentinel would
+            # sample the second run before it had started anything.
+            sentinel = root / CONCAT_SENTINEL
+            sentinel.unlink()
+
+            log = root / "assembly.log"
+            parent = subprocess.Popen(
+                ["bash", "-c", 'bash "$0" > "$1" 2>&1', str(script), str(log)],
                 env=env,
-                check=False,
             )
-            self.assertEqual(blocked.returncode, 1, blocked.stdout + blocked.stderr)
-            self.assertIn("could not publish this run's results", blocked.stderr)
+            tree = []
+            try:
+                self.assertTrue(
+                    _wait_for(sentinel.exists, timeout=120),
+                    "the run never reached the log-assembly step",
+                )
+                tree = _descendants(parent.pid)
+                self.assertTrue(tree, "the run had already finished")
+
+                parent.kill()
+                parent.wait(timeout=30)
+
+                self.assertTrue(
+                    _wait_for(
+                        lambda: not [pid for pid in tree if _alive(pid)],
+                        timeout=60,
+                    ),
+                    "the run outlived the launcher that died during assembly: "
+                    f"{[pid for pid in tree if _alive(pid)]}",
+                )
+            finally:
+                if parent.poll() is None:
+                    parent.kill()
+                    parent.wait(timeout=30)
+                for pid in tree:
+                    try:
+                        os.kill(pid, 9)
+                    except OSError:
+                        pass
+
+            self.assertTrue(
+                published.read_text().startswith("PREVIOUS COMPLETE RUN"),
+                "the orphan published over the last complete run's results",
+            )
+            self.assertEqual(len(_shards(root)), 2, _shards(root))
 
 
 class PublishSignalTests(unittest.TestCase):
