@@ -50,6 +50,27 @@ def search_root() -> Path:
     return Path(os.path.expanduser("~/repos"))
 
 
+def checkouts(root):
+    """Every git checkout under `root`, one and two levels deep.
+
+    Not `*/*`. Checkouts sit at both depths -- `~/repos/system` is one level,
+    `~/repos/<org>/<name>` is two -- and a `*/*` glob alone silently omits the
+    first. That omission is not hypothetical: `system` is one of the two
+    repositories the fleet pins by SHA, so a walk that cannot see it reports
+    every pin of it as having no checkout to check against.
+    """
+    root = Path(root)
+    found = []
+    for path in sorted(root.glob("*")):
+        if not path.is_dir():
+            continue
+        if (path / ".git").exists():
+            found.append(path)
+            continue
+        found += [p for p in sorted(path.glob("*")) if (p / ".git").exists()]
+    return found
+
+
 def git(repo, *args):
     """Run git in repo, returning stripped stdout, or None if the command failed."""
     try:
@@ -111,7 +132,7 @@ def build_index(repo, siblings=None):
     roots = list((Path(repo) / "vendor").glob("*"))
     outside = search_root() if siblings is None else Path(siblings)
     if outside.is_dir():
-        roots += list(outside.glob("*/*"))
+        roots += checkouts(outside)
     for path in roots:
         if not (path / ".git").exists():
             continue
@@ -209,10 +230,177 @@ def report(repo):
         print(f"\n  {len(missing)} pin(s) have no checkout here to check against.")
 
 
+# ---------------------------------------------------------------------------
+# The fleet side: the same question asked of CI, not of prose.
+#
+# A research document pins a source in backticks. CI pins the same way and in
+# four more forms, none of which any ecosystem can see: `uses: owner/repo@sha`
+# is invisible to Dependabot once the pack is told to ignore it, and `ref:`,
+# `<NAME>_REVISION:` and a committed tarball's `"source_commit"` are invisible
+# to every ecosystem by construction. Nothing reported staleness, and the cost
+# was paid on 2026-09-11: this pack's own tests.yml pins `platypeeps/system` at
+# a commit predating a function the tests import, and CI failed on an
+# ImportError that no staleness report existed to predict.
+# ---------------------------------------------------------------------------
+
+USES = re.compile(r"uses:\s*([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)(?:/\S*?)?@([0-9a-f]{7,40})\b")
+REPOSITORY = re.compile(r"^\s*repository:\s*['\"]?([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)")
+REF = re.compile(r"^\s*ref:\s*['\"]?([0-9a-f]{7,40})['\"]?\s*$")
+REF_ENV = re.compile(r"^\s*ref:\s*\$\{\{\s*env\.([A-Za-z0-9_]+)\s*\}\}")
+REVISION = re.compile(r"^\s*([A-Za-z0-9_]*REVISION):\s*['\"]?([0-9a-f]{7,40})['\"]?\s*$")
+SOURCE_COMMIT = re.compile(r'"source_commit"\s*:\s*"([0-9a-f]{7,40})"')
+
+WORKFLOW_SUFFIXES = {".yml", ".yaml"}
+
+
+def workflow_sites(text):
+    """(hint, sha, form, line) for every pin in one workflow file.
+
+    `uses:` names its repository on the line. `ref:` does not — it belongs to
+    the `repository:` of the same `with:` block, so the file is read in order
+    and the last `repository:` seen carries the ref. A `ref:` that reads an env
+    var is that link one hop further out: it says which repository the
+    `<NAME>_REVISION` at the top of the file is a revision *of*, which is how
+    `PACK_REVISION` resolves without anyone having written down that "PACK"
+    means the command pack. The bare name is only the fallback.
+    """
+    sites, repository, by_env = [], None, {}
+    lines = text.splitlines()
+    for line in lines:
+        found = REPOSITORY.match(line)
+        if found:
+            repository = found.group(1)
+            continue
+        found = REF_ENV.match(line)
+        if found and repository:
+            by_env[found.group(1)] = repository
+
+    repository = None
+    for number, line in enumerate(lines, 1):
+        found = REPOSITORY.match(line)
+        if found:
+            repository = found.group(1)
+        found = USES.search(line)
+        if found:
+            sites.append((found.group(1), found.group(2), "uses", number))
+            continue
+        found = REF.match(line)
+        if found and repository:
+            sites.append((repository, found.group(1), "ref", number))
+            continue
+        found = REVISION.match(line)
+        if found:
+            name = found.group(1)
+            hint = by_env.get(name) or name[: -len("REVISION")].strip("_").lower()
+            sites.append((hint, found.group(2), "env", number))
+    return sites
+
+
+def manifest_sites(path, text):
+    """A committed tarball manifest pins its source in `"source_commit"`.
+
+    Nothing inside the manifest says which repository it came from. The file is
+    named for it -- `system-source.json` -- which is the only handle there is.
+    """
+    name = Path(path).stem
+    for suffix in ("-source", "_source", "-manifest", "_manifest"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    return [
+        (name.lower(), m.group(1), "manifest", text[: m.start()].count("\n") + 1)
+        for m in SOURCE_COMMIT.finditer(text)
+    ]
+
+
+def scan(checkout):
+    """Every pin site under one checkout's `.github/`, enumerated from disk."""
+    sites: list[tuple[Path, int, str, str, str]] = []
+    github = Path(checkout) / ".github"
+    if not github.is_dir():
+        return sites
+    for path in sorted(github.rglob("*")):
+        if not path.is_file() or any(part in SKIP_DIRS for part in path.parts):
+            continue
+        if path.suffix not in WORKFLOW_SUFFIXES and path.suffix != ".json":
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        read = workflow_sites(text) if path.suffix in WORKFLOW_SUFFIXES \
+            else manifest_sites(path, text)
+        for hint, sha, form, number in read:
+            sites.append((path, number, hint, sha, form))
+    return sites
+
+
+def fleet(root=None):
+    """Resolve every fleet pin site against the checkouts beside it.
+
+    Only pins resolving to a checkout under the same root are reported. That is
+    not a shortcut, it is what makes the report readable: the fleet's workflows
+    carry hundreds of third-party action pins, and a report listing
+    `actions/checkout` beside the pack would bury the rows anyone acts on. What
+    we clone is what we own.
+    """
+    root = search_root() if root is None else Path(root)
+    trees = checkouts(root)
+    index: dict[str, Path] = {}
+    for path in trees:
+        full = slug(path)
+        index.setdefault(full, path)
+        index.setdefault(full.split("/")[-1], path)
+        index.setdefault(path.name.lower(), path)
+
+    rows = []
+    for checkout in trees:
+        for path, number, hint, sha, form in scan(checkout):
+            target = index.get(hint.lower()) or index.get(hint.split("/")[-1].lower())
+            if target is None or Path(target).resolve() == Path(checkout).resolve():
+                # Unresolved is third-party; self-pinned is not a fleet pin.
+                continue
+            status, note = describe(target, sha)
+            rows.append({
+                "repo": slug(checkout),
+                "where": f"{path.relative_to(checkout).as_posix()}:{number}",
+                "form": form,
+                "target": slug(target),
+                "sha": sha,
+                "status": status,
+                "note": note,
+            })
+    return rows
+
+
+def fleet_report(root=None):
+    rows = fleet(root)
+    if not rows:
+        print("no fleet pins found")
+        return 0
+    width = {k: max(len(str(r[k])) for r in rows) for k in ("repo", "where", "form", "target")}
+    for row in sorted(rows, key=lambda r: (r["repo"], r["where"])):
+        print(f"  {row['repo']:<{width['repo']}}  {row['where']:<{width['where']}}  "
+              f"{row['form']:<{width['form']}}  {row['target']:<{width['target']}}  "
+              f"{row['sha'][:8]}  {row['status']}")
+    behind = [r for r in rows if r["status"].startswith("behind")]
+    print(f"\n  {len(rows)} pin site(s) across {len({r['repo'] for r in rows})} "
+          f"repo(s); {len(behind)} behind.")
+    if behind:
+        print("  Report only — the repin stays a hand decision.")
+    return 0
+
+
 def main() -> int:
     # R10-D6: the repository is the one the caller is standing in. This took
     # `pins [repo_dir ...]` before the kit moved into the pack.
     report(os.getcwd())
+    return 0
+
+
+def fleet_main() -> int:
+    """`sd-research-kit fleet-pins`. Reports; never gates."""
+    fleet_report()
     return 0
 
 

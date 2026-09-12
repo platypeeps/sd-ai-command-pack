@@ -192,7 +192,9 @@ def sections(text):
     examples whose content begins `## 1. First section`, and splitting on those
     invents a section that exists in neither document.
     """
-    out, head, buf, fence = [], "", [], False
+    out: list[tuple[str, str]] = []
+    buf: list[str] = []
+    head, fence = "", False
     for line in text.split("\n"):
         if FENCE_LINE.match(line):
             fence = not fence
@@ -207,7 +209,9 @@ def sections(text):
 
 def blocks(body):
     """Blank-line-separated blocks, with fenced code kept whole."""
-    out, buf, fence = [], [], False
+    out: list[str] = []
+    buf: list[str] = []
+    fence = False
     for line in body.split("\n"):
         if FENCE_LINE.match(line):
             fence = not fence
@@ -273,8 +277,9 @@ def drift(template_text, repo_text):
     difference drift would fire on all five research repos forever and be
     switched off within a week.
     """
-    findings, local = [], 0
-    repo_sections = {}
+    findings: list[tuple[str, str, str]] = []
+    local = 0
+    repo_sections: dict[str, str] = {}
     for head, body in sections(repo_text):
         repo_sections.setdefault(head, body)
     seen = set()

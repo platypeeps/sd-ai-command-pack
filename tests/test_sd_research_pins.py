@@ -180,5 +180,166 @@ class TheRealHomeIsNeverConsulted(unittest.TestCase):
         self.assertEqual(json.loads(done.stdout), sorted(SEEDED))
 
 
+WORKFLOW = """\
+name: probe
+jobs:
+  probe:
+    env:
+      SYSTEM_REVISION: 1111111111111111111111111111111111111111
+      PACK_REVISION: 2222222222222222222222222222222222222222
+    steps:
+      - uses: owner/pack-repo/actions/review-route@3333333333333333333333333333333333333333
+      - uses: actions/checkout@4444444444444444444444444444444444444444 # v7.0.1
+        with:
+          repository: owner/system-repo
+          ref: 5555555555555555555555555555555555555555
+      - uses: actions/checkout@4444444444444444444444444444444444444444 # v7.0.1
+        with:
+          repository: owner/pack-repo
+          ref: ${{ env.PACK_REVISION }}
+"""
+
+
+class FleetPinFormsTests(unittest.TestCase):
+    """The four forms no ecosystem can see, read out of one workflow file.
+
+    `uses:` names its repository; `ref:` does not, and `<NAME>_REVISION:` names
+    only a word. The item's inventory was assembled by hand; this pins the
+    reading so the next one is not.
+    """
+
+    def setUp(self) -> None:
+        self.module = load()
+
+    def sites(self):
+        return self.module.workflow_sites(WORKFLOW)
+
+    def test_a_uses_pin_is_read_through_a_subdirectory_action(self) -> None:
+        self.assertIn(("owner/pack-repo", "3" * 40, "uses", 8), self.sites())
+
+    def test_a_literal_ref_takes_the_repository_of_its_with_block(self) -> None:
+        self.assertIn(("owner/system-repo", "5" * 40, "ref", 12), self.sites())
+
+    def test_a_revision_env_resolves_through_the_ref_that_reads_it(self) -> None:
+        """`PACK_REVISION` means the command pack because the file says so."""
+
+        self.assertIn(("owner/pack-repo", "2" * 40, "env", 6), self.sites())
+
+    def test_an_unconsumed_revision_env_falls_back_to_its_name(self) -> None:
+        self.assertIn(("system", "1" * 40, "env", 5), self.sites())
+
+    def test_a_third_party_action_pin_is_still_read_here(self) -> None:
+        """Filtering third parties is `fleet`'s job, not the reader's."""
+
+        self.assertIn(("actions/checkout", "4" * 40, "uses", 9), self.sites())
+
+    def test_a_tarball_manifest_takes_its_repository_from_its_filename(self) -> None:
+        found = self.module.manifest_sites(
+            "/x/.github/dependencies/system-source.json",
+            '{\n  "archive_sha256": "ab",\n  "source_commit": "%s"\n}\n' % ("6" * 40),
+        )
+        self.assertEqual(found, [("system", "6" * 40, "manifest", 3)])
+
+
+class CheckoutsAtBothDepthsTests(unittest.TestCase):
+    """`~/repos/system` is one level deep and is half of what the fleet pins.
+
+    `build_index` walked `*/*` only, so the one repository that sits beside the
+    org directories rather than inside one was invisible to it, and every pin
+    of `system` answered "no checkout".
+    """
+
+    def test_a_checkout_directly_under_the_root_is_found(self) -> None:
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            (root / "system" / ".git").mkdir(parents=True)
+            (root / "owner" / "nested" / ".git").mkdir(parents=True)
+            found = [p.name for p in load().checkouts(root)]
+        self.assertEqual(sorted(found), ["nested", "system"])
+
+    def test_an_org_directory_is_not_itself_a_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            (root / "owner" / "nested" / ".git").mkdir(parents=True)
+            found = [p.name for p in load().checkouts(root)]
+        self.assertEqual(found, ["nested"])
+
+
+class FleetReportTests(unittest.TestCase):
+    """End to end against a tree the test built, with real commits behind it."""
+
+    def git(self, cwd, *args):
+        subprocess.run(["git", "-C", str(cwd), *args], check=True,
+                       capture_output=True, text=True)
+
+    def upstream(self, root: Path, name: str, commits: int) -> str:
+        repo = root / "owner" / name
+        repo.mkdir(parents=True)
+        self.git(repo, "init", "-q", "-b", "main")
+        self.git(repo, "config", "user.email", "probe@example.invalid")
+        self.git(repo, "config", "user.name", "probe")
+        first = ""
+        for n in range(commits):
+            (repo / "f.txt").write_text(str(n))
+            self.git(repo, "add", "f.txt")
+            self.git(repo, "commit", "-q", "-m", f"c{n}")
+            if not first:
+                first = subprocess.run(
+                    ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                    capture_output=True, text=True, check=True).stdout.strip()
+        return first
+
+    def test_the_report_names_the_stale_site_and_leaves_third_parties_out(self) -> None:
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            old = self.upstream(root, "system-probe", commits=4)
+            consumer = root / "owner" / "consumer-probe"
+            flow = consumer / ".github" / "workflows"
+            flow.mkdir(parents=True)
+            (consumer / ".git").mkdir()
+            (flow / "tests.yml").write_text(
+                "jobs:\n  t:\n    steps:\n"
+                "      - uses: actions/checkout@%s # v7.0.1\n"
+                "        with:\n"
+                "          repository: owner/system-probe\n"
+                "          ref: %s\n" % ("4" * 40, old)
+            )
+            rows = load().fleet(root)
+
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]["target"], "system-probe")
+        self.assertEqual(rows[0]["where"], ".github/workflows/tests.yml:7")
+        self.assertEqual(rows[0]["status"], "behind 3")
+
+    def test_a_pin_at_the_tip_reads_current(self) -> None:
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            self.upstream(root, "system-probe", commits=1)
+            tip = subprocess.run(
+                ["git", "-C", str(root / "owner" / "system-probe"), "rev-parse", "HEAD"],
+                capture_output=True, text=True, check=True).stdout.strip()
+            consumer = root / "owner" / "consumer-probe"
+            flow = consumer / ".github" / "workflows"
+            flow.mkdir(parents=True)
+            (consumer / ".git").mkdir()
+            (flow / "x.yml").write_text(
+                "jobs:\n  t:\n    steps:\n      - uses: owner/system-probe@%s\n" % tip
+            )
+            rows = load().fleet(root)
+
+        self.assertEqual([r["status"] for r in rows], ["current"])
+
+    def test_a_repo_pinning_itself_is_not_a_fleet_pin(self) -> None:
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            sha = self.upstream(root, "self-probe", commits=2)
+            flow = root / "owner" / "self-probe" / ".github" / "workflows"
+            flow.mkdir(parents=True)
+            (flow / "x.yml").write_text(
+                "jobs:\n  t:\n    steps:\n      - uses: owner/self-probe@%s\n" % sha
+            )
+            self.assertEqual(load().fleet(root), [])
+
+
 if __name__ == "__main__":
     unittest.main()
