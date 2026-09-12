@@ -1238,7 +1238,16 @@ def issues_section(root: pathlib.Path) -> dict[str, Any]:
 
 
 class Class(NamedTuple):
-    """One check that exists, and everything the report needs to know of it."""
+    """One check that exists, and everything the report needs to know of it.
+
+    `needs` names the collected sections this check reads. A section that
+    reports `available: False` was not read, so the check was not asked, and
+    `actionable_inventory` marks it `unchecked` rather than letting an empty
+    row list read as nothing found. It lives here and not in a producer for
+    the reason the table exists at all: a check's data dependency is a fact
+    about the check, and a producer that forgot to declare it would go on
+    reporting clear over a question nobody asked.
+    """
 
     check: str
     letter: str
@@ -1246,6 +1255,7 @@ class Class(NamedTuple):
     rank: int
     source: str
     what: str
+    needs: tuple[str, ...] = ()
 
 
 #: The enumeration. This tuple is the *only* answer to "which checks exist":
@@ -1268,13 +1278,15 @@ CLASSES = (
     Class("unresolved-concern", "c", True, 20, "## Review ledger",
           "a review concern left open by its own ledger row"),
     Class("pr-check-failing", "p", True, 30, "open pull requests",
-          "an open pull request with a failing check"),
+          "an open pull request with a failing check", ("pull_requests",)),
     Class("pr-check-missing", "p", True, 30, "open PRs + protection",
-          "an open pull request reporting no check the branch requires"),
+          "an open pull request reporting no check the branch requires",
+          ("pull_requests", "protection")),
     Class("dirty-tree-with-open-pr", "p", True, 30, "git + open PRs",
-          "uncommitted work on a branch that already has a pull request"),
+          "uncommitted work on a branch that already has a pull request",
+          ("pull_requests",)),
     Class("protection-gap", "g", True, 40, "protection",
-          "an enforcement leg missing on the default branch"),
+          "an enforcement leg missing on the default branch", ("protection",)),
     Class("accepted-gap-standing", "g", False, 45,
           ".github/sd-status.json accepted_gaps[]",
           "a written acceptance whose until condition nothing re-reads"),
@@ -1390,6 +1402,31 @@ def _widen_collisions(rows: list[dict[str, Any]]) -> None:
             row["widened"] = True
 
 
+def _mark_unasked(sections: dict[str, Any], unchecked: dict[str, str]) -> None:
+    """Mark every check whose data a section could not supply.
+
+    Driven off `CLASSES.needs` rather than off a list of GitHub-backed check
+    names, so a check added to the table brings its own blindness with it. The
+    alternative -- naming the affected checks here -- is the recited inventory
+    this file exists to avoid, and it is how eleven of twelve classes came to
+    be counted clear on a machine that could not reach GitHub at all.
+
+    `setdefault` because a producer that already knows *why* its own class went
+    unread has said something more specific than "the section was unavailable",
+    and runs before this does.
+    """
+    for kind in CLASSES:
+        for name in kind.needs:
+            section = sections.get(name) or {}
+            if section.get("available", True):
+                continue
+            unchecked.setdefault(
+                kind.check,
+                str(section.get("reason") or f"{name} could not be read"),
+            )
+            break
+
+
 class Inventory(NamedTuple):
     """The rows, and the checks that could not be asked at all.
 
@@ -1455,6 +1492,7 @@ def actionable_inventory(
     rows += _tool_rows(root)
     rows += _concern_rows(root)
     rows += _accepted_rows(protection)
+    _mark_unasked(sections, unchecked)
     _widen_collisions(rows)
     rows.sort(key=lambda row: (row["rank"], -row["age_days"], row["id"]))
     return Inventory(rows, unchecked)

@@ -2511,8 +2511,15 @@ class BannerTests(InventoryFixture):
         row = self.state_of(result, "branch-already-merged")
         self.assertEqual(status.UNCHECKED, row["state"])
         self.assertEqual("unchecked: gh is not installed", row["label"])
-        self.assertEqual(1, result["unchecked_classes"])
         self.assertNotIn("clear", result["summary"])
+        # The count is not 1. A blind `protection` also puts every class that
+        # declares it out of reach, which is sd:600 -- so the assertion names
+        # the set rather than a number that would grow silently.
+        self.assertEqual(
+            {"branch-already-merged", "protection-gap", "pr-check-missing"},
+            {row["check"] for row in result["classes"]
+             if row["state"] == status.UNCHECKED},
+        )
 
     def test_an_unresolvable_branch_leaves_the_merge_check_clear(self) -> None:
         """The `elif` in `_work_rows`, and what it stops.
@@ -2530,11 +2537,118 @@ class BannerTests(InventoryFixture):
             ["branch-unresolvable"],
             [row["check"] for row in inventory.rows if row["check"].startswith("branch-")],
         )
-        self.assertEqual({}, inventory.unchecked)
+        # Narrowed to this test's subject. A blind `protection` does mark the
+        # classes that read it, so an empty map would assert something this
+        # test is not about and sd:600 says is wrong.
+        self.assertNotIn("branch-already-merged", inventory.unchecked)
         result = status.banner(inventory)
         self.assertEqual(
             status.CLEAR, self.state_of(result, "branch-already-merged")["state"]
         )
+
+    # -- sd:600: a class whose section could not be read ----------------------
+
+    #: Which collected section each check reads, as the design states it and
+    #: not as `CLASSES` happens to say today. A test that derives this from
+    #: the table cannot catch a deleted or mistyped `needs` entry, because the
+    #: expectation moves with the defect. Adding a dependency means adding it
+    #: here and in `CLASSES`, and the two are asserted equal below.
+    DECLARED_SECTIONS = {
+        "pull_requests": {
+            "pr-check-failing", "pr-check-missing", "dirty-tree-with-open-pr",
+        },
+        "protection": {"pr-check-missing", "protection-gap"},
+    }
+
+    def test_the_table_declares_exactly_the_dependencies_the_design_states(
+        self,
+    ) -> None:
+        """`CLASSES` against the design, so a deleted `needs` entry is loud."""
+        actual: dict[str, set[str]] = {}
+        for kind in status.CLASSES:
+            for name in kind.needs:
+                actual.setdefault(name, set()).add(kind.check)
+        self.assertEqual(self.DECLARED_SECTIONS, actual)
+
+    def test_a_blind_section_marks_every_class_that_declares_it(self) -> None:
+        """Every section any class declares, driven blind in turn.
+
+        Derived from `CLASSES.needs`, never from a list of check names: the
+        defect this replaces counted eleven of twelve classes clear on a
+        machine that could not reach GitHub at all, because `unchecked` had
+        exactly one producer.
+
+        Driving only `protection` was not enough, and a mutation proved it:
+        deleting all three `pull_requests` dependencies left this suite green
+        at 211 passing, so the merge checks would have gone on reporting clear
+        against a `pull_requests` section nothing could read.
+
+        Deriving the expectation from `CLASSES.needs` does not fix that, and
+        the same mutation proved that too. Blank an entry and the sections
+        looped over and the checks expected shrink together, so the assertion
+        agrees with whatever the table says. The expectation therefore comes
+        from `DECLARED_SECTIONS`, which states the design.
+        """
+        for name, expected in sorted(self.DECLARED_SECTIONS.items()):
+            with self.subTest(section=name):
+                # Blind the section in place, so it keeps the shape its
+                # producers expect and only the readability flag changes.
+                blinded = dict(self.sections()[name], **{
+                    "available": False, "reason": "gh is not installed"})
+                inventory = self.inventory(**{name: blinded})
+                self.assertLessEqual(expected, set(inventory.unchecked))
+                for check in expected:
+                    self.assertEqual(
+                        "gh is not installed", inventory.unchecked[check])
+
+    def test_a_class_that_needs_no_section_is_not_marked_unchecked(
+        self,
+    ) -> None:
+        """The control. Without it the test above passes on a blanket mark.
+
+        `in-progress-without-branch` reads work items and git and nothing
+        else, so a blind `protection` must leave it exactly as it was.
+        """
+        self.item("2026-08-01-alpha", status="in_progress")
+        blind = status.banner(self.inventory(protection=self.BLIND))
+        self.assertEqual(
+            status.FINDINGS,
+            self.state_of(blind, "in-progress-without-branch")["state"],
+        )
+        self.assertNotIn("in-progress-without-branch", 
+                         {row["check"] for row in blind["classes"]
+                          if row["state"] == status.UNCHECKED})
+
+    def test_a_readable_section_marks_nothing(self) -> None:
+        """The second control: the success case still reports clear.
+
+        A guard that marked on every run would satisfy both assertions above
+        and report a healthy repository as blind forever.
+        """
+        result = status.banner(self.inventory())
+        self.assertEqual(0, result["unchecked_classes"])
+        self.assertIn("clear", result["summary"])
+
+    def test_the_summary_cannot_say_clear_while_any_class_is_blind(self) -> None:
+        """sd:4's criterion 14, as an executable check.
+
+        `skills/sd-status/SKILL.md` states this three times in its Never list
+        and the code did not do it: the banner said `all 12 checks clear` over
+        a `protection` section carrying `available: False` and a reason.
+        """
+        summary = status.banner(self.inventory(protection=self.BLIND))["summary"]
+        self.assertNotIn("clear", summary)
+        self.assertIn("could not run", summary)
+
+    def test_every_section_a_class_declares_is_a_section_that_exists(self) -> None:
+        """A typo in `needs` would make a class silently never go blind.
+
+        Compared against the section names the report actually assembles, so
+        renaming a section breaks here rather than turning a check back into a
+        silent pass.
+        """
+        declared = {name for kind in status.CLASSES for name in kind.needs}
+        self.assertLessEqual(declared, set(self.sections()))
 
     # -- the producer -------------------------------------------------------
 
