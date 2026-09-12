@@ -1312,8 +1312,15 @@ def quoted_repoint(
 def repoint_document(
     doc: pathlib.Path, root: pathlib.Path = REPO_ROOT
 ) -> tuple[str, list[Move], list[Refusal]]:
-    """One document, repointed: the new text, what moved, and what refused to."""
-    raw = doc.read_text(encoding="utf-8", errors="replace")
+    """One document, repointed: the new text, what moved, and what refused to.
+
+    Read strictly, unlike every other reader in this module. They compare and
+    discard; this one hands its result to `--apply`, and `errors="replace"`
+    would substitute U+FFFD for a byte it could not decode and then write that
+    substitution back over the file. A reader that mangles is a wrong answer;
+    a writer that mangles is a lost one, so this raises instead.
+    """
+    raw = doc.read_text(encoding="utf-8")
     flat = raw.replace("\n", " ")
     edits: list[tuple[tuple[int, int], str]] = []
     moves: list[Move] = []
