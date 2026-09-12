@@ -21,7 +21,7 @@
 > it. The **bash 3.2 warning block** inside Testing Requirements is
 > **live** with one clause gone: `.github/scripts/check-bash32-syntax.sh` exists, `make
 > lint` runs it, and CI runs it under `STRICT=1` in the `bash32` job, but it
-> enumerates `git ls-files -- '*.sh'` and nothing else -- the tracked git hooks
+> enumerates every tracked shell script and nothing else -- the tracked git hooks
 > it also parsed left with `.githooks/` at step 0 (#597), and the block below
 > no longer claims them. `CONTRIBUTING.md` carries the same account. The surrounding
 > Testing Requirements prose is not: it names a Ruff scope over `install.py`,
