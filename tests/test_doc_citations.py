@@ -1095,29 +1095,254 @@ def source_declaration_error(root: pathlib.Path, path: str, symbol: str) -> str 
     except (OSError, UnicodeError, SyntaxError) as error:
         return f"{path}: cannot read a Python source declaration: {error}"
 
-    # Module level, then one level into each class. A test method is a
-    # declaration a document cites by name as readily as a function is, and
-    # `TestCase` puts every one of them inside a class. Not deeper: a name
-    # defined inside a function body is a local, and a citation to one is a
-    # claim about an implementation detail that has no stable identity.
+    declarations = declared_at(tree, symbol)
+    if len(declarations) != 1:
+        return (f"{path}::{symbol}: expected one declaration at module or class "
+                f"level, found {len(declarations)}")
+    return None
+
+
+def declared_at(tree, symbol: str) -> list[int]:
+    """The lines at which a parsed module declares `symbol`.
+
+    Module level, then one level into each class. A test method is a
+    declaration a document cites by name as readily as a function is, and
+    `TestCase` puts every one of them inside a class. Not deeper: a name
+    defined inside a function body is a local, and a citation to one is a
+    claim about an implementation detail that has no stable identity.
+
+    Positions rather than a count, because the repointer below needs the line
+    and the locator rule needs the count, and two walks would be two answers.
+    """
+    import ast
+
     bodies = [tree.body]
     bodies += [node.body for node in tree.body if isinstance(node, ast.ClassDef)]
-    declarations = 0
+    found: list[int] = []
     for body in bodies:
         for node in body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                declarations += node.name == symbol
+                found += [node.lineno] * (node.name == symbol)
             elif isinstance(node, (ast.Assign, ast.AnnAssign)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                declarations += sum(
+                found += [node.lineno] * sum(
                     isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store)
                     and name.id == symbol
                     for target in targets for name in ast.walk(target)
                 )
-    if declarations != 1:
-        return (f"{path}::{symbol}: expected one declaration at module or class "
-                f"level, found {declarations}")
-    return None
+    return found
+
+
+# ---------------------------------------------------------------- repointing
+#
+# sd:592. The gate above catches a moved citation; nothing repointed one.
+#
+# MEASURED, over the 200 commits before this one, by pairing removed and added
+# document lines that differ only inside a `path:line` token: 238 citation
+# line numbers were rewritten by hand, spread over 45 commits -- better than
+# one commit in five. 147 of them named source files, which nothing covers at
+# all; the other 91 named markdown, where `--update-citations` re-baselines
+# the manifest but leaves the number in the prose for a person to fix. So the
+# whole 238 was hand work, and the shortcut it invites is a blunt regex over
+# every citation in the page, which has already caused a defect once.
+#
+# THE RULE THIS FOLLOWS. A citation is repointed from its ANCHORED TEXT, never
+# from the citation string: find where the thing the citation is a claim about
+# lives now, and write that number. Two shapes, one walk. A symbol-anchored
+# citation is a claim about the symbol, so the symbol's declaration is what is
+# looked for. A `[quoted: path:line]` reason is a claim that the source quotes
+# this citation verbatim, so the citation token itself is what is looked for.
+#
+# WHAT IT REFUSES. Two candidate lines, or none, and it moves nothing and says
+# which citation it left alone. A repointer that silently picks the first match
+# is the hand shortcut with a tool wrapped around it.
+
+#: One rewrite the repointer would make, and one it declined to make.
+Move = collections.namedtuple("Move", "doc citation was now")
+Refusal = collections.namedtuple("Refusal", "doc citation reason")
+
+
+def declaration_lines(root: pathlib.Path, path: str, symbol: str) -> list[int]:
+    """The lines where a Python file declares `symbol`, or none it cannot read.
+
+    The same walk `source_declaration_error` counts, returning positions
+    instead of a verdict, so the locator rule and the repointer cannot
+    disagree about what a declaration is.
+    """
+    import ast
+
+    try:
+        tree = ast.parse((root / path).read_text(encoding="utf-8"), filename=path)
+    except (OSError, UnicodeError, SyntaxError, ValueError):
+        return []
+    return declared_at(tree, symbol)
+
+
+def anchor_lines(root: pathlib.Path, path: str, anchor: str) -> list[int]:
+    """Every line that could be what the anchored symbol moved to.
+
+    The declaration first, because a symbol that is declared once is
+    unambiguous however many times it is used. Only when the target is not
+    Python, or the name is not declared at its top level, does this fall back
+    to the lines that mention it -- and a name mentioned twice then refuses,
+    which is the point.
+    """
+    name = anchor.rstrip("()").lstrip(".")
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        declared = declaration_lines(root, path, name)
+        if len(declared) == 1:
+            return declared
+    try:
+        lines = (root / path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    needle = anchor.rstrip("()")
+    return [n for n, line in enumerate(lines, 1) if needle in line]
+
+
+def inside(root: pathlib.Path, path: str) -> pathlib.Path | None:
+    """The cited file, when it is a real file inside `root`. Containment only."""
+    try:
+        target = (root / path).resolve()
+    except OSError:
+        return None
+    return target if target.is_relative_to(root.resolve()) and target.is_file() else None
+
+
+def anchored_repoint(root: pathlib.Path, flat: str, match: re.Match) -> tuple | str | None:
+    """Shape one: a citation anchored to a backticked symbol.
+
+    `None` when this tool has nothing to say -- no adjacent symbol, no file, or
+    a citation that is already right. A string when it refuses and why. A
+    `(span, text)` pair when the number should be rewritten.
+    """
+    found = anchor_for(flat, match.span())
+    if found is None or not found[1] or not is_symbol(found[0]):
+        return None
+    anchor, path = found[0], match.group(1)
+    target = inside(root, path)
+    if target is None:
+        return None
+    start = int(match.group(2))
+    end = int(match.group(3) or match.group(2))
+    if names_its_symbol(anchor, target, start, end):
+        return None
+    candidates = anchor_lines(root, path, anchor)
+    if not candidates:
+        return f"`{anchor}` is gone from {path}"
+    if len(candidates) > 1:
+        listed = ", ".join(str(n) for n in candidates[:5])
+        return f"`{anchor}` is at {len(candidates)} lines of {path} ({listed}); ambiguous"
+    moved = candidates[0]
+    text = f"{moved}-{moved + end - start}`" if match.group(3) else f"{moved}`"
+    return (match.start(2), match.end()), text
+
+
+def quoted_repoint(
+    doc: pathlib.Path, root: pathlib.Path, flat: str, match: re.Match, reason: str
+) -> tuple | str | None:
+    """Shape two: a `[quoted: path:line]` reason, whose anchored text is the citation.
+
+    sd:568's marker is a citation as much as the token it exempts, and it goes
+    stale the same way -- so the same walk repoints it, looking for the line
+    that carries this citation verbatim rather than for a symbol.
+
+    What moves here is the REASON, never the citation it covers. A quoted
+    citation is a quotation of somebody else's citation, deliberately inert;
+    rewriting its number would edit the example. The first draft of this tool
+    did exactly that -- it proposed moving `bin/sd:1231` in a page that quotes
+    it -- which is the PR #868 defect arriving through the tool built to
+    prevent it. The caller therefore routes a quoted citation here and nowhere
+    else, and `None` from this function means the marker is already right.
+    """
+    marker = (reason,)
+    if quotes(marker[0], match.group(0), doc):
+        return None
+    span = MARKER.search(flat, match.end())
+    if span is None or span.group(2).strip() != reason:
+        return None
+    path, _, _ = reason.rpartition(":")
+    source = inside(root, path)
+    if source is None or source.resolve() == doc.resolve():
+        return f"[quoted: {reason}] names no readable source"
+    lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
+    carrying = [n for n, line in enumerate(lines, 1) if match.group(0) in line]
+    if not carrying:
+        return f"[quoted: {reason}] -- {match.group(0)} is gone from {path}"
+    if len(carrying) > 1:
+        listed = ", ".join(str(n) for n in carrying[:5])
+        return f"[quoted: {reason}] -- {match.group(0)} is at {listed}; ambiguous"
+    return span.span(2), f"{path}:{carrying[0]}"
+
+
+def repoint_document(
+    doc: pathlib.Path, root: pathlib.Path = REPO_ROOT
+) -> tuple[str, list[Move], list[Refusal]]:
+    """One document, repointed: the new text, what moved, and what refused to."""
+    raw = doc.read_text(encoding="utf-8", errors="replace")
+    flat = raw.replace("\n", " ")
+    edits: list[tuple[tuple[int, int], str]] = []
+    moves: list[Move] = []
+    refusals: list[Refusal] = []
+    for match in TOKEN.finditer(flat):
+        if not match.group(1):
+            continue
+        # Routed, not chained. A citation covered by a valid `quoted` marker is
+        # a quotation and its own number is never touched; only the marker's
+        # reason can move. Falling through from one shape to the other is how
+        # the first draft proposed rewriting a quoted example.
+        marker = marker_after(flat, raw, match.end())
+        if marker is not None and marker[0] == "quoted":
+            outcome = quoted_repoint(doc, root, flat, match, marker[1])
+        else:
+            outcome = anchored_repoint(root, flat, match)
+        if outcome is None:
+            continue
+        if isinstance(outcome, str):
+            refusals.append(Refusal(doc, match.group(0), outcome))
+            continue
+        span, text = outcome
+        edits.append((span, text))
+        moves.append(Move(doc, match.group(0), raw[span[0]:span[1]], text))
+    for (begin, stop), text in sorted(edits, reverse=True):
+        raw = raw[:begin] + text + raw[stop:]
+    return raw, moves, refusals
+
+
+def repointable() -> list[pathlib.Path]:
+    """The documents this tool will rewrite: living pages, never the archive.
+
+    An archived page is a record of what was true when it was archived, and
+    `classify` already reports a stale archived citation without failing it.
+    Repointing one would rewrite the record, which is the same objection rule
+    6 makes to re-anchoring a citation below a Log heading.
+    """
+    return [doc for doc in corpus() if "archive" not in doc.parts] + [
+        REPO_ROOT / name for name in ROOT_DOCUMENTS if (REPO_ROOT / name).is_file()
+    ]
+
+
+def repoint_main(argv: list[str]) -> int:
+    """`--repoint` names every move; `--repoint --apply` takes them.
+
+    Dry run is the default and not a flag, because the failure mode this tool
+    exists to avoid is an unread bulk rewrite of citation numbers.
+    """
+    apply = "--apply" in argv
+    moved = refused = 0
+    for doc in repointable():
+        text, moves, refusals = repoint_document(doc)
+        for move in moves:
+            print(f"{doc}: {move.citation} -> {move.now.rstrip('`')}")
+        for refusal in refusals:
+            print(f"{doc}: REFUSED {refusal.citation}: {refusal.reason}")
+        moved += len(moves)
+        refused += len(refusals)
+        if apply and moves:
+            doc.write_text(text, encoding="utf-8")
+    verb = "repointed" if apply else "would repoint"
+    print(f"{verb} {moved} citation(s); refused {refused}")
+    return 1 if refused else 0
 
 
 class StableSourceCitationTests(unittest.TestCase):
@@ -1598,5 +1823,131 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
         self.assertEqual(unqualified_rule_paths(root), [])
 
 
+class CitationRepointerTests(unittest.TestCase):
+    """sd:592. The tool that makes a moved citation a read rather than arithmetic.
+
+    Measured over the 200 commits before this one: 238 citation line numbers
+    rewritten by hand across 45 commits. 147 named source files, which nothing
+    covered; 91 named markdown, where `--update-citations` re-baselines the
+    manifest and leaves the number in the prose for a person. The shortcut that
+    invites is a blunt regex over the numbers in a page, and that shortcut has
+    already moved two markers that were about other things.
+
+    So the anchored text is what is looked for, never the citation string, and
+    two candidates or none move nothing.
+    """
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = pathlib.Path(temporary.name)
+        (self.root / "bin").mkdir()
+        self.source = self.root / "bin" / "tool.py"
+        self.source.write_text("def render():\n    return 1\n", encoding="utf-8")
+        self.doc = self.root / "page.md"
+
+    def page(self, body: str) -> pathlib.Path:
+        self.doc.write_text(body, encoding="utf-8")
+        return self.doc
+
+    def test_a_symbol_that_moved_is_repointed_to_its_declaration(self) -> None:
+        self.page("The renderer is `render` (`bin/tool.py:1`).\n")
+        self.source.write_text(
+            "# inserted\n" * 9 + self.source.read_text(encoding="utf-8"), encoding="utf-8")
+        text, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(refusals, [])
+        self.assertEqual([(move.citation, move.now) for move in moves],
+                         [("`bin/tool.py:1`", "10`")])
+        self.assertIn("`bin/tool.py:10`", text)
+
+    def test_a_range_keeps_its_width_when_it_moves(self) -> None:
+        self.page("The renderer is `render` (`bin/tool.py:1-2`).\n")
+        self.source.write_text(
+            "# inserted\n" * 9 + self.source.read_text(encoding="utf-8"), encoding="utf-8")
+        text, _, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(refusals, [])
+        self.assertIn("`bin/tool.py:10-11`", text)
+
+    def test_green_a_citation_that_is_still_right_is_not_touched(self) -> None:
+        """CONTROL. A repointer that rewrites a correct citation is a churn engine."""
+        original = self.page("The renderer is `render` (`bin/tool.py:1`).\n").read_text(
+            encoding="utf-8")
+        text, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual((moves, refusals), ([], []))
+        self.assertEqual(text, original)
+
+    def test_an_ambiguous_anchor_refuses_rather_than_guessing(self) -> None:
+        """Two candidates, so it moves nothing and says which citation it left."""
+        self.source.write_text(
+            "helper()\n" + "# pad\n" * 10 + "helper()\n", encoding="utf-8")
+        self.page("The helper is `helper` (`bin/tool.py:6`).\n")
+        text, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(moves, [])
+        self.assertEqual([refusal.citation for refusal in refusals], ["`bin/tool.py:6`"])
+        self.assertIn("ambiguous", refusals[0].reason)
+        self.assertIn("`bin/tool.py:6`", text)
+
+    def test_a_vanished_anchor_refuses_rather_than_deleting(self) -> None:
+        self.page("The renderer is `render` (`bin/tool.py:1`).\n")
+        self.source.write_text("# nothing here\n" * 5, encoding="utf-8")
+        _, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(moves, [])
+        self.assertIn("is gone from bin/tool.py", refusals[0].reason)
+
+    def test_a_quoted_reason_moves_and_the_citation_it_covers_does_not(self) -> None:
+        """sd:568's marker is a citation too, and its anchored text is the citation.
+
+        The citation itself stays put even though its own symbol has moved:
+        a quoted citation is somebody else's example, and rewriting it edits
+        the example rather than repairing a claim.
+        """
+        (self.root / "other.md").write_text(
+            "# other\n\npad\npad\nthe example writes `bin/tool.py:1` here\n", encoding="utf-8")
+        self.page("`render` (`bin/tool.py:1`) [quoted: other.md:2]\n")
+        self.source.write_text("# inserted\n" * 9 + "def render():\n", encoding="utf-8")
+        text, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(refusals, [])
+        self.assertEqual([move.now for move in moves], ["other.md:5"])
+        self.assertIn("[quoted: other.md:5]", text)
+        self.assertIn("`bin/tool.py:1`", text)
+
+    def test_a_quoted_source_that_no_longer_carries_the_citation_refuses(self) -> None:
+        (self.root / "other.md").write_text("# other\n\nnothing\n", encoding="utf-8")
+        self.page("`render` (`bin/tool.py:1`) [quoted: other.md:2]\n")
+        _, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(moves, [])
+        self.assertIn("is gone from other.md", refusals[0].reason)
+
+    def test_this_repository_has_nothing_to_repoint(self) -> None:
+        """The two gates agreeing: a green corpus gives the repointer no work.
+
+        It is also the regression test for the routing defect the live corpus
+        found in this tool's first draft, which proposed rewriting a citation a
+        page quotes -- the PR #868 mistake arriving through the tool built to
+        prevent it. Any fall-through from the quoted shape to the anchored one
+        turns this red.
+        """
+        documents = repointable()
+        self.assertTrue(documents, "no document was offered to the repointer")
+        proposed = []
+        for doc in documents:
+            _, moves, refusals = repoint_document(doc)
+            proposed += [f"{doc}: {move.citation} -> {move.now}" for move in moves]
+            proposed += [f"{doc}: REFUSED {r.citation}: {r.reason}" for r in refusals]
+        self.assertEqual(proposed, [])
+
+    def test_the_corpus_this_tool_writes_to_excludes_the_archive(self) -> None:
+        """An archived page is a record. `classify` refuses to fail one; this
+        refuses to rewrite one, for the same reason rule 6 will not re-anchor a
+        citation below a Log heading."""
+        self.assertEqual([doc for doc in repointable() if "archive" in doc.parts], [])
+        self.assertTrue(any("archive" in doc.parts for doc in corpus()),
+                        "the corpus carries no archived page, so this proves nothing")
+
+
 if __name__ == "__main__":
+    import sys
+
+    if "--repoint" in sys.argv:
+        raise SystemExit(repoint_main(sys.argv[1:]))
     unittest.main()

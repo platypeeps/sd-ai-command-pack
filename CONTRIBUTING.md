@@ -203,6 +203,13 @@ macOS leg is restored.
   edit. Use `path:line` when the claim concerns a particular line; those
   references are still checked strictly. Keep historical references tied to
   the version they describe.
+- When an edit moves a cited line, repoint from the anchored text rather than
+  by hand: `python3 tests/test_doc_citations.py --repoint` names every move it
+  would make and every citation it refuses to guess at, and `--repoint
+  --apply` takes them. It finds the symbol's declaration, not the citation
+  string, and moves nothing when two lines or none could be the new home. A
+  blunt search-and-replace over the numbers in a page has already moved two
+  markers that were about other things.
 - Claude permissions split by what they describe. A rule about *this machine* —
   a path only you have, a tool only you installed — goes in the ignored
   `.claude/settings.local.json`. A rule about *this repository's workflow* —
