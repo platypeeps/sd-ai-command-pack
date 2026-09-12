@@ -344,5 +344,29 @@ function that exceeds one of them is over its ceiling because of how it is
 written, which is a review question, not a capacity question.
 
 What the file still governs: `MIGRATE_CAP`, the three dashboard constants, and
-the review lane's 1,986, none of which R11-D48 retired and none of which this
-change touches.
+the review lane's ceiling, none of which R11-D48 retired and none of which this
+change touches. The lane's ceiling is the one number left here that a feature
+can still bust, so it still gets a record when it moves; the entry below is
+the first since this one.
+
+## Review-lane ceiling for the Dependabot guard, 2026-09-11
+
+The baseline is `a380ea2b fix(status-source): the contract says what the marker says, and rule 1's row sign is pinned (#822)`.
+`sd-review setup-github` gains a second emitted file, the Dependabot `ignore:` guard for the review-route pin that seven consumers hand-wrote in six wordings, and a `--check` verb that renders both files at the repository's own pin and prints `same` or `DIFFERS` against the tracked bytes (sd:435).
+
+| Tracked component | Baseline lines | Corrected lines | Change |
+| --- | ---: | ---: | ---: |
+| `bin/sd-review` | 1,660 | 1,660 | 0 |
+| `bin/sd_setup_github.py` | 326 | 383 | +57 |
+| Review lane | 1,986 | 2,043 | +57 |
+
+Set the review-lane ceiling to 2,043, an increase of fifty-seven lines and no reserve; the lane stood at exactly 1,986 of 1,986 before this change.
+The fifty-seven lines are measured on the written change, not forecast: the import, a second read, the guard-state refusal, the one write loop that keeps the installer at a single write site, the `--check` dispatch and its renderer, two result keys and one render line.
+The guard template, the line transform that merges it into a consumer's `dependabot.yml` without a YAML round-trip, and the same/DIFFERS report are in a new module, `bin/sd_setup_guard.py`, which the installer imports and `bin/sd-review` does not, so the lane's derivation does not count it.
+That is a module boundary and not a way around the number: the module is text-in/text-out and a test asserts it opens nothing, so the lane's proof that the installer is its one writer still reads one file and counts one write site.
+Trimming prose in `sd_setup_github.py` to pay for the wiring is the trade R11-D41 names as the wrong one.
+
+This preparatory change contains only this record and the ceiling in `tests/test_sd_review_boundary.py`.
+Its runtime remains at 1,986 review-lane lines, within the old ceiling.
+Implementation follows in a separate pull request stacked on this one.
+All behavioral, inventory, native, external-review, and merge gates remain enforced.
