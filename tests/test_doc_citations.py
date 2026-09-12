@@ -410,7 +410,15 @@ FOREIGN_SKILL = "skills/sd-research-repo"
 #: path this check exists for begins `.claude/`, so without it the scan matched
 #: nothing and the live test passed over the defect it was written to catch.
 BACKTICKED_PATH = re.compile(r"`(\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:md|py|json|toml|ya?ml|sh))`")
-QUALIFIER = re.compile(r"pack", re.IGNORECASE)
+#: Word-bounded, and that is the whole point. An unbounded `pack` is satisfied
+#: by "the package documentation", "the packaging notes" or "unpack the brief",
+#: so an unqualified citation with any of those within the window read as
+#: qualified and the scan passed it -- verified against all three before this
+#: was tightened. A guard with a false negative is worse than no guard, because
+#: the class then looks clean. The boundary still matches what the prose
+#: actually says: `pack`, `pack's`, and the `pack` in `sd-ai-command-pack`,
+#: whose preceding `-` is a non-word character.
+QUALIFIER = re.compile(r"\bpack\b", re.IGNORECASE)
 
 #: Enough to reach back over "live in the sd-ai-command-pack checkout's" and a
 #: line wrap, and short enough that the word has to be about this citation.
@@ -507,6 +515,51 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
         document.write_text(
             "its cap is in the pack's\n`.claude/rules/caps.md`.\n", encoding="utf-8")
         self.assertEqual(unqualified_pack_paths(root), [])
+
+    def test_a_word_containing_pack_does_not_qualify_a_citation(self) -> None:
+        """The false negative from the other side, and the reason for `\\b`.
+
+        The first version matched `pack` as a bare substring, so "the package
+        documentation", "the packaging notes" and "unpack the brief" all read
+        as naming this pack and let an unqualified citation through. Each of
+        the three was confirmed to slip through before the boundary was added.
+        A guard that cannot fail is worse than no guard: the class it watches
+        then looks clean.
+
+        The second half is the one that matters as much -- the boundary must
+        still accept what the prose really says, or the guard fires on every
+        correct citation and gets deleted the next time the build is red.
+        """
+
+        import tempfile
+
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = pathlib.Path(temporary.name)
+        skill = root / FOREIGN_SKILL
+        skill.mkdir(parents=True)
+        (root / ".claude" / "rules").mkdir(parents=True)
+        (root / ".claude" / "rules" / "caps.md").write_text("| Cap |\n", encoding="utf-8")
+        document = skill / "SKILL.md"
+
+        for decoy in (
+            "the package documentation says the cap is in",
+            "see the packaging notes; the cap is in",
+            "unpack the brief first. The cap is in",
+            "the cap is in",
+        ):
+            with self.subTest(lead=decoy):
+                document.write_text(f"{decoy}\n`.claude/rules/caps.md`.\n", encoding="utf-8")
+                self.assertEqual(len(unqualified_pack_paths(root)), 1)
+
+        for real in (
+            "the cap is in the sd-ai-command-pack checkout's",
+            "the caps live in the pack's",
+            "read it in the pack at",
+        ):
+            with self.subTest(lead=real):
+                document.write_text(f"{real}\n`.claude/rules/caps.md`.\n", encoding="utf-8")
+                self.assertEqual(unqualified_pack_paths(root), [])
 
     def test_relative_and_third_repository_citations_are_left_alone(self) -> None:
         """The two exclusions, each because the check would be wrong otherwise.
