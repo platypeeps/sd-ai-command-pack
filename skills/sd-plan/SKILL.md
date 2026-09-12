@@ -63,9 +63,12 @@ create a PRD just to record routine progress or work already merged.
 4. **Review the plan.** Run `sd-review --scope planning`, which resolves the
    active `planning`/`in_progress` item's `prd.md`/`design.md`/`implement.md`
    and routes them to the reviewer the registry gives. This is the development
-   flow's *prd and design* review point; its cap is that row's in
-   `.claude/rules/sd-planning-adversarial-review.md`. Record the findings
-   under a `## Review` heading in the item.
+   flow's *prd and design* review point; its cap is that row's in the
+   sd-ai-command-pack checkout's
+   `.claude/rules/sd-planning-adversarial-review.md`. Planning runs in whatever
+   repository encloses cwd (R10-D6) and only the pack carries that file, so
+   read the cap there. Record the findings under a `## Review` heading in the
+   item.
 5. **Promote.** `planning → ready` only when acceptance criteria are present
    and **no open `BLOCKING` line remains**. An unresolved blocking concern is a
    stop, not a note. In a checkout using row status, write the transition
