@@ -528,8 +528,12 @@ def _operands(name: str, node: ast.Call) -> list[ast.expr] | None:
         return None
     if any(keyword.arg is None for keyword in node.keywords):
         return None
-    # `zip` truncates the trailing `msg` and friends passed positionally.
-    bound = dict(zip(parameters, node.args))
+    # `strict=False` is the point rather than an omission: the truncation is
+    # what drops a trailing `msg` passed positionally, and the short side is
+    # equally allowed -- an operand given by keyword leaves `node.args` shorter
+    # than `parameters`, and the length check below is what rejects a call that
+    # really is missing one.
+    bound = dict(zip(parameters, node.args, strict=False))
     bound.update({keyword.arg: keyword.value for keyword in node.keywords
                   if keyword.arg in parameters})
     if len(bound) != len(parameters):
