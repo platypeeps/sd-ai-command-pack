@@ -207,11 +207,25 @@ shard_pgid=""
 # watchdog stays armed through this: a launcher that dies while the log is being
 # assembled still leaves an orphan, and an orphan that reaches the publish below
 # writes the shared files this change exists to protect.
+#
+# The append is checked because this log is evidence, not a convenience: `make
+# test` decides whether the suite skipped anything by reading it, so a write
+# that failed half way -- a full temporary filesystem is the ordinary way --
+# would publish a log missing whatever those shards reported and pass the skip
+# gate by omission. A run that cannot assemble its own log publishes nothing and
+# says why, leaving the root on the last complete run.
+assembly_status=0
 for module in "${modules[@]}"; do
   if [ -f "$work_dir/$module.log" ]; then
-    cat "$work_dir/$module.log" >> "$run_log"
+    cat "$work_dir/$module.log" >> "$run_log" || assembly_status=1
   fi
 done
+
+if [ "$assembly_status" -ne 0 ]; then
+  printf '%s\n' \
+    "error: could not assemble this run's log under $work_dir; nothing was published." >&2
+  exit 1
+fi
 
 # Publish, and stand the watchdog down first. Everything above is interruptible
 # without consequence; from here on an interruption would leave the repo root

@@ -424,6 +424,48 @@ class PublishFailureTests(unittest.TestCase):
             (root / "unittest-output.log").mkdir()
             self._assert_reported(self._run(root, script))
 
+    def test_an_assembly_write_that_fails_publishes_nothing(self):
+        # The run's own log is evidence: `make test` reads it to decide whether
+        # anything was skipped, so an append that failed half way would publish
+        # a log missing those shards and pass the skip gate by omission. The
+        # shim fails the per-shard appends and lets the run's own log through,
+        # which is how the two `cat` calls are told apart.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+
+            clean = self._run(root, script)
+            self.assertEqual(clean.returncode, 0, clean.stdout + clean.stderr)
+            published = root / "unittest-output.log"
+            published.write_text("PREVIOUS COMPLETE RUN\n" + published.read_text())
+
+            shim_dir = root / "shim"
+            shim_dir.mkdir()
+            sentinel = root / "cat-was-refused"
+            shim = shim_dir / "cat"
+            shim.write_text(
+                "#!/bin/sh\n"
+                "for arg in \"$@\"; do\n"
+                "  case \"$arg\" in\n"
+                "    */unittest-output.log) exec /bin/cat \"$@\" ;;\n"
+                "  esac\n"
+                "done\n"
+                f': > "{sentinel}"\n'
+                "exit 1\n"
+            )
+            shim.chmod(0o755)
+            env = _fixture_env(HARNESS_FIXTURE_SLEEP="0")
+            env["PATH"] = f"{shim_dir}:{env['PATH']}"
+
+            blocked = self._run(root, script, env)
+            self.assertEqual(blocked.returncode, 1, blocked.stdout + blocked.stderr)
+            self.assertIn("could not assemble this run's log", blocked.stderr)
+            self.assertTrue(sentinel.exists(), "the failing `cat` was never called")
+            self.assertTrue(
+                published.read_text().startswith("PREVIOUS COMPLETE RUN"),
+                "a run that could not assemble its log published anyway",
+            )
+
 
 class AssemblyWindowTests(unittest.TestCase):
     """A launcher that dies while the log is being assembled leaves no orphan."""
