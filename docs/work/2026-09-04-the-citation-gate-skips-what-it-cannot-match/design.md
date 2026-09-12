@@ -123,7 +123,7 @@ rather than on a fixture.
 
 **The marker read is line-aware, and the flattening does not prevent it.**
 `classify` flattens with `.replace("\n", " ")`
-(`tests/test_doc_citations.py:390`), which a reviewer read as making 0.71.34's
+(`tests/test_doc_citations.py:400`), which a reviewer read as making 0.71.34's
 "same line" rule unimplementable. It does not: the substitution is one
 character for one character, so offsets in the flattened text are offsets in
 the original. `marker_after()` matches against the flattened text and then
@@ -755,7 +755,7 @@ that could never be wrong — the exact shape D4 rejects one paragraph above, an
 a reviewer was right to say the principle was stated and not applied. The form
 is `[quoted: <path:line>]`, and the gate asserts that the quoted citation's own
 text appears at that line of that file. A page quoting `` `is_symbol` (`source:tests/test_doc_citations.py::is_symbol`) `` as an example of the shape writes
-`[quoted: tests/test_doc_citations.py:237]` after it, and if the example is
+`[quoted: tests/test_doc_citations.py:239]` after it, and if the example is
 moved or the line changes, the quotation fails like any other claim. This costs
 nothing over the free-text form — it is the same grammar, the same
 `marker_after()`, and the same one-citation scope — and it removes the only

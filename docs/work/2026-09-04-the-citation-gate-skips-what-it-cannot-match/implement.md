@@ -166,8 +166,9 @@ rather than invent the argument.
       next-line case is testable because the flatten is offset-preserving:
       `marker_after()` matches on the flattened text and then asserts no `\n`
       in the *unflattened* slice between citation and marker. `[quoted: ]`
-      takes a `path:line` and not free text, per D4a, and its reason string is
-      verified the same way a citation is.
+      takes free text and the gate does not read it, so the exemption is
+      counted and not yet falsifiable. D4a specifies a `path:line` reason
+      verified the way a citation is; that is sd:568 and not this step.
 - [x] **4. The split.** `is_inside_repo` becomes `is_under_repo` plus a
       `target.is_file()` at the call site. `is_under_repo` **keeps the
       `resolve()`**: `Path.is_relative_to` is lexical, and

@@ -46,13 +46,13 @@ numbers drifted. What holds now, printed by the module on every run:
 
 Corpus: 1,096 tracked markdown files, `CHANGELOG.md` excluded by name. The
 compared population was **36** under the predecessor's corpus immediately
-before this work and is **53** after it, of which 38 are live. Two of the
-seventeen were found by widening to the parenthesised comma, and both were
+before this work and is **54** after it, of which 39 are live. Two of the
+eighteen were found by widening to the parenthesised comma, and both were
 stale: `CITATION_RE` cited at `bin/sd-docs-lint:306` when it is at 351, and
 `MODES` cited at `bin/sd_lib.py:32` when it is at 38. Neither was reachable
 before. That is criterion 4 paying for itself on the day it landed.
 
-`target-missing` and `escapes-checkout` are both empty, which is the reason
+`target-missing`, `escapes-checkout` and `absent-but-present` are all empty, which is the reason
 `make check` stays green through this change rather than a claim that nothing
 is wrong: the one live missing target is criterion 2's, and it carries
 `[absent: ...]`.

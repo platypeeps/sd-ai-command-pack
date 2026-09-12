@@ -62,8 +62,9 @@ reason                         live  archiv   total
 
 Each reason, with why it exists:
 
-* **`compared`** -- the anchor was checked against the cited line. The only
-  bucket that can fail, together with `target-missing`.
+* **`compared`** -- the anchor was checked against the cited line. One of the
+  three buckets that can fail, with `target-missing` and `absent-but-present`;
+  `test_the_red_buckets_are_empty` is what spends the other two.
 * **`no-adjacent-anchor`** and **`elided-path`** -- the token matched no
   anchoring shape, or names a line and no file because the prose named the
   file already. Both are tokens, neither is anchorable, and between them they
@@ -107,9 +108,10 @@ purpose. `[quoted: <path:line>]` says a citation is an example rather than a
 claim -- the answer to "can a document explain this gate without tripping it",
 found by being caught, when this item's own PRD reproduced a self-test
 verbatim and `make check` failed on that file. Both require a reason: an
-exemption nobody has to justify is a silencer with better manners. The reason
-on `[quoted: ]` is itself a `path:line`, so the escape hatch is falsifiable
-too.
+exemption nobody has to justify is a silencer with better manners. That reason
+is free text today and the gate does not read it, so the exemption is counted
+and not yet falsifiable; D4a is where it becomes a checked `path:line`, and
+saying so is cheaper than implying the check already runs.
 
 Three shapes are named and counted rather than resolved, and saying so is more
 honest than a number that implies they were handled: the bare comma and
@@ -284,12 +286,20 @@ def corpus(root: pathlib.Path | None = None) -> list[pathlib.Path]:
     root = root or REPO_ROOT
     try:
         listed = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "-z", "*.md"],
+            # `--deduplicate` and the basename rule both match
+            # `bin/sd-docs-lint`'s enumerator, deliberately. A conflicted index
+            # carries one entry per stage, so without the flag the same
+            # document is read once per stage and conservation counts its
+            # tokens twice; backbone item 481 records that for the other
+            # reader. The `--` keeps a path that looks like an option out of
+            # the option list.
+            ["git", "-C", str(root), "ls-files", "-z", "--deduplicate",
+             "--", "*.md"],
             capture_output=True, text=True, check=True).stdout.split("\0")
     except (OSError, subprocess.CalledProcessError):  # pragma: no cover - no git
         listed = [str(p.relative_to(root)) for p in sorted(root.rglob("*.md"))]
     return contained(root, [root / name for name in listed
-                            if name and name != CHANGELOG])
+                            if name and not name.endswith(CHANGELOG)])
 
 
 def marker_after(flat: str, raw: str, end: int) -> tuple[str, str] | None:
@@ -542,6 +552,26 @@ class DocCitationTests(unittest.TestCase):
         # result, and iterating the counter would delete it from the report.
         print("citation census: " + ", ".join(
             f"{reason}={counts[reason]}" for reason in sorted(REASONS)))
+
+    def test_the_changelog_exclusion_is_by_basename_and_not_by_root_path(self) -> None:
+        """The docstring says `CHANGELOG.md` is excluded. It said it of one file.
+
+        The test compared the whole relative path against the literal, so the
+        rule read "the CHANGELOG at the root" while the prose read "a file
+        called CHANGELOG.md". Only the root one is tracked today, so nothing
+        was wrong and nothing would have said so when a second one appeared.
+        `bin/sd-docs-lint` already excludes by basename; matching it is the
+        point, since two readers of the same corpus disagreeing is the defect.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            (root / "docs").mkdir()
+            (root / "CHANGELOG.md").write_text("root\n", encoding="utf-8")
+            (root / "docs" / "CHANGELOG.md").write_text("nested\n", encoding="utf-8")
+            (root / "docs" / "kept.md").write_text("kept\n", encoding="utf-8")
+            names = sorted(doc.name for doc in corpus(root))
+            self.assertEqual(names, ["kept.md"], f"corpus was {names}")
 
     def test_the_red_buckets_are_empty(self) -> None:
         """The docstring calls two buckets red. Until this, nothing made them so.
