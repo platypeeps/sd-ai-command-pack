@@ -4,6 +4,12 @@
 # `coverage combine` merges. Writes unittest-output.log (for the skipped-test
 # gate) and exits non-zero if any shard's tests fail.
 #
+# Both of those live at the repo root, where `make test` and the CI job read
+# them, but they are written there only once the run is over: a run in progress
+# writes to a private directory and publishes at the end. An interrupted run
+# publishes nothing, so the root keeps the last complete run's results rather
+# than a half-written mixture of two. Item 522, and see the two blocks below.
+#
 # Env:
 #   PYTHON_BIN     interpreter to run (default: python3)
 #   TEST_WORKERS   parallel workers (default: online CPUs minus one, min 1)
@@ -56,10 +62,27 @@ else
   fi
 fi
 
+# Everything this run writes goes to a private directory and is published to the
+# repo root only when the run is over. Until item 522 the script opened by
+# deleting `.coverage .coverage.*` and truncating unittest-output.log at the
+# repo root, so those names were shared, mutable, and written from the first
+# second of a run to the last. Two runs in one checkout then destroyed each
+# other's data in flight, and the orphan control below is there because a run
+# whose parent was killed is exactly how a checkout comes to hold two runs
+# without the operator knowing it does. Reproduced before the fix, on this
+# script: a live shard was deleted two seconds after a second run started, and
+# the surviving orphan appended its own output to the second run's log.
+work_dir="$(mktemp -d)" || {
+  printf '%s\n' "error: cannot create a temporary directory for test shards" >&2
+  exit 1
+}
+run_log="$work_dir/unittest-output.log"
+: > "$run_log"
+
 # Absolute paths so installer subprocesses spawned from temp cwds still load the
-# coverage config and write their shards where `coverage combine` finds them.
+# coverage config and write their shards where this run collects them.
 export COVERAGE_PROCESS_START="$REPO_ROOT/.coveragerc"
-export COVERAGE_FILE="$REPO_ROOT/.coverage"
+export COVERAGE_FILE="$work_dir/.coverage"
 export PYTHONPATH="$REPO_ROOT/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}"
 
 # Git 2.54 can detach automatic maintenance after commits and pushes. The test
@@ -75,12 +98,6 @@ export GIT_CONFIG_VALUE_1=0
 export GIT_CONFIG_KEY_2=receive.autogc
 export GIT_CONFIG_VALUE_2=false
 
-# Start clean so combine and the skip gate only see this run's data. Create the
-# log up front so the skip gate and final cat always have a file to read, even
-# if a shard dies before writing any output.
-rm -f .coverage .coverage.*
-: > unittest-output.log
-
 # Largest test file first (size approximates runtime) to shorten the tail.
 modules=()
 while IFS= read -r path; do
@@ -89,32 +106,127 @@ done < <(ls -S tests/test_*.py 2>/dev/null)
 
 if [ "${#modules[@]}" -eq 0 ]; then
   printf '%s\n' "error: no test modules found under tests/" >&2
+  rm -rf "$work_dir"
   exit 1
 fi
 
-work_dir="$(mktemp -d)" || {
-  printf '%s\n' "error: cannot create a temporary directory for test shards" >&2
-  exit 1
-}
-trap 'rm -rf "$work_dir"' EXIT
 mod_file="$work_dir/modules"
 printf '%s\n' "${modules[@]}" > "$mod_file"
+
+# --- orphan control -------------------------------------------------------
+#
+# A killed parent does not stop this run. The shell is reparented and keeps
+# going, and the `coverage run` children outlive it either way: stopping a
+# clean run left run-tests.sh alive with two coverage processes still writing.
+# So the run has to notice that the process which started it is gone, and it
+# has to be able to take its whole shard tree down with it.
+#
+# `set -m` gives the shard job its own process group, so `kill -- -$shard_pgid`
+# reaches xargs and every coverage grandchild at once. That is what makes the
+# reaping precise: no pattern kill on the basename `run-tests.sh`, which is
+# identical in every worktree on this machine and would take out other
+# checkouts' suites.
+#
+# The watchdog is a plain poll of this shell's parent. It acts only on a
+# reparent it can read (`ps` returning a different, non-empty ppid) or on this
+# shell being gone outright, so an unreadable `ps` leaves the run alone rather
+# than killing it on a guess. A run that was already detached when it started
+# (ppid 1) has no launcher to watch and gets no watchdog.
+shard_pgid=""
+watchdog_pid=""
+gate_pid=$$
+gate_ppid="$PPID"
+
+reap_shards() {
+  if [ -n "$shard_pgid" ]; then
+    kill -TERM -- "-$shard_pgid" 2>/dev/null
+  fi
+}
+
+cleanup() {
+  if [ -n "$watchdog_pid" ]; then
+    kill -TERM "$watchdog_pid" 2>/dev/null
+    watchdog_pid=""
+  fi
+  reap_shards
+  rm -rf "$work_dir"
+}
+
+on_signal() {
+  # Nothing is published from here: a run that was interrupted has no complete
+  # data, and the repo root still holds whatever the last finished run left.
+  printf '%s\n' "error: test run interrupted; shard processes terminated." >&2
+  cleanup
+  exit 143
+}
+
+trap 'cleanup' EXIT
+trap 'on_signal' INT TERM HUP
+
+watchdog() {
+  # Stated rather than relied on: bash resets trapped signals in the subshell a
+  # background job runs in, and a watchdog that inherited `cleanup` would delete
+  # this run's private directory the moment it was told to stand down.
+  trap - EXIT INT TERM HUP
+  while :; do
+    sleep 2
+    if ! kill -0 "$gate_pid" 2>/dev/null; then
+      reap_shards
+      return 0
+    fi
+    current_ppid="$(ps -o ppid= -p "$gate_pid" 2>/dev/null | tr -d '[:space:]')"
+    [ -n "$current_ppid" ] || continue
+    [ "$current_ppid" = "$gate_ppid" ] && continue
+    printf '%s\n' \
+      "error: the process that started this test run exited; terminating the run and its shards." >&2
+    reap_shards
+    kill -TERM "$gate_pid" 2>/dev/null
+    return 0
+  done
+}
 
 # One `coverage run` per module, up to TEST_WORKERS at a time. Each shard's
 # output goes to its own log so parallel writers never interleave. xargs exits
 # non-zero (123) if any shard command fails.
 run_status=0
+set -m
 xargs -P "$TEST_WORKERS" -I {} bash -c '
   "$1" -m coverage run --parallel-mode -m unittest "$3" > "$2/$3.log" 2>&1
-' _ "$PYTHON_BIN" "$work_dir" {} < "$mod_file" || run_status=$?
+' _ "$PYTHON_BIN" "$work_dir" {} < "$mod_file" &
+shard_pgid=$!
+if [ "$gate_ppid" != "1" ]; then
+  watchdog &
+  watchdog_pid=$!
+fi
+wait "$shard_pgid" || run_status=$?
+set +m
+
+if [ -n "$watchdog_pid" ]; then
+  kill -TERM "$watchdog_pid" 2>/dev/null
+  wait "$watchdog_pid" 2>/dev/null
+  watchdog_pid=""
+fi
+shard_pgid=""
 
 # Concatenate shard output in a stable order for the skipped-test gate.
 for module in "${modules[@]}"; do
   if [ -f "$work_dir/$module.log" ]; then
-    cat "$work_dir/$module.log" >> unittest-output.log
+    cat "$work_dir/$module.log" >> "$run_log"
   fi
 done
-cat unittest-output.log
+
+# Publish. The run is over, so the repo root can now carry its results: the
+# skipped-test gate reads unittest-output.log there, and `coverage combine`
+# reads `.coverage.*` there, in both `make test` and CI. Clearing the old data
+# happens here rather than at startup so the destructive step lands when this
+# run's data is complete instead of while another run's data is being written.
+rm -f "$REPO_ROOT/.coverage" "$REPO_ROOT"/.coverage.*
+for shard in "$work_dir"/.coverage.*; do
+  [ -e "$shard" ] || continue
+  mv -f "$shard" "$REPO_ROOT/"
+done
+cat "$run_log" > "$REPO_ROOT/unittest-output.log"
+cat "$REPO_ROOT/unittest-output.log"
 
 if [ "$run_status" -ne 0 ]; then
   exit 1
