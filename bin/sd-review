@@ -1214,6 +1214,10 @@ def review(
     policy, source = load_policy(root)
     item = getattr(args, "item", None)
     subject = resolve_subject(root, "branch" if preflight else args.scope, item, getattr(args, "base", None))
+    # `sd-plan` step 4 routes the triad here and step 5 gates `planning -> ready` on this
+    # lane, so this is where a `mode: guest` checkout finds out; `sd_lib` owns the rule.
+    if subject.scope == "planning" and (refusal := sd_lib.guest_artifact_refusal(root, subject.paths)):
+        raise UsageError(refusal)
     plan = sd_route.route(subject.paths, subject.lines, args.draft, policy)
     # Read from the home this run was handed, not from the process's, so a run
     # given a different environment reads that operator's pins. A missing
