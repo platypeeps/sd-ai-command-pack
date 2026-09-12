@@ -402,7 +402,7 @@ def anchor_for(flat: str, span: tuple[int, int]) -> tuple[str, bool] | None:
     return None
 
 
-def quotes(reason: str, token: str) -> bool:
+def quotes(reason: str, token: str, doc: pathlib.Path) -> bool:
     """Does the `path:line` in a `quoted` reason carry `token` at that line?
 
     `token` is the citation as written, backticks and all, so the check is
@@ -410,11 +410,22 @@ def quotes(reason: str, token: str) -> bool:
     mention the same file. A reason naming a file outside the checkout, a
     line past its end, or a line that does not carry the token all answer
     no, and the citation is then classified as the claim it looks like.
+
+    **`doc` cannot be its own source.** A page whose marker names the page
+    itself proves the citation by pointing at the citation: the line the
+    reason names is the line the marker sits on, so the token is trivially
+    there and the exemption certifies itself. That is the shape this whole
+    device exists to remove, arriving through the mechanism that removes it,
+    so the same document is refused outright rather than only the same line
+    -- quoting a *different* line of the same page is the same circle drawn
+    wider.
     """
 
     path, _, line = reason.rpartition(":")
     source = REPO_ROOT / path
     if not is_under_repo(source) or not source.is_file():
+        return False
+    if source.resolve() == doc.resolve():
         return False
     try:
         number = int(line)
@@ -474,8 +485,18 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                 # the gate goes and looks. An exemption that cannot fail is
                 # the silencer this module exists to remove, so this one is
                 # made to fail: move the quoted text and the row goes red.
-                reason = ("quoted" if quotes(marker[1], match.group(0))
-                          else "quoted-not-there")
+                if quotes(marker[1], match.group(0), doc):
+                    reason = "quoted"
+                elif archived:
+                    # An archive is a record. Its quoted source moving is the
+                    # same event as its cited target moving, and that is
+                    # `archived-stale` by policy everywhere else in this
+                    # module. Red here would mean archiving a page turns a
+                    # later, unrelated edit into a build failure -- including
+                    # for this very item, once it is archived.
+                    reason = "archived-stale"
+                else:
+                    reason = "quoted-not-there"
                 rows.append(Citation(doc, "", path, None, start, end, reason))
                 continue
             if not path:
@@ -801,6 +822,51 @@ class TheMarkerGrammar(unittest.TestCase):
         self.assertEqual(
             self.reason_for(f"`f` ({self.QUOTABLE}) [quoted: tests/test_doc_citations.py:1]"),
             "quoted-not-there")
+
+    def test_a_page_cannot_be_its_own_quoted_source(self) -> None:
+        """The circle: the reason names the line the marker sits on.
+
+        `[quoted: doc.md:1]` written on line 1 of `doc.md` passes a
+        content check trivially -- the token is there because the marker is
+        there -- so the exemption certifies itself. Found by Copilot on #870.
+        The whole document is refused as a source, not just the one line:
+        quoting a different line of the same page draws the same circle
+        wider.
+        """
+
+        # Asked of `quotes` directly, and with a control. A fixture written
+        # through `classify` cannot reach this guard: `quotes` resolves the
+        # reason against REPO_ROOT, so a document in a temporary directory
+        # fails earlier, for the wrong reason, and the assertion passes while
+        # proving nothing. The first version of this test did exactly that.
+        here = pathlib.Path(__file__)
+        reason = self.quoting(self.QUOTABLE)
+        self.assertTrue(
+            quotes(reason, self.QUOTABLE, REPO_ROOT / "docs" / "some-other-page.md"),
+            "the control: any other page may cite this line")
+        self.assertFalse(
+            quotes(reason, self.QUOTABLE, here),
+            "but this file may not cite itself")
+
+    def test_a_failed_quote_in_an_archive_is_archived_stale_not_red(self) -> None:
+        """An archive is a record, and its sources move like anything else.
+
+        Every other reason in this module treats an archived page's drift as
+        `archived-stale` rather than a failure. Without this the quoted
+        branch would be the one exception, so archiving a page would turn a
+        later unrelated edit into a build failure -- including for the very
+        item that introduced the marker, once it is archived.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            doc = root / "archive" / "2026-01-old" / "design.md"
+            doc.parent.mkdir(parents=True)
+            doc.write_text(
+                f"`f` ({self.QUOTABLE}) [quoted: tests/test_doc_citations.py:1]\n",
+                encoding="utf-8")
+            rows = classify([doc])
+        self.assertEqual([row.reason for row in rows], ["archived-stale"])
 
     def test_a_reason_naming_a_file_that_is_not_there(self) -> None:
         self.assertEqual(

@@ -123,7 +123,7 @@ rather than on a fixture.
 
 **The marker read is line-aware, and the flattening does not prevent it.**
 `classify` flattens with `.replace("\n", " ")`
-(`tests/test_doc_citations.py:466`), which a reviewer read as making 0.71.34's
+(`tests/test_doc_citations.py:477`), which a reviewer read as making 0.71.34's
 "same line" rule unimplementable. It does not: the substitution is one
 character for one character, so offsets in the flattened text are offsets in
 the original. `marker_after()` matches against the flattened text and then

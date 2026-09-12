@@ -208,7 +208,10 @@ rather than invent the argument.
 - [x] **7. This item's own pages.** `prd.md`, `design.md` and this file each
       carry illustrative citation shapes written with a metavariable line
       number because no inert form existed when they were written. Rewrite them
-      to use `[quoted: <reason>]`. This is the acceptance test for question 3
+      to use `[quoted: <path:line>]`, naming a line of *another* file that
+      really carries the quoted citation -- free text stopped being a marker
+      at D4a, and a page cannot be its own source. This is the acceptance
+      test for question 3
       that no fixture can be: if the pages still cannot show the shape they
       discuss, the marker did not solve the problem it was designed for.
 - [x] **8. Criterion 2.** Verify that
