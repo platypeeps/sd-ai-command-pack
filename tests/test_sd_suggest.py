@@ -97,8 +97,17 @@ TWO_OPEN_ISSUES = {
 
 
 def load(name: str, filename: str | None = None):
-    """Import a `bin/` module by path -- `bin/` is not a package."""
+    """Import a `bin/` module by path -- `bin/` is not a package.
+
+    A module already in `sys.modules` from that same file is handed back
+    rather than executed again; see the same helper in
+    `tests/test_sd_handoff_rows.py` for what re-executing `sd_lib` did to
+    every other module in a `unittest discover` process.
+    """
     path = str(REPO_ROOT / "bin" / (filename or f"{name}.py"))
+    already = sys.modules.get(name)
+    if already is not None and getattr(already, "__file__", None) == path:
+        return already
     loader = importlib.machinery.SourceFileLoader(name, path)
     spec = importlib.util.spec_from_file_location(name, path, loader=loader)
     module = importlib.util.module_from_spec(spec)
@@ -687,6 +696,32 @@ class WhatIsNotAPaletteEntry(unittest.TestCase):
         self.assertIn("sd_suggest.suggest_add", text)
         self.assertIn("sd_suggest.suggest_publish", text)
         self.assertEqual(1, text.count('groups.add_parser(\n        "suggest"'))
+
+
+class TheModuleLoader(unittest.TestCase):
+    """The same guard as `tests/test_sd_handoff_rows.py`, on this copy.
+
+    Two files carry this helper and either one re-executing `sd_lib` is
+    enough to split the module in two, so each carries its own check. This
+    was the copy that actually produced the failure: it sorts after
+    `test_sd_lib` and so replaced the module that file had already bound.
+    """
+
+    def test_a_module_already_imported_is_not_executed_again(self) -> None:
+        self.assertIs(load("sd_lib"), sys.modules["sd_lib"])
+        self.assertIs(load("sd_lib"), sd_lib)
+
+    def test_it_still_executes_a_module_that_is_not_imported_yet(self) -> None:
+        """The control: a guard returning early for everything would pass the
+        test above while loading nothing at all."""
+
+        name = "sd_lib_under_another_name"
+        sys.modules.pop(name, None)
+        self.addCleanup(sys.modules.pop, name, None)
+        fresh = load(name, "sd_lib.py")
+        self.assertIs(sys.modules[name], fresh)
+        self.assertIsNot(fresh, sd_lib)
+        self.assertTrue(callable(fresh.parse_frontmatter))
 
 
 if __name__ == "__main__":
