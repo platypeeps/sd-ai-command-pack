@@ -36,8 +36,16 @@ happening once already.
       extended for a filed issue — and *not* for a draft, which is already
       keyed `item:<id>` by `sd_db/contributions.py:615-618`; the projection's
       second pass at `sd_db/contributions.py:622` taught which keys are its
-      own. Green on its own: a row can be registered, listed and filed without
-      any collector existing.
+      own. Also in this step, because it changes the same projection:
+      requirement 10's lane vocabulary. `LANES` at
+      `sd_db/contributions.py:32` has a terminal lane called `merged`, and it
+      is the sort key of the whole projection at
+      `sd_db/contributions.py:630`; a closed issue must land in a lane that is
+      not a lie. Decide it here — a neutral terminal lane, or an explicit rule
+      that a closed issue is `awaiting_them` — and assert that the sort stays
+      total either way, because every reader depends on that order. Green on
+      its own: a row can be registered, listed and filed without any collector
+      existing.
 
 - [ ] **3 — library: the collector watches it (system).** `observe_issue`
       beside `sd_db/contributions.py:412`; `_issue_attention` beside

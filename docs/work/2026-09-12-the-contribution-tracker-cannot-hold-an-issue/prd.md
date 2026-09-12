@@ -186,6 +186,9 @@ blocked behind it, and the landing order is a hard requirement below.
       `newly_unblocked` lane when that issue resolves, and a dependency cycle
       through an issue is still refused.
 - [ ] Re-collecting an unchanged issue produces no second notification.
+- [ ] A closed issue occupies a lane that is not `merged`, and the projection's
+      sort is still total over the lane set — asserted by a test that sorts a
+      mixed set of pull-request and issue rows, not by inspection.
 - [ ] `bin/sd-status --json` and `sd task contribution list --json` both emit
       `issue_url`, `target_repo`, `draft_title` and `draft_path` for an issue
       row. A test asserts the field list, not a sample row, so a future field

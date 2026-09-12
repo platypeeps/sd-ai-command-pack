@@ -64,6 +64,16 @@ gap has widened:
 the three variables, only the API token is present in the shell; the base URL
 and the email are unset. (Presence was checked, never values.)
 
+The commit's own numbers are still directly re-checkable, because the legacy
+index was never deleted. Read on 2026-09-12 from
+`~/.cache/sd-ai-command-pack/index.sqlite`, the path
+`dashboard/store.py:78` builds: grouping its `issue` rows by tracker prefix
+still returns `github|1175` and nothing else, and its `tracker_watermark`
+table still holds one row, GitHub's, last moved 2026-09-01T05:23:37Z. So the
+two-tracker loop at `dashboard/collect.py:168` ran against this store, with
+Jira in `TRACKERS` the whole time, and produced zero Jira rows before it
+stopped running. The mechanism is not untested. It is tested and empty.
+
 The operator's Jira credentials *do* exist on this machine — they are set in
 the `jira` MCP server's own environment block, not exported to the shell — so
 this is not "Jira is unreachable". It is that the path `dashboard/jira.py` and
