@@ -307,11 +307,19 @@ class LineBudgetTests(unittest.TestCase):
         # The whole lane, not the entry point: `bin/sd-review` plus every
         # bin/ module it imports. A cap that measures one file is a cap you
         # can duck by adding a second file.
+        #
+        # The number is the lane's exact size, so it is a ratchet: the next
+        # line spent has to be argued for here. 2043 -> 2069 is sd:376, which
+        # gates the five provider-capability lines on a registry that reads or
+        # a reviewer that resolves. It is 26 lines that make the lane print
+        # less, on eight consumers where those lines were unreachable by
+        # construction. Raise this only with the reason written down; a cap
+        # moved in silence is not a cap.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2043,
+            2069,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

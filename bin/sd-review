@@ -1486,6 +1486,23 @@ STATUS_EXIT = {
 
 # Rendering
 
+def workstation_lane_is_reachable(result: Mapping[str, Any]) -> bool:
+    """True when the provider-capability lines name something a reader can fix.
+
+    A GitHub runner satisfies none of them by construction -- `CLAUDE.local.md`
+    is gitignored globally and tracked in no repository here, and no registry
+    is installed anywhere in the fleet -- so the block printed 283 times in 30
+    days without once naming a provider. The routing tier and the attribution
+    verdict are not gated; they are what the lane is kept for, and `--json` is
+    unchanged, because this is a print-time condition.
+    """
+    return bool(
+        result.get("providers")
+        or not result.get("registry_refusal")
+        or any(row["eligible"] for row in result.get("chain") or ())
+    )
+
+
 def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write = stream.write
     if result.get("operation") == "provider_preflight":
@@ -1503,30 +1520,39 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write(f"  policy      {result['policy_source']}  (severity floor {result['severity_floor']})\n")
     write(f"  route       tier {route['tier']}  category {route['category'] or '-'}\n")
     write(f"  because     {route['reason']}\n")
-    write(f"  providers   {', '.join(result['providers']) or '(none)'}\n")
-    if result.get("authorization"):
-        write(f"  consent     {result['authorization']['source']} ({result['authorization']['path']})\n")
+    reachable = workstation_lane_is_reachable(result)
+    if reachable:
+        write(f"  providers   {', '.join(result['providers']) or '(none)'}\n")
+        if result.get("authorization"):
+            write(f"  consent     {result['authorization']['source']} ({result['authorization']['path']})\n")
     if result.get("fallback_candidates"):
         write(f"  fallbacks   {', '.join(result['fallback_candidates'])}\n")
     write(f"  authored    {result['authored_with_report']}\n")
-    preflight = result["codex_preflight"]
-    state = "ok (ChatGPT subscription)" if preflight["ok"] else f"would refuse: {preflight['reason']}"
-    write(f"  codex auth  {state}\n")
-    scrubbed = result["scrubbed_env_names"]
-    present = ", ".join(scrubbed) if scrubbed else "no metered codex variables present"
-    write(f"  env scrub   {present} (names only; values are never read or printed)\n")
+    if reachable:
+        preflight = result["codex_preflight"]
+        state = "ok (ChatGPT subscription)" if preflight["ok"] else f"would refuse: {preflight['reason']}"
+        write(f"  codex auth  {state}\n")
+        scrubbed = result["scrubbed_env_names"]
+        present = ", ".join(scrubbed) if scrubbed else "no metered codex variables present"
+        write(f"  env scrub   {present} (names only; values are never read or printed)\n")
 
     if result.get("explain_only"):
-        write(f"\nreviewer chain ({result['registry']}):\n")
-        if result["registry_refusal"]:
-            write(f"  {result['registry_refusal']}\n")
-        if result["consent_refusal"]:
-            write(f"  {result['consent_refusal']}\n")
-        for row in result["chain"]:
-            mark = "use" if row["eligible"] else "  -"
-            write(f"  {mark} {row['provider']:<12} {row['vendor']:<10} {row['bill']}\n")
-            if not row["eligible"]:
-                write(f"      passed over: {row['reason']}\n")
+        if not reachable:
+            # One line rather than six, and it says the block was suppressed
+            # rather than leaving a reader to think the tool forgot it.
+            write(f"\nno provider registry at {result['registry']}, and no reviewer resolves"
+                  " here; the provider lines are not reported.\n")
+        else:
+            write(f"\nreviewer chain ({result['registry']}):\n")
+            if result["registry_refusal"]:
+                write(f"  {result['registry_refusal']}\n")
+            if result["consent_refusal"]:
+                write(f"  {result['consent_refusal']}\n")
+            for row in result["chain"]:
+                mark = "use" if row["eligible"] else "  -"
+                write(f"  {mark} {row['provider']:<12} {row['vendor']:<10} {row['bill']}\n")
+                if not row["eligible"]:
+                    write(f"      passed over: {row['reason']}\n")
         write("\nsd-review: explain only, nothing ran\n")
         return
 
