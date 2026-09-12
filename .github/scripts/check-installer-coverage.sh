@@ -47,7 +47,14 @@ trap 'rm -f "$tracked_list" "$report_file"' EXIT
 # and silently shrink the measured set -- the exact failure this gate exists to
 # prevent. tests/test_installer_coverage_gate.py pins that behaviour so the
 # subtlety is checked rather than remembered.
-if ! git ls-files -- 'bin/sd_install*.py' >"$tracked_list"; then
+#
+# `--deduplicate` because an unmerged path sits in the index once per merge
+# stage and plain `ls-files` prints it once per stage. The count below is a
+# floor, so a conflict INFLATES it and the floor then passes a surface it was
+# written to refuse -- a gate failing open, which is the one direction a gate
+# must never fail. It also fed the same path to `--include=` three times.
+# Requires git >= 2.31 (March 2021). Backbone item 481.
+if ! git ls-files --deduplicate -- 'bin/sd_install*.py' >"$tracked_list"; then
   printf 'error: git ls-files failed; cannot enumerate the installer surface.\n' >&2
   exit 1
 fi

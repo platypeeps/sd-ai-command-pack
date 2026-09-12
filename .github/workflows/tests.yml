@@ -286,5 +286,9 @@ jobs:
       # review ("reviewed upstream"), so upstream lint rigor is the
       # compensating control. Warning severity is the achieved baseline;
       # keep it there.
+      # `--deduplicate`: an unmerged path is listed once per merge stage, which
+      # would lint one script three times and print each finding three times.
+      # CI checks out a merged tree so this lane does not meet a conflict, but
+      # the line is copied into local sweeps that do (item 481).
       - name: Shellcheck (pack shell)
-        run: git ls-files -z '*.sh' | xargs -0 shellcheck -S warning
+        run: git ls-files -z --deduplicate '*.sh' | xargs -0 shellcheck -S warning

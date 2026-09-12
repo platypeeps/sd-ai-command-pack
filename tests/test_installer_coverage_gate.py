@@ -96,7 +96,7 @@ class GateContractTests(unittest.TestCase):
     def test_gate_measures_the_installer_and_declares_both_floors(self):
         self.assertTrue(GATE.exists(), f"{GATE} is missing")
         source = GATE.read_text()
-        self.assertIn(f"git ls-files -- '{PATHSPEC}'", source)
+        self.assertIn(f"git ls-files --deduplicate -- '{PATHSPEC}'", source)
         self.assertIn("MIN_FILES=", source)
         self.assertIn("MIN_STATEMENTS=", source)
         self.assertIn("--fail-under=100", source)
@@ -134,6 +134,95 @@ class GateContractTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("below the declared floor", result.stderr)
+
+
+class UnmergedIndexTests(unittest.TestCase):
+    """The floor counts files, and an unmerged path is one file.
+
+    An unmerged path sits in the index once per merge stage, so a plain
+    enumeration hands the gate the same file three times. The count is a
+    *floor*, which makes that inflation the one direction a gate must never
+    fail in: the surface shrinks below what was declared and the gate says
+    yes anyway.
+
+    Exercised against a throwaway repository with the floor raised, the same
+    seam `test_file_floor_refuses_a_shrunken_surface` uses -- raising
+    MIN_FILES fails before any coverage runs, so the case never needs a
+    coverage datafile.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self._build()
+
+    def git(self, *argv, check=True):
+        return subprocess.run(
+            # Identity and signing per invocation, so the fixture does not
+            # fail on a host with no `user.email` or one that signs commits.
+            ["git", "-C", str(self.root),
+             "-c", "user.email=gate@example.invalid",
+             "-c", "user.name=coverage gate",
+             "-c", "commit.gpgsign=false", *argv],
+            capture_output=True, text=True, check=check,
+        )
+
+    def _build(self):
+        """One installer file, conflicted by a real merge, then resolved.
+
+        Resolved in the working tree and left unstaged, which is the state a
+        person runs the suite in: the file on disk is valid Python again and
+        nothing warns them, while the index still carries three stages.
+        """
+        module = self.root / "bin" / "sd_install.py"
+        module.parent.mkdir(parents=True)
+        (self.root / ".github" / "scripts").mkdir(parents=True)
+        self.git("init", "-q", "-b", "main")
+        module.write_text("x = 1\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.git("checkout", "-q", "-b", "other")
+        module.write_text("x = 2\n")
+        self.git("commit", "-qam", "other")
+        self.git("checkout", "-q", "main")
+        module.write_text("x = 3\n")
+        self.git("commit", "-qam", "mine")
+        self.git("merge", "other", check=False)
+        module.write_text("x = 4\n")
+
+    def test_the_fixture_really_leaves_three_stages(self):
+        """Without this the case below would pass against any clean repo."""
+        stages = self.git("ls-files", "-u", "--", PATHSPEC).stdout
+        self.assertEqual(
+            [line.split("\t")[0].split()[-1] for line in stages.splitlines()],
+            ["1", "2", "3"],
+        )
+        self.assertEqual(
+            self.git("ls-files", "--", PATHSPEC).stdout.split(),
+            ["bin/sd_install.py"] * 3,
+            "this git no longer repeats an unmerged path; if that is now the "
+            "default, say so here rather than deleting the case",
+        )
+
+    def test_the_floor_is_not_satisfied_by_merge_stages(self):
+        """One conflicted file must not add up to a surface of three."""
+        source = GATE.read_text().replace("MIN_FILES=1\n", "MIN_FILES=2\n", 1)
+        self.assertNotIn("MIN_FILES=1\n", source, "MIN_FILES anchor not found")
+        probe = self.root / ".github" / "scripts" / "probe.sh"
+        probe.write_text(source)
+
+        result = subprocess.run(
+            ["bash", str(probe)], capture_output=True, text=True
+        )
+
+        self.assertIn(
+            "installer surface is 1 tracked file(s), below the declared floor of 2",
+            result.stderr,
+            "the gate counted merge stages as files and passed a surface "
+            "below its own floor -- a gate failing open:\n"
+            + result.stdout + result.stderr,
+        )
 
 
 if __name__ == "__main__":
