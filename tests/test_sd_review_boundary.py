@@ -132,16 +132,28 @@ class NeverPostsTests(unittest.TestCase):
         allowed = {
             "__future__",
             "argparse",
+            "contextlib",  # `closing` around the read-only receipt connection.
             "hashlib",  # Binds fix verification to the exact preceding report.
             "json",
             "os",
             "pathlib",
             "re",
             "shlex",
+            "sqlite3",  # Only to name the error class the receipt read catches.
             "subprocess",
             "sys",
             "tempfile",
             "typing",
+            # sd:495. The runner records the repository check it ran on the
+            # clone, and `recorded_check` reads that row instead of running the
+            # same deterministic gate again. Read-only and local: the
+            # connection is opened `write=False` against the `--database` this
+            # run was already handed, and the only call is `check_record`, a
+            # single SELECT. It is a SQLite file on this machine, so it widens
+            # the allow-list by a database the lane already depends on for
+            # provider state and not by a way out of the process.
+            "sd_db",
+            "sd_db.errors",
             "sd_lib",
             "sd_route",
             # The registry reader, and since #754 a network client as well.
@@ -309,17 +321,25 @@ class LineBudgetTests(unittest.TestCase):
         # can duck by adding a second file.
         #
         # The number is the lane's exact size, so it is a ratchet: the next
-        # line spent has to be argued for here. 2043 -> 2069 is sd:376, which
-        # gates the five provider-capability lines on a registry that reads or
-        # a reviewer that resolves. It is 26 lines that make the lane print
-        # less, on eight consumers where those lines were unreachable by
-        # construction. Raise this only with the reason written down; a cap
-        # moved in silence is not a cap.
+        # line spent has to be argued for here. Raise this only with the reason
+        # written down; a cap moved in silence is not a cap.
+        #
+        # 2043 -> 2069 is sd:376, which gates the five provider-capability
+        # lines on a registry that reads or a reviewer that resolves: 26 lines
+        # that make the lane print less, on eight consumers where those lines
+        # were unreachable by construction.
+        #
+        # 2069 -> 2123 is sd:495, which lets the lane accept the runner's own
+        # `sd-check` pass when it is recorded against the tree being reviewed
+        # instead of running the same deterministic gate a second time. The 54
+        # lines buy back the whole native suite on every clean `system` row,
+        # and most of them are the fall-through legs: no database, no run, no
+        # row, a non-zero exit, or a tree that moved all run the gate.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2069,
+            2123,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

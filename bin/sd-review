@@ -28,12 +28,14 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
 import pathlib
 import re
 import shlex
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -1094,6 +1096,57 @@ def dispose(findings: Sequence[Mapping[str, Any]], floor: str) -> list[dict[str,
 
 # Pipeline
 
+def recorded_check(
+    root: pathlib.Path, args: argparse.Namespace, env: Mapping[str, str]
+) -> dict[str, Any] | None:
+    """The runner's own `sd-check` pass for this exact tree, or None.
+
+    sd:495. Step 1 re-runs the same deterministic gate the runner has just run
+    on the same clone at the same head, so a clean row pays for it twice; on
+    `system` that is the whole native suite. The runner records its pass on the
+    run, keyed by the tree it checked (`sd_db.runner.record_check`, system
+    #284).
+
+    Every leg must hold -- a database, a named run, a row, exit 0, and the tree
+    being reviewed -- and any of them failing returns None and runs the gate.
+    That is what makes it a receipt and not a trust: a commit amended after the
+    check has a different tree, a person's own `sd-ship` has no run and no row,
+    and an unreadable database answers nothing. Each falls through to the
+    behaviour of before, and `sd-ship` still requires `check.status == "pass"`.
+    """
+
+    ident = env.get("SD_ASSIGNMENT")
+    if not ident or getattr(args, "database", None) is None:
+        return None
+    try:
+        from sd_db import database  # noqa: PLC0415 - optional at runtime
+        from sd_db import runner as rows  # noqa: PLC0415
+        from sd_db.errors import SdDbError  # noqa: PLC0415
+    except ImportError:
+        return None
+    # Through `_git`, not the injected runner: the tree is a fact about the
+    # checkout, not a step of the review that a seam should be able to answer.
+    tree = _git(root, ["rev-parse", "HEAD^{tree}"])
+    if not tree:
+        return None
+    try:
+        with contextlib.closing(database.connect(args.database, write=False)) as connection:
+            row = rows.check_record(connection, ident)
+    except (OSError, sqlite3.Error, SdDbError):
+        return None
+    if not row or row.get("exit_code") != 0 or row.get("tree") != tree:
+        return None
+    return {
+        "status": "pass",
+        "exit_code": 0,
+        "detail": "",
+        "checks": row.get("checks"),
+        "source": "runner",
+        "run": ident,
+        "tree": tree,
+    }
+
+
 def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int) -> dict[str, Any]:
     """Step 1: the repository's own deterministic gate, through sd-check."""
 
@@ -1358,7 +1411,8 @@ def review(
         result["status"] = "dry_run"
         return result
 
-    check = run_check(root, runner, env, args.timeout)
+    # The runner's receipt when it is for this exact tree, the gate otherwise.
+    check = recorded_check(root, args, env) or run_check(root, runner, env, args.timeout)
     result["check"] = check
     if check["status"] == "fail":
         result["status"] = "gate_failed"
