@@ -40,16 +40,17 @@ so it does not drift when prose is reorganised, and it is what would have
 caught each of these on the day it was introduced rather than one at a time by
 being bitten.
 
-Measured over the corpus at the time of writing -- 1,096 tracked markdown
-files, 5,699 tokens -- and re-measurable by running the module, which prints
-the census on every run:
+Measured over the corpus at the time of writing -- 5,699 tokens -- and
+re-measurable by running the module, which prints the census on every run.
+A snapshot, and the only defensible kind: it is dated by the commit that
+carries it, and `census()` is what a reader should run rather than trust it.
 
 ===========================  ======  ======  ======
 reason                         live  archiv   total
 ===========================  ======  ======  ======
-`compared`                       39      15      54
-`no-adjacent-anchor`            322   2,410   2,732
-`elided-path`                   176   2,180   2,356
+`compared`                       38      15      53
+`no-adjacent-anchor`            321   2,410   2,731
+`elided-path`                   178   2,180   2,358
 `archived-stale`                  0     277     277
 `anchor-not-a-symbol`            13     131     144
 `separator-not-adjacent`         20     114     134
@@ -123,36 +124,37 @@ opens, and a reason that does not carry the citation lands in
 
 Three shapes are named and counted rather than resolved, and saying so is more
 honest than a number that implies they were handled: the bare comma and
-semicolon (134), the elided path (2,356), and the token with no anchoring
-shape at all (2,732).
+semicolon (134), the elided path (2,358), and the token with no anchoring
+shape at all (2,731).
 
 **sd:525, measured 2026-09-12, and a recommendation rather than a change.**
 The item reports that line-anchored citations make any insertion in a source
 file a docs failure, sighted three times in one parallel round by three lanes
 none of whom were editing documentation, and puts the population at "2,147
 line-anchored citations across docs/". The census above says otherwise, and
-the difference is the whole answer: of 5,699 `path:line` tokens, exactly 54
+the difference is the whole answer: of 5,699 `path:line` tokens, exactly 53
 are `compared`, and only a `compared` row can go stale. `anchored_citations`
 filters to that bucket. So the mechanism imposing repoint churn on every
 writer lane is staleness-checking about 1% of what it classifies.
 
-Narrowed further, it is 39 rows, because the other 15 are archived and an
-archive is not edited. Every one of the 39 cites source code -- 31 in `bin/`,
-4 in `tests/`, 4 in `dashboard/` -- and 34 of the 39 sit in a single
+Narrowed further, it is 38 rows, because the other 15 are archived and an
+archive is not edited. Every one of the 38 cites source code -- 30 in `bin/`,
+4 in `tests/`, 4 in `dashboard/` -- and 34 of the 38 sit in a single
 document. The insertion has to be large to bite: `WINDOW` absorbs a shift of
 two, and inserting one line into `bin/sd_lib.py` broke nothing while
 inserting seven broke six citations.
 
 The migration is therefore small and specific rather than a redesign. Running
-`source_declaration_error` over all 39 today, 35 resolve to exactly one
+`source_declaration_error` over all 38 today, 34 resolve to exactly one
 declaration and could be rewritten as `source:<path>::<symbol>`, the form
 `test_inserted_lines_do_not_break_a_declaration_locator` already guarantees
-and the live corpus already carries 35 of. The 4 that cannot are two
+and the live corpus already carries 36 of -- one of them migrated by this
+commit, which is where 39 and 35 went. The 4 that cannot are two
 `dashboard/app.js` citations, which the locator cannot parse because it is
 Python-only, and two whose anchor is not a symbol at all -- `None` and
 `.replace("\n", " ")`.
 
-Not done here, and the reason is the item's own complaint: 34 of the 35 are in
+Not done here, and the reason is the item's own complaint: all 34 are in
 an active work item another lane holds, so migrating them from this lane would
 commit the cross-lane write that sd:525 exists to object to. The recommended
 sequence is one lane that owns that item migrating its 34, a decision on the
