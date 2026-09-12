@@ -3271,6 +3271,13 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
         write(f"    remove: {entry['remove']}\n")
 
 
+CONTRIBUTION_ORDER = (
+    "key", "item_id", "url", "local_status", "external_state", "reasons", "observed_at",
+    "freshness", "blocked_on", "depends_on", "local_clone", "local_branch", "tested_commit",
+    "evidence", "evidence_verified", "notification_state", "attention_sources",
+)
+
+
 def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:
     write("\ncontributions (this repo, shared database order)\n")
     if not section or not section["available"]:
@@ -3283,9 +3290,10 @@ def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:
         # JSON string encoding prevents external metadata from injecting terminal
         # controls or a second status heading. Ordering belongs to the library.
         write(f"  [{row['lane']}] " + json.dumps(row["title"], ensure_ascii=False) + "\n")
-        for key in ("key", "item_id", "url", "local_status", "external_state", "reasons", "observed_at",
-                    "freshness", "blocked_on", "depends_on", "local_clone", "local_branch", "tested_commit",
-                    "evidence", "evidence_verified", "notification_state", "attention_sources"):
+        # The tuple is the display ORDER, not the membership. Every other key
+        # the library projected follows it, sorted, because a reader that
+        # iterated the tuple alone dropped five live keys without a word.
+        for key in sd_lib.display_fields(row, CONTRIBUTION_ORDER, ("lane", "title")):
             value = row.get(key)
             if value is not None and value != [] and value != "":
                 write(f"    {key}: " + json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n")

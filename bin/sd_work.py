@@ -522,6 +522,22 @@ def _contribution_changes(path: str) -> dict[str, Any]:
         raise WorkRefusal(f"contribution input refused: {error}") from error
 
 
+CONTRIBUTION_ORDER = (
+    "url", "local_clone", "local_branch", "tested_commit", "blocked_on", "depends_on",
+    "evidence", "reasons", "event_ids", "attention_sources",
+)
+
+#: Printed by the trailer below for a `show` result, so the loop must not
+#: print them again. `revision` reached the loop for the first time when
+#: membership stopped being the tuple, and a snapshot then carried it twice.
+SNAPSHOT_SHOWN = ("key", "attention", "notifications", "revision")
+
+# Printed by the header lines above the loop, so the loop must not repeat them.
+CONTRIBUTION_SHOWN = (
+    "key", "lane", "title", "local_status", "external_state", "freshness", "evidence_verified",
+)
+
+
 def _emit_contributions(value: Any, *, machine: bool) -> None:
     if machine:
         print(json.dumps(value, ensure_ascii=False))
@@ -531,6 +547,7 @@ def _emit_contributions(value: Any, *, machine: bool) -> None:
         print(f"contribution: item:{value['item']['id']}")
         return
     rows = value if isinstance(value, list) else [value.get("contribution")]
+    trailer = SNAPSHOT_SHOWN if isinstance(value, dict) else ()
     for row in rows:
         if row is None:
             continue
@@ -538,8 +555,10 @@ def _emit_contributions(value: Any, *, machine: bool) -> None:
         print(f"  local: {row.get('local_status')} · external: {row.get('external_state')}"
               f" · freshness: {row.get('freshness')}")
         print(f"  evidence_verified: {json.dumps(row.get('evidence_verified', False))}")
-        for field in ("url", "local_clone", "local_branch", "tested_commit", "blocked_on", "depends_on",
-                      "evidence", "reasons", "event_ids", "attention_sources"):
+        # Order here, membership from the row: the seven keys this tuple did
+        # not name were dropped in silence on every live contribution.
+        for field in sd_lib.display_fields(
+                row, CONTRIBUTION_ORDER, CONTRIBUTION_SHOWN + trailer):
             if row.get(field):
                 print(f"  {field}: {json.dumps(row[field], ensure_ascii=False)}")
     if not rows:
