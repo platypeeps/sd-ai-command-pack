@@ -313,7 +313,7 @@ def manifest_sites(path, text):
     ]
 
 
-def scan(checkout):
+def pin_sites(checkout):
     """Every pin site under one checkout's `.github/`, enumerated from disk."""
     sites: list[tuple[Path, int, str, str, str]] = []
     github = Path(checkout) / ".github"
@@ -355,7 +355,7 @@ def fleet(root=None):
 
     rows = []
     for checkout in trees:
-        for path, number, hint, sha, form in scan(checkout):
+        for path, number, hint, sha, form in pin_sites(checkout):
             target = index.get(hint.lower()) or index.get(hint.split("/")[-1].lower())
             if target is None or Path(target).resolve() == Path(checkout).resolve():
                 # Unresolved is third-party; self-pinned is not a fleet pin.
