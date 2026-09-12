@@ -1578,19 +1578,99 @@ class WorkItemInventoryTests(InventoryFixture):
         self.assertEqual([row["title"] for row in found], ["alpha"])
         self.assertEqual(found[0]["key"], "2026-08-01-alpha")
 
-    def test_a_planning_item_past_the_threshold_ages_into_a_finding(self) -> None:
-        """`created:` is what ages an item, so the fixture writes its own."""
-        ancient = self.repo / "docs" / "work" / "2026-01-01-ancient"
-        ancient.mkdir(parents=True)
-        (ancient / "prd.md").write_text(
-            "---\ntitle: ancient\nstatus: planning\ncreated: 2026-01-01\n---\n",
+    def ancient(self, name: str = "2026-01-01-ancient") -> pathlib.Path:
+        """A planning item whose own date is 249 days before `TODAY`.
+
+        Uncommitted and unrecorded, so the only thing dating it is the date it
+        wrote on itself. Every idle test below starts here and then adds one
+        piece of evidence that something has happened to it since.
+        """
+        directory = self.repo / "docs" / "work" / name
+        directory.mkdir(parents=True)
+        (directory / "prd.md").write_text(
+            f"---\ntitle: {name}\nstatus: planning\ncreated: 2026-01-01\n---\n",
             encoding="utf-8",
         )
+        return directory
+
+    def committed(self, when: str) -> None:
+        """Commit the item tree with a committer date this test chooses.
+
+        `sd_sweep.touched` reads `%cs`, the *committer* date -- when the work
+        entered this history rather than when it was first written, which is
+        the question "has anything happened to this item" actually asks. Git
+        takes it from the environment and from nowhere else, so a fixture that
+        did not set it would be measuring the wall clock.
+        """
+        with mock.patch.dict(os.environ, {"GIT_COMMITTER_DATE": when}):
+            self.git("add", "-A")
+            self.git("commit", "-q", "-m", "record the items")
+
+    def test_a_planning_item_past_the_threshold_ages_into_a_finding(self) -> None:
+        """`created:` is what ages an item, so the fixture writes its own.
+
+        The control for the two tests under it: nothing has been committed and
+        nothing recorded, so birth date and last activity are the same day and
+        this fires either way. It passed before `idle-planning` changed its
+        basis and passes after, which is what makes the two failures below
+        evidence about the basis rather than about the fixture.
+        """
+        self.ancient()
         self.item("2026-08-01-alpha")
         rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY).rows
         idle = self.by_check(rows, "idle-planning")
         self.assertEqual([row["key"] for row in idle], ["2026-01-01-ancient"])
         self.assertGreater(idle[0]["age_days"], status.IDLE_DAYS)
+
+    def test_an_ancient_item_committed_to_this_week_is_not_idle(self) -> None:
+        """sd:455: an item worked on two days ago is not one nobody has touched.
+
+        The defect, in one item. `idle-planning` aged an item by the date it
+        dated itself, so the number it printed could only ever go up: 21 of
+        mezmo_benchmark's 24 planning items read past the threshold on birth
+        dates while every one of them had been triaged live the day before.
+        Its finding says the item has been planning for N days and its remedy
+        is start it, park it or archive it -- all three of which assume
+        neglect, and acting on them would have buried confirmed-live work.
+
+        Fails against the old basis, which cannot see the commit at all.
+        """
+        self.ancient()
+        self.committed("2026-09-05T12:00:00 +0000")
+        rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY).rows
+        self.assertEqual([], self.by_check(rows, "idle-planning"))
+
+    def test_a_stamp_only_the_database_carries_resets_the_clock(self) -> None:
+        """The other half of sd:455, and the half git cannot answer.
+
+        A `row` checkout records a triage decision as a note against the item
+        and touches no file, so the item tree is byte-identical before and
+        after -- which is why this fixture commits nothing. The four decision
+        notes on mezmo_benchmark's items were exactly this shape.
+
+        The stamp arrives on the work section, where `work_section` puts it
+        from `WorkItem.activity`; `RowActivity` in `tests/test_sd_lib.py` is
+        what checks the database actually fills it.
+        """
+        self.ancient()
+        work = status.work_section(self.repo)
+        for entry in work["items"]:
+            entry["activity"] = "2026-09-06T09:14:00+00:00"
+        self.assertEqual([], self.by_check(self.rows(work=work), "idle-planning"))
+
+    def test_the_row_says_what_the_age_measures_rather_than_how_old_it_is(
+        self,
+    ) -> None:
+        """The wording is the finding: "planning for N days" was the false half.
+
+        An age measured from activity and described as an age since creation
+        would be a second way of saying the wrong thing, so the detail line is
+        pinned here rather than left to read like the old one.
+        """
+        self.ancient()
+        rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY).rows
+        detail = self.by_check(rows, "idle-planning")[0]["detail"]
+        self.assertIn("has had nothing recorded against it for 249 days", detail)
 
     def test_a_planning_item_with_no_date_anywhere_is_its_own_finding(self) -> None:
         directory = self.repo / "docs" / "work" / "undated-thing"
@@ -1781,6 +1861,64 @@ class AdapterInventoryTests(InventoryFixture):
             [], self.by_check(self.rows(pull_requests=carried), "unmerged-branch")
         )
 
+    def test_a_branch_origin_no_longer_carries_is_not_a_row(self) -> None:
+        """sd:496: the ghost, and why `fetch --prune` is not the cure here.
+
+        A remote-tracking ref outlives its branch the moment a pull request is
+        squash-merged with `--delete-branch` by anything but this checkout.
+        Observed on `origin/worktree-agent-a429ba188d801962d` after #839
+        landed: `git ls-remote --heads origin <name>` printed nothing, and both
+        actions the row named -- open a pull request for it, or delete it --
+        had nothing to act on.
+
+        `sd-status` cannot prune its way out, because pruning writes refs and
+        this tool writes nothing, so it asks origin instead. The branch is
+        deleted **in the bare repository directly** rather than with
+        `git push --delete`, which removes the remote-tracking ref here as a
+        side effect and would leave this fixture with no ghost to find.
+
+        Fails before the cross-check, which reports `origin/task/gone`.
+        """
+        remote = self.base / "ghost.git"
+        self.git("init", "-q", "--bare", str(remote))
+        self.set_origin(str(remote))
+        self.git("branch", "task/gone")
+        self.git("push", "-q", "origin", "main", "task/gone")
+        self.git("fetch", "-q", "origin")
+        self.git("update-ref", "-d", "refs/heads/task/gone", cwd=remote)
+
+        self.assertIn(
+            "origin/task/gone",
+            self.git("for-each-ref", "--format=%(refname:short)", "refs/remotes"),
+            "the fixture is meant to leave a stale remote-tracking ref standing",
+        )
+        self.assertEqual([], self.by_check(self.rows(), "unmerged-branch"))
+
+    def test_a_remote_that_cannot_be_asked_says_so_in_the_row(self) -> None:
+        """Option (b), kept as the fallback rather than dropped for option (a).
+
+        Offline, the refs are the only answer there is, and reporting nothing
+        would trade a ghost for a blind spot. The row is still emitted and says
+        what it was built from, and its suggestion names the prune ahead of the
+        two actions that are unrunnable against a branch already gone.
+
+        `unchecked` is not the vehicle: `unmerged-branch` is not abnormal and
+        `banner` reports `unchecked` for abnormal classes only, so a reason
+        recorded there is a reason nothing prints.
+        """
+        remote = self.base / "away.git"
+        self.git("init", "-q", "--bare", str(remote))
+        self.set_origin(str(remote))
+        self.git("branch", "task/one")
+        self.git("push", "-q", "origin", "main", "task/one")
+        self.git("fetch", "-q", "origin")
+        shutil.rmtree(remote)
+
+        found = self.by_check(self.rows(), "unmerged-branch")
+        self.assertEqual([row["key"] for row in found], ["origin/task/one"])
+        self.assertIn(status.STALE_REFS, found[0]["detail"])
+        self.assertIn("git fetch --prune", found[0]["suggest"])
+
 
 class LowYieldProducerTests(InventoryFixture):
     def test_a_marker_in_tracked_source_is_found_and_one_in_docs_is_not(self) -> None:
@@ -1878,12 +2016,17 @@ class LowYieldProducerTests(InventoryFixture):
 
         The regression guard. An earlier revision of `_tool_candidates` also
         tried `-` respelled `_`, on the theory that `bin/sd_suggest.py` builds
-        `bin/sd-suggest`. It does not: that module is an implementation detail
-        `bin/sd` imports, the command is `sd suggest`, and the disclosing skill
-        says *"There is no `bin/sd-suggest` yet"* in the line the regex
-        matched -- the same sentence `skills/sd-help` writes about
-        `bin/sd-help`, which was reported. The transform gave two identical
-        sentences opposite verdicts.
+        `bin/sd-suggest`. It does not: such a module is an implementation
+        detail `bin/sd` imports, and the command is a `sd <verb>` subcommand.
+        The transform therefore gave two identically-worded disclosures
+        opposite verdicts -- one silenced by a module that shares its stem, the
+        other reported -- and the silenced one was true.
+
+        Which surfaces disclose an absent binary is not written down here, for
+        the reason `tests/test_permission_allowlist.py` gives about hand-kept
+        lists: `tests/test_skill_frontmatter.py`'s `BinaryClaims` derives it at
+        run time. This test's own fixture is synthetic, so it keeps working
+        whichever surfaces those are.
 
         Fails if the `underscored` candidates come back, which is the point:
         the defect it guards was a silenced true finding, and a silenced

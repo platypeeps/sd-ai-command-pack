@@ -84,9 +84,9 @@ predict `pending` from this table before running the command.
 | 50 | `issue-needs-you` | `i` | no | `dashboard index` | an indexed issue the index says is waiting on you |
 | 60 | `pr-needs-action` | `p` | no | `open pull requests` | an open pull request waiting on a review or a merge |
 | 70 | `open-step` | `s` | no | `- [ ] in item docs` | an unchecked box on an item nobody has closed |
-| 80 | `unmerged-branch` | `b` | no | `git refs` | a branch on origin with no open pull request carrying it |
+| 80 | `unmerged-branch` | `b` | no | `origin heads` | a branch on origin with no open pull request carrying it |
 | 90 | `parked-concern` | `c` | no | `## Review ledger` | a concern parked behind a trigger nobody is watching |
-| 100 | `idle-planning` | `w` | yes | `work item + R10-D1` | an item idle in planning past the 45-day threshold |
+| 100 | `idle-planning` | `w` | yes | `item activity + R10-D1` | an item idle in planning past the 45-day threshold |
 | 100 | `undated-planning` | `w` | yes | `work item` | a planning item with no date to age it by |
 | 110 | `issue-open` | `i` | no | `dashboard index` | an indexed issue open against this repository |
 | 120 | `source-marker` | `t` | no | `marker scan over the index` | a marker left in tracked source |

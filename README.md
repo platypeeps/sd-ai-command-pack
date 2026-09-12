@@ -262,7 +262,7 @@ arrives.
 | `sd-status` | `bin/` | Read-only: derived status, open PRs, branch-protection gaps and the states this repo accepts (`.github/sd-status.json`) |
 | `sd-deps` | prose | Batch-triage dependabot and renovate PRs |
 | `sd-help` | prose | Runtime catalog of installed `sd-*` surfaces |
-| `sd-suggest` | prose | File framework improvements to the configured tracker |
+| `sd-suggest` | prose | Record framework friction as a local proposal; publish only when asked |
 | `sd-skill-adopt` | `bin/` | Safety pre-screen, lint, and canonical transform for an incoming skill |
 | `sd-map` | prose | Supporting artifacts into an out-of-tree cache; never a gate, never scheduled |
 | `sd-handoff` | `bin/` | Write the local session packet for this directory; `/clear` restores it |

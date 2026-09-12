@@ -147,6 +147,172 @@ class Scan(unittest.TestCase):
         self.assertEqual(len(self.scan(10)["due"]), 1)
 
 
+class Activity(unittest.TestCase):
+    """The aging basis: what counts as something happening to an item.
+
+    `item_date` answers when an item began. `last_active` answers when anything
+    last happened to it, and it is what the threshold is measured from -- the
+    two are different questions, and `idle-planning` read the first one while
+    saying the second. This class is the one definition both `scan` here and
+    `sd-status`'s producer read, so it is where the difference is pinned.
+    """
+
+    ITEM = datetime.date(2026, 1, 1)
+
+    def last(self, name: str = "2026-01-01-x", activity: str = "",
+             marks: dict | None = None) -> datetime.date:
+        return sd_sweep.last_active(self.ITEM, name, activity, marks)
+
+    def test_an_item_with_no_evidence_ages_from_its_own_date(self) -> None:
+        """The floor, and the whole of the old behaviour."""
+        self.assertEqual(self.last(), self.ITEM)
+
+    def test_a_commit_on_its_directory_is_activity(self) -> None:
+        commit = datetime.date(2026, 9, 5)
+        self.assertEqual(self.last(marks={"2026-01-01-x": commit}), commit)
+
+    def test_a_database_stamp_is_activity(self) -> None:
+        """A note carries a full timestamp; only its day is read."""
+        self.assertEqual(
+            self.last(activity="2026-09-06T09:14:00+00:00"),
+            datetime.date(2026, 9, 6),
+        )
+
+    def test_the_latest_of_the_three_wins_rather_than_the_first_found(self) -> None:
+        """A union, not a precedence chain: each source is blind where the
+        others see, so the newest evidence is the answer whichever gave it."""
+        marks = {"2026-01-01-x": datetime.date(2026, 8, 1)}
+        self.assertEqual(
+            self.last(activity="2026-09-06T09:14:00+00:00", marks=marks),
+            datetime.date(2026, 9, 6),
+        )
+        self.assertEqual(
+            self.last(activity="2026-07-01T09:14:00+00:00", marks=marks),
+            datetime.date(2026, 8, 1),
+        )
+
+    def test_an_unparseable_stamp_lowers_nothing(self) -> None:
+        """Absent evidence degrades to the floor, never below it."""
+        self.assertEqual(self.last(activity="not a date"), self.ITEM)
+        self.assertEqual(self.last(activity=""), self.ITEM)
+
+    def test_a_commit_on_another_item_is_not_this_item_s_activity(self) -> None:
+        self.assertEqual(
+            self.last(marks={"2026-01-01-other": datetime.date(2026, 9, 5)}),
+            self.ITEM,
+        )
+
+
+class ItemDirectory(unittest.TestCase):
+    """Which item a tracked path belongs to, for `touched`'s one `git log`."""
+
+    def resolve(self, path: str) -> str:
+        return sd_sweep._item_directory(path, "docs/work")
+
+    def test_a_file_in_an_item_names_that_item(self) -> None:
+        self.assertEqual(self.resolve("docs/work/2026-01-01-x/prd.md"), "2026-01-01-x")
+
+    def test_an_archived_item_is_named_through_its_month(self) -> None:
+        self.assertEqual(
+            self.resolve("docs/work/archive/2026-08/2026-01-01-x/prd.md"),
+            "2026-01-01-x",
+        )
+
+    def test_a_file_directly_in_the_work_directory_names_no_item(self) -> None:
+        """`.status-source` lives there and is not an item."""
+        self.assertEqual(self.resolve("docs/work/.status-source"), "")
+
+    def test_a_path_outside_the_work_directory_names_no_item(self) -> None:
+        self.assertEqual(self.resolve("bin/sd-status"), "")
+
+
+class Touched(unittest.TestCase):
+    """One `git log` per root, and what it maps."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = pathlib.Path(tmp.name) / "repo"
+        (self.repo / "docs" / "work").mkdir(parents=True)
+        self.at("init", "--quiet", "--initial-branch=main")
+        self.at("config", "user.email", "t@example.com")
+        self.at("config", "user.name", "t")
+        self.at("config", "commit.gpgsign", "false")
+
+    def at(self, *args: str, when: str | None = None) -> None:
+        """One git call in the fixture repository.
+
+        Not named `run`: that is `TestCase.run`, and overriding it stops the
+        case from running at all -- which it did, loudly, on the first draft.
+        """
+        env = {**os.environ}
+        if when:
+            env["GIT_COMMITTER_DATE"] = env["GIT_AUTHOR_DATE"] = when
+        subprocess.run(["git", *args], cwd=self.repo, check=True,
+                       capture_output=True, env=env)
+
+    def commit(self, name: str, when: str, **fields: str) -> None:
+        """One item, written as a real item and committed on a chosen day."""
+        item = self.repo / "docs" / "work" / name
+        if item.exists():
+            (item / "touched").write_text(when, encoding="utf-8")
+        else:
+            make_item(self.repo, name, **fields)
+        self.at("add", "-A")
+        self.at("commit", "--quiet", "-m", f"touch {name}", when=when)
+
+    def test_each_item_maps_to_the_day_it_was_last_committed_to(self) -> None:
+        self.commit("2026-01-01-a", "2026-08-01T12:00:00 +0000")
+        self.commit("2026-01-01-b", "2026-09-05T12:00:00 +0000")
+        self.assertEqual(
+            sd_sweep.touched(self.repo),
+            {"2026-01-01-a": datetime.date(2026, 8, 1),
+             "2026-01-01-b": datetime.date(2026, 9, 5)},
+        )
+
+    def test_the_latest_commit_wins_and_not_the_first_one(self) -> None:
+        """`git log` is newest first, so the first sighting is the latest."""
+        self.commit("2026-01-01-a", "2026-08-01T12:00:00 +0000")
+        self.commit("2026-01-01-a", "2026-09-05T12:00:00 +0000")
+        self.assertEqual(
+            sd_sweep.touched(self.repo), {"2026-01-01-a": datetime.date(2026, 9, 5)}
+        )
+
+    def test_a_directory_that_is_not_a_checkout_is_empty_and_not_an_error(self) -> None:
+        """Git refusing and git finding nothing leave the age on its other two
+        sources, so there is no third state for a caller to handle."""
+        loose = self.repo.parent / "not-a-checkout"
+        loose.mkdir()
+        self.assertEqual(sd_sweep.touched(loose), {})
+
+    def test_the_sweep_does_not_call_a_recently_committed_item_due(self) -> None:
+        """sd:455's sequencing note, checked rather than trusted.
+
+        The sweep and `sd-status` read one aging basis. If only the report had
+        moved, the sweep would go on counting from birth dates and would park
+        exactly the items the report had just stopped calling idle.
+        """
+        self.commit("2026-01-01-a", "2026-08-30T12:00:00 +0000",
+                    status="planning", created="2026-01-01")
+        self.assertEqual(sd_sweep.scan(self.repo, TODAY, 45)["due"], [])
+
+    def test_an_item_nothing_has_touched_is_still_due_and_says_from_when(
+        self,
+    ) -> None:
+        """The other direction: the check still fires, on the later date.
+
+        243 days since it was created, 92 since anything happened to it, and
+        the row carries both -- `date` is the item's own, `active` is what the
+        age was measured from.
+        """
+        self.commit("2026-01-01-a", "2026-06-01T12:00:00 +0000",
+                    status="planning", created="2026-01-01")
+        due = sd_sweep.scan(self.repo, TODAY, 45)["due"]
+        self.assertEqual([(row["slug"], row["age"]) for row in due], [("a", 92)])
+        self.assertEqual(due[0]["date"], "2026-01-01")
+        self.assertEqual(due[0]["active"], "2026-06-01")
+
+
 class Sweep(unittest.TestCase):
     """The fleet shape, over the same scan."""
 

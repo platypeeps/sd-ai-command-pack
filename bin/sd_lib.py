@@ -16,7 +16,7 @@ import re
 import shlex
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
@@ -442,6 +442,10 @@ class StatusReport:
     status: str
     archived: bool
     inconsistencies: tuple[str, ...] = ()
+    #: The latest timestamp the database carries for this item, empty when
+    #: there is no database, no row for it, or no readable stamp. Attached by
+    #: `_reported`, which is the one place holding an open `Statuses`.
+    activity: str = ""
 
 
 @dataclass(frozen=True)
@@ -463,6 +467,12 @@ class WorkItem:
     #: parked is a property of the item, never a row in a separate ledger.
     parked: str = ""
     inconsistencies: tuple[str, ...] = ()
+    #: When the database last recorded anything against this item -- its row's
+    #: `updated_at` or the newest of its notes, whichever is later. Empty on a
+    #: checkout with no database, which is an absence of evidence and never a
+    #: statement that nothing happened. Read by the aging basis in
+    #: `sd_sweep.last_active`, and by nothing that decides a status.
+    activity: str = ""
 
 
 def status_marker(root: pathlib.Path, work_dir: str = WORK_DIR) -> tuple[str, str]:
@@ -567,6 +577,7 @@ class Rows:
         self._read: Any = None
         self._artifact_read: Any = None
         self._completion_read: Any = None
+        self._notes_read: Any = None
         try:
             import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
         except ImportError as error:
@@ -601,6 +612,14 @@ class Rows:
         else:
             self._artifact_read = item_for_artifact
             self._completion_read = completion_record
+        try:
+            # Optional, like the two above: an older installation without it
+            # reports what the row says and nothing the notes say.
+            from sd_db.reads import item_notes  # noqa: PLC0415
+        except ImportError:
+            pass  # An installation without it reports row activity alone.
+        else:
+            self._notes_read = item_notes
         self.opened = True
 
     def external_id(self, item_dir: pathlib.Path) -> str:
@@ -630,6 +649,41 @@ class Rows:
             relative = (item_dir / "prd.md").relative_to(_root_of(item_dir)).as_posix()
             return self._artifact_read(self._connection, self.base, relative)
         return self._read(self._connection, ITEM_ROW_SOURCE, self.external_id(item_dir))
+
+    def activity(self, item_dir: pathlib.Path) -> str:
+        """The latest stamp this item's row or any of its notes carries.
+
+        **`updated_at` is not the answer on its own.** `sd_db.writes.add_note`
+        inserts the note and leaves the item row alone, so a decision recorded
+        against an item moves nothing on it. Measured on item 492, whose
+        `comment` note stands four and a half hours after an `updated_at` that
+        still equals `created_at`. Aging on the row alone would therefore call
+        an item nobody has touched and an item triaged this morning the same
+        age, which is the defect `idle-planning` was reported for.
+
+        Empty for every absence -- no database, no row, no readable stamp --
+        because a caller that cannot distinguish them would still be wrong in
+        only one direction: an absent stamp never *lowers* an age, so the
+        answer degrades to the item's own date rather than to silence.
+        """
+        if not self.opened:
+            return ""
+        try:
+            row = self.item(item_dir)
+        except Exception:  # noqa: BLE001 - a read that failed said nothing
+            return ""
+        if row is None:
+            return ""
+        stamps = [str(row["updated_at"] or "")]
+        if self._notes_read is not None:
+            try:
+                stamps += [
+                    str(note["timestamp"] or "")
+                    for note in self._notes_read(self._connection, int(row["id"]))
+                ]
+            except Exception:  # noqa: BLE001 - notes are evidence, not a gate
+                pass
+        return max((stamp for stamp in stamps if stamp), default="")
 
     def completed(self, item_dir: pathlib.Path) -> bool:
         if self._completion_read is None:
@@ -808,18 +862,45 @@ def _status_report(
     return StatusReport(declared, False, tuple(problems))
 
 
+def _recorded(statuses: "Statuses", item_dir: pathlib.Path) -> str:
+    """What the database last recorded against this item, `""` when none.
+
+    A `file` checkout holds no `Rows` and answers `""`, which is the right
+    answer rather than a missing one: there is no database to have recorded
+    anything, and the aging basis falls back to git and to the item's own date
+    exactly as it does for a row the database has lost.
+
+    A function rather than a `Statuses.activity` method beside `Rows.activity`:
+    `tests/test_code_health.py` counts two functions of one name as a place its
+    dead-code check cannot speak for, and that ceiling only falls.
+    """
+    return statuses.rows.activity(item_dir) if statuses.rows is not None else ""
+
+
 def _reported(
     item_dir: pathlib.Path,
     fields: dict[str, str],
     problems: list[str],
     statuses: "Statuses | None",
 ) -> StatusReport:
-    """`_status_report`, resolving and closing its own `Statuses` when given none."""
+    """`_status_report`, resolving and closing its own `Statuses` when given none.
+
+    The activity stamp is attached here rather than inside `_status_report`,
+    which has six returns and no business reading a second fact on each of
+    them. This is also the only frame that is holding an open `Statuses` in
+    both branches, so it is the one place that can ask.
+    """
     if statuses is not None:
-        return _status_report(item_dir, fields, problems, statuses)
+        return replace(
+            _status_report(item_dir, fields, problems, statuses),
+            activity=_recorded(statuses, item_dir),
+        )
     own = Statuses.of(_root_of(item_dir))
     try:
-        return _status_report(item_dir, fields, problems, own)
+        return replace(
+            _status_report(item_dir, fields, problems, own),
+            activity=_recorded(own, item_dir),
+        )
     finally:
         own.close()
 
@@ -864,6 +945,7 @@ def work_item(item_dir: pathlib.Path, *, statuses: "Statuses | None" = None) -> 
         archived=report.archived,
         parked=fields.get("parked", "").strip(),
         inconsistencies=report.inconsistencies,
+        activity=report.activity,
     )
 
 
