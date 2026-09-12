@@ -3,6 +3,11 @@
 Applies to this repo. Full standard: run `sd-research-kit conventions` for its path,
 or read it in the pack at `skills/sd-research-repo/references/conventions.md`.
 
+This file was laid once by `sd-research-kit init-claude-md` and is never re-laid.
+`sd-research-kit review` reports where it has fallen behind the pack's template; a
+section this repo states differently on purpose goes under `## Local overrides of the
+shared template`, with the reason.
+
 ## Layout
 
 | Path | Holds |

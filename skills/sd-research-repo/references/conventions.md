@@ -16,6 +16,67 @@ Fan-out and file-tool rules are not here either: they are properties of the
 harness rather than of this standard, and live in
 `references/subagent-dispatch.md`.
 
+## The repo's own `CLAUDE.md`
+
+Every research repo carries a `CLAUDE.md` — the short form of this standard, for
+an agent working in the repo with no pack checkout to read. It comes from
+`skills/sd-research-repo/templates/CLAUDE.md`, and until 2026-09-12 it came from
+there by no written route at all: five repos carried a copy, nothing said to
+install one, and nothing re-read them. One divergence sat unnoticed for six
+weeks and was reported three separate times as three findings.
+
+**Laying the first copy is a supported operation, and re-laying it is not.**
+
+```bash
+sd-research-kit init-claude-md     # from inside a repo that has none
+```
+
+That verb writes `CLAUDE.md` and refuses outright if one is already there. The
+refusal is the design, not a gap: a research repo legitimately states parts of
+the template differently — a repo whose Notion folder is a team space replaces
+the template's personal `file:///` Source header, because the page is read by
+people who have no such checkout — and a writer that merged the template back
+over an existing copy would undo that silently, putting an absolute path on a
+team page. There is no re-sync verb and there should not be one.
+
+So after the first copy, the file is managed by being **checked** rather than by
+being rewritten. `sd-research-kit review` compares this repo's `CLAUDE.md`
+against the template and reports what the repo no longer says. The comparison is
+one-directional: the template is a floor, not a ceiling. Anything the repo adds
+— a whole local section, an extra paragraph inside a shared one — is the repo
+doing its job and is counted, never reported.
+
+### Saying a section is different on purpose
+
+What the repo *replaces* is the case a one-directional check cannot read, so the
+repo declares it:
+
+```markdown
+## Local overrides of the shared template
+
+- `## Publishing — Notion, not artifacts` — this repo's Notion folder is a team
+  space, so the template's personal `file:///` Source header is replaced by a
+  mirror shape carrying no path from anyone's checkout.
+```
+
+Name the section exactly as `review` names it, so a finding can be moved into
+the list by copying its backticked part across. Then:
+
+- Every entry states a reason. An entry without one fails the review — an
+  override with no reason cannot be told from drift someone wanted to stop
+  hearing about, which is the one use of this list that would break it.
+- An entry naming a section the template does not have fails too, so a stale
+  override cannot sit here covering nothing.
+- `review` prints each honoured override as an `ok` line saying how many
+  template blocks it stopped comparing. That is the standing cost of an
+  override: later template changes to that section land unseen. Keep overrides
+  to the narrowest section that carries the difference, and re-read the
+  template's copy of that section when the pack moves.
+
+A repo with no `CLAUDE.md` at all, and a pack install whose `skills/` is missing
+from beside its `bin/`, both fail the review rather than passing quietly: a gate
+that cannot run has not passed.
+
 ## Layout
 
 | Path | Holds |

@@ -184,6 +184,23 @@ LOCAL_VALUE = re.compile(r"https?://\S+|file:///\S+|/(?:Users|home|opt|srv|var|m
 
 FENCE_LINE = re.compile(r"^\s*```")
 
+#: The section where a repo declares the template blocks it deliberately states
+#: differently. Without it the detector has no word for a *substitution*: it can
+#: tell an addition (local content, left alone) from a deletion (drift), but a
+#: repo that replaces a template block with a better one for its situation looks
+#: exactly like a repo that fell behind. Two of the five research repos do
+#: exactly that -- they publish to a team Notion space, so the template's
+#: personal `file:///` Source header would put an absolute path on a page read by
+#: people who have no such checkout -- and they had no way to say so. A detector
+#: that reports a repo forever for doing the right thing is a detector that gets
+#: switched off, which is the failure this whole check exists to prevent.
+OVERRIDES_HEADING = "Local overrides of the shared template"
+
+#: One entry in that section: the template section it replaces, then why.
+#: The section is named exactly as a finding names it, so a reader can move a
+#: `FAIL ... `## X`` line into the list by copying the backticked part across.
+OVERRIDE_ENTRY = re.compile(r"^-\s+`##\s+(?P<head>[^`\n]+)`\s*(?P<reason>.*)$", re.S)
+
 
 def sections(text):
     """(heading, body) pairs, split on `##` headings outside code fences.
@@ -314,6 +331,85 @@ def drift(template_text, repo_text):
     return findings, local
 
 
+def declared_overrides(repo_text):
+    """Template sections this repo says it states differently, and why.
+
+    Returns `{section heading: reason}`, with an empty reason for an entry that
+    gave none -- reported as a failure rather than honoured, because an override
+    with no reason is indistinguishable from drift someone wanted to stop
+    hearing about, and that is the one use of this section that would break it.
+    """
+
+    body = next((text for head, text in sections(repo_text)
+                 if head == OVERRIDES_HEADING), "")
+    found: dict[str, str] = {}
+    for block in blocks(body):
+        # Split the bullet list back into bullets, keeping each entry's
+        # continuation lines with it: a reason wraps, and the wrapped half is
+        # the half that says why.
+        for entry in re.split(r"\n(?=\s*-\s)", block):
+            match = OVERRIDE_ENTRY.match(entry.strip())
+            if match:
+                reason = flat(match.group("reason")).strip(" —-:")
+                found[match.group("head").strip()] = reason
+    return found
+
+
+def override_faults(declared, template_heads):
+    """The override entries that cannot be honoured, as printable failures.
+
+    A stale entry is worth catching for the same reason the drift check is: it
+    is a claim about the template that nothing re-reads. An override naming a
+    section the template no longer has is silently covering nothing, and the day
+    the template grows a section by that name it would start covering it.
+    """
+
+    faults = []
+    for head in sorted(declared):
+        if head not in template_heads:
+            faults.append(
+                f"  FAIL CLAUDE.md `## {head}`: declared a local override of a "
+                "section the template does not have — fix the name, or drop the "
+                "entry now that the template has moved on")
+        elif not declared[head]:
+            faults.append(
+                f"  FAIL CLAUDE.md `## {head}`: declared a local override with "
+                "no reason — say why this repo states it differently, or delete "
+                "the entry and re-sync the section")
+    return faults
+
+
+def apply_overrides(findings, repo_text, template_text):
+    """Drop the findings this repo has declared, print those and any faults.
+
+    Returns the findings that survive and how many declared entries could not be
+    honoured. Split out of `template_drift` rather than written inline: the
+    decision about which findings count is one thing, and printing the report is
+    another, and holding both in one function put it over the complexity
+    ceiling. The ceiling was right — this is easier to read apart.
+    """
+
+    declared = declared_overrides(repo_text)
+    template_heads = {head for head, _ in sections(template_text) if head}
+    faults = override_faults(declared, template_heads)
+    honoured = {head for head in declared if head in template_heads and declared[head]}
+
+    # The cost of an override is that the template's blocks in that section stop
+    # being compared, so a later change to the template lands there unseen. That
+    # cost is printed on every run, with the count, rather than being paid
+    # quietly: an override is a standing decision and should keep asking to be
+    # re-read, not disappear into a clean report.
+    for head in sorted(honoured):
+        skipped = len([f for f in findings if f[0] == f"`## {head}`"])
+        print(f"  ok   CLAUDE.md `## {head}`: overridden locally "
+              f"({skipped} template block(s) not compared) — {declared[head]}")
+    for line in faults:
+        print(line)
+
+    silenced = {f"`## {head}`" for head in honoured}
+    return [f for f in findings if f[0] not in silenced], len(faults)
+
+
 def template_drift(repo):
     """Report where this repo's `CLAUDE.md` has fallen behind the pack's template.
 
@@ -336,20 +432,27 @@ def template_drift(repo):
               f"descended from {os.path.relpath(TEMPLATE, os.path.dirname(os.path.dirname(TEMPLATE)))}")
         return 1
 
-    template_text = open(TEMPLATE, encoding="utf-8", errors="replace").read()
-    repo_text = open(local_copy, encoding="utf-8", errors="replace").read()
+    with open(TEMPLATE, encoding="utf-8", errors="replace") as handle:
+        template_text = handle.read()
+    with open(local_copy, encoding="utf-8", errors="replace") as handle:
+        repo_text = handle.read()
     findings, local = drift(template_text, repo_text)
-    if not findings:
+    findings, faults = apply_overrides(findings, repo_text, template_text)
+
+    if not findings and not faults:
         print(f"  ok   CLAUDE.md: in sync with the template"
               f"{f'; {local} local block(s)/section(s) left alone' if local else ''}")
         return 0
     for where, how, excerpt in findings:
         detail = f": {excerpt[:72]}…" if excerpt else ""
         print(f"  FAIL CLAUDE.md {where}: {how}{detail}")
-    print(f"  ---- {len(findings)} template block(s) drifted; {local} local "
-          "block(s)/section(s) were left alone. Re-sync from "
-          "skills/sd-research-repo/templates/CLAUDE.md, keeping the local ones.")
-    return len(findings)
+    if findings:
+        print(f"  ---- {len(findings)} template block(s) drifted; {local} local "
+              "block(s)/section(s) were left alone. Re-sync from "
+              "skills/sd-research-repo/templates/CLAUDE.md keeping the local "
+              "ones, or — if this repo states a section differently on purpose "
+              f"— say so under `## {OVERRIDES_HEADING}`.")
+    return len(findings) + faults
 
 
 def check(repo):
@@ -450,6 +553,54 @@ The half no script can do — work it before publishing, per document:
   changed, what was rejected and why. A review that found nothing says so, and
   says what it checked.
 """
+
+
+def init_main() -> int:
+    """Lay the pack's `CLAUDE.md` into a research repo that has none.
+
+    This is the whole of "install the template", and the narrowness is the
+    point. The template reached five repositories by a route nobody wrote down
+    (sd:518), and the tempting fix -- a verb that re-syncs an existing
+    `CLAUDE.md` -- is the one that must not be built: two of those five
+    deliberately replace the template's personal `file:///` Source header
+    because their Notion space is read by people with no such checkout, and a
+    writer that merged the template back over them would undo that silently and
+    put an absolute path on a team page. Laying the *first* copy has no such
+    ambiguity, because there is nothing local to lose.
+
+    So the operation this kit supports is: create once here, and from then on
+    `review` reports where the copy and the template disagree while
+    `## Local overrides of the shared template` records the disagreements that
+    are on purpose. Refusing to overwrite is not a missing feature.
+    """
+
+    repo = os.getcwd()
+    local_copy = os.path.join(repo, "CLAUDE.md")
+    if not os.path.exists(TEMPLATE):
+        print(f"sd-research-kit: the template is not at {TEMPLATE} — install "
+              "the pack's skills/ alongside its bin/", file=sys.stderr)
+        return 1
+    if not os.path.exists(os.path.join(repo, "research.conf.py")):
+        print("sd-research-kit: no research.conf.py here — init-claude-md "
+              "writes into a research repo, and this is not one", file=sys.stderr)
+        return 1
+    if os.path.exists(local_copy):
+        print("sd-research-kit: CLAUDE.md already exists here; this verb lays "
+              "the first copy and never overwrites one.\n"
+              "  `sd-research-kit review` reports where it has drifted from the "
+              "template, and anything\n"
+              "  this repo states differently on purpose belongs under "
+              f"`## {OVERRIDES_HEADING}`.", file=sys.stderr)
+        return 1
+
+    with open(TEMPLATE, encoding="utf-8", errors="replace") as handle:
+        text = handle.read()
+    with open(local_copy, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    print(f"wrote CLAUDE.md from {TEMPLATE}")
+    print("  Fill in the `<...>` slots and the Notion folder URL, then run "
+          "`sd-research-kit review`.")
+    return 0
 
 
 def main() -> int:

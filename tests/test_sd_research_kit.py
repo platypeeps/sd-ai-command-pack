@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import io
 import os
 import subprocess
 import sys
@@ -27,7 +28,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KIT = REPO_ROOT / "bin" / "sd-research-kit"
-VERBS = ("render", "checklinks", "review", "pins", "conventions")
+VERBS = ("render", "checklinks", "review", "pins", "conventions", "init-claude-md")
 TEMPLATE = REPO_ROOT / "skills" / "sd-research-repo" / "templates" / "CLAUDE.md"
 
 
@@ -341,6 +342,194 @@ class TemplateDriftTests(unittest.TestCase):
             result = run("review", cwd=repo)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("CLAUDE.md: in sync with the template", result.stdout)
+
+
+class LocalOverrideTests(unittest.TestCase):
+    """The case a one-directional check cannot read: a *replaced* block.
+
+    The detector shipped with a word for what a repo adds (local content, left
+    alone) and a word for what it drops (drift), and none for what it replaces.
+    Two of the five research repos replace the template's personal `file:///`
+    Source header because their Notion folder is a team space read by people
+    with no such checkout -- correct work, reported as four defects between them
+    on every run, with no way to say so. A check that reports a repo forever for
+    doing the right thing is a check that gets switched off, which is the
+    failure the drift detector exists to prevent.
+    """
+
+    OVERRIDE_HEAD = "\n## Local overrides of the shared template\n\n"
+
+    def setUp(self) -> None:
+        self.module = load_kit().load("sd_research_review")
+        self.template = TEMPLATE.read_text(encoding="utf-8")
+        # A real replacement, in the shape mcp-research and aura-research use:
+        # the section is still there, one of its blocks says something else.
+        self.replaced = self.template.replace(
+            "- Absolute paths when pointing at a local file: `file:///Users/...`, "
+            "not a bare path.",
+            "- Local notes may use absolute paths; published pages must not.",
+        )
+        self.assertNotEqual(self.replaced, self.template, "the Style bullet moved")
+
+    def report(self, text: str):
+        """`template_drift`'s exit count and what it printed."""
+        with tempfile.TemporaryDirectory() as raw:
+            (Path(raw) / "CLAUDE.md").write_text(text, encoding="utf-8")
+            with unittest.mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                count = self.module.template_drift(raw)
+            return count, out.getvalue()
+
+    def test_an_undeclared_replacement_is_still_drift(self) -> None:
+        """The override is opt-in. Saying nothing changes nothing."""
+
+        count, printed = self.report(self.replaced)
+        self.assertEqual(count, 1, printed)
+        self.assertIn("FAIL CLAUDE.md `## Style`", printed)
+
+    def test_a_declared_override_is_not_drift(self) -> None:
+        count, printed = self.report(
+            self.replaced + self.OVERRIDE_HEAD
+            + "- `## Style` — published pages are read by people with no checkout.\n"
+        )
+        self.assertEqual(count, 0, printed)
+        self.assertIn("`## Style`: overridden locally", printed)
+
+    def test_an_honoured_override_prints_what_it_stopped_comparing(self) -> None:
+        """The standing cost of an override, on the page, on every run.
+
+        A template change to an overridden section lands unseen. That is the
+        price, and a price nobody is quoted is a price nobody re-examines.
+        """
+
+        _, printed = self.report(
+            self.replaced + self.OVERRIDE_HEAD
+            + "- `## Style` — published pages are read by people with no checkout.\n"
+        )
+        self.assertIn("(1 template block(s) not compared)", printed)
+        self.assertIn("published pages are read by people with no checkout", printed)
+
+    def test_an_override_with_no_reason_fails_and_suppresses_nothing(self) -> None:
+        """Otherwise the list is a mute button, and mute buttons get used.
+
+        Both halves matter. The entry is reported, *and* the drift it names is
+        still reported under it -- an unreasoned entry that silenced the section
+        while complaining about itself would be a mute button with a warning
+        label, which is still a mute button.
+        """
+
+        count, printed = self.report(
+            self.replaced + self.OVERRIDE_HEAD + "- `## Style`\n"
+        )
+        self.assertEqual(count, 2, printed)
+        self.assertIn("local override with no reason", printed)
+        self.assertIn("FAIL CLAUDE.md `## Style`: gone", printed)
+
+    def test_an_override_of_a_section_the_template_lacks_fails(self) -> None:
+        """A stale override is the same disease one level down: an unread claim."""
+
+        count, printed = self.report(
+            self.template + self.OVERRIDE_HEAD
+            + "- `## Retired Section` — kept after the template dropped it.\n"
+        )
+        self.assertEqual(count, 1, printed)
+        self.assertIn("the template does not have", printed)
+
+    def test_an_override_does_not_excuse_another_section(self) -> None:
+        """It suppresses the section it names and nothing else."""
+
+        gone = "Use only the directories this repo needs; do not invent new ones.\n"
+        self.assertIn(gone, self.template)
+        count, printed = self.report(
+            self.replaced.replace(gone, "") + self.OVERRIDE_HEAD
+            + "- `## Style` — published pages are read by people with no checkout.\n"
+        )
+        self.assertEqual(count, 1, printed)
+        self.assertIn("`## Layout`", printed)
+
+    def test_a_reason_wrapping_onto_the_next_line_is_read_whole(self) -> None:
+        count, printed = self.report(
+            self.replaced + self.OVERRIDE_HEAD
+            + "- `## Style` — published pages are read by people who do not\n"
+            "  have this checkout, so an absolute path is unusable there.\n"
+        )
+        self.assertEqual(count, 0, printed)
+        self.assertIn("unusable there", printed)
+
+    def test_the_overrides_section_itself_is_not_drift(self) -> None:
+        """It is a local section, like any other the repo adds."""
+
+        found, _ = self.module.drift(
+            self.template,
+            self.template + self.OVERRIDE_HEAD + "- `## Style` — because.\n",
+        )
+        self.assertEqual(found, [])
+
+
+class InitClaudeMdTests(unittest.TestCase):
+    """`init-claude-md` lays the first copy, and only ever the first.
+
+    sd:518: five repos carried a copy of a 167-line template and nothing told
+    anyone to install it, so the route was unwritten and the copies drifted. The
+    verb writes the route down. What it deliberately does not do is re-lay an
+    existing copy -- see `LocalOverrideTests` for the reason that would be
+    destructive rather than merely unhelpful.
+    """
+
+    def setUp(self) -> None:
+        self.template = TEMPLATE.read_text(encoding="utf-8")
+
+    def test_it_writes_the_template_into_a_repo_with_none(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            (repo / "research.conf.py").write_text('PROJECT = "probe"\nDOCS = []\n')
+            result = run("init-claude-md", cwd=repo)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(
+                (repo / "CLAUDE.md").read_text(encoding="utf-8"), self.template
+            )
+
+    def test_what_it_writes_passes_the_drift_check_it_ships_with(self) -> None:
+        """A laid copy the checker then calls drifted would be worse than none."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            (repo / "research.conf.py").write_text('PROJECT = "probe"\nDOCS = []\n')
+            self.assertEqual(run("init-claude-md", cwd=repo).returncode, 0)
+            result = run("review", cwd=repo)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("CLAUDE.md: in sync with the template", result.stdout)
+
+    def test_it_refuses_to_overwrite_an_existing_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            (repo / "research.conf.py").write_text('PROJECT = "probe"\nDOCS = []\n')
+            (repo / "CLAUDE.md").write_text("local work\n", encoding="utf-8")
+            result = run("init-claude-md", cwd=repo)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(
+                (repo / "CLAUDE.md").read_text(encoding="utf-8"), "local work\n"
+            )
+        self.assertIn("already exists", result.stderr)
+
+    def test_the_refusal_names_where_a_deliberate_difference_goes(self) -> None:
+        """The refusal is only fair if it says what to do instead."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            (repo / "research.conf.py").write_text('PROJECT = "probe"\nDOCS = []\n')
+            (repo / "CLAUDE.md").write_text("local work\n", encoding="utf-8")
+            result = run("init-claude-md", cwd=repo)
+        self.assertIn("review", result.stderr)
+        self.assertIn("Local overrides of the shared template", result.stderr)
+
+    def test_it_refuses_outside_a_research_repo(self) -> None:
+        """No `research.conf.py` means this is not the kit's repo to write in."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            result = run("init-claude-md", cwd=Path(raw))
+            self.assertEqual(result.returncode, 1)
+            self.assertFalse((Path(raw) / "CLAUDE.md").exists())
+        self.assertIn("research.conf.py", result.stderr)
 
 
 if __name__ == "__main__":

@@ -49,7 +49,7 @@ say. A skill in `contrib/` is one command away, and use is what moves it.
 
 **What it writes in a repository:** nothing at machine-scope install. Everything
 below is written by something you invoke against that repository, and nothing
-else is. Its executables write four paths:
+else is. Its executables write these paths, and no others:
 
 - `CLAUDE.local.md` — per-repo configuration, from `bin/sd_install.py --repo`.
   Untracked by way of that one excludes line, and that command refuses outright
@@ -63,6 +63,14 @@ else is. Its executables write four paths:
   item, from `sd-docs-lint --update-citations`. **Tracked.**
 - `build/` — HTML from `sd-research-kit render`, into the research repository you
   are standing in. Gitignored.
+- `CLAUDE.md` — the research-repo standard in short form, from `sd-research-kit
+  init-claude-md`, into a research repository that has none. **Tracked.** Written
+  once: the verb refuses if a copy is already there, and there is no re-sync
+  verb, because a repo may state parts of the template differently on purpose.
+  From then on `sd-research-kit review` reports where the copy and
+  `skills/sd-research-repo/templates/CLAUDE.md` disagree, and the repo's own
+  `## Local overrides of the shared template` section records the disagreements
+  that are deliberate.
 
 Two skills add paths of their own, both tracked. Invoking either is the approval
 to write, and neither writes anywhere else:
