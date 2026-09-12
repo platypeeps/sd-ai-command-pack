@@ -583,19 +583,67 @@ class TheShadowRecoveryWindow(SuggestCase):
         self.assertNotIn("cursor held", output)
         self.assertEqual(0, code, output)
 
+    class Reporting:
+        """A `Synced`-shaped result whose `report()` this test controls.
+
+        NOT a convenience. `queued` and `incomplete` arrived in the library at
+        #301, and CI pins a commit that predates it -- `Synced(queued=3)`
+        raises `TypeError` there while passing on every local venv. Naming the
+        library's newer fields in a test would make the test assert the
+        library's schema; what is under test is the VERB's forwarding, which
+        must hold whatever `report()` returns.
+        """
+
+        def __init__(self, lines, *, ok=True, reason="", truncated=()):
+            self.written, self.window_start = 0, "2026-09-06T10:00:00Z"
+            self.watermark_moved, self.ok = True, ok
+            self.reason, self.truncated = reason, list(truncated)
+            self._lines = list(lines)
+
+        def report(self):
+            return ["shadow sync: 0 row(s), watermark moved", *self._lines]
+
+    def report(self, result, *, strict=False):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = self.command.sd_shadow.report_sync(result, strict=strict)
+        return code, output.getvalue()
+
     def test_the_backlog_and_the_incomplete_observations_reach_the_log(self):
         """sd:614. The verb printed neither, so a growing queue was invisible.
 
         The 213-deep backlog of 2026-09-12 showed only in the contribution-sync
-        heartbeat; the nightly log said nothing. These lines are the library's
-        own, forwarded rather than re-worded, so one it learns to emit arrives
-        without this verb being edited.
+        heartbeat; the nightly log said nothing.
         """
-        code, output = self.sync_returning(
-            self.synced(queued=3, incomplete=["item:42: rate limited"]))
+        code, output = self.report(self.Reporting([
+            "shadow sync: contribution observation incomplete: item:42: rate limited",
+            "shadow sync: contribution detail backlog: 3 queued",
+        ]))
         self.assertIn("contribution detail backlog: 3 queued", output)
         self.assertIn("contribution observation incomplete: item:42: rate limited", output)
         self.assertEqual(0, code, output)
+
+    def test_a_line_the_library_learns_to_emit_needs_no_edit_here(self):
+        """The property, not the two lines that prompted it.
+
+        A verb that named the fields it forwards would drop the next one in
+        silence -- which is sd:602, in the file that just fixed sd:602.
+        """
+        _, output = self.report(self.Reporting(["shadow sync: something new: 4"]))
+        self.assertIn("shadow sync: something new: 4", output)
+
+    def test_the_library_line_the_verb_already_said_is_not_repeated(self):
+        """CONTROL. Forwarding wholesale duplicates the truncation and reason."""
+        _, output = self.report(
+            self.Reporting(["shadow sync: truncated buckets: issues",
+                            "shadow sync: request budget spent",
+                            "shadow sync: contribution detail backlog: 3 queued"],
+                           ok=False, reason="request budget spent",
+                           truncated=["issues"]),
+            strict=True)
+        self.assertEqual(1, output.count("request budget spent"), output)
+        self.assertNotIn("truncated buckets", output)
+        self.assertIn("contribution detail backlog: 3 queued", output)
 
     def test_the_verb_does_not_say_the_same_thing_twice(self):
         """CONTROL. Forwarding the report wholesale would duplicate three lines."""
