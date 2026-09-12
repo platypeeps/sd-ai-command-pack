@@ -123,7 +123,7 @@ rather than on a fixture.
 
 **The marker read is line-aware, and the flattening does not prevent it.**
 `classify` flattens with `.replace("\n", " ")`
-(`tests/test_doc_citations.py:477`), which a reviewer read as making 0.71.34's
+(`tests/test_doc_citations.py:511`), which a reviewer read as making 0.71.34's
 "same line" rule unimplementable. It does not: the substitution is one
 character for one character, so offsets in the flattened text are offsets in
 the original. `marker_after()` matches against the flattened text and then
@@ -241,7 +241,7 @@ and it covers one citation, not a document, a region or a path.
 
 **Delivered, and demonstrated here rather than described.** This page can now
 show the literal shape it is about.
-`frontmatter` (`bin/sd:1231`) [quoted: tests/test_doc_citations.py:343]
+`frontmatter` (`bin/sd:1231`) [quoted: tests/test_doc_citations.py:377]
 is the citation that went stale, quoted here as the example it is and carrying
 a marker that tells the gate not to read it as a claim. The live one is `frontmatter` (`bin/sd:1257`),
 and 1231 now sits inside another function's docstring -- which is the whole

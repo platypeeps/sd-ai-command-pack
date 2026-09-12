@@ -125,6 +125,40 @@ Three shapes are named and counted rather than resolved, and saying so is more
 honest than a number that implies they were handled: the bare comma and
 semicolon (134), the elided path (2,356), and the token with no anchoring
 shape at all (2,732).
+
+**sd:525, measured 2026-09-12, and a recommendation rather than a change.**
+The item reports that line-anchored citations make any insertion in a source
+file a docs failure, sighted three times in one parallel round by three lanes
+none of whom were editing documentation, and puts the population at "2,147
+line-anchored citations across docs/". The census above says otherwise, and
+the difference is the whole answer: of 5,699 `path:line` tokens, exactly 54
+are `compared`, and only a `compared` row can go stale. `anchored_citations`
+filters to that bucket. So the mechanism imposing repoint churn on every
+writer lane is staleness-checking about 1% of what it classifies.
+
+Narrowed further, it is 39 rows, because the other 15 are archived and an
+archive is not edited. Every one of the 39 cites source code -- 31 in `bin/`,
+4 in `tests/`, 4 in `dashboard/` -- and 34 of the 39 sit in a single
+document. The insertion has to be large to bite: `WINDOW` absorbs a shift of
+two, and inserting one line into `bin/sd_lib.py` broke nothing while
+inserting seven broke six citations.
+
+The migration is therefore small and specific rather than a redesign. Running
+`source_declaration_error` over all 39 today, 35 resolve to exactly one
+declaration and could be rewritten as `source:<path>::<symbol>`, the form
+`test_inserted_lines_do_not_break_a_declaration_locator` already guarantees
+and the live corpus already carries 35 of. The 4 that cannot are two
+`dashboard/app.js` citations, which the locator cannot parse because it is
+Python-only, and two whose anchor is not a symbol at all -- `None` and
+`.replace("\n", " ")`.
+
+Not done here, and the reason is the item's own complaint: 34 of the 35 are in
+an active work item another lane holds, so migrating them from this lane would
+commit the cross-lane write that sd:525 exists to object to. The recommended
+sequence is one lane that owns that item migrating its 34, a decision on the
+JavaScript locator and the two non-symbol anchors, and only then making a bare
+`path:line` into a source file fail -- in that order, because reversing it
+turns CI red on the first commit.
 """
 
 from __future__ import annotations
@@ -1250,9 +1284,9 @@ def quoted_repoint(
     What moves here is the REASON, never the citation it covers. A quoted
     citation is a quotation of somebody else's citation, deliberately inert;
     rewriting its number would edit the example. The first draft of this tool
-    did exactly that -- it proposed moving `bin/sd:1231` in a page that quotes
-    it -- which is the PR #868 defect arriving through the tool built to
-    prevent it. The caller therefore routes a quoted citation here and nowhere
+    did exactly that -- it proposed rewriting a citation a page quotes, which
+    is the PR #868 defect arriving through the tool built to prevent it. The
+    caller therefore routes a quoted citation here and nowhere
     else, and `None` from this function means the marker is already right.
     """
     marker = (reason,)
