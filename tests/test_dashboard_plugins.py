@@ -21,12 +21,35 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from dashboard import plugins  # noqa: E402
+
+# How much of a budget a tile gets to reach the state it is being tested in.
+#
+# sd:526. The four tests below pinned `TILE_SECONDS` to 0.4 and then asserted on
+# which refusal came back. That budget has to cover the tile getting far enough
+# to be the thing under test -- a fresh interpreter starting, importing,
+# printing -- and how long that takes is a property of the machine at that
+# instant, not of this repository. On 2026-09-12 five writer lanes, none of them
+# having touched `dashboard/`, read `no stdout within 0.4s` where the test
+# expected `did not exit`: the tile had not been scheduled inside the window, so
+# the loader was asked about a tile that had not yet spoken and answered
+# correctly. The module takes 12.6s alone and took 120s at load average 63.
+#
+# Picking a bigger constant only moves the number the machine has to beat, so
+# there is no constant. `refusal_saying` below runs the load again with twice
+# the budget while the answer is still the one a machine too busy to start an
+# interpreter would give, and fails when the budgets run out. The escalation
+# buys that direction only: a loader that accepts a tile still sitting in the
+# state under test fails on the spot with no budget consulted, and a refusal
+# that never says the expected thing fails at the ceiling carrying the last one
+# it did say.
+TILE_BUDGETS = (0.4, 0.8, 1.6, 3.2, 6.4, 12.8)
 
 
 def tile_script(body: str) -> str:
@@ -87,6 +110,89 @@ class PluginLoaderTest(unittest.TestCase):
         plugin = self.only(loaded)
         self.assertEqual(len(plugin["tabs"]), 1)
         return plugin["tabs"][0]
+
+    # -- tiles that have to be caught in the act ---------------------------
+
+    def refusal_saying(
+        self,
+        prefix: str,
+        body: str,
+        expected: str,
+        *,
+        reached: pathlib.Path | None = None,
+    ) -> dict:
+        """`load()`, under a budget this machine can meet, refusing `expected`.
+
+        The tile is registered once and loaded under each of `TILE_BUDGETS` in
+        turn until its refusal says `expected`; every tile passed here holds
+        its state for 30 seconds, far longer than the largest budget, so the
+        only thing a longer budget can change is whether the loader got to see
+        the state at all. See `TILE_BUDGETS` for why that is not a constant.
+
+        `expected` is the premise, not the assertion: the caller still asserts
+        on the returned load, and on everything else it wants to say about the
+        row. What this decides is only whether the machine put the loader in
+        front of the case under test, and it cannot decide that in the
+        permissive direction -- a tab reported `ok` while its tile is still
+        sleeping is a defect under any budget and fails here immediately.
+
+        `reached`, where the case needs more of the tile than a refusal can
+        show, is a path the tile writes once it is in that state. It is removed
+        before each load and has to be back for the load to count, which is how
+        a tile killed before it got there is told apart from one that got there
+        and was let off.
+        """
+        self.register(self.plugin(prefix, tile_script(body)))
+        original = plugins.TILE_SECONDS
+        self.addCleanup(lambda: setattr(plugins, "TILE_SECONDS", original))
+        reason = "the tile was never loaded"
+        for seconds in TILE_BUDGETS:
+            if reached is not None:
+                reached.unlink(missing_ok=True)
+            plugins.TILE_SECONDS = seconds
+            loaded = plugins.load()
+            tab = self.only_tab(loaded)
+            self.assertFalse(
+                tab["ok"],
+                f"the loader accepted a tile still in the state under test, "
+                f"at {seconds:g}s of budget",
+            )
+            reason = tab["reason"]
+            if expected in reason and (reached is None or reached.exists()):
+                return loaded
+        if reached is not None and not reached.exists():
+            reason = f"{reason}, and the tile never reached {reached.name}"
+        self.fail(
+            f"no refusal said {expected!r} up to {TILE_BUDGETS[-1]:g}s of "
+            f"budget; the last one said {reason!r}"
+        )
+
+    def died(self, pid: int) -> bool:
+        """Whether `pid` is gone, waited for rather than assumed.
+
+        Orphaned by the kill that took its parent, the child is reaped by init
+        rather than by anyone here, so there is a short window in which a
+        killed process still answers. Polling closes it without putting a
+        wall-clock number in the assertion: the ceiling is far below the two
+        minutes the child would sleep, so reaching it means the process really
+        is alive.
+        """
+        self.addCleanup(self.reap, pid)
+        stop = time.monotonic() + 30.0
+        while time.monotonic() < stop:
+            try:
+                os.kill(pid, 0)
+            except (ProcessLookupError, PermissionError):
+                return True
+            time.sleep(0.05)
+        return False
+
+    def reap(self, pid: int) -> None:
+        """A survivor of a failed kill is this test's mess to clear up."""
+        try:
+            os.kill(pid, 9)
+        except OSError:
+            pass
 
     # -- the empty machine -------------------------------------------------
 
@@ -559,21 +665,14 @@ class PluginLoaderTest(unittest.TestCase):
         self.assertEqual(loaded["rows"][0]["rank"], 0)
 
     def test_a_tile_that_outlasts_its_deadline_is_killed_and_reported(self) -> None:
-        original = plugins.TILE_SECONDS
-        plugins.TILE_SECONDS = 0.4
-        self.addCleanup(lambda: setattr(plugins, "TILE_SECONDS", original))
-        self.register(
-            self.plugin(
-                "ff",
-                tile_script(
-                    """
-                    import time
-                    time.sleep(30)
-                    """
-                ),
-            )
+        loaded = self.refusal_saying(
+            "ff",
+            """
+            import time
+            time.sleep(30)
+            """,
+            "within",
         )
-        loaded = plugins.load()
         self.assertFalse(self.only_tab(loaded)["ok"])
         self.assertIn("within", self.only_tab(loaded)["reason"])
         self.assertEqual(len(self.rows_of("plugin-dark", loaded)), 1)
@@ -584,36 +683,38 @@ class PluginLoaderTest(unittest.TestCase):
         A tile whose child holds the pipe open would otherwise keep the read
         blocked past the deadline, which would bound this module and nothing
         else.
-        """
-        original = plugins.TILE_SECONDS
-        plugins.TILE_SECONDS = 0.4
-        self.addCleanup(lambda: setattr(plugins, "TILE_SECONDS", original))
-        marker = self.tmp / "child-finished"
-        self.register(
-            self.plugin(
-                "gg",
-                tile_script(
-                    f"""
-                    import subprocess, sys, time
-                    subprocess.Popen([sys.executable, "-c",
-                      "import time,pathlib; time.sleep(0.8);"
-                      "pathlib.Path({str(marker)!r}).write_text('x')"])
-                    time.sleep(30)
-                    """
-                ),
-            )
-        )
-        loaded = plugins.load()
-        self.assertFalse(self.only_tab(loaded)["ok"])
-        import time as _time
 
-        # The child's own sleep sits between the deadline that kills it (0.4s,
-        # so it is still running when the group is killed) and this wait, which
-        # is long enough that a survivor would certainly have written by now.
-        # Found in review: with a 6s child and a 1.5s wait the marker could not
-        # exist either way, and the assertion held whether or not the kill
-        # worked.
-        _time.sleep(2.0)
+        What is asserted is that the child is *gone*, waited for by its pid,
+        rather than that a file it would have written is absent after a fixed
+        pause. sd:526: the pause was 2s against a child that would have written
+        at 0.8s, and on a machine busy enough the child that was merely late
+        and the child that was killed are the same observation -- so the old
+        form of this passed against a loader that never killed the group. A pid
+        that is still alive cannot be explained that way, and a child sleeping
+        two minutes cannot have got there on its own.
+        """
+        born = self.tmp / "child-born"
+        marker = self.tmp / "child-finished"
+        loaded = self.refusal_saying(
+            "gg",
+            f"""
+            import pathlib, subprocess, sys, time
+            child = subprocess.Popen([sys.executable, "-c",
+              "import time,pathlib; time.sleep(120);"
+              "pathlib.Path({str(marker)!r}).write_text('x')"])
+            # After `Popen` returns, so the file existing means the child was
+            # started -- a failed exec raises here instead of writing it.
+            pathlib.Path({str(born)!r}).write_text(str(child.pid))
+            time.sleep(30)
+            """,
+            "within",
+            reached=born,
+        )
+        self.assertFalse(self.only_tab(loaded)["ok"])
+        self.assertTrue(
+            self.died(int(born.read_text())),
+            "the tile's child survived the group kill and kept running",
+        )
         self.assertFalse(
             marker.exists(),
             "the tile's child survived the group kill and kept running",
@@ -666,24 +767,17 @@ class PluginLoaderTest(unittest.TestCase):
 
     def test_a_tile_that_writes_then_hangs_is_refused_rather_than_accepted(self) -> None:
         """Output in hand is not a finished run while the deadline is unmet."""
-        original = plugins.TILE_SECONDS
-        plugins.TILE_SECONDS = 0.4
-        self.addCleanup(lambda: setattr(plugins, "TILE_SECONDS", original))
-        self.register(
-            self.plugin(
-                "pp",
-                tile_script(
-                    """
-                    import json, os, sys, time
-                    print(json.dumps({"title": "t"}))
-                    sys.stdout.flush()
-                    os.close(1)
-                    time.sleep(30)
-                    """
-                ),
-            )
+        loaded = self.refusal_saying(
+            "pp",
+            """
+            import json, os, sys, time
+            print(json.dumps({"title": "t"}))
+            sys.stdout.flush()
+            os.close(1)
+            time.sleep(30)
+            """,
+            "did not exit",
         )
-        loaded = plugins.load()
         self.assertFalse(self.only_tab(loaded)["ok"])
         self.assertIn("did not exit", self.only_tab(loaded)["reason"])
 
@@ -696,23 +790,17 @@ class PluginLoaderTest(unittest.TestCase):
         started. Stdout stays open here -- that is what separates this path
         from the one the hang test takes.
         """
-        original = plugins.TILE_SECONDS
-        plugins.TILE_SECONDS = 0.4
-        self.addCleanup(lambda: setattr(plugins, "TILE_SECONDS", original))
-        self.register(
-            self.plugin(
-                "ss",
-                tile_script(
-                    """
-                    import sys, time
-                    sys.stdout.write('{"title": "t"')
-                    sys.stdout.flush()
-                    time.sleep(30)
-                    """
-                ),
-            )
+        loaded = self.refusal_saying(
+            "ss",
+            """
+            import sys, time
+            sys.stdout.write('{"title": "t"')
+            sys.stdout.flush()
+            time.sleep(30)
+            """,
+            "stopped writing stdout",
         )
-        reason = self.only_tab(plugins.load())["reason"]
+        reason = self.only_tab(loaded)["reason"]
         self.assertIn("stopped writing stdout", reason)
         self.assertNotIn("no stdout", reason)
 
