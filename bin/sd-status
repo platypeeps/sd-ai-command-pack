@@ -2522,6 +2522,13 @@ def _marker_rows(root: pathlib.Path) -> list[dict[str, Any]]:
     return rows
 
 
+#: The two roots that hold a skill. `skills/` is what a path names and the
+#: installer renders; `contrib/` is everything `sd skill try` can still reach.
+#: A skill in either is a skill in this pack, which is the same sentence
+#: `tests/test_skill_frontmatter.py` writes over its own `ROOTS`, and the two
+#: are pinned equal by a test rather than left to agree by coincidence.
+SKILL_ROOTS = ("skills", "contrib")
+
 _DISCLOSED_RE = re.compile(r"bin/(?P<tool>[A-Za-z0-9][A-Za-z0-9_-]*)")
 
 #: The one file suffix `bin/` uses. The regex above stops at the `.`, so a
@@ -2530,6 +2537,42 @@ _DISCLOSED_RE = re.compile(r"bin/(?P<tool>[A-Za-z0-9][A-Za-z0-9_-]*)")
 #: here rather than folded into the regex so the trailing period of an English
 #: sentence -- `see bin/sd-plan.` -- cannot be read as an extension.
 _MODULE_SUFFIX = ".py"
+
+
+def skill_surfaces(root: pathlib.Path) -> list[pathlib.Path]:
+    """Every `SKILL.md` on disk, under either root in `SKILL_ROOTS`.
+
+    This is the producer's answer to "what is a skill surface", and it exists
+    as a named function for the reason `CLASSES` exists: one answer, in one
+    place, that a check reads rather than restates. `_tool_rows` used to carry
+    its own `(root / "skills").glob("*/SKILL.md")`, which made the enumeration
+    an implementation detail of one check -- and the detail was wrong. It never
+    opened `contrib/`, so two live disclosures in `contrib/sd-deps` and
+    `contrib/sd-map` were invisible while the class reported health over a
+    directory it had not read. That is the same failure the banner refuses when
+    it will not print `clear` over an unchecked class.
+
+    Direction matters. `tests/test_skill_frontmatter.py` already enumerated
+    both roots, so the fix is not to teach this file the suite's answer but to
+    put the answer where a producer may live: `bin/` cannot import from
+    `tests/`, and a check that depended on the suite would invert the
+    dependency the pack ships. The suite is free to read this; the pinning is
+    `tests/test_sd_status.py`, which asserts the two enumerations return the
+    same set and fails the moment either widens or narrows alone.
+
+    Shaped to match the suite exactly -- directories under each root that hold
+    a `SKILL.md`, sorted by directory name -- rather than by a glob, because a
+    glob and an `iterdir()` walk disagree about a dotted directory, and a
+    difference that small is precisely the kind that drifts back.
+    """
+    found = [
+        entry / "SKILL.md"
+        for name in SKILL_ROOTS
+        if (root / name).is_dir()
+        for entry in (root / name).iterdir()
+        if entry.is_dir() and (entry / "SKILL.md").is_file()
+    ]
+    return sorted(found, key=lambda path: path.parent.name)
 
 
 def _tool_candidates(tool: str) -> tuple[str, ...]:
@@ -2587,10 +2630,19 @@ def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
     `design.md`'s natural-key table predates this class and names no key for
     the `k` letter. The key used here is the disclosing file and the tool, and
     it is stable for the same reason the others are: neither endpoint moves
-    when an unrelated tool gets built.
+    when an unrelated tool gets built. The key carries the root it was found
+    under, so a skill that moves between `skills/` and `contrib/` reads as the
+    move it is rather than as a finding that closed and a new one that opened.
+
+    Which files count is `skill_surfaces`, not a glob written here. Reading
+    both roots deliberately *adds* findings -- `contrib/sd-deps` and
+    `contrib/sd-map` each disclose a `bin/` command that is not built, and both
+    were invisible while this loop read one root. Surfacing them is the point;
+    the roadmap they name is a decision for a person, and a check that hid the
+    question to keep its own count at zero was answering a different one.
     """
     rows: list[dict[str, Any]] = []
-    for path in sorted((root / "skills").glob("*/SKILL.md")):
+    for path in skill_surfaces(root):
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
