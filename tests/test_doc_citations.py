@@ -41,19 +41,20 @@ caught each of these on the day it was introduced rather than one at a time by
 being bitten.
 
 Measured over the corpus at the time of writing -- 1,096 tracked markdown
-files, 5,698 tokens -- and re-measurable by running the module, which prints
+files, 5,699 tokens -- and re-measurable by running the module, which prints
 the census on every run:
 
 ===========================  ======  ======  ======
 reason                         live  archiv   total
 ===========================  ======  ======  ======
-`compared`                       38      15      53
+`compared`                       39      15      54
 `no-adjacent-anchor`            322   2,410   2,732
 `elided-path`                   176   2,180   2,356
 `archived-stale`                  0     277     277
 `anchor-not-a-symbol`            13     131     144
 `separator-not-adjacent`         20     114     134
 `declared-absent`                 1       0       1
+`absent-but-present`              0       0       0
 `target-missing`                  0       0       0
 `escapes-checkout`                0       0       0
 `quoted`                          1       0       1
@@ -82,8 +83,11 @@ Each reason, with why it exists:
   is a stale citation and it is **red**. Empty today.
 * **`declared-absent`** -- the same, but the citation carries
   `[absent: <reason>]`. Not a failure and not the same bucket, because the
-  marker is a claim that can itself go stale: an `[absent: ...]` whose target
-  exists fails.
+  marker is a claim that can itself go stale.
+* **`absent-but-present`** -- that claim, gone stale: an `[absent: ...]` whose
+  target exists. **Red**, and empty today. Stated as a contract in an earlier
+  draft of this docstring with nothing enforcing it, which is the silencer
+  shape this module is about; `test_the_red_buckets_are_empty` enforces it now.
 * **`escapes-checkout`** -- the path resolved outside the tree. Silent by
   design and the only one of these that is a security refusal. It has never
   fired on real content, and it is its own bucket so that the silence stays
@@ -202,6 +206,7 @@ REASONS = frozenset({
     "escapes-checkout",
     "target-missing",
     "declared-absent",
+    "absent-but-present",
     "anchor-not-a-symbol",
     "elided-path",
     "separator-not-adjacent",
@@ -430,7 +435,13 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                 rows.append(Citation(doc, anchor, path, target, start, end, reason))
                 continue
             reason = "compared"
-            if archived and not names_its_symbol(anchor, target, start, end):
+            if marker and marker[0] == "absent":
+                # The marker claims the target is gone and it is not. The claim
+                # is the thing that went stale, so it is its own bucket and it
+                # is red -- an absence marker nobody rechecks is a silencer
+                # that outlives its reason.
+                reason = "absent-but-present"
+            elif archived and not names_its_symbol(anchor, target, start, end):
                 reason = "archived-stale"
             rows.append(Citation(doc, anchor, path, target, start, end, reason))
     return rows
@@ -527,8 +538,29 @@ class DocCitationTests(unittest.TestCase):
         # `.github/scripts/run-tests.sh` runs each module as
         # `python -m unittest <module> > <shard>.log 2>&1` with no `-b`, so
         # this lands in `unittest-output.log` on every run.
-        print("citation census: " + (", ".join(
-            f"{reason}={counts[reason]}" for reason in sorted(counts)) or "no tokens"))
+        # Over `REASONS`, not over `counts`: a bucket that fell to zero is a
+        # result, and iterating the counter would delete it from the report.
+        print("citation census: " + ", ".join(
+            f"{reason}={counts[reason]}" for reason in sorted(REASONS)))
+
+    def test_the_red_buckets_are_empty(self) -> None:
+        """The docstring calls two buckets red. Until this, nothing made them so.
+
+        `anchored_citations()` filters to `compared`, so the stale-symbol test
+        never sees `target-missing` or `absent-but-present`: a live citation to
+        a deleted file, or an `[absent: ...]` on a file that came back, landed
+        in its bucket, was counted, and left the suite green. Counting a defect
+        is not catching it. The reasons named here are the ones the module
+        documents as failures, and this is the assertion that spends them.
+        """
+
+        rows = classify()
+        for reason in ("target-missing", "absent-but-present"):
+            offenders = [
+                f"{row.doc.relative_to(REPO_ROOT)}: `{row.path}:{row.start}`"
+                for row in rows if row.reason == reason
+            ]
+            self.assertEqual(offenders, [], f"{reason}:\n" + "\n".join(offenders))
 
     def test_a_citation_cannot_send_this_test_outside_the_checkout(self) -> None:
         """A citation is a string in a document, and this test opens what it names.
@@ -746,6 +778,22 @@ class TheReasonsThatHaveNoLiveInstance(unittest.TestCase):
             self.classify_one(
                 "`frontmatter` (`bin/no-such-file:1`) [absent: deleted in 0.72.0]"),
             "declared-absent")
+
+    def test_an_absent_marker_on_a_file_that_exists_is_the_claim_going_stale(self) -> None:
+        """The pair to the test above, and the one that makes the marker honest.
+
+        `[absent: ...]` is the only marker that asserts something about the
+        world rather than about the prose, so it is the only one that can be
+        contradicted by the world. A file that comes back -- restored, renamed
+        back, un-deleted -- leaves the marker behind saying it is gone. Without
+        this the marker is a permanent exemption bought once and never re-read,
+        which is the thing this module exists to stop.
+        """
+
+        self.assertEqual(
+            self.classify_one(
+                "`is_symbol` (`tests/test_doc_citations.py:232`) [absent: never was]"),
+            "absent-but-present")
 
     def test_the_elided_form_names_no_file_and_is_counted(self) -> None:
         self.assertEqual(self.classify_one("as written at `:1378`"), "elided-path")

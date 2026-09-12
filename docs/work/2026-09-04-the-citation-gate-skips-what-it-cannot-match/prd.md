@@ -31,17 +31,18 @@ numbers drifted. What holds now, printed by the module on every run:
 
 | bucket | live | archived | total |
 |---|---:|---:|---:|
-| `compared` | 38 | 15 | **53** |
+| `compared` | 39 | 15 | **54** |
 | `no-adjacent-anchor` | 322 | 2,410 | 2,732 |
 | `elided-path` | 176 | 2,180 | 2,356 |
 | `archived-stale` | 0 | 277 | 277 |
 | `anchor-not-a-symbol` | 13 | 131 | 144 |
 | `separator-not-adjacent` | 20 | 114 | 134 |
 | `declared-absent` | 1 | 0 | 1 |
+| `absent-but-present` | 0 | 0 | **0** |
 | `target-missing` | 0 | 0 | **0** |
 | `escapes-checkout` | 0 | 0 | **0** |
 | `quoted` | 1 | 0 | **1** |
-| | | | **5,698** |
+| | | | **5,699** |
 
 Corpus: 1,096 tracked markdown files, `CHANGELOG.md` excluded by name. The
 compared population was **36** under the predecessor's corpus immediately

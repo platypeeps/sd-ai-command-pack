@@ -122,8 +122,8 @@ buckets under-count against the corpus and conservation fails on the real tree
 rather than on a fixture.
 
 **The marker read is line-aware, and the flattening does not prevent it.**
-`anchored_citations` flattens with `.replace("\n", " ")`
-(`tests/test_doc_citations.py:385`), which a reviewer read as making 0.71.34's
+`classify` flattens with `.replace("\n", " ")`
+(`tests/test_doc_citations.py:390`), which a reviewer read as making 0.71.34's
 "same line" rule unimplementable. It does not: the substitution is one
 character for one character, so offsets in the flattened text are offsets in
 the original. `marker_after()` matches against the flattened text and then
@@ -240,13 +240,23 @@ and it covers one citation, not a document, a region or a path.
 **Rejected, and why.**
 
 **Delivered, and demonstrated here rather than described.** This page can now
-show the literal shape it is about. `frontmatter` (`bin/sd:1231`) [quoted: tests/test_doc_citations.py:385]
-is a real citation, written with its real line number, carrying a marker that
-tells the gate it is an example. It lands in the `quoted` bucket and is
-counted; the marker's own reason is a `path:line` and is checked like any
-other citation, so the escape hatch is falsifiable too. That this paragraph
-survives `make check` is question 3's acceptance test, and no fixture could
-have been it.
+show the literal shape it is about.
+`frontmatter` (`bin/sd:1231`) [quoted: the docstring's own stale example]
+is the citation that went stale, quoted here as the example it is and carrying
+a marker that tells the gate not to read it as a claim. The live one is `frontmatter` (`bin/sd:1257`),
+and 1231 now sits inside another function's docstring -- which is the whole
+point, and a first draft of this paragraph called 1231 "its real line number"
+and was wrong in the document arguing against exactly that.
+
+The quoted citation lands in the `quoted` bucket and is counted, which is this
+design's standard: a silencer that is counted is visible, and a bucket that
+moves is a defect that shows. But the marker's reason is free text today and
+the gate does not read it, so `[quoted: anything]` exempts a citation. D4a
+below is where that reason becomes a `path:line` the gate checks. Until then
+this exemption is counted and not falsifiable, and the honest thing is to say
+so here rather than let the paragraph imply the check already runs. That this
+paragraph survives `make check` is question 3's acceptance test, and no fixture
+could have been it.
 
 *A metavariable line number* — `` `bin/sd:NN` `` — reusing rule 7's own device.
 It is genuinely the closest precedent and it is what this document was forced
@@ -745,7 +755,7 @@ that could never be wrong — the exact shape D4 rejects one paragraph above, an
 a reviewer was right to say the principle was stated and not applied. The form
 is `[quoted: <path:line>]`, and the gate asserts that the quoted citation's own
 text appears at that line of that file. A page quoting `` `is_symbol` (`source:tests/test_doc_citations.py::is_symbol`) `` as an example of the shape writes
-`[quoted: tests/test_doc_citations.py:385]` after it, and if the example is
+`[quoted: tests/test_doc_citations.py:237]` after it, and if the example is
 moved or the line changes, the quotation fails like any other claim. This costs
 nothing over the free-text form — it is the same grammar, the same
 `marker_after()`, and the same one-citation scope — and it removes the only
