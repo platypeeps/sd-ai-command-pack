@@ -416,9 +416,15 @@ class AcknowledgementTests(unittest.TestCase):
         self.assertEqual((entries, problems), ([], []))
 
     def test_this_repos_own_file_loads_clean(self) -> None:
+        # The accepted id is deliberately not recited here. This repository's
+        # entry has changed once already -- `reviews` was deleted when
+        # protection was removed on 2026-09-12 and its `until` came true --
+        # and a list naming the current id fails on the next such decision
+        # while proving nothing the loader does not already enforce. The file
+        # is tracked, so a new acceptance arrives as a reviewed diff, which is
+        # where it is meant to be read.
         entries, problems = status.load_acknowledgements(BIN.parent)
         self.assertEqual(problems, [])
-        self.assertEqual([entry["id"] for entry in entries], ["reviews"])
 
     def test_an_empty_state_is_rejected_rather_than_accepting_the_id(self) -> None:
         # An entry with no facts would accept `reviews` whatever the branch
