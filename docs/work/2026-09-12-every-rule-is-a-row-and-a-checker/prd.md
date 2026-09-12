@@ -88,10 +88,12 @@ status checks.
    - b. every enforcement claim in a skill cites a rule id that the registry
      carries;
    - c. every rule id cited in live prose is defined in the registry.
-6. **Leg b and leg c carry a frozen baseline, not a flag day.** 681 live
-   machinery claims and 26 archive-only R-ids cannot be fixed in the pull
-   request that introduces the check. The baseline is a count that may fall and
-   may not rise, in the shape `tests/test_loc_caps.py` already uses.
+6. **Leg b and leg c carry a frozen baseline, not a flag day.** 263 uncited
+   claims in `skills/` and 26 archive-only R-ids cannot be fixed in the pull
+   request that introduces the check. A baseline counts *violations*, never a
+   population: it may fall and may not rise, in the shape
+   `tests/test_loc_caps.py` already uses, and adding a correctly cited claim
+   must not move it.
 7. **The pre-commit tier is scoped by measurement, not by assumption.** A
    checker runs over the whole repository when a whole-repository run is fast,
    and is diff-scoped only where it is not. The backbone item asserts the
@@ -113,15 +115,22 @@ status checks.
       Demonstrated by mutation: add a row, see one named test go red, remove it,
       `diff -q` reports the tree identical.
 - [ ] Meta-check leg b fails when a skill asserts an enforcement naming a rule
-      id the registry does not carry. Demonstrated by the same mutation
-      discipline.
+      id the registry does not carry, **and equally when it names no rule id at
+      all.** Both mutations are required. The unknown-id case alone would be
+      satisfied by a checker that only validates ids it finds, which would pass
+      over the uncited shape — and the uncited shape is 263 of the 264 claims in
+      `skills/` today, so a leg b that missed it would miss essentially
+      everything it exists to catch.
+- [ ] The leg b baseline is 263 — the uncited claims in `skills/`, not the 681
+      live-prose population. A test asserts it may fall and may not rise, and a
+      control asserts that adding a *correctly cited* claim does not redden it.
 - [ ] Meta-check leg c reports the 4 currently dangling R-ids — `R11-D1`,
       `R11-D30`, `R11-D46`, `R5-D1` — as failures on the first run over live
       prose, and reports zero once they are resolved or registered.
 - [ ] The baselines for legs b and c are recorded with the measured numbers
       above, and a test asserts a baseline may fall and may not rise.
-- [ ] `pytest tests/` passes with 0 new failures against the pre-existing
-      collection errors on `origin/main`.
+- [ ] `make test` — the repository's own runner, sharding `python -m unittest`
+      — passes with 0 new failures.
 - [ ] `bin/sd-docs-lint` exits 0.
 
 ## References

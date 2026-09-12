@@ -3,8 +3,9 @@
 ## The first decision is to rescope, and it comes before the approach
 
 The backbone item proposes three prose rules. Measured, one is unimplementable
-as written and one now contradicts work that landed after the item was filed.
-Recording that first, because the approach below assumes the narrowed form.
+as written and one now contradicts sd:568, which merged as `730d4541` after
+this item was filed. Recording that first, because the approach below assumes
+the narrowed form.
 
 ### Prose rule 3, as written, fires 681 times
 
@@ -23,9 +24,12 @@ and it cites nothing because there is nothing to cite.
 
 **Narrowed form.** The rule applies to a claim that asserts a *tool behaviour*:
 an enforcement verb whose grammatical subject is a pack tool or a test. It
-carries a frozen baseline of the 681 measured today. The baseline may fall and
-may not rise, which makes the rule bite on every new claim while costing
-nothing on the existing corpus. This is the same device `tests/test_loc_caps.py`
+carries a frozen baseline — of the 263 uncited claims in `skills/`, which is
+leg b's scope, not of the 681 live-prose population. A baseline counts
+violations, never a population; on the population, a new and correctly cited
+claim would redden it. The baseline may fall and may not rise, which makes the
+rule bite on every new uncited claim while costing nothing on the existing
+corpus. This is the same device `tests/test_loc_caps.py`
 already uses for line counts, and the same rule applies to it: a baseline is
 never raised in the pull request that busts it.
 
@@ -34,19 +38,43 @@ never raised in the pull request that busts it.
 > no `file.py:NNN` citation — use `source:<file>::<symbol>`, because bin/ moves
 > constantly and every line-number citation is a future lie
 
-The symbolic form already exists. `bin/sd-docs-lint` resolves it, in
-`source:bin/sd-docs-lint::resolve_citation`, and 8 tracked files carry the form
-— 7 documents using it in earnest, plus `tests/test_doc_citations.py`, whose
-fixtures include a deliberately unresolvable one. So the alternative the rule
-demands is built.
+The symbolic form already exists, and it is *not* `bin/sd-docs-lint` that
+implements it. `source:bin/sd-docs-lint::resolve_citation` says so in its own
+docstring: only `docs/work` markdown resolves there, and a citation into code
+is the adjacency rule's business. The symbolic form is implemented in
+`source:tests/test_doc_citations.py::source_declaration_error`, against the
+`STABLE_SOURCE` pattern. 8 tracked files carry the form — 7 documents using it
+in earnest, plus `tests/test_doc_citations.py`, whose fixtures include a
+deliberately unresolvable one. So the alternative the rule demands is built,
+but any plan that extends the wrong tool to enforce it would have extended a
+resolver that refuses code citations by design.
 
 But the flat prohibition cannot be adopted, for two reasons measured after the
 item was filed:
 
-1. 325 line-anchored citations exist in live markdown, each one enforced by
-   `tests/test_doc_citations.py`, which verifies the cited line still carries
-   the cited symbol. These are not unchecked assertions. They are the most
-   strongly verified citations in the corpus.
+1. The line-anchored form carries the pack's only *verified* citations — but
+   far fewer than the raw count suggests, and the first draft of this document
+   got that badly wrong. It claimed 325 line-anchored citations "each one
+   enforced". `source:tests/test_doc_citations.py::anchored_citations` returns
+   only the rows whose reason is `compared`, and the census over the corpus is:
+
+   | Bucket | Rows | Staleness-checked |
+   |---|---|---|
+   | `no-adjacent-anchor` | 2,732 | no |
+   | `elided-path` | 2,356 | no |
+   | `archived-stale` | 277 | no |
+   | `anchor-not-a-symbol` | 144 | no |
+   | `separator-not-adjacent` | 134 | no |
+   | `compared` | 54 | **yes** |
+   | `declared-absent` | 1 | n/a |
+   | `quoted` | 1 | by its own reason |
+   | total classified | 5,699 | 54 |
+
+   **54 of 5,699.** So prose rule 1's complaint is stronger than this document
+   first allowed, not weaker: the overwhelming majority of line-anchored
+   citations are counted, not checked. What survives is narrower — the
+   `compared` and `quoted` rows are genuinely verified, and those are the ones a
+   prohibition would have destroyed.
 2. sd:568, in flight on pull request #870, introduces the marker
    `[quoted: path:line]`, whose whole purpose is to point at a line and prove
    the quoted text is on it. A line number is load-bearing there by
@@ -65,11 +93,26 @@ sd:525 already carries the broader complaint that line anchors shape code
 layout. This item should not try to settle sd:525; it should stop asserting a
 rule that contradicts it.
 
-### Prose rule 2 survives unchanged
+### Prose rule 2 survives, but it needs an exemption it was not filed with
 
 > no literal count restating something enumerable — derive it
 
-No conflict found. It stays as filed.
+No conflict with other machinery. But as filed it would fail on *this document*,
+which is nothing but literal counts: 768, 681, 264, 54, 5,699. Every one is a
+measurement of an enumerable property, written down.
+
+The distinction the rule needs: a count is a **claim** when prose asserts it as
+the current state of the repository and a reader would act on it being current.
+It is a **measurement** when it is reported against a named commit, as a
+finding. `bin/` carrying 768 `def` lines is a measurement of `e6c2cb20`;
+"the pack ships 16 tools" in a skill is a claim that rots.
+
+So the rule applies to prose that states a count as present-tense fact, and
+exempts a count carrying its own commit or date. That exemption must be written
+into the rule before the rule lands, because the first document it would redden
+is the one proposing it — and a rule whose own design document violates it gets
+an exception carved out under pressure later, which is how rules stop meaning
+anything.
 
 ## Approach
 
@@ -142,8 +185,12 @@ apply to the checkers the item aims it at.
   consumer outside Python needs to read the registry; at that point the table
   gains a serializer, and the table stays the source.
 - **2026-09-12 — prose rule 3 is narrowed to tool-behaviour claims and carries
-  a frozen baseline of 681.** Reversed if the corpus is deliberately swept and
-  the baseline reaches a number small enough to fix outright.
+  a frozen baseline of 263**, the uncited claims in `skills/`. Reversed if the
+  corpus is deliberately swept and the baseline reaches a number small enough
+  to fix outright.
+- **2026-09-12 — prose rule 2 gains an exemption for counts reported against a
+  commit.** Without it the rule reddens its own design document. Reversed if a
+  cheaper discriminator than "carries a commit or a date" is found.
 - **2026-09-12 — prose rule 1 is narrowed from a prohibition to a preference
   conditioned on a symbol existing.** Reversed by sd:525 deciding the broader
   question against line anchors, which would then be that item's call to make,
@@ -160,7 +207,7 @@ apply to the checkers the item aims it at.
 
 **Accepted: the baseline can be gamed.** Anyone may add a machinery claim if
 they delete another. The baseline catches drift in aggregate, not per line.
-Accepted because the alternative — fixing 681 claims before the check can land
+Accepted because the alternative — fixing 263 claims before the check can land
 — means the check never lands.
 
 **Accepted: leg b needs a parser for "the subject of this verb is a tool", and

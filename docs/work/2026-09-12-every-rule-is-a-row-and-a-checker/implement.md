@@ -15,9 +15,15 @@
 
 - [ ] **2. Meta-check legs a and b, with the baseline.** Leg a: every registry
       row is cited by at least one skill. Leg b: every tool-behaviour claim in
-      a skill cites a rule id the registry carries, against a frozen baseline
-      of 681. Verify: each leg reddens under its own mutation; the baseline test
-      reddens when the number is raised.
+      a skill cites a rule id the registry carries.
+      **The baseline is 263, not 681.** 681 is the whole live-prose population,
+      of which 264 are in `skills/` — leg b's scope — and 263 of those cite no
+      rule id. A downward-only ratchet on 681 would be wrong twice: it counts
+      claims leg b never examines, and it counts the *population* rather than
+      the *violations*, so adding a new, correctly cited claim would redden it.
+      Verify: each leg reddens under its own mutation; the baseline test reddens
+      when 263 is raised to 264; adding a correctly cited claim does NOT redden
+      it, which is the control that separates a violation count from a census.
 
 - [ ] **3. Meta-check leg c, over the R-id corpus.** Every rule id cited in live
       prose is defined in the registry. On the first run this reports 4
@@ -43,10 +49,14 @@
 - [ ] **7. The pre-commit tier.** The code checkers run whole — measured at
       1.71 s over the tree, so there is no second scope to drift from the CI
       scope. Only `bin/sd-docs-lint`, at 19.87 s, is diff-scoped, and its cost
-      is attributed to a stage first. Verify: time the assembled hook on a
-      one-file diff; it must finish under two seconds. Re-run the whole-tree
-      timings in the same pull request, because the decision to skip
-      diff-scoping rests on a number that will age.
+      is attributed to a stage first. **No threshold is set here on purpose.**
+      The two whole-tree passes are already 1.71 s + 0.84 s = 2.55 s before the
+      diff-scoped docs lint and any hook overhead, so the "under two seconds"
+      this step first demanded was unreachable from its own measurements. Verify:
+      time the assembled hook on a one-file diff, record the number, and set the
+      budget from that result in the same pull request. Re-run the whole-tree
+      timings there too, because the decision to skip diff-scoping rests on
+      numbers that will age.
 
 - [ ] **8. The authoring tier.** Skills consult the registry and name the rule
       ids in scope. Last, because it depends on the registry carrying rules.
@@ -71,9 +81,14 @@ into fewer pull requests to reduce CI churn.
   go red. A baseline that does not redden when raised is not a ratchet.
 - Leg c's first run must name exactly `R11-D1`, `R11-D30`, `R11-D46` and
   `R5-D1`. More or fewer means the live-prose scope is wrong.
-- Full suite: `pytest tests/` with 0 new failures. Do not expect a fully green
-  run — 19 collection errors from a missing `sd_db` module are pre-existing on
-  `origin/main`.
+- Full suite through the repository's own runner: `make test`, which runs
+  `.github/scripts/run-tests.sh` and shards `python -m unittest` across workers.
+  That is the authoritative suite and the one CI gates on. A focused run is
+  `python -m unittest tests.test_<module> -v`.
+  `pytest` is a convenience here, not the contract: under `pytest tests/` this
+  tree reports 19 collection errors from a missing `sd_db` module, pre-existing
+  on `origin/main`, which is a fact about `pytest` rather than a baseline for
+  this project.
 - `bin/sd-docs-lint` exits 0.
 
 **What cannot be verified here.** Whether an R-id in an archived design document
