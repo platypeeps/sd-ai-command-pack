@@ -66,15 +66,16 @@ These run without being asked.
   setting `delete_branch_on_merge` removes
   the remote branch.
 - The default branch is protected: pull requests only, CI required, branches
-  up to date before they merge, no required approvals. `sd-status` reports
-  it, the dashboard sets it in one
-  action on a repository you own, and an unattended merge into a branch
-  that is not refuses naming the setting.
+  up to date before they merge, no required approvals. It is set in the
+  repository's GitHub settings by hand; nothing in the pack or the dashboard
+  writes it. `sd-status` reports the gaps, and an unattended merge into a
+  branch that is not protected refuses naming the setting.
 - `make check` runs `sd-docs-lint` rules 1 to 4 whenever `docs/work/` exists.
 - A commit to the pack, the system repository or the writing repository names
   what needed it: `Needed-by: <item id>` or `Needed-by: cost | efficiency |
   visibility`. `sd-ship` warns when the trailer is missing and ships anyway.
-  The weekly count of missing trailers is on the dashboard.
+  The dashboard's weekly missing-trailer count reads `Authored-with:`, not
+  `Needed-by:`; nothing counts a missing `Needed-by:` after the warning.
 
 ## Opt-in
 
@@ -146,7 +147,8 @@ A shared repository is one where someone else also merges. In it:
 - No workflow files or repository settings unless the owner of that
   repository asked for them.
 - No merge without task-specific or standing operator permission. Shared contributors
-  do not revoke that permission. Existing ownership and protection gates still
+  do not revoke that permission. The assistant reads the permission, not
+  `sd-ship`, which never consults `sd.merge_authorization`. Existing ownership and protection gates still
   decide whether the pack can execute it; a refusal remains a stop.
 - No issue filed. `sd-suggest` writes a row everywhere; `sd suggest publish`
   files one when you run it, to the destination you name with `--to`.
@@ -268,10 +270,12 @@ carries a meter instead: the plan grants use in a five-hour window and a
 weekly window, and `GET /v1/token_plan/remains` on `www.minimax.io`, with
 the same key, answers with `current_interval_remaining_percent` and
 `current_weekly_remaining_percent` for `model_name: general`, probed
-2026-09-05. The meter writes those two percents as `meter` rows, Today
-shows them beside the bill, a `plan` bill reserves no dollars, and
-fallthrough skips it while either window reads zero; the two Baseten tools
-pin
+2026-09-05. The bill carries that meter as a URL, and that is all it does
+today: nothing probes it, nothing writes `meter` rows, and fallthrough does
+not read either window. The design is for the meter to write the two
+percents as `meter` rows Today shows beside the bill, with a `plan` bill
+reserving no dollars and fallthrough skipping it while either window reads
+zero; the two Baseten tools pin
 DeepSeek V4 Pro, whose 0813 build is the cheapest of Baseten's frontier
 reviewers. `max_tokens` bounds generated reasoning and the final answer together;
 exhausting it does not establish that the review subject was too large.
@@ -295,7 +299,8 @@ review reads no declaration: every commit in the reviewed range is attributed
 by its own trailer, or by an `Attributes: <sha> <name>/<vendor>` trailer on a
 later commit in the range that `sd attribute` makes, and a commit with neither
 refuses the review by name rather than being guessed. `reviewer` is the first entry that is enabled, is of no vendor the
-range's trailers carry, has budget left on its bill, and answers its preflight. A rate limit,
+range's trailers carry, and answers its preflight; its bill's cap is not
+consulted (see below). A rate limit,
 a missing binary, a failed run or a timeout falls through to the next, and the
 run says which one reviewed and why the earlier ones did not. With none left,
 the review refuses by name rather than reading its own work.
@@ -306,11 +311,11 @@ review with findings counts; it does not trigger a replacement. Consent, author
 exclusions and spending limits apply to every fallback, and earlier findings remain.
 `vendor` is the
 maker of the model, not the tool; `bill` is whose money. A bill with
-`cap_usd_month` is enforced per call: the library reserves each call's bound,
-prompt plus `max_tokens` at the entry's price, against the month's settled and
-reserved rows in one transaction, refuses the call when the bound would pass
-the cap, and skips that bill in fallthrough for the rest of the month; a
-direct pick of it refuses with the month's total. Entries with
+`cap_usd_month` is a recorded ceiling, not an enforced one: the dashboard
+stores it and Today shows the month's spend beside it, and nothing refuses a
+call against it. `reviewer_chain` in `bin/sd_registry.py` carries the
+refusal for a bill at its cap, and no caller supplies it a capped bill, so
+fallthrough never skips one and a direct pick never refuses one. Entries with
 `url` share one OpenAI-compatible client and one reader. This file is
 identity and seed; enabled, order and caps are rows the dashboard edits, and
 the library merges file and rows on every read.
@@ -336,6 +341,7 @@ The reserved `sd` namespace declares two settings:
   `deny` vetoes all local allowances. Absence supplies no standing grant.
 - `sd.merge_authorization`: `controlled` permits assistant merges for active, in-scope PR work in repositories the user controls.
   An explicit instruction to wait wins. `ask`, or absence, requires task-specific permission.
+  `sd config` validates and stores the value; the assistant reads it, and `sd-ship` does not.
   Shared contributors do not revoke permission, but the current sole-operator ownership gate may still refuse execution.
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.

@@ -657,5 +657,28 @@ class BinaryClaims(unittest.TestCase):
         self.assertNotEqual(self.MENTION.findall(joined), [], "no bin/ mention parsed")
 
 
+class ValueLadderTests(unittest.TestCase):
+    """`argument-vocabulary.md` calls two ladders enforced; this is the enforcer.
+
+    Set membership, not order: a skill lists its subset default-first. Before
+    this test the reference said the ladders were "checked" and nothing read
+    it, so a skill could spell `depth=short` and stay green.
+    """
+
+    LADDERS = {"depth": {"brief", "standard", "deep"},
+               "sensitivity": {"minimal", "restricted", "standard"}}
+    BULLET = re.compile(r"^- `(depth|sensitivity)=([^`]*)`", re.MULTILINE)
+
+    def test_every_declared_subset_is_drawn_from_the_ladder(self) -> None:
+        seen = 0
+        for path in surfaces():
+            for name, values in self.BULLET.findall(path.read_text(encoding="utf-8")):
+                seen += 1
+                declared = set(values.split("|"))
+                self.assertLessEqual(declared, self.LADDERS[name],
+                                     f"{path.parent.name}: {name}={values} leaves the ladder")
+        self.assertGreater(seen, 0, "no ladder bullets parsed")
+
+
 if __name__ == "__main__":
     unittest.main()

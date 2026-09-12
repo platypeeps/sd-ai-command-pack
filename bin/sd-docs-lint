@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lint the tracked documentation footprint of the sd-ai-command-pack workflow.
 
-Five rules, no more (adding a sixth is a decision record, not a patch):
+Seven rules (each past the fifth arrived with a decision record, not a patch):
 
 1. Shape         -- a work item is a `<YYYY-MM-DD>-<slug>` directory holding a
                     `prd.md` whose frontmatter carries a title, a known status,
@@ -14,13 +14,13 @@ Five rules, no more (adding a sixth is a decision record, not a patch):
 4. Spec index    -- every spec directory has an `index.md` that links each of
                     its siblings, so no page can be reached only by guessing.
 5. PR link       -- a named item exists under the work directory or uses a
-                    canonical database association, `sd:<positive integer>`.
-                    Database existence and ownership are checked by `sd-ship`.
-                    A change without an item needs no `Work:` line.
-                    Delivery evidence belongs to `sd-ship --deliver`.
-
-Rules 1 through 4 read the tree. Rule 5 needs the pull request body, so it runs
-only when `--pr-body` supplies one and reports itself as not run otherwise.
+                    canonical database association, `sd:<positive integer>`;
+                    existence and ownership are `sd-ship`'s. No item, no line.
+6. Citations     -- each `path:line` an active item records still says what it
+                    said when recorded (`.citations.tsv`, `--update-citations`).
+7. Work refs     -- every `docs/work/` path tracked markdown names resolves.
+Rules 1 to 4, 6 and 7 read the tree. Rule 5 needs the pull request body, so it
+runs only when `--pr-body` supplies one and reports itself as not run otherwise.
 
 Exits 0 when every rule that ran passed, 1 when any of them failed, and 2 when
 the arguments themselves were wrong.

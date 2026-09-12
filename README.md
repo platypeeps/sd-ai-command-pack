@@ -104,6 +104,7 @@ The installer preserves restrictions and refuses malformed answers. It cannot re
 
 `controlled` permits the assistant to merge active, in-scope PR work in repositories the user controls.
 An explicit instruction to wait overrides it. `ask`, or an absent setting, requires task-specific permission.
+The setting is read by the assistant, not by `sd-ship`: `sd config` validates and stores it, and no tool in `bin/` consults it.
 Ownership, review, CI, protection, and runner gates remain mandatory. This setting starts no background work.
 See [the workflow policy](WORKFLOW.md#standing-authorization) for resolution and limits.
 
@@ -258,9 +259,9 @@ CI is four jobs, named here as branch protection sees them:
 | `bash 3.2 syntax` | Every tracked shell script parsed by a bash 3.2 built from source |
 | `security` | Bandit over `bin/`, zizmor over the workflows, ShellCheck |
 
-The matrix means five reporting contexts and, with `strict: true`, six required
-ones. `sd-status` reads the live protection object rather than any list written
-here, so this table cannot silently disagree with what is enforced.
+`sd-status` compares the live protection object with the contexts the
+workflow files produce, not with this table, so a row here can go stale
+without anything saying so; the workflow files are the inventory.
 
 One protection state on `main` is accepted rather than open, and it is recorded
 in tracked `.github/sd-status.json` rather than in prose: a pull request is
