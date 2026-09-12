@@ -143,6 +143,10 @@ def work_section(root: pathlib.Path) -> dict[str, Any]:
                 "title": item.title,
                 "status": item.status,
                 "created": item.created,
+                # What the database last recorded against this item, empty on
+                # a checkout without one. Half of what ages it -- see
+                # `_idle_days`, which is the only reader.
+                "activity": item.activity,
                 "branch": item.branch,
                 "archived": item.archived,
                 "parked": item.parked,
@@ -1280,11 +1284,11 @@ CLASSES = (
           "an open pull request waiting on a review or a merge"),
     Class("open-step", "s", False, 70, "- [ ] in item docs",
           "an unchecked box on an item nobody has closed"),
-    Class("unmerged-branch", "b", False, 80, "git refs",
+    Class("unmerged-branch", "b", False, 80, "origin heads",
           "a branch on origin with no open pull request carrying it"),
     Class("parked-concern", "c", False, 90, "## Review ledger",
           "a concern parked behind a trigger nobody is watching"),
-    Class("idle-planning", "w", True, 100, "work item + R10-D1",
+    Class("idle-planning", "w", True, 100, "item activity + R10-D1",
           "an item idle in planning past the 45-day threshold"),
     Class("undated-planning", "w", True, 100, "work item",
           "a planning item with no date to age it by"),
@@ -1539,13 +1543,17 @@ IDLE_DAYS = sd_sweep.DEFAULT_DAYS
 _ITEM_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
 
-def _age_days(entry: dict[str, Any], today: datetime.date) -> int | None:
-    """Days since the item dated itself, or None when nothing dates it.
+def _item_date(entry: dict[str, Any]) -> datetime.date | None:
+    """The day the item dated itself, or None when nothing dates it.
 
     `created:` first, because it is what the item says about itself; the
     directory's date prefix second, because every templated item carries one.
     The same order and the same two sources as `sd_sweep.item_date`, read off
     the dict this section already holds rather than off a second tree walk.
+
+    This decides `undated-planning` and nothing else. It used to decide
+    `idle-planning` too, and that is the defect: it answers when an item began,
+    while the check that read it says the item has been neglected since.
     """
     stamps = (entry.get("created") or "", pathlib.PurePosixPath(entry["path"]).name)
     for text in stamps:
@@ -1553,10 +1561,38 @@ def _age_days(entry: dict[str, Any], today: datetime.date) -> int | None:
         if not found:
             continue
         try:
-            return (today - datetime.date.fromisoformat(found.group(1))).days
+            return datetime.date.fromisoformat(found.group(1))
         except ValueError:
             continue
     return None
+
+
+def _idle_days(
+    entry: dict[str, Any],
+    when: datetime.date,
+    today: datetime.date,
+    marks: dict[str, datetime.date],
+) -> int:
+    """Days since anything last happened to this item.
+
+    The basis is `sd_sweep.last_active` and deliberately not a second copy of
+    it, for the reason `IDLE_DAYS` reads `sd_sweep.DEFAULT_DAYS` rather than
+    restating 45: two definitions of "idle" would let the sweep park what this
+    report had just stopped calling idle. This wraps that function rather than
+    reimplementing it, handing it the same three facts off the dict the work
+    section already holds -- the item's own date, the commit that last touched
+    its directory, and the database's last stamp for it.
+
+    Never `None`: the caller has already established a date for the item, so
+    there is always at least the floor to measure from.
+    """
+    active_on = sd_sweep.last_active(
+        when,
+        pathlib.PurePosixPath(entry["path"]).name,
+        str(entry.get("activity") or ""),
+        marks,
+    )
+    return (today - active_on).days
 
 
 def _branch_names(root: pathlib.Path) -> set[str] | None:
@@ -1770,6 +1806,9 @@ def _work_rows(
         if remote:
             closing_refs += (f"{remote}/{local_default}",)
     heads = _branch_names(root)
+    # Once per run, not once per item: `touched` is one `git log` over the item
+    # tree, and asking it per item would put a subprocess behind every row.
+    marks = sd_sweep.touched(root)
     rows: list[dict[str, Any]] = []
     for entry in work.get("items") or []:
         if entry["archived"] or entry["parked"]:
@@ -1834,24 +1873,50 @@ def _work_rows(
                     f"reconcile the database row for {item} with its closing trailer, "
                     "then rerun sd-status",
                 ))
-        if status != "planning":
-            continue
-        age = _age_days(entry, today)
-        if age is None:
-            rows.append(_row(
-                "undated-planning", item, slug,
-                f"{where} is planning with no created: date and no dated directory",
-                f"add a created: date to {where}/prd.md so the sweep can age it",
-            ))
-        elif age > IDLE_DAYS:
-            rows.append(_row(
-                "idle-planning", item, slug,
-                f"{where} has been planning for {age} days, past the "
-                f"{IDLE_DAYS}-day R10-D1 threshold",
-                f"start {slug}, park it, or archive it",
-                age,
-            ))
+        if status == "planning":
+            rows += _age_rows(entry, item, slug, where, today, marks)
     return rows
+
+
+def _age_rows(
+    entry: dict[str, Any],
+    item: str,
+    slug: str,
+    where: str,
+    today: datetime.date,
+    marks: dict[str, datetime.date],
+) -> list[dict[str, Any]]:
+    """The two age classes, which are one question asked in two orders.
+
+    `undated-planning` asks whether the item can be aged at all and
+    `idle-planning` asks what the age is, so they are mutually exclusive and
+    neither is a special case of the other. An item with no date carries no
+    age this reader can prove: calling it zero days old would hide it forever
+    and infinitely old would sweep whatever nobody dated, which is why the
+    absence is its own finding rather than a value.
+
+    Split out of `_work_rows` when the aging basis moved. That function sat at
+    the statement ceiling, and this is the half of it that is about one item's
+    dates rather than about the tree -- so the ceiling bought the split it
+    exists to buy, and was not raised.
+    """
+    when = _item_date(entry)
+    if when is None:
+        return [_row(
+            "undated-planning", item, slug,
+            f"{where} is planning with no created: date and no dated directory",
+            f"add a created: date to {where}/prd.md so the sweep can age it",
+        )]
+    age = _idle_days(entry, when, today, marks)
+    if age <= IDLE_DAYS:
+        return []
+    return [_row(
+        "idle-planning", item, slug,
+        f"{where} has had nothing recorded against it for {age} days, "
+        f"past the {IDLE_DAYS}-day R10-D1 threshold",
+        f"start {slug}, park it, or archive it",
+        age,
+    )]
 
 
 # -- the concern-ledger producer --------------------------------------------
@@ -2557,18 +2622,62 @@ def _issue_rows(issues: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _origin_heads(root: pathlib.Path) -> set[str] | None:
+    """Every branch origin publishes right now, or None when it cannot be asked.
+
+    **`ls-remote` reads; it does not write**, which is the whole reason this
+    class is allowed to ask. `sd-status` never writes -- no cache, no index row,
+    no ref -- so `git fetch --prune`, the obvious cure for a remote-tracking ref
+    that has outlived its branch, is not a move this tool can make.
+    `sd_sweep.branches` already reads origin exactly this way, for the same
+    reason and with the same one-call-per-root budget.
+    """
+    listing = sd_lib.git_output(["ls-remote", "--heads", "origin"], root)
+    if listing is None:
+        return None
+    return {
+        line.split("refs/heads/", 1)[1]
+        for line in listing.splitlines() if "refs/heads/" in line
+    }
+
+
+#: What the row says when origin itself could not be asked. The remote-tracking
+#: refs are then the only answer there is, and they go stale the moment a pull
+#: request is squash-merged with `--delete-branch` by anything but this
+#: checkout -- so the row names the prune first, ahead of two actions that are
+#: both unrunnable against a branch that is already gone.
+#:
+#: Deliberately a weaker row rather than an `unchecked` class: `unmerged-branch`
+#: is not abnormal, `banner` reports `unchecked` for abnormal classes only, and
+#: a reason recorded where nothing prints it is a reason nobody reads.
+STALE_REFS = "origin could not be asked; read from this checkout's refs"
+
+
 def _branch_rows(
     root: pathlib.Path, pulls: dict[str, Any], protection: dict[str, Any]
 ) -> list[dict[str, Any]]:
     """Branches on origin that no open pull request is carrying.
 
-    Shaped on `carrier_branches` above -- the same read of origin's refs as
-    this checkout currently knows them -- without its `wip:` filter, because a
+    Shaped on `carrier_branches` above, without its `wip:` filter, because a
     finished branch nobody opened a pull request for is exactly the thread this
     class is for and it does not announce itself in a subject line.
+
+    **The refs say what this checkout last heard, not what origin has.** A
+    branch squash-merged and deleted from anywhere else leaves its
+    remote-tracking ref standing here until something prunes, and the row built
+    off that ref is a ghost: measured on `origin/worktree-agent-a429ba188d801962d`
+    after #839 landed, where `git ls-remote --heads origin <name>` printed
+    nothing and both of the actions the row named -- open a pull request for
+    it, or delete it -- had nothing to act on. So origin is asked, and a
+    candidate it does not publish produces no row.
+
+    The refs are still what the row is *built* from: `ls-remote` gives names
+    and nothing else, while the detail line wants the last commit's age and
+    subject. Origin decides which names survive; the refs describe them.
     """
     default = protection.get("default_branch") or "main"
     carried = {str(pull["head"]) for pull in pulls.get("pull_requests") or []}
+    published = _origin_heads(root)
     listing = sd_lib.git_output(
         ["for-each-ref",
          "--format=%(refname:short)%09%(committerdate:relative)%09%(contents:subject)",
@@ -2583,10 +2692,16 @@ def _branch_rows(
         name = parts[0][len("origin/"):]
         if name in ("HEAD", default) or name in carried:
             continue
+        if published is not None and name not in published:
+            continue
         rows.append(_row(
             "unmerged-branch", parts[0], parts[0],
-            f"last commit {parts[1]}: {parts[2]}",
-            f"open a pull request for {parts[0]}, or delete it",
+            f"last commit {parts[1]}: {parts[2]}"
+            + ("" if published is not None else f" ({STALE_REFS})"),
+            f"open a pull request for {parts[0]}, or delete it"
+            if published is not None else
+            f"run git fetch --prune, then open a pull request for {parts[0]} "
+            "or delete it if it is still there",
         ))
     return rows
 

@@ -13,11 +13,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "bin"))
 
+import sd_db  # noqa: E402 - `make setup` provisions it; `RowActivity` needs one
 import sd_lib  # noqa: E402
 
 PRD = """---
@@ -503,6 +505,95 @@ class CorePolicyReadTests(Fixture):
                 path.write_text(json.dumps(value))
                 with self.assertRaises(sd_lib.ConfigError):
                     sd_lib.core_setting("external_reviews", env)
+
+
+class RowActivity(unittest.TestCase):
+    """`Rows.activity`: what the database last recorded against an item.
+
+    The half of sd:455 that git cannot answer. A `row` checkout records a
+    triage decision as a note against the item and touches no file, so the item
+    tree is byte-identical before and after and the only evidence that anything
+    happened is in the database.
+
+    **And `updated_at` is not that evidence on its own.** `sd_db.writes.add_note`
+    inserts the note and leaves the item row alone -- measured on item 492,
+    whose `comment` note stands four and a half hours after an `updated_at`
+    that still equals its `created_at`. A reader that stopped at the row would
+    have called a freshly-triaged item as idle as an abandoned one, which is
+    the defect being fixed rather than a detail of it.
+    """
+
+    def setUp(self) -> None:
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.home = pathlib.Path(os.path.realpath(scratch.name))
+        sd_db.initialise(home=self.home)
+        self.connection = sd_db.connect(sd_db.default_path(self.home), write=True)
+        self.addCleanup(self.connection.close)
+
+        self.root = self.home / "checkout"
+        self.item_dir = self.root / sd_lib.WORK_DIR / "2026-01-01-x"
+        self.item_dir.mkdir(parents=True)
+        (self.item_dir / "prd.md").write_text("# x\n", encoding="utf-8")
+        for args in (["init", "-q"], ["config", "user.email", "t@example.com"],
+                     ["config", "user.name", "T"], ["add", "-A"],
+                     ["commit", "-qm", "first"]):
+            subprocess.run(["git", "-C", str(self.root), *args], check=True,
+                           capture_output=True)
+        self.root = self.root.resolve()
+        sd_db.writes.upsert_repo(self.connection, str(self.root))
+        self.item = sd_db.writes.create_item(
+            self.connection, kind="work", title="x", status="planning",
+            repo=str(self.root), source=sd_lib.ITEM_ROW_SOURCE,
+            external_id=sd_lib.external_id(self.root, self.item_dir),
+        )
+
+    def read(self) -> str:
+        """`Rows` opens the default database, so `HOME` is what points it here."""
+        with unittest.mock.patch.dict(os.environ, {"HOME": str(self.home)}):
+            rows = sd_lib.Rows(self.root)
+            try:
+                return rows.activity(self.item_dir)
+            finally:
+                rows.close()
+
+    def test_a_row_with_no_notes_answers_with_its_own_stamp(self) -> None:
+        stamp = self.connection.execute(
+            "SELECT updated_at FROM item WHERE id = ?", (self.item,)
+        ).fetchone()["updated_at"]
+        self.assertEqual(self.read(), stamp)
+
+    def test_a_note_is_newer_than_the_row_it_was_written_against(self) -> None:
+        """The whole point: the note moves the answer and `updated_at` does not."""
+        before = self.connection.execute(
+            "SELECT updated_at FROM item WHERE id = ?", (self.item,)
+        ).fetchone()["updated_at"]
+        sd_db.add_note(self.connection, self.item, "decision", "triaged live")
+        note = self.connection.execute(
+            "SELECT timestamp FROM note WHERE item = ?", (self.item,)
+        ).fetchone()["timestamp"]
+        after = self.connection.execute(
+            "SELECT updated_at FROM item WHERE id = ?", (self.item,)
+        ).fetchone()["updated_at"]
+
+        self.assertEqual(after, before, "add_note is not supposed to move the row")
+        self.assertEqual(self.read(), note)
+
+    def test_an_item_the_database_does_not_hold_answers_empty(self) -> None:
+        """Empty is every absence, and it never lowers an age."""
+        absent = self.root / sd_lib.WORK_DIR / "2026-01-01-nothing"
+        absent.mkdir(parents=True)
+        with unittest.mock.patch.dict(os.environ, {"HOME": str(self.home)}):
+            rows = sd_lib.Rows(self.root)
+            self.addCleanup(rows.close)
+            self.assertEqual(rows.activity(absent), "")
+
+    def test_a_file_checkout_has_no_rows_and_answers_empty(self) -> None:
+        """`Statuses` without a marker holds no `Rows` at all."""
+        statuses = sd_lib.Statuses.of(self.root)
+        self.addCleanup(statuses.close)
+        self.assertEqual(statuses.source, sd_lib.FROM_FILE)
+        self.assertEqual(sd_lib._recorded(statuses, self.item_dir), "")
 
 
 if __name__ == "__main__":
