@@ -130,7 +130,7 @@ class LintFixture(unittest.TestCase):
         return item
 
     def record(self) -> tuple[int, list[tuple[str, str, str, str]]]:
-        return lint.write_citation_manifest(self.cited_item(), self.work)
+        return lint.write_citation_manifest(self.cited_item(), self.work)[:2]
 
     def assert_fails(self, needle: str, pr_body: str | None = None) -> list[str]:
         report = self.run_lint(pr_body)
@@ -589,7 +589,7 @@ class Rule6CitationTests(LintFixture):
         lines.append(prefix + " beyond the first phrase.")
         (item / "prd.md").write_text("\n".join(lines) + "\n")
         (item / "design.md").write_text(f"# design\n\nSee `prd.md:{len(lines)}`.\n")
-        self.assertEqual(lint.write_citation_manifest(item, self.work), (1, []))
+        self.assertEqual(lint.write_citation_manifest(item, self.work)[:2], (1, []))
         return item, prefix, len(lines)
 
     def test_manifest_writer_emits_no_space_at_the_truncation_boundary(self) -> None:
@@ -661,6 +661,33 @@ class Rule6CitationTests(LintFixture):
         lines.insert(1, "An inserted paragraph above the citation.")
         page.write_text("\n".join(lines) + "\n", encoding="utf-8")
         self.assert_clean()
+
+    def test_red_the_citing_page_is_gone_altogether(self) -> None:
+        """A deleted page and a deleted citation read differently to a reader.
+
+        Both end with a row asserting a citation nobody carries, but one is
+        fixed by restoring a page and the other by re-recording, so the rule
+        says which happened rather than making the reader look.
+        """
+
+        self.record()
+        item = self.work / "2026-08-29-a-cited-item"
+        (item / "design.md").unlink()
+        self.assert_fails("design.md, which does not exist")
+
+    def test_the_recorder_names_the_row_it_drops(self) -> None:
+        """Re-recording is where a row that outlived its citation leaves.
+
+        The survey walks the pages, so a deleted citation yields no row and
+        simply stops being written. That is correct, and it was silent.
+        """
+
+        self.record()
+        item = self.cited_item()
+        (item / "design.md").write_text("# design\n\nNo citation here.\n", encoding="utf-8")
+        count, _, dropped = lint.write_citation_manifest(item, self.work)
+        self.assertEqual(count, 0)
+        self.assertEqual(dropped, ["design.md:3 `prd.md:3`"])
 
     def test_red_a_malformed_manifest_row(self) -> None:
         item = self.cited_item()

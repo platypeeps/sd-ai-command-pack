@@ -497,12 +497,27 @@ def citation_survey(
 
 def write_citation_manifest(
     item: pathlib.Path, work_root: pathlib.Path
-) -> tuple[int, list[Skip]]:
-    """Record what each citation points at today. The recording is the baseline."""
+) -> tuple[int, list[Skip], list[str]]:
+    """Record what each citation points at today. The recording is the baseline.
+
+    Re-recording is also where a row that outlived its citation leaves. The
+    survey walks the pages, so a citation deleted in an edit yields no row and
+    simply stops being written -- which is correct and was silent. The third
+    return value names those rows, because a recording that quietly forgets
+    what it used to assert is the same silence rule 6 exists to end.
+    """
     rows, skipped = citation_survey(item, work_root)
+    manifest = item / CITATION_MANIFEST
+    keys = {tuple(row.split("\t")[:2]) for row in rows}
+    dropped = []
+    if manifest.is_file():
+        for line in manifest.read_text(encoding="utf-8").splitlines():
+            fields = line.rstrip().split("\t")
+            if len(fields) == 5 and tuple(fields[:2]) not in keys:
+                dropped.append(f"{fields[0]} `{fields[1]}`")
     body = "\n".join(rows)
-    (item / CITATION_MANIFEST).write_text(body + ("\n" if body else ""), encoding="utf-8")
-    return len(rows), skipped
+    manifest.write_text(body + ("\n" if body else ""), encoding="utf-8")
+    return len(rows), skipped, dropped
 
 
 def check_manifest(
@@ -520,7 +535,7 @@ def check_manifest(
     checked = 0
     manifest = item / CITATION_MANIFEST
     cache: dict[str, list[str]] = {}
-    citing: dict[str, str] = {}
+    citing: dict[str, str | None] = {}
     for number, row in enumerate(manifest.read_text(encoding="utf-8").splitlines(), 1):
         fields = row.split("\t")
         if len(fields) != 5:
@@ -542,8 +557,18 @@ def check_manifest(
         page_name = source.rpartition(":")[0] or source
         if page_name not in citing:
             page = item / page_name
-            citing[page_name] = page.read_text(encoding="utf-8") if page.is_file() else ""
-        if citation not in citing[page_name]:
+            citing[page_name] = page.read_text(encoding="utf-8") if page.is_file() else None
+        page_text = citing[page_name]
+        # A deleted page and a deleted citation are the same silence with two
+        # causes, and a reader fixes them differently, so they are two lines.
+        if page_text is None:
+            report.fail(
+                f"{item.name}/{source}",
+                f"`{citation}` is recorded against {page_name}, which does not exist; "
+                "re-record with sd-docs-lint --update-citations",
+            )
+            continue
+        if citation not in page_text:
             report.fail(
                 f"{item.name}/{source}",
                 f"`{citation}` is recorded but {page_name} no longer cites it; "
@@ -956,7 +981,7 @@ def main(argv: list[str] | None = None) -> int:
         for item in item_directories(work_root):
             if "archive" in item.parts:
                 continue
-            count, skipped = write_citation_manifest(item, work_root)
+            count, skipped, dropped = write_citation_manifest(item, work_root)
             # The recorder's own count was a count of what it wrote, so a
             # citation it refused to record was invisible at recording time
             # too -- the one moment a person is looking straight at it. Both
@@ -965,6 +990,8 @@ def main(argv: list[str] | None = None) -> int:
             for source, citation, reason, detail in skipped:
                 if reason == UNRECORDABLE:
                     print(f"  not recorded: {source} `{citation}` {detail}")
+            for row in dropped:
+                print(f"  dropped: {row} is no longer cited")
         return 0
 
     body: str | None = None
