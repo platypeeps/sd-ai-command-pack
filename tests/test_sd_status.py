@@ -2481,6 +2481,61 @@ class ConcernLedgerTests(InventoryFixture):
             "C-2 is the tail of a sentence, not a row; C-3 and C-4 are rows",
         )
 
+    def test_a_bullet_that_is_not_a_row_still_ends_absorption(self) -> None:
+        """A row's verdict comes from the row, and the bullet below it is a
+        different bullet.
+
+        Real, and the one row the boundary moves: C-89 of the solo-first
+        item's `prd.md` writes no disposition word of its own, and was read
+        as closed from `Recorded, not corrected here` in the bullet under it
+        -- a bullet about criterion 4 naming a directory that is not there.
+        Both halves are here: the row states its severity and its decision
+        and never says what became of it, and the bullet below carries two
+        closing words. Absorbing the second is how the first reads clean.
+        """
+        self.ledger("2026-08-01-foreign/prd.md", (
+            "# foreign\n\n"
+            "- C-3, blocking: the two issues stay open, and criterion 28's\n"
+            "  clause is rewritten to assert the rows instead.\n"
+            "- **The governed tree names a directory that is not there.**\n"
+            "  The criterion lists `templates/`; there is no such directory.\n"
+            "  Recorded, not corrected here.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-01-foreign/prd.md#C-3"],
+            found.get("unreadable-concern-row"),
+            "C-3 says nothing this reader carries; the bullet below is not "
+            "its row and must not close it",
+        )
+
+    def test_a_wrap_onto_a_number_is_not_a_new_item(self) -> None:
+        """The bullet boundary stops at bullets and deliberately not at
+        numbered items.
+
+        Real: C-107 of the solo-first item wraps `... was cited at line` onto
+        `21. Line 21 is about rendered copies ...`, so the row's own
+        continuation opens exactly like an ordered-list item. Widening the
+        boundary to catch it costs the row its own `Addressed.` and makes a
+        correctly-read row unreadable -- one more finding, no rescue, against
+        a row that was already right. This fixture is that shape, and C-5
+        below it is the row that must stay the only finding.
+        """
+        self.ledger("2026-08-01-numbered/prd.md", (
+            "# numbered\n\n"
+            "- C-4, material: the writes-nothing claim was cited at line\n"
+            "  21. Line 21 is about rendered copies; the claim is line 34.\n"
+            "  Addressed.\n"
+            "- C-5, material: a row whose disposition never arrives.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-01-numbered/prd.md#C-5"],
+            found.get("unreadable-concern-row"),
+            "C-4 closes itself on its third line, across a wrap that opens "
+            "with a number",
+        )
+
     # -- never dropped ------------------------------------------------------
 
     def test_a_row_with_no_word_this_reader_carries_is_a_finding(self) -> None:
