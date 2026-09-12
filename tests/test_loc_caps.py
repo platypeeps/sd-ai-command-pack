@@ -348,7 +348,9 @@ def ceiling_moves() -> tuple[int, int, int]:
     values = upward = downward = 0
     for history in CEILING_HISTORY.values():
         values += len(history)
-        for (_, before), (_, after) in zip(history, history[1:]):
+        # `strict=False` deliberately: the offset slice is one shorter, which
+        # is what makes each pair a transition rather than a value.
+        for (_, before), (_, after) in zip(history, history[1:], strict=False):
             if after > before:
                 upward += 1
             elif after < before:
