@@ -1148,7 +1148,7 @@ log, not here.
   (`bin/sd-status:903`), derived from the registry instead; the residue
   detectors (`bin/sd-status:946-1004`) after one clean run across the fleet;
   the history comments in `Makefile`; `--stash-ref` (`bin/sd-handoff:374`) and
-  `carrier_branches` (`bin/sd-status:884-907`); `sd-status`'s `_git` is taken --
+  `carrier_branches` (`bin/sd-status:994-1017`); `sd-status`'s `_git` is taken --
   it now calls `sd_lib.git_output`, which already carried the timeout.
   `bin/sd-pr-state` remains; `bin/sd-handoff` and `bin/sd-handoff-restore` are
   not cuts, both pinned self-contained by their own suites; `bin/sd-docs-lint:52,72-82,148` imports the vocabulary, the
@@ -4052,7 +4052,7 @@ from a number the operator types.
       re-reserved: it maps authors onto vendors and `delivered` has no
       equivalent of that.
     - `bin/sd-status`'s row read and its stale line — **38**.
-      `residue_section` (`bin/sd-status:999-1017`, 19) is a section that
+      `residue_section` (`bin/sd-status:1109-1127`, 19) is a section that
       enumerates a condition and names it, which is what "report the line by
       name as stale" is, and `_render_work` (`bin/sd-status`, 24) is
       the rendering half that has to say which source answered.

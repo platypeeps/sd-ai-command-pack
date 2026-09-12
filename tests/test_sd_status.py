@@ -182,6 +182,82 @@ class WorkflowCheckNameTests(unittest.TestCase):
         self.assertEqual(produced, {"build"})
         self.assertTrue(any("conditional" in note for note in notes))
 
+    def test_an_aggregate_gate_written_to_always_report_is_not_flagged(self) -> None:
+        """The idiom the note used to accuse of the opposite of what it does.
+
+        `if: ${{ !cancelled() }}` is how a required aggregate context is meant
+        to be written: it runs the job when the jobs it `needs` were skipped or
+        failed, which is precisely the case the note warned would leave the
+        context pending forever. Flagging it argued for deleting a working
+        branch protection, so the expression is read now rather than merely
+        noticed.
+        """
+        self.write(
+            "ci.yml",
+            "on: [pull_request]\njobs:\n  result:\n    name: CI Result\n"
+            "    needs: [lint]\n    if: ${{ !cancelled() }}\n    steps:\n      - run: true\n",
+        )
+        produced, notes = status.workflow_checks(self.repo)
+        self.assertEqual(produced, {"CI Result"})
+        self.assertEqual([note for note in notes if "conditional" in note], [])
+
+    def test_always_reports_too_and_is_recognised_however_it_is_spelled(self) -> None:
+        """`always()` is the same guarantee, and spelling must not decide it.
+
+        GitHub accepts a bare expression as well as a `${{ }}` one, treats the
+        function name case-insensitively, and lets the author quote the value
+        or space the `!` out from `cancelled()`. A reader that recognised one
+        spelling and flagged the next would be the same defect with a smaller
+        blast radius, so each form a real workflow uses is covered here.
+        """
+        for index, condition in enumerate(
+            (
+                "always()",
+                "${{ always() }}",
+                "${{ ALWAYS() }}",
+                "'${{ !cancelled() }}'",
+                "${{ ! cancelled() }}",
+                "${{ !cancelled() }} # the aggregate gate",
+            )
+        ):
+            with self.subTest(condition=condition):
+                self.write(
+                    f"gate{index}.yml",
+                    "on: [pull_request]\njobs:\n  result:\n"
+                    f"    if: {condition}\n    steps:\n      - run: true\n",
+                )
+                _, notes = status.workflow_checks(self.repo)
+                self.assertEqual([note for note in notes if "conditional" in note], [])
+                (self.workflows / f"gate{index}.yml").unlink()
+
+    def test_a_condition_that_can_still_skip_the_job_is_still_flagged(self) -> None:
+        """The other half: reading the expression must not amount to trusting it.
+
+        Every one of these can leave the job skipped, and two of them mention
+        the reporting functions -- `always() && ...` is skippable on the right
+        operand, and a job that runs only when nothing was cancelled *on main*
+        reports nothing on a pull request. A note that cleared them because the
+        word appeared would be worse than the note it replaced.
+        """
+        for index, condition in enumerate(
+            (
+                "github.actor != 'bot'",
+                "${{ always() && github.ref == 'refs/heads/main' }}",
+                "${{ !cancelled() && github.event_name == 'push' }}",
+                "${{ cancelled() }}",
+                "${{ success() }}",
+            )
+        ):
+            with self.subTest(condition=condition):
+                self.write(
+                    f"skip{index}.yml",
+                    "on: [pull_request]\njobs:\n  build:\n"
+                    f"    if: {condition}\n    steps:\n      - run: true\n",
+                )
+                _, notes = status.workflow_checks(self.repo)
+                self.assertTrue(any("conditional" in note for note in notes))
+                (self.workflows / f"skip{index}.yml").unlink()
+
     def test_no_workflows_directory_is_stated_rather_than_silent(self) -> None:
         empty = self.repo / "empty"
         empty.mkdir()
@@ -433,6 +509,60 @@ class AcknowledgementTests(unittest.TestCase):
         entries, problems = self.written(json.dumps({"accepted_gaps": [entry]}))
         self.assertEqual(entries, [])
         self.assertTrue(any("must be a non-empty object" in problem for problem in problems))
+
+    def test_an_id_no_gap_can_emit_is_rejected_rather_than_accepting_nothing(self) -> None:
+        """A typo in `id` used to load clean and accept nothing, silently.
+
+        The loader checked that the id was a non-empty string and stopped
+        there, so `unprotectd` passed, matched no finding, printed nothing, and
+        left the gap it was written to accept printing on every run with no
+        sign that an acknowledgement had been attempted. That is the failure
+        mode this file exists to prevent, reintroduced one keystroke down, and
+        it is rejected the same way an unobservable fact name already was.
+        """
+        for wrong in ("unprotectd", "enforce-admins", "squash_message", ""):
+            with self.subTest(id=wrong):
+                entry = dict(self.ZERO_APPROVALS, id=wrong)
+                entries, problems = self.written(json.dumps({"accepted_gaps": [entry]}))
+                self.assertEqual(entries, [])
+                self.assertTrue(problems)
+        # `squash_message` is in that list on purpose: it is a real id printed
+        # by the report, on a merge-settings flag that never passes through
+        # `_apply_acknowledgements`. An id that exists somewhere in the output
+        # is still an id no acknowledgement can ever match, so the vocabulary
+        # is the set of *acknowledgeable* findings, not every id in the file.
+        entries, problems = self.written(
+            json.dumps({"accepted_gaps": [dict(self.ZERO_APPROVALS, id="squash_message")]})
+        )
+        self.assertTrue(any("is not an acknowledgeable gap" in problem for problem in problems))
+
+    def test_every_id_the_protection_section_emits_is_in_the_vocabulary(self) -> None:
+        """The two halves are read from the code, not from a list written here.
+
+        The ids were scattered string literals, which is how the loader came to
+        validate a vocabulary nobody had written down. This drives the
+        producers until each one fires and compares what came out against
+        `ACKNOWLEDGEABLE_GAPS`, both directions: an id the producers can emit
+        and the tuple omits would be unacceptable by acknowledgement, and a
+        tuple member no producer emits would be a spelling an author could put
+        in the file and never see applied.
+        """
+        emitted: set[str] = set()
+        unprotected, _ = status._apply_acknowledgements(
+            [{"id": "unprotected", "gap": "no protection at all"}],
+            status._observed_state(None),
+            [],
+        )
+        emitted.update(gap["id"] for gap in unprotected)
+        for protection, produced in (
+            ({}, set()),
+            (self.enforcing(), {"lint", "a-check-nothing-requires"}),
+            (self.enforcing(required_status_checks={"contexts": ["nobody-reports-this"]}), set()),
+            (self.enforcing(required_pull_request_reviews=None), {"lint"}),
+        ):
+            gaps, _ = status._protection_gaps(protection, "main", produced, [])
+            emitted.update(gap["id"] for gap in gaps)
+        self.assertEqual(emitted, set(status.ACKNOWLEDGEABLE_GAPS))
 
     def test_a_fact_name_this_reader_cannot_observe_is_rejected(self) -> None:
         entry = dict(self.ZERO_APPROVALS, state={"requred_approving_review_count": 0})

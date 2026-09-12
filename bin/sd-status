@@ -384,6 +384,51 @@ def _jobs(lines: list[str]) -> list[tuple[str, list[str]]]:
     return []
 
 
+#: The whole `if:` expression, with the `${{ }}` wrapper and any trailing
+#: comment peeled off. Non-greedy so `}}` inside the expression cannot end it
+#: early -- there is no such expression in a condition this reader accepts, and
+#: one that appeared would simply fail to match and be flagged.
+_EXPRESSION_RE = re.compile(r"^\$\{\{(?P<expr>.*?)\}\}\s*(?:#.*)?$")
+
+#: Job-level conditions that guarantee the job still reports. Both run it when
+#: the jobs it `needs` were skipped or failed, which is the state the note
+#: below warns about -- so these two are the opposite of the defect, not an
+#: instance of it. They are compared whole: `always() && github.ref == ...` is
+#: skippable on its right operand and must stay flagged.
+REPORTING_CONDITIONS = ("always()", "!cancelled()")
+
+
+def _reports_regardless(condition: str) -> bool:
+    """Whether a job-level `if:` still reports when its `needs` do not run.
+
+    **Incident.** This note used to fire on the presence of `if:` alone,
+    without reading a character of the expression. Measured on 2026-09-12
+    across the five repositories whose required context is `CI Result` --
+    anomaly-metric-creator, hoa-manager, loadsmith, rwbp-coordinator,
+    rwbp-website -- every one writes that gate as `${{ !cancelled() }}`, so
+    every one was told its required context could hang forever, and not one of
+    them can. The consequence was not cosmetic: the note is read as evidence,
+    and the evidence argued for deleting a branch protection that worked.
+
+    So the expression is read far enough to tell the two apart, and no
+    further. A condition is cleared only when it is exactly one of
+    `REPORTING_CONDITIONS`; anything compound, anything conditioned on the
+    event or the ref, and anything this cannot parse stays flagged. Erring
+    towards the note is the safe direction here -- a false flag costs a reader
+    a minute, and a missed one costs a pull request that never merges.
+
+    Spelling must not decide it. GitHub accepts a bare expression as well as a
+    `${{ }}` one, resolves function names case-insensitively, and lets the
+    author quote the value, space the `!` out, or trail a comment after it, so
+    all of those reduce to the same answer here.
+    """
+    text = _scalar(condition)
+    match = _EXPRESSION_RE.match(text)
+    if match:
+        text = match.group("expr")
+    return "".join(text.split()).lower() in REPORTING_CONDITIONS
+
+
 def _job_names(
     filename: str, job_id: str, body: list[str], produced: set[str], notes: list[str]
 ) -> None:
@@ -408,10 +453,11 @@ def _job_names(
             "that only the runner can resolve"
         )
         return
-    if _field(body, "if") is not None:
+    condition = _field(body, "if")
+    if condition is not None and not _reports_regardless(condition):
         notes.append(
-            f"{filename}: job {job_id} is conditional (if:); a required context "
-            "it does not report stays pending forever"
+            f"{filename}: job {job_id} is conditional (if: {_scalar(condition)}); a "
+            "required context it does not report stays pending forever"
         )
     produced.update(names)
 
@@ -446,6 +492,50 @@ ACKNOWLEDGED_FACTS = (
     "required_pull_request_reviews",
     "strict",
 )
+
+
+#: Every finding an acknowledgement can name, and the whole vocabulary `id`
+#: may use. One tuple, read by the producers below and by the loader, because
+#: the ids used to be scattered string literals with no set anywhere: an entry
+#: reading `unprotectd` or `enforce-admins` passed every check the loader made,
+#: matched no finding, printed nothing, and left the gap it was written to
+#: accept printing on every run -- a silent suppression of the accept, which is
+#: the failure this file exists to prevent.
+#:
+#: What is deliberately *not* here is as load-bearing as what is.
+#: `squash_message` and `rebase_merge` are real ids the report prints, on merge
+#: settings that never pass through `_apply_acknowledgements`; `acknowledgements`
+#: is the id a fault in the file itself carries, and a broken file must not be
+#: able to accept its own breakage. All three are ids no acknowledgement could
+#: ever match, so admitting them here would re-open the hole under a
+#: better-spelled name.
+ACKNOWLEDGEABLE_GAPS = (
+    "enforce_admins",
+    "produced_not_required",
+    "required_checks",
+    "required_not_produced",
+    "reviews",
+    "strict",
+    "unprotected",
+)
+
+
+def _gap(gap_id: str, text: str) -> dict[str, str]:
+    """One finding, named from `ACKNOWLEDGEABLE_GAPS`.
+
+    Every producer builds its findings through here so that the vocabulary the
+    loader validates against and the ids the report actually emits are one
+    list rather than two that agree today. An id outside the tuple is a
+    mistake in this file -- nothing a repository or a user can write reaches
+    this argument -- so it raises where a test sees it, rather than printing a
+    finding no acknowledgement could name.
+    """
+    if gap_id not in ACKNOWLEDGEABLE_GAPS:
+        raise AssertionError(
+            f"{gap_id!r} is not in ACKNOWLEDGEABLE_GAPS, so no acknowledgement could "
+            f"ever name it; known ids are {', '.join(ACKNOWLEDGEABLE_GAPS)}"
+        )
+    return {"id": gap_id, "gap": text}
 
 
 def _observed_state(protection: dict[str, Any] | None) -> dict[str, Any]:
@@ -536,36 +626,66 @@ def load_acknowledgements(root: pathlib.Path) -> tuple[list[dict[str, Any]], lis
     entries: list[dict[str, Any]] = []
     problems: list[str] = []
     for index, entry in enumerate(raw):
-        label = f"{where}: accepted_gaps[{index}]"
-        if not isinstance(entry, dict):
-            problems.append(f"{label} must be an object")
-            continue
-        missing = [key for key in ("id", "state", "because", "since", "until") if key not in entry]
-        if missing:
-            # `because` and `until` are required rather than optional because
-            # an acknowledgement without a reason and an end condition is a
-            # suppression, and a suppression is the thing this replaces.
-            problems.append(f"{label} is missing {', '.join(missing)}")
-            continue
-        for key in ("id", "because", "since", "until"):
-            if not isinstance(entry[key], str) or not entry[key].strip():
-                problems.append(f"{label}.{key} must be a non-empty string")
-        state = entry["state"]
-        if not isinstance(state, dict) or not state:
-            # An empty `state` would accept the id whatever the branch looks
-            # like, which is exactly the shape this file must not be able to
-            # take: see ACKNOWLEDGED_FACTS.
-            problems.append(f"{label}.state must be a non-empty object of observed facts")
-        else:
-            for fact in sorted(set(state) - set(ACKNOWLEDGED_FACTS)):
-                problems.append(
-                    f"{label}.state.{fact} is not an observable protection fact; "
-                    f"known facts are {', '.join(ACKNOWLEDGED_FACTS)}"
-                )
-        entries.append(entry)
+        faults = _entry_problems(f"{where}: accepted_gaps[{index}]", entry)
+        problems.extend(faults)
+        if not faults:
+            # A faulty entry is not carried, and it makes no difference which
+            # way that goes: one fault anywhere discards the whole file two
+            # lines below. Dropping it here keeps the list that reaches the
+            # matcher to entries this reader has fully checked.
+            entries.append(entry)
     if problems:
         return [], problems
     return entries, []
+
+
+def _entry_problems(label: str, entry: Any) -> list[str]:
+    """Everything wrong with one `accepted_gaps` entry, in the order read.
+
+    Split out of `load_acknowledgements` rather than inlined: the loader reads
+    a file, and this decides whether one entry can mean anything, which are
+    two jobs that grew past what one function can hold at a glance.
+
+    The two vocabularies are the substance. `state` may name only facts this
+    reader can observe, and `id` may name only a finding an acknowledgement
+    can be matched against -- both rejected here rather than quietly matching
+    nothing, which is the failure this whole file was written to remove.
+    """
+    problems: list[str] = []
+    if not isinstance(entry, dict):
+        return [f"{label} must be an object"]
+    missing = [key for key in ("id", "state", "because", "since", "until") if key not in entry]
+    if missing:
+        # `because` and `until` are required rather than optional because an
+        # acknowledgement without a reason and an end condition is a
+        # suppression, and a suppression is the thing this replaces.
+        return [f"{label} is missing {', '.join(missing)}"]
+    for key in ("id", "because", "since", "until"):
+        if not isinstance(entry[key], str) or not entry[key].strip():
+            problems.append(f"{label}.{key} must be a non-empty string")
+    gap_id = entry["id"]
+    if isinstance(gap_id, str) and gap_id.strip() and gap_id not in ACKNOWLEDGEABLE_GAPS:
+        # Compared exactly rather than stripped, and that is not pedantry:
+        # `_apply_acknowledgements` matches `entry["id"] == gap["id"]`, so
+        # ` reviews ` would load clean and accept nothing, which is the whole
+        # defect being closed here, one space to the left.
+        problems.append(
+            f"{label}.id {gap_id!r} is not an acknowledgeable gap, so it would accept "
+            f"nothing; known ids are {', '.join(ACKNOWLEDGEABLE_GAPS)}"
+        )
+    state = entry["state"]
+    if not isinstance(state, dict) or not state:
+        # An empty `state` would accept the id whatever the branch looks like,
+        # which is exactly the shape this file must not be able to take: see
+        # ACKNOWLEDGED_FACTS.
+        problems.append(f"{label}.state must be a non-empty object of observed facts")
+    else:
+        problems.extend(
+            f"{label}.state.{fact} is not an observable protection fact; "
+            f"known facts are {', '.join(ACKNOWLEDGED_FACTS)}"
+            for fact in sorted(set(state) - set(ACKNOWLEDGED_FACTS))
+        )
+    return problems
 
 
 def _apply_acknowledgements(
@@ -623,66 +743,55 @@ def _protection_gaps(
 
     if not (admins.get("enabled") if isinstance(admins, dict) else admins):
         gaps.append(
-            {
-                "id": "enforce_admins",
-                "gap": (
-                    f"enforce_admins is off on {default_branch}: every rule below stops "
-                    "collaborators and exempts the admins who do the merging. "
-                    "Protection that exempts admins is prose, not authority."
-                ),
-            }
+            _gap(
+                "enforce_admins",
+                f"enforce_admins is off on {default_branch}: every rule below stops "
+                "collaborators and exempts the admins who do the merging. "
+                "Protection that exempts admins is prose, not authority.",
+            )
         )
     if not isinstance(checks, dict) or not checks:
         gaps.append(
-            {
-                "id": "required_checks",
-                "gap": f"no required status checks on {default_branch}: a red PR still merges",
-            }
+            _gap(
+                "required_checks",
+                f"no required status checks on {default_branch}: a red PR still merges",
+            )
         )
         contexts: list[str] = []
     else:
         contexts = [str(name) for name in checks.get("contexts") or []]
         if not checks.get("strict"):
             gaps.append(
-                {
-                    "id": "strict",
-                    "gap": (
-                        "required checks are not strict: a green check run against a "
-                        "stale base still merges, so main can go red on a merge that "
-                        "was never tested against it"
-                    ),
-                }
+                _gap(
+                    "strict",
+                    "required checks are not strict: a green check run against a "
+                    "stale base still merges, so main can go red on a merge that "
+                    "was never tested against it",
+                )
             )
     missing = sorted(set(contexts) - produced)
     extra = sorted(produced - set(contexts))
     if missing:
         gaps.append(
-            {
-                "id": "required_not_produced",
-                "gap": (
-                    "required contexts no workflow in this repo produces: "
-                    + ", ".join(missing)
-                    + " -- each one blocks every PR until an external app reports it"
-                ),
-            }
+            _gap(
+                "required_not_produced",
+                "required contexts no workflow in this repo produces: "
+                + ", ".join(missing)
+                + " -- each one blocks every PR until an external app reports it",
+            )
         )
     if extra:
         gaps.append(
-            {
-                "id": "produced_not_required",
-                "gap": (
-                    "checks this repo runs but does not require: "
-                    + ", ".join(extra)
-                    + " -- they can go red without blocking a merge"
-                ),
-            }
+            _gap(
+                "produced_not_required",
+                "checks this repo runs but does not require: "
+                + ", ".join(extra)
+                + " -- they can go red without blocking a merge",
+            )
         )
     if not isinstance(reviews, dict):
         gaps.append(
-            {
-                "id": "reviews",
-                "gap": f"no pull-request review is required on {default_branch}",
-            }
+            _gap("reviews", f"no pull-request review is required on {default_branch}")
         )
         approvals = 0
     else:
@@ -697,13 +806,11 @@ def _protection_gaps(
             # state than the one being described. What asks for nothing is the
             # approval count, not the requirement.
             gaps.append(
-                {
-                    "id": "reviews",
-                    "gap": (
-                        "a pull request is required but no approving review is: "
-                        "0 approvals, so one with green CI self-merges"
-                    ),
-                }
+                _gap(
+                    "reviews",
+                    "a pull request is required but no approving review is: "
+                    "0 approvals, so one with green CI self-merges",
+                )
             )
     detail = {
         "enforce_admins": bool(admins.get("enabled")) if isinstance(admins, dict) else False,
@@ -759,6 +866,11 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
     # this section gets to -- including the branches that never reach GitHub.
     # It is a gap and not a note because it fails closed: while it is wrong,
     # nothing is accepted, and the reader should know why.
+    #
+    # `acknowledgements` is built here rather than through `_gap` and is
+    # deliberately absent from ACKNOWLEDGEABLE_GAPS: these rows never reach
+    # `_apply_acknowledgements`, because a file that accepted its own faults
+    # would be a suppression that switches itself on the moment it breaks.
     unreadable: list[dict[str, Any]] = [
         {"id": "acknowledgements", "gap": problem} for problem in problems
     ]
@@ -807,14 +919,12 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
         result["protected"] = False
         still_open, accepted = _apply_acknowledgements(
             [
-                {
-                    "id": "unprotected",
-                    "gap": (
-                        f"{default_branch} has no branch protection at all: nothing "
-                        "that can push is stopped by anything, and no local lane can "
-                        "supply the authority the config does not"
-                    ),
-                }
+                _gap(
+                    "unprotected",
+                    f"{default_branch} has no branch protection at all: nothing "
+                    "that can push is stopped by anything, and no local lane can "
+                    "supply the authority the config does not",
+                )
             ],
             _observed_state(None),
             acknowledgements,
