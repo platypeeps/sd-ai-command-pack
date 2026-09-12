@@ -73,13 +73,15 @@ jobs:
       # using something the old pin does not carry, and only then: the suite
       # fails on a skip, so a capability the library lacks is a red run here
       # rather than a quietly unexercised test. It last moved for
-      # `register_work_item` and `registered_for`, which `sd work register`
-      # calls and which `89dcd866` predates.
+      # `record_check`, which `bin/sd-review` reads to skip a gate the runner
+      # has already run, and which `4c9ebff4` predates: the reader landed
+      # before this pin could see the writer, so CI failed on an ImportError
+      # that no local run reproduced, every local venv already carrying it.
       - name: Check out the system checkout, for sd_db
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          ref: 4c9ebff46dd79e82de952d2782f8dabaedf7d4d7
+          ref: 3c4c723a724c5922fb464042a036ded0408a3d51
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false
