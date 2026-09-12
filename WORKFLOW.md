@@ -70,7 +70,15 @@ These run without being asked.
   repository's GitHub settings by hand; nothing in the pack or the dashboard
   writes it. `sd-status` reports the gaps, and an unattended merge into a
   branch that is not protected refuses naming the setting.
-- `make check` runs `sd-docs-lint` rules 1 to 4 whenever `docs/work/` exists.
+- `make check` and the pack's `lint` CI job run `sd-docs-lint` against the
+  checkout's own `docs/work/`, `docs/spec/` and `docs/decisions/`.
+  `sd-ship` runs it again at delivery time. A consumer that wants the gate
+  checks the pack out in its own workflow and runs `<pack>/bin/sd-docs-lint`
+  from there; the machine-scope installer puts no `bin/` in a consumer,
+  and nothing runs the lint there otherwise. A runner has no database, so
+  rule 2 reads statuses from git there, with full history, and checks
+  fewer items than the machine with the rows; each run prints which source
+  it read.
 - A commit to the pack, the system repository or the writing repository names
   what needed it: `Needed-by: <item id>` or `Needed-by: cost | efficiency |
   visibility`. `sd-ship` warns when the trailer is missing and ships anyway.
@@ -83,11 +91,18 @@ These run only when asked by name.
 
 - A work item under `docs/work/<date>-<slug>/prd.md`. Create one when the
   work spans more than one session or more than about 300 changed lines.
-  `design.md` and `implement.md` exist only when you ask for them. Status lives
-  on the item's row and nowhere in the file; a checkout or CI runner with no
-  database asks git whether the item is delivered, by the merge trailers, and
-  nothing else once the line has retired. `ready_to_send` marks a finished
-  artifact waiting on you.
+  `design.md` and `implement.md` exist only when you ask for them. Where
+  status lives is what `docs/work/.status-source` says. A checkout whose
+  marker says `row` reads it from the item's row and nowhere in the file: an
+  active `prd.md` there carries no `status:` line, and `sd-docs-lint` fails
+  one that does. A checkout with no marker reads the prd's `status:` line,
+  because its lines were never retired -- `file` is the unmarked default, and
+  deliberately so (`source:bin/sd_lib.py::status_marker` answers `file` for an
+  absent marker: the path every reader took before rows existed, not a new
+  one that happens to agree with it). Under `row`, a checkout or CI runner
+  with no database asks git whether the item is delivered, by the merge
+  trailers, and nothing else. `ready_to_send` marks a finished artifact
+  waiting on you.
 - `sd-spec`. Run it when a change alters behaviour that `docs/spec/` documents.
 - A review pass beyond the table below. Ask for it by name; the item records
   that you did.
