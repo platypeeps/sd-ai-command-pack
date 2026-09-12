@@ -1214,6 +1214,15 @@ def review(
     policy, source = load_policy(root)
     item = getattr(args, "item", None)
     subject = resolve_subject(root, "branch" if preflight else args.scope, item, getattr(args, "base", None))
+    # `sd-plan` step 4 routes the triad here, and step 5 gates `planning ->
+    # ready` on the lane, so this is the one command the planning sequence runs
+    # against the artifacts while they are still only in the working tree. In
+    # `mode: guest` they do not belong in this tree at all, and the refusal used
+    # to be a bullet in the skill rather than anything a machine performed.
+    if subject.scope == "planning":
+        refusal = sd_lib.guest_artifact_refusal(root, subject.paths)
+        if refusal:
+            raise UsageError(refusal)
     plan = sd_route.route(subject.paths, subject.lines, args.draft, policy)
     # Read from the home this run was handed, not from the process's, so a run
     # given a different environment reads that operator's pins. A missing

@@ -171,7 +171,12 @@ interview, and leave its prose where it will still be current next month.
 - **Never promote past an open `BLOCKING` line**, and never claim approval from
   a review lane that was skipped or that failed.
 - **In `mode: guest`, never write artifacts into the upstream tree** — the
-  triad lives on the fork's integration branch.
+  triad lives on the fork's integration branch. This one is no longer only an
+  instruction: step 4's `sd-review --scope planning` resolves `sd_lib.mode()`
+  over the paths it is about to review and exits 2 with one sentence naming
+  them, so a guest checkout cannot reach `planning → ready` with a triad in the
+  upstream tree. The refusal fires after the files are written, not before —
+  move them to the fork's integration branch and re-run.
 - **Never generate a design or implement file to look thorough.** Three files
   where one was warranted is the failure mode this command exists to avoid.
 

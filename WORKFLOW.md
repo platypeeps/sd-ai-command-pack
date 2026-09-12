@@ -155,8 +155,16 @@ A shared repository is one where someone else also merges. In it:
 - No `Work:` line in a pull request body unless the pull request resolves a
   work item that lives in that repository.
 - No `docs/work/`, `docs/spec/`, or `docs/decisions/` commits. `mode: guest`
-  already carries this: planning artifacts go to the fork's integration branch,
-  and every writing skill refuses the upstream tree.
+  already carries this: planning artifacts go to the fork's integration branch.
+  Two machines perform that refusal rather than describing it, and both read
+  `sd_lib.guest_artifact_refusal`, which resolves `sd_lib.mode()` and names the
+  paths it refused: `sd-review --scope planning`, the lane `sd-plan` gates
+  `planning → ready` on, refuses the active item's `prd.md`, `design.md` and
+  `implement.md` before they are promoted; `sd-ship` refuses a guest push whose
+  diff carries any of the three trees. Nothing yet refuses a `docs/spec/` or
+  `docs/decisions/` write at the moment it happens — `sd-spec` and `sd-plan
+  --decision` are still prose there, and the push gate is where those are
+  caught.
 - No labels, review comments, reviewer requests, or bot posts from any pack
   surface. `sd-review` and `sd-receive-review` never post.
 - No workflow files or repository settings unless the owner of that

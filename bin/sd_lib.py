@@ -408,6 +408,7 @@ def mode(root: pathlib.Path, *, ask: Asker = gh_api) -> str:
     return DEFAULT_MODE if remote_permits_full(root, ask=ask).full else "guest"
 
 
+
 # --------------------------------------------------------------------------
 # Work items: status derived from artifacts and git, never from stored state
 # --------------------------------------------------------------------------
@@ -1501,3 +1502,70 @@ def delivered(root: pathlib.Path, item: str) -> Answer:
         elif _closed_by(root, "FETCH_HEAD", item):
             return Answer(YES)
     return Answer(YES if _closed_by(root, "HEAD", item) else NO)
+
+
+# --------------------------------------------------------------------------
+# Guest mode: the planning artifacts that do not belong in an upstream tree
+# --------------------------------------------------------------------------
+#
+# Placed at the end of the file rather than beside `mode` so that adding it
+# moves no line in this module: `tests/test_doc_citations.py` anchors work
+# items to `bin/sd_lib.py:<line>`, and an insertion higher up invalidates
+# every citation below it.
+
+
+#: The three trees `WORKFLOW.md` keeps out of an upstream checkout in
+#: `mode: guest`: the planning triad, the specs and the decision records.
+#: Written once here because `bin/sd-ship` already spells the same three at
+#: push time, and two lists is how one of them gains a fourth entry alone.
+GUEST_REFUSED_DIRS = ("docs/work", "docs/spec", "docs/decisions")
+
+
+def guest_artifacts(paths: Any) -> tuple[str, ...]:
+    """The repo-relative `paths` that live under a guest-refused tree.
+
+    Separate from the mode question on purpose: this half is pure, so a caller
+    with nothing to refuse never reaches the network to find that out.
+    """
+
+    found = set()
+    for entry in paths:
+        text = re.sub(r"^(?:\./)+", "", str(entry).replace(os.sep, "/"))
+        for directory in GUEST_REFUSED_DIRS:
+            if text == directory or text.startswith(directory + "/"):
+                found.add(text)
+    return tuple(sorted(found))
+
+
+def guest_artifact_refusal(root: pathlib.Path, paths: Any, *, ask: Asker = gh_api) -> str:
+    """One sentence refusing planning artifacts in the upstream tree, or `""`.
+
+    `WORKFLOW.md` states the refusal as a mechanical property -- "every writing
+    skill refuses the upstream tree" -- and until this existed the only copy of
+    the rule was a bullet in `skills/sd-plan/SKILL.md` addressed to an agent. A
+    sentence an agent may skip is not a refusal, and two repositories reached
+    `guest` carrying 162 committed `prd.md` files between them with nothing
+    objecting at write time.
+
+    `mode` is the authority, not the remote directly, so detection stays a
+    ceiling: a written `full` that the remote lowers refuses here too, and a
+    remote that cannot be asked at all resolves `guest` and refuses -- the same
+    way `bin/sd-ship` refuses a guest push carrying these paths. The sentence
+    names the paths and where they belong instead; the caller decides the exit
+    code, because this module raises nothing.
+    """
+
+    refused = guest_artifacts(paths)
+    if not refused:
+        return ""
+    if mode(root, ask=ask) != "guest":
+        return ""
+    shown = ", ".join(refused[:3])
+    if len(refused) > 3:
+        shown += f" and {len(refused) - 3} more"
+    return (
+        f"this repository is in guest mode, so {shown} cannot be written into the "
+        "upstream tree; planning artifacts live on the fork's integration branch "
+        "(WORKFLOW.md, `mode: guest`). Detection is a ceiling: a `mode: full` line "
+        "the remote lowers, and a remote that cannot be asked, both resolve guest here."
+    )
