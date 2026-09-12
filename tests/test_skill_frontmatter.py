@@ -275,9 +275,10 @@ class DocumentedFlagTests(unittest.TestCase):
     it, because the author branched before the fix landed, and every structural
     test still passed.
 
-    Scoped to the surfaces with a real implementation in `bin/`. For the eight
-    that have no tool yet the design's table is the only source, and asserting
-    against it would pin prose to prose.
+    Scoped to the surfaces with a real implementation in `bin/` -- which ones
+    those are is `implemented()` below, read off the filesystem, not a count
+    kept here. For the rest the design's table is the only source, and
+    asserting against it would pin prose to prose.
     """
 
     def implemented(self) -> list[tuple[str, pathlib.Path, pathlib.Path]]:
@@ -380,10 +381,12 @@ class DocumentedFlagTests(unittest.TestCase):
 class UnbuiltSurfaceTests(unittest.TestCase):
     """A skill for a tool that does not exist must say so.
 
-    Eight of the twelve surfaces have no `bin/` implementation yet. Their skills
-    are written from the design, and a reader -- human or model -- who takes one
-    at face value will try to run a command that is not there. Saying "not built
-    yet" once is the whole requirement; this test only checks it is said.
+    Some of the twelve surfaces have no `bin/` implementation yet -- which ones,
+    and how many, is `unbuilt()` below, derived from `bin/` at run time and
+    deliberately not written down here. Their skills are written from the
+    design, and a reader -- human or model -- who takes one at face value will
+    try to run a command that is not there. Saying "not built yet" once is the
+    whole requirement; this test only checks it is said.
 
     Scoped to those twelve. The folded skills name no `bin/` tool at all -- they
     are procedures the model follows, so there is nothing for them to disclose,
@@ -611,10 +614,13 @@ class RunsAsColumn(unittest.TestCase):
 class BinaryClaims(unittest.TestCase):
     """A skill that names a `bin/` command either has it or says it does not.
 
-    Seven of the twelve surfaces ship as prose an agent follows rather than as
-    a runner: `sd-deps`, `sd-help`, `sd-map`, `sd-plan`, `sd-ship`, `sd-spec`
-    and `sd-suggest` have no binary. That is a deliberate state and each one
-    currently says so in its own "State of the tooling" section -- which is the
+    Some of the twelve surfaces ship as prose an agent follows rather than as a
+    runner, and that is a deliberate state. Which ones is not written here on
+    purpose: the earlier draft of this paragraph named seven and included
+    `sd-ship`, which has shipped a binary since, and `RunsAsColumn` above
+    derives the same fact from README's table against `bin/` on every run.
+    What that leaves this class to check is the pairing -- a skill that names a
+    `bin/` command either has it or declares it missing -- which is the
     difference between a documented gap and drift, and it is a difference
     nothing checked.
 

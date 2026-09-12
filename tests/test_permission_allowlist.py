@@ -33,14 +33,17 @@ written so it can fail on the defect it cites -- the first draft of the second
 one could not, walking `bin/...` rules to ask after their `python3` twin when
 what shipped was the `python3` rule alone.
 
-`skills/` names seven `bin/` commands that do not exist -- `sd-ship`,
-`sd-plan`, `sd-map`, `sd-help`, `sd-deps`, `sd-spec` and `sd-suggest`, each
-saying so in its own SKILL.md ("There is no `bin/sd-suggest` yet"). This
-docstring said six and listed six, omitting `sd-spec`, which is the ordinary
-fate of a count kept by hand next to a list kept by hand;
-`tests/test_skill_frontmatter.py` now derives the same fact at run time. That
-is also why every derivation here filters on the filesystem rather than
-trusting a name it read in a document.
+Some of the shipped surfaces name a `bin/` command that does not exist yet, and
+the skill is expected to declare that rather than read as a command you can
+run. This docstring used to carry the list and the count. It said six and
+listed six, omitting `sd-spec`; it was then corrected to seven and named
+`sd-ship`, which has shipped a binary since -- the ordinary fate of a count
+kept by hand next to a list kept by hand, twice over, in the paragraph arguing
+against the practice. The list is gone and no number replaces it:
+`tests/test_skill_frontmatter.py` derives both facts at run time, in
+`UnbuiltSurfaceTests.unbuilt` and `BinaryClaims`. That is also why every
+derivation here filters on the filesystem rather than trusting a name it read
+in a document.
 """
 
 from __future__ import annotations
