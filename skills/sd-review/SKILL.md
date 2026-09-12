@@ -38,9 +38,9 @@ Each chain stops when its required depth completes.
 One completion cannot satisfy a two-review requirement.
 
 `--scope planning` is the development flow's *prd and design* review point;
-`--scope branch` before a push is *code, before merge*. Both caps are those
-rows' in `.claude/rules/sd-planning-adversarial-review.md`, and this tool
-states neither.
+`--scope branch` before a push is *code, before merge*. Their caps are the ones
+on those rows in the sd-ai-command-pack checkout's
+`.claude/rules/sd-planning-adversarial-review.md`, and this tool states neither.
 
 ## Nothing is ever posted
 

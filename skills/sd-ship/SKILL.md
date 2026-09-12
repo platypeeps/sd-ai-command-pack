@@ -67,8 +67,8 @@ A change with no work item needs no PRD or database row to ship.
    `sd-ship` has built by then. With no work root, omit that artifact lint;
    do not create a planning directory to satisfy it. The repository's checks
    and local code review still run. The review is the development flow's *code, before
-   merge* point, and its cap is that row's in
-   `.claude/rules/sd-planning-adversarial-review.md`. Dispose every blocking
+   merge* point. Its cap is the one on that row in the sd-ai-command-pack
+   checkout's `.claude/rules/sd-planning-adversarial-review.md`. Dispose every blocking
    finding here. Commit fixes and run their required verification before publishing the changed head.
    For an unchanged, completely reviewed head, use the evidence-backed disposition acceptance path below.
    A written reason alone cannot clear the executable gate.
