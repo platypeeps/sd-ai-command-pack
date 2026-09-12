@@ -38,6 +38,24 @@ GIT_IDENTITY = (
 )
 
 
+def load_hook():
+    """Import the hook as a module, for failures that need to be reached inside.
+
+    Most of this file drives the real executable, which is the right default:
+    it proves the thing that is installed. Two kinds of failure cannot be
+    provoked from outside the process, though -- a write that goes short
+    without progressing, and a rename whose target the fixture must name --
+    and a mocked-out subprocess would prove less, not more.
+    """
+    loader = importlib.machinery.SourceFileLoader("sd_handoff_restore", str(RESTORE))
+    spec = importlib.util.spec_from_file_location(
+        "sd_handoff_restore", str(RESTORE), loader=loader
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def git(cwd: pathlib.Path, *args: str) -> str:
     completed = subprocess.run(
         ["git", *GIT_IDENTITY, *args],
@@ -443,6 +461,121 @@ class RaceTests(RestoreFixture):
         self.assert_silent(self.restore())
 
 
+class ClaimFailureTests(RestoreFixture):
+    """A claim that failed for a reason that is not a rival has to say so.
+
+    `claim` caught every `OSError` from the rename and returned False, and
+    the one caller read False as "another session in this directory won the
+    race". So a read-only state directory, a full disk and a removed handoff
+    directory all reached the operator as the hook's ordinary silence, which
+    is the same output as having no packet at all -- the one failure a person
+    could have fixed was indistinguishable from the routine one they are
+    supposed to ignore, and the packet stayed pending with nothing said.
+
+    The three causes are told apart at the function, because two of them need
+    the fixture to name the rename's target, which only the hook's own pid
+    can do. `packet_section` is then exercised in the same process to prove
+    the reason is emitted rather than stopping at `claim`, and one case runs
+    the real executable end to end.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.module = load_hook()
+        self.handoff = self.packet_path(self.repo).parent
+        self.handoff.mkdir(parents=True, exist_ok=True)
+        self.path = self.packet_path(self.repo)
+        self.path.write_text('{"summary": "unclaimed"}\n', encoding="utf-8")
+
+    def block_the_rename(self) -> pathlib.Path:
+        """Make this process's rename fail with a cause root cannot overrule.
+
+        The chmod route needs the directory's write bit to mean something,
+        which it does not for uid 0. Renaming a file onto a non-empty
+        directory is refused for everybody, and the target is predictable
+        here because `claim` builds it from `os.getpid()` -- this process's.
+        """
+        target = self.path.with_name(f"{self.path.name}.claim.{os.getpid()}")
+        target.mkdir()
+        (target / "occupied").write_text("x", encoding="utf-8")
+        return target
+
+    def test_a_rival_that_claimed_first_is_the_one_silent_failure(self) -> None:
+        """The race is real and is nobody's fault, so it stays silent."""
+        self.path.unlink()
+        self.assertEqual(self.module.claim(self.path, {}), "")
+
+    def test_a_removed_handoff_directory_is_not_reported_as_a_rival(self) -> None:
+        self.path.unlink()
+        shutil.rmtree(self.handoff)
+        reason = self.module.claim(self.path, {})
+        self.assertIn("no longer exists", reason)
+        self.assertIn("nothing took it", reason)
+
+    def test_a_claim_that_fails_for_a_real_reason_says_which(self) -> None:
+        self.block_the_rename()
+        reason = self.module.claim(self.path, {})
+        self.assertIn("could not be renamed", reason)
+        self.assertIn("was not restored", reason)
+        # The packet is still here: nothing was consumed, so nothing is lost.
+        self.assertTrue(self.path.is_file())
+        # And the reader is not sent to `--show` as a way around it. The
+        # next test proves that sentence rather than trusting it.
+        self.assertIn("this same rename", reason)
+
+    def test_the_stated_reason_reaches_the_section_the_hook_emits(self) -> None:
+        """Not stopping at `claim`: the caller has to hand it on."""
+        self.write_packet("--summary", "a claim nobody could take")
+        self.block_the_rename()
+        # In-process, `HOME` in the passed mapping is not enough: `state_home`
+        # falls back to `expanduser`, which reads the real environment. The
+        # subprocess fixtures get there by exporting HOME; here the other
+        # documented route to the same directory is named outright, so the
+        # operator's own packets stay untouched either way.
+        environ = self.env(
+            self.repo, XDG_STATE_HOME=str(self.home / ".local" / "state")
+        )
+        section = self.module.packet_section(
+            str(self.repo), str(self.repo), environ
+        )
+        self.assertIn("could not be renamed", section)
+        self.assertNotIn("a claim nobody could take", section)
+
+    def test_an_unwritable_handoff_directory_reaches_a_real_session(self) -> None:
+        """The same failure through the installed executable, not the import."""
+        if os.geteuid() == 0:
+            self.skipTest(
+                "uid 0 renames inside a directory it has no write bit for, so "
+                "the failure under test cannot be staged as root")
+        self.write_packet("--summary", "still pending after the refusal")
+        mode = self.handoff.stat().st_mode
+        self.addCleanup(os.chmod, self.handoff, stat.S_IMODE(mode))
+        os.chmod(self.handoff, 0o500)
+        context = self.context(self.restore())
+        self.assertIn("was not restored", context)
+        self.assertIn("could not be renamed", context)
+        self.assertNotIn("still pending after the refusal", context)
+        # The refusal tells the reader that `sd-handoff --show` refuses for
+        # the same reason rather than handing them the packet. That is a
+        # claim about another tool, so it is checked against that tool: the
+        # first draft said `--show` "reads it meanwhile", which was wrong in
+        # exactly the situation the line is printed in, because `--show`
+        # claims by the same rename into the same unwritable directory.
+        shown = subprocess.run(
+            [str(HANDOFF), "--show"],
+            cwd=str(self.repo),
+            env=self.env(self.repo),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(shown.returncode, 0, shown.stdout)
+        self.assertNotIn("still pending after the refusal", shown.stdout)
+        os.chmod(self.handoff, stat.S_IMODE(mode))
+        self.assertIsNone(self.packet()["consumed"])
+
+
 class LoadLogTests(RestoreFixture):
     """R10-D3's deletion criterion needs a count and a median, from somewhere.
 
@@ -779,15 +912,7 @@ class TornRecordTests(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        loader = importlib.machinery.SourceFileLoader(
-            "sd_handoff_restore", str(RESTORE)
-        )
-        spec = importlib.util.spec_from_file_location(
-            "sd_handoff_restore", str(RESTORE), loader=loader
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        self.module = module
+        self.module = load_hook()
         self.directory = pathlib.Path(
             tempfile.mkdtemp(prefix="handoff-torn-")
         ).resolve()

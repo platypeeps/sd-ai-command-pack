@@ -91,8 +91,9 @@ a document.
    `references/conventions.md` has the eight steps.
 7. Get the independent pass where the document carries a decision someone will
    act on. This is the research flow's review point *after the brief and
-   decisions*, and its cap is that row's in
-   `.claude/rules/sd-planning-adversarial-review.md`. The second reader is a
+   decisions*. Its cap is the one on that row in the sd-ai-command-pack
+   checkout's `.claude/rules/sd-planning-adversarial-review.md`. A research
+   repo does not carry that file; read it in the pack. The second reader is a
    CLI invoked on the working tree with focus text that redirects it from code
    review to prose — the exact invocation and its limits are in
    `references/conventions.md`. If it is unavailable, record that in Status

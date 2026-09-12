@@ -47,14 +47,40 @@ say. A skill in `contrib/` is one command away, and use is what moves it.
   line describes it and does not govern it.
 - one line — `CLAUDE.local.md` — in the global git excludes
 
-**What it writes in a repository:** nothing, ever. Work items live under
-`docs/work/<date>-<slug>/` because you put them there; per-repo configuration
-lives in `CLAUDE.local.md`, which is untracked by way of that one excludes line.
-`bin/sd_install.py --repo` refuses outright if `CLAUDE.local.md` turns out to be
-tracked, rather than edit a file under version control.
+**What it writes in a repository:** nothing at machine-scope install. Everything
+below is written by something you invoke against that repository, and nothing
+else is. Its executables write four paths:
 
-That block's `mode:` line carries one of three values, and the workflow each
-selects is stated in [WORKFLOW.md](WORKFLOW.md):
+- `CLAUDE.local.md` — per-repo configuration, from `bin/sd_install.py --repo`.
+  Untracked by way of that one excludes line, and that command refuses outright
+  if `CLAUDE.local.md` turns out to be tracked, rather than edit a file under
+  version control.
+- `.github/workflows/sd-review-route.yml` — the routing lane, from `sd-review
+  setup-github`, which runs only in a `full`-mode repository. **Tracked.** With
+  `--remove-legacy` it also deletes the three files the old `sd-github-review`
+  installer left.
+- `docs/work/<item>/.citations.tsv` — the citation baseline, one per active work
+  item, from `sd-docs-lint --update-citations`. **Tracked.**
+- `build/` — HTML from `sd-research-kit render`, into the research repository you
+  are standing in. Gitignored.
+
+Two skills add paths of their own, both tracked. Invoking either is the approval
+to write, and neither writes anywhere else:
+
+- `sd-plan` — `docs/work/<YYYY-MM-DD>-<slug>/`: `prd.md`, plus `README.md` when
+  the directory is new, plus `design.md` and `implement.md` only when you ask
+  for them. `--work-dir` selects a root other than `docs/work`; `--decision`
+  writes `docs/decisions/<YYYY-MM-DD>-<slug>.md` instead of a work item.
+- `sd-spec` — `docs/spec/**`, rewritten in place on the branch so the
+  correction lands with the change, plus the learnings page under `--retro`.
+
+Every other skill either edits documents that are already yours or reads only.
+
+`sd attribute` adds one empty commit to `HEAD` and writes no file. Everything
+else the pack writes lands outside the repository entirely.
+
+That `CLAUDE.local.md` block carries a `mode:` line with one of three values,
+and the workflow each selects is stated in [WORKFLOW.md](WORKFLOW.md):
 
 - `full` — planning artifacts live in `docs/work/` in the repository, and the
   whole path runs; an unattended merge additionally needs `merge: auto` on the
