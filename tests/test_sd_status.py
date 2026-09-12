@@ -1682,6 +1682,84 @@ class LowYieldProducerTests(InventoryFixture):
         self.assertFalse(found[0]["abnormal"])
         self.assertEqual(found[0]["key"], "skills/sd-thing/SKILL.md#bin/sd-thing")
 
+    def disclose(self, said: str) -> None:
+        """One skill saying one thing, so a row is about the resolver alone."""
+        skill = self.repo / "skills" / "sd-thing"
+        skill.mkdir(parents=True, exist_ok=True)
+        (skill / "SKILL.md").write_text(said + "\n", encoding="utf-8")
+        (self.repo / "bin").mkdir(exist_ok=True)
+
+    def test_a_disclosure_quoting_a_real_module_path_is_not_a_row(self) -> None:
+        """`_DISCLOSED_RE` stops at the `.`, so the suffix has to be restored.
+
+        This is two of the six findings the literal test produced in this
+        repository: `skills/sd-handoff` writes `bin/sd_handoff_rows.py` and
+        `skills/sd-review` writes `bin/sd_setup_github.py`, both of which are
+        the true paths of files that are on disk.
+        """
+        self.disclose("Rows come from `bin/sd_rows.py`.")
+        (self.repo / "bin" / "sd_rows.py").write_text("x = 1\n", encoding="utf-8")
+        self.assertEqual([], self.by_check(self.rows(), "undisclosed-tool"))
+
+    def test_a_module_sharing_a_stem_does_not_silence_a_missing_command(self) -> None:
+        """A hyphenated tool is not built by an underscored module beside it.
+
+        The regression guard. An earlier revision of `_tool_candidates` also
+        tried `-` respelled `_`, on the theory that `bin/sd_suggest.py` builds
+        `bin/sd-suggest`. It does not: that module is an implementation detail
+        `bin/sd` imports, the command is `sd suggest`, and the disclosing skill
+        says *"There is no `bin/sd-suggest` yet"* in the line the regex
+        matched -- the same sentence `skills/sd-help` writes about
+        `bin/sd-help`, which was reported. The transform gave two identical
+        sentences opposite verdicts.
+
+        Fails if the `underscored` candidates come back, which is the point:
+        the defect it guards was a silenced true finding, and a silenced
+        finding leaves nothing in the report to notice.
+        """
+        self.disclose("There is no `bin/sd-rows` yet.")
+        (self.repo / "bin" / "sd_rows.py").write_text("x = 1\n", encoding="utf-8")
+        found = self.by_check(self.rows(), "undisclosed-tool")
+        self.assertEqual([row["title"] for row in found], ["bin/sd-rows"])
+
+    def test_a_tool_absent_in_every_spelling_survives_the_widening(self) -> None:
+        """The failure mode of widening a resolver: silence, not noise.
+
+        Three neighbours that a glob or a prefix test would accept, and none
+        of them is a spelling of the disclosed name.
+        """
+        self.disclose("Planning will live in `bin/sd-gone`.")
+        for name in ("sd-goneish", "sd_gone_helper.py", "sd-other"):
+            (self.repo / "bin" / name).write_text("x = 1\n", encoding="utf-8")
+        found = self.by_check(self.rows(), "undisclosed-tool")
+        self.assertEqual([row["title"] for row in found], ["bin/sd-gone"])
+
+    def test_a_directory_under_bin_is_not_a_built_tool(self) -> None:
+        """`is_file`, not `exists`: a directory answers no disclosure."""
+        self.disclose("Planning will live in `bin/sd-gone`.")
+        (self.repo / "bin" / "sd-gone").mkdir()
+        found = self.by_check(self.rows(), "undisclosed-tool")
+        self.assertEqual([row["title"] for row in found], ["bin/sd-gone"])
+
+    def test_the_candidates_are_the_name_and_the_name_with_its_suffix(self) -> None:
+        """Pinned as a list: the shortness is the argument.
+
+        Two candidates, and the second exists only because `_DISCLOSED_RE`
+        truncates at the `.`. No respelling of `-` as `_` in either direction
+        -- see `_tool_candidates` for why the transform cannot come back.
+        """
+        self.assertEqual(
+            list(status._tool_candidates("sd-plan")), ["sd-plan", "sd-plan.py"]
+        )
+        self.assertEqual(
+            list(status._tool_candidates("sd_plan")), ["sd_plan", "sd_plan.py"]
+        )
+        # Stated as a property too, so a third candidate cannot be added
+        # later in a spelling this pin happens not to name.
+        self.assertTrue(
+            all("_" not in name for name in status._tool_candidates("sd-plan"))
+        )
+
 
 class BranchLandedTests(StatusFixture):
     """`branch_landed`, against real git and injected pull-request rows.
