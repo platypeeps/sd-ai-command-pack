@@ -707,7 +707,7 @@ draft of this page named nowhere.** All three come from item B's criterion 7,
 enumerated clause by clause in B's round five, and each is a pack file no
 `system` pull request can reach.
 
-*The tracked marker.* `prd.md:582` and `prd.md:2576` both say the retire
+*The tracked marker.* `prd.md:582` and `prd.md:2585` both say the retire
 commit adds `docs/work/.status-source`, one line, `row`. This page named
 `status_source` — the column — and never the file. It is what a checkout
 without a database reads, so it lands in the same commit as the removal, not
