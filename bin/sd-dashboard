@@ -53,8 +53,29 @@ LABEL = "com.sven.sd-dashboard"
 PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 LOGS = Path.home() / "Library" / "Logs"
 
-# Homebrew first, because that is where `tailscale` and a current `git` live
-# on this machine; the system paths follow so nothing is lost.
+# Both Homebrew prefixes, ahead of the system pair, and the order is the whole
+# point -- not a preference for newer tools.
+#
+# `ProgramArguments[0]` is this file, and its shebang is `/usr/bin/env
+# python3`, so the PATH written here is what selects the interpreter the
+# service runs under. macOS ships `/usr/bin/python3` at 3.9; this pack declares
+# `requires-python = ">=3.13"`, and `dashboard/collect.py` calls `zip(...,
+# strict=True)`, which 3.9 rejects with `zip() takes no keyword arguments`.
+# Move the system pair to the front and the agent still boots, still binds the
+# port and still answers -- with a traceback on every page that needs the
+# fleet, from a service `launchctl list` reports as healthy. That is the
+# failure this ordering exists to prevent, and it is not the one the old
+# comment here named.
+#
+# `/opt/homebrew/bin` is the Apple Silicon prefix and `/usr/local/bin` the
+# Intel one. Naming both is what makes one plist correct on either mac; the
+# prefix that is absent costs a failed lookup and nothing else, which is why
+# neither is dead weight to be trimmed. `tailscale` and `gh` live under
+# whichever one is real. The system pair carries `git` (macOS ships a current
+# one at `/usr/bin/git`, so this is not where Homebrew earns its place) and
+# `ps`. Every directory named here is one the running service reaches into;
+# `launchctl` is not, because `install` is the only verb that calls it and the
+# service never runs that verb.
 LAUNCHD_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
 PLIST_BODY = """<?xml version="1.0" encoding="UTF-8"?>
@@ -85,10 +106,12 @@ PLIST_BODY = """<?xml version="1.0" encoding="UTF-8"?>
  <key>StandardErrorPath</key><string>{logs}/{label}.err</string>
  <key>EnvironmentVariables</key>
  <dict><key>SD_REPO_ROOT</key><string>{root}</string>
-  <!-- launchd's own PATH is /usr/bin:/bin:/usr/sbin:/sbin, which holds neither
-       `git` nor `tailscale`. Under it the fleet reads as zero repositories and
-       the tailnet bind silently does nothing, both of them looking like a
-       quiet dashboard rather than a broken one. -->
+  <!-- launchd's own PATH is /usr/bin:/bin:/usr/sbin:/sbin. It does carry `git`
+       and `ps`, and nothing else this service needs: no `tailscale`, so the
+       tailnet bind silently does nothing; no `gh`, so the issues half reports
+       a missing binary; and no python3 above the 3.9 macOS ships, which is
+       four minor versions under this pack's floor. All three read as a quiet
+       dashboard rather than a broken one. See LAUNCHD_PATH for the order. -->
   <key>PATH</key><string>{path}</string>
   <!-- Also listen on this node's tailnet addresses, not just loopback: an IP
        URL keeps working on a device whose resolver ignores MagicDNS. On here
