@@ -2437,8 +2437,8 @@ from a number the operator types.
 - **2026-09-05** — Planning review, round thirty-three of forty: one
   blocking finding, addressed by the operator's decision that also
   closes rounds thirty to thirty-two.
-  - C-63, requirement 5: the deferred refresh added a commit after the
-    integration update, so the reviewed head and the pushed head
+  - **C-63, requirement 5. `addressed`.** The deferred refresh added a commit
+    after the integration update, so the reviewed head and the pushed head
     differed, and the unattended path either pushed an unreviewed commit
     or stopped for a pass. The reviewer offered the simpler design,
     deriving terminal state from git trailers with no rewrite of other
@@ -2454,6 +2454,15 @@ from a number the operator types.
     one empty commit on the item's own branch, for a branch-only cancel
     and for the guest fork. Requirement 5 and criterion 13 rewritten,
     criteria 11 and 12 and the design page follow; items B and D follow.
+    Re-read 2026-09-12, against the page rather than against this row:
+    requirement 5 carries the trailer design and names "the operator's
+    decision on 2026-09-05 after A's round thirty-three" as its source,
+    criterion 13 asserts the import-and-retire fixture and cites the same
+    round, and the mirror this finding was about survives only as the
+    paragraph saying rounds eleven to thirty-two kept the line as a derived
+    mirror needing `rev`, a guard, `--rebind`, a refresh command, a lint
+    comparison and a closure. The word `deferred` above names the mechanism
+    that was dropped, not the state of this row.
 - **2026-09-05** — Planning review, round thirty-four of forty: two
   blocking findings, addressed.
   - C-64, requirement 5: the migration read only open items, and a
@@ -2663,7 +2672,8 @@ from a number the operator types.
     not the owner. Corrected in place, and the distinction now stated rather
     than assumed. Severity: material. It mattered because the sentence
     licensed the next one.
-  - **C-89, the two issues are shadowed, not imported and closed.** The
+  - **C-89, the two issues are shadowed, not imported and closed.
+    `addressed`.** The
     operator's decision of 2026-09-05, and the ownership correction is why:
     closing an issue in a repository eight people read, with a pointer to a
     database only the operator can reach, takes information away from every
@@ -2673,6 +2683,13 @@ from a number the operator types.
     Requirement 11's premise changes with it: internal issues stop being where
     work is filed, they do not stop existing. Severity: blocking, since the
     old criterion asserted a close that must not happen.
+    Re-read 2026-09-12: both halves are on the page. Criterion 28 now says the
+    two open internal issues stay open on GitHub and appear as `shadow` rows
+    after a sync, asserted by a test that runs the sync against a recording
+    fixture holding both and then asserts the rows and that the fixture saw no
+    close call; requirement 11 says they are shadowed, not imported, that both
+    stay open, and that neither is closed with a pointer, naming the same
+    decision date. No criterion left in the page asserts a close.
   - **The governed tree names a directory that is not there.** Criterion 4's
     definition lists `templates/`; the pack has no top-level `templates/`, and
     the templates live under `skills/*/templates/`. Recorded, not corrected
@@ -3159,7 +3176,8 @@ from a number the operator types.
     vendored scripts, the router workflow and the candidate ledger. Corrected
     before the fix landed; recorded because the wrong count would have made
     the frozen set shrink by three on PR 4's merge.
-  - C-154, blocking: requirement 13's second bug was documented backwards.
+  - **C-154, blocking: requirement 13's second bug was documented backwards.
+    `addressed`, and its subject is since `n/a`.**
     The page said `bin/sd-docs-lint:242` compares with `none` where it should
     use `startswith`. `:242` is a `report.note` call; the load-bearing line is
     `:244`, which already reads `if value.startswith("none"):` — and that
@@ -3169,6 +3187,19 @@ from a number the operator types.
     regression test would have been written against the wrong assertion.
     Addressed: `:244`, `if value == "none":`, and the test asserts the
     **unresolved path** failure.
+    Re-read 2026-09-12, and the correction is on the page — requirement 13 and
+    `implement.md` both name `:244`, call `startswith` the bug and
+    `if value == "none":` the cure — but the code it corrects is gone. Pull
+    request 751, commit `d48d7a19`, "rule 5 stops asking for a line the change
+    has no item for", deleted the `Work: none - <reason>` form outright and
+    took `WORK_NONE_RE` and the `value.startswith("none")` line with it;
+    `grep -rn 'startswith("none")' bin/ tests/` returns nothing today, and
+    `:244` is now an unrelated `report.fail` about decision-record naming. So
+    the row closes on its correction, and the regression test it prescribes is
+    `n/a` against a deleted code path. **This does not repair requirement 13,
+    which still lists the bug, or `implement.md`, which still assigns the test
+    to PR 2.** That staleness is a finding of its own and is left for the
+    operator rather than fixed under this row's number.
   - C-155, blocking: C-150 above is refuted. The two signs of rule 1 *can*
     both hold, and must. `item_directories` returns active and archived items
     in one flat list — its own docstring says so — and
@@ -3245,9 +3276,10 @@ from a number the operator types.
     `2026-08-29-artifacts-as-product`, is the case this item cites at
     `prd.md:794` for keeping directories. Merging it would also have broken
     the thirteen references C-164 names. Recorded; the pull request stays closed.
-  - C-166, decision: criterion 33 added, on the operator's word, closing the
-    gap C-164 recorded. `sd-docs-lint` gains a rule that enumerates tracked
-    `*.md` from git, outside `docs/work/archive/` and `CHANGELOG.md`, and
+  - **C-166, decision: criterion 33 added, on the operator's word, closing the
+    gap C-164 recorded. `addressed`.** `sd-docs-lint` gains a rule that
+    enumerates tracked `*.md` from git, outside `docs/work/archive/` and
+    `CHANGELOG.md`, and
     fails on a `docs/work/<path>` reference that names nothing. Written by
     running it first, not after: over this repository it reads 62 references
     in 138 files with **none** unresolved, and with pull request 743's four
@@ -3261,8 +3293,24 @@ from a number the operator types.
     it for the same reason. This is C-27's rule from round
     fourteen, dropped with requirement 5's deletion; the deletion is gone and
     the need is not.
-  - C-167, blocking: requirement 13's removal list has an entry no pull
-    request lands. "The residue detectors (`bin/sd-status:960-1018`) after one
+    Re-read 2026-09-12: criterion 33 is in the acceptance list, worded as this
+    row describes it — the git enumeration, the two exclusions, the failure on
+    a `docs/work/` reference naming nothing, and the metavariable skip carried
+    as a property with a test — and `implement.md` schedules it as rule 7 in
+    PR 7, after PR 2. The rule is further along than either page says: it is
+    already in `bin/sd-docs-lint`, landed by pull request 767, `d369b6b1`,
+    and a run in this checkout reports "rule 7 work references: read 77
+    reference(s) across 143 file(s)" with no failure. The implementation
+    page's C-154 text no longer writes an illustrative path, so the rewording
+    landed too. One correction to this row's own figures: criterion 33
+    carries a later measurement, dated
+    2026-09-07, of 49 references across 129 files and **17 unresolved across
+    12**, which supersedes the 62/138/none and 15-across-11 counts above; those
+    stand as what the day this row was written measured, not as the current
+    state.
+  - **C-167, blocking: requirement 13's removal list has an entry no pull
+    request lands. `addressed`.** "The residue detectors
+    (`bin/sd-status:960-1018`) after one
     clean run across the fleet" is the `RESIDUE` tuple and `residue_section`,
     and the string `residue` appears nowhere in `implement.md`. The cut is
     gated on a fleet run this item does not schedule, and criterion 31 cannot
@@ -3276,6 +3324,15 @@ from a number the operator types.
     removal is not what governs it. Addressed: the frozen set is stated for
     both states, and PR 2 carries the detectors as a named deferred cut so
     the requirement's entry has a landing site a reader can find.
+    Re-read 2026-09-12 against the finding's own test, which was that the
+    string `residue` appeared nowhere in `implement.md`: it appears there now,
+    across ten lines, and the PR 2 passage states the frozen set at eight
+    lines today and three if the detectors go, says the cut is gated on a
+    fleet run nothing in the item schedules, and carries the detectors as a
+    cut that is "named, gated, and not performed by this pull request", with
+    `bin/sd-status`'s `RESIDUE` tuple and `bin/sd_install.py` in that pull
+    request's Touches. The `deferred` above is the kind of cut, not the state
+    of the row.
   - C-168, material: three corrections from this session landed in
     `implement.md` and not in `prd.md`, which is where requirement 13's
     removal list actually lives. The `prd.md` still carried the backwards
