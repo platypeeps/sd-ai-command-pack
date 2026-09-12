@@ -632,6 +632,14 @@ class DisplayFieldsTests(unittest.TestCase):
         """
         self.assertEqual(["a", "b"], sd_lib.display_fields({}, ("a", "b")))
 
+    def test_a_key_named_twice_in_the_order_is_offered_once(self) -> None:
+        """A hand-written tuple acquires a repeat, and it printed twice."""
+        row = {"url": 1, "extra": 2}
+        self.assertEqual(
+            ["url", "local_status", "extra"],
+            sd_lib.display_fields(row, ("url", "local_status", "url")),
+        )
+
     def test_the_result_never_repeats_a_key(self) -> None:
         row = {"a": 1, "b": 2}
         fields = sd_lib.display_fields(row, ("a", "a", "b"), ())

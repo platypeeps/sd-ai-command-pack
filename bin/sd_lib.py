@@ -1728,6 +1728,9 @@ def display_fields(
     exists. `shown` names keys a caller already printed, such as in a header.
     """
     skip = set(shown)
-    named = [key for key in order if key not in skip]
+    # `dict.fromkeys` rather than a set: it removes a repeat while keeping the
+    # caller's order. A tuple that names a key twice printed it twice, which
+    # is the kind of thing a hand-written list acquires and nobody notices.
+    named = list(dict.fromkeys(key for key in order if key not in skip))
     known = skip | set(order)
     return named + sorted(key for key in row if key not in known)

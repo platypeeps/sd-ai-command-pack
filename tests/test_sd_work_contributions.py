@@ -290,6 +290,25 @@ class ContributionRendering(unittest.TestCase):
                    for line in text.splitlines() if line.startswith("  ")]
         self.assertEqual(["local", "evidence_verified", "reasons"], printed)
 
+    def test_a_snapshot_prints_its_revision_once(self):
+        """The `show` trailer prints `revision`; the loop must not repeat it.
+
+        `revision` is in the projection and was in neither tuple, so it first
+        reached the loop when membership stopped being the tuple -- and a
+        snapshot then carried the same value on two lines.
+        """
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            sd_work._emit_contributions(
+                {"key": "item:42", "revision": "r7", "attention": {}, "notifications": {},
+                 "contribution": {"key": "item:42", "lane": "merged", "title": "Fix",
+                                  "revision": "r7", "repo": "acme/widget"}},
+                machine=False)
+        text = output.getvalue()
+        self.assertEqual(1, len([line for line in text.splitlines()
+                                 if line.strip().startswith("revision:")]), text)
+        self.assertIn("repo", text)
+
     def test_a_field_the_header_already_printed_is_not_repeated(self):
         """`lane` and `title` are on the first line; a repeat would be a bug."""
         text = self.render({"key": "item:42", "lane": "awaiting_you", "title": "Fix",
