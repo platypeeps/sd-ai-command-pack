@@ -19,8 +19,16 @@ stamp earns its keep.
 This hook gates nothing and blocks nothing. It is fast and silent when there
 is nothing to do -- `SD_HANDOFF_RESTORE=0` in the environment (read here, set by
 nobody for you: a headless `claude -p` job exports it or eats the packet), no
-packet, a consumed packet, an expired packet -- and any internal error exits 0
-silently rather than break session startup.
+packet, a consumed packet, an expired packet -- and it exits 0 whatever
+happens, rather than break session startup.
+
+Exiting 0 and saying nothing were one sentence here, and they are not one
+thing. What is silent is a failure the hook has no words for: `main()` catches
+everything left and returns 0, because a traceback on the stream a
+SessionStart hook is read from is worse than a lost packet. A failure it *can*
+name is named -- the identity refusals below, and a claim that failed for
+something other than a lost race. Those exit 0 as well. They just do it out
+loud, into the context the session was going to be handed anyway.
 
 Identity is hashed on path and verified on content. Before injecting:
 
@@ -39,7 +47,9 @@ commit or a rebase. It is context, not a check.
 
 A win is marked consumed by renaming the packet away and writing it back, so
 two sessions racing in one directory cannot both claim it. Injected exactly
-once, then inert.
+once, then inert. A claim that fails for any reason other than losing that
+race -- a read-only state directory, a full disk, a directory removed
+underneath the hook -- says so rather than passing for "no packet here".
 
 **There are two sources, and only one of them is claimed.** The packet exists
 only if somebody ran `sd-handoff` by hand, and a session killed mid-task ran
@@ -320,17 +330,72 @@ def load_age_seconds(created_raw: object, consumed_raw: str) -> int | None:
     return max(int((consumed - created).total_seconds()), 0)
 
 
-def claim(path: Path, packet: dict) -> bool:
+def rival_or_removal(path: Path) -> str:
+    """What an ENOENT on the claim was: a rival session, or a removed directory.
+
+    `os.rename` raises the same FileNotFoundError whether another hook claimed
+    the packet a microsecond earlier or the state directory was removed
+    underneath both of them. Only the first is a race, and only the first is
+    somebody else's doing. Reporting a wiped directory as a rival sends the
+    reader looking for a process that never existed, and tells them their
+    packet was consumed when it was deleted.
+
+    `bin/sd-handoff` splits the same two causes in its own `lost_the_race`,
+    and raises, because a person ran a command and is waiting on the answer.
+    Here the caller is a SessionStart hook that must not raise, so the split
+    is carried in the return instead: "" for the race, which is genuinely
+    nothing to report, and a line for the removal, which is not.
+
+    Deliberately not the same name as the one in `sd-handoff`. Two functions
+    in `bin/` sharing a name put both of them outside the reach of the
+    dead-code check, whose blind spot `test_code_health` holds to a ceiling
+    that may only come down -- so the borrowed pattern is worth two lines of
+    cross-reference and not two entries in that blind spot.
+
+    A surviving parent means the file alone went, which is the race. This is
+    a report, so it is read after the failure and not before it: a check that
+    ran first would be a guess about a directory that can vanish between the
+    guess and the call.
+    """
+    if path.parent.is_dir():
+        return ""
+    return (
+        "A handoff packet existed for this directory but was not restored: "
+        f"the handoff directory {path.parent} no longer exists, so the packet "
+        f"at {path} could not be claimed; nothing took it, the directory "
+        "holding it was removed."
+    )
+
+
+def claim(path: Path, packet: dict) -> str | None:
     """Take exclusive ownership by renaming the packet away, then write it back.
 
     Two hooks racing in one directory both try to move the same source file;
     only the first rename can succeed, so only one session restores.
+
+    None says the packet is this session's and the context may be injected.
+    Anything else is the line the caller emits instead: "" when there is
+    nothing worth saying, and a stated reason when there is. A bare
+    `except OSError: return False` reported a read-only state directory, a
+    full disk and a vanished mount as "another session got there first", so
+    the one failure a person could have fixed was indistinguishable from the
+    routine one they are supposed to ignore -- and the hook's silence is a
+    word it has already spent on "there was no packet".
     """
     claimed = path.with_name(path.name + f".claim.{os.getpid()}")
     try:
         os.rename(path, claimed)
-    except OSError:
-        return False
+    except FileNotFoundError:
+        return rival_or_removal(path)
+    except OSError as error:
+        return (
+            "A handoff packet exists for this directory but was not restored: "
+            f"claiming it failed, because {path} could not be renamed "
+            f"({error.strerror or error}). The packet is still pending, so "
+            "fixing the cause is enough. `sd-handoff --show` is not a way "
+            "around it meanwhile: it claims by this same rename, and refuses "
+            "with the same reason until the cause is fixed."
+        )
     # One reading of the clock for one restore: the log and the packet carry
     # the same `consumed`, and the logged age is derived from it.
     consumed = now_iso()
@@ -356,7 +421,7 @@ def claim(path: Path, packet: dict) -> bool:
             os.unlink(claimed)
         except OSError:
             pass
-    return True
+    return None
 
 
 # -------------------------------------------------------------------- render
@@ -524,9 +589,12 @@ def packet_section(root: str, cwd: str, environ: dict[str, str]) -> str:
             "before pushing."
         )
 
-    if not claim(path, packet):
-        # Another session in this directory won the race for the packet.
-        return ""
+    refused = claim(path, packet)
+    if refused is not None:
+        # "" when another session in this directory won the race for the
+        # packet, which is nothing to report; a stated reason when the claim
+        # failed for a cause that is nobody's race and somebody's to fix.
+        return refused
     return context_for(packet, warnings)
 
 
