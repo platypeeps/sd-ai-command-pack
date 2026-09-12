@@ -8,8 +8,10 @@
 > Two references in them are stale: the enforcement pointer ending "When a
 > Reviewer Reports Nothing" names
 > `templates/.agents/skills/sd-review-pr/SKILL.md`, deleted on 2026-08-30 by
-> step 3e (`43170716`, #610) -- the live equivalent is
-> `skills/sd-review/SKILL.md` -- and the sweep in "When Closing Out a Task Whose
+> step 3e (`43170716`, #610) -- it has no live equivalent: nothing in `skills/`
+> or `bin/` reads a suppressed-comment block or compares a review's `commit_id`
+> to the head, so that checklist is convention, followed by hand -- and the
+> sweep in "When Closing Out a Task Whose
 > Work Already Landed" names a `scripts/` directory the same step deleted.
 >
 > The text below is unedited. It is the record of what that machinery
@@ -122,7 +124,7 @@ Over-claiming is the well-known failure. Under-claiming is the one that ends a r
 - [ ] Review body claims full coverage ("reviewed N out of N changed files") → Compare the review event's `commit_id` to the recorded head. A review can be submitted against an earlier commit while a newer one is already head; N is counted against the commit it actually read, so the claim is true and the head is still unreviewed.
 - [ ] Round looks clean → It is clean only when the body reports no new comments **and** no suppressed entry survives verification **and** `commit_id` equals the head.
 
-Enforcement lives in `templates/.agents/skills/sd-review-pr/SKILL.md` steps 4 and 5.
+Enforcement lives in `templates/.agents/skills/sd-review-pr/SKILL.md` [absent: deleted at step 3e, #610; no live equivalent, see the notice above] steps 4 and 5.
 
 ### When Closing Out a Task Whose Work Already Landed
 
