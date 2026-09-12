@@ -699,7 +699,7 @@ class Rule7WorkReferenceTests(LintFixture):
 
 
 class WorkDirSpellingTests(LintFixture):
-    """One root, spelled any accepted way, is read as one root.
+    """A spelling that opens a root is read as that root, or is refused.
 
     `--work-dir` is a path to rules 1, 2, 5 and 6 and a *literal prefix* to
     rule 7, which matches it against the text of tracked markdown where a
@@ -711,7 +711,23 @@ class WorkDirSpellingTests(LintFixture):
     dangling reference the relative spelling catches. A rule that reads
     nothing has checked nothing, which is the failure the rule's own
     `git could not list tracked markdown` branch already refuses to commit.
+
+    This class first claimed the general form -- one root however it is
+    spelled -- and the review of #833 showed that claim false on this
+    platform, which is the reason for the hedged sentence above. `resolve()`
+    canonicalises `..`, symlinks and separators but not *case*, so on APFS
+    `--work-dir DOCS/WORK` opened the real tree for rules 1, 2, 5 and 6 and
+    survived as `DOCS/WORK` into rule 7: 77 references across 143 files
+    became 0 across 1096, and the command still exited 0. The canonical
+    spelling now comes from the directory entry, so the claim holds where the
+    filesystem folds case; where it does not fold case, a mis-cased root
+    opens nothing and is reported missing. Both are answers. Neither is the
+    silent pass.
     """
+
+    def case_folds(self) -> bool:
+        """Whether this filesystem opens `DOCS` and `docs` as one directory."""
+        return (self.repo / "DOCS" / "WORK").is_dir()
 
     def setUp(self) -> None:
         super().setUp()
@@ -778,6 +794,60 @@ class WorkDirSpellingTests(LintFixture):
             outside = pathlib.Path(elsewhere) / "docs" / "spec"
             outside.mkdir(parents=True)
             self.assertEqual(lint.main(["--spec-dir", str(outside)]), 2)
+
+    def test_a_case_only_misspelling_is_not_a_second_work_root(self) -> None:
+        """The #833 finding: `resolve()` does not canonicalise case.
+
+        On a case-folding filesystem `DOCS/WORK` is the same directory, so it
+        has to read the same; on one that does not fold, it is no directory at
+        all, so it has to be reported missing. The outcome this refuses is the
+        third one, which is what the tool did: open the right tree, keep the
+        typed string, read nothing with it, and exit 0.
+        """
+        baseline = self.report_for("docs/work")
+        shouted = self.report_for("DOCS/WORK")
+        if self.case_folds():
+            self.assertEqual(self.rule_7_note(shouted), self.rule_7_note(baseline))
+            self.assertEqual(shouted.failures, baseline.failures)
+        else:
+            self.assertEqual(len(shouted.failures), 1, shouted.failures)
+            self.assertIn("does not exist", shouted.failures[0])
+
+    def test_the_canonical_spelling_comes_from_the_directory_entry(self) -> None:
+        self.assertEqual(lint.spelled_on_disk(self.repo, "docs"), "docs")
+        # Left as typed, so the caller reports the directory that is not there
+        # rather than this inventing one that is.
+        self.assertEqual(lint.spelled_on_disk(self.repo, "not-a-directory"), "not-a-directory")
+        if self.case_folds():
+            self.assertEqual(lint.spelled_on_disk(self.repo, "DOCS"), "docs")
+
+    def test_run_guards_every_root_and_not_only_the_work_dir(self) -> None:
+        """An absolute right-hand operand wins in pathlib, for all three.
+
+        The foreign tree here is deliberately *valid*, so that a `run` which
+        only guards `work_dir` reports no failures at all -- which is what it
+        did: rules 3 and 4 lint one repository while the rest lint another,
+        and the verdict over that mixture is a clean one.
+        """
+        for flag, relative in (("--spec-dir", "docs/spec"), ("--decisions-dir", "docs/decisions")):
+            with self.subTest(flag=flag), tempfile.TemporaryDirectory() as elsewhere:
+                outside = pathlib.Path(elsewhere) / relative
+                outside.mkdir(parents=True)
+                (outside / "page.md").write_text("# page\n", encoding="utf-8")
+                (outside / "index.md").write_text(
+                    "# index\n\n- [page](./page.md)\n", encoding="utf-8"
+                )
+                self.git("add", "-A")
+                report = lint.run(
+                    self.repo,
+                    "docs/work",
+                    str(outside) if flag == "--spec-dir" else "docs/spec",
+                    str(outside) if flag == "--decisions-dir" else "docs/decisions",
+                    None,
+                )
+                self.assertEqual(len(report.failures), 1, report.failures)
+                self.assertIn(flag, report.failures[0])
+                self.assertIn("is outside", report.failures[0])
 
     def test_cli_accepts_an_absolute_work_dir_inside_the_repository(self) -> None:
         self.git("add", "-A")

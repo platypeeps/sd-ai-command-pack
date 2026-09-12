@@ -29,6 +29,7 @@ the arguments themselves were wrong.
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import re
 import sys
@@ -531,6 +532,50 @@ def check_work_references(repo: pathlib.Path, work_dir: str, report: Report) -> 
     report.note(f"rule 7 work references: read {seen} reference(s) across {files} file(s)")
 
 
+def spelled_on_disk(base: pathlib.Path, name: str) -> str:
+    """`name` as the directory entry in `base` actually spells it.
+
+    `Path.resolve()` canonicalises `..`, symlinks and duplicate separators. It
+    does not canonicalise *case*, and APFS -- this repository's filesystem --
+    opens `DOCS` and `docs` as one directory while handing back whichever
+    string the caller typed. That is the whole defect surviving in miniature:
+    `--work-dir DOCS/WORK` opened the real tree, so rules 1, 2, 5 and 6 all
+    ran correctly, and then the untouched string reached rule 7's regex, which
+    only ever sees `docs/work/` written in markdown. Measured on this
+    checkout before this function existed:
+
+        --work-dir docs/work   rule 7 ... read 77 reference(s) across 143 file(s)
+        --work-dir DOCS/WORK   rule 7 ... read 0 reference(s) across 1096 file(s)
+
+    Both exited 0. The archive skip prefix misses for the same reason, which
+    is the 1096 rather than 143. A silent pass is worse than the half-applied
+    run this rule set exists to close, because a refusal at least says so.
+
+    The directory entry is the authority on its own name, so ask it, and match
+    by identity rather than by a case-fold this process would have to guess --
+    APFS also normalises Unicode, so lowercasing both sides is not the same
+    question. Non-existent components are left as typed: the caller's next
+    check is whether the directory is there, and it should report that.
+    """
+    try:
+        wanted = (base / name).lstat()
+    except OSError:
+        return name
+    try:
+        with os.scandir(base) as entries:
+            for entry in entries:
+                if entry.name == name:
+                    return name
+                try:
+                    if os.path.samestat(entry.stat(follow_symlinks=False), wanted):
+                        return entry.name
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return name
+
+
 def repo_relative(repo: pathlib.Path, value: str) -> tuple[str, str]:
     """A directory flag's value as the repo-relative POSIX path it claims to be.
 
@@ -561,6 +606,14 @@ def repo_relative(repo: pathlib.Path, value: str) -> tuple[str, str]:
     options that hand a command a repository other than the caller's.
     Standing in that repository already lints it correctly, so the refusal
     says to do that instead.
+
+    One residual, deliberately left: an absolute value whose *prefix* is
+    mis-cased -- `/USERS/sven/...` for `/Users/sven/...` -- fails the
+    containment test and is refused as outside the repository, though a
+    case-insensitive filesystem would have opened it. That is a loud refusal
+    naming the spelling to use, not a silent pass, so it is the safe side of
+    the line and not worth the machinery to canonicalise a prefix this
+    process never chose. Every spelling that reaches a rule is canonical.
     """
     resolved = (repo / value).resolve()
     try:
@@ -573,7 +626,16 @@ def repo_relative(repo: pathlib.Path, value: str) -> tuple[str, str]:
         )
     if relative == pathlib.Path("."):
         return "", f"names {repo} itself, not a directory inside it"
-    return relative.as_posix(), ""
+    # Deciding equality correctly is not enough on its own: the literal string
+    # is what reaches rule 7's regex and its archive prefix, so the canonical
+    # spelling has to replace it rather than merely be compared against it.
+    canonical: list[str] = []
+    base = repo
+    for part in relative.parts:
+        part = spelled_on_disk(base, part)
+        canonical.append(part)
+        base = base / part
+    return "/".join(canonical), ""
 
 
 def run(
@@ -587,12 +649,24 @@ def run(
     repo = repo.resolve()
     # Also here, and not only at the flag: `run` is the library entry point,
     # and a caller reaching it directly must not be able to half-apply the run
-    # either.
-    normalised, problem = repo_relative(repo, work_dir)
-    if problem:
-        report.fail(f"--work-dir {work_dir}", problem)
-        return report
-    work_dir = normalised
+    # either. Every root, not just the one this item was reported against --
+    # an absolute right-hand operand wins in pathlib, so `repo / spec_dir`
+    # left the repository as silently as `work_dir` did, and rules 3 and 4
+    # reported on a foreign tree with no failures at all.
+    roots = {}
+    for flag, given in (
+        ("--work-dir", work_dir),
+        ("--spec-dir", spec_dir),
+        ("--decisions-dir", decisions_dir),
+    ):
+        normalised, problem = repo_relative(repo, given)
+        if problem:
+            report.fail(f"{flag} {given}", problem)
+            return report
+        roots[flag] = normalised
+    work_dir = roots["--work-dir"]
+    spec_dir = roots["--spec-dir"]
+    decisions_dir = roots["--decisions-dir"]
     work_root = repo / work_dir
     if not work_root.is_dir():
         report.fail(str(work_root), "the work directory does not exist")
