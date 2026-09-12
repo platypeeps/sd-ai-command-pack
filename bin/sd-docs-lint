@@ -4,8 +4,8 @@
 Five rules, no more (adding a sixth is a decision record, not a patch):
 
 1. Shape         -- a work item is a `<YYYY-MM-DD>-<slug>` directory holding a
-                    `prd.md` whose frontmatter carries a title, a known status,
-                    and a creation date that agrees with the directory name.
+                    `prd.md` with a title, a date agreeing with the directory, and
+                    a known `status:` only where `.status-source` is not `row`.
 2. Ready         -- an item that claims to be workable can be worked: it states
                     acceptance criteria, carries no open BLOCKING line, and,
                     when `in_progress`, records the branch it lives on.
