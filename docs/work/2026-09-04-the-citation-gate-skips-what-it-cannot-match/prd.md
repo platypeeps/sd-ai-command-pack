@@ -24,6 +24,39 @@ Measured against the merged tree, over every `*.md` in the checkout:
 | **punctuation alone** — `PAIR`'s `\s*` is not a comma, and nothing else would have skipped it | **0** | no |
 | | **23** | |
 
+**Re-measured 2026-09-12, at implementation, per criterion 3.** The table above
+is a snapshot from 2026-09-04 and every figure in it has moved. It is kept
+because an item about a gate that hides things should not hide that its own
+numbers drifted. What holds now, printed by the module on every run:
+
+| bucket | live | archived | total |
+|---|---:|---:|---:|
+| `compared` | 39 | 15 | **54** |
+| `no-adjacent-anchor` | 322 | 2,410 | 2,732 |
+| `elided-path` | 176 | 2,180 | 2,356 |
+| `archived-stale` | 0 | 277 | 277 |
+| `anchor-not-a-symbol` | 13 | 131 | 144 |
+| `separator-not-adjacent` | 20 | 114 | 134 |
+| `declared-absent` | 1 | 0 | 1 |
+| `absent-but-present` | 0 | 0 | **0** |
+| `target-missing` | 0 | 0 | **0** |
+| `escapes-checkout` | 0 | 0 | **0** |
+| `quoted` | 1 | 0 | **1** |
+| | | | **5,699** |
+
+Corpus: 1,096 tracked markdown files, `CHANGELOG.md` excluded by name. The
+compared population was **36** under the predecessor's corpus immediately
+before this work and is **54** after it, of which 39 are live. Two of the
+eighteen were found by widening to the parenthesised comma, and both were
+stale: `CITATION_RE` cited at `bin/sd-docs-lint:306` when it is at 351, and
+`MODES` cited at `bin/sd_lib.py:32` when it is at 38. Neither was reachable
+before. That is criterion 4 paying for itself on the day it landed.
+
+`target-missing`, `escapes-checkout` and `absent-but-present` are all empty, which is the reason
+`make check` stays green through this change rather than a claim that nothing
+is wrong: the one live missing target is criterion 2's, and it carries
+`[absent: ...]`.
+
 The last row is zero *today* and that is not reassuring, because it was 1 an hour
 ago. The 24th comma-shaped citation in this repository was in the first draft of
 **this PRD**, and vanished when the draft was rewritten. The document was inside

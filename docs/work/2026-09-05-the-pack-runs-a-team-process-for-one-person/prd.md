@@ -153,8 +153,8 @@ caps; the path for a change at each size; and the modes and how they resolve.
 `sd-help` names it. The `CLAUDE.local.md` block the installer writes links to it.
 
 The block carries the keys the pack reads and no others: `mode:` (`MODES`,
-`bin/sd_lib.py:32`), `check:`, `test:` and `lint:` (`CHECK_NAMES`, `:36`, read
-at `:391-414`), and `reviewers:`, the consent key requirement 6 adds. Every
+`bin/sd_lib.py:38`), `check:`, `test:` and `lint:` (`CHECK_NAMES`, `:42`, read
+at `:1004`), and `reviewers:`, the consent key requirement 6 adds. Every
 opt-in lane is asked for by name in the moment. A key that turns a lane on
 permanently is a default in disguise: it converts a decision about one change
 into a decision about the repository, taken once and unrecorded.

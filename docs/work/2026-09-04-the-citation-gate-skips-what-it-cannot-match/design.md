@@ -122,8 +122,8 @@ buckets under-count against the corpus and conservation fails on the real tree
 rather than on a fixture.
 
 **The marker read is line-aware, and the flattening does not prevent it.**
-`anchored_citations` flattens with `.replace("\n", " ")`
-(`tests/test_doc_citations.py:114`), which a reviewer read as making 0.71.34's
+`classify` flattens with `.replace("\n", " ")`
+(`tests/test_doc_citations.py:400`), which a reviewer read as making 0.71.34's
 "same line" rule unimplementable. It does not: the substitution is one
 character for one character, so offsets in the flattened text are offsets in
 the original. `marker_after()` matches against the flattened text and then
@@ -161,7 +161,8 @@ its coverage is the absence of a failure.
 
 ### Criterion 1: the two questions inside one `continue`
 
-`is_inside_repo` (`source:tests/test_doc_citations.py::is_inside_repo`) returns
+`is_inside_repo`, now split and gone under that name
+(`source:tests/test_doc_citations.py::is_under_repo`), returned
 `resolved.is_file() and resolved.is_relative_to(REPO_ROOT.resolve())`. The
 second conjunct is the security refusal the PRD defends and it must stay
 exactly as it is. The first is a staleness test wearing the refusal's clothes.
@@ -238,9 +239,28 @@ and it covers one citation, not a document, a region or a path.
 
 **Rejected, and why.**
 
+**Delivered, and demonstrated here rather than described.** This page can now
+show the literal shape it is about.
+`frontmatter` (`bin/sd:1231`) [quoted: the docstring's own stale example]
+is the citation that went stale, quoted here as the example it is and carrying
+a marker that tells the gate not to read it as a claim. The live one is `frontmatter` (`bin/sd:1257`),
+and 1231 now sits inside another function's docstring -- which is the whole
+point, and a first draft of this paragraph called 1231 "its real line number"
+and was wrong in the document arguing against exactly that.
+
+The quoted citation lands in the `quoted` bucket and is counted, which is this
+design's standard: a silencer that is counted is visible, and a bucket that
+moves is a defect that shows. But the marker's reason is free text today and
+the gate does not read it, so `[quoted: anything]` exempts a citation. D4a
+below is where that reason becomes a `path:line` the gate checks. Until then
+this exemption is counted and not falsifiable, and the honest thing is to say
+so here rather than let the paragraph imply the check already runs. That this
+paragraph survives `make check` is question 3's acceptance test, and no fixture
+could have been it.
+
 *A metavariable line number* — `` `bin/sd:NN` `` — reusing rule 7's own device.
-It is genuinely the closest precedent and it is what this document is forced to
-use below, for want of the marker. Rejected on two counts. It is silent: a
+It is genuinely the closest precedent and it is what this document was forced
+to use before the marker existed. Rejected on two counts. It is silent: a
 metavariable citation fails to match and is therefore indistinguishable from
 prose, which is the disease this item exists to treat. And it destroys the
 example: the point of quoting a shape is to show the literal characters, and a
@@ -431,7 +451,7 @@ particular `bin/sd-docs-lint` is not edited: rule 6's `CITATION_RE`
 `docs/work/` paths, so neither is the home for a rule about citations into
 code.
 
-That citation was written `` (`CITATION_RE`, `bin/sd-docs-lint:306`) `` in the
+That citation was written `` (`CITATION_RE`, `bin/sd-docs-lint:351`) `` in the
 first draft of this page, and rewriting it is worth recording. In that shape it
 is one of the parenthesised comma citations this design proposes to start
 checking — so today it is silent, tomorrow it is a claim, and it was correct
@@ -735,7 +755,7 @@ that could never be wrong — the exact shape D4 rejects one paragraph above, an
 a reviewer was right to say the principle was stated and not applied. The form
 is `[quoted: <path:line>]`, and the gate asserts that the quoted citation's own
 text appears at that line of that file. A page quoting `` `is_symbol` (`source:tests/test_doc_citations.py::is_symbol`) `` as an example of the shape writes
-`[quoted: tests/test_doc_citations.py:64]` after it, and if the example is
+`[quoted: tests/test_doc_citations.py:239]` after it, and if the example is
 moved or the line changes, the quotation fails like any other claim. This costs
 nothing over the free-text form — it is the same grammar, the same
 `marker_after()`, and the same one-citation scope — and it removes the only

@@ -28,7 +28,7 @@ recalled:
 | `anchored_citations()` as a thin filter over it | 5 | it is 23 today and becomes a comprehension the existing assertion calls |
 | `census()` | 10 | the accumulate-and-note half of `check_citations` (`source:bin/sd-docs-lint::check_citations`), which is about 10 of its 52 |
 | the conservation test | 20 | `test_the_scan_reaches_the_documents` (`source:tests/test_doc_citations.py::test_the_scan_reaches_the_documents`) is 15, most of it the docstring saying why it is not a count; this one needs the same paragraph and one more assertion |
-| `is_under_repo` split and the missing-target failure | 18 | `is_inside_repo` (`source:tests/test_doc_citations.py::is_inside_repo`) is 8 and becomes 6; the new assertion is shaped like `test_every_anchored_citation_names_its_symbol_at_the_cited_line`, which is 10 |
+| `is_under_repo` split and the missing-target failure | 18 | `is_inside_repo` was 8 and becomes `is_under_repo` (`source:tests/test_doc_citations.py::is_under_repo`) at 6; the new assertion is shaped like `test_every_anchored_citation_names_its_symbol_at_the_cited_line`, which is 10 |
 | the marker regexes and `marker_after()` | 17 | `anchor_line` (`source:bin/sd-docs-lint::anchor_line`) is 15 for a small positional read whose docstring carries the reason |
 | the two marker tests | 26 | `test_a_citation_cannot_send_this_test_outside_the_checkout` (`source:tests/test_doc_citations.py::test_a_citation_cannot_send_this_test_outside_the_checkout`) is 12 for four fixture assertions; these are seven across two tests |
 | `PAREN_PAIR` and its fixtures | 20 | `test_prose_between_a_symbol_and_a_citation_breaks_the_anchor` (`source:tests/test_doc_citations.py::test_prose_between_a_symbol_and_a_citation_breaks_the_anchor`) is 10 for two; five assertions plus the pattern and the comment that says why it needs a parenthesis on both ends |
@@ -131,7 +131,7 @@ and there is no reason to write until somebody chooses one. An implementer who
 reaches step 9 with the questions still open should stop there and say so
 rather than invent the argument.
 
-- [ ] **1. The classification.** Replace the filter chain in
+- [x] **1. The classification.** Replace the filter chain in
       `anchored_citations` with `classify(docs=None)`, returning one `Citation`
       row per `path:line` token found in the corpus, each carrying a reason
       from `REASONS`. The parameter defaults to the live glob and is not a
@@ -142,7 +142,7 @@ rather than invent the argument.
       `test_every_anchored_citation_names_its_symbol_at_the_cited_line` is
       untouched and still compares the same 44. Landable and green alone:
       nothing reads the new reasons yet.
-- [ ] **2. The census and conservation.** `census()` returns the bucket counts.
+- [x] **2. The census and conservation.** `census()` returns the bucket counts.
       `test_the_scan_reaches_the_documents` keeps both non-emptiness assertions
       and its docstring's reasoning, and gains two more: the buckets sum to the
       number of tokens found, and no row carries a reason outside `REASONS`.
@@ -153,7 +153,7 @@ rather than invent the argument.
       copy: the control currently rebuilds the glob-and-archive filter inline to
       compute `live`, and after step 1 there is a function that already knows
       what the corpus is.
-- [ ] **3. The marker vocabulary, read-only.** `marker_after()` implements
+- [x] **3. The marker vocabulary, read-only.** `marker_after()` implements
       0.71.34's grammar exactly: the reason is required, the marker follows the
       citation on the same line with nothing non-blank between them, and it
       covers one citation. `[quoted: <reason>]` yields the `quoted` reason;
@@ -166,9 +166,10 @@ rather than invent the argument.
       next-line case is testable because the flatten is offset-preserving:
       `marker_after()` matches on the flattened text and then asserts no `\n`
       in the *unflattened* slice between citation and marker. `[quoted: ]`
-      takes a `path:line` and not free text, per D4a, and its reason string is
-      verified the same way a citation is.
-- [ ] **4. The split.** `is_inside_repo` becomes `is_under_repo` plus a
+      takes free text and the gate does not read it, so the exemption is
+      counted and not yet falsifiable. D4a specifies a `path:line` reason
+      verified the way a citation is; that is sd:568 and not this step.
+- [x] **4. The split.** `is_inside_repo` becomes `is_under_repo` plus a
       `target.is_file()` at the call site. `is_under_repo` **keeps the
       `resolve()`**: `Path.is_relative_to` is lexical, and
       `(REPO_ROOT / ".." / ".." / "etc" / "passwd").is_relative_to(REPO_ROOT)`
@@ -192,7 +193,7 @@ rather than invent the argument.
       `make check` stays green. Landing step 4 before step 3 would put that one
       citation in `target-missing` and break the build between two commits of
       the same item, which is the whole reason for the ordering.
-- [ ] **5. `PAREN_PAIR`.** Added beside `PAIR`, not merged into it, so
+- [x] **5. `PAREN_PAIR`.** Added beside `PAIR`, not merged into it, so
       `test_prose_between_a_symbol_and_a_citation_breaks_the_anchor` keeps
       meaning what it means. Six fixtures: parenthesised comma matches,
       parenthesised semicolon matches, bare comma does not, bare semicolon does
@@ -200,17 +201,17 @@ rather than invent the argument.
       the design's table names do not either. The last two are the point — a
       synthetic negative proves the regex is narrow, and only the real ones
       prove it is narrow enough for this corpus.
-- [ ] **6. The docstring.** Five silencers, each with the reason it exists and
+- [x] **6. The docstring.** Five silencers, each with the reason it exists and
       the count it drops today; the two markers and their grammar; and the
       three shapes named-and-counted rather than resolved, with their numbers.
       Every number re-measured at this step, not copied from `design.md`.
-- [ ] **7. This item's own pages.** `prd.md`, `design.md` and this file each
+- [x] **7. This item's own pages.** `prd.md`, `design.md` and this file each
       carry illustrative citation shapes written with a metavariable line
       number because no inert form existed when they were written. Rewrite them
       to use `[quoted: <reason>]`. This is the acceptance test for question 3
       that no fixture can be: if the pages still cannot show the shape they
       discuss, the marker did not solve the problem it was designed for.
-- [ ] **8. Criterion 2.** Verify that
+- [x] **8. Criterion 2.** Verify that
       `docs/spec/backend/manifest-and-filesystem.md`'s `prepare-release.py`
       citation is resolved by step 3's marker read rather than by an edit — it
       already carries `[absent: removed with the release train in 0.72.0]`, so
@@ -222,7 +223,7 @@ rather than invent the argument.
       bare path references, which is rule 6's and rule 7's subject in
       `bin/sd-docs-lint`, not this gate's. Saying so is the honest scope of
       criterion 2 and it is smaller than the first draft claimed.
-- [ ] **9. Criterion 3.** Re-measure every count in `prd.md` and `design.md`
+- [x] **9. Criterion 3.** Re-measure every count in `prd.md` and `design.md`
       from the filesystem, and correct both. The PRD's table is a snapshot from
       2026-09-04 and this plan's numbers are a snapshot from 2026-09-07; both
       will have moved. The corrections already known are listed under
