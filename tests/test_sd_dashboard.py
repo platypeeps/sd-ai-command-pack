@@ -310,6 +310,24 @@ class CommandLineTests(FleetHarness):
         self.assertEqual(named & banned, set())
 
 
+def plist_strings(value):
+    """Every string anywhere in a parsed plist, keys included.
+
+    A path leaks into whatever key the next edit renders it into, so the test
+    that hunts for one walks the whole structure rather than reciting the
+    fields that leaked the last time.
+    """
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from plist_strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from plist_strings(item)
+
+
 class InstallTests(FleetHarness):
     """The one LaunchAgent this pack owns, written to a scratch HOME.
 
@@ -322,13 +340,22 @@ class InstallTests(FleetHarness):
         super().setUp()
         self.plist = self.root / "LaunchAgents" / "com.sven.sd-dashboard.plist"
         self.said: list[tuple[str, ...]] = []
+        self.logs = self.root / "Logs"
+        # Every path the install verb writes through, and `LOGS` belongs in
+        # that list for the same reason `PLIST` does: it is rendered into the
+        # body, so leaving it out means asserting against a plist that is
+        # scratch in the fields these tests read and this machine in the two
+        # they did not. `test_the_rendered_plist_carries_no_home_but_the_program`
+        # is what now notices, for this name and for the next one.
+        #
         # Captured before the patch, not after: an `addCleanup` whose argument
         # is read after the assignment restores the patch instead of removing
         # it, and the leak shows up in whatever test runs next.
-        for module, name in [(sd_dashboard, "PLIST"), (sd_dashboard, "launchctl"),
-                             (collect, "repo_root")]:
+        for module, name in [(sd_dashboard, "PLIST"), (sd_dashboard, "LOGS"),
+                             (sd_dashboard, "launchctl"), (collect, "repo_root")]:
             self.addCleanup(setattr, module, name, getattr(module, name))
         sd_dashboard.PLIST = self.plist
+        sd_dashboard.LOGS = self.logs
         sd_dashboard.launchctl = lambda *argv: (self.said.append(argv), (0, ""))[1]
         collect.repo_root = lambda environ=None: self.root  # type: ignore[assignment]
 
@@ -382,6 +409,49 @@ class InstallTests(FleetHarness):
         self.assertFalse(self.plist.exists())
         self.assertEqual([argv[0] for argv in self.said], ["bootout"])
         self.assertIn("removed", output)
+
+    def test_the_rendered_plist_carries_no_home_but_the_program(self):
+        """The scratch HOME in this class's docstring, asserted instead of assumed.
+
+        `setUp` rebinds the paths the install verb writes through, and for a
+        while that list was three names while the plist body was rendered from
+        four. `LOGS` was the fourth: a module constant off `Path.home()`, fed
+        straight into `StandardOutPath` and `StandardErrorPath`, so every body
+        the tests below assert against carried this developer's own
+        `~/Library/Logs` while every other field was scratch. Nothing failed,
+        because nothing looked -- the tests read the keys they were about and
+        the leaked ones were not among them.
+
+        Looking is the whole of this test, and it looks at the parsed plist
+        rather than at the two keys known to have leaked: a key rendered later
+        out of another home-derived constant leaks the same way and is caught
+        by the same assertion.
+
+        The program is *excluded* rather than expected, and that difference is
+        the whole portability of this test. `cmd_install` renders an absolute
+        path to this script because launchd is given one, so the program is
+        the one path in the body that may sit under the real home -- but only
+        may. A checkout outside the home directory renders a perfectly correct
+        plist with nothing under the home in it at all, and an assertion that
+        the program is present fails on it. That shape passes here, where the
+        worktree lives inside the repository and so inside the home, and on a
+        CI runner under `/home/runner`, and nowhere else -- a latent failure
+        that both of the places it would be noticed are blind to. Excluded,
+        the expected answer is the empty list from either location, and a
+        `LOGS`-class leak fails it from either location too.
+
+        The comparison is an equality against `[]` rather than an absence
+        check so that a failure prints the paths it found.
+        """
+        self.install()
+        home = str(Path.home())
+        program = str(REPO_ROOT / "bin" / "sd-dashboard")
+        body = plistlib.loads(self.plist.read_bytes())
+        leaked = sorted(
+            found for found in plist_strings(body)
+            if (found == home or found.startswith(home + "/")) and found != program
+        )
+        self.assertEqual(leaked, [])
 
     def test_launchd_refusing_is_reported_and_not_an_exit_code(self):
         """The plist is written and correct; failing would say it was not."""
