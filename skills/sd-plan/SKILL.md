@@ -63,9 +63,11 @@ create a PRD just to record routine progress or work already merged.
 4. **Review the plan.** Run `sd-review --scope planning`, which resolves the
    active `planning`/`in_progress` item's `prd.md`/`design.md`/`implement.md`
    and routes them to the reviewer the registry gives. This is the development
-   flow's *prd and design* review point; its cap is that row's in
-   `.claude/rules/sd-planning-adversarial-review.md`. Record the findings
-   under a `## Review` heading in the item.
+   flow's *prd and design* review point. The review table in
+   `.claude/rules/sd-planning-adversarial-review.md` gives the cap on that row.
+   That file lives only in the sd-ai-command-pack checkout, and planning runs
+   in whatever repository encloses cwd (R10-D6), so read the cap there. Record
+   the findings under a `## Review` heading in the item.
 5. **Promote.** `planning → ready` only when acceptance criteria are present
    and **no open `BLOCKING` line remains**. An unresolved blocking concern is a
    stop, not a note. In a checkout using row status, write the transition
@@ -181,9 +183,12 @@ the field that saves the most rework — `dont[]`.
 
 ## State of the tooling
 
-There is no `bin/sd-plan` yet; the templates ship and this procedure is carried
-out by the agent. `sd-review`, `sd-check`, `sd-status`, `sd-handoff`,
-`sd-trackers` and `sd-docs-lint` are real and callable today.
+`sd-plan` has no `bin/` half, and is not waiting for one: the templates ship
+and the procedure is carried out by the agent. The one part that would drift if
+it stayed in prose — turning a tracker reference into the `## References`
+block — is already a command, `sd-trackers ref`. `sd-review`, `sd-check`,
+`sd-status`, `sd-handoff`, `sd-trackers` and `sd-docs-lint` are real and
+callable today.
 
 `sd suggest add` can record a proposal on an existing imported work item, but
 `--from-suggestion` and `--from-proposal` have no resolution path yet. Do not

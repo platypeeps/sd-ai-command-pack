@@ -253,6 +253,25 @@ roles:
         self.assertEqual(after["body"], before["body"])
         self.assertEqual(len(after["passes"]), 2)
 
+    def test_prepare_hands_the_pull_request_body_to_the_docs_lint(self):
+        # Rule 5 only runs with a body. The skill says the PR link is checked
+        # locally in step 2, and until this test the call passed no body, so
+        # the rule reported itself not run on every prepare.
+        (self.root / "docs/work").mkdir(parents=True)
+        calls = []
+        original = ship.run
+
+        def recording(root, argv, **kwargs):
+            calls.append(argv)
+            return original(root, argv, **kwargs)
+
+        with patch.object(ship, "run", recording):
+            self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        lint = [argv for argv in calls if str(argv[1]).endswith("sd-docs-lint")]
+        self.assertEqual(len(lint), 1, calls)
+        body = pathlib.Path(lint[0][lint[0].index("--pr-body") + 1])
+        self.assertFalse(body.exists(), "the body file is temporary")
+
     def test_real_cli_review_prepare_slice_merge_and_repeat_reconcile(self):
         prepared = self.cli("prepare")
         self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)

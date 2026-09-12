@@ -21,9 +21,13 @@
 >
 > Two things here are still load-bearing and should be read before this page is
 > acted on. The **Machine-Scope Installer** section describes the
-> *design* that `bin/sd_install.py` implements, but by way of files that no
+> *design* `bin/sd_install.py` grew out of, by way of files that no
 > longer exist -- `installer/machinescope.py`, `bin/sd-machine-install`,
-> `install.py --machine` -- so it is a design record, not a map of the code.
+> `install.py --machine` -- and the code kept only part of it: the receipt
+> owns the names it rendered, and uninstall removes those and refuses one
+> whose digest changed. There is no intent journal, no `drifted`/`unowned`
+> classification, no `.bak` restore and no partition gate in the code, so it is
+> a design record, not a map of what runs.
 > And the **Trellis Gitignore Maintenance** section is the only reason the
 > vestigial `SD-AI-COMMAND-PACK` markers in `.gitignore` are still there:
 > `CONTRIBUTING.md` says they are left in place because this section still
@@ -474,7 +478,7 @@ path-less plugin entry fails with its own exit code and runs no install. Both
 halves are idempotent and the receipt only advances on success, so an update
 interrupted between them is visible as version skew and a rerun converges.
 
-### `sd-status` machine-scope line
+### `sd-status` machine-scope line [absent: `bin/sd-status` has no `--expect-clean` and no `machineScope` line; its payload is `SCHEMA_VERSION = 3`]
 
 The status collector reads the receipt directly through the engine — the shared
 state ladder finds it, no plugin required — and reports `machineScope` with
@@ -636,7 +640,7 @@ spreading the receipt, so a new receipt key that is not named here is dropped
 between the receipt and the section — which renders as a normal report that
 silently hides the very skew the key was added to expose.
 
-### `sd-status fleet` install modes, pins, and skew
+### `sd-status fleet` install modes, pins, and skew [absent: `bin/sd-status` has no fleet mode (R10-D6 dropped the walk; the dashboard owns cross-repository views), and its `SCHEMA_VERSION` is 3, not 2]
 
 Fleet mode collects `collect_machine_scope` **once per run** against the pack
 root — never once per consumer; each consumer row keeps

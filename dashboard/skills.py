@@ -20,7 +20,22 @@ from pathlib import Path
 
 # Far enough to clear the frontmatter of a file whose body is prose.
 FRONTMATTER_LINES = 20
-INSTALLED = Path.home() / ".claude" / "skills"
+
+
+def installed_root() -> Path:
+    """`~/.claude/skills` -- the same directory, resolved when it is asked for.
+
+    This was a module constant, and the home it named was frozen into the
+    import. Production never noticed: one process, one home, and the answer is
+    the same either way. A test did. `/api/skills` takes no argument for the
+    installed side, so every run of the route walked whatever the developer
+    happened to have installed -- 88 directories on the machine where this was
+    found -- and the test gate moved with the machine rather than the diff.
+
+    A function is the whole fix. The route still reaches the real home, and a
+    test can point this one name at a directory it controls.
+    """
+    return Path.home() / ".claude" / "skills"
 
 
 def described(path: Path) -> dict:
@@ -62,7 +77,7 @@ def names(root: Path) -> set[str]:
 
 def collect_skills(pack: Path, installed: Path | None = None) -> dict:
     """What ships here, what is installed, and which way each gap runs."""
-    target = INSTALLED if installed is None else installed
+    target = installed_root() if installed is None else installed
     shipped, live = names(pack / "skills"), names(target)
     rows = []
     for name in sorted(shipped | live):

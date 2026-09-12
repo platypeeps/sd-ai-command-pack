@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Lint the tracked documentation footprint of the sd-ai-command-pack workflow.
 
-Five rules, no more (adding a sixth is a decision record, not a patch):
+Seven rules (each past the fifth arrived with a decision record, not a patch):
 
 1. Shape         -- a work item is a `<YYYY-MM-DD>-<slug>` directory holding a
                     `prd.md` with a title, a date agreeing with the directory, and
@@ -14,13 +14,13 @@ Five rules, no more (adding a sixth is a decision record, not a patch):
 4. Spec index    -- every spec directory has an `index.md` that links each of
                     its siblings, so no page can be reached only by guessing.
 5. PR link       -- a named item exists under the work directory or uses a
-                    canonical database association, `sd:<positive integer>`.
-                    Database existence and ownership are checked by `sd-ship`.
-                    A change without an item needs no `Work:` line.
-                    Delivery evidence belongs to `sd-ship --deliver`.
-
-Rules 1 through 4 read the tree. Rule 5 needs the pull request body, so it runs
-only when `--pr-body` supplies one and reports itself as not run otherwise.
+                    canonical database association, `sd:<positive integer>`;
+                    existence and ownership are `sd-ship`'s. No item, no line.
+6. Citations     -- each `path:line` an active item records still says what it
+                    said when recorded (`.citations.tsv`, `--update-citations`).
+7. Work refs     -- every `docs/work/` path tracked markdown names resolves.
+Rules 1 to 4, 6 and 7 read the tree. Rule 5 needs the pull request body, so it
+runs only when `--pr-body` supplies one and reports itself as not run otherwise.
 
 Exits 0 when every rule that ran passed, 1 when any of them failed, and 2 when
 the arguments themselves were wrong.
@@ -29,6 +29,7 @@ the arguments themselves were wrong.
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import re
 import sys
@@ -531,6 +532,112 @@ def check_work_references(repo: pathlib.Path, work_dir: str, report: Report) -> 
     report.note(f"rule 7 work references: read {seen} reference(s) across {files} file(s)")
 
 
+def spelled_on_disk(base: pathlib.Path, name: str) -> str:
+    """`name` as the directory entry in `base` actually spells it.
+
+    `Path.resolve()` canonicalises `..`, symlinks and duplicate separators. It
+    does not canonicalise *case*, and APFS -- this repository's filesystem --
+    opens `DOCS` and `docs` as one directory while handing back whichever
+    string the caller typed. That is the whole defect surviving in miniature:
+    `--work-dir DOCS/WORK` opened the real tree, so rules 1, 2, 5 and 6 all
+    ran correctly, and then the untouched string reached rule 7's regex, which
+    only ever sees `docs/work/` written in markdown. Measured on this
+    checkout before this function existed:
+
+        --work-dir docs/work   rule 7 ... read 77 reference(s) across 143 file(s)
+        --work-dir DOCS/WORK   rule 7 ... read 0 reference(s) across 1096 file(s)
+
+    Both exited 0. The archive skip prefix misses for the same reason, which
+    is the 1096 rather than 143. A silent pass is worse than the half-applied
+    run this rule set exists to close, because a refusal at least says so.
+
+    The directory entry is the authority on its own name, so ask it, and match
+    by identity rather than by a case-fold this process would have to guess --
+    APFS also normalises Unicode, so lowercasing both sides is not the same
+    question. Non-existent components are left as typed: the caller's next
+    check is whether the directory is there, and it should report that.
+    """
+    try:
+        wanted = (base / name).lstat()
+    except OSError:
+        return name
+    try:
+        with os.scandir(base) as entries:
+            for entry in entries:
+                if entry.name == name:
+                    return name
+                try:
+                    if os.path.samestat(entry.stat(follow_symlinks=False), wanted):
+                        return entry.name
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return name
+
+
+def repo_relative(repo: pathlib.Path, value: str) -> tuple[str, str]:
+    """A directory flag's value as the repo-relative POSIX path it claims to be.
+
+    Returns `(normalised, problem)`; a non-empty problem means the value names
+    no directory inside `repo` and the run must stop rather than start.
+
+    `--work-dir` has two meanings at once. Rules 1, 2, 5 and 6 join it to the
+    repository root and read whatever tree that lands on; rule 7 splices it
+    into a regular expression and matches it against the *text* of tracked
+    markdown, where a `docs/work/` reference is written repo-relative and
+    nothing else. Every spelling that is not the plain relative path makes
+    those two meanings disagree, and the disagreement is silent: rule 7 then
+    matches nothing, reports `read 0 reference(s)`, and passes. Measured on a
+    fixture whose single dangling reference rule 7 catches as `docs/work`:
+    `./docs/work`, `docs/work/`, `docs/../docs/work` and the tree's own
+    absolute path each read 0 references and reported clean.
+
+    So normalise, and refuse only what cannot be normalised. An absolute path
+    inside the repository is that repository's `docs/work` spelled the long
+    way -- it has one unambiguous answer, and this gives it. A root outside
+    the repository has none: rule 7's enumeration (`git ls-files`), rule 2's
+    row database and rule 5's `Work:` resolution are all rooted at the
+    checkout the caller is standing in, so honouring it would mean re-rooting
+    four rules at a foreign repository -- a different feature, and one this
+    flag's own contract already denies: skills/sd-plan/SKILL.md calls it a
+    root within this repository, this parser's help calls it repo-relative,
+    and tests/test_verb_inventory.py records that it is not one of the
+    options that hand a command a repository other than the caller's.
+    Standing in that repository already lints it correctly, so the refusal
+    says to do that instead.
+
+    One residual, deliberately left: an absolute value whose *prefix* is
+    mis-cased -- `/USERS/sven/...` for `/Users/sven/...` -- fails the
+    containment test and is refused as outside the repository, though a
+    case-insensitive filesystem would have opened it. That is a loud refusal
+    naming the spelling to use, not a silent pass, so it is the safe side of
+    the line and not worth the machinery to canonicalise a prefix this
+    process never chose. Every spelling that reaches a rule is canonical.
+    """
+    resolved = (repo / value).resolve()
+    try:
+        relative = resolved.relative_to(repo.resolve())
+    except ValueError:
+        return "", (
+            f"names {resolved}, which is outside {repo}; the flag is "
+            "repo-relative, so lint that repository by running this from its "
+            "own root instead"
+        )
+    if relative == pathlib.Path("."):
+        return "", f"names {repo} itself, not a directory inside it"
+    # Deciding equality correctly is not enough on its own: the literal string
+    # is what reaches rule 7's regex and its archive prefix, so the canonical
+    # spelling has to replace it rather than merely be compared against it.
+    canonical: list[str] = []
+    base = repo
+    for part in relative.parts:
+        part = spelled_on_disk(base, part)
+        canonical.append(part)
+        base = base / part
+    return "/".join(canonical), ""
+
+
 def run(
     repo: pathlib.Path,
     work_dir: str,
@@ -540,6 +647,26 @@ def run(
 ) -> Report:
     report = Report()
     repo = repo.resolve()
+    # Also here, and not only at the flag: `run` is the library entry point,
+    # and a caller reaching it directly must not be able to half-apply the run
+    # either. Every root, not just the one this item was reported against --
+    # an absolute right-hand operand wins in pathlib, so `repo / spec_dir`
+    # left the repository as silently as `work_dir` did, and rules 3 and 4
+    # reported on a foreign tree with no failures at all.
+    roots = {}
+    for flag, given in (
+        ("--work-dir", work_dir),
+        ("--spec-dir", spec_dir),
+        ("--decisions-dir", decisions_dir),
+    ):
+        normalised, problem = repo_relative(repo, given)
+        if problem:
+            report.fail(f"{flag} {given}", problem)
+            return report
+        roots[flag] = normalised
+    work_dir = roots["--work-dir"]
+    spec_dir = roots["--spec-dir"]
+    decisions_dir = roots["--decisions-dir"]
     work_root = repo / work_dir
     if not work_root.is_dir():
         report.fail(str(work_root), "the work directory does not exist")
@@ -589,6 +716,19 @@ def main(argv: list[str] | None = None) -> int:
     if root is None:
         print(f"error: {pathlib.Path.cwd()} is not inside a git repository", file=sys.stderr)
         return 2
+
+    # Every directory flag is documented repo-relative and is checked to be,
+    # before any rule runs. `--spec-dir` and `--decisions-dir` carry no second
+    # meaning the way `--work-dir` does, but a root outside the checkout makes
+    # them lint one repository while the rest of the run lints another, and a
+    # verdict over a mixture is the same silent wrong answer.
+    for flag in ("work_dir", "spec_dir", "decisions_dir"):
+        given = getattr(args, flag)
+        normalised, problem = repo_relative(root, given)
+        if problem:
+            print(f"error: --{flag.replace('_', '-')} {given}: {problem}", file=sys.stderr)
+            return 2
+        setattr(args, flag, normalised)
 
     if args.update_citations:
         work_root = root / args.work_dir

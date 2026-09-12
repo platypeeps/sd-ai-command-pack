@@ -42,5 +42,8 @@ write under `docs/spec/` (and, with `--retro`, to append review learnings).
 
 ## State of the tooling
 
-There is no `bin/sd-spec` yet. Today the agent performs the refresh and
-`bin/sd-docs-lint` verifies rule 4 (`--spec-dir`, default `docs/spec`).
+`sd-spec` has no `bin/` half, and is not waiting for one: the refresh is a
+reading pass over the diff that decides which pages a change invalidates, which
+is judgement rather than something a command can compute. What is mechanically
+checkable is already checked — `sd-docs-lint` verifies rule 4 (`--spec-dir`,
+default `docs/spec`).
