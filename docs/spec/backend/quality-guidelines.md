@@ -19,9 +19,11 @@
 > **"Silent Paths Must Say Why"** is a general rule with no deleted
 > subject, and the four defects it was adopted from are still the argument for
 > it. The **bash 3.2 warning block** inside Testing Requirements is
-> **live and accurate**: `.github/scripts/check-bash32-syntax.sh` exists, `make
-> lint` runs it, and CI runs it under `STRICT=1` in the `bash32` job, exactly as
-> described -- `CONTRIBUTING.md` carries the same account. The surrounding
+> **live** with one clause gone: `.github/scripts/check-bash32-syntax.sh` exists, `make
+> lint` runs it, and CI runs it under `STRICT=1` in the `bash32` job, but it
+> enumerates `git ls-files -- '*.sh'` and nothing else -- the tracked git hooks
+> it also parsed left with `.githooks/` at step 0 (#597), and the block below
+> no longer claims them. `CONTRIBUTING.md` carries the same account. The surrounding
 > Testing Requirements prose is not: it names a Ruff scope over `install.py`,
 > `installer/`, `scripts/` and `templates/scripts/` (the live scope is
 > `LINT_RUFF_PATHS` in the Makefile) and a macOS unittest leg that R11-D4
@@ -1042,7 +1044,7 @@ Wrong: infer historical branch proof from newly submitted main-branch evidence
 Correct: require an already-recorded non-empty main branch before skipping the repeated shipped-branch check; still validate head ancestry and all identities
 ```
 
-## Ship Receipt Recording Contract
+## Ship Receipt Recording Contract [absent: `bin/sd-ship` writes no `SD_SHIP_MERGE_RESULT` line and nothing defines `load_ship_receipt()` or `record_result_from_receipt()`; the live receipt is the item's ship row in the database]
 
 ### 1. Scope / Trigger
 
@@ -1400,7 +1402,7 @@ Wrong: reject every old repository once first-parent history exceeds the search 
 Correct: bound the search window while accepting a valid anchor near the current head
 ```
 
-## Read-Only SD Check Runtime Contract
+## Read-Only SD Check Runtime Contract [absent: `bin/sd-check` exits 0, 1 or 2 only, reads no `check.json`, and hashes no state; it runs the repository's own `check`/`test`/`lint` entrypoints and reports one typed row per name]
 
 ### 1. Scope / Trigger
 
@@ -2008,7 +2010,7 @@ leg protects BSD-tool and bash-3.2 behavior that Ubuntu cannot exercise.
 > gate that parses shell with the `PATH` interpreter passes and the macOS CI
 > leg is the first thing to see it. `make lint` therefore runs
 > `.github/scripts/check-bash32-syntax.sh`, which parses every tracked `*.sh`
-> plus tracked git hooks with a probed bash 3.2 (`/bin/bash` on macOS). Run it
+> with a probed bash 3.2 (`/bin/bash` on macOS). Run it
 > directly when iterating on shell:
 >
 > ```bash

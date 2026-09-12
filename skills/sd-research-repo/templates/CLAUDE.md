@@ -94,8 +94,9 @@ The product — read what the reader gets, not what you meant:
    the mirror.
 
 This pass is the research flow's review point *after the brief and decisions*; the pass over
-the final product before the send box is the second point. Both caps live in the pack's
-`.claude/rules/sd-planning-adversarial-review.md`, and this page states neither.
+the final product before the send box is the second point. Both caps live in the
+sd-ai-command-pack checkout's `.claude/rules/sd-planning-adversarial-review.md` — not in this
+repo, which does not carry that file — and this page states neither.
 
 The second reader is an independent CLI reviewer, **run through its own CLI, not a plugin**.
 The invocation is not retyped here — `sd-research-kit review` prints it under *The second
