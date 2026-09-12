@@ -22,6 +22,7 @@ else is the change that needs a decision record.
 """
 
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -37,10 +38,28 @@ RENDER_ROOT = "skills/"
 SHELL_SUFFIXES = (".sh", ".bash", ".zsh")
 
 
-def tracked_files():
+def tracked_files(root=REPO_ROOT):
+    """Every tracked path under `root`, as git reports it.
+
+    `--deduplicate` because the index holds an unmerged path once per merge
+    stage, and plain `ls-files` prints it once per stage. A file being merged
+    therefore entered every sweep below three times: linted three times, and
+    listed three times in whichever message named it. No verdict moved --
+    these results are filtered into lists and compared as lists, so three
+    copies of an offender is still an offender and three copies of a compliant
+    file is still nothing -- which is exactly why it went unnoticed. The cost
+    was a report that named one file three times to somebody mid-merge who was
+    already hunting for what they had just broken.
+
+    `root` is the test seam, kept off the callers below: the case at the foot
+    of this file points the enumeration at a throwaway repository, because
+    nothing about a clean checkout separates the two behaviours and a check
+    made against this one would pass either way.
+    """
+
     result = subprocess.run(
-        ["git", "ls-files", "-z"],
-        cwd=REPO_ROOT,
+        ["git", "ls-files", "-z", "--deduplicate"],
+        cwd=root,
         capture_output=True,
         text=True,
         check=True,
@@ -141,6 +160,111 @@ class NoShippedShellTests(unittest.TestCase):
                 path.startswith(TOOLING_PREFIXES),
                 f"{path} is shell the bash 3.2 gate does not cover",
             )
+
+
+def _repo_with_a_script_being_merged(root):
+    """Leave `root` holding `tool.sh` unmerged in the index, resolved on disk.
+
+    A real merge rather than a hand-built index: the three stages have to come
+    from git's own conflict machinery, or this restates the belief under test
+    instead of evidencing it.
+
+    The working tree is then repaired and deliberately left unstaged, which is
+    the state this is actually met in. The conflict has been fixed in the
+    editor, the script on disk is a valid file again so nothing complains about
+    it, and the index goes on carrying three stages until somebody runs
+    `git add`. Identity and signing are passed per invocation rather than read
+    from the machine, so this does not fail on a host with no `user.email` or
+    one that signs every commit.
+    """
+
+    def git(*argv, check=True):
+        return subprocess.run(
+            ["git", "-c", "user.email=shell@example.invalid",
+             "-c", "user.name=no shipped shell",
+             "-c", "commit.gpgsign=false", *argv],
+            cwd=root, capture_output=True, text=True, check=check)
+
+    script = root / "tool.sh"
+    git("init", "-q", "-b", "main", ".")
+    script.write_text("#!/bin/bash\necho base\n")
+    git("add", "tool.sh")
+    git("commit", "-qm", "base")
+    git("checkout", "-q", "-b", "other")
+    script.write_text("#!/bin/bash\necho other\n")
+    git("commit", "-qam", "other")
+    git("checkout", "-q", "main")
+    script.write_text("#!/bin/bash\necho mine\n")
+    git("commit", "-qam", "mine")
+    git("merge", "other", check=False)
+    script.write_text("#!/bin/bash\necho resolved\n")  # fixed, not yet staged
+
+
+class EnumerationTests(unittest.TestCase):
+    def test_a_script_being_merged_is_enumerated_once(self):
+        """An unmerged path must arrive once, not once per merge stage.
+
+        Cosmetic, and stated as such rather than dressed up: every sweep above
+        filters this list and compares lists, so three copies of an offender is
+        still an offender and three copies of a compliant file is still
+        nothing. No verdict moves. What moves is the report -- the last
+        assertion here is the one a reader would actually see, and before the
+        fix it named one script three times to somebody mid-merge who was
+        already looking for what they had just broken.
+
+        Nothing about a clean checkout separates the two behaviours, so the
+        conflict is built for real and the premises are asserted before the
+        conclusion: the index is genuinely unmerged, and plain `ls-files` does
+        repeat the path there. Drop either and what follows would pass against
+        any ordinary repository, which is how this survived.
+        """
+
+        with tempfile.TemporaryDirectory() as home:
+            root = Path(home)
+            _repo_with_a_script_being_merged(root)
+
+            stages = subprocess.run(
+                ["git", "ls-files", "-u", "--", "tool.sh"], cwd=root,
+                capture_output=True, text=True, check=True).stdout
+            self.assertEqual(
+                [line.split("\t")[0].split()[-1] for line in stages.splitlines()],
+                ["1", "2", "3"],
+                "the fixture did not leave an unmerged index, so the case "
+                "below proves nothing")
+
+            repeated = subprocess.run(
+                ["git", "ls-files", "-z", "--", "tool.sh"], cwd=root,
+                capture_output=True, text=True, check=True).stdout
+            self.assertEqual(
+                [name for name in repeated.split("\0") if name],
+                ["tool.sh", "tool.sh", "tool.sh"],
+                "this git no longer repeats an unmerged path; if that is now "
+                "the default, say so here rather than deleting the case")
+
+            self.assertEqual(
+                tracked_files(root=root), ["tool.sh"],
+                "a file being merged entered the sweep once per merge stage")
+
+            # The shape every check above consumes: one script, named once.
+            # `looks_like_shell` settles a `.sh` name on the suffix alone, so
+            # this stays inside the throwaway repository.
+            self.assertEqual(
+                [p for p in tracked_files(root=root) if looks_like_shell(p)],
+                ["tool.sh"],
+                "a script being merged was reported once per merge stage")
+
+    def test_the_seam_reads_the_repository_it_is_pointed_at(self):
+        """`root` must move the enumeration, not merely be accepted.
+
+        A seam that were ignored would let the case above read this
+        repository, find no conflict in it, and pass whatever the helper does.
+        """
+
+        with tempfile.TemporaryDirectory() as home:
+            root = Path(home)
+            _repo_with_a_script_being_merged(root)
+            self.assertEqual(tracked_files(root=root), ["tool.sh"])
+            self.assertNotIn("tool.sh", tracked_files())
 
 
 if __name__ == "__main__":
