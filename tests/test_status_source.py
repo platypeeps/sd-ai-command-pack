@@ -743,10 +743,11 @@ class RuleTwoReadsTheRow(Fixture):
     def lint(self) -> list[str]:
         """Rule 2's findings alone.
 
-        Rule 1 fails on a `prd.md` with no `status:` line and will go on
-        failing until the retire commit changes its sign, which is the next
-        pull request's work and not this one's. Filtering it out here keeps
-        this class asserting the thing it is about.
+        Rule 1's sign inverts on the marker since #767 -- under `row` an
+        active `status:` line is the failure, not its absence -- and
+        `tests/test_sd_docs_lint.py` pins each cell of that table. The filter
+        stays so this class keeps asserting the thing it is about whichever
+        way a fixture is written.
         """
         report = lint.run(self.root, "docs/work", "docs/spec", "docs/decisions", None)
         return [f for f in report.failures if "is not one of" not in f]
