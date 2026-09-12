@@ -1893,10 +1893,25 @@ OPEN_WORDS = ("does not pass", "unresolved", "deferred")
 #: 1 rescue, 0 reclassifications. Carried as a second literal rather than by
 #: stemming, because a stemmer would also fold `noted` into `note`, `notes`
 #: and `noting` -- ordinary English three times over -- to win this one row.
+#:
+#: `removed` is the eighth, and it comes in with `_NAMING_SPAN_RE` rather than
+#: on its own: C-162 of the solo-first item disposes itself `Removed from PR
+#: 2's reader enumeration`, and until the parked tier stopped reading the
+#: `parked` in `the `archived` and `parked` fields` that row never reached
+#: this tier at all. Measured whole-corpus: it appears in 16 row extents of
+#: 532 -- 13 already closed, 1 parked, 2 that nothing could read -- against
+#: `added`'s 41 and `verified`'s 36, which is the exposure figure that
+#: rejected both. Both of the two were read. C-2 in `archive/2026-08/
+#: 2026-08-03-decouple-fleet-refresh-command/design.md` is `**C-2** command
+#: not shipped to consumers -> consumer-behavior claim removed.`, where the
+#: word is the disposition and nothing else in the row is. The other is a
+#: prose cross-reference that `_concern_rows` no longer reads as a row, so
+#: this tier never sees it. 1 rescue, 0 reclassifications, 0 rows made
+#: unreadable.
 CLOSED_WORDS = (
     "addressed", "rebutted", "resolved", "fixed", "n/a",
     "corrected", "recorded", "noted", "superseded", "confirmed",
-    "restated", "supersedes",
+    "restated", "supersedes", "removed",
 )
 
 #: `accepted` is checked after everything else because it is the one
@@ -1965,15 +1980,62 @@ def _disposition(text: str) -> str:
     return _verdict(text)
 
 
+#: An inline code span that *names* something rather than closing a clause.
+#: `parked` is this corpus's one disposition word that is also one of its own
+#: field names, so a row can write it in backticks meaning either. The two
+#: uses are told apart by where the span sits in the sentence: a verdict
+#: written as code ends its clause -- `` -- `parked`. `` -- while a name
+#: written as code is a noun with the rest of its phrase still to come --
+#: `` the `archived` and `parked` fields ``. So a span followed by anything
+#: other than a full stop or the end of the row is a name, and the lookahead
+#: is the whole rule. The optional `**` is for a row whose closing bold
+#: marker follows the span's own full stop.
+#:
+#: **This is deliberately not "ignore matches inside backticks".** That is
+#: the wide form `_disposition` rejects, and the same measurement rejects it
+#: again from here: applied to every tier this pattern makes 21 rows
+#: unreadable, because the house style of two whole ledgers writes the
+#: closing verdict itself as a clause-final code span and one blanked span in
+#: the middle of a row is enough to lose it.
+#:
+#: Measured whole-corpus on the parked tier alone. `parked` occurs in 18 of
+#: the 532 row extents and 7 of those are inside a code span. Three are the
+#: verdict -- C-17 and C-19 of the write-the-test-first item, both `-- `
+#: `parked`.`, and C-35 of `archive/2026-09/2026-09-02-dashboard-ack-and-
+#: mutation-count/design.md`, which is `deferred with a named reason.
+#: `parked`.` -- and this pattern leaves all three parked. The other four are
+#: the field name, and all four were reading as parked while their rows said
+#: otherwise: C-140, C-152, C-162 and C-168 of the solo-first item, plus the
+#: prose cross-reference in the branch-field item that `_concern_rows` no
+#: longer reads as a row. C-162 is the row item 484 names, and it is the
+#: expensive shape of the misread: a row disposed `Removed from PR 2's
+#: reader enumeration` was reported as waiting on a trigger nobody re-reads.
+#: 0 rescues, 4 reclassifications, every one `parked` to `closed` and every
+#: one read, 0 rows made unreadable, and `open` moves by zero.
+#:
+#: The failure it can still have is the safe one. A row writing `` `parked`,
+#: pending the 3.13 floor `` puts a comma where this rule wants a full stop
+#: and reads as unclassifiable rather than as parked -- a louder banner, not
+#: a quieter one, which is the direction this section is built to fail in.
+_NAMING_SPAN_RE = re.compile(r"`[^`\n]*`(?:\*\*)?(?![.]|\s*$)")
+
+
 def _verdict(text: str) -> str:
-    """The four tiers against one span of text, in order."""
+    """The four tiers against one span of text, in order.
+
+    The parked tier reads the text with its naming spans blanked out and the
+    other three read it whole, which is `_NAMING_SPAN_RE`'s whole reason for
+    existing: `parked` is the one word in these vocabularies that is also a
+    field name this repository writes in backticks constantly.
+    """
     lowered = text.lower()
-    for words, verdict in (
-        (PARKED_WORDS, "parked"), (OPEN_WORDS, "open"),
-        (CLOSED_WORDS, "closed"), (STANDING_WORDS, "parked"),
+    named_blind = _NAMING_SPAN_RE.sub(" ", lowered)
+    for words, verdict, span in (
+        (PARKED_WORDS, "parked", named_blind), (OPEN_WORDS, "open", lowered),
+        (CLOSED_WORDS, "closed", lowered), (STANDING_WORDS, "parked", lowered),
     ):
         for word in words:
-            if re.search(rf"(?<![a-z]){re.escape(word)}(?![a-z])", lowered):
+            if re.search(rf"(?<![a-z]){re.escape(word)}(?![a-z])", span):
                 return verdict
     return ""
 
@@ -2013,6 +2075,63 @@ def _concern_shape(text: str) -> int:
 #: A bulleted row, for the tier above prose. `[-*]` and then whitespace: the
 #: dash alone is not enough, since a prose line may begin with an em dash.
 _BULLET_RE = re.compile(r"^[-*]\s")
+
+
+def _continues_a_sentence(lines: list[str], number: int, text: str) -> bool:
+    """Whether a hit is the middle of a sentence rather than a row.
+
+    `CONCERN_ANCHOR` is anchored at the start of a line, so the only prose it
+    can match is prose that happens to *wrap* onto a `C-` id: `... the same
+    fixed-string quoting that C-4 and` / `C-9 earned.` is one sentence, and
+    the second line of it is a hit. Nothing downstream then declines to
+    report it, so the section names a concern that has no row -- C-9 has no
+    ledger entry anywhere in `2026-09-04-the-plan-interview-is-one-sentence/
+    design.md`, and the only place the id appears in that file is inside that
+    sentence.
+
+    **The property is the wrap, not the prose shape.** `_ROW_START_RE` warns
+    that an unindented row needs no marker, because the prose ledgers in the
+    older archived items write a row at column zero with nothing in front of
+    it, so "prose shape means not a row" would be wrong as a blanket rule --
+    and `test_an_unindented_row_needs_no_marker_to_end_absorption` writes two
+    such rows back to back, which the blanket rule would swallow. A row
+    *begins a sentence*; a wrap *finishes the one above it*. So a
+    prose-shaped hit is discarded only when the line above it neither is
+    blank nor ends a sentence, which leaves both a bare prose row that opens
+    a block and one that follows another bare prose row still readable.
+
+    The sentence test is `.`, `!` or `?`, and deliberately not `:` or `;`:
+    both of those *introduce* what comes next, so a line ending in one is
+    still mid-sentence. Measured -- with them counted as terminators two more
+    hits survive, `prd.md:513` of the sd-status item and `design.md:460` of
+    the plan-interview item, and both are the middle of a list of concern
+    ids rather than a row.
+
+    Measured whole-corpus: of the 627 hits, 18 are prose-shaped, **none** of
+    the 18 has a blank line above it, and 15 of the 18 continue a sentence.
+    The 3 that follow a full stop stay, and none of the three is the row of
+    record for its id, so the escape hatch costs nothing today. The 15
+    collapse to 6 rows of record, every one of them read: four were reported
+    as unreadable -- C-9 above, C-1 in `archive/2026-07/2026-07-28-pin-
+    bookkeeping-ci-classifier-trust/implement.md`, and C-3 and C-4 in
+    `archive/2026-08/2026-08-11-thin-candidate-loop-shape` -- and two were
+    reported as parked from a word inside somebody else's paragraph: C-7 of
+    the branch-field item and C-11 of `archive/2026-07/2026-07-30-silence-
+    satisfied-scope-advisory/implement.md`. 6 findings that named no row,
+    removed; 0 verdicts moved and 0 rows added.
+    """
+    if _concern_shape(text):
+        return False
+    previous = lines[number - 2] if number >= 2 else ""
+    if not previous.strip():
+        return False
+    return not _SENTENCE_END_RE.search(previous)
+
+
+#: A line that finishes its sentence. The trailing class is the markup a
+#: sentence can close inside -- a bold span, a quotation, a code span -- so
+#: `... (`prd.md:1232-1234`).` and `... is wrong.**` both count.
+_SENTENCE_END_RE = re.compile(r"[.!?][\"')*`_\]]*\s*$")
 
 
 def _absorb(lines: list[str], number: int) -> str:
@@ -2057,6 +2176,8 @@ def _concern_rows(root: pathlib.Path) -> list[dict[str, Any]]:
             continue
         if path not in cache:
             cache[path] = _file_lines(root / path)
+        if _continues_a_sentence(cache[path], int(number), text):
+            continue
         # Keyed on the **full** path. A prototype keying on `split("/")[2]`
         # collapsed 487 archived items into one bucket and lost C-19 outright,
         # which is the one row that most had to survive.

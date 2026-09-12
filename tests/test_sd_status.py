@@ -2444,6 +2444,43 @@ class ConcernLedgerTests(InventoryFixture):
             found.get("unreadable-concern-row"),
         )
 
+    def test_a_wrapped_sentence_is_not_a_ledger_row(self) -> None:
+        """A concern named only in passing has no row, and reporting one
+        invents a finding nobody can go and read.
+
+        `CONCERN_ANCHOR` is anchored at the start of a line, so the only
+        prose it can match is prose that happens to *wrap* onto a `C-` id.
+        Real: `2026-09-04-the-plan-interview-is-one-sentence/design.md` has
+        no C-9 row anywhere, and the only place the id appears in the file is
+        the tail of the sentence below. 7 of the 627 hits collapse to 6 such
+        rows of record, four reported as unreadable and two reported as
+        parked from a word inside somebody else's paragraph.
+
+        The rule is the wrap and not the prose shape, so the last two rows
+        are the half that must not move: `C-3` opens a block and `C-4`
+        follows a finished sentence, and both are bare prose rows of the kind
+        `_ROW_START_RE` exists for. `C-1` is not a hit at all -- it sits
+        mid-line, where the anchor cannot reach it -- which is the shape that
+        makes this defect invisible until a sentence wraps.
+        """
+        self.ledger("2026-08-04-wrap/prd.md", (
+            "# wrap\n\n"
+            "The clause survived because it was the same fixed-string "
+            "quoting that C-1 and\n"
+            "C-2 earned. A criterion whose path names nothing checks "
+            "nothing.\n\n"
+            "C-3 identified the wrong anchor and nothing here says what "
+            "became of it.\n"
+            "C-4 is an argument-construction defect and only argv proves it."
+            " Corrected.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-04-wrap/prd.md#C-3"],
+            found.get("unreadable-concern-row"),
+            "C-2 is the tail of a sentence, not a row; C-3 and C-4 are rows",
+        )
+
     # -- never dropped ------------------------------------------------------
 
     def test_a_row_with_no_word_this_reader_carries_is_a_finding(self) -> None:
@@ -2624,6 +2661,61 @@ class ConcernLedgerTests(InventoryFixture):
             ],
             sorted(found.get("unreadable-concern-row", [])),
         )
+
+    # -- `parked`, the word that is also a field name -----------------------
+
+    def test_a_backticked_field_name_does_not_park_a_row(self) -> None:
+        """`parked` is this corpus's one verdict that is also its own field
+        name, and the two are told apart by where the code span sits.
+
+        A verdict written as code ends its clause; a name written as code is
+        a noun with the rest of its phrase still to come. Both rows below are
+        real. The first is C-162 of the solo-first item, which named
+        `bin/sd-docs-lint` among the readers of the `archived` and `parked`
+        fields and was reported as waiting on a trigger nobody re-reads --
+        the most expensive misread this section has, because a disposed row
+        reads as live work. The second is C-17 of the write-the-test-first
+        item, whose disposition *is* the backticked word, and it must stay
+        parked: 3 of the 7 backticked `parked`s in the corpus are that shape,
+        and ignoring matches inside code spans wholesale loses all three.
+
+        Whole-corpus: 4 rows move, every one `parked` to `closed`, none is
+        made unreadable and `open` moves by zero.
+        """
+        self.ledger("2026-08-04-naming/prd.md", (
+            "# naming\n\n"
+            "- C-1, minor: `bin/sd-docs-lint:87-91` was listed among the "
+            "readers of the `archived` and `parked` fields. It reads "
+            "neither, and the line range is unrelated. Corrected.\n"
+            "- **C-2** (the handoff had no operative pre-fix step) -- "
+            "`parked`. The seam it describes no longer exists.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-04-naming/prd.md#C-2"],
+            found.get("parked-concern"),
+            "C-1 names the field; C-2's whole disposition is the code span",
+        )
+        self.assertEqual([], found.get("unreadable-concern-row", []))
+
+    def test_removed_is_a_disposition_this_reader_carries(self) -> None:
+        """`removed` joins `CLOSED_WORDS`, and it comes in with the naming
+        rule rather than on its own.
+
+        C-162 of the solo-first item disposes itself `Removed from PR 2's
+        reader enumeration`, and until the parked tier stopped reading the
+        field name in its prose the row never reached this tier at all.
+        Measured whole-corpus, its exposure is 16 row extents of 532 -- 13
+        already closed, 1 parked, 2 nothing could read -- against `added`'s
+        41 and `verified`'s 36, the figures that rejected those two. 1
+        rescue, 0 reclassifications, 0 rows made unreadable.
+        """
+        self.ledger("2026-08-04-removed/prd.md", (
+            "# removed\n\n"
+            "- C-1, minor: the reader enumeration named a file that reads "
+            "neither field. Removed from PR 2's enumeration.\n"
+        ))
+        self.assertEqual([], self.scan())
 
     # -- the keying ---------------------------------------------------------
 
