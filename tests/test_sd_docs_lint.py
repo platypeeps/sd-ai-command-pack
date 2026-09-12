@@ -662,6 +662,30 @@ class Rule6CitationTests(LintFixture):
         page.write_text("\n".join(lines) + "\n", encoding="utf-8")
         self.assert_clean()
 
+    def test_red_a_deleted_citation_that_is_a_prefix_of_a_surviving_one(self) -> None:
+        """`prd.md:3` is a substring of `prd.md:35`.
+
+        Three pages in this repository carry a pair like that today, so a
+        source-side check written as a substring scan would report the
+        shorter citation as still present after it was deleted. The check
+        compares against `item_citations`, the same walk the recorder uses,
+        so the two halves of the comparison cannot disagree.
+        """
+
+        item = self.cited_item()
+        lines = (item / "prd.md").read_text(encoding="utf-8").splitlines()
+        while len(lines) < 35:
+            lines.append(f"filler line {len(lines) + 1}")
+        (item / "prd.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        page = item / "design.md"
+        page.write_text(
+            "# design\n\nThe ladder is at `prd.md:3`.\n\nThe filler is at `prd.md:35`.\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(lint.write_citation_manifest(item, self.work)[0], 2)
+        page.write_text("# design\n\nThe filler is at `prd.md:35`.\n", encoding="utf-8")
+        self.assert_fails("design.md no longer cites it")
+
     def test_red_the_citing_page_is_gone_altogether(self) -> None:
         """A deleted page and a deleted citation read differently to a reader.
 
