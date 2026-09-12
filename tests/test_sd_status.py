@@ -2312,6 +2312,49 @@ class ConcernLedgerTests(InventoryFixture):
             found.get("unreadable-concern-row"),
         )
 
+    def test_a_continuation_opening_with_a_cross_reference_is_not_a_new_row(self) -> None:
+        """A row's argument is usually about another row, so its prose opens
+        with one. Absorption must not read that as the next entry.
+
+        Measured on C-120 of the solo-first item before this: the row says
+        `Addressed` on its fifth line, its third line opens `C-100's rebuild`,
+        and the row was reported as disposed in words nothing could read. The
+        bullet below it is a real row and must still end absorption, or one
+        entry's disposition would close the entry above it.
+        """
+
+        self.ledger("2026-08-01-crossref/prd.md", (
+            "# crossref\n\n"
+            "- C-8, blocking: the criterion's documentation clause was skipped.\n"
+            "    C-100's rebuild derived the Touches from the runtime clauses\n"
+            "    and dropped it. Addressed, and PR 1 is ordered before PR 6.\n"
+            "- C-9, blocking: a second row whose disposition never arrives.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-01-crossref/prd.md#C-9"],
+            found.get("unreadable-concern-row"),
+            "C-8 closes on its own fifth line; C-9 carries no word at all",
+        )
+
+    def test_an_unindented_row_needs_no_marker_to_end_absorption(self) -> None:
+        """The older archived ledgers write rows as bare prose at column zero.
+
+        Requiring a bullet would make every one of those rows a continuation of
+        the row above it, which is the opposite failure and a larger one.
+        """
+
+        self.ledger("2026-08-01-bare/prd.md", (
+            "# bare\n\n"
+            "C-1 identified the wrong anchor. Corrected.\n"
+            "C-2 is an argument-construction defect and only argv proves it.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-01-bare/prd.md#C-2"],
+            found.get("unreadable-concern-row"),
+        )
+
     # -- never dropped ------------------------------------------------------
 
     def test_a_row_with_no_word_this_reader_carries_is_a_finding(self) -> None:

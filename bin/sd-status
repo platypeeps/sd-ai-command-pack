@@ -1759,9 +1759,28 @@ def _work_rows(
 CONCERN_ANCHOR = r"^ *(\| *|[-*] *)?(\*\*)?C-[0-9]+([^0-9]|$)"
 
 #: The same shape in Python's dialect, which does have `\s`. Used to re-read
-#: each hit and to stop continuation absorption at the next row.
+#: each hit and recover its id. **Not** used to end absorption -- see
+#: `_ROW_START_RE`, which is the half of that job this pattern cannot do.
 _CONCERN_RE = re.compile(
     r"^\s*(?:\|\s*)?(?:\*\*)?(?:[-*]\s*(?:\*\*)?)?C-(?P<id>\d+)"
+)
+
+#: Where a row *begins*, which is not the same question as where a concern id
+#: appears. `_CONCERN_RE` makes every marker optional, so it matches an
+#: indented continuation line that merely opens with a cross-reference -- and
+#: ledger prose opens with one constantly, because a row's argument is usually
+#: about another row. Absorption stopped there and lost the disposition that
+#: came after it. Measured on C-120 in the solo-first item: the row says
+#: `Addressed` on its fifth line, the third line opens `C-100's rebuild ...`,
+#: and the row was reported as disposed in words nothing could read.
+#:
+#: So an indented line must carry a marker -- a table pipe, a bullet, or both
+#: with bold -- to count as a new row. An unindented line still counts without
+#: one, because the prose ledgers in the older archived items have no marker
+#: at all and a row of theirs starts at column zero.
+_ROW_START_RE = re.compile(
+    r"^\s*(?:\|\s*|[-*]\s*)(?:\*\*)?C-\d+"
+    r"|^(?:\*\*)?C-\d+"
 )
 
 #: Five vocabularies, enumerated from the corpus rather than from the contract,
@@ -1784,10 +1803,18 @@ OPEN_WORDS = ("does not pass", "unresolved", "deferred")
 #: registry block`, `superseded here` and `**Confirmed, design changed.**` are
 #: dispositions, written by hand in ledgers older than this scanner.
 #:
-#: Measured on the corpus: they take unclassifiable rows from 58 of 530 to 35
-#: -- 6.6%, which is the 6.5% the design accepted at 16 of 245 -- and move
-#: `open` and `parked` by exactly zero, which the precedence above guarantees
-#: rather than hopes.
+#: Re-measured on the corpus after `_ROW_START_RE` fixed absorption, because
+#: the earlier figures here were taken with that defect present and a row read
+#: short is a row read wrong: they take unclassifiable rows from 58 of 532 to
+#: 33 -- 6.2%, under the 6.5% the design accepted at 16 of 245.
+#:
+#: They move `open` by zero and `parked` by one, and the one is the point.
+#: `STANDING_WORDS` sits *below* this tier, so a row saying both `accepted`
+#: and a closing word reads as parked without these five and closed with
+#: them. That row is C-182 in the solo-first item: it says `accepted two
+#: spellings of one instant`, which is prose about a bug, and `Closed by
+#: normalizing at the write`, which is the disposition. Closed is the right
+#: answer, so the movement is a rescue and not a reclassification.
 CLOSED_WORDS = (
     "addressed", "rebutted", "resolved", "fixed", "n/a",
     "corrected", "recorded", "noted", "superseded", "confirmed",
@@ -1861,7 +1888,7 @@ def _absorb(lines: list[str], number: int) -> str:
     """
     parts: list[str] = []
     for text in lines[number - 1:]:
-        if parts and (not text.strip() or _CONCERN_RE.match(text)):
+        if parts and (not text.strip() or _ROW_START_RE.match(text)):
             break
         parts.append(text.strip())
     return " ".join(parts)
