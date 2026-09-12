@@ -438,7 +438,8 @@ def anchor_for(flat: str, span: tuple[int, int]) -> tuple[str, bool] | None:
     return None
 
 
-def quotes(reason: str, token: str, doc: pathlib.Path) -> bool:
+def quotes(reason: str, token: str, doc: pathlib.Path,
+           root: pathlib.Path | None = None) -> bool:
     """Does the `path:line` in a `quoted` reason carry `token` at that line?
 
     `token` is the citation as written, backticks and all, so the check is
@@ -458,8 +459,14 @@ def quotes(reason: str, token: str, doc: pathlib.Path) -> bool:
     """
 
     path, _, line = reason.rpartition(":")
-    source = REPO_ROOT / path
-    if not is_under_repo(source) or not source.is_file():
+    # `repoint_document` supports a root that is not the checkout, so resolving
+    # through the global one made every marker in a custom root read as
+    # unquoted: a current quoted marker then produced a same-line Move instead
+    # of no move at all. The default keeps `classify`'s caller unchanged.
+    base = REPO_ROOT if root is None else root
+    source = base / path
+    if not (source.resolve().is_relative_to(base.resolve()) if root is not None
+            else is_under_repo(source)) or not source.is_file():
         return False
     if source.resolve() == doc.resolve():
         return False
@@ -1223,7 +1230,12 @@ def anchor_lines(root: pathlib.Path, path: str, anchor: str) -> list[int]:
     to the lines that mention it -- and a name mentioned twice then refuses,
     which is the point.
     """
-    name = anchor.rstrip("()").lstrip(".")
+    # `SYMBOL` accepts a call-shaped anchor with arguments, and `rstrip("()")`
+    # removes only the trailing parenthesis: `render("x")` became `render("x"`,
+    # which is not an identifier, so the AST lookup never saw `render` and the
+    # fallback searched malformed text. An otherwise unique moved declaration
+    # was then reported as gone. Take the callee before the first paren.
+    name = anchor.split("(", 1)[0].lstrip(".")
     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
         declared = declaration_lines(root, path, name)
         if len(declared) == 1:
@@ -1232,7 +1244,19 @@ def anchor_lines(root: pathlib.Path, path: str, anchor: str) -> list[int]:
         lines = (root / path).read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return []
+    # The FULL anchor, not the callee. `.replace("\n", " ")` is discriminating
+    # exactly because of its arguments; truncating it to `.replace` made a
+    # citation this repository already carries match three lines and refuse as
+    # ambiguous. Only the AST lookup above wants the bare name.
     needle = anchor.rstrip("()")
+    # On an identifier boundary, never as a substring, when the needle IS a
+    # bare name. `foo in line` made a line carrying only `foobar` a candidate
+    # for a removed `foo`, and as the sole match it was taken -- so the tool
+    # rewrote a citation to unrelated text instead of refusing. A needle
+    # carrying punctuation keeps the literal search; it is specific already.
+    if re.fullmatch(r"\.?[A-Za-z_][A-Za-z0-9_.]*", needle):
+        found = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(needle)}(?![A-Za-z0-9_])")
+        return [n for n, line in enumerate(lines, 1) if found.search(line)]
     return [n for n, line in enumerate(lines, 1) if needle in line]
 
 
@@ -1292,7 +1316,7 @@ def quoted_repoint(
     else, and `None` from this function means the marker is already right.
     """
     marker = (reason,)
-    if quotes(marker[0], match.group(0), doc):
+    if quotes(marker[0], match.group(0), doc, root):
         return None
     span = MARKER.search(flat, match.end())
     if span is None or span.group(2).strip() != reason:
@@ -1928,6 +1952,47 @@ class CitationRepointerTests(unittest.TestCase):
         text, moves, refusals = repoint_document(self.doc, self.root)
         self.assertEqual((moves, refusals), ([], []))
         self.assertEqual(text, original)
+
+    def test_an_anchor_written_with_arguments_finds_its_declaration(self) -> None:
+        """`SYMBOL` accepts a call-shaped anchor, so the callee must be taken.
+
+        `rstrip("()")` removed only the trailing parenthesis, leaving
+        `render("x"`. That is not an identifier, so the AST lookup never saw
+        `render` and the fallback searched malformed text: a declaration that
+        moved exactly once was reported gone.
+        """
+        self.page('The renderer is `render("x")` (`bin/tool.py:1`).\n')
+        self.source.write_text(
+            "# inserted\n" * 9 + self.source.read_text(encoding="utf-8"), encoding="utf-8")
+        text, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(refusals, [])
+        self.assertEqual([move.now for move in moves], ["10`"])
+        self.assertIn("`bin/tool.py:10`", text)
+
+    def test_a_removed_anchor_is_not_repointed_onto_a_longer_name(self) -> None:
+        """The fallback matches an identifier, never a substring.
+
+        With `needle in line`, a line carrying only `renderer` was a candidate
+        for a removed `render`; as the sole match it was taken, so the tool
+        rewrote a citation to unrelated text instead of refusing. In a tool
+        that writes pages, that is the worst available outcome.
+        """
+        self.source.write_text(
+            "# pad\n" * 5 + "renderer = 1\n", encoding="utf-8")
+        self.page("The renderer is `render` (`bin/tool.py:1`).\n")
+        text, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(moves, [])
+        self.assertIn("is gone from", refusals[0].reason)
+        self.assertIn("`bin/tool.py:1`", text)
+
+    def test_green_a_longer_name_still_moves_when_it_is_the_anchor(self) -> None:
+        """CONTROL. The boundary must not stop a real match from being found."""
+        self.source.write_text(
+            "# pad\n" * 5 + "def renderer():\n    return 1\n", encoding="utf-8")
+        self.page("The renderer is `renderer` (`bin/tool.py:1`).\n")
+        _, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(refusals, [])
+        self.assertEqual([move.now for move in moves], ["6`"])
 
     def test_an_ambiguous_anchor_refuses_rather_than_guessing(self) -> None:
         """Two candidates, so it moves nothing and says which citation it left."""
