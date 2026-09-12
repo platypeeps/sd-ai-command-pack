@@ -201,32 +201,76 @@ fi
 wait "$shard_pgid" || run_status=$?
 set +m
 
+shard_pgid=""
+
+# Concatenate shard output in a stable order for the skipped-test gate. The
+# watchdog stays armed through this: a launcher that dies while the log is being
+# assembled still leaves an orphan, and an orphan that reaches the publish below
+# writes the shared files this change exists to protect.
+#
+# The append is checked because this log is evidence, not a convenience: `make
+# test` decides whether the suite skipped anything by reading it, so a write
+# that failed half way -- a full temporary filesystem is the ordinary way --
+# would publish a log missing whatever those shards reported and pass the skip
+# gate by omission. A run that cannot assemble its own log publishes nothing and
+# says why, leaving the root on the last complete run.
+assembly_status=0
+for module in "${modules[@]}"; do
+  if [ -f "$work_dir/$module.log" ]; then
+    cat "$work_dir/$module.log" >> "$run_log" || assembly_status=1
+  fi
+done
+
+if [ "$assembly_status" -ne 0 ]; then
+  printf '%s\n' \
+    "error: could not assemble this run's log under $work_dir; nothing was published." >&2
+  exit 1
+fi
+
+# Publish, and stand the watchdog down first. Everything above is interruptible
+# without consequence; from here on an interruption would leave the repo root
+# holding half of one run and half of another, which is worse than an orphan
+# finishing a publish of data that is already complete and its own.
 if [ -n "$watchdog_pid" ]; then
   kill -TERM "$watchdog_pid" 2>/dev/null
   wait "$watchdog_pid" 2>/dev/null
   watchdog_pid=""
 fi
-shard_pgid=""
 
-# Concatenate shard output in a stable order for the skipped-test gate.
-for module in "${modules[@]}"; do
-  if [ -f "$work_dir/$module.log" ]; then
-    cat "$work_dir/$module.log" >> "$run_log"
-  fi
-done
+# Standing the watchdog down is not on its own enough to make the publish
+# uninterruptible: the INT/TERM/HUP trap installed above would still fire
+# between the `rm` and the `mv`, and `on_signal` would exit with the old data
+# deleted and the new data never moved in. Reproduced, with the window held
+# open: `exit=143 terms=13 blocks=2 shards=0` -- no coverage at the repo root
+# at all, under a log describing the run before it. So the publish runs with
+# those three signals ignored. SIGKILL cannot be masked and is not claimed to
+# be; what is claimed is that an operator's Ctrl-C or `kill` cannot cut the
+# publish in half.
+trap '' INT TERM HUP
 
-# Publish. The run is over, so the repo root can now carry its results: the
-# skipped-test gate reads unittest-output.log there, and `coverage combine`
-# reads `.coverage.*` there, in both `make test` and CI. Clearing the old data
-# happens here rather than at startup so the destructive step lands when this
-# run's data is complete instead of while another run's data is being written.
-rm -f "$REPO_ROOT/.coverage" "$REPO_ROOT"/.coverage.*
+# The run is over, so the repo root can now carry its results: the skipped-test
+# gate reads unittest-output.log there, and `coverage combine` reads
+# `.coverage.*` there, in both `make test` and CI. Clearing the old data happens
+# here rather than at startup so the destructive step lands when this run's data
+# is complete instead of while another run's data is being written.
+#
+# Every step is checked. A publish that half-failed and then reported the tests'
+# own success would hand the next gate a mixed shard set or a stale log with a
+# zero exit, which is the failure mode this script is being fixed for.
+publish_status=0
+rm -f "$REPO_ROOT/.coverage" "$REPO_ROOT"/.coverage.* || publish_status=1
 for shard in "$work_dir"/.coverage.*; do
   [ -e "$shard" ] || continue
-  mv -f "$shard" "$REPO_ROOT/"
+  mv -f "$shard" "$REPO_ROOT/" || publish_status=1
 done
-cat "$run_log" > "$REPO_ROOT/unittest-output.log"
+cat "$run_log" > "$REPO_ROOT/unittest-output.log" || publish_status=1
 cat "$REPO_ROOT/unittest-output.log"
+
+if [ "$publish_status" -ne 0 ]; then
+  printf '%s\n' \
+    "error: could not publish this run's results to $REPO_ROOT; the files there are not this run's." >&2
+  exit 1
+fi
 
 if [ "$run_status" -ne 0 ]; then
   exit 1
