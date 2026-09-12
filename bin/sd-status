@@ -2248,12 +2248,65 @@ def _marker_rows(root: pathlib.Path) -> list[dict[str, Any]]:
 
 _DISCLOSED_RE = re.compile(r"bin/(?P<tool>[A-Za-z0-9][A-Za-z0-9_-]*)")
 
+#: The one file suffix `bin/` uses. The regex above stops at the `.`, so a
+#: skill writing the true path `bin/sd_handoff_rows.py` discloses the tool
+#: `sd_handoff_rows`, and a literal test for that name finds nothing. Named
+#: here rather than folded into the regex so the trailing period of an English
+#: sentence -- `see bin/sd-plan.` -- cannot be read as an extension.
+_MODULE_SUFFIX = ".py"
+
+
+def _tool_candidates(tool: str) -> tuple[str, ...]:
+    """The filenames under `bin/` that this disclosure could be naming.
+
+    Two, and the second only because `_DISCLOSED_RE` stops at the `.`: a skill
+    writing the true path `bin/sd_handoff_rows.py` discloses the tool
+    `sd_handoff_rows`, so restoring the suffix asks the question the skill
+    actually asked. Resolved by name, never by a directory listing or a
+    `bin/sd-*` glob, either of which would also swallow a disclosure no file
+    answers. A second suffix in `bin/` is a change to `_MODULE_SUFFIX` alone.
+
+    **Respelling `-` as `_` is deliberately *not* done here**, and an earlier
+    revision of this function that did it was wrong. The reasoning was that
+    `bin/` holds both executables and the modules they import, so a disclosure
+    of `bin/sd-suggest` could be answered by `bin/sd_suggest.py`. It cannot.
+    `bin/sd_suggest.py` is an implementation module `bin/sd` imports; the
+    command is `sd suggest`, and nothing named `bin/sd-suggest` exists. The
+    skill disclosing it says so in the very line the regex matches -- *"There
+    is no `bin/sd-suggest` yet"* -- which is word for word what `skills/sd-help`
+    says about `bin/sd-help`. The transform gave those two identical sentences
+    opposite verdicts, and silenced the one whose stem a module happened to
+    share.
+
+    Measured over this repository: of the thirteen disclosures in `skills/`,
+    the respelling changed exactly one verdict, and that one was a true
+    finding. It rescued nothing, because both paths it was meant to rescue --
+    `bin/sd_handoff_rows.py` and `bin/sd_setup_github.py` -- are already
+    written with underscores by the skills that disclose them, and are
+    resolved by the suffix candidate alone.
+
+    The deeper reason it cannot come back: under it, whether a roadmap note is
+    reported turns on whether an unrelated module happens to share a stem.
+    Someone adding `bin/sd_plan.py` as an implementation detail would silently
+    drop the `bin/sd-plan` finding, with nothing in a `sd-status` diff to show
+    for it. A check whose correctness rests on unrelated naming is the defect
+    this class exists to catch, not a resolution strategy.
+    """
+    return tuple(dict.fromkeys((tool, tool + _MODULE_SUFFIX)))
+
 
 def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
     """Skills disclosing a tool under `bin/` that is not built.
 
     Exact and low-yield: a known roadmap that would print the same lines every
     run, which is why it sits at rank 125 and is not abnormal.
+
+    Low-yield only while it stays exact. A literal test for `bin/<tool>` called
+    two of its six findings against files that are on disk, both of them skills
+    quoting a real `.py` path that `_DISCLOSED_RE` had truncated at the `.`,
+    and noise in an abnormality report is worse than a missing check because it
+    teaches the reader to skim the class. `_tool_candidates` says which
+    spellings resolve, and why it stops where it does.
 
     `design.md`'s natural-key table predates this class and names no key for
     the `k` letter. The key used here is the disclosing file and the tool, and
@@ -2268,7 +2321,10 @@ def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
             continue
         where = str(path.relative_to(root))
         for tool in sorted({m.group("tool") for m in _DISCLOSED_RE.finditer(text)}):
-            if (root / "bin" / tool).exists():
+            if any(
+                (root / "bin" / name).is_file()
+                for name in _tool_candidates(tool)
+            ):
                 continue
             rows.append(_row(
                 "undisclosed-tool", f"{where}#bin/{tool}", f"bin/{tool}",
