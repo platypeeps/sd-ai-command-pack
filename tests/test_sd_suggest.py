@@ -24,6 +24,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -653,6 +654,32 @@ class WhatIsNotAPaletteEntry(unittest.TestCase):
         """
         self.assertFalse((REPO_ROOT / "bin" / "sd-suggest").exists())
         self.assertTrue((REPO_ROOT / "bin" / "sd_suggest.py").exists())
+
+    def test_the_skill_discloses_no_bin_path_that_is_not_built(self):
+        """The skill may not point a reader at a command that is not there.
+
+        `sd-status`'s `undisclosed-tool` class fired on this file: the tooling
+        section named `bin/sd-suggest` in the act of saying it did not exist,
+        and a reader who skims a backticked path takes it for something they
+        can run. The decision was to stop disclosing it rather than build it,
+        so the section now names the verbs that do exist.
+
+        Resolved the way `_tool_rows` resolves, and for the same reason its
+        `_tool_candidates` refuses to respell `-` as `_`: `bin/sd_suggest.py`
+        is a module `bin/sd` imports, and it does not build `bin/sd-suggest`.
+        The two candidates are the name itself and the name with `.py`, which
+        is what lets the true path `bin/sd_handoff_rows.py` resolve.
+        """
+        skill = REPO_ROOT / "skills" / "sd-suggest" / "SKILL.md"
+        disclosed = sorted(set(re.findall(
+            r"bin/([A-Za-z0-9][A-Za-z0-9_-]*)", skill.read_text(encoding="utf-8"))))
+        self.assertIn("sd", disclosed, "the section that names the group moved")
+        unbuilt = [
+            f"bin/{tool}" for tool in disclosed
+            if not any((REPO_ROOT / "bin" / name).is_file()
+                       for name in (tool, tool + ".py"))
+        ]
+        self.assertEqual([], unbuilt, f"{skill.name} names {unbuilt}, not built")
 
     def test_the_two_verbs_are_reachable_only_through_the_group(self):
         """`sd suggest add` and `sd suggest publish`, and nothing else wires them."""

@@ -50,8 +50,9 @@ preference with no incident behind it.
 
 ## State of the tooling
 
-There is no `bin/sd-suggest` yet. The implemented commands are `sd suggest add`
-and `sd suggest publish`, under `bin/sd`. Capture currently requires
+The implemented commands are `sd suggest add` and `sd suggest publish`, verbs
+under `bin/sd`. Filing is deliberately not an entrypoint of its own, so there is
+no standalone command to look for. Capture currently requires
 both a directory under `docs/work/` and its imported database row. If either is
 missing, report the prerequisite; do not create a GitHub issue or a PRD merely
 to work around it. `sd-status` is read-only and cannot create the missing row.
