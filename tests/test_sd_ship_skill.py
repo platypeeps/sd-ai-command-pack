@@ -311,6 +311,26 @@ class TheSequenceParses(unittest.TestCase):
     """The controls. Every check below reads one of these three things, and
     a parser returning nothing would make all of them pass over any file."""
 
+    def test_the_prose_count_matches_the_steps_that_exist(self) -> None:
+        """The recital that went stale, made mechanical so it cannot again.
+
+        A reviewer found "Eight steps." still standing in the sequence's own
+        introduction after a ninth was added, and a case-sensitive grep for
+        `eight step` had missed it. A recited number drifts; a derived one
+        cannot, so the page is read for whichever number word it uses and that
+        word has to be the count `steps()` finds.
+        """
+
+        words = ("zero", "one", "two", "three", "four", "five", "six",
+                 "seven", "eight", "nine", "ten", "eleven", "twelve")
+        expected = words[len(steps())]
+        recited = [w for w in words if re.search(rf"\b{w}[- ]steps?\b",
+                                                 SKILL_TEXT, re.IGNORECASE)]
+        self.assertNotEqual(recited, [], "the page recites no step count at all")
+        self.assertEqual(
+            sorted(set(recited)), [expected],
+            f"the page says {sorted(set(recited))} but there are {len(steps())} steps")
+
     def test_the_sequence_has_nine_numbered_steps(self) -> None:
         self.assertEqual(sorted(steps()), list(range(1, 10)))
 
@@ -484,22 +504,39 @@ class ABranchAnotherPullRequestIsBasedOn(unittest.TestCase):
     def test_the_step_asks_github_for_pull_requests_based_on_this_branch(self) -> None:
         asks = [
             c for c in commands(self.step)
-            if c.startswith("gh pr list") and "--base" in shlex.split(c)
+            if c.startswith("gh pr list") and {"--base", "--state"} <= set(shlex.split(c))
         ]
         self.assertEqual(
             len(asks), 1, f"step 6 issues {len(asks)} base queries, not one"
         )
+        words = shlex.split(asks[0])
+        self.assertEqual(
+            words[words.index("--state") + 1], "open",
+            "the query is not scoped to open pull requests, so a merged or "
+            "closed child would stop the run")
 
     def test_the_step_prescribes_no_merge(self) -> None:
         merges = [c for c in commands(self.step) if c.startswith("gh pr merge")]
         self.assertEqual(merges, [], "step 6 merges; the merge is step 7's")
 
     def test_a_non_empty_answer_stops_the_run(self) -> None:
-        lowered = self.step.lower()
+        """Tied to the *result*, not to the word "refuse" in the heading.
+
+        The first version of this asserted a refusal word anywhere in the
+        step, which the heading supplies on its own -- so it would have passed
+        a step that asked the question and then merged anyway. The refusal has
+        to be predicated on the answer being non-empty, so both halves are
+        required in one sentence.
+        """
+
+        stopping = ("ends the run", "stops the run", "refuse", "does not merge")
+        tied = [
+            line for line in sentences(self.step)
+            if "non-empty" in line.lower()
+            and any(word in line.lower() for word in stopping)
+        ]
         self.assertTrue(
-            any(word in lowered for word in REFUSAL) or "ends the run" in lowered,
-            "step 6 never says a non-empty answer stops the run",
-        )
+            tied, "step 6 never ties stopping the run to a non-empty answer")
 
 
 class TheReviewedHead(unittest.TestCase):

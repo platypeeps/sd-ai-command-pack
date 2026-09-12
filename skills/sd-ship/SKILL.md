@@ -9,7 +9,7 @@ disable-model-invocation: true
 `sd-ship` sequences the stages between "the work is done" and "delivery is confirmed". Invocation is explicit approval for the in-scope commits, the PR-branch
 push and the merge — and for nothing outside the paths you enumerate. It is
 not approval to delete anything local: not a branch, not a worktree, not a
-checkout. Step 8 reports those and leaves them standing.
+checkout. Step 9 reports those and leaves them standing.
 
 ## Standing permission
 
@@ -36,7 +36,7 @@ pushing a head no adversary has seen, which is what step 2 exists to prevent.
 
 ## The sequence
 
-Eight steps. Before the first of them verify the scope this branch delivers,
+Nine steps. Before the first of them verify the scope this branch delivers,
 with the actual checks run and their output seen. A slice may ship while later
 item criteria remain open. Only `--deliver` claims the whole item is complete:
 for that claim, every acceptance criterion in the item's `prd.md` must have
