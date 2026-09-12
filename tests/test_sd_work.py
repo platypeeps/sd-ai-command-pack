@@ -164,7 +164,7 @@ class TaskCLI(unittest.TestCase):
         self.call("task", "add", "Both", "--here", "--no-repo", cwd=root, code=2)
 
     def test_a_filed_task_can_be_moved_between_repositories_and_off_them(self):
-        """The move a hand `UPDATE item.repo` used to be (sd:507, sd:452).
+        """The move a hand-written `UPDATE item.repo` used to be (sd:507, sd:452).
 
         `repo` was the one capture-time field `edit` could not change, so a row
         filed from the wrong directory stayed mis-attributed. The rule it has

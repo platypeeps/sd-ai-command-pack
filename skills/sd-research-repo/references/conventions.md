@@ -125,11 +125,17 @@ For multiple research tracks, use an overview that directs readers to each track
   links only, never a filename, a type prefix, or a Notion page identity.
   Exactly one document carries the `START HERE — ` marker.
 
-Before publishing, enumerate all configured documents and check their H1s and rendered titles.
-Require exactly one matching main document across those surfaces.
-Read back its Notion title, README links, and parent reference after publication.
-Missing, duplicate, or mismatched titles fail this manual review.
-`sd-research-kit review` does not currently enforce this title convention.
+`sd-research-kit review` enumerates the configured documents and checks the two
+surfaces that are inside the checkout: each document's H1, and the `title` and
+`h1` the config renders it under. Missing, duplicate and mismatched all fail it.
+Its scope is the configured documents, not the tree — a superseded draft in
+`90-scratch/` still carrying an old marker is neither cited nor mirrored, and is
+not a duplicate.
+
+The README entry link, the Notion page title and the Notion parent are in no
+file the kit reads, so reading those back after publication stays manual. The
+review's `ok   main document` line names the surfaces it did check, so that a
+pass is not read as a claim about the two it did not.
 
 ## Documents
 
