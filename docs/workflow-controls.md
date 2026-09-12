@@ -16,6 +16,7 @@ progress belongs to the database.
 | --- | --- |
 | Capture work without a PRD | Today, or `sd task add "Title"` — it takes the registered checkout enclosing cwd; `--no-repo` files one that belongs to none |
 | Prioritize, schedule, add details | Item screen, or `sd task edit ID` |
+| Move a task to the right checkout | `sd task edit ID --belongs-to PATH` — `.` names the checkout enclosing cwd; `--no-repo` leaves it belonging to none, as it does on `add`. An unregistered path is refused, and the move is recorded as an item note |
 | Change task status | Item screen, or `sd task status ID STATUS` |
 | Record and resolve a followup | Item notes, or `sd task note ID --kind followup --body TEXT` / `sd task resolve NOTE_ID` |
 | See the same inventory as the dashboard | `sd today --json`, `sd store items --json` |

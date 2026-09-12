@@ -163,6 +163,70 @@ class TaskCLI(unittest.TestCase):
 
         self.call("task", "add", "Both", "--here", "--no-repo", cwd=root, code=2)
 
+    def test_a_filed_task_can_be_moved_between_repositories_and_off_them(self):
+        """The move a hand `UPDATE item.repo` used to be (sd:507, sd:452).
+
+        `repo` was the one capture-time field `edit` could not change, so a row
+        filed from the wrong directory stayed mis-attributed. The rule it has
+        to obey is the same one `add` obeys -- the `repo` table decides what a
+        repository is -- and the note the library already writes for every
+        edited field is what records the move, so nothing here re-implements
+        either half.
+        """
+        first, second = self._checkout("first"), self._checkout("second")
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.repos.add(connection, first, home=self.home)
+            sd_db.repos.add(connection, second, home=self.home)
+
+        state = json.loads(self.call("task", "add", "Filed nowhere", "--json").stdout)
+        item = state["item"]["id"]
+        self.assertIsNone(state["item"]["repo"])
+
+        moved = json.loads(self.call("task", "edit", item, "--belongs-to", first, "--json").stdout)
+        self.assertEqual(moved["item"]["repo"], str(first.resolve()))
+
+        # The path is read the way `add` reads cwd, so `.` inside a checkout
+        # names that checkout rather than a directory the `repo` table has
+        # never heard of. The flag is `--belongs-to` and not `--repo` because
+        # R10-D6 refuses that option name anywhere under `bin/`, and `add`
+        # answered the same question without it one verb earlier.
+        again = json.loads(
+            self.call("task", "edit", item, "--belongs-to", ".", "--json", cwd=second).stdout)
+        self.assertEqual(again["item"]["repo"], str(second.resolve()))
+
+        cleared = json.loads(self.call("task", "edit", item, "--no-repo", "--json").stdout)
+        self.assertIsNone(cleared["item"]["repo"])
+
+    def test_the_move_is_recorded_on_the_item_rather_than_happening_silently(self):
+        root = self._checkout("recorded")
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.repos.add(connection, root, home=self.home)
+        state = json.loads(self.call("task", "add", "Mis-filed", "--json").stdout)
+        item = state["item"]["id"]
+        before = {note["id"] for note in state["notes"]}
+        moved = json.loads(self.call("task", "edit", item, "--belongs-to", root, "--json").stdout)
+        added = [note for note in moved["notes"] if note["id"] not in before]
+        self.assertEqual([note["kind"] for note in added], ["comment"])
+        self.assertIn("repo", added[0]["body"])
+
+    def test_an_unregistered_repository_is_refused_without_moving_the_row(self):
+        """The `repo` table is the authority, and a refusal changes nothing."""
+        stranger = self._checkout("stranger")
+        state = json.loads(self.call("task", "add", "Stays put", "--json").stdout)
+        item = state["item"]["id"]
+        refused = self.call("task", "edit", item, "--belongs-to", stranger, code=1)
+        self.assertIn("not registered", refused.stderr)
+        readback = json.loads(self.call("store", "item", item, "--json").stdout)
+        self.assertIsNone(readback["item"]["repo"])
+        self.assertEqual(readback["revision"], state["revision"])
+
+    def test_belongs_to_and_no_repo_are_the_same_field_and_cannot_both_be_given(self):
+        state = json.loads(self.call("task", "add", "One or the other", "--json").stdout)
+        self.call("task", "edit", state["item"]["id"], "--belongs-to", self.home,
+                  "--no-repo", code=2)
+        self.assertIn("requires a field",
+                      self.call("task", "edit", state["item"]["id"], code=1).stderr)
+
     def test_refusals_and_usage_have_distinct_exit_codes(self):
         self.assertIn("no item", self.call("store", "item", 9999, code=1).stderr)
         self.call("task", "add", "Task", "--priority", 9, code=2)

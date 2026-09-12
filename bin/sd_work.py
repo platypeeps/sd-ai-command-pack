@@ -62,6 +62,70 @@ def _task_repo(args: argparse.Namespace, connection: Any) -> str | None:
     return None
 
 
+def _belongs_to(value: str) -> str:
+    """Which checkout `--belongs-to` names, read the way `add` reads cwd.
+
+    Not spelled `--repo`, and the reason is R10-D6 rather than taste:
+    `tests/test_verb_inventory.py` refuses that option name anywhere under
+    `bin/`, because a command that can be *pointed at* another checkout is one
+    that can act on it. This flag only sets a field on a row -- the command
+    still runs where the caller stands -- but `sd task add` met the same
+    question one verb earlier and answered it without `--repo` too, in the
+    `--here` / `--no-repo` pair. One family, one spelling; a second answer
+    here would make the rule read as negotiable.
+
+    A row's `repo` is an absolute path and a foreign key into the `repo`
+    table, so the argument has to become one before the library sees it.
+    `--belongs-to .` from inside a checkout is the spelling a caller standing
+    in the misfiled row's real repository will reach for, and a relative path
+    is what a shell hands over; both resolve here rather than arriving as a
+    string the `repo` table has never heard of.
+
+    A linked worktree resolves to its main checkout for the reason `add` does:
+    the worktree is a temporary path and the row outlives it. A path that is
+    no checkout at all is passed through resolved, because a registered
+    repository is whatever the `repo` table carries and this is not the place
+    that decides -- `edit_item` refuses an unregistered path by name, and one
+    rule with one owner is the point of the move going through the library.
+    """
+    path = pathlib.Path(value).expanduser()
+    root = sd_lib.repo_root(path)
+    if root is None:
+        return str(path.resolve())
+    return str(sd_lib.main_worktree_root(root))
+
+
+def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
+    """The fields `edit` was asked to set, or a refusal naming the omission.
+
+    Lifted out of `run` rather than left inline: `edit` is the one verb whose
+    arguments need work before the library sees them -- a cleared field is a
+    `None` no `getattr` loop can distinguish from an absent one, and a
+    checkout is a path that has to be resolved -- and `run`'s job is to pick
+    the operation, not to do this.
+    """
+    changes: dict[str, Any] = {
+        field: getattr(args, field) for field in ("title", "body", "priority", "due")
+        if getattr(args, field) is not None
+    }
+    if args.clear_priority:
+        changes["priority"] = None
+    if args.clear_due:
+        changes["due"] = None
+    # The field `add` sets and nothing could change afterwards. It is not in
+    # the loop above because the flag carries a path and the row carries a
+    # checkout; `_belongs_to` is the one step between them, and `edit_item` --
+    # not this function -- decides whether the checkout is registered and
+    # writes the note that records the move.
+    if args.belongs_to is not None:
+        changes["repo"] = _belongs_to(args.belongs_to)
+    if args.no_repo:
+        changes["repo"] = None
+    if not changes:
+        raise WorkRefusal("edit requires a field to change")
+    return changes
+
+
 def _library():
     sd_db = sd_handoff_rows.library()
     try:
@@ -247,15 +311,7 @@ def run(args: argparse.Namespace) -> int:
                 due=args.due, repo=_task_repo(args, connection), who=who,
             )
         elif action == "edit":
-            changes = {field: getattr(args, field) for field in
-                       ("title", "body", "priority", "due")
-                       if getattr(args, field) is not None}
-            if args.clear_priority:
-                changes["priority"] = None
-            if args.clear_due:
-                changes["due"] = None
-            if not changes:
-                raise WorkRefusal("edit requires a field to change")
+            changes = _edit_changes(args)
             result = workflow.edit_item(
                 connection, args.item, changes, who=who, expected_revision=revision)
         elif action == "status":
@@ -469,6 +525,14 @@ def register(groups: Any, store: Any) -> None:
     due = edit.add_mutually_exclusive_group()
     due.add_argument("--due", help="YYYY-MM-DD")
     due.add_argument("--clear-due", action="store_true")
+    # `--belongs-to` and not `--repo`: see `_belongs_to`. `--no-repo` is the
+    # word `add` already uses for the same idea, so the pair reads the same on
+    # both verbs.
+    belongs = edit.add_mutually_exclusive_group()
+    belongs.add_argument("--belongs-to", metavar="PATH",
+                         help="move the task to a registered checkout (`.` is this one)")
+    belongs.add_argument("--no-repo", action="store_true",
+                         help="leave the task belonging to no checkout")
     _output(edit, "edit", revision=True)
 
     status = verbs.add_parser("status", help="change status with an atomic history entry")
