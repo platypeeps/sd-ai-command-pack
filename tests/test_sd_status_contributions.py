@@ -80,6 +80,53 @@ class ContributionStatusTests(unittest.TestCase):
         for value in ("fix/library", "c" * 40, "d" * 64, '"exit_code": 1', "Incomplete observation", "CLOSED"):
             self.assertIn(value, text)
 
+    def test_a_projected_field_the_renderer_does_not_name_is_printed(self) -> None:
+        """sd:602. The tuple was the membership, so five live keys vanished.
+
+        Measured on the real projection before the fix, `_render_contributions`
+        dropped `blocking_labels`, `event_ids`, `needs_you`, `repo` and
+        `revision` -- no error, no warning, nothing for a reader to notice.
+        """
+        rows = [{"key": "item:1", "title": "A contribution", "lane": "awaiting_you",
+                 "blocking_labels": ["needs-rebase"], "repo": "acme/widget",
+                 "a_field_invented_after_this_test": "surfaced"}]
+        output = io.StringIO()
+        status._render_contributions({"available": True, "rows": rows}, output.write)
+        text = output.getvalue()
+        for key in ("blocking_labels", "repo", "a_field_invented_after_this_test"):
+            self.assertIn(key, text)
+        self.assertIn("needs-rebase", text)
+
+    def test_the_named_fields_still_lead_in_the_order_the_tuple_gives(self) -> None:
+        """The control. Without it the test above passes on unordered dumping.
+
+        `CONTRIBUTION_ORDER` is still the display order; what changed is that
+        it no longer decides what appears at all.
+        """
+        rows = [{"key": "item:1", "title": "A contribution", "lane": "awaiting_you",
+                 "url": "https://example.invalid/pull/1", "local_status": "planning",
+                 "zzz_unknown": "last"}]
+        output = io.StringIO()
+        status._render_contributions({"available": True, "rows": rows}, output.write)
+        text = output.getvalue()
+        self.assertLess(text.index("key:"), text.index("url:"))
+        self.assertLess(text.index("url:"), text.index("local_status:"))
+        self.assertLess(text.index("local_status:"), text.index("zzz_unknown:"))
+
+    def test_a_row_of_only_known_fields_renders_exactly_as_before(self) -> None:
+        """The second control: the fix must add nothing to an ordinary row.
+
+        A renderer that appended a key unconditionally would satisfy both
+        assertions above while corrupting every existing line.
+        """
+        rows = [{"key": "item:1", "title": "A contribution", "lane": "merged",
+                 "local_status": "done"}]
+        output = io.StringIO()
+        status._render_contributions({"available": True, "rows": rows}, output.write)
+        printed = [line.strip().split(":")[0]
+                   for line in output.getvalue().splitlines() if line.startswith("    ")]
+        self.assertEqual(["key", "local_status"], printed)
+
     def test_no_registration_never_invents_contributions_from_generic_tasks(self) -> None:
         connection = sd_db.connect(self.database)
         try:

@@ -250,5 +250,54 @@ class ContributionStoreCLI(unittest.TestCase):
         self.assertEqual(json.loads(self.call("show", key, "--json").stdout), acknowledged)
 
 
+class ContributionRendering(unittest.TestCase):
+    """sd:602. The text renderer printed a hand-written tuple, not the row."""
+
+    def render(self, row):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            sd_work._emit_contributions([row], machine=False)
+        return output.getvalue()
+
+    def test_a_projected_field_the_renderer_does_not_name_is_printed(self):
+        """Measured before the fix: seven live keys never reached the reader.
+
+        `blocking_labels`, `item_id`, `needs_you`, `notification_state`,
+        `observed_at`, `repo` and `revision` were all in the projection and
+        in no tuple, so `sd task contribution list` dropped them in silence.
+        """
+        text = self.render({"key": "item:42", "lane": "awaiting_you", "title": "Fix",
+                            "blocking_labels": ["needs-rebase"], "repo": "acme/widget",
+                            "a_field_invented_after_this_test": "surfaced"})
+        for field in ("blocking_labels", "repo", "a_field_invented_after_this_test"):
+            self.assertIn(f"  {field}: ", text)
+        self.assertIn("needs-rebase", text)
+
+    def test_the_named_fields_still_lead_in_the_order_the_tuple_gives(self):
+        """The control: order is still CONTRIBUTION_ORDER, unknown keys follow."""
+        text = self.render({"key": "item:42", "lane": "awaiting_you", "title": "Fix",
+                            "reasons": ["changes requested"], "event_ids": ["review:7"],
+                            "zzz_unknown": "last"})
+        self.assertLess(text.index("  reasons:"), text.index("  event_ids:"))
+        self.assertLess(text.index("  event_ids:"), text.index("  zzz_unknown:"))
+
+    def test_a_row_of_only_known_fields_renders_exactly_as_before(self):
+        """The second control: an ordinary row gains no line from the fix."""
+        text = self.render({"key": "item:42", "lane": "merged", "title": "Fix",
+                            "local_status": "done", "external_state": "merged",
+                            "freshness": "current", "reasons": ["landed"]})
+        printed = [line.strip().split(":")[0]
+                   for line in text.splitlines() if line.startswith("  ")]
+        self.assertEqual(["local", "evidence_verified", "reasons"], printed)
+
+    def test_a_field_the_header_already_printed_is_not_repeated(self):
+        """`lane` and `title` are on the first line; a repeat would be a bug."""
+        text = self.render({"key": "item:42", "lane": "awaiting_you", "title": "Fix",
+                            "local_status": "planning"})
+        self.assertNotIn("  lane:", text)
+        self.assertNotIn("  title:", text)
+        self.assertNotIn("  local_status:", text)
+
+
 if __name__ == "__main__":
     unittest.main()

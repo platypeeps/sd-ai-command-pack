@@ -596,5 +596,47 @@ class RowActivity(unittest.TestCase):
         self.assertEqual(sd_lib._recorded(statuses, self.item_dir), "")
 
 
+class DisplayFieldsTests(unittest.TestCase):
+    """The membership comes from the row; only the order comes from the caller."""
+
+    def test_a_key_the_caller_never_named_is_still_returned(self) -> None:
+        """sd:602. The two contribution renderers dropped these in silence."""
+        row = {"url": 1, "blocking_labels": ["blocked"], "revision": "abc"}
+        self.assertEqual(
+            ["url", "blocking_labels", "revision"],
+            sd_lib.display_fields(row, ("url",)),
+        )
+
+    def test_named_keys_lead_in_the_caller_s_order_and_the_rest_are_sorted(self) -> None:
+        # The named pair is deliberately out of alphabetical order. With
+        # ("first", "second") a sort of the named keys is invisible, and the
+        # test passes on an implementation that ignores the caller entirely.
+        row = {"zeta": 1, "alpha": 2, "second": 3, "first": 4}
+        self.assertEqual(
+            ["second", "first", "alpha", "zeta"],
+            sd_lib.display_fields(row, ("second", "first")),
+        )
+
+    def test_a_key_the_header_already_printed_is_not_repeated(self) -> None:
+        row = {"title": 1, "lane": 2, "url": 3, "extra": 4}
+        self.assertEqual(
+            ["url", "extra"],
+            sd_lib.display_fields(row, ("url",), ("title", "lane")),
+        )
+
+    def test_a_named_key_the_row_lacks_is_still_offered_to_the_caller(self) -> None:
+        """The caller filters empties; this function does not read values.
+
+        Returning only present keys would make the order depend on the data,
+        so two rows of the same kind would print their fields differently.
+        """
+        self.assertEqual(["a", "b"], sd_lib.display_fields({}, ("a", "b")))
+
+    def test_the_result_never_repeats_a_key(self) -> None:
+        row = {"a": 1, "b": 2}
+        fields = sd_lib.display_fields(row, ("a", "a", "b"), ())
+        self.assertEqual(sorted(set(fields)), sorted(set(row)))
+
+
 if __name__ == "__main__":
     unittest.main()

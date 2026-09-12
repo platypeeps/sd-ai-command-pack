@@ -1713,3 +1713,21 @@ def demoted_trailers(message: str) -> tuple[str, ...]:
         line for line in message.splitlines()
         if _STATED_RE.match(line) and line not in block
     )
+
+
+def display_fields(
+    row: dict[str, Any],
+    order: tuple[str, ...],
+    shown: tuple[str, ...] = (),
+) -> list[str]:
+    """The keys of `row` to print: `order` first, then everything else.
+
+    A renderer that iterates a hand-written tuple makes that tuple the
+    membership as well as the order, so every key a producer adds later is
+    dropped in silence. `order` stays the display order; the row decides what
+    exists. `shown` names keys a caller already printed, such as in a header.
+    """
+    skip = set(shown)
+    named = [key for key in order if key not in skip]
+    known = skip | set(order)
+    return named + sorted(key for key in row if key not in known)
