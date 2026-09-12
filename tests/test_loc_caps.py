@@ -316,17 +316,36 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
 }
 
 
-def tracked(*pathspecs: str) -> list[pathlib.Path]:
-    """Tracked files matching `pathspecs`, as the index reports them."""
+def tracked(*pathspecs: str, root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:
+    """Tracked files matching `pathspecs`, as the index reports them.
+
+    `--deduplicate` because the index holds an unmerged path once per merge
+    stage, and plain `ls-files` prints it once per stage. The consumers here
+    are `line_count` and `code_line_count`, which iterate and **sum**, so a
+    conflicted file charges its lines to a cap three times.
+
+    That is a worse failure than the one the same missing flag caused in
+    `tests/test_code_health.py`, which shares this call's argv and which is
+    where the defect was found. There the tripling surfaces as a countable
+    contradiction -- two functions sharing one key -- and the message says so.
+    Here it surfaces as a larger number against a ceiling, in a file whose
+    ceilings are famously argued over one raise at a time, with nothing to
+    distinguish the inflation from real growth. The reader's next move is to
+    derive a raise for a cap that was never crossed.
+
+    `root` is the test seam, kept off every caller's signature deliberately:
+    the suite injects a throwaway repository to build an index this repository
+    will not hold on demand.
+    """
 
     output = subprocess.run(
-        ["git", "ls-files", "-z", "--", *pathspecs],
-        cwd=REPO_ROOT,
+        ["git", "ls-files", "-z", "--deduplicate", "--", *pathspecs],
+        cwd=root,
         capture_output=True,
         text=True,
         check=True,
     ).stdout
-    return [REPO_ROOT / name for name in output.split("\0") if name]
+    return [root / name for name in output.split("\0") if name]
 
 
 # Everything that is not a line of code: a comment, a docstring, a blank. The
@@ -571,6 +590,137 @@ class LineCountCaps(unittest.TestCase):
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 self.assertFalse(
                     line.strip().startswith("/*"), f"{path}:{number} opens a block comment")
+
+
+#: What `_unmerged_index_repo` leaves in the working tree once the conflict is
+#: resolved: four lines, of which two carry code. Small enough that the
+#: expected sums below are read rather than computed, which is the point --
+#: a case that derived its own expectation from the same helper it is testing
+#: would agree with the defect as readily as with the fix.
+RESOLVED = '"""Resolved."""\n\nx = 1\ny = 2\n'
+RESOLVED_LINES = 4
+RESOLVED_CODE_LINES = 2
+
+
+def _unmerged_index_repo(root: pathlib.Path) -> pathlib.Path:
+    """A repository whose index holds `dashboard/panel.py` unmerged.
+
+    The conflict is a real merge, not a hand-written index: the three stages
+    have to come from git's own machinery or the fixture merely restates the
+    belief under test.
+
+    The working tree is then **resolved and left unstaged**, which is the
+    state this defect is actually met in. A person fixes the conflict in their
+    editor and runs the suite before `git add`; the file on disk is valid
+    Python again, so nothing warns them, while the index still carries three
+    stages. Leaving the conflict markers in place instead would make
+    `code_line_count` raise on a tokenise error -- a different failure, and a
+    louder one than the silent inflation this guards.
+    """
+
+    def git(*argv: str, check: bool = True) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            # Identity and signing are passed per invocation rather than read
+            # from the machine, so the fixture does not fail on a host with no
+            # `user.email` or one that signs every commit.
+            ["git", "-c", "user.email=caps@example.invalid",
+             "-c", "user.name=loc caps", "-c", "commit.gpgsign=false", *argv],
+            cwd=root, capture_output=True, text=True, check=check)
+
+    panel = root / "dashboard" / "panel.py"
+    panel.parent.mkdir(parents=True)
+    git("init", "-q", "-b", "main", ".")
+    panel.write_text('"""Base."""\n\nx = 0\n')
+    git("add", "dashboard/panel.py")
+    git("commit", "-qm", "base")
+    git("checkout", "-q", "-b", "other")
+    panel.write_text('"""Other."""\n\nx = 2\n')
+    git("commit", "-qam", "other")
+    git("checkout", "-q", "main")
+    panel.write_text('"""Mine."""\n\nx = 1\n')
+    git("commit", "-qam", "mine")
+    git("merge", "other", check=False)
+    panel.write_text(RESOLVED)
+    return panel
+
+
+class AnUnmergedIndex(unittest.TestCase):
+    """What the caps measure while a merge is still being resolved."""
+
+    def setUp(self) -> None:
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        self.root = pathlib.Path(home.name)
+        self.panel = _unmerged_index_repo(self.root)
+
+    def assert_the_index_is_unmerged(self) -> None:
+        """The premise every case below rests on, asserted rather than assumed.
+
+        Without this the cases would pass against any ordinary repository,
+        which is exactly how the defect survived: nothing about a clean
+        checkout tells the two behaviours apart.
+        """
+
+        stages = subprocess.run(
+            ["git", "ls-files", "-u", "--", "dashboard/panel.py"],
+            cwd=self.root, capture_output=True, text=True, check=True).stdout
+        self.assertEqual(
+            [line.split("\t")[0].split()[-1] for line in stages.splitlines()],
+            ["1", "2", "3"],
+            "the fixture did not leave an unmerged index, so nothing below "
+            "proves anything")
+        raw = subprocess.run(
+            ["git", "ls-files", "-z", "--", "dashboard/panel.py"],
+            cwd=self.root, capture_output=True, text=True, check=True).stdout
+        self.assertEqual(
+            [name for name in raw.split("\0") if name],
+            ["dashboard/panel.py"] * 3,
+            "this git no longer repeats an unmerged path; if that is now the "
+            "default, say so here rather than deleting these cases")
+
+    def test_a_conflicted_file_charges_the_total_cap_once(self) -> None:
+        """The measure, not the path list.
+
+        Deduplicating the paths is the mechanism; the thing that breaks is the
+        sum. Asserting only that `tracked` returns one path would leave the
+        case passing for a reason next to the one that matters, and would not
+        fail if somebody later reintroduced the tripling further down the
+        pipe.
+        """
+
+        self.assert_the_index_is_unmerged()
+        self.assertEqual(self.panel.read_text(), RESOLVED,
+                         "the working tree is resolved; only the index is not")
+        self.assertEqual(
+            line_count(tracked("dashboard", root=self.root)), RESOLVED_LINES,
+            "a file being merged charged its lines to the total cap once per "
+            "merge stage")
+
+    def test_a_conflicted_file_charges_the_code_cap_once(self) -> None:
+        """`code_line_count` sums over the same list and inflates the same way.
+
+        Both consumers are named because they are separate loops over
+        `tracked`, and a fix applied to one of them would leave the other
+        wrong -- which is the shape of the defect being fixed here in the
+        first place.
+        """
+
+        self.assert_the_index_is_unmerged()
+        self.assertEqual(
+            code_line_count(tracked("dashboard", root=self.root)),
+            RESOLVED_CODE_LINES,
+            "a file being merged charged its code lines to the code cap once "
+            "per merge stage")
+
+    def test_the_seam_reads_the_repository_it_is_pointed_at(self) -> None:
+        """`root` must move the enumeration, not merely be accepted.
+
+        A seam that is ignored would let the cases above read this repository,
+        find no conflict, and agree with whatever `tracked` does.
+        """
+
+        self.assertEqual(tracked("dashboard", root=self.root), [self.panel])
+        self.assertNotIn(self.panel, tracked("dashboard"))
 
 
 if __name__ == "__main__":
