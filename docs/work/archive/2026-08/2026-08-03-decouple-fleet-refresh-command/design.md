@@ -175,7 +175,7 @@ reversible pre-merge.
 
 ## Adversarial review corrections (folded in)
 
-- **C-1** wrong edit target → true source is `.github/command-sources/…`.
+- **C-1** wrong edit target → true source is `.github/command-sources/…`. Addressed.
 - **C-2** command not shipped to consumers → consumer-behavior claim removed.
-- **C-3** version bump conditional → mandatory (0.64.2 + ledger).
-- **C-4** generator anchor coupling → per-command injection anchor added.
+- **C-3** version bump conditional → mandatory (0.64.2 + ledger). Addressed.
+- **C-4** generator anchor coupling → per-command injection anchor added. Addressed.

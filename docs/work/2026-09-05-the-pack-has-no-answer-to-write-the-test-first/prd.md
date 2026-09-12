@@ -483,13 +483,19 @@ because they are the ones that settled the scope question:
   an import error "into an assertion failure" while step 4, twenty-seven lines
   later, forbade manufacturing one — the C-1 defect class, introduced by the
   remediation for a finding about reachability.
+  Confirmed; resolved by the scope cut below, which removes the bootstrap
+  carve-out this finding belongs to.
 - **C-21** showed the recovery procedure could not execute. After writing the
   test, the tree holds both the test and the fix; the
   `git stash --include-untracked` the safety rule prescribed removes both,
   leaving no fix to revert and no test to run.
+  Confirmed; resolved by the scope cut below, which removes the late-recovery
+  revert path this finding belongs to.
 - **C-20** found a no-evidence exit written into the gate that was added to
   close a no-evidence hole: the report bullet ended "or a statement that a body
   shipped without it".
+  Confirmed; resolved by the scope cut below, which removes the
+  `sd-typed-holes` seam this finding belongs to.
 
 **The scope was cut rather than remediated a fourth time.** Across three rounds
 the item produced twenty-three findings, and fourteen belong to three
