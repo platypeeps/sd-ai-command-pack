@@ -470,6 +470,109 @@ class GuardTests(SetupFixture):
         self.assertIn("sd-review route", result["would_write"])
 
 
+#: `mezmo/mezmo-world-simulator`'s file, trimmed to the entry under test: it
+#: pins `actions/docs-gate` only, and hand-adapted the pack's guard for it.
+DOCS_GATE_CONSUMER = """\
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    ignore:
+{guard}
+      # `dtolnay/rust-toolchain` is referenced by a ref named after a Rust
+      # release, so Dependabot version-compares the action's own branch names.
+      - dependency-name: "dtolnay/rust-toolchain"
+"""
+
+
+class BothActionsTests(SetupFixture):
+    """The pack ships two actions and the guard reader knows both.
+
+    `DEPENDENCY`, the guard item pattern and the pin pattern were all keyed to
+    `actions/review-route`, the action `setup-github` installs. The one
+    consumer that pins `actions/docs-gate` instead carries a correct,
+    hand-adapted guard for it, and `guard_state()` called that file `absent` --
+    so a census built on this reader miscounted the fleet by one, in the
+    direction of "nobody guards it".
+    """
+
+    def guarded(self, action: str) -> str:
+        return DOCS_GATE_CONSUMER.format(guard=guard.guard_block("      ", action).rstrip("\n"))
+
+    def test_every_shipped_action_has_guard_text(self) -> None:
+        """Enumerated from `actions/`, not from a list beside the constant.
+
+        A third action landing with no wording here is the failure this
+        catches: it would ship a consumer the reader again calls `absent`.
+        """
+        shipped = {
+            path.name
+            for path in (REPO_ROOT / "actions").iterdir()
+            if path.is_dir() and (path / "action.yml").is_file()
+        }
+        self.assertEqual(shipped, set(guard.ACTIONS))
+        for action in guard.ACTIONS:
+            with self.subTest(action=action):
+                block = guard.guard_block("", action)
+                self.assertIn(f"actions/{action}/README.md", block)
+                self.assertIn(f'- dependency-name: "{guard.dependency_name(action)}"', block)
+                for other in guard.ACTIONS:
+                    if other != action:
+                        self.assertNotIn(f"actions/{other}/README.md", block)
+
+    def test_the_review_route_guard_is_unchanged(self) -> None:
+        """Eight consumers carry these bytes today and must keep reading `same`."""
+        self.assertEqual(guard.guard_block(""), guard.guard_block("", "review-route"))
+        self.assertIn("`sd-review setup-github --pin <sha> --force`", guard.guard_block(""))
+
+    def test_a_docs_gate_guard_reads_as_present(self) -> None:
+        text = self.guarded("docs-gate")
+        self.assertEqual(guard.guard_state(text), "same")
+        self.assertEqual(guard.guard_state(text, "docs-gate"), "same")
+
+    def test_rendering_docs_gate_is_idempotent_and_adds_no_second_item(self) -> None:
+        """Writing is per-action and reading is not: `rendered` renders the
+        action it is given, so a docs-gate consumer converges on its own guard
+        and never gains a review-route item for an action it does not pin."""
+        text = self.guarded("docs-gate")
+        self.assertEqual(guard.rendered(text, "docs-gate"), text)
+        self.assertNotIn("actions/review-route", guard.rendered(text, "docs-gate"))
+
+    def test_the_installers_action_still_appends_beside_another_guard(self) -> None:
+        """The installer writes review-route and must keep doing so: a
+        docs-gate item is another action's guard, not this one's, so it is
+        left standing and the review-route guard lands beside it."""
+        both = guard.rendered(self.guarded("docs-gate"))
+        self.assertIn(guard.guard_block("      ", "docs-gate"), both)
+        self.assertIn(guard.guard_block("      ", "review-route"), both)
+        self.assertEqual(guard.rendered(both), both)
+
+    def test_the_hand_adapted_wording_differs_rather_than_vanishing(self) -> None:
+        """The live defect, in one assertion: the shipped file cites the wrong
+        README, and the reader must say so instead of `absent`."""
+        hand = self.guarded("docs-gate").replace(
+            "actions/docs-gate/README.md", "actions/review-route/README.md"
+        )
+        self.assertEqual(guard.guard_state(hand), "differs")
+        self.assertEqual(guard.rendered(hand, "docs-gate"), self.guarded("docs-gate"))
+
+    def test_the_pin_is_read_for_either_action(self) -> None:
+        workflow = (
+            "      - uses: platypeeps/sd-ai-command-pack/actions/docs-gate@" + PIN + "\n"
+        )
+        self.assertIsNone(guard.read_pin(workflow))
+        self.assertEqual(guard.read_pin(workflow, "docs-gate"), PIN)
+        self.assertEqual(guard.pinned_actions(workflow), ("docs-gate",))
+
+    def test_an_unknown_action_is_refused_by_name(self) -> None:
+        with self.assertRaises(guard.GuardError) as caught:
+            guard.guard_block("", "no-such-action")
+        self.assertIn("no-such-action", str(caught.exception))
+
+
 class CheckTests(SetupFixture):
     """`--check` renders at the repository's own pin and writes nothing."""
 
