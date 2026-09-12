@@ -166,9 +166,9 @@ rather than invent the argument.
       next-line case is testable because the flatten is offset-preserving:
       `marker_after()` matches on the flattened text and then asserts no `\n`
       in the *unflattened* slice between citation and marker. `[quoted: ]`
-      takes free text and the gate does not read it, so the exemption is
-      counted and not yet falsifiable. D4a specifies a `path:line` reason
-      verified the way a citation is; that is sd:568 and not this step.
+      took free text and the gate did not read it, so the exemption was
+      counted and not falsifiable. D4a made the reason a `path:line` the gate
+      opens; delivered as sd:568, after this step.
 - [x] **4. The split.** `is_inside_repo` becomes `is_under_repo` plus a
       `target.is_file()` at the call site. `is_under_repo` **keeps the
       `resolve()`**: `Path.is_relative_to` is lexical, and
@@ -208,7 +208,10 @@ rather than invent the argument.
 - [x] **7. This item's own pages.** `prd.md`, `design.md` and this file each
       carry illustrative citation shapes written with a metavariable line
       number because no inert form existed when they were written. Rewrite them
-      to use `[quoted: <reason>]`. This is the acceptance test for question 3
+      to use `[quoted: <path:line>]`, naming a line of *another* file that
+      really carries the quoted citation -- free text stopped being a marker
+      at D4a, and a page cannot be its own source. This is the acceptance
+      test for question 3
       that no fixture can be: if the pages still cannot show the shape they
       discuss, the marker did not solve the problem it was designed for.
 - [x] **8. Criterion 2.** Verify that
@@ -336,11 +339,13 @@ pass.
 **Not verifiable here.** Whether the census line is *read* by anyone is a
 property of the people running `make check`, not of this repository; the
 conservation assertion is what stands in for it and is the reason the design
-does not rely on the printing. Whether `[quoted: <reason>]` is used honestly —
+does not rely on the printing. Whether `[quoted: <path:line>]` is used honestly —
 to mark an example rather than to silence a claim someone could not be bothered
-to fix — cannot be tested at all. The census makes its population visible,
-which is the most a gate can do about a marker whose whole purpose is to be
-unfalsifiable.
+to fix — cannot be tested at all, and that limit is the only one left. D4a
+closed the rest: the reason names a line, the gate opens it, and a reason that
+does not carry the citation lands in `quoted-not-there` and fails. What a gate
+cannot check is the intent behind an honest-looking reason; the census makes
+the population visible, which is the most it can do about that.
 
 ## Verification results
 
