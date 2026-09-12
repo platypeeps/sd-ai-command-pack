@@ -112,20 +112,32 @@ def _fixture_env(**overrides):
     return env
 
 
-def _parent_map():
-    """Every live pid mapped to its parent, as `ps` reports them."""
+def _process_rows():
+    """Every pid `ps` lists, mapped to its parent and its state letter.
+
+    The state is read because a reaped-but-not-collected child still has a row.
+    A test that counted those as survivors would report an orphan wherever PID 1
+    does not reap promptly -- a container, most of the time -- and the failure
+    would look exactly like the defect this module exists to catch.
+    """
     proc = subprocess.run(
-        ["ps", "-A", "-o", "pid=", "-o", "ppid="],
+        ["ps", "-A", "-o", "pid=", "-o", "ppid=", "-o", "state="],
         capture_output=True,
         text=True,
         check=False,
     )
-    table = {}
+    rows = {}
     for line in proc.stdout.splitlines():
         fields = line.split()
         if len(fields) >= 2 and fields[0].isdigit() and fields[1].isdigit():
-            table[int(fields[0])] = int(fields[1])
-    return table
+            state = fields[2] if len(fields) >= 3 else ""
+            rows[int(fields[0])] = (int(fields[1]), state)
+    return rows
+
+
+def _parent_map():
+    """Every pid `ps` lists, mapped to its parent."""
+    return {pid: parent for pid, (parent, _) in _process_rows().items()}
 
 
 def _descendants(pid):
@@ -144,8 +156,9 @@ def _descendants(pid):
 
 
 def _alive(pid):
-    """Whether `pid` still exists, zombies excluded."""
-    return pid in _parent_map()
+    """Whether `pid` is still running, a zombie row not being running."""
+    row = _process_rows().get(pid)
+    return row is not None and not row[1].startswith("Z")
 
 
 def _wait_for(predicate, timeout, interval=0.25):

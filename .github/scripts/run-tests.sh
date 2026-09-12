@@ -201,32 +201,51 @@ fi
 wait "$shard_pgid" || run_status=$?
 set +m
 
-if [ -n "$watchdog_pid" ]; then
-  kill -TERM "$watchdog_pid" 2>/dev/null
-  wait "$watchdog_pid" 2>/dev/null
-  watchdog_pid=""
-fi
 shard_pgid=""
 
-# Concatenate shard output in a stable order for the skipped-test gate.
+# Concatenate shard output in a stable order for the skipped-test gate. The
+# watchdog stays armed through this: a launcher that dies while the log is being
+# assembled still leaves an orphan, and an orphan that reaches the publish below
+# writes the shared files this change exists to protect.
 for module in "${modules[@]}"; do
   if [ -f "$work_dir/$module.log" ]; then
     cat "$work_dir/$module.log" >> "$run_log"
   fi
 done
 
-# Publish. The run is over, so the repo root can now carry its results: the
-# skipped-test gate reads unittest-output.log there, and `coverage combine`
-# reads `.coverage.*` there, in both `make test` and CI. Clearing the old data
-# happens here rather than at startup so the destructive step lands when this
-# run's data is complete instead of while another run's data is being written.
-rm -f "$REPO_ROOT/.coverage" "$REPO_ROOT"/.coverage.*
+# Publish, and stand the watchdog down first. Everything above is interruptible
+# without consequence; from here on an interruption would leave the repo root
+# holding half of one run and half of another, which is worse than an orphan
+# finishing a publish of data that is already complete and its own.
+if [ -n "$watchdog_pid" ]; then
+  kill -TERM "$watchdog_pid" 2>/dev/null
+  wait "$watchdog_pid" 2>/dev/null
+  watchdog_pid=""
+fi
+
+# The run is over, so the repo root can now carry its results: the skipped-test
+# gate reads unittest-output.log there, and `coverage combine` reads
+# `.coverage.*` there, in both `make test` and CI. Clearing the old data happens
+# here rather than at startup so the destructive step lands when this run's data
+# is complete instead of while another run's data is being written.
+#
+# Every step is checked. A publish that half-failed and then reported the tests'
+# own success would hand the next gate a mixed shard set or a stale log with a
+# zero exit, which is the failure mode this script is being fixed for.
+publish_status=0
+rm -f "$REPO_ROOT/.coverage" "$REPO_ROOT"/.coverage.* || publish_status=1
 for shard in "$work_dir"/.coverage.*; do
   [ -e "$shard" ] || continue
-  mv -f "$shard" "$REPO_ROOT/"
+  mv -f "$shard" "$REPO_ROOT/" || publish_status=1
 done
-cat "$run_log" > "$REPO_ROOT/unittest-output.log"
+cat "$run_log" > "$REPO_ROOT/unittest-output.log" || publish_status=1
 cat "$REPO_ROOT/unittest-output.log"
+
+if [ "$publish_status" -ne 0 ]; then
+  printf '%s\n' \
+    "error: could not publish this run's results to $REPO_ROOT; the files there are not this run's." >&2
+  exit 1
+fi
 
 if [ "$run_status" -ne 0 ]; then
   exit 1
