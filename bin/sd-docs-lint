@@ -497,12 +497,27 @@ def citation_survey(
 
 def write_citation_manifest(
     item: pathlib.Path, work_root: pathlib.Path
-) -> tuple[int, list[Skip]]:
-    """Record what each citation points at today. The recording is the baseline."""
+) -> tuple[int, list[Skip], list[str]]:
+    """Record what each citation points at today. The recording is the baseline.
+
+    Re-recording is also where a row that outlived its citation leaves. The
+    survey walks the pages, so a citation deleted in an edit yields no row and
+    simply stops being written -- which is correct and was silent. The third
+    return value names those rows, because a recording that quietly forgets
+    what it used to assert is the same silence rule 6 exists to end.
+    """
     rows, skipped = citation_survey(item, work_root)
+    manifest = item / CITATION_MANIFEST
+    keys = {tuple(row.split("\t")[:2]) for row in rows}
+    dropped = []
+    if manifest.is_file():
+        for line in manifest.read_text(encoding="utf-8").splitlines():
+            fields = line.rstrip().split("\t")
+            if len(fields) == 5 and tuple(fields[:2]) not in keys:
+                dropped.append(f"{fields[0]} `{fields[1]}`")
     body = "\n".join(rows)
-    (item / CITATION_MANIFEST).write_text(body + ("\n" if body else ""), encoding="utf-8")
-    return len(rows), skipped
+    manifest.write_text(body + ("\n" if body else ""), encoding="utf-8")
+    return len(rows), skipped, dropped
 
 
 def check_manifest(
@@ -520,6 +535,14 @@ def check_manifest(
     checked = 0
     manifest = item / CITATION_MANIFEST
     cache: dict[str, list[str]] = {}
+    # What the pages cite today, keyed on (page, citation). `item_citations`
+    # is the same walk the recorder uses, so the two halves are compared
+    # rather than one of them re-derived by a scan that could disagree. A
+    # substring scan would have: `prd.md:3` is a substring of `prd.md:35`,
+    # and three pages in this repository carry a pair like that, so deleting
+    # the shorter one would have read as still cited.
+    found, _ = item_citations(item, work_root)
+    live = {(source.rpartition(":")[0] or source, cited) for source, cited, _, _ in found}
     for number, row in enumerate(manifest.read_text(encoding="utf-8").splitlines(), 1):
         fields = row.split("\t")
         if len(fields) != 5:
@@ -527,6 +550,34 @@ def check_manifest(
             continue
         source, citation, relative, start, snippet = fields
         snippet = snippet.rstrip()  # Older writers could truncate at a space.
+        # The source side, which this rule did not read until now. Every check
+        # below is about the target -- is the recorded text still at the
+        # recorded line -- so a row outlived the prose it was written for: a
+        # citation deleted in an edit stayed in the manifest and reported as
+        # checked forever, and `checked` counted manifest rows rather than
+        # citations. Falsified before it was fixed: deleting one citation from
+        # its citing page left `checked 25 citation(s)` and `clean`, EXIT 0.
+        #
+        # The page is searched rather than the recorded line, deliberately.
+        # An edit above the citation moves it, and failing on the line would
+        # turn ordinary editing red while catching nothing this does not.
+        page_name = source.rpartition(":")[0] or source
+        # A deleted page and a deleted citation are the same silence with two
+        # causes, and a reader fixes them differently, so they are two lines.
+        if not (item / page_name).is_file():
+            report.fail(
+                f"{item.name}/{source}",
+                f"`{citation}` is recorded against {page_name}, which does not exist; "
+                "re-record with sd-docs-lint --update-citations",
+            )
+            continue
+        if (page_name, citation) not in live:
+            report.fail(
+                f"{item.name}/{source}",
+                f"`{citation}` is recorded but {page_name} no longer cites it; "
+                "re-record with sd-docs-lint --update-citations",
+            )
+            continue
         target = work_root.resolve() / relative
         if not target.is_file():
             report.fail(f"{item.name}/{source}", f"`{citation}` names {relative}, which is gone")
@@ -885,6 +936,28 @@ def run(
     return report
 
 
+def record_citations(work_root: pathlib.Path) -> int:
+    """Re-record rule 6's baseline for every active item, and say what moved."""
+    if not work_root.is_dir():
+        print(f"error: {work_root} does not exist", file=sys.stderr)
+        return 2
+    for item in item_directories(work_root):
+        if "archive" in item.parts:
+            continue
+        count, skipped, dropped = write_citation_manifest(item, work_root)
+        # The recorder's own count was a count of what it wrote, so a citation
+        # it refused to record was invisible at recording time too -- the one
+        # moment a person is looking straight at it. Both numbers here, and
+        # the refusals it owns named in full.
+        print(f"{item.name}: recorded {count} of {count + len(skipped)} citation(s)")
+        for source, citation, reason, detail in skipped:
+            if reason == UNRECORDABLE:
+                print(f"  not recorded: {source} `{citation}` {detail}")
+        for row in dropped:
+            print(f"  dropped: {row} is no longer cited")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Lint docs/work, docs/spec and docs/decisions.")
     parser.add_argument("--work-dir", default="docs/work", help="work item root, repo-relative")
@@ -926,23 +999,7 @@ def main(argv: list[str] | None = None) -> int:
         setattr(args, flag, normalised)
 
     if args.update_citations:
-        work_root = root / args.work_dir
-        if not work_root.is_dir():
-            print(f"error: {work_root} does not exist", file=sys.stderr)
-            return 2
-        for item in item_directories(work_root):
-            if "archive" in item.parts:
-                continue
-            count, skipped = write_citation_manifest(item, work_root)
-            # The recorder's own count was a count of what it wrote, so a
-            # citation it refused to record was invisible at recording time
-            # too -- the one moment a person is looking straight at it. Both
-            # numbers here, and the refusals it owns named in full.
-            print(f"{item.name}: recorded {count} of {count + len(skipped)} citation(s)")
-            for source, citation, reason, detail in skipped:
-                if reason == UNRECORDABLE:
-                    print(f"  not recorded: {source} `{citation}` {detail}")
-        return 0
+        return record_citations(root / args.work_dir)
 
     body: str | None = None
     if args.pr_body is not None:

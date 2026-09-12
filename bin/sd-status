@@ -2145,7 +2145,50 @@ def _disposition(text: str) -> str:
         verdict = _verdict(found.group(1))
         if verdict:
             return verdict
+    cell = _verdict_cell(text)
+    if cell is not None:
+        verdict = _verdict(cell)
+        if verdict:
+            return verdict
     return _verdict(text)
+
+
+def _verdict_cell(text: str) -> str | None:
+    """A table row's last cell, or `None` when the row is not a table.
+
+    The structural twin of reading the header first, and it exists for the
+    same reason. A prose row answers in its title; a table row answers in its
+    last column, and every cell before it is *about the defect*, so it carries
+    the subject's vocabulary. C-11 in
+    `archive/2026-08/2026-08-10-thin-canary-conversion/design.md` is the case:
+    its narrative column says a validation "was deferred to a phase-2 refresh"
+    and its verdict column says `**addressed**`. Under tier order the
+    narrative's `deferred` outranks the verdict's `addressed`, so the row read
+    `open` and ranked at 20 in a record nobody can act on.
+
+    The header rule could not reach it. `_HEADER_RE` wants a bold title and a
+    table row has none, so the row fell straight through to the tiers.
+
+    Measured on this corpus the same way every other tier change here was
+    measured: of **173** table-shaped ledger rows, reading the last cell moves
+    exactly **one** -- C-11, `open` to `closed`. It rescues one and loses
+    none, and no row moves the other way. That is the whole population, not a
+    sample.
+
+    **No minimum cell count, and that is deliberate.** A first draft required
+    three cells, reasoning that the verdict is a *column* and a two-cell row
+    has none. The guard turned out to be unfalsifiable: with two cells the
+    last cell is the row minus its id, so the last-cell read and the tier read
+    cannot disagree, and removing the minimum changes no row in the corpus and
+    fails no test. A guard whose failing path cannot be exercised is the shape
+    this repository keeps removing, so it was removed here rather than kept
+    for the comfort of the sentence that justified it.
+    """
+
+    row = text.strip()
+    if not row.startswith("|"):
+        return None
+    return [cell.strip() for cell in row.strip("|").split("|")][-1]
 
 
 #: An inline code span that *names* something rather than closing a clause.

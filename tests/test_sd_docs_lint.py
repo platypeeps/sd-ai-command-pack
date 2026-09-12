@@ -130,7 +130,7 @@ class LintFixture(unittest.TestCase):
         return item
 
     def record(self) -> tuple[int, list[tuple[str, str, str, str]]]:
-        return lint.write_citation_manifest(self.cited_item(), self.work)
+        return lint.write_citation_manifest(self.cited_item(), self.work)[:2]
 
     def assert_fails(self, needle: str, pr_body: str | None = None) -> list[str]:
         report = self.run_lint(pr_body)
@@ -589,7 +589,7 @@ class Rule6CitationTests(LintFixture):
         lines.append(prefix + " beyond the first phrase.")
         (item / "prd.md").write_text("\n".join(lines) + "\n")
         (item / "design.md").write_text(f"# design\n\nSee `prd.md:{len(lines)}`.\n")
-        self.assertEqual(lint.write_citation_manifest(item, self.work), (1, []))
+        self.assertEqual(lint.write_citation_manifest(item, self.work)[:2], (1, []))
         return item, prefix, len(lines)
 
     def test_manifest_writer_emits_no_space_at_the_truncation_boundary(self) -> None:
@@ -629,6 +629,89 @@ class Rule6CitationTests(LintFixture):
         del lines[2]
         (item / "prd.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
         self.assert_fails("that text is gone from the file")
+
+    def test_red_the_citing_page_no_longer_carries_the_citation(self) -> None:
+        """Backbone item sd:572. The rule only ever read the target side.
+
+        Every other check here asks whether the recorded text is still at the
+        recorded line in the page being cited. None asked whether the citing
+        page still cites it, so an edit that deleted a citation left its
+        manifest row behind, and the row reported as checked forever. The
+        count said `checked 25 citation(s)` while one of the twenty-five had
+        not existed for some time.
+        """
+
+        self.record()
+        item = self.work / "2026-08-29-a-cited-item"
+        (item / "design.md").write_text("# design\n\nNo citation here.\n", encoding="utf-8")
+        self.assert_fails("design.md no longer cites it")
+
+    def test_green_a_citation_that_moved_down_its_own_page_is_not_a_failure(self) -> None:
+        """The source side is searched, not read at the recorded line.
+
+        An edit above a citation moves it without changing what it says. If
+        this rule read `design.md:3` literally it would go red on ordinary
+        editing while catching nothing the page-wide search does not.
+        """
+
+        self.record()
+        item = self.work / "2026-08-29-a-cited-item"
+        page = item / "design.md"
+        lines = page.read_text(encoding="utf-8").splitlines()
+        lines.insert(1, "An inserted paragraph above the citation.")
+        page.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.assert_clean()
+
+    def test_red_a_deleted_citation_that_is_a_prefix_of_a_surviving_one(self) -> None:
+        """`prd.md:3` is a substring of `prd.md:35`.
+
+        Three pages in this repository carry a pair like that today, so a
+        source-side check written as a substring scan would report the
+        shorter citation as still present after it was deleted. The check
+        compares against `item_citations`, the same walk the recorder uses,
+        so the two halves of the comparison cannot disagree.
+        """
+
+        item = self.cited_item()
+        lines = (item / "prd.md").read_text(encoding="utf-8").splitlines()
+        while len(lines) < 35:
+            lines.append(f"filler line {len(lines) + 1}")
+        (item / "prd.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        page = item / "design.md"
+        page.write_text(
+            "# design\n\nThe ladder is at `prd.md:3`.\n\nThe filler is at `prd.md:35`.\n",
+            encoding="utf-8",
+        )
+        self.assertEqual(lint.write_citation_manifest(item, self.work)[0], 2)
+        page.write_text("# design\n\nThe filler is at `prd.md:35`.\n", encoding="utf-8")
+        self.assert_fails("design.md no longer cites it")
+
+    def test_red_the_citing_page_is_gone_altogether(self) -> None:
+        """A deleted page and a deleted citation read differently to a reader.
+
+        Both end with a row asserting a citation nobody carries, but one is
+        fixed by restoring a page and the other by re-recording, so the rule
+        says which happened rather than making the reader look.
+        """
+
+        self.record()
+        item = self.work / "2026-08-29-a-cited-item"
+        (item / "design.md").unlink()
+        self.assert_fails("design.md, which does not exist")
+
+    def test_the_recorder_names_the_row_it_drops(self) -> None:
+        """Re-recording is where a row that outlived its citation leaves.
+
+        The survey walks the pages, so a deleted citation yields no row and
+        simply stops being written. That is correct, and it was silent.
+        """
+
+        self.record()
+        item = self.cited_item()
+        (item / "design.md").write_text("# design\n\nNo citation here.\n", encoding="utf-8")
+        count, _, dropped = lint.write_citation_manifest(item, self.work)
+        self.assertEqual(count, 0)
+        self.assertEqual(dropped, ["design.md:3 `prd.md:3`"])
 
     def test_red_a_malformed_manifest_row(self) -> None:
         item = self.cited_item()

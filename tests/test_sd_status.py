@@ -2749,6 +2749,53 @@ class ConcernLedgerTests(InventoryFixture):
         ))
         self.assertEqual([], self.scan())
 
+    def test_a_table_row_is_read_by_its_verdict_column_and_not_by_its_narrative(self) -> None:
+        """C-11's shape: the verdict says addressed, the narrative says deferred.
+
+        Every cell before the last is *about the defect*, so it carries the
+        subject's vocabulary. Under tier order alone the narrative's `deferred`
+        outranks the verdict's `addressed` and the row reads open -- which is
+        the misread `_disposition` already documents for prose rows and fixes
+        by reading the header first. A table row has no header to read, so it
+        fell through unchanged until the last cell was read the same way.
+        """
+
+        self.ledger("2026-08-02-table/design.md", (
+            "# table\n\n"
+            "| id | sev | finding | disposition |\n"
+            "|---|---|---|---|\n"
+            "| C-11 | low | validation was deferred to a phase-2 refresh on the"
+            " assumption the fix was in shipped text | **addressed** - D2d"
+            " validates locally |\n"
+        ))
+        # Every row, not two named classes. Copilot's verification pass was
+        # right that excluding `unresolved-concern` and `unreadable-concern-row`
+        # leaves a misread free to land as `parked-concern` and still pass.
+        # `addressed` is closed, and closed means this ledger yields nothing.
+        self.assertEqual([], self.scan())
+
+    def test_a_table_row_whose_verdict_column_is_open_stays_open(self) -> None:
+        """The control, and the half that stops the fix from silencing rows.
+
+        Without it the last-cell read could return anything and the test above
+        would still pass. C-1's real shape: a deferral written *as* the
+        verdict, which is open and has to stay open.
+        """
+
+        self.ledger("2026-08-03-deferred/design.md", (
+            "# deferred\n\n"
+            "| id | sev | finding | disposition |\n"
+            "|---|---|---|---|\n"
+            "| C-1 | critical | the installer flips a real registry entry,"
+            " mutating the source checkout | **deferred** to"
+            " 08-11-thin-candidate-loop-shape |\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-03-deferred/design.md#C-1"],
+            found.get("unresolved-concern"),
+        )
+
     def test_a_disposition_on_the_next_line_is_still_read(self) -> None:
         """Continuation absorption: dispositions wrap, and the row is one row."""
         self.ledger("2026-08-01-wrapped/prd.md", (
