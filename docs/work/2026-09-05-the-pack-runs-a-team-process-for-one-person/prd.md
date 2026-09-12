@@ -3119,7 +3119,7 @@ from a number the operator types.
     `prd.md:2527` both say the retire commit adds the tracked marker, one
     line, `row`. This page named the `status_source` column and never the
     file, so the thing a checkout without a database actually reads was
-    scheduled nowhere. Added to PR 7, in the same commit as the removal.
+    scheduled nowhere. Addressed in PR 7, in the same commit as the removal.
   - C-150, blocking: `sd-docs-lint` rule 1's sign. It fails today when a
     `status:` line is missing; B's criterion 7 requires it to fail when one
     is present outside the archive. The two cannot both hold, so the
@@ -3127,13 +3127,13 @@ from a number the operator types.
     later pull request that would leave the lint failing on every item in
     between. `bin/sd-docs-lint` was already in PR 7's Touches, for the
     reader — the file was right and the obligation was missing, which is why
-    four rounds of Touches checks did not surface it.
+    four rounds of Touches checks did not surface it. Addressed in PR 7.
   - C-151, blocking: `shipped_at` and `Closes:`. Neither string appeared
     anywhere in this item. B's `prd.md:911-913` gives the merge write to
     `sd-ship`, and B's clauses 7.18, 7.21 and 15.25 all assert it. Both PR 6
     and PR 7 list `skills/sd-ship/`; the merge path is PR 7's, through
     `--deliver`, so it lands there. B records these as its hand-offs 11 and
-    12.
+    12. Addressed in PR 7.
 
 - **2026-09-05** — Executable review. A reviewer built the fixtures and ran
   the commands this item's pages prescribe, on the real repository, rather
@@ -3185,23 +3185,23 @@ from a number the operator types.
     citation whose target is missing is skipped by `is_inside_repo()` rather
     than failed, which its own docstring calls deliberate. `Ran 4 tests` /
     `OK` with the page deleted. The real gate is the link checker's
-    `documentationRoots`.
+    `documentationRoots`. Corrected.
   - C-157, material: the `authors` policy key sites were cited at
     `bin/sd-review:287` and `:1092`, which are a `raise PolicyError` and
     `"scope": args.scope`. The key is at `:276`, `:283` and `:1098`, and
     `:283` is the shared `_STRING_LIST_KEYS` tuple, so that site is an edit
-    and not a line deletion.
+    and not a line deletion. Corrected.
   - C-158, material: the criteria 30/31/32 transposition note has now cited
     the wrong lines twice. A first draft said 1580 and 1590; its correction
     said 1591, 1592 and 1602, all four low, with two of the three again
     landing mid-body of a different criterion. The lines are 1595, 1596 and
     1606, read from `grep -n '^3[012]\. '` rather than counted from the
-    previous sentence.
+    previous sentence. Corrected.
   - C-159, material: two cross-item citations were written `B's prd.md:N`.
     Rule 6 resolves the bare `prd.md:` against *this* item, so both anchored
     into this file's own text and passed the lint while pointing at the wrong
     document. The `B/prd.md:` form used elsewhere in the page fails to
-    resolve instead, which is the safe failure. Both rewritten, and their
+    resolve instead, which is the safe failure. Both corrected, and their
     targets re-read: `B/prd.md:911-913` for `shipped_at`'s three writers,
     `B/prd.md:1252-1253` for rule 1's archive predicate.
   - C-160, material: criterion 32's merge refusal named no mechanism. Both
@@ -3209,12 +3209,12 @@ from a number the operator types.
     `-t` and `-b` alone, which refuse nothing, so "asserts the merge call
     named the reviewed head and was refused" was asserting against a call
     that cannot refuse. The flag is `gh pr merge --match-head-commit <sha>`,
-    present in gh 2.98.0; the `design.md` now names it.
+    present in gh 2.98.0; the `design.md` is corrected to name it.
   - C-161, minor: the ordering section said PR 1 writes the `mode` and
     `check` keys into `DEFAULT_BLOCK_BODY`. Both already stand there
     (`bin/sd_install.py:799-805`). PR 1's block work is `test` and `lint`;
     `reviewers` is PR 6's. As written, PR 1's edit was a no-op and criterion
-    1's five-key set stayed two keys short.
+    1's five-key set stayed two keys short. Corrected.
   - C-162, minor: `bin/sd-docs-lint:87-91` was listed among the readers of the
     `archived` and `parked` fields. It reads neither field; the line range is
     unrelated. Removed from PR 2's reader enumeration.
@@ -3244,7 +3244,7 @@ from a number the operator types.
     sweep, no archive, the directory stays. Its first swept item,
     `2026-08-29-artifacts-as-product`, is the case this item cites at
     `prd.md:794` for keeping directories. Merging it would also have broken
-    the thirteen references C-164 names.
+    the thirteen references C-164 names. Recorded; the pull request stays closed.
   - C-166, decision: criterion 33 added, on the operator's word, closing the
     gap C-164 recorded. `sd-docs-lint` gains a rule that enumerates tracked
     `*.md` from git, outside `docs/work/archive/` and `CHANGELOG.md`, and
@@ -3347,12 +3347,12 @@ from a number the operator types.
     failure this item exists to remove, with the two halves swapped. Those
     two files and their ten bare tokens move to PR 6. PR 1 closes criterion
     5's two table clauses and converts the twenty-two tokens in the six
-    planning and research surfaces; the vendor clause closes in PR 6.
+    planning and research surfaces; the vendor clause closes in PR 6. Addressed.
   - C-174, material, same run: `skills/sd-review/SKILL.md` stood in no pull
     request's Touches at all, while criterion 6 deletes `bin/sd-review`'s
     `BACKENDS` table and `.github/sd-review.json`'s `tiers`, both of which
     that page documents — the `prism` and `gito` entries requirement 3 says
-    are gone are named at `:77-78` as shipped. Added to PR 6's Touches
+    are gone are named at `:77-78` as shipped. Addressed in PR 6's Touches,
     beside them.
   - C-175, blocking, supersedes C-173's split: criterion 5's vendor clause is
     PR 6's **whole**, not for two files of eight. C-173 moved
@@ -3440,7 +3440,7 @@ from a number the operator types.
     a skill because it is adjacent is not a pipeline. Nothing is lost —
     `sd skill try` returns any of the forty-nine for thirty days, and use
     decides from there, which is the mechanism this requirement exists to
-    start.
+    start. Recorded as the decision.
   - C-181, material, found while wiring the installer: retiring a skill is two
     edits now and three tests assumed it was one. `ReconciliationTests` removed
     a directory from a fixture checkout and expected the render to disappear;
@@ -3481,7 +3481,7 @@ from a number the operator types.
     findings were real: an unused f-prefix, and a premise -- "`skills/` is
     copied verbatim" -- that requirement 10 had made too broad, since the
     installer iterates named directories and cannot render a file beside them.
-    The rule this leaves: for any change that adds a tracked file, the run
+    Recorded as a rule: for any change that adds a tracked file, the run
     that counts is the one after `git add`.
   - C-184, blocking, found by the remote review of PR 5: PR 1 landed the rule
     that no skill carries a cap of its own, and left a skill carrying one.
@@ -3502,7 +3502,7 @@ from a number the operator types.
     not every directory, and `skills/paths.json` is a file at the root of that
     tree. Every caller in the file re-checked `is_dir()`, so nothing was
     wrong today; the name described the callers rather than the function, and
-    the next caller is the one that would not check. Filtered at the source,
+    the next caller is the one that would not check. Addressed: filtered at the source,
     with a test that says so.
   - C-186, blocking, found when PR 5's own pull request could not merge: the
     pack's test suite acquired a dependency on a second private repository and
@@ -3548,7 +3548,7 @@ from a number the operator types.
     skip gate with a documented hole, to advertise support the pack does not
     have. One consequence worth naming: `bin/sd_skill.py` had spelled UTC as
     `datetime.timezone.utc` because `datetime.UTC` is 3.11 and mypy was pinned
-    at 3.10; that workaround is gone.
+    at 3.10; that workaround is removed.
   - C-189, material, from the same run: `TheProvisioningMode`'s two tests
     asserted facts about the machine they ran on. `main` derives the checkout
     from the module's own location and has no flag for it, so the tests
@@ -3559,7 +3559,7 @@ from a number the operator types.
     actually does: turn a report into an exit code. A third test was added
     with them, giving the stub a report whose words contradict its flag, so
     the defect these tests exist for -- an exit code that read `"installed"
-    in report` -- cannot come back by wording.
+    in report` -- cannot come back by wording. Addressed.
 - **2026-09-06** — **R11-D31, `BIN_CAP` re-derived from 14,000 to 14,700**, in
   its own change, because PR 6 cannot land under the ceiling it replaced.
   `bin/` stood at 13,307 on `main`; PR 6's first half -- `bin/sd_registry.py`

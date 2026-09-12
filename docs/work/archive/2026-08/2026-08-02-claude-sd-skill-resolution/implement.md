@@ -14,7 +14,7 @@ Parity-only (owner option 3): guard-embed evaluated and dropped. One PR.
   from round 1:
   - **C-1 order:** `make generate` writes manifest/templates AND runs surface-check
     inline; the root `.claude/skills/*` mirrors land only via `make sync`. So
-    generate's inline check fails until sync runs. Correct order: generator →
+    generate's inline check fails until sync runs. Corrected order: generator →
     `make sync` → checks.
   - **C-2 footprint:** `command_installed_targets` iterates `SKILL_FANOUT_PLATFORMS`
     (`registry.py:1211`) for EVERY footprint incl. retired + source-only
