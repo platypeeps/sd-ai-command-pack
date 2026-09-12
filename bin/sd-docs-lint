@@ -501,7 +501,16 @@ def check_work_references(repo: pathlib.Path, work_dir: str, report: Report) -> 
     names paths as they were at the time, which is the one place a reference
     that no longer resolves is still correct.
     """
-    tracked = sd_lib.git_output(["ls-files", "-z", "--", "*.md"], repo)
+    # `--deduplicate`, because an unmerged path sits in the index once per
+    # merge stage and plain `ls-files` prints it once per stage. Without the
+    # flag a conflicted document is read and linted three times: every finding
+    # in it is reported three times and both totals below are inflated. That
+    # is not a corner -- this linter runs during the merge it happens in, and
+    # the file on disk is already resolved and valid by then, so nothing else
+    # says the index is still carrying stages. (Backbone item 481; the flag
+    # needs git >= 2.31, March 2021, which is older than every other git
+    # feature this repository already depends on.)
+    tracked = sd_lib.git_output(["ls-files", "-z", "--deduplicate", "--", "*.md"], repo)
     if tracked is None:
         # Not a skip. An unanswerable enumeration checks nothing, and a rule
         # that reports a pass on nothing is the failure mode this whole item

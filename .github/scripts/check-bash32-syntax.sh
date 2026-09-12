@@ -86,7 +86,14 @@ is_shell_file() {
 tracked_list="$(mktemp)"
 trap 'rm -f "$tracked_list"' EXIT
 
-if ! git ls-files -z -- '*.sh' >"$tracked_list"; then
+#
+# `--deduplicate` because an unmerged path is listed once per merge stage, and
+# the loop below would then check one conflicted script three times, print each
+# rejection three times, and report a `checked` total that is not a count of
+# files. The verdict is unchanged -- three passes of `bash -n` over the same
+# bytes agree -- but the number it is reported with is wrong.
+# Requires git >= 2.31 (March 2021). Backbone item 481.
+if ! git ls-files -z --deduplicate -- '*.sh' >"$tracked_list"; then
   printf '%s\n' \
     "error: git ls-files failed; cannot enumerate tracked shell scripts for the bash 3.2 gate." >&2
   exit 1

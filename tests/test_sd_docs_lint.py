@@ -698,6 +698,115 @@ class Rule7WorkReferenceTests(LintFixture):
         self.assertIn("rule 7 read nothing", joined)
 
 
+BAD_REFERENCE = "docs/work/2026-01-01-long-gone/prd.md"
+NOTES = f"# notes\n\nThe shape is described in `{BAD_REFERENCE}`.\n"
+
+
+class Rule7UnmergedIndexTests(unittest.TestCase):
+    """What rule 7 reports while a merge is still being resolved.
+
+    `sd-docs-lint` is run *during* the merge workflow, which is the only
+    reason this case is worth building by hand: an unmerged path sits in the
+    index once per stage, so the enumeration hands the rule the same document
+    three times, and it is read, linted and reported on three times.
+
+    The fixture resolves the working tree and deliberately leaves it
+    unstaged. That is the state a person is actually in -- the conflict is
+    fixed in the editor, the file on disk is ordinary markdown again, nothing
+    warns them, and the index still carries three stages.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = pathlib.Path(self._tmp.name)
+        self._build()
+
+    def git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            # Identity and signing are set per invocation rather than read
+            # from the machine, so the fixture does not fail on a host with no
+            # `user.email` or one that signs every commit.
+            ["git", "-C", str(self.repo),
+             "-c", "user.email=lint@example.invalid",
+             "-c", "user.name=docs lint",
+             "-c", "commit.gpgsign=false", *args],
+            capture_output=True, text=True, check=check,
+        )
+
+    def _build(self) -> None:
+        """A real merge, not a hand-written index.
+
+        The three stages have to come from git's own conflict machinery, or
+        the fixture restates the belief under test instead of evidencing it.
+        """
+        notes = self.repo / "NOTES.md"
+        item = self.repo / "docs" / "work" / "2026-08-29-a-workable-item"
+        item.mkdir(parents=True)
+        (item / "prd.md").write_text(GOOD_PRD, encoding="utf-8")
+
+        self.git("init", "-q", "-b", "main")
+        notes.write_text("# notes\n\nbase\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.git("checkout", "-q", "-b", "other")
+        notes.write_text("# notes\n\ntheir side\n", encoding="utf-8")
+        self.git("commit", "-qam", "other")
+        self.git("checkout", "-q", "main")
+        notes.write_text("# notes\n\nmy side\n", encoding="utf-8")
+        self.git("commit", "-qam", "mine")
+        self.git("merge", "other", check=False)
+        # Resolved on disk, never staged.
+        notes.write_text(NOTES, encoding="utf-8")
+
+    def assert_the_index_is_unmerged(self) -> None:
+        stages = self.git("ls-files", "-u", "--", "NOTES.md").stdout
+        self.assertEqual(
+            [line.split("\t")[0].split()[-1] for line in stages.splitlines()],
+            ["1", "2", "3"],
+            "the fixture did not leave an unmerged index, so the cases below "
+            "prove nothing -- they would pass against any clean checkout",
+        )
+        listed = self.git("ls-files", "-z", "--", "NOTES.md").stdout
+        self.assertEqual(
+            [name for name in listed.split("\0") if name],
+            ["NOTES.md"] * 3,
+            "this git no longer repeats an unmerged path; if that is now the "
+            "default, say so here rather than deleting the case",
+        )
+
+    def test_a_conflicted_document_is_reported_once(self) -> None:
+        """One bad reference in one file is one finding, not three.
+
+        This is what the person resolving the merge reads, so it is asserted
+        on the report rather than on the path list: a rule that deduplicated
+        its enumeration but still counted per stage would look fixed and
+        print the same three lines.
+        """
+        self.assert_the_index_is_unmerged()
+        report = lint.run(self.repo, "docs/work", "docs/spec", "docs/decisions", None)
+        self.assertEqual(
+            [f for f in report.failures if "names nothing in the checkout" in f],
+            [f"NOTES.md: {BAD_REFERENCE} names nothing in the checkout"],
+            "a conflicted document was linted once per merge stage",
+        )
+
+    def test_the_totals_count_the_conflicted_document_once(self) -> None:
+        """The counters, which a deduplicated path list alone would not fix.
+
+        Two files are readable here -- `NOTES.md` and the item's `prd.md` --
+        and between them they name one `docs/work/` path. Both numbers are
+        read rather than computed, so the case cannot agree with the defect.
+        """
+        self.assert_the_index_is_unmerged()
+        report = lint.run(self.repo, "docs/work", "docs/spec", "docs/decisions", None)
+        self.assertIn(
+            "rule 7 work references: read 1 reference(s) across 2 file(s)",
+            report.notes,
+            f"inflated totals: {report.notes}",
+        )
+
+
 class WorkDirSpellingTests(LintFixture):
     """A spelling that opens a root is read as that root, or is refused.
 

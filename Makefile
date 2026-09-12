@@ -37,7 +37,11 @@ test:
 # Everything tracked under `bin/`
 # is Python (tests/test_no_shipped_shell.py enforces it), so a non-Python file
 # arriving there fails lint loudly, which is the right direction to fail.
-LINT_BIN := $(shell git ls-files -- bin)
+# `--deduplicate`: an unmerged path is listed once per merge stage, so during
+# a conflict ruff and mypy would each be handed the same file three times.
+# Both dedupe internally, so this one is waste rather than a wrong answer --
+# but every `ls-files` in this repository now says what it means (item 481).
+LINT_BIN := $(shell git ls-files --deduplicate -- bin)
 LINT_RUFF_PATHS := dashboard $(LINT_BIN) tests
 LINT_MYPY_PATHS := dashboard $(LINT_BIN)
 
@@ -66,7 +70,7 @@ lint:
 	"$(VENV_PYTHON)" -m ruff check $(LINT_RUFF_PATHS)
 	"$(VENV_PYTHON)" -m mypy $(LINT_MYPY_PATHS)
 	@if command -v shellcheck >/dev/null 2>&1; then \
-		git ls-files -z '*.sh' | xargs -0 shellcheck -S warning; \
+		git ls-files -z --deduplicate '*.sh' | xargs -0 shellcheck -S warning; \
 	elif [ "$(STRICT)" = "1" ]; then \
 		printf '%s\n' "error: shellcheck not found and STRICT=1; shell lint is required." >&2; \
 		exit 1; \
