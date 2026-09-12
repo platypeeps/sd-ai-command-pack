@@ -17,7 +17,9 @@ Seven rules (each past the fifth arrived with a decision record, not a patch):
                     canonical database association, `sd:<positive integer>`;
                     existence and ownership are `sd-ship`'s. No item, no line.
 6. Citations     -- each `path:line` an active item cites is recorded and still
-                    says what it said (`.citations.tsv`, `--update-citations`).
+                    says what it said (`.citations.tsv`, `--update-citations`),
+                    and resolves onto a work item document rather than onto
+                    some other file that happens to share the name.
 7. Work refs     -- every `docs/work/` path tracked markdown names resolves.
 Rules 1 to 4, 6 and 7 read the tree. Rule 5 needs the pull request body, so it
 runs only when `--pr-body` supplies one and reports itself as not run otherwise.
@@ -385,6 +387,7 @@ LOG_HEADING_RE = re.compile(r"^#{1,3} +Log *$", re.IGNORECASE)
 ELSEWHERE = "name no markdown under the work directory"
 QUOTATION = "sit below a Log heading, where a citation quotes rather than claims"
 UNRECORDABLE = "could not be recorded"
+MISRESOLVED = "resolved onto a file that is not a work item document"
 
 Skip = tuple[str, str, str, str]  # citing source, citation, reason, detail
 
@@ -434,6 +437,19 @@ def item_citations(
                     skipped.append((where, citation, ELSEWHERE, ""))
                     continue
                 relative = target.relative_to(work_root.resolve()).as_posix()
+                # A resolution that succeeded onto the wrong file. Every
+                # citation this rule owns names an item document, so anything
+                # else that resolved did so through the fallback bases rather
+                # than because the author meant it -- and unlike a citation
+                # that does not resolve, this one is checked, reported clean,
+                # and wrong. Named rather than silently narrowed, because the
+                # reader has to be told which of the two files was read.
+                if target.name not in ITEM_DOCUMENTS:
+                    skipped.append((where, citation, MISRESOLVED,
+                                    f"names no {match.group('path')} beside {name}, so it "
+                                    f"resolved onto {relative}, which is not one of "
+                                    f"{', '.join(ITEM_DOCUMENTS)}; write the path you mean"))
+                    continue
                 found.append((where, citation, relative, int(match.group("start"))))
     return found, skipped
 
@@ -611,15 +627,20 @@ def census_note(declined: list[Skip]) -> str:
     a Log heading is a deliberate exemption, and one that could not be
     recorded is rule 6 failing to watch its own corpus. On this repository the
     third is 3 against the other two's 123, so a single total would bury it.
+
+    The fourth is the one that is also a failure. `MISRESOLVED` is not a
+    citation this rule declined to look at; it is one this rule looked at
+    against the wrong file, so it is counted here and reported by name.
     """
-    by_reason = {ELSEWHERE: 0, QUOTATION: 0, UNRECORDABLE: 0}
+    by_reason = {ELSEWHERE: 0, QUOTATION: 0, UNRECORDABLE: 0, MISRESOLVED: 0}
     for _, _, reason, _ in declined:
         by_reason[reason] = by_reason.get(reason, 0) + 1
     return (
         f"rule 6 not checked: {len(declined)} citation(s) -- "
         f"{by_reason[ELSEWHERE]} {ELSEWHERE} (the adjacency rule's), "
         f"{by_reason[QUOTATION]} {QUOTATION}, "
-        f"{by_reason[UNRECORDABLE]} {UNRECORDABLE}"
+        f"{by_reason[UNRECORDABLE]} {UNRECORDABLE}, "
+        f"{by_reason[MISRESOLVED]} {MISRESOLVED}"
     )
 
 
@@ -668,6 +689,14 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
             for source, citation, reason, detail in skipped
             if reason == UNRECORDABLE
         )
+        # The one decline that is a failure rather than a note. The others say
+        # a citation went unchecked; this one says a citation was checked
+        # against a file its author did not name, which the clean verdict then
+        # asserted was sound. A miss is a gap a reader can act on. A wrong
+        # answer delivered as a right one is not.
+        for source, citation, reason, detail in skipped:
+            if reason == MISRESOLVED:
+                report.fail(f"{item.name}/{source}", f"`{citation}` {detail}")
         manifest = item / CITATION_MANIFEST
         if not manifest.is_file():
             if recordable:

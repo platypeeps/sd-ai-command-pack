@@ -489,11 +489,15 @@ half alone is worse than neither.
 Criterion 9 needs `WORKFLOW.md` to state that Copilot review is off on
 repositories the operator pays for personally, so `WORKFLOW.md` is in the
 Touches list above; criterion 12 needs `README.md`, which is now in this pull request's Touches
-above. Two corrections to an earlier draft. The writes-nothing claim is
-`README.md:34`, "**What it writes in a repository:** nothing, ever." —
-quoted at `prd.md:871` — and not line 21, which is a claim about rendered
-copies; an implementer following the old citation would have edited the
-wrong paragraph and left "nothing, ever" unscoped. And criterion 12 has a
+above. Two corrections to an earlier draft. The writes-nothing claim is the
+repository `README.md`'s "**What it writes in a repository:**" paragraph —
+quoted at `prd.md:871` — and not the rendered-copies paragraph above it; an
+implementer following the old citation would have edited the wrong paragraph
+and left the claim unscoped. Named by its heading rather than by a line: the
+line number this sentence used to carry was both stale and mis-resolved,
+because a bare filename with no directory component was read against the work
+root, where a different seven-line `README.md` lives. Rule 6 now fails that
+shape by name. And criterion 12 has a
 second half that appeared in no pull request at all: `README.md` must also
 **list the skills that write tracked files** (`prd.md:1405-1406`). Both
 halves land here. C-95 recorded this criterion as addressed; it was not,
