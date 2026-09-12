@@ -1790,8 +1790,29 @@ _CONCERN_RE = re.compile(
 #: Tabs need no separate case: `\s*` reads one exactly as it reads spaces, so
 #: a tab-indented line is held to the same marker requirement. A bullet nested
 #: *deeper* than the row it follows is still read as a new row rather than as
-#: that row's child. Latent, not live -- it ends none of the 33 rows the
-#: corpus cannot classify -- and recorded rather than fixed here.
+#: that row's child. Latent, not live, and recorded rather than fixed here.
+#:
+#: Re-measured on the corpus, and the shape is rarer than the first reading of
+#: it: not only does it end none of the 29 rows nothing can classify, it ends
+#: none of the 532 rows at all, because across the 26 ledger files a `C-<n>`
+#: bullet never once sits deeper than the `C-<n>` bullet above it inside one
+#: blank-line-delimited block. Zero occurrences, not zero consequences of
+#: occurrences. So the fix would be a rewrite of the one pattern the whole of
+#: absorption rests on, validated against a fixture and nothing else, for a
+#: shape no ledger in this repository writes. It stays recorded.
+#:
+#: The live sibling of it, also recorded rather than fixed: absorption ends
+#: only at a `C-<n>` row, so a row followed with no blank line by a bullet
+#: that is *not* one swallows it, and a foreign bullet's words can decide the
+#: row above. 54 of the 532 rows swallow such a bullet, and in 3 the
+#: swallowed text is what decides the verdict. Ending at any bullet instead
+#: is not the fix: measured, it rescues nothing, moves C-7 of the branch-field
+#: item from `parked` to `closed`, and returns C-89 and `archive/2026-07/
+#: 2026-07-30-silence-satisfied-scope-advisory/implement.md`'s C-11 to
+#: unreadable -- which is arguably right for both, since neither states a
+#: disposition of its own and both currently inherit one. That is a change
+#: that *adds* findings on a correctness argument, which is its own item and
+#: its own review, not a rider on a vocabulary change.
 _ROW_START_RE = re.compile(
     r"^\s*(?:\|\s*|[-*]\s*)(?:\*\*)?C-\d+"
     r"|^(?:\*\*)?C-\d+"
@@ -1810,7 +1831,7 @@ _ROW_START_RE = re.compile(
 PARKED_WORDS = ("parked",)
 OPEN_WORDS = ("does not pass", "unresolved", "deferred")
 
-#: The last five are the sixth vocabulary `design.md` named and declined to
+#: The middle five are the sixth vocabulary `design.md` named and declined to
 #: add, on the grounds that a vocabulary should grow when a row is read and
 #: understood rather than when a count is being tuned. The rows were read.
 #: `Corrected.`, `Recorded rather than silently recounted.`, `Noted in the
@@ -1829,9 +1850,53 @@ OPEN_WORDS = ("does not pass", "unresolved", "deferred")
 #: spellings of one instant`, which is prose about a bug, and `Closed by
 #: normalizing at the write`, which is the disposition. Closed is the right
 #: answer, so the movement is a rescue and not a reclassification.
+#:
+#: `restated` is the seventh, and with `supersedes` below it the last one
+#: worth having: together they rescue 4 of those 33 and reclassify none,
+#: taking the floor to 29 -- 5.5%.
+#:
+#: `restated` earns 3 of the 4. Two are it in its own right, in the solo-first
+#: item:
+#: C-163 ends `Restated as the work.` and C-172 ends `Restated as a bare-token
+#: shape`, and in both the sentence carrying the word *is* the disposition.
+#: The third is honest weakness rather than a rescue earned cleanly. C-7 in
+#: `archive/2026-08/2026-08-10-thin-canary-conversion/design.md` is a table
+#: with a literal `disposition` column; its disposition cell reads
+#: `**verified**`, which this vocabulary does not carry, and `restated`
+#: reaches the row from the *evidence* cell -- "explicitly flagged as
+#: recomputed rather than restated". Closed is still the right answer, because
+#: the prose under that table reads `No unresolved blocker.`, but the word
+#: that gets there is in the wrong cell.
+#:
+#: Rejected, each measured whole-corpus as rescues/reclassifications:
+#: `added` 7/0 and `verified` 2/0 are the two that look best by count and are
+#: the two worst by reading. `added` appears in 41 row extents, 32 already
+#: closed and 2 already open, and two of its seven rescues are plainly wrong
+#: -- C-20 in the write-the-test-first item says a no-evidence exit "was added
+#: to close a no-evidence hole", which is the finding, not its disposition.
+#: `verified` appears in 36, and its second rescue reads C-183's "the commit
+#: that claimed `make check exit 0` was verified by the weaker one", which is
+#: again prose about the defect. Both are `accepted`'s problem -- ordinary
+#: English in a ledger that writes prose -- without `accepted`'s excuse of
+#: being a verdict somewhere. `**verified**` in its bold form is exact, 0
+#: exposure and C-7's actual disposition cell, and is left out because it
+#: rescues nothing `restated` does not already reach: a latent correctness
+#: gain, recorded here on the same terms as the one in `_ROW_START_RE`.
+#:
+#: What the remaining 30 are is not a vocabulary gap. They are review-log
+#: entries whose outcome is the last sentence's verb and a different verb each
+#: time -- "lands in the commit that removes the lines", "Chosen: tight",
+#: "Filtered at the source", "the `design.md` now names it". No word list
+#: reads those without reading the prose around them too.
+#: `supersedes` is `superseded` missing the tier by one inflection, and C-175
+#: in the solo-first item is the row: it opens `supersedes C-173's split`.
+#: 1 rescue, 0 reclassifications. Carried as a second literal rather than by
+#: stemming, because a stemmer would also fold `noted` into `note`, `notes`
+#: and `noting` -- ordinary English three times over -- to win this one row.
 CLOSED_WORDS = (
     "addressed", "rebutted", "resolved", "fixed", "n/a",
     "corrected", "recorded", "noted", "superseded", "confirmed",
+    "restated", "supersedes",
 )
 
 #: `accepted` is checked after everything else because it is the one
@@ -1847,8 +1912,61 @@ CLOSED_WORDS = (
 STANDING_WORDS = ("accepted",)
 
 
+#: A row's own leading bold span, which is the row saying what it is before
+#: it says what happened. `**C-18 addressed** -- the C-17 runner-sink rule is
+#: **unsound** ...` and `**C-24 -- the bound rule contradicted the
+#: closing-state classifier. `addressed`.**` are both this shape.
+_HEADER_RE = re.compile(r"^\s*(?:[-*]\s*)?\*\*(.+?)\*\*", re.S)
+
+
 def _disposition(text: str) -> str:
-    """`parked`, `open`, `closed`, or `""` when the row does not say."""
+    """`parked`, `open`, `closed`, or `""` when the row does not say.
+
+    **The header is read first, and only then the whole row.** The tiers
+    below answer "which vocabulary does this row touch", which is the wrong
+    question for a row that already answered it in its own title: the prose
+    after the header is *about the defect*, so it is full of the subject's
+    vocabulary -- a rule that `defers`, an `unresolved` path, a `deferred`
+    cut -- and under tier order alone any of those outranks an `addressed`
+    written four words in.
+
+    Measured on the corpus, and the direction matters because this one only
+    ever quietens the banner: reading the header first moves 5 rows, every
+    one of them `open` to `closed`, rescues none and loses none. All five
+    were read. Four are `**C-N -- <the finding>. `addressed`.**` in the
+    write-the-test-first item (C-24, C-25, C-30, C-37) and the fifth is
+    `**C-18 addressed**` in `archive/2026-08/2026-08-05-consolidate-git-
+    invocation/design.md`. In all five the row says `addressed` in its title
+    and then describes the defect, which is where the open token comes from.
+    Five of the fourteen rows this feature called open were this misread.
+
+    Rejected, measured the same way: **earliest match wins**, which is the
+    same finding aimed at offsets rather than at structure. It fixes those 5
+    and 3 more, and then breaks C-182 -- the row `CLOSED_WORDS` is built on,
+    which says `accepted two spellings of one instant` before it says `Closed
+    by normalizing at the write` -- along with C-42, and moves three parked
+    rows. 8 fixed, 5 broken. The header is the narrow form of the same idea
+    and the only one that costs nothing: it cannot reach C-182, because a row
+    with no bold header still falls through to the tiers unchanged.
+
+    Also rejected: **ignoring matches inside backticks**, on the theory that
+    the false opens are collisions with backticked code identifiers. They
+    are, but the cure loses far more than it saves -- 0 rescues, 6
+    reclassifications and **56 rows made unreadable** -- because this corpus
+    writes the verdict itself as inline code. `**C-1 -- acceptance mixed
+    committed and worktree state. `addressed`.**` is the house style of an
+    entire ledger, and stripping code spans deletes the disposition from it.
+    """
+    found = _HEADER_RE.match(text)
+    if found:
+        verdict = _verdict(found.group(1))
+        if verdict:
+            return verdict
+    return _verdict(text)
+
+
+def _verdict(text: str) -> str:
+    """The four tiers against one span of text, in order."""
     lowered = text.lower()
     for words, verdict in (
         (PARKED_WORDS, "parked"), (OPEN_WORDS, "open"),
@@ -1874,9 +1992,11 @@ def _concern_shape(text: str) -> int:
     happens to open with a `C-` id is not. Folded together, which of the two
     decides the concern is settled by whichever line `git grep` returns first,
     since rows of equal shape keep the one seen first. Re-measured on the
-    corpus after `_ROW_START_RE` fixed absorption, since the earlier figures
-    here were taken with that defect present: the two rules still agree
-    exactly -- 465 closed, 14 open, 20 parked, 33 unreadable either way, zero
+    corpus after `_ROW_START_RE` fixed absorption and again after the
+    vocabulary and `_disposition`'s header rule moved nine rows, since the
+    earlier figures here were taken with that defect present: the two rules
+    still agree exactly -- 474 closed, 9 open, 20 parked, 29 unreadable
+    either way, zero
     concerns changing verdict -- so this is a latent defect removed rather
     than a live misclassification corrected. It matters because the largest
     ledger in the corpus, now 182 rows, is written in the non-bold bullet form
@@ -2248,12 +2368,65 @@ def _marker_rows(root: pathlib.Path) -> list[dict[str, Any]]:
 
 _DISCLOSED_RE = re.compile(r"bin/(?P<tool>[A-Za-z0-9][A-Za-z0-9_-]*)")
 
+#: The one file suffix `bin/` uses. The regex above stops at the `.`, so a
+#: skill writing the true path `bin/sd_handoff_rows.py` discloses the tool
+#: `sd_handoff_rows`, and a literal test for that name finds nothing. Named
+#: here rather than folded into the regex so the trailing period of an English
+#: sentence -- `see bin/sd-plan.` -- cannot be read as an extension.
+_MODULE_SUFFIX = ".py"
+
+
+def _tool_candidates(tool: str) -> tuple[str, ...]:
+    """The filenames under `bin/` that this disclosure could be naming.
+
+    Two, and the second only because `_DISCLOSED_RE` stops at the `.`: a skill
+    writing the true path `bin/sd_handoff_rows.py` discloses the tool
+    `sd_handoff_rows`, so restoring the suffix asks the question the skill
+    actually asked. Resolved by name, never by a directory listing or a
+    `bin/sd-*` glob, either of which would also swallow a disclosure no file
+    answers. A second suffix in `bin/` is a change to `_MODULE_SUFFIX` alone.
+
+    **Respelling `-` as `_` is deliberately *not* done here**, and an earlier
+    revision of this function that did it was wrong. The reasoning was that
+    `bin/` holds both executables and the modules they import, so a disclosure
+    of `bin/sd-suggest` could be answered by `bin/sd_suggest.py`. It cannot.
+    `bin/sd_suggest.py` is an implementation module `bin/sd` imports; the
+    command is `sd suggest`, and nothing named `bin/sd-suggest` exists. The
+    skill disclosing it says so in the very line the regex matches -- *"There
+    is no `bin/sd-suggest` yet"* -- which is word for word what `skills/sd-help`
+    says about `bin/sd-help`. The transform gave those two identical sentences
+    opposite verdicts, and silenced the one whose stem a module happened to
+    share.
+
+    Measured over this repository: of the thirteen disclosures in `skills/`,
+    the respelling changed exactly one verdict, and that one was a true
+    finding. It rescued nothing, because both paths it was meant to rescue --
+    `bin/sd_handoff_rows.py` and `bin/sd_setup_github.py` -- are already
+    written with underscores by the skills that disclose them, and are
+    resolved by the suffix candidate alone.
+
+    The deeper reason it cannot come back: under it, whether a roadmap note is
+    reported turns on whether an unrelated module happens to share a stem.
+    Someone adding `bin/sd_plan.py` as an implementation detail would silently
+    drop the `bin/sd-plan` finding, with nothing in a `sd-status` diff to show
+    for it. A check whose correctness rests on unrelated naming is the defect
+    this class exists to catch, not a resolution strategy.
+    """
+    return tuple(dict.fromkeys((tool, tool + _MODULE_SUFFIX)))
+
 
 def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
     """Skills disclosing a tool under `bin/` that is not built.
 
     Exact and low-yield: a known roadmap that would print the same lines every
     run, which is why it sits at rank 125 and is not abnormal.
+
+    Low-yield only while it stays exact. A literal test for `bin/<tool>` called
+    two of its six findings against files that are on disk, both of them skills
+    quoting a real `.py` path that `_DISCLOSED_RE` had truncated at the `.`,
+    and noise in an abnormality report is worse than a missing check because it
+    teaches the reader to skim the class. `_tool_candidates` says which
+    spellings resolve, and why it stops where it does.
 
     `design.md`'s natural-key table predates this class and names no key for
     the `k` letter. The key used here is the disclosing file and the tool, and
@@ -2268,7 +2441,10 @@ def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
             continue
         where = str(path.relative_to(root))
         for tool in sorted({m.group("tool") for m in _DISCLOSED_RE.finditer(text)}):
-            if (root / "bin" / tool).exists():
+            if any(
+                (root / "bin" / name).is_file()
+                for name in _tool_candidates(tool)
+            ):
                 continue
             rows.append(_row(
                 "undisclosed-tool", f"{where}#bin/{tool}", f"bin/{tool}",

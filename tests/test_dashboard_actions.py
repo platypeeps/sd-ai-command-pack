@@ -33,6 +33,7 @@ from dashboard import (  # noqa: E402 - after the path insert
     actions,
     plugins,
     server,
+    skills,
     work,
 )
 
@@ -524,6 +525,9 @@ class HandlerShape(unittest.TestCase):
         self.assertNotIn("Access-Control-Allow", source)
 
 
+SEEDED_SKILL = "harness-probe-skill"
+
+
 class Live:
     """A real server on an ephemeral port, for the guards that are HTTP's.
 
@@ -537,9 +541,24 @@ class Live:
 
     def __enter__(self) -> "Live":
         self.scratch = tempfile.TemporaryDirectory()
+        # `/api/skills` is the one route that takes no argument for the side it
+        # reads, so every request made through this harness walked the
+        # developer's own `~/.claude/skills`: 88 directories on the machine
+        # where this was found, none of them anything this repository ships or
+        # controls. The gate then answered differently per machine, and once
+        # answered by timing out. A directory the harness writes is the
+        # controlled one, and one seeded skill tells it apart from a real home.
+        self.installed = Path(self.scratch.name) / "claude" / "skills"
+        (self.installed / SEEDED_SKILL).mkdir(parents=True)
+        (self.installed / SEEDED_SKILL / "SKILL.md").write_text(
+            f"---\nname: {SEEDED_SKILL}\ndescription: seeded by the harness\n---\n",
+            encoding="utf-8")
         self.cache_patch = unittest.mock.patch.dict(
             os.environ, {"XDG_CACHE_HOME": self.scratch.name})
         self.cache_patch.start()
+        self.installed_patch = unittest.mock.patch.object(
+            skills, "installed_root", lambda: self.installed)
+        self.installed_patch.start()
         self.patch = unittest.mock.patch.object(plugins, "catalog", lambda: ([], ""))
         self.patch.start()
         handler = server.make_handler(server.Cache(REPO_ROOT / "missing"), "// none")
@@ -554,6 +573,7 @@ class Live:
         self.httpd.server_close()
         self.thread.join(timeout=5)
         self.patch.stop()
+        self.installed_patch.stop()
         self.cache_patch.stop()
         self.scratch.cleanup()
 
@@ -776,6 +796,42 @@ class TheDeliverEndpoint(unittest.TestCase):
             status, body = self.post(live, {"repo": "a", "item": "an-item"})
         self.assertEqual((status, json.loads(body)), (200, {"ok": True}))
         self.assertEqual(seen, [(pathlib.Path("/somewhere"), "an-item")])
+
+
+class TheSkillsRouteReadsTheHarnessAndNotAHome(unittest.TestCase):
+    """The gate must not depend on what the developer happens to have installed.
+
+    Every other route here is answered out of a scratch cache or a patched
+    collaborator. `/api/skills` was the exception: it resolved the installed
+    side from a module constant built at import time out of `Path.home()`, so
+    the thing under test on this machine was 88 unrelated directories, and the
+    walk of them is what made `NoGetSideEffect` time out on a Markdown-only
+    diff. Asserting the directory, rather than only that the route answers,
+    is what stops it drifting back: a route reading a real home fails here
+    even when it is fast enough that nobody notices.
+    """
+
+    def test_the_installed_side_is_the_directory_the_harness_made(self) -> None:
+        with Live(self) as live:
+            status, body = live.request("GET", "/api/skills")
+            controlled = live.installed
+        self.assertEqual(status, 200)
+        got = json.loads(body)
+        self.assertEqual(got["installedAt"], str(controlled))
+        self.assertTrue(got["installedExists"])
+
+    def test_the_installed_names_are_exactly_what_the_harness_seeded(self) -> None:
+        """One seeded skill. A real home would bring dozens of its own."""
+        with Live(self) as live:
+            _, body = live.request("GET", "/api/skills")
+        got = json.loads(body)
+        self.assertEqual(
+            [row["name"] for row in got["skills"] if row["installed"]], [SEEDED_SKILL])
+        self.assertEqual(got["counts"]["installed"], 1)
+
+    def test_the_production_default_still_names_the_agents_own_directory(self) -> None:
+        """Unpatched, so the fix is an injection point and not a move."""
+        self.assertEqual(skills.installed_root(), Path.home() / ".claude" / "skills")
 
 
 if __name__ == "__main__":
