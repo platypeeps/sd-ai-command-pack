@@ -23,7 +23,7 @@ recalled:
 
 | span | lines | analogue |
 |---|---|---|
-| `Citation` record and the closed `REASONS` vocabulary | 16 | `ITEM_STATUSES` (`bin/sd-docs-lint:57`) and the three tuples under it are one line each, plus a six-field record, `TOKEN` and `SEPARATED_PAIR` written out, and the comment that says why the nine-name vocabulary is closed |
+| `Citation` record and the closed `REASONS` vocabulary | 16 | `source:bin/sd-docs-lint::ITEM_STATUSES` and the three tuples under it are one line each, plus a six-field record, `TOKEN` and `SEPARATED_PAIR` written out, and the comment that says why the nine-name vocabulary is closed |
 | `classify()` | 32 | `check_work_references` (`source:bin/sd-docs-lint::check_work_references`) is 41 for walk-a-corpus, skip-with-a-named-reason, count, report; this is the same job without its git call and without `METAVARIABLE_RE`'s branch |
 | `anchored_citations()` as a thin filter over it | 5 | it is 23 today and becomes a comprehension the existing assertion calls |
 | `census()` | 10 | the accumulate-and-note half of `check_citations` (`source:bin/sd-docs-lint::check_citations`), which is about 10 of its 52 |

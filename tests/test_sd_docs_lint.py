@@ -939,6 +939,160 @@ class Rule6SilencerTests(LintFixture):
         self.assertNotIn("rule 6 not checked:", notes)
 
 
+class CitationRecorderIdempotenceTests(LintFixture):
+    """sd:593. Re-recording a current manifest is a no-op, so it can be a check.
+
+    It was not. On a clean checkout `--update-citations` rewrote four rows of
+    one manifest and nothing else, every time: the snippet field of four rows
+    ended in a space, because an older writer truncated at 48 characters
+    without stripping and the boundary landed on one. Nothing was
+    mis-reported -- rule 6 reads both shapes on purpose, and
+    `test_legacy_trailing_space_anchor_still_detects_moved_and_changed_text`
+    says so -- but a recorder that moves the tree on a tree that is already
+    current cannot be asserted about. The assertion fails for a reason that is
+    not a defect, so the check is never added, and the only evidence a
+    manifest is current is that somebody says they ran the writer.
+
+    Tolerating the old shape on READ stays, forever. Writing it stops.
+    """
+
+    def test_re_recording_this_repository_changes_no_manifest(self) -> None:
+        """The property as a check, over the live corpus, without writing to it.
+
+        `citation_survey` is the walk the writer records from and
+        `manifest_body` is the bytes it writes, so comparing them against the
+        file on disk is exactly `--update-citations` followed by a porcelain
+        status, with nothing left behind when it fails.
+        """
+        work = REPO_ROOT / "docs" / "work"
+        compared = 0
+        for item in lint.item_directories(work):
+            if "archive" in item.parts:
+                continue
+            manifest = item / lint.CITATION_MANIFEST
+            if not manifest.is_file():
+                continue
+            rows, _ = lint.citation_survey(item, work)
+            compared += 1
+            self.assertEqual(
+                manifest.read_text(encoding="utf-8"),
+                lint.manifest_body(rows),
+                f"re-recording {item.name} would rewrite its manifest; run "
+                "bin/sd-docs-lint --update-citations and commit the result",
+            )
+        # The control for this test's own reach: an assertion that compared
+        # nothing would pass on an empty repository just as loudly.
+        self.assertGreater(compared, 0, "no recorded item was compared")
+
+    def test_a_legacy_trailing_space_row_is_rewritten_once_and_then_never(self) -> None:
+        """The fixture form: one re-record normalises, the next is byte-equal."""
+        item = self.cited_item()
+        lint.write_citation_manifest(item, self.work)
+        manifest = item / lint.CITATION_MANIFEST
+        current = manifest.read_text(encoding="utf-8")
+        manifest.write_text(current.replace("\n", " \n"), encoding="utf-8")
+        lint.write_citation_manifest(item, self.work)
+        first = manifest.read_text(encoding="utf-8")
+        self.assertEqual(first, current)
+        lint.write_citation_manifest(item, self.work)
+        self.assertEqual(manifest.read_text(encoding="utf-8"), first)
+
+    def test_the_writer_strips_a_snippet_that_truncates_onto_a_space(self) -> None:
+        """The guard itself, called directly, on the shape that produced the four.
+
+        A line whose 48th character is a space is the whole cause, so the
+        fixture builds one rather than hoping the corpus still contains one.
+        """
+        line = "a" * (lint.SNIPPET_CHARS - 1) + " trailing words follow"
+        self.assertEqual(lint.snippet_of(line), "a" * (lint.SNIPPET_CHARS - 1))
+        # CONTROL: a snippet that does not end on the boundary is untouched.
+        self.assertEqual(lint.snippet_of("  a  short   line  "), "a short line")
+
+
+class Rule6MisresolutionTests(LintFixture):
+    """sd:533. A citation that resolves onto the wrong file is an error.
+
+    The live instance: an implement.md wrote `README.md:34`, meaning the
+    repository README, and `resolve_citation` landed it on the seven-line
+    `docs/work/README.md` -- a real file, at a line it does not have. The
+    citation was stale AND mis-resolved, and rule 6's verdict was clean.
+
+    WHY AN ERROR AND NOT A SILENT NARROWING. The cheapest available fix was
+    to fail only when the cited line exceeds the resolved file's length,
+    which would have caught this instance. It does not catch the class: a
+    bare name that lands on a file long enough to have the cited line is
+    read, compared against unrelated text, and reported as sound. The second
+    cheapest was to stop resolving a bare name anywhere but beside the citing
+    page, which turns the wrong answer into no answer -- still silence, which
+    is the thing sd:5 closed and this must not reopen.
+
+    So the rule is stated positively: every citation rule 6 owns names a work
+    item document. A citation that resolved onto anything else resolved
+    through a fallback base rather than because its author meant it, and both
+    readings are named in the failure so the author can write the path.
+    """
+
+    def misresolving_item(self) -> pathlib.Path:
+        """An item whose page cites a sibling and a bare work-root filename.
+
+        `docs/work/README.md` is four lines long on purpose. The cited line
+        exists in it, so this fixture is the case a length check would miss:
+        without the guard the citation is recorded, compared against text
+        about something else, and reported as checked and clean.
+        """
+        (self.work / "README.md").write_text(
+            "# Work items\n\nOne directory per item.\nNothing here is a claim about installs.\n",
+            encoding="utf-8",
+        )
+        item = self.write_item("2026-08-29-a-misciting-item", GOOD_PRD)
+        (item / "design.md").write_text(
+            "# design\n\nThe ladder is at `prd.md:3`.\nThe claim is `README.md:3`.\n",
+            encoding="utf-8",
+        )
+        return item
+
+    def test_red_a_bare_name_resolving_onto_a_non_item_document_fails(self) -> None:
+        """The guard, called directly, and then through the run.
+
+        Called directly first because the same page carries a citation that
+        must still resolve: a fixture that only asserted a failure would pass
+        just as well against a resolver that refused everything.
+        """
+        item = self.misresolving_item()
+        found, skipped = lint.item_citations(item, self.work)
+        # CONTROL, in the same page and the same walk.
+        self.assertEqual(
+            [entry[:3] for entry in found],
+            [("design.md:3", "prd.md:3", "2026-08-29-a-misciting-item/prd.md")],
+        )
+        self.assertEqual(
+            [entry[:3] for entry in skipped],
+            [("design.md:4", "README.md:3", lint.MISRESOLVED)],
+        )
+        joined = "\n".join(self.assert_fails("`README.md:3`"))
+        self.assertIn("names no README.md beside design.md", joined)
+        self.assertIn("resolved onto README.md", joined)
+
+    def test_the_census_counts_a_misresolution_apart_from_a_decline(self) -> None:
+        """It is counted, because the census is a partition or it is nothing."""
+        self.misresolving_item()
+        notes = self.notes()
+        self.assertIn("rule 6 not checked: 1 citation(s)", notes)
+        self.assertIn(f"1 {lint.MISRESOLVED}", notes)
+
+    def test_green_a_bare_name_that_names_a_sibling_is_untouched(self) -> None:
+        """The control for the whole class: the ordinary citation still works.
+
+        `docs/work/README.md` exists here too, so this is not green merely
+        because the ambiguous file is absent -- it is green because the
+        citation names a document of the item it sits in.
+        """
+        (self.work / "README.md").write_text("# Work items\n", encoding="utf-8")
+        self.record()
+        self.assert_clean()
+        self.assertIn("checked 1 citation(s)", self.notes())
+
+
 class Rule7WorkReferenceTests(LintFixture):
     """A `docs/work/` path a document names has to resolve.
 
