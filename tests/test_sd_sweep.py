@@ -609,5 +609,94 @@ class BranchResolution(unittest.TestCase):
         self.assertEqual(counts, {1})
 
 
+
+class FleetPins(unittest.TestCase):
+    """What `sd sweep --fleet` says about the commits the fleet pins.
+
+    A pack or system pin is a full SHA that no ecosystem watches: Dependabot is
+    told to ignore it, and the `ref:`, `*_REVISION:` and tarball-manifest forms
+    are invisible by construction. So the report rides the fleet walk that is
+    already scheduled rather than a flag of its own, and the control below is
+    the load-bearing case: a single-checkout sweep must *not* grow a `pins`
+    key, because one checkout cannot answer what the rest of the fleet pins.
+
+    The seeded tree is `$HOME/fleet` and not `$HOME/repos` on purpose. If the
+    pin half ever stopped reading the checkouts the sweep enumerated and went
+    back to walking the home tree itself, `search_root()` would land on a
+    directory that does not exist, and every assertion below would read zero
+    pins rather than quietly agreeing with a second walk.
+    """
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        # Resolved: on macOS the scratch directory is a symlink, and the pin
+        # half compares a pin's target against the checkout it walked by path.
+        self.home = pathlib.Path(tmp.name).resolve()
+        self.root = self.home / "fleet"
+        self.root.mkdir()
+        self.environment = {**os.environ, "HOME": str(self.home),
+                            "SD_REPO_ROOT": str(self.root)}
+        self.upstream, first = self.checkout("system-probe", commits=3)
+        self.consumer, _ = self.checkout("consumer-probe")
+        flows = self.consumer / ".github" / "workflows"
+        flows.mkdir(parents=True)
+        (flows / "tests.yml").write_text(
+            "jobs:\n  t:\n    steps:\n"
+            f"      - uses: owner/system-probe@{first}\n", encoding="utf-8")
+
+    def git(self, repo: pathlib.Path, *args: str) -> str:
+        done = subprocess.run(["git", "-C", str(repo), *args], check=True,
+                              capture_output=True, text=True)
+        return done.stdout.strip()
+
+    def checkout(self, name: str, commits: int = 1) -> tuple[pathlib.Path, str]:
+        """One checkout under an org directory, with real commits behind it."""
+        repo = self.root / "owner" / name
+        (repo / "docs" / "work").mkdir(parents=True)
+        self.git(repo, "init", "--quiet", "--initial-branch=main")
+        self.git(repo, "config", "user.email", "t@example.com")
+        self.git(repo, "config", "user.name", "t")
+        self.git(repo, "config", "commit.gpgsign", "false")
+        first = ""
+        for number in range(commits):
+            (repo / "f.txt").write_text(str(number), encoding="utf-8")
+            self.git(repo, "add", "-A")
+            self.git(repo, "commit", "--quiet", "-m", f"c{number}")
+            first = first or self.git(repo, "rev-parse", "HEAD")
+        return repo, first
+
+    def sweep(self, *arguments: str, cwd: pathlib.Path | None = None):
+        done = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "bin" / "sd"), "sweep", *arguments],
+            cwd=str(cwd or self.root), env=self.environment,
+            capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        return done
+
+    def test_the_fleet_sweep_names_the_pin_that_is_behind(self) -> None:
+        report = json.loads(self.sweep("--fleet", "--json").stdout)
+        self.assertEqual(
+            [(row["repo"], row["target"], row["status"]) for row in report["pins"]],
+            [("consumer-probe", "system-probe", "behind 2")])
+
+    def test_a_single_checkout_sweep_reports_no_pins_at_all(self) -> None:
+        """The control. Without it the case above passes on a key that is
+        always there, which would be one checkout answering a fleet question."""
+        report = json.loads(self.sweep("--json", cwd=self.consumer).stdout)
+        self.assertNotIn("pins", report)
+
+    def test_the_text_report_carries_the_pin_section_and_its_footer(self) -> None:
+        printed = self.sweep("--fleet").stdout
+        self.assertIn("behind 2", printed)
+        self.assertIn("1 pin site(s) across 1 repo(s); 1 behind.", printed)
+        self.assertIn("Report only", printed)
+
+    def test_the_pin_site_is_named_by_file_and_line(self) -> None:
+        report = json.loads(self.sweep("--fleet", "--json").stdout)
+        self.assertEqual(report["pins"][0]["where"],
+                         ".github/workflows/tests.yml:4")
+
+
 if __name__ == "__main__":
     unittest.main()

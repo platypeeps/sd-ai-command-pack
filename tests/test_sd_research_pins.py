@@ -22,8 +22,10 @@ the import.
 from __future__ import annotations
 
 import ast
+import contextlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -265,29 +267,40 @@ class CheckoutsAtBothDepthsTests(unittest.TestCase):
         self.assertEqual(found, ["nested"])
 
 
+def git_in(cwd, *args):
+    subprocess.run(["git", "-C", str(cwd), *args], check=True,
+                   capture_output=True, text=True)
+
+
+def seed_repo(root: Path, name: str, commits: int) -> str:
+    """A checkout under `root/owner`, and the SHA of its first commit.
+
+    Module level rather than a method because three classes build the same
+    tree now, and a second copy of it is a second fixture that can disagree
+    with this one about what a fleet looks like.
+    """
+    repo = root / "owner" / name
+    repo.mkdir(parents=True)
+    git_in(repo, "init", "-q", "-b", "main")
+    git_in(repo, "config", "user.email", "probe@example.invalid")
+    git_in(repo, "config", "user.name", "probe")
+    first = ""
+    for n in range(commits):
+        (repo / "f.txt").write_text(str(n))
+        git_in(repo, "add", "f.txt")
+        git_in(repo, "commit", "-q", "-m", f"c{n}")
+        if not first:
+            first = subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                capture_output=True, text=True, check=True).stdout.strip()
+    return first
+
+
 class FleetReportTests(unittest.TestCase):
     """End to end against a tree the test built, with real commits behind it."""
 
-    def git(self, cwd, *args):
-        subprocess.run(["git", "-C", str(cwd), *args], check=True,
-                       capture_output=True, text=True)
-
     def upstream(self, root: Path, name: str, commits: int) -> str:
-        repo = root / "owner" / name
-        repo.mkdir(parents=True)
-        self.git(repo, "init", "-q", "-b", "main")
-        self.git(repo, "config", "user.email", "probe@example.invalid")
-        self.git(repo, "config", "user.name", "probe")
-        first = ""
-        for n in range(commits):
-            (repo / "f.txt").write_text(str(n))
-            self.git(repo, "add", "f.txt")
-            self.git(repo, "commit", "-q", "-m", f"c{n}")
-            if not first:
-                first = subprocess.run(
-                    ["git", "-C", str(repo), "rev-parse", "HEAD"],
-                    capture_output=True, text=True, check=True).stdout.strip()
-        return first
+        return seed_repo(root, name, commits)
 
     def test_the_report_names_the_stale_site_and_leaves_third_parties_out(self) -> None:
         with tempfile.TemporaryDirectory() as scratch:
@@ -339,6 +352,74 @@ class FleetReportTests(unittest.TestCase):
                 "jobs:\n  t:\n    steps:\n      - uses: owner/self-probe@%s\n" % sha
             )
             self.assertEqual(load().fleet(root), [])
+
+
+
+def seeded_fleet(root: Path, commits: int = 3) -> Path:
+    """One consumer pinning one upstream at its first of `commits` commits."""
+    old = seed_repo(root, "system-probe", commits)
+    consumer = root / "owner" / "consumer-probe"
+    flow = consumer / ".github" / "workflows"
+    flow.mkdir(parents=True)
+    (consumer / ".git").mkdir()
+    (flow / "x.yml").write_text(
+        "jobs:\n  t:\n    steps:\n      - uses: owner/system-probe@%s\n" % old
+    )
+    return consumer
+
+
+class GivenCheckoutsTests(unittest.TestCase):
+    """`fleet(trees=...)` takes the fleet a caller has already walked.
+
+    `sd sweep --fleet` enumerates the checkouts to age their work items and
+    then asks for the pins in the same ones. Passing that list is what makes
+    the two halves of one report incapable of disagreeing about which
+    repositories exist; discovering the tree a second time here would let them.
+    """
+
+    def test_the_given_checkouts_are_the_ones_resolved(self) -> None:
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            seeded_fleet(root)
+            trees = [root / "owner" / "consumer-probe", root / "owner" / "system-probe"]
+            rows = load().fleet(trees=trees)
+        self.assertEqual([(r["target"], r["status"]) for r in rows],
+                         [("system-probe", "behind 2")])
+
+    def test_a_root_holding_nothing_is_the_control_and_finds_no_pins(self) -> None:
+        """Without this the case above could be passing on a walk of the real
+        `~/repos`, which on this machine does carry fleet pins."""
+        with tempfile.TemporaryDirectory() as scratch:
+            self.assertEqual(load().fleet(root=Path(scratch)), [])
+
+    def test_the_given_checkouts_outrank_the_root_beside_them(self) -> None:
+        """A caller that named its fleet gets that fleet, not a second walk."""
+        with tempfile.TemporaryDirectory() as scratch, \
+                tempfile.TemporaryDirectory() as elsewhere:
+            root = Path(scratch)
+            seeded_fleet(root)
+            trees = [root / "owner" / "consumer-probe", root / "owner" / "system-probe"]
+            rows = load().fleet(root=Path(elsewhere), trees=trees)
+        self.assertEqual(len(rows), 1, rows)
+
+
+class FleetLinesTests(unittest.TestCase):
+    """One renderer, so the standalone verb and the sweep cannot drift apart."""
+
+    def test_the_standalone_verb_prints_exactly_the_shared_lines(self) -> None:
+        module = load()
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            seeded_fleet(root, commits=2)
+            expected = module.fleet_lines(module.fleet(root))
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                module.fleet_report(root)
+        self.assertEqual(buffer.getvalue(), "".join(f"{line}\n" for line in expected))
+        self.assertIn("  Report only — the repin stays a hand decision.", expected)
+
+    def test_an_empty_fleet_says_so_rather_than_rendering_a_header(self) -> None:
+        self.assertEqual(load().fleet_lines([]), ["no fleet pins found"])
 
 
 if __name__ == "__main__":

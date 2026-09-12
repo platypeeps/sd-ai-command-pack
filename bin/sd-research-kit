@@ -60,7 +60,9 @@ USAGE = """usage: sd-research-kit render|checklinks|review|pins|fleet-pins|
                 documents each run, never maintained
   fleet-pins    every pack and system pin across the checkouts beside this one
                 -- `uses:`, `ref:`, `<NAME>_REVISION:`, a tarball manifest's
-                `source_commit` -- current or behind N. Report only; exit 0
+                `source_commit` -- current or behind N. Report only; exit 0.
+                `sd sweep --fleet` prints the same report under the fleet walk
+                the scheduler already runs; this is the way to ask for it alone
   init-claude-md
                 lay skills/sd-research-repo/templates/CLAUDE.md into this repo,
                 once, when it has none. Never overwrites an existing copy: from
