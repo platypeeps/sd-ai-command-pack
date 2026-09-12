@@ -355,7 +355,15 @@ SNIPPET_CHARS = 48
 
 
 def snippet_of(line: str) -> str:
-    """The recorded shape: collapsed, truncated, without trailing whitespace."""
+    """The recorded shape: collapsed, truncated, without trailing whitespace.
+
+    The `rstrip` is what makes the recorder idempotent, and it is not
+    decoration: the truncation boundary lands on a space often enough that
+    four rows in this repository were written with a trailing one by a writer
+    that did not strip. Rule 6 reads both shapes deliberately, so nothing was
+    mis-reported -- but every re-record rewrote those four rows and nothing
+    else, so `--update-citations` could never be run as a check.
+    """
     return " ".join(line.split())[:SNIPPET_CHARS].rstrip()
 
 
@@ -511,6 +519,20 @@ def citation_survey(
     return rows, skipped
 
 
+def manifest_body(rows: list[str]) -> str:
+    """The exact bytes a recording is: one row a line, one trailing newline.
+
+    One spelling, because idempotence is a property of the bytes and not of
+    the rows. A recorder that can be run twice for the same result can be run
+    as a check -- re-record, assert the tree did not move, and the manifest is
+    proven current without anyone reading it. A recorder that cannot is a
+    writer somebody has to be trusted to have run. Two places building this
+    string is how the second one drifts, so there is one.
+    """
+    body = "\n".join(rows)
+    return body + ("\n" if body else "")
+
+
 def write_citation_manifest(
     item: pathlib.Path, work_root: pathlib.Path
 ) -> tuple[int, list[Skip], list[str]]:
@@ -531,8 +553,7 @@ def write_citation_manifest(
             fields = line.rstrip().split("\t")
             if len(fields) == 5 and tuple(fields[:2]) not in keys:
                 dropped.append(f"{fields[0]} `{fields[1]}`")
-    body = "\n".join(rows)
-    manifest.write_text(body + ("\n" if body else ""), encoding="utf-8")
+    manifest.write_text(manifest_body(rows), encoding="utf-8")
     return len(rows), skipped, dropped
 
 

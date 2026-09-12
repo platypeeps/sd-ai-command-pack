@@ -939,6 +939,76 @@ class Rule6SilencerTests(LintFixture):
         self.assertNotIn("rule 6 not checked:", notes)
 
 
+class CitationRecorderIdempotenceTests(LintFixture):
+    """sd:593. Re-recording a current manifest is a no-op, so it can be a check.
+
+    It was not. On a clean checkout `--update-citations` rewrote four rows of
+    one manifest and nothing else, every time: the snippet field of four rows
+    ended in a space, because an older writer truncated at 48 characters
+    without stripping and the boundary landed on one. Nothing was
+    mis-reported -- rule 6 reads both shapes on purpose, and
+    `test_legacy_trailing_space_anchor_still_detects_moved_and_changed_text`
+    says so -- but a recorder that moves the tree on a tree that is already
+    current cannot be asserted about. The assertion fails for a reason that is
+    not a defect, so the check is never added, and the only evidence a
+    manifest is current is that somebody says they ran the writer.
+
+    Tolerating the old shape on READ stays, forever. Writing it stops.
+    """
+
+    def test_re_recording_this_repository_changes_no_manifest(self) -> None:
+        """The property as a check, over the live corpus, without writing to it.
+
+        `citation_survey` is the walk the writer records from and
+        `manifest_body` is the bytes it writes, so comparing them against the
+        file on disk is exactly `--update-citations` followed by a porcelain
+        status, with nothing left behind when it fails.
+        """
+        work = REPO_ROOT / "docs" / "work"
+        compared = 0
+        for item in lint.item_directories(work):
+            if "archive" in item.parts:
+                continue
+            manifest = item / lint.CITATION_MANIFEST
+            if not manifest.is_file():
+                continue
+            rows, _ = lint.citation_survey(item, work)
+            compared += 1
+            self.assertEqual(
+                manifest.read_text(encoding="utf-8"),
+                lint.manifest_body(rows),
+                f"re-recording {item.name} would rewrite its manifest; run "
+                "bin/sd-docs-lint --update-citations and commit the result",
+            )
+        # The control for this test's own reach: an assertion that compared
+        # nothing would pass on an empty repository just as loudly.
+        self.assertGreater(compared, 0, "no recorded item was compared")
+
+    def test_a_legacy_trailing_space_row_is_rewritten_once_and_then_never(self) -> None:
+        """The fixture form: one re-record normalises, the next is byte-equal."""
+        item = self.cited_item()
+        lint.write_citation_manifest(item, self.work)
+        manifest = item / lint.CITATION_MANIFEST
+        current = manifest.read_text(encoding="utf-8")
+        manifest.write_text(current.replace("\n", " \n"), encoding="utf-8")
+        lint.write_citation_manifest(item, self.work)
+        first = manifest.read_text(encoding="utf-8")
+        self.assertEqual(first, current)
+        lint.write_citation_manifest(item, self.work)
+        self.assertEqual(manifest.read_text(encoding="utf-8"), first)
+
+    def test_the_writer_strips_a_snippet_that_truncates_onto_a_space(self) -> None:
+        """The guard itself, called directly, on the shape that produced the four.
+
+        A line whose 48th character is a space is the whole cause, so the
+        fixture builds one rather than hoping the corpus still contains one.
+        """
+        line = "a" * (lint.SNIPPET_CHARS - 1) + " trailing words follow"
+        self.assertEqual(lint.snippet_of(line), "a" * (lint.SNIPPET_CHARS - 1))
+        # CONTROL: a snippet that does not end on the boundary is untouched.
+        self.assertEqual(lint.snippet_of("  a  short   line  "), "a short line")
+
+
 class Rule6MisresolutionTests(LintFixture):
     """sd:533. A citation that resolves onto the wrong file is an error.
 
