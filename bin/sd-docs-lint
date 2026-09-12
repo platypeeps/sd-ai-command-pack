@@ -936,6 +936,28 @@ def run(
     return report
 
 
+def record_citations(work_root: pathlib.Path) -> int:
+    """Re-record rule 6's baseline for every active item, and say what moved."""
+    if not work_root.is_dir():
+        print(f"error: {work_root} does not exist", file=sys.stderr)
+        return 2
+    for item in item_directories(work_root):
+        if "archive" in item.parts:
+            continue
+        count, skipped, dropped = write_citation_manifest(item, work_root)
+        # The recorder's own count was a count of what it wrote, so a citation
+        # it refused to record was invisible at recording time too -- the one
+        # moment a person is looking straight at it. Both numbers here, and
+        # the refusals it owns named in full.
+        print(f"{item.name}: recorded {count} of {count + len(skipped)} citation(s)")
+        for source, citation, reason, detail in skipped:
+            if reason == UNRECORDABLE:
+                print(f"  not recorded: {source} `{citation}` {detail}")
+        for row in dropped:
+            print(f"  dropped: {row} is no longer cited")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Lint docs/work, docs/spec and docs/decisions.")
     parser.add_argument("--work-dir", default="docs/work", help="work item root, repo-relative")
@@ -977,25 +999,7 @@ def main(argv: list[str] | None = None) -> int:
         setattr(args, flag, normalised)
 
     if args.update_citations:
-        work_root = root / args.work_dir
-        if not work_root.is_dir():
-            print(f"error: {work_root} does not exist", file=sys.stderr)
-            return 2
-        for item in item_directories(work_root):
-            if "archive" in item.parts:
-                continue
-            count, skipped, dropped = write_citation_manifest(item, work_root)
-            # The recorder's own count was a count of what it wrote, so a
-            # citation it refused to record was invisible at recording time
-            # too -- the one moment a person is looking straight at it. Both
-            # numbers here, and the refusals it owns named in full.
-            print(f"{item.name}: recorded {count} of {count + len(skipped)} citation(s)")
-            for source, citation, reason, detail in skipped:
-                if reason == UNRECORDABLE:
-                    print(f"  not recorded: {source} `{citation}` {detail}")
-            for row in dropped:
-                print(f"  dropped: {row} is no longer cited")
-        return 0
+        return record_citations(root / args.work_dir)
 
     body: str | None = None
     if args.pr_body is not None:

@@ -2768,9 +2768,11 @@ class ConcernLedgerTests(InventoryFixture):
             " assumption the fix was in shipped text | **addressed** - D2d"
             " validates locally |\n"
         ))
-        found = self.checks(self.scan())
-        self.assertEqual([], found.get("unresolved-concern", []))
-        self.assertEqual([], found.get("unreadable-concern-row", []))
+        # Every row, not two named classes. Copilot's verification pass was
+        # right that excluding `unresolved-concern` and `unreadable-concern-row`
+        # leaves a misread free to land as `parked-concern` and still pass.
+        # `addressed` is closed, and closed means this ledger yields nothing.
+        self.assertEqual([], self.scan())
 
     def test_a_table_row_whose_verdict_column_is_open_stays_open(self) -> None:
         """The control, and the half that stops the fix from silencing rows.
