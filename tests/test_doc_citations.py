@@ -1350,10 +1350,20 @@ def repointable() -> list[pathlib.Path]:
     `classify` already reports a stale archived citation without failing it.
     Repointing one would rewrite the record, which is the same objection rule
     6 makes to re-anchoring a citation below a Log heading.
+
+    Deduplicated, and that is not tidiness. `corpus()` already enumerates every
+    tracked markdown file and `ROOT_DOCUMENTS` names some of the same pages, so
+    a document reached twice is written twice by `--apply` and reported twice
+    by the dry run -- a reader counting the moves is told there are two where
+    there is one.
     """
-    return [doc for doc in corpus() if "archive" not in doc.parts] + [
-        REPO_ROOT / name for name in ROOT_DOCUMENTS if (REPO_ROOT / name).is_file()
-    ]
+    documents = [doc for doc in corpus() if "archive" not in doc.parts]
+    documents += [REPO_ROOT / name for name in ROOT_DOCUMENTS
+                  if (REPO_ROOT / name).is_file()]
+    seen: dict[pathlib.Path, None] = {}
+    for doc in documents:
+        seen.setdefault(doc.resolve(), None)
+    return list(seen)
 
 
 def repoint_main(argv: list[str]) -> int:
@@ -1969,6 +1979,20 @@ class CitationRepointerTests(unittest.TestCase):
             proposed += [f"{doc}: {move.citation} -> {move.now}" for move in moves]
             proposed += [f"{doc}: REFUSED {r.citation}: {r.reason}" for r in refusals]
         self.assertEqual(proposed, [])
+
+    def test_no_document_is_offered_to_the_repointer_twice(self) -> None:
+        """`corpus()` and `ROOT_DOCUMENTS` overlap, and `CONTRIBUTING.md` is
+        the overlap. Reached twice, `--apply` writes it twice and the dry run
+        counts its moves twice.
+
+        The control is that the overlap is real: an assertion about duplicates
+        on a list that could not contain one proves nothing.
+        """
+        documents = repointable()
+        self.assertEqual(len(documents), len(set(documents)))
+        self.assertTrue(
+            {REPO_ROOT / name for name in ROOT_DOCUMENTS} & set(corpus()),
+            "ROOT_DOCUMENTS no longer overlaps the corpus, so this proves nothing")
 
     def test_the_corpus_this_tool_writes_to_excludes_the_archive(self) -> None:
         """An archived page is a record. `classify` refuses to fail one; this
