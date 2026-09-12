@@ -32,7 +32,7 @@ numbers drifted. What holds now, printed by the module on every run:
 | bucket | live | archived | total |
 |---|---:|---:|---:|
 | `compared` | 38 | 15 | **53** |
-| `no-adjacent-anchor` | 320 | 2,410 | 2,730 |
+| `no-adjacent-anchor` | 322 | 2,410 | 2,732 |
 | `elided-path` | 176 | 2,180 | 2,356 |
 | `archived-stale` | 0 | 277 | 277 |
 | `anchor-not-a-symbol` | 13 | 131 | 144 |
@@ -40,8 +40,8 @@ numbers drifted. What holds now, printed by the module on every run:
 | `declared-absent` | 1 | 0 | 1 |
 | `target-missing` | 0 | 0 | **0** |
 | `escapes-checkout` | 0 | 0 | **0** |
-| `quoted` | 0 | 0 | 1 |
-| | | | **5,695** |
+| `quoted` | 1 | 0 | **1** |
+| | | | **5,698** |
 
 Corpus: 1,096 tracked markdown files, `CHANGELOG.md` excluded by name. The
 compared population was **36** under the predecessor's corpus immediately

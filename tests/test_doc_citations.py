@@ -41,14 +41,14 @@ caught each of these on the day it was introduced rather than one at a time by
 being bitten.
 
 Measured over the corpus at the time of writing -- 1,096 tracked markdown
-files, 5,695 tokens -- and re-measurable by running the module, which prints
+files, 5,698 tokens -- and re-measurable by running the module, which prints
 the census on every run:
 
 ===========================  ======  ======  ======
 reason                         live  archiv   total
 ===========================  ======  ======  ======
 `compared`                       38      15      53
-`no-adjacent-anchor`            320   2,410   2,730
+`no-adjacent-anchor`            322   2,410   2,732
 `elided-path`                   176   2,180   2,356
 `archived-stale`                  0     277     277
 `anchor-not-a-symbol`            13     131     144
@@ -56,7 +56,7 @@ reason                         live  archiv   total
 `declared-absent`                 1       0       1
 `target-missing`                  0       0       0
 `escapes-checkout`                0       0       0
-`quoted`                          0       0       0
+`quoted`                          1       0       1
 ===========================  ======  ======  ======
 
 Each reason, with why it exists:
@@ -110,7 +110,7 @@ too.
 Three shapes are named and counted rather than resolved, and saying so is more
 honest than a number that implies they were handled: the bare comma and
 semicolon (134), the elided path (2,356), and the token with no anchoring
-shape at all (2,730).
+shape at all (2,732).
 """
 
 from __future__ import annotations
@@ -173,7 +173,15 @@ EXTENSION = re.compile(r"\.(md|py|js|json|sh|ya?ml|toml|txt|lock)$")
 #: The two markers, and their grammar, taken from 0.71.34. The reason is
 #: required, the marker follows its citation on the same line with nothing
 #: non-blank between them, and it covers exactly one citation.
-MARKER = re.compile(r"\[(quoted|absent):[ \t]*([^\]\n]*?)[ \t]*\]")
+#: Every line terminator the grammar names, not just `\n`. 0.71.34 is explicit
+#: -- "Reasons may not span a line terminator, `\r` and U+2028/U+2029
+#: included" -- and a reason class excluding only `\n` would let
+#: `[absent: x\u2028y]` through, which is a marker spanning a line
+#: suppressing a missing-target failure. A guard that fails open on an exotic
+#: separator is worth less than no guard, because it reads as covered.
+TERMINATORS = "\n\r\u2028\u2029"
+
+MARKER = re.compile(r"\[(quoted|absent):[ \t]*([^\]" + TERMINATORS + r"]*?)[ \t]*\]")
 
 # The cited line is where the symbol is *introduced*; prose cites a `def` line
 # and the reader looks at the lines under it. Wide enough to survive a
@@ -312,7 +320,7 @@ def marker_after(flat: str, raw: str, end: int) -> tuple[str, str] | None:
     match = MARKER.match(flat, cursor)
     if match is None:
         return None
-    if "\n" in raw[end:match.end()]:
+    if any(mark in raw[end:match.end()] for mark in TERMINATORS):
         return None
     kind, reason = match.group(1), match.group(2).strip()
     if not reason:
@@ -519,8 +527,8 @@ class DocCitationTests(unittest.TestCase):
         # `.github/scripts/run-tests.sh` runs each module as
         # `python -m unittest <module> > <shard>.log 2>&1` with no `-b`, so
         # this lands in `unittest-output.log` on every run.
-        print("citation census: " + ", ".join(
-            f"{reason}={counts[reason]}" for reason in sorted(counts)))
+        print("citation census: " + (", ".join(
+            f"{reason}={counts[reason]}" for reason in sorted(counts)) or "no tokens"))
 
     def test_a_citation_cannot_send_this_test_outside_the_checkout(self) -> None:
         """A citation is a string in a document, and this test opens what it names.
@@ -625,6 +633,25 @@ class TheMarkerGrammar(unittest.TestCase):
 
         self.assertNotEqual(
             self.reason_for("`f` (`bin/x.py:1`)\n[quoted: bin/sd:1]"), "quoted")
+
+    def test_no_line_terminator_the_grammar_names_can_be_spanned(self) -> None:
+        """All four, because the first version of this checked only `\n`.
+
+        0.71.34 is explicit: "Reasons may not span a line terminator, `\r`
+        and U+2028/U+2029 included". A reason class excluding only `\n` lets
+        `[absent: x\u2028y]` through, and that marker suppresses a
+        missing-target failure -- a guard failing open on an exotic separator,
+        which is worth less than no guard because it reads as covered. Each
+        terminator is asserted separately so a partial fix cannot pass.
+        """
+
+        for name, mark in (("newline", "\n"), ("carriage return", "\r"),
+                           ("line separator", "\u2028"),
+                           ("paragraph separator", "\u2029")):
+            with self.subTest(terminator=name):
+                self.assertNotEqual(
+                    self.reason_for(f"`f` (`bin/x.py:1`) [quoted: bin/sd{mark}:1]"),
+                    "quoted", f"a reason spanning a {name} exempted the citation")
 
     def test_a_marker_covers_one_citation_and_not_the_next(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

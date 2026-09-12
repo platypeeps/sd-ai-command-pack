@@ -123,7 +123,7 @@ rather than on a fixture.
 
 **The marker read is line-aware, and the flattening does not prevent it.**
 `anchored_citations` flattens with `.replace("\n", " ")`
-(`tests/test_doc_citations.py:377`), which a reviewer read as making 0.71.34's
+(`tests/test_doc_citations.py:385`), which a reviewer read as making 0.71.34's
 "same line" rule unimplementable. It does not: the substitution is one
 character for one character, so offsets in the flattened text are offsets in
 the original. `marker_after()` matches against the flattened text and then
@@ -240,7 +240,7 @@ and it covers one citation, not a document, a region or a path.
 **Rejected, and why.**
 
 **Delivered, and demonstrated here rather than described.** This page can now
-show the literal shape it is about. `frontmatter` (`bin/sd:1231`) [quoted: tests/test_doc_citations.py:377]
+show the literal shape it is about. `frontmatter` (`bin/sd:1231`) [quoted: tests/test_doc_citations.py:385]
 is a real citation, written with its real line number, carrying a marker that
 tells the gate it is an example. It lands in the `quoted` bucket and is
 counted; the marker's own reason is a `path:line` and is checked like any
@@ -745,7 +745,7 @@ that could never be wrong — the exact shape D4 rejects one paragraph above, an
 a reviewer was right to say the principle was stated and not applied. The form
 is `[quoted: <path:line>]`, and the gate asserts that the quoted citation's own
 text appears at that line of that file. A page quoting `` `is_symbol` (`source:tests/test_doc_citations.py::is_symbol`) `` as an example of the shape writes
-`[quoted: tests/test_doc_citations.py:377]` after it, and if the example is
+`[quoted: tests/test_doc_citations.py:385]` after it, and if the example is
 moved or the line changes, the quotation fails like any other claim. This costs
 nothing over the free-text form — it is the same grammar, the same
 `marker_after()`, and the same one-citation scope — and it removes the only
