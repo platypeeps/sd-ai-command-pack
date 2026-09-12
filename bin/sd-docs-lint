@@ -16,8 +16,8 @@ Seven rules (each past the fifth arrived with a decision record, not a patch):
 5. PR link       -- a named item exists under the work directory or uses a
                     canonical database association, `sd:<positive integer>`;
                     existence and ownership are `sd-ship`'s. No item, no line.
-6. Citations     -- each `path:line` an active item records still says what it
-                    said when recorded (`.citations.tsv`, `--update-citations`).
+6. Citations     -- each `path:line` an active item cites is recorded and still
+                    says what it said (`.citations.tsv`, `--update-citations`).
 7. Work refs     -- every `docs/work/` path tracked markdown names resolves.
 Rules 1 to 4, 6 and 7 read the tree. Rule 5 needs the pull request body, so it
 runs only when `--pr-body` supplies one and reports itself as not run otherwise.
@@ -437,14 +437,43 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
     recorded against a snippet of the line it was written for; when the
     snippet moves, this says where it went, so re-anchoring is a read rather
     than arithmetic.
+
+    The rule reads a recording, so an item that was never recorded has nothing
+    to read -- and until this said so, that item was passed over in silence.
+    Its citations were not checked and found sound; they were never looked at,
+    and the run printed the same clean line either way. The only tell was
+    arithmetic nobody was asked to do: `across 3 recorded item(s)` while four
+    items sat under `docs/work`, with the two numbers never placed side by
+    side. That is the same fail-open shape as rule 7 reading nothing and
+    reporting a pass, and it is closed the same way -- by saying so.
+
+    So the note carries both numbers, and an unrecorded item whose documents
+    actually *contain* citations fails by name. The condition is the citations
+    rather than the manifest file because that is where the harm is: an item
+    with nothing to cite has nothing left unguarded, and demanding a manifest
+    from it would turn every freshly planned item red on the day it was
+    created without a single citation going unwatched. An item that gains its
+    first citation and is not re-recorded is exactly the case that used to be
+    invisible, and is now the loud one.
     """
     checked = 0
     manifests = 0
+    active = 0
     for item in item_directories(work_root):
         if "archive" in item.parts:
             continue
+        active += 1
         manifest = item / CITATION_MANIFEST
         if not manifest.is_file():
+            unrecorded = item_citations(item, work_root)
+            if unrecorded:
+                source, citation = unrecorded[0][0], unrecorded[0][1]
+                report.fail(
+                    f"{item.name}/{CITATION_MANIFEST}",
+                    f"missing, so {len(unrecorded)} citation(s) in this item are "
+                    f"unwatched -- the first is `{citation}` at {source}; run "
+                    "sd-docs-lint --update-citations to record the baseline",
+                )
             continue
         manifests += 1
         cache: dict[str, list[str]] = {}
@@ -477,8 +506,12 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
                 f"{item.name}/{source}",
                 f"`{citation}` was written against {relative}:{start} {snippet!r}; {where}",
             )
+    # Both numbers, always, and on one line. A reader who is told only how
+    # many items were recorded cannot tell a complete run from a partial one;
+    # told how many are active beside it, a gap reads as a gap at a glance.
     report.note(
-        f"rule 6 citations: checked {checked} citation(s) across {manifests} recorded item(s)"
+        f"rule 6 citations: checked {checked} citation(s) across {manifests} recorded item(s) "
+        f"of {active} active item(s)"
     )
 
 
