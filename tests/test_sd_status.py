@@ -2284,8 +2284,9 @@ class ConcernLedgerTests(InventoryFixture):
         does, and for the same reason.
 
         Found by review on #792. On the live corpus the three-tier and
-        four-tier rules agree on every one of 530 concerns, so this is a latent
-        defect removed rather than a live misclassification corrected.
+        four-tier rules agree on every one of 532 concerns, re-measured after
+        `_ROW_START_RE` fixed absorption, so this is a latent defect removed
+        rather than a live misclassification corrected.
         """
         self.ledger("2026-08-01-bullet/prd.md", (
             "# bullet\n\n"

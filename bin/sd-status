@@ -1778,6 +1778,20 @@ _CONCERN_RE = re.compile(
 #: with bold -- to count as a new row. An unindented line still counts without
 #: one, because the prose ledgers in the older archived items have no marker
 #: at all and a row of theirs starts at column zero.
+#:
+#: This refines `design.md`'s rule 2, which absorbs "to the next blank line or
+#: next candidate row" without saying what makes a line a candidate. It does
+#: not reverse it: the rule named the boundary correctly and left the test for
+#: it to `_CONCERN_RE`, which was written to *find* ids rather than to bound
+#: rows. Named here for the same reason `_concern_shape` names the three-tier
+#: rule it split -- the design document records what was designed, and the
+#: code says where the code has since gone.
+#:
+#: Tabs need no separate case: `\s*` reads one exactly as it reads spaces, so
+#: a tab-indented line is held to the same marker requirement. A bullet nested
+#: *deeper* than the row it follows is still read as a new row rather than as
+#: that row's child. Latent, not live -- it ends none of the 33 rows the
+#: corpus cannot classify -- and recorded rather than fixed here.
 _ROW_START_RE = re.compile(
     r"^\s*(?:\|\s*|[-*]\s*)(?:\*\*)?C-\d+"
     r"|^(?:\*\*)?C-\d+"
@@ -1859,12 +1873,14 @@ def _concern_shape(text: str) -> int:
     rule did not separate. A bulleted row is a ledger entry; a sentence that
     happens to open with a `C-` id is not. Folded together, which of the two
     decides the concern is settled by whichever line `git grep` returns first,
-    since rows of equal shape keep the one seen first. Measured on the corpus
-    the two rules agree exactly -- 453 closed, 24 open, 18 parked, 35
-    unreadable either way, zero concerns changing verdict -- so this is a
-    latent defect removed rather than a live misclassification corrected. It
-    matters because the largest ledger in the corpus, 37 rows, is written in
-    the non-bold bullet form that was sharing a tier with prose.
+    since rows of equal shape keep the one seen first. Re-measured on the
+    corpus after `_ROW_START_RE` fixed absorption, since the earlier figures
+    here were taken with that defect present: the two rules still agree
+    exactly -- 465 closed, 14 open, 20 parked, 33 unreadable either way, zero
+    concerns changing verdict -- so this is a latent defect removed rather
+    than a live misclassification corrected. It matters because the largest
+    ledger in the corpus, now 182 rows, is written in the non-bold bullet form
+    that was sharing a tier with prose.
     """
     stripped = text.lstrip()
     if stripped.startswith("|"):
