@@ -392,5 +392,143 @@ class StableSourceCitationTests(unittest.TestCase):
         self.assertEqual(failures, [], "\n".join(failures))
 
 
+#: The one installed skill whose working directory is a *different* checkout.
+#: `sd-research-repo` is read while the reader stands in a research repo, so a
+#: repo-relative path it cites resolves against that repo and not against this
+#: pack. `.claude/rules/sd-planning-adversarial-review.md` exists here and in
+#: none of the six research repos on disk; step 7 told the reader to go and
+#: read a cap from a file their checkout does not have. It cannot be made to
+#: resolve by shipping a copy -- the caps table is allowed exactly two, and
+#: `tests/test_workflow_policy.py::ReviewTable` enforces that -- so the
+#: invariant is that the prose names the checkout that holds it.
+FOREIGN_SKILL = "skills/sd-research-repo"
+
+#: A backticked path with a directory separator. Only those make a claim about
+#: some checkout's layout; a bare `CLAUDE.md` or `research.conf.py` is a name
+#: the research-repo standard defines and not a pointer into this repository.
+#: The leading `\.?` is load-bearing and was missing in the first draft: every
+#: path this check exists for begins `.claude/`, so without it the scan matched
+#: nothing and the live test passed over the defect it was written to catch.
+BACKTICKED_PATH = re.compile(r"`(\.?[A-Za-z0-9_][A-Za-z0-9_./-]*\.(?:md|py|json|toml|ya?ml|sh))`")
+QUALIFIER = re.compile(r"pack", re.IGNORECASE)
+
+#: Enough to reach back over "live in the sd-ai-command-pack checkout's" and a
+#: line wrap, and short enough that the word has to be about this citation.
+QUALIFIER_WINDOW = 100
+
+
+def pack_path_citations(root: pathlib.Path) -> list[tuple[pathlib.Path, str, bool]]:
+    """Every pack-layout path the foreign-checkout skill cites, and whether
+    the prose beside it names the pack.
+
+    Enumerated from disk in both directions: the documents come from globbing
+    the skill, and whether a cited path belongs to the pack is decided by
+    opening it here rather than by matching a list of known names. A citation
+    that resolves to nothing in this checkout is naming a third repository --
+    `local-adversarial-gate/core.md` in `system`, say -- and the prose around
+    it already says which, so it is left alone.
+    """
+
+    skill = root / FOREIGN_SKILL
+    found: list[tuple[pathlib.Path, str, bool]] = []
+    for doc in contained(root, sorted(skill.rglob("*.md"))):
+        # Newlines flattened: the qualifier routinely wraps away from the path.
+        flat = doc.read_text(encoding="utf-8").replace("\n", " ")
+        for match in BACKTICKED_PATH.finditer(flat):
+            cited = match.group(1)
+            if "/" not in cited:
+                continue
+            # `references/x.md` ships beside the installed skill wherever the
+            # reader is standing -- the installer fans the shared ones out of
+            # `skills/_shared/references/` -- so it is relative on purpose.
+            if cited.startswith("references/"):
+                continue
+            try:
+                resolved = (root / cited).resolve()
+            except OSError:
+                continue
+            if not (resolved.is_file() and resolved.is_relative_to(root.resolve())):
+                continue
+            before = flat[max(0, match.start() - QUALIFIER_WINDOW):match.start()]
+            found.append((doc, cited, bool(QUALIFIER.search(before))))
+    return found
+
+
+def unqualified_pack_paths(root: pathlib.Path) -> list[str]:
+    """The failures, as `<document>: <path>` lines."""
+
+    return [
+        f"{doc.relative_to(root)}: `{cited}` is a path in this pack, cited to a reader"
+        " standing in a research repo without naming the pack"
+        for doc, cited, qualified in pack_path_citations(root)
+        if not qualified
+    ]
+
+
+class ForeignCheckoutCitationTests(unittest.TestCase):
+    def test_no_pack_path_is_cited_as_if_the_research_repo_had_it(self) -> None:
+        problems = unqualified_pack_paths(REPO_ROOT)
+        self.assertEqual(problems, [], "\n".join(problems))
+
+    def test_the_scan_reaches_the_skill(self) -> None:
+        """The control, and it is not a formality.
+
+        The first draft's regex rejected a leading dot, so it matched none of
+        the `.claude/...` paths this check exists for and the test above passed
+        on the unfixed tree. Asserting that the skill was globbed is not
+        enough; a pack path has to have been classified.
+        """
+
+        self.assertTrue((REPO_ROOT / FOREIGN_SKILL / "SKILL.md").is_file())
+        self.assertNotEqual(pack_path_citations(REPO_ROOT), [], "no pack path was classified")
+
+    def test_an_unqualified_pack_path_is_caught_and_a_qualified_one_is_not(self) -> None:
+        """The guard against the guard: the defect this class exists for.
+
+        Both halves matter. Without the first the check can never fail; without
+        the second it fails on every correctly-written citation and gets
+        deleted the next time someone needs the build green.
+        """
+
+        import tempfile
+
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = pathlib.Path(temporary.name)
+        skill = root / FOREIGN_SKILL
+        (skill / "references").mkdir(parents=True)
+        (root / ".claude" / "rules").mkdir(parents=True)
+        (root / ".claude" / "rules" / "caps.md").write_text("| Cap |\n", encoding="utf-8")
+
+        document = skill / "SKILL.md"
+        document.write_text("its cap is in\n`.claude/rules/caps.md`.\n", encoding="utf-8")
+        self.assertEqual(len(unqualified_pack_paths(root)), 1)
+
+        document.write_text(
+            "its cap is in the pack's\n`.claude/rules/caps.md`.\n", encoding="utf-8")
+        self.assertEqual(unqualified_pack_paths(root), [])
+
+    def test_relative_and_third_repository_citations_are_left_alone(self) -> None:
+        """The two exclusions, each because the check would be wrong otherwise.
+
+        `references/x.md` is correct unqualified -- it ships beside the skill.
+        A path this checkout does not have is naming another repository, which
+        is what the prose beside it says, and rewriting it to a pack path would
+        be the worse bug this test must not create.
+        """
+
+        import tempfile
+
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = pathlib.Path(temporary.name)
+        skill = root / FOREIGN_SKILL
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(
+            "read `references/conventions.md` and `local-adversarial-gate/core.md`\n",
+            encoding="utf-8")
+        self.assertEqual(unqualified_pack_paths(root), [])
+
+
 if __name__ == "__main__":
     unittest.main()
