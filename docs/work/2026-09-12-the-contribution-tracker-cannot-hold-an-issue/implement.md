@@ -92,10 +92,10 @@ Named before the work, with the result that means failure.
 
 - `bin/sd-docs-lint` exits 0. Any `FAIL` line is failure.
 - `python3 -m pytest tests/test_doc_citations.py tests/test_loc_caps.py` — the
-  baseline on this branch at 730d4541 is `53 passed, 21 subtests passed` and
+  baseline on this branch at cc93ea85 is `53 passed, 21 subtests passed` and
   `11 passed, 2 subtests passed`. Fewer passes, or any failure, is failure.
 - `make test` is the authoritative suite. A bare `pytest tests/` is **not** a
-  valid check here: it reports 21 collection errors at 730d4541, every one of
+  valid check here: it reports 21 collection errors at cc93ea85, every one of
   them `ModuleNotFoundError: No module named 'sd_db'`, because this pack cannot
   import the library without the system checkout. That count is the baseline to
   compare against, not a pass.

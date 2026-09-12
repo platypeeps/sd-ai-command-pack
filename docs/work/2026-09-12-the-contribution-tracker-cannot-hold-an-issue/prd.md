@@ -253,7 +253,7 @@ blocked behind it, and the landing order is a hard requirement below.
       evidence sd:602 actually landed.
 - [ ] `bin/sd-docs-lint` exits 0 and
       `python3 -m pytest tests/test_doc_citations.py tests/test_loc_caps.py`
-      passes. Measured green on this branch at 730d4541 before any change.
+      passes. Measured green on this branch at cc93ea85 before any change.
 - [ ] sd:244 is migrated to an issue row keeping item ID 244, and
       `mProjectsCode/obsidian-meta-bind-plugin#644` is registered, before the
       item closes. Both were re-measured open on 2026-09-12 (see References).
@@ -277,4 +277,4 @@ blocked behind it, and the landing order is a hard requirement below.
 ## Log
 
 - 2026-09-12 created. Library facts measured against `platypeeps/system@754204d`;
-  pack facts against this pack at 730d4541.
+  pack facts against this pack at cc93ea85.

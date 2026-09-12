@@ -65,7 +65,7 @@ today the pin is `3c4c723a72…`; the module count is **22** by an actual
 `import`/`from sd_db` statement and **28** by any mention of the string, so the
 right correction depends on which was meant and the import count is the one
 that governs collection. The collection-error count in the same item has
-drifted too: a `pytest tests/ --collect-only -q` at 730d4541 reports **21**
+drifted too: a `pytest tests/ --collect-only -q` at cc93ea85 reports **21**
 errors, not 19, and all 21 are the single cause
 `ModuleNotFoundError: No module named 'sd_db'`. Those numbers belong to sd:392,
 and a note carrying all three corrections now exists on that item; they are

@@ -14,7 +14,7 @@ not-collected line rather than a failure.
 
 **Every one of those four things is already implemented in this pack.** Each
 is cited to the line below; what no measurement here shows is the Jira branch
-of them carrying live rows, which is fact one. Measured at 730d4541:
+of them carrying live rows, which is fact one. Measured at cc93ea85:
 
 - **The iteration.** `TRACKERS` (`dashboard/collect.py:24`) is
   `(github, jira)`. The loop over it begins at `dashboard/collect.py:168`.
@@ -213,5 +213,5 @@ header discusses at length; `dashboard/jira.py` is 363 lines of it.
 
 ## Log
 
-- 2026-09-12 created. Pack facts measured at 730d4541; library facts against
+- 2026-09-12 created. Pack facts measured at cc93ea85; library facts against
   `platypeeps/system@754204d`; database counts from the live `sd.db`.
