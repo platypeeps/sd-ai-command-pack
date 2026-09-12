@@ -181,9 +181,12 @@ the field that saves the most rework — `dont[]`.
 
 ## State of the tooling
 
-There is no `bin/sd-plan` yet; the templates ship and this procedure is carried
-out by the agent. `sd-review`, `sd-check`, `sd-status`, `sd-handoff`,
-`sd-trackers` and `sd-docs-lint` are real and callable today.
+`sd-plan` has no `bin/` half, and is not waiting for one: the templates ship
+and the procedure is carried out by the agent. The one part that would drift if
+it stayed in prose — turning a tracker reference into the `## References`
+block — is already a command, `sd-trackers ref`. `sd-review`, `sd-check`,
+`sd-status`, `sd-handoff`, `sd-trackers` and `sd-docs-lint` are real and
+callable today.
 
 `sd suggest add` can record a proposal on an existing imported work item, but
 `--from-suggestion` and `--from-proposal` have no resolution path yet. Do not

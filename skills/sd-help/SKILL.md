@@ -62,6 +62,10 @@ editing** — which is the property that makes the enumeration worth having.
 
 ## State of the tooling
 
-There is no `bin/sd-help` yet. Today: read `skills/` in the pack checkout for
-the authored surfaces, and the installer's `installed.json` `owned[]` for what
-is actually rendered on this machine.
+`sd-help` has no `bin/` half, and is not waiting for one — this file already
+says why in its opening paragraph: it is the one surface in this set that is a
+skill rather than a command, because a catalog pre-authorizes nothing. The reads it
+needs are a directory listing and two files: `skills/` in the pack checkout for
+the authored surfaces, the installer's `installed.json` `owned[]` for what is
+actually rendered on this machine, and `sd plugin list` for the registered
+plugins.
