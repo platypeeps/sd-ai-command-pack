@@ -108,10 +108,12 @@ purpose. `[quoted: <path:line>]` says a citation is an example rather than a
 claim -- the answer to "can a document explain this gate without tripping it",
 found by being caught, when this item's own PRD reproduced a self-test
 verbatim and `make check` failed on that file. Both require a reason: an
-exemption nobody has to justify is a silencer with better manners. That reason
-is free text today and the gate does not read it, so the exemption is counted
-and not yet falsifiable; D4a is where it becomes a checked `path:line`, and
-saying so is cheaper than implying the check already runs.
+exemption nobody has to justify is a silencer with better manners. `absent`
+keeps free text, because its claim -- the target is gone -- is one the gate
+checks directly. `quoted` does not: nothing but the reason says where the
+example came from, so under D4a the reason **is** a `path:line` the gate
+opens, and a reason that does not carry the citation lands in
+`quoted-not-there` rather than exempting anything.
 
 Three shapes are named and counted rather than resolved, and saying so is more
 honest than a number that implies they were handled: the bare comma and
@@ -147,8 +149,23 @@ PAIR = re.compile(r"`([^`\n]+)`\s*\(?`([A-Za-z0-9_./-]+):(\d+)(?:-(\d+))?`")
 #: nobody claimed was there -- the mis-attribution
 #: `test_prose_between_a_symbol_and_a_citation_breaks_the_anchor` exists to
 #: prevent, arriving through punctuation instead of prose. So the wrapping
-#: parenthesis is the discriminator, and the anchor class excludes parentheses
-#: so the leading `\(` cannot bind to one inside the anchor.
+#: parenthesis is the discriminator, and it is the *only* discriminator.
+#:
+#: The anchor class also excludes parentheses, and the reason once given for
+#: that -- "so the leading `\(` cannot bind to one inside the anchor" -- is
+#: not true: the `\(` must be followed immediately by a backtick, and the
+#: anchor is backtick-delimited, so a parenthesis inside the anchor can never
+#: be taken for the wrapping one. The exclusion costs a call-shaped anchor,
+#: ``(`frontmatter()`, `bin/sd:1`)``, which falls through to
+#: `SEPARATED_PAIR` and is filed `separator-not-adjacent`, never compared --
+#: while the same anchor unparenthesised is compared, because `SYMBOL`
+#: accepts the call shape and `PAIR` admits it.
+#:
+#: Measured 2026-09-12 and left alone: zero instances in the corpus. Widening
+#: a documented discriminator with no live instance is the move this module
+#: refuses everywhere else, so the false reason goes and the constraint
+#: stays. If a live instance appears, admit parentheses to the anchor class
+#: and expect one row to move from `separator-not-adjacent` to `compared`.
 PAREN_PAIR = re.compile(
     r"\(`([^`()\n]+)`\s*[,;]\s*`([A-Za-z0-9_./-]+):(\d+)(?:-(\d+))?`\)")
 
@@ -189,6 +206,11 @@ TERMINATORS = "\n\r\u2028\u2029"
 
 MARKER = re.compile(r"\[(quoted|absent):[ \t]*([^\]" + TERMINATORS + r"]*?)[ \t]*\]")
 
+#: A `quoted` reason is a `path:line`, and nothing else. The path shape is
+#: TOKEN's own, so a reason cannot name something a citation could not, and
+#: the line is where the gate looks for the quoted text.
+QUOTED_REASON = re.compile(r"([A-Za-z0-9_./-]+):(\d+)")
+
 # The cited line is where the symbol is *introduced*; prose cites a `def` line
 # and the reader looks at the lines under it. Wide enough to survive a
 # signature wrapped across lines, narrow enough that a symbol used a hundred
@@ -214,6 +236,7 @@ REASONS = frozenset({
     "separator-not-adjacent",
     "no-adjacent-anchor",
     "quoted",
+    "quoted-not-there",
 })
 
 
@@ -340,6 +363,15 @@ def marker_after(flat: str, raw: str, end: int) -> tuple[str, str] | None:
     kind, reason = match.group(1), match.group(2).strip()
     if not reason:
         return None
+    # D4a. `absent` keeps free text: it claims a file is gone, which the gate
+    # checks directly by looking for the file. `quoted` claims the citation is
+    # an example copied from somewhere, and nothing but the reason says where,
+    # so a free-text reason is an exemption bought once and never re-read --
+    # `[quoted: anything]` silenced a citation forever. The reason is now the
+    # evidence: a `path:line` the gate opens. A malformed one is not a marker,
+    # so the citation falls through and is checked like any other claim.
+    if kind == "quoted" and QUOTED_REASON.fullmatch(reason) is None:
+        return None
     return kind, reason
 
 
@@ -362,6 +394,25 @@ def anchor_for(flat: str, span: tuple[int, int]) -> tuple[str, bool] | None:
             if (match.start(2) - 1, match.end() - trailing) == span:
                 return match.group(1), pattern is not SEPARATED_PAIR
     return None
+
+
+def quotes(reason: str, token: str) -> bool:
+    """Does the `path:line` in a `quoted` reason carry `token` at that line?
+
+    `token` is the citation as written, backticks and all, so the check is
+    that the source really does quote this citation rather than merely
+    mention the same file. A reason naming a file outside the checkout, a
+    line past its end, or a line that does not carry the token all answer
+    no, and the citation is then classified as the claim it looks like.
+    """
+
+    path, _, line = reason.rpartition(":")
+    source = REPO_ROOT / path
+    if not is_under_repo(source) or not source.is_file():
+        return False
+    lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
+    number = int(line)
+    return 1 <= number <= len(lines) and token in lines[number - 1]
 
 
 def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
@@ -404,7 +455,13 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
             end = int(match.group(3) or match.group(2))
             marker = marker_after(flat, raw, match.end())
             if marker and marker[0] == "quoted":
-                rows.append(Citation(doc, "", path, None, start, end, "quoted"))
+                # D4a. The reason names where the example was copied from, and
+                # the gate goes and looks. An exemption that cannot fail is
+                # the silencer this module exists to remove, so this one is
+                # made to fail: move the quoted text and the row goes red.
+                reason = ("quoted" if quotes(marker[1], match.group(0))
+                          else "quoted-not-there")
+                rows.append(Citation(doc, "", path, None, start, end, reason))
                 continue
             if not path:
                 rows.append(Citation(doc, "", path, None, start, end, "elided-path"))
@@ -574,7 +631,7 @@ class DocCitationTests(unittest.TestCase):
             self.assertEqual(names, ["kept.md"], f"corpus was {names}")
 
     def test_the_red_buckets_are_empty(self) -> None:
-        """The docstring calls two buckets red. Until this, nothing made them so.
+        """The docstring calls three buckets red. Until this, nothing made them so.
 
         `anchored_citations()` filters to `compared`, so the stale-symbol test
         never sees `target-missing` or `absent-but-present`: a live citation to
@@ -582,10 +639,14 @@ class DocCitationTests(unittest.TestCase):
         in its bucket, was counted, and left the suite green. Counting a defect
         is not catching it. The reasons named here are the ones the module
         documents as failures, and this is the assertion that spends them.
+
+        `quoted-not-there` joined them with D4a: a `[quoted:]` reason that
+        parses as a `path:line` but does not carry the citation is worse than
+        free text, because it looks checked.
         """
 
         rows = classify()
-        for reason in ("target-missing", "absent-but-present"):
+        for reason in ("target-missing", "absent-but-present", "quoted-not-there"):
             offenders = [
                 f"{row.doc.relative_to(REPO_ROOT)}: `{row.path}:{row.start}`"
                 for row in rows if row.reason == reason
@@ -662,6 +723,25 @@ class TheMarkerGrammar(unittest.TestCase):
     to justify is a silencer with better manners.
     """
 
+    QUOTABLE = "`bin/sd:1231`"
+
+    def quoting(self, token: str) -> str:
+        """A `path:line` reason naming a line of this file that carries `token`.
+
+        Searched rather than written down. D4a makes the reason evidence the
+        gate opens, so a fixture asserting the positive case has to name a
+        line that really carries the token -- and a hard-coded number here
+        would be the same stale citation this module exists to catch, in the
+        test that proves it catches them.
+        """
+
+        here = pathlib.Path(__file__)
+        for number, line in enumerate(
+                here.read_text(encoding="utf-8").splitlines(), 1):
+            if token in line and "QUOTABLE = " not in line:
+                return f"{here.relative_to(REPO_ROOT)}:{number}"
+        raise AssertionError(f"no line of {here.name} carries {token}")
+
     def reason_for(self, text: str) -> str:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -672,7 +752,45 @@ class TheMarkerGrammar(unittest.TestCase):
 
     def test_a_marker_with_a_reason_exempts_the_citation_it_follows(self) -> None:
         self.assertEqual(
-            self.reason_for("`f` (`bin/x.py:1`) [quoted: bin/sd:1]"), "quoted")
+            self.reason_for(
+                f"`f` ({self.QUOTABLE}) [quoted: {self.quoting(self.QUOTABLE)}]"),
+            "quoted")
+
+    def test_a_reason_that_is_not_a_path_line_does_not_exempt(self) -> None:
+        """D4a. The reason the marker shipped with, and what it bought.
+
+        `[quoted: the docstring's own stale example]` reads like a
+        justification and is not one: nothing opens it, so it exempts the
+        citation forever. It is not a marker now, and the citation under it
+        is checked like any other claim.
+        """
+
+        self.assertNotEqual(
+            self.reason_for("`f` (`bin/x.py:1`) [quoted: an English sentence]"),
+            "quoted")
+
+    def test_a_reason_naming_a_line_that_does_not_carry_the_citation(self) -> None:
+        """The failing direction, which is the whole point of D4a.
+
+        A reason that parses but does not hold is worse than free text,
+        because it looks checked. It lands in its own red bucket rather than
+        in `quoted`, so the census shows it and the gate fails.
+        """
+
+        self.assertEqual(
+            self.reason_for(f"`f` ({self.QUOTABLE}) [quoted: tests/test_doc_citations.py:1]"),
+            "quoted-not-there")
+
+    def test_a_reason_naming_a_file_that_is_not_there(self) -> None:
+        self.assertEqual(
+            self.reason_for(f"`f` ({self.QUOTABLE}) [quoted: no-such-file-here.md:1]"),
+            "quoted-not-there")
+
+    def test_a_reason_naming_a_line_past_the_end_of_its_file(self) -> None:
+        self.assertEqual(
+            self.reason_for(
+                f"`f` ({self.QUOTABLE}) [quoted: tests/test_doc_citations.py:999999]"),
+            "quoted-not-there")
 
     def test_a_marker_with_no_reason_does_not_exempt(self) -> None:
         self.assertNotEqual(self.reason_for("`f` (`bin/x.py:1`) [quoted:]"), "quoted")
@@ -719,7 +837,8 @@ class TheMarkerGrammar(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             (root / "doc.md").write_text(
-                "`f` (`bin/x.py:1`) [quoted: bin/sd:1] and `g` (`bin/x.py:2`)\n",
+                f"`f` ({self.QUOTABLE}) [quoted: {self.quoting(self.QUOTABLE)}]"
+                " and `g` (`bin/x.py:2`)\n",
                 encoding="utf-8")
             reasons = [row.reason for row in classify([root / "doc.md"])]
         self.assertEqual(reasons.count("quoted"), 1, reasons)

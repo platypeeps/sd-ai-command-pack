@@ -232,15 +232,26 @@ reproduces the exact defect being fixed.
 
 ## D7a. Planning review concern ledger (2026-08-11)
 
+> **Swept 2026-09-12.** C-1 to C-4 stood open for a month as `deferred`,
+> two of them `critical`. They were handed to
+> `08-11-thin-candidate-loop-shape`, which shipped with no concern ledger
+> of its own, so nothing recorded them there. The branch their code lived
+> on is deleted and none of the files they cite exist on any origin ref,
+> so there is nothing left to action. They are closed as `n/a` with the
+> evidence in each row rather than left ranking as abnormalities against
+> code that is gone. This is a record of a gap, not a fix: the gap was
+> that a deferral named a successor and nobody checked the successor
+> carried it. That is filed separately.
+
 Two lanes ran: the host's own, and this repository's Codex appendix lane
 (`docs/planning-adversarial-review-codex.md`). Rounds 1–2 host, round 3 Codex.
 
 | ID | Severity | Concern | Disposition |
 |---|---|---|---|
-| C-1 | critical | `--thin` without `--consumer` is rejected; with it, `flip_registry_mode` (`installer/thin.py:967-976`) flips a real registry entry to `thin`, mutating the source checkout | **deferred** to `08-11-thin-candidate-loop-shape` |
-| C-2 | critical | A candidate install dirties the clone, `thin-resweep.py:1723` turns a dirty worktree into a blocked verdict, and `install.py:898` refuses it — the ordering defeats itself | **deferred** |
-| C-3 | high | The fat-install-first lane passes `--platform`, which an already-thin checkout rejects (`install.py:1268`, via `install.py:1474`) | **deferred** |
-| C-4 | high | `blocked` cannot coexist with a written ledger: `fleet-candidate-check.py:502` fails on any non-`passed`, `fleet_lib.py:829` rejects it in validation. Also a release-gate policy call | **deferred**, policy question travels with it |
+| C-1 | critical | `--thin` without `--consumer` is rejected; with it, `flip_registry_mode` (`installer/thin.py:967-976`) flips a real registry entry to `thin`, mutating the source checkout | **n/a** — subject gone. The branch `feat/candidate-validator-digest` is deleted from origin and every file this row cites is absent from every origin ref; checked 2026-09-12. Handed to `08-11-thin-candidate-loop-shape`, which shipped `status: done` carrying no ledger, so this was never recorded there. |
+| C-2 | critical | A candidate install dirties the clone, `thin-resweep.py:1723` turns a dirty worktree into a blocked verdict, and `install.py:898` refuses it — the ordering defeats itself | **n/a** — subject gone. The branch `feat/candidate-validator-digest` is deleted from origin and every file this row cites is absent from every origin ref; checked 2026-09-12. Handed to `08-11-thin-candidate-loop-shape`, which shipped `status: done` carrying no ledger, so this was never recorded there. |
+| C-3 | high | The fat-install-first lane passes `--platform`, which an already-thin checkout rejects (`install.py:1268`, via `install.py:1474`) | **n/a** — subject gone. The branch `feat/candidate-validator-digest` is deleted from origin and every file this row cites is absent from every origin ref; checked 2026-09-12. Handed to `08-11-thin-candidate-loop-shape`, which shipped `status: done` carrying no ledger, so this was never recorded there. |
+| C-4 | high | `blocked` cannot coexist with a written ledger: `fleet-candidate-check.py:502` fails on any non-`passed`, `fleet_lib.py:829` rejects it in validation. Also a release-gate policy call | **n/a** — subject gone. The branch `feat/candidate-validator-digest` is deleted from origin and every file this row cites is absent from every origin ref; checked 2026-09-12. Handed to `08-11-thin-candidate-loop-shape`, which shipped `status: done` carrying no ledger, so this was never recorded there. |
 | C-5 | critical | The plan edited the `scripts/` mirror and called `templates/` a generated twin, exactly inverting `CONTRIBUTING.md:143`; `make sync` would erase the mechanism | **addressed** — D2, and `CANDIDATE_VALIDATOR_SOURCES` no longer names fleet_lib at all |
 | C-6 | medium | Digest API used loader and root-path spellings interchangeably; executable participation undecided | **addressed** — D1 gives them distinct names and types, and settles the executable bit on measured evidence |
 | C-7 | medium | Fixtures build trees with no validator source, which fail-closed loading breaks | **addressed** — D5 |
