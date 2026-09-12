@@ -29,17 +29,20 @@ with matching hashes on its own.
 make test
 make lint
 make audit
+make docs-lint
 make check
 ```
 
-`make check` is exactly `test lint audit`, which is exactly what CI runs.
+`make check` is exactly `test lint audit docs-lint`, which is exactly what CI
+runs.
 `make full-check` and `make generate` are gone: the first wrapped a shipped
 script that no longer exists, and the second regenerated committed per-platform
 copies that no longer exist either — the installer renders from `skills/` at
 install time, so there is nothing to keep in sync.
 
 `make check` runs coverage-gated tests, Ruff and mypy over `bin/`, optional
-ShellCheck, and optional Bandit/Zizmor. Missing optional tools print warnings
+ShellCheck, optional Bandit/Zizmor, and `sd-docs-lint` over this checkout's
+own `docs/`. Missing optional tools print warnings
 instead of blocking Python-only contributor setups. Run `STRICT=1 make lint`
 to turn those missing-tool skips into hard errors for parity with CI.
 
