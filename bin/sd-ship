@@ -474,7 +474,14 @@ class Ship:
         self.assert_scope()
         work = self.root / "docs/work"
         if work.is_dir():
-            run(self.root, [sys.executable, str(BIN / "sd-docs-lint")], timeout=300)
+            # Rule 5 reads the pull request body, and the body is built by
+            # now. Without it the rule reports itself not run and CI is the
+            # first to check the `Work:` line, which the skill said happened
+            # here.
+            with tempfile.TemporaryDirectory(prefix="sd-ship-lint-") as directory:
+                body_path = pathlib.Path(directory) / "pr-body.md"
+                body_path.write_text(body)
+                run(self.root, [sys.executable, str(BIN / "sd-docs-lint"), "--pr-body", str(body_path)], timeout=300)
         self.review(head)
         warnings = []
         if pathlib.Path(self.repo["path"]).name in {"sd-ai-command-pack", "system", "sd-writing-pack"}:

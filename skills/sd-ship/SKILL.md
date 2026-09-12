@@ -55,13 +55,16 @@ A change with no work item needs no PRD or database row to ship.
    later as a weekly count, so a missing one is a gap in that record and not
    a fault in the change, and the warning is the whole of what happens. In
    any other repository the trailer is not expected and nothing is said about
-   it. `WORKFLOW.md` names those three and nothing here recognises one from
-   its remote or its path; which repository you are in is yours to know.
+   it. `WORKFLOW.md` names those three, and `sd-ship` recognises one by the
+   basename of the registered repository path (`sd-ai-command-pack`, `system`,
+   `sd-writing-pack`), not by its remote: a checkout under another folder
+   name gets no warning.
 2. **Local review.** `sd-review --scope branch --challenge` on the commits,
    before anything leaves the machine. When the selected work root exists
    (`docs/work` by default), run `sd-docs-lint` for that root with its applicable
    rules enforced locally regardless of repo mode: shape · ready · decision
-   shape · spec index · PR link. With no work root, omit that artifact lint;
+   shape · spec index · PR link, the last against the pull request body
+   `sd-ship` has built by then. With no work root, omit that artifact lint;
    do not create a planning directory to satisfy it. The repository's checks
    and local code review still run. The review is the development flow's *code, before
    merge* point, and its cap is that row's in
@@ -156,8 +159,9 @@ The merge and the row are two acts with the remote's answer between them, so
 there is a window in which the merge has happened and the row does not know
 it. A run killed there leaves the row `in_progress`, still naming the pull
 request it opened. Nothing repairs that at the moment of death — a killed run
-runs no handler — so the next `sd-ship` run in that repository does it, before
-it starts a sequence of its own.
+runs no handler — so the next `sd-ship` run for that item does it, before it
+starts a sequence of its own. It is per item: a run for a different item reads
+only its own receipt and leaves the other row as it found it.
 
 Reconciliation reads the pull request the row names and takes that remote's
 answer for it. Merged and carrying `Delivers:`, run

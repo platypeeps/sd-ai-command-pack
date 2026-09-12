@@ -9,7 +9,10 @@ inventing a new one.
 Two argument names carry an enforced value ladder; the rest reserve a name to a
 concept without constraining its per-skill values. Value ladders are checked as
 **set membership**, not order — a skill lists its values default-first and may
-expose any subset of the ladder.
+expose any subset of the ladder. The check is `ValueLadderTests` in
+`tests/test_skill_frontmatter.py`, which reads every `depth=` and
+`sensitivity=` argument bullet under `skills/` and `contrib/`; a value outside
+the ladder fails the suite.
 
 ## Enforced axes (name + value ladder)
 

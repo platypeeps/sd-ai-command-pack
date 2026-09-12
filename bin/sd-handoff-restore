@@ -17,8 +17,8 @@ gesture, and a packet reaching it is seconds old. `startup` is where the age
 stamp earns its keep.
 
 This hook gates nothing and blocks nothing. It is fast and silent when there
-is nothing to do -- `SD_HANDOFF_RESTORE=0` in the environment (headless
-`claude -p` cron jobs export it so a 3 a.m. run cannot eat a packet), no
+is nothing to do -- `SD_HANDOFF_RESTORE=0` in the environment (read here, set by
+nobody for you: a headless `claude -p` job exports it or eats the packet), no
 packet, a consumed packet, an expired packet -- and any internal error exits 0
 silently rather than break session startup.
 
