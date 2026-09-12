@@ -335,7 +335,7 @@ def pin_sites(checkout):
     return sites
 
 
-def fleet(root=None):
+def fleet(root=None, trees=None):
     """Resolve every fleet pin site against the checkouts beside it.
 
     Only pins resolving to a checkout under the same root are reported. That is
@@ -343,9 +343,19 @@ def fleet(root=None):
     carry hundreds of third-party action pins, and a report listing
     `actions/checkout` beside the pack would bury the rows anyone acts on. What
     we clone is what we own.
+
+    `trees` is the fleet, already enumerated, for a caller that has walked it
+    once and is entitled to one answer about what it contains. `sd sweep
+    --fleet` is that caller: it discovers checkouts to age their work items and
+    then asks this for the pins in the same ones, and a second discovery here
+    would let the two halves of one report disagree about which repositories
+    exist. Still enumerated from the filesystem either way -- what moves is
+    *who* walked it, never whether a list is maintained somewhere.
     """
-    root = search_root() if root is None else Path(root)
-    trees = checkouts(root)
+    if trees is None:
+        trees = checkouts(search_root() if root is None else Path(root))
+    else:
+        trees = [Path(tree) for tree in trees]
     index: dict[str, Path] = {}
     for path in trees:
         full = slug(path)
@@ -373,21 +383,37 @@ def fleet(root=None):
     return rows
 
 
-def fleet_report(root=None):
-    rows = fleet(root)
+def fleet_lines(rows):
+    """The pin rows as lines, so the two callers cannot drift apart.
+
+    `sd-research-kit fleet-pins` prints this and `sd sweep --fleet` appends it
+    to its own report. Returning lines rather than printing them is what makes
+    that one renderer instead of two: a second copy of the column widths and
+    the "repin stays a hand decision" footer would be two reports claiming to
+    be the same one, and the divergence would show up first to whoever read
+    only the other surface.
+    """
     if not rows:
-        print("no fleet pins found")
-        return 0
+        return ["no fleet pins found"]
     width = {k: max(len(str(r[k])) for r in rows) for k in ("repo", "where", "form", "target")}
-    for row in sorted(rows, key=lambda r: (r["repo"], r["where"])):
-        print(f"  {row['repo']:<{width['repo']}}  {row['where']:<{width['where']}}  "
-              f"{row['form']:<{width['form']}}  {row['target']:<{width['target']}}  "
-              f"{row['sha'][:8]}  {row['status']}")
+    lines = [
+        f"  {row['repo']:<{width['repo']}}  {row['where']:<{width['where']}}  "
+        f"{row['form']:<{width['form']}}  {row['target']:<{width['target']}}  "
+        f"{row['sha'][:8]}  {row['status']}"
+        for row in sorted(rows, key=lambda r: (r["repo"], r["where"]))
+    ]
     behind = [r for r in rows if r["status"].startswith("behind")]
-    print(f"\n  {len(rows)} pin site(s) across {len({r['repo'] for r in rows})} "
-          f"repo(s); {len(behind)} behind.")
+    lines.append("")
+    lines.append(f"  {len(rows)} pin site(s) across {len({r['repo'] for r in rows})} "
+                 f"repo(s); {len(behind)} behind.")
     if behind:
-        print("  Report only — the repin stays a hand decision.")
+        lines.append("  Report only — the repin stays a hand decision.")
+    return lines
+
+
+def fleet_report(root=None):
+    for line in fleet_lines(fleet(root)):
+        print(line)
     return 0
 
 

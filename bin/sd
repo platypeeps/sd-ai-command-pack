@@ -81,6 +81,7 @@ import sd_handoff_rows  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_operations  # noqa: E402
 import sd_registry  # noqa: E402
+import sd_research_pins  # noqa: E402
 import sd_restore  # noqa: E402
 import sd_runner  # noqa: E402
 import sd_shadow  # noqa: E402
@@ -2707,6 +2708,34 @@ def store_get(args: argparse.Namespace) -> int:
     return 0
 
 
+def sweep_roots(fleet: bool) -> list[tuple[str, pathlib.Path]]:
+    """The checkouts the sweep reads, enumerated once for everything that asks.
+
+    Lifted out of `sweep` because it now has two readers. The fleet is walked
+    here and nowhere else in this verb: the pin report takes this same list
+    rather than discovering `~/repos` a second time with its own walk, so one
+    report cannot hold two answers to what the fleet is.
+    """
+    if not fleet:
+        here = sd_lib.repo_root(pathlib.Path.cwd())
+        if here is None:
+            raise Refusal("not inside a git checkout; --fleet reads SD_REPO_ROOT")
+        return [(here.name, here)]
+    # Imported here rather than at module scope: `dashboard.collect` pulls
+    # in the tracker modules, and `sd plugin list` has no business paying
+    # for a GitHub client it will never construct.
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+    from dashboard.collect import discover_checkouts, repo_root
+
+    roots = [
+        (repo.name if group == "." else f"{group}/{repo.name}", repo)
+        for group, repo in discover_checkouts(repo_root())
+    ]
+    if not roots:
+        raise Refusal(f"no checkouts under {repo_root()}")
+    return roots
+
+
 def sweep(args: argparse.Namespace) -> int:
     """What the 45-day rule would park, in this checkout or across the fleet.
 
@@ -2714,33 +2743,33 @@ def sweep(args: argparse.Namespace) -> int:
     the acting half is withheld. Exit 0 whether or not anything is due: a sweep
     that found work is not a failure, and a non-zero exit would make the
     scheduled run look broken every time the rule did its job.
+
+    **`--fleet` also reports the fleet's pinned commits.** A pack or system pin
+    is a full SHA that no ecosystem can see -- Dependabot is told to ignore it,
+    and the `ref:`, `*_REVISION:` and tarball-manifest forms are invisible by
+    construction -- so nothing said one was behind until CI failed on it. The
+    section rides `--fleet` rather than a flag of its own because a pin is a
+    fleet-wide fact, one checkout cannot answer it, and this is the fleet walk
+    the scheduler already runs weekly; a `--pins` nobody remembers to pass
+    would report exactly as often as the nothing it replaced.
     """
-
-    if args.fleet:
-        # Imported here rather than at module scope: `dashboard.collect` pulls
-        # in the tracker modules, and `sd plugin list` has no business paying
-        # for a GitHub client it will never construct.
-        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-        from dashboard.collect import discover_checkouts, repo_root
-
-        roots = [
-            (repo.name if group == "." else f"{group}/{repo.name}", repo)
-            for group, repo in discover_checkouts(repo_root())
-        ]
-        if not roots:
-            raise Refusal(f"no checkouts under {repo_root()}")
-    else:
-        here = sd_lib.repo_root(pathlib.Path.cwd())
-        if here is None:
-            raise Refusal("not inside a git checkout; --fleet reads SD_REPO_ROOT")
-        roots = [(here.name, here)]
+    roots = sweep_roots(args.fleet)
     report = sd_sweep.sweep(roots, datetime.date.today(), args.days)
+    if args.fleet:
+        # Added here and not inside `sd_sweep`: ages and pins are two questions
+        # about one fleet, and the age sweep has no business knowing how a
+        # workflow file pins a commit.
+        report["pins"] = sd_research_pins.fleet(trees=[root for _, root in roots])
     if args.json:
         json.dump(report, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
         return 0
     for line in sd_sweep.render(report):
         print(line)
+    if args.fleet:
+        print()
+        for line in sd_research_pins.fleet_lines(report["pins"]):
+            print(line)
     return 0
 
 
@@ -2942,7 +2971,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"age threshold in days (default {sd_sweep.DEFAULT_DAYS})")
     sweeper.add_argument(
         "--fleet", action="store_true",
-        help="every checkout under SD_REPO_ROOT, not just this one")
+        help="every checkout under SD_REPO_ROOT, not just this one, "
+             "and the commits those checkouts pin each other at")
     sweeper.add_argument("--json", action="store_true", help="machine-readable")
     sweeper.set_defaults(handler=sweep)
 
