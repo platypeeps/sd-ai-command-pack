@@ -21,6 +21,7 @@ the import.
 
 from __future__ import annotations
 
+import ast
 import importlib.machinery
 import importlib.util
 import json
@@ -49,6 +50,24 @@ def load():
     sys.modules[name] = module
     loader.exec_module(module)
     return module
+
+
+def module_level(tree: ast.Module):
+    """Every statement that runs at import, including indented ones.
+
+    A module-level `if` or `try` body executes on import exactly as the top
+    level does, so "module level" is a matter of what encloses a statement,
+    not of what column it starts in. Function and class bodies are the real
+    boundary, and they are the only thing skipped here.
+    """
+    stack = list(tree.body)
+    while stack:
+        stmt = stack.pop(0)
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        yield stmt
+        for field in ("body", "orelse", "finalbody"):
+            stack.extend(getattr(stmt, field, None) or [])
 
 
 def seed(root: Path) -> Path:
@@ -93,13 +112,25 @@ class TheDefaultIsStillTheAgentsOwnRepos(unittest.TestCase):
         self.assertEqual(load().search_root(), Path(os.path.expanduser("~/repos")))
 
     def test_the_module_holds_no_home_at_import_time(self) -> None:
-        """The constant is gone, and the grep that says so is the whole point."""
-        source = MODULE.read_text(encoding="utf-8")
-        for line in source.splitlines():
-            if line.startswith((" ", "\t", "#")) or not line.strip():
+        """The constant is gone, and nothing may put one back under another name.
+
+        This asks the syntax tree, not the text. The first version of this
+        test skipped any line starting with a space, which is the same
+        column-zero assumption that made the first sweep for this defect miss
+        `bin/sd-dashboard` -- a module-level read nested in an `if` or a `try`
+        is indented, executes at import all the same, and a `startswith` guard
+        cannot see it. Walking the module body catches it wherever it sits.
+        """
+        tree = ast.parse(MODULE.read_bytes())
+        for stmt in module_level(tree):
+            if not isinstance(stmt, ast.Assign | ast.AnnAssign | ast.AugAssign):
                 continue
-            self.assertNotIn("expanduser", line, f"module level home read: {line}")
-            self.assertNotIn("Path.home", line, f"module level home read: {line}")
+            if stmt.value is None:
+                continue
+            shown = ast.unparse(stmt)
+            for mark in ("expanduser", "Path.home"):
+                self.assertNotIn(
+                    mark, shown, f"module level home read at line {stmt.lineno}: {shown}")
 
 
 class TheSiblingTreeIsTheOneTheCallerNames(unittest.TestCase):
