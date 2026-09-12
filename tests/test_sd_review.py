@@ -1268,6 +1268,93 @@ class TheRoutingLaneRunsOnABareRunner(ReviewFixture):
         self.assertIn("no provider registry", finished.stdout)
 
 
+class TheWorkstationLaneIsNotPrintedWhereItCannotBeReached(ReviewFixture):
+    """The provider-capability lines print where a person can act on them.
+
+    Five lines of `--explain` -- providers, consent, codex auth, env scrub and
+    the reviewer chain -- describe a workstation. A GitHub runner can satisfy
+    none of them by construction: `CLAUDE.local.md` is gitignored globally and
+    tracked in no repository of this fleet, and no provider registry is
+    installed anywhere in it. Across eight consumers the block printed 283
+    times in 30 days and named a provider on none of them.
+
+    The lane stays. The rest of its report is the reason: the same runs
+    produce a real routing tier, and six of the eight name an unattributed
+    commit together with the command that fixes it.
+    """
+
+    def bare(self) -> dict[str, str]:
+        """A HOME with no registry, which is what a GitHub runner is."""
+        empty = self.tmp / "gated-home"
+        empty.mkdir()
+        return {"HOME": str(empty)}
+
+    def explained(self, env: Mapping[str, str]) -> tuple[dict, str]:
+        root = self.make_repo()
+        result = sd_review.review(
+            root, namespace(explain=True), FakeRunner(), dict(env), self.chatgpt_home()
+        )
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        return result, stream.getvalue()
+
+    def test_a_runner_is_not_told_to_configure_what_it_cannot_hold(self) -> None:
+        _, text = self.explained(self.bare())
+        for absent in ("providers  ", "codex auth", "env scrub", "reviewer chain"):
+            self.assertNotIn(absent, text)
+
+    def test_the_suppression_says_so_rather_than_going_quiet(self) -> None:
+        """A reader who sees five lines vanish must be able to tell the
+        difference between "suppressed" and "the tool forgot"."""
+
+        _, text = self.explained(self.bare())
+        self.assertIn("no provider registry", text)
+        self.assertIn("the provider lines are not reported", text)
+
+    def test_what_the_lane_is_kept_for_still_prints(self) -> None:
+        """The gate is five lines wide, not the whole report."""
+
+        _, text = self.explained(self.bare())
+        for kept in ("scope", "subject", "route", "because", "authored"):
+            self.assertIn(kept, text)
+        self.assertIn("explain only, nothing ran", text)
+
+    def test_a_workstation_keeps_every_line(self) -> None:
+        """The fixture repository has a registry and a reviewer that resolves,
+        so nothing is gated away there."""
+
+        _, text = self.explained(self.environment())
+        for present in ("providers", "codex auth", "env scrub", "reviewer chain"):
+            self.assertIn(present, text)
+        self.assertNotIn("the provider lines are not reported", text)
+
+    def test_json_carries_the_fields_either_way(self) -> None:
+        """The gate is a print-time condition. A caller reading `--explain
+        --json` sees the same keys on a runner as on a workstation, which is
+        what keeps this a display change rather than a loss of data."""
+
+        result, _ = self.explained(self.bare())
+        for key in ("providers", "registry", "registry_refusal", "consent_refusal", "chain"):
+            self.assertIn(key, result)
+        self.assertIn("no provider registry", result["registry_refusal"])
+
+    def test_the_predicate_answers_on_each_leg_on_its_own(self) -> None:
+        """Either half is enough: a registry that reads, or a reviewer that
+        resolves. Asserted directly so a future edit to `render` cannot make
+        the gate look right by making both legs unreachable together."""
+
+        self.assertTrue(sd_review.workstation_lane_is_reachable(
+            {"providers": ["codex"], "registry_refusal": "no provider registry at /x"}))
+        self.assertTrue(sd_review.workstation_lane_is_reachable(
+            {"providers": [], "registry_refusal": ""}))
+        self.assertTrue(sd_review.workstation_lane_is_reachable(
+            {"providers": [], "registry_refusal": "no registry", "chain": [{"eligible": True}]}))
+        self.assertFalse(sd_review.workstation_lane_is_reachable(
+            {"providers": [], "registry_refusal": "no registry", "chain": [{"eligible": False}]}))
+        self.assertFalse(sd_review.workstation_lane_is_reachable(
+            {"providers": [], "registry_refusal": "no registry", "chain": []}))
+
+
 #: A registry whose first reviewer is a `url` entry and whose second is a
 #: `start` one, so a run can be watched at both seams at once: what the client
 #: sent, and what the runner spawned.
