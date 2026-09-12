@@ -223,6 +223,17 @@ if [ -n "$watchdog_pid" ]; then
   watchdog_pid=""
 fi
 
+# Standing the watchdog down is not on its own enough to make the publish
+# uninterruptible: the INT/TERM/HUP trap installed above would still fire
+# between the `rm` and the `mv`, and `on_signal` would exit with the old data
+# deleted and the new data never moved in. Reproduced, with the window held
+# open: `exit=143 terms=13 blocks=2 shards=0` -- no coverage at the repo root
+# at all, under a log describing the run before it. So the publish runs with
+# those three signals ignored. SIGKILL cannot be masked and is not claimed to
+# be; what is claimed is that an operator's Ctrl-C or `kill` cannot cut the
+# publish in half.
+trap '' INT TERM HUP
+
 # The run is over, so the repo root can now carry its results: the skipped-test
 # gate reads unittest-output.log there, and `coverage combine` reads
 # `.coverage.*` there, in both `make test` and CI. Clearing the old data happens

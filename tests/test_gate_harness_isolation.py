@@ -10,15 +10,19 @@ hold two without anyone deciding to. The shell is reparented and keeps going,
 and the `coverage run` children outlive it either way -- stopping a clean run
 left the script alive with two coverage processes still writing.
 
-Both halves were reproduced against the pre-fix script before either was
-fixed, which is why the two tests here are the two that were run by hand:
+Every case here was reproduced against the script before it was fixed, which is
+why these are the tests that exist and not others:
 
 * an orphan survived its killed parent with its whole shard tree, and
   appended its own output into the *next* run's `unittest-output.log`, which
   is how one lane's log came to describe tests it had not run;
 * a run starting in the checkout deleted a live run's coverage shard two
   seconds after it started, leaving the live run to combine data that was no
-  longer there -- the "no data collected" failure over a passing suite.
+  longer there -- the "no data collected" failure over a passing suite;
+* a publish that could not write the root reported the tests' own exit status,
+  handing the next reader a stale log under a zero exit;
+* a signal delivered while the root was being rewritten left it holding the old
+  shards deleted and the new ones never moved in.
 
 Neither is provable from reading the script, and neither is cheap to
 rediscover: the failure presents as a red gate on the lane's own diff, so the
@@ -32,6 +36,7 @@ cannot see it.
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -75,7 +80,34 @@ branch = True
 """
 
 
-def _build_fixture(root):
+PUBLISH_RM_PREFIX = 'rm -f "$REPO_ROOT/.coverage"'
+
+
+def _widen_publish_window(harness):
+    """Hold the publish open for two seconds, in this copy of the script only.
+
+    The window between the destructive `rm` and the `mv` that refills the root
+    is a few milliseconds, which is too short for a test to aim a signal at: a
+    first version of the signal test below polled for that window, never landed
+    a signal in it, and reported a pass having tested nothing. Inserting a sleep
+    changes the width of the window and nothing else -- the same statements run
+    in the same order with the same traps installed.
+
+    A missing anchor raises rather than no-oping, so a future edit that moves
+    the publish block fails this test loudly instead of making it vacuous again.
+    """
+    lines = harness.read_text().splitlines(keepends=True)
+    anchors = [i for i, line in enumerate(lines) if line.startswith(PUBLISH_RM_PREFIX)]
+    if len(anchors) != 1:
+        raise AssertionError(
+            f"expected exactly one publish `rm` line to widen, found {len(anchors)}: "
+            "the publish block moved, and this test would otherwise assert nothing"
+        )
+    lines.insert(anchors[0] + 1, "sleep 2\n")
+    harness.write_text("".join(lines))
+
+
+def _build_fixture(root, widen_publish=False):
     """A throwaway repo root the real `run-tests.sh` can be run against.
 
     The harness derives its own root from `BASH_SOURCE`, so a copy of it under
@@ -84,7 +116,10 @@ def _build_fixture(root):
     """
     scripts = root / ".github" / "scripts"
     scripts.mkdir(parents=True)
-    shutil.copy2(HARNESS, scripts / "run-tests.sh")
+    harness = scripts / "run-tests.sh"
+    shutil.copy2(HARNESS, harness)
+    if widen_publish:
+        _widen_publish_window(harness)
 
     tests = root / "tests"
     (tests / "coverage_sitecustomize").mkdir(parents=True)
@@ -92,7 +127,7 @@ def _build_fixture(root):
     (tests / "test_aaa_slow.py").write_text(SLOW_MODULE.format(padding="x" * 2000))
     (tests / "test_bb_fast.py").write_text(FAST_MODULE)
     (root / ".coveragerc").write_text(COVERAGERC)
-    return scripts / "run-tests.sh"
+    return harness
 
 
 def _fixture_env(**overrides):
@@ -278,6 +313,114 @@ class InFlightIsolationTests(unittest.TestCase):
             # The long run published last, so the repo root must hold its two
             # modules and its two shards -- not a blend of both runs, which is
             # what the pre-fix script produced here (four blocks, three shards).
+            self.assertEqual(_blocks(root), 2, (root / "unittest-output.log").read_text())
+            self.assertEqual(len(_shards(root)), 2, _shards(root))
+
+
+class PublishFailureTests(unittest.TestCase):
+    """A publish that cannot land must not report the tests' success."""
+
+    def test_a_publish_that_cannot_land_is_not_reported_as_success(self):
+        # The failure is arranged by putting a *directory* where the log has to
+        # be written, not by making the root read-only: a suite running as root
+        # ignores directory permissions, and skipping the test there is not an
+        # option -- `make test` fails the gate on any skipped test. A directory
+        # refuses `cat >` for every user.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            env = _fixture_env(HARNESS_FIXTURE_SLEEP="0")
+
+            first = subprocess.run(
+                ["bash", str(script)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+
+            (root / "unittest-output.log").unlink()
+            (root / "unittest-output.log").mkdir()
+
+            blocked = subprocess.run(
+                ["bash", str(script)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(blocked.returncode, 1, blocked.stdout + blocked.stderr)
+            self.assertIn("could not publish this run's results", blocked.stderr)
+
+
+class PublishSignalTests(unittest.TestCase):
+    """An operator's signal must not cut the publish in half."""
+
+    def test_a_signal_during_the_publish_cannot_halve_the_root(self):
+        # Standing the watchdog down does not make the publish uninterruptible:
+        # the INT/TERM/HUP trap would still fire between the `rm` and the `mv`
+        # and exit with the old shards deleted and the new ones never moved in.
+        # Reproduced with the window held open, before the signals were masked:
+        # `exit=143 terms=13 blocks=2 shards=0` -- no coverage at the root at
+        # all, under a log describing the run before it, which is what a later
+        # `coverage combine` reports as "no data collected" over a passing suite.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root, widen_publish=True)
+            env = _fixture_env(HARNESS_FIXTURE_SLEEP="1")
+
+            first = subprocess.run(
+                ["bash", str(script)],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+
+            log = root / "second.log"
+            with open(log, "w", encoding="utf-8") as handle:
+                second = subprocess.Popen(
+                    ["bash", str(script)],
+                    stdout=handle,
+                    stderr=subprocess.STDOUT,
+                    env=env,
+                )
+                try:
+                    self.assertTrue(
+                        _wait_for(lambda: bool(_descendants(second.pid)), timeout=60),
+                        "the shard phase never started",
+                    )
+                    # The window is read off the filesystem rather than off the
+                    # process tree: the first run left two shards at the root, so
+                    # a live run with none there is one that has run the
+                    # destructive `rm` and not yet the `mv`. Counting processes
+                    # instead does not work -- the widening sleep is a child of
+                    # the script, so the tree never empties.
+                    _wait_for(
+                        lambda: second.poll() is not None or not _shards(root),
+                        timeout=120,
+                    )
+                    delivered = 0
+                    while second.poll() is None:
+                        try:
+                            os.kill(second.pid, signal.SIGTERM)
+                        except OSError:
+                            break
+                        delivered += 1
+                        time.sleep(0.05)
+                    self.assertGreater(
+                        delivered,
+                        0,
+                        "no signal reached the run; this assertion tested nothing",
+                    )
+                finally:
+                    if second.poll() is None:
+                        second.kill()
+                    second.wait(timeout=30)
+
+            self.assertEqual(second.returncode, 0, log.read_text())
             self.assertEqual(_blocks(root), 2, (root / "unittest-output.log").read_text())
             self.assertEqual(len(_shards(root)), 2, _shards(root))
 
