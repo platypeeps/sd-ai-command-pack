@@ -72,6 +72,46 @@ To see what holds on the machine in front of you, run the installer's status
 command rather than reading a list: its `commands:` line enumerates `bin/` and
 `PATH` at runtime, and says whether a command resolves elsewhere.
 
+## What a Document Owns
+
+A document owns the scope it describes, never the argv that reached it. A page
+about this pack's rules describes this pack's rules whichever command opened
+it, and a path written for the reader's own checkout stays unqualified. One
+ruling settles all three of the questions that kept arriving separately, so
+there is nothing further to decide case by case.
+
+It applies to **live text only.** A preserved review body, an archived work
+item, and `CHANGELOG.md` are records of what was said at a time, not claims
+about what holds now. Rewriting one to match today's scope destroys the record
+it exists to keep.
+
+Two consequences, both enforced rather than remembered:
+
+- **A provenance citation needs no qualifying.** Naming where a fact came from
+  is not an instruction to go and open it, so no prose beside it has to say
+  whose checkout holds the file.
+- **The qualifying guard stays scoped to `.claude/rules/`.** That is the one
+  surface this pack authors, tells the reader to go and read for authoritative
+  content, and cannot install into the reader's checkout. Per-repository
+  configuration that the reader's checkout is supposed to carry -- the files
+  `bin/sd_setup_github.py` writes under `.github/` -- is correct unqualified,
+  and naming the pack beside one would be the worse bug. The reasoning, and
+  both ends of the scan enumerated from the filesystem, are in
+  `tests/test_doc_citations.py`.
+
+## When the Git Wrapper Is Refused
+
+In a worktree-isolated session the hook rewrites `git ...` into a wrapped form,
+and the isolation guard refuses it: the guard cannot verify that a wrapped
+command stays inside the worktree. That guard lives in the Claude Code binary,
+not in this pack, so nothing here can teach it the wrapped form.
+
+Call `/usr/bin/git` instead, which the guard reads directly, and say in the
+report that you fell back to it. Do not edit the wrapper's configuration to get
+past the refusal. Its exclusion list is machine-global while the refusal is
+per-session, so switching it off for one worktree switches it off for every
+repository on the machine.
+
 <!-- SD-AI-COMMAND-PACK:ROUTING:START -->
 ## Canonical Entry Points
 
