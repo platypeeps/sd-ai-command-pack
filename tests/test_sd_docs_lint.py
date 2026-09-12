@@ -589,11 +589,62 @@ class Rule6CitationTests(LintFixture):
         (item / lint.CITATION_MANIFEST).write_text("two\tfields\n", encoding="utf-8")
         self.assert_fails("a manifest row is not five fields")
 
-    def test_an_item_with_no_manifest_is_not_checked(self) -> None:
+    def test_red_an_item_that_cites_and_was_never_recorded_is_named(self) -> None:
+        """Backbone item sd:440. The skip used to be the whole story.
+
+        `cited_item` writes a `design.md` naming `prd.md:3` and records
+        nothing. Before this, rule 6 reached the item, found no
+        `.citations.tsv`, moved on, and the run printed a clean verdict over a
+        citation it had never looked at. The only difference from a citation
+        that was checked and found sound was a count nobody compared against
+        anything.
+        """
         self.cited_item()
+        failures = "\n".join(self.assert_fails(lint.CITATION_MANIFEST))
+        self.assertIn("2026-08-29-a-cited-item", failures)
+        self.assertIn("`prd.md:3`", failures)
+        self.assertIn("--update-citations", failures)
+
+    def test_the_note_says_how_many_items_are_active_beside_how_many_recorded(self) -> None:
+        """The two numbers a reader needs to see a gap, on the same line.
+
+        The fixture's own `2026-08-29-a-workable-item` cites nothing, so it is
+        active without being recorded and the numbers legitimately differ. That
+        is the case the old note could not express at all.
+        """
+        self.record()
         report = self.run_lint()
         self.assertEqual(report.failures, [])
-        self.assertIn("across 0 recorded item(s)", "\n".join(report.notes))
+        self.assertIn(
+            "checked 1 citation(s) across 1 recorded item(s) of 2 active item(s)",
+            "\n".join(report.notes),
+        )
+
+    def test_an_item_with_nothing_to_cite_needs_no_manifest(self) -> None:
+        """A freshly planned item is not a finding.
+
+        The demand is for a recording of the citations an item has, not for a
+        file per directory: an item that cites nothing leaves nothing
+        unguarded, and failing it would make every item red on the day it was
+        created for a gap that cannot hide anything.
+        """
+        self.write_item("2026-08-29-an-uncitable-item", GOOD_PRD)
+        self.assert_clean()
+
+    def test_an_archived_item_that_cites_and_was_never_recorded_is_left_alone(self) -> None:
+        """The archive is a record of what was, and rule 6 has always read past it.
+
+        Demanding a baseline from it would ask for a recording of pages that
+        are finished changing, which is the one place citation drift cannot
+        happen.
+        """
+        archived = self.write_item(
+            "2026-08-29-an-archived-citer", GOOD_PRD, month="2026-08"
+        )
+        (archived / "design.md").write_text(
+            "# design\n\nThe ladder is at `prd.md:3`.\n", encoding="utf-8"
+        )
+        self.assert_clean()
 
     def test_the_manifest_is_not_a_stray_file_under_rule_1(self) -> None:
         self.record()
