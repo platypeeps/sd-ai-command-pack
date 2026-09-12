@@ -156,6 +156,11 @@ jobs:
       # The docs lint runs here and not in the unittest job: the tests lint
       # fixture repositories they build, never this checkout's own docs/work.
       # It reads sd_lib and the tree, so the lint job's dependencies suffice.
+      # No runner has the database, so rule 2 reads each open item's status
+      # from git here and checks fewer items than `make check` does on a
+      # machine with the rows; the run's `rule 2 status source:` line says
+      # which happened. Installing sd_db would not change that: a library
+      # with no database file to open answers the same way.
       - name: Docs lint (docs/work, docs/spec, docs/decisions)
         run: python3 bin/sd-docs-lint
 

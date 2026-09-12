@@ -254,7 +254,7 @@ CI is four jobs, named here as branch protection sees them:
 | Job | What it runs |
 |---|---|
 | `unittest` | The suite on Ubuntu, Python 3.13, plus the installer coverage gate |
-| `lint` | Ruff and mypy over `bin/` |
+| `lint` | Ruff and mypy over `bin/`, then `sd-docs-lint` over this checkout's `docs/` |
 | `bash 3.2 syntax` | Every tracked shell script parsed by a bash 3.2 built from source |
 | `security` | Bandit over `bin/`, zizmor over the workflows, ShellCheck |
 

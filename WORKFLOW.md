@@ -74,6 +74,9 @@ These run without being asked.
   checkout's own `docs/work/`, `docs/spec/` and `docs/decisions/`.
   `sd-ship` runs it again at delivery time. A consumer copies the one CI
   step from `.github/workflows/tests.yml`; nothing runs it there otherwise.
+  A runner has no database, so rule 2 reads statuses from git there and
+  checks fewer items than the machine with the rows; each run prints
+  which source it read.
 - A commit to the pack, the system repository or the writing repository names
   what needed it: `Needed-by: <item id>` or `Needed-by: cost | efficiency |
   visibility`. `sd-ship` warns when the trailer is missing and ships anyway.

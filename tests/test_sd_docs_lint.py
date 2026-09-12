@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import unittest
 from types import ModuleType
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -224,6 +225,27 @@ class Rule2ReadyTests(LintFixture):
             ),
         )
         self.assert_fails("records the branch it lives on")
+
+
+class Rule2StatusSourceTests(LintFixture):
+    """The run says where rule 2 read its statuses, because the two sources
+    check different item sets and print the same `clean`."""
+
+    def source_note(self) -> str:
+        report = self.run_lint()
+        return next(note for note in report.notes if note.startswith("rule 2 status source:"))
+
+    def test_no_marker_reads_the_line(self) -> None:
+        self.assertIn("the status: line in prd.md", self.source_note())
+
+    def test_a_row_marker_with_no_database_says_git_and_names_the_gap(self) -> None:
+        (self.work / ".status-source").write_text("row\n", encoding="utf-8")
+        # An empty HOME is a machine with the library and no database: the
+        # CI lint job, and any checkout that never ran `sd-db.sh init`.
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {"HOME": home}):
+            note = self.source_note()
+        self.assertIn("git, not the row", note)
+        self.assertIn("rule 2 does not check it", note)
 
 
 class Rule3DecisionTests(LintFixture):
