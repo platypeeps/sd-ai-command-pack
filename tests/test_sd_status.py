@@ -32,6 +32,10 @@ from unittest import mock
 
 from tests.test_sd_pr_state import BIN, SD_STATUS, ToolFixture, tree_digest
 
+#: The other half of the pin in `SkillSurfaceTests`. Imported as the function
+#: alone so this module collects its own tests and not that file's.
+from tests.test_skill_frontmatter import surfaces as frontmatter_surfaces
+
 SD_HANDOFF = BIN / "sd-handoff"
 
 
@@ -1682,6 +1686,38 @@ class LowYieldProducerTests(InventoryFixture):
         self.assertFalse(found[0]["abnormal"])
         self.assertEqual(found[0]["key"], "skills/sd-thing/SKILL.md#bin/sd-thing")
 
+    def test_a_contrib_skill_discloses_on_the_same_terms_as_a_shipped_one(
+        self,
+    ) -> None:
+        """Both roots, or the class reports health over a tree it never read.
+
+        `_tool_rows` used to glob `skills/` alone. `contrib/` is where every
+        skill `sd skill try` can still reach lives, and two of them disclose a
+        `bin/` command that is not built, so the class printed a count that
+        described one half of the surface and read as the whole of it.
+
+        Asserted as one fixture holding one skill in each root, because the
+        defect was never "contrib is missed" in isolation -- it was the two
+        roots being answered differently. A revert drops the `contrib/` row
+        and leaves the `skills/` one, so this fails on exactly the change it
+        guards.
+        """
+        for root, name in (("skills", "sd-shipped"), ("contrib", "sd-tried")):
+            skill = self.repo / root / name
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text(
+                f"There is no `bin/{name}` yet.\n", encoding="utf-8"
+            )
+        (self.repo / "bin").mkdir(exist_ok=True)
+        found = self.by_check(self.rows(), "undisclosed-tool")
+        self.assertEqual(
+            sorted(row["key"] for row in found),
+            [
+                "contrib/sd-tried/SKILL.md#bin/sd-tried",
+                "skills/sd-shipped/SKILL.md#bin/sd-shipped",
+            ],
+        )
+
     def disclose(self, said: str) -> None:
         """One skill saying one thing, so a row is about the resolver alone."""
         skill = self.repo / "skills" / "sd-thing"
@@ -1759,6 +1795,65 @@ class LowYieldProducerTests(InventoryFixture):
         self.assertTrue(
             all("_" not in name for name in status._tool_candidates("sd-plan"))
         )
+
+
+class SkillSurfaceTests(unittest.TestCase):
+    """One answer to "what is a skill surface", pinned across the two readers.
+
+    The pack had two, and they disagreed. `bin/sd-status` globbed `skills/`;
+    `tests/test_skill_frontmatter.surfaces()` walked `skills/` and `contrib/`
+    both. The producer's half was the wrong one, and the cost was not a
+    cosmetic count -- `undisclosed-tool` asserted health over `contrib/`
+    without opening it, which is the failure the banner refuses by never
+    printing `clear` over an unchecked class.
+
+    The single answer lives in `bin/`, not here. A check may not depend on the
+    test suite: `bin/` ships and `tests/` does not, so the direction that
+    survives installation is the suite reading the producer. What this file
+    owes in return is the pin -- if either reader widens or narrows alone, the
+    sets stop matching and this fails. Agreeing today without pinning the
+    agreement is the same defect deferred to whoever adds the third root.
+    """
+
+    def test_the_producer_and_the_suite_enumerate_the_same_surfaces(self) -> None:
+        root = BIN.parent
+        produced = {p.relative_to(root) for p in status.skill_surfaces(root)}
+        asserted = {p.relative_to(root) for p in frontmatter_surfaces()}
+        self.assertEqual(produced, asserted)
+        # Not vacuous: an enumeration that returned nothing would also match.
+        self.assertTrue(any(p.parts[0] == "contrib" for p in produced))
+        self.assertTrue(any(p.parts[0] == "skills" for p in produced))
+
+    def test_a_directory_without_a_skill_file_is_not_a_surface(self) -> None:
+        """`skills/_shared` is a real directory holding references, not a skill.
+
+        The suite checks `is_file()` on the entrypoint; so must the producer,
+        or the two sets differ by a directory that was never a surface.
+        """
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            (root / "skills" / "_shared").mkdir(parents=True)
+            (root / "contrib" / "sd-real").mkdir(parents=True)
+            (root / "contrib" / "sd-real" / "SKILL.md").write_text(
+                "x\n", encoding="utf-8"
+            )
+            self.assertEqual(
+                [p.relative_to(root) for p in status.skill_surfaces(root)],
+                [pathlib.Path("contrib/sd-real/SKILL.md")],
+            )
+
+    def test_a_missing_root_is_not_an_error(self) -> None:
+        """A checkout without `contrib/` still reports on `skills/`."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            (root / "skills" / "sd-one").mkdir(parents=True)
+            (root / "skills" / "sd-one" / "SKILL.md").write_text(
+                "x\n", encoding="utf-8"
+            )
+            self.assertEqual(
+                [p.relative_to(root) for p in status.skill_surfaces(root)],
+                [pathlib.Path("skills/sd-one/SKILL.md")],
+            )
 
 
 class BranchLandedTests(StatusFixture):
