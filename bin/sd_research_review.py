@@ -26,6 +26,7 @@ Usage:  sd-research-kit review        # from inside the research repo
 (R10-D6, the same move `render` made). Exit 1 if any check fails.
 """
 import datetime
+import difflib
 import os
 import re
 import subprocess
@@ -166,6 +167,191 @@ def work_items(repo):
     return len(failures) or 1
 
 
+TEMPLATE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "skills", "sd-research-repo", "templates", "CLAUDE.md",
+)
+
+# The template's own substitution marker. It survives inside fenced examples, so
+# a repo that filled one in and a repo that kept the placeholder both match.
+SLOT = re.compile(r"<[^<>\n]+>")
+
+# What a repo legitimately writes where the template describes a value: the
+# Notion folder URL, the absolute path of a document, a `file:///` link. These
+# are the only substitutions the template invites that are not `<...>` slots,
+# and they are recognisable as values rather than as prose.
+LOCAL_VALUE = re.compile(r"https?://\S+|file:///\S+|/(?:Users|home|opt|srv|var|mnt)/\S+")
+
+FENCE_LINE = re.compile(r"^\s*```")
+
+
+def sections(text):
+    """(heading, body) pairs, split on `##` headings outside code fences.
+
+    The fence tracking is not decoration: both files carry fenced markdown
+    examples whose content begins `## 1. First section`, and splitting on those
+    invents a section that exists in neither document.
+    """
+    out: list[tuple[str, str]] = []
+    buf: list[str] = []
+    head, fence = "", False
+    for line in text.split("\n"):
+        if FENCE_LINE.match(line):
+            fence = not fence
+        elif not fence and line.startswith("## "):
+            out.append((head, "\n".join(buf)))
+            head, buf = line[3:].strip(), []
+            continue
+        buf.append(line)
+    out.append((head, "\n".join(buf)))
+    return out
+
+
+def blocks(body):
+    """Blank-line-separated blocks, with fenced code kept whole."""
+    out: list[str] = []
+    buf: list[str] = []
+    fence = False
+    for line in body.split("\n"):
+        if FENCE_LINE.match(line):
+            fence = not fence
+            buf.append(line)
+            continue
+        if not line.strip() and not fence:
+            if buf:
+                out.append("\n".join(buf).strip())
+            buf = []
+            continue
+        buf.append(line)
+    if buf:
+        out.append("\n".join(buf).strip())
+    return [b for b in out if b.strip()]
+
+
+def flat(block):
+    return re.sub(r"\s+", " ", block).strip()
+
+
+def fills_a_slot(template_block, repo_block):
+    """True if the repo block is the template block with its `<...>` slots filled."""
+    if not SLOT.search(template_block):
+        return False
+    pattern = ".+?".join(re.escape(part) for part in SLOT.split(template_block))
+    return re.fullmatch(pattern, repo_block, re.S) is not None
+
+
+def only_a_local_value(template_block, repo_block):
+    """True if the two differ only where the repo wrote a local value.
+
+    This is the line between template drift and intended local content inside a
+    section both files carry. Every span where the repo departs from the
+    template is looked at: if what the repo put there is a URL or an absolute
+    path — a Notion folder, a `file:///` document link — the departure is the
+    repo filling in its own identity, which is what the template asks for. If
+    what the repo put there is prose, the repo is carrying a wording the
+    template no longer has, which is drift.
+    """
+    left, right = template_block.split(), repo_block.split()
+    matcher = difflib.SequenceMatcher(None, left, right, autojunk=False)
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if not LOCAL_VALUE.search(" ".join(right[j1:j2])):
+            return False
+    return True
+
+
+# Below this, the nearest repo block is a different block rather than an edited
+# one, so the template block is reported as gone instead of as reworded. It
+# changes the wording of a finding, never whether one is reported.
+REWORDED_FLOOR = 0.40
+
+
+def drift(template_text, repo_text):
+    """Template-owned blocks this repo no longer carries.
+
+    One-directional on purpose. The template is a floor, not a ceiling: what it
+    states, the repo should state. What the repo adds — whole local sections,
+    local paragraphs inside a shared section — is the repo doing its job, and is
+    counted but never reported as a defect. A detector that called every
+    difference drift would fire on all five research repos forever and be
+    switched off within a week.
+    """
+    findings: list[tuple[str, str, str]] = []
+    local = 0
+    repo_sections: dict[str, str] = {}
+    for head, body in sections(repo_text):
+        repo_sections.setdefault(head, body)
+    seen = set()
+
+    for head, body in sections(template_text):
+        seen.add(head)
+        name = f"`## {head}`" if head else "the opening"
+        if head not in repo_sections:
+            findings.append((name, "section is missing", ""))
+            continue
+        candidates = [flat(b) for b in blocks(repo_sections[head])]
+        matched = set()
+        for block in blocks(body):
+            want = flat(block)
+            best, ratio = "", 0.0
+            for candidate in candidates:
+                score = difflib.SequenceMatcher(None, want, candidate).ratio()
+                if score > ratio:
+                    best, ratio = candidate, score
+            if best and (
+                best == want
+                or fills_a_slot(want, best)
+                or only_a_local_value(want, best)
+            ):
+                matched.add(best)
+                continue
+            how = "reworded" if ratio >= REWORDED_FLOOR else "gone"
+            findings.append((name, how, want))
+        local += len([c for c in candidates if c not in matched])
+
+    local += len([h for h, _ in sections(repo_text) if h not in seen])
+    return findings, local
+
+
+def template_drift(repo):
+    """Report where this repo's `CLAUDE.md` has fallen behind the pack's template.
+
+    Nothing looked before. Three findings in the 2026-09-10 fleet review were
+    all one divergence between this template and the copies in the research
+    repos, and it had been there six weeks because the only thing that would
+    have caught it was a person reading two files side by side.
+    """
+    local_copy = os.path.join(repo, "CLAUDE.md")
+    if not os.path.exists(TEMPLATE):
+        # Same reasoning as `work_items`: a gate that cannot run has not passed.
+        # `sd-research-kit conventions` already assumes `skills/` sits beside
+        # `bin/`, so a missing template means a partial install, and the message
+        # names that rather than only the symptom.
+        print(f"  FAIL CLAUDE.md: the template is not at {TEMPLATE} — install "
+              "the pack's skills/ alongside its bin/, or drift goes unchecked")
+        return 1
+    if not os.path.exists(local_copy):
+        print("  FAIL CLAUDE.md: missing — every research repo carries one, "
+              f"descended from {os.path.relpath(TEMPLATE, os.path.dirname(os.path.dirname(TEMPLATE)))}")
+        return 1
+
+    template_text = open(TEMPLATE, encoding="utf-8", errors="replace").read()
+    repo_text = open(local_copy, encoding="utf-8", errors="replace").read()
+    findings, local = drift(template_text, repo_text)
+    if not findings:
+        print(f"  ok   CLAUDE.md: in sync with the template"
+              f"{f'; {local} local block(s)/section(s) left alone' if local else ''}")
+        return 0
+    for where, how, excerpt in findings:
+        detail = f": {excerpt[:72]}…" if excerpt else ""
+        print(f"  FAIL CLAUDE.md {where}: {how}{detail}")
+    print(f"  ---- {len(findings)} template block(s) drifted; {local} local "
+          "block(s)/section(s) were left alone. Re-sync from "
+          "skills/sd-research-repo/templates/CLAUDE.md, keeping the local ones.")
+    return len(findings)
+
+
 def check(repo):
     repo = os.path.abspath(repo)
     name = os.path.basename(repo)
@@ -204,7 +390,7 @@ def check(repo):
 
     if not bad:
         print(f"  ok   {len(docs)} document(s): provenance, Status, build freshness")
-    return bad + work_items(repo)
+    return bad + template_drift(repo) + work_items(repo)
 
 
 CHECKLIST = """

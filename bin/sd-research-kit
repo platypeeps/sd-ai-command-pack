@@ -43,18 +43,22 @@ HERE = Path(__file__).resolve().parent
 CHECKOUT = HERE.parent
 CONVENTIONS = CHECKOUT / "skills" / "sd-research-repo" / "references" / "conventions.md"
 
-USAGE = """usage: sd-research-kit render|checklinks|review|pins|conventions
+USAGE = """usage: sd-research-kit render|checklinks|review|pins|fleet-pins|conventions
 
   render        render research.conf.py in this repo into build/
   checklinks    verify every relative markdown link and backticked in-repo path
                 resolves; exit 1 if anything is broken
   review        the mechanical half of the pre-publication adversarial review:
                 provenance block, Status section separating verified from not,
-                build freshness. Then prints the checklist for the half no
-                script can do. Exit 1 if a check fails
+                build freshness, and this repo's CLAUDE.md against the pack's
+                template. Then prints the checklist for the half no script can
+                do. Exit 1 if a check fails
   pins          for every `source` @ `sha` the markdown asserts, say whether
                 upstream has moved past it. The list is read out of the
                 documents each run, never maintained
+  fleet-pins    every pack and system pin across the checkouts beside this one
+                -- `uses:`, `ref:`, `<NAME>_REVISION:`, a tarball manifest's
+                `source_commit` -- current or behind N. Report only; exit 0
   conventions   print the path of the standard every research repo follows
 
 Every verb acts on the current working directory. There is no repo argument.
@@ -136,6 +140,10 @@ def main(argv: list[str]) -> int:
 
     if verb == "render":
         return run_render(rest)
+    if verb == "fleet-pins":
+        # Not `pins --fleet`: every verb here takes no argument, and a flag that
+        # changes what a verb is pointed at is the argument R10-D6 removed.
+        return int(load("sd_research_pins").fleet_main())
     if verb in ("checklinks", "review", "pins"):
         # Each module's own `main()` owns its exit status and everything it
         # prints around the check -- `review` in particular prints the
