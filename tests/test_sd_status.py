@@ -2343,16 +2343,26 @@ class ConcernLedgerTests(InventoryFixture):
 
         Requiring a bullet would make every one of those rows a continuation of
         the row above it, which is the opposite failure and a larger one.
+
+        The disposition sits on the *second* row and the bare one comes first,
+        so over-absorption changes the answer rather than preserving it. Put
+        the other way round -- the closing word above, the bare row below --
+        the second row is still found on its own and still reads as nothing,
+        and the fixture passes whether the unindented branch is there or not.
+        Found by review on #821: the first version of this test was written
+        that way and guarded nothing.
         """
 
         self.ledger("2026-08-01-bare/prd.md", (
             "# bare\n\n"
-            "C-1 identified the wrong anchor. Corrected.\n"
-            "C-2 is an argument-construction defect and only argv proves it.\n"
+            "C-1 identified the wrong anchor and nothing here says what became"
+            " of it.\n"
+            "C-2 is an argument-construction defect and only argv proves it."
+            " Corrected.\n"
         ))
         found = self.checks(self.scan())
         self.assertEqual(
-            ["docs/work/2026-08-01-bare/prd.md#C-2"],
+            ["docs/work/2026-08-01-bare/prd.md#C-1"],
             found.get("unreadable-concern-row"),
         )
 
