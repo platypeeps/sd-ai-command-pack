@@ -175,10 +175,44 @@ it is never skipped no matter what `docs_skip` says.
 
 ## setup-github
 
-`sd-review setup-github` installs the opt-in CI routing lane, one file:
-`.github/workflows/sd-review-route.yml`. The code lives in
-`bin/sd_setup_github.py`, reached through the `SETUP_GITHUB_SEAM` dispatch in
-`bin/sd-review`, and it is the only surface in this lane that writes.
+`sd-review setup-github` installs the opt-in CI routing lane, two files:
+`.github/workflows/sd-review-route.yml`, and a Dependabot guard in
+`.github/dependabot.yml`. The code lives in `bin/sd_setup_github.py`, reached
+through the `SETUP_GITHUB_SEAM` dispatch in `bin/sd-review`, and it is the
+only surface in this lane that writes.
+
+**The guard.** The workflow pins the action by commit, and the action runs the
+pack's own code out of that checkout, so a Dependabot bump of the pin is a
+behaviour change across the whole pack dressed as a version number. The guard
+is one `ignore:` item for the action in the file's github-actions entry, with
+a comment that names no incident, pull request or SHA -- the reason lives in
+`actions/review-route/README.md` and is cited by path, so the text has nothing
+in it the next pin move can make false. The template is `GUARD_LINES` in
+`bin/sd_setup_guard.py`, and it is the only copy: before it existed, seven
+repositories carried the guard in six hand-written wordings, five of them
+reciting a fix commit that was already behind their pin. Do not write the
+guard by hand; run `setup-github` and let the file gain it.
+
+The rest of `dependabot.yml` is the consumer's. With no file, `setup-github`
+creates a minimal one (one github-actions entry, weekly, five open pull
+requests, the guard). With a file, it appends the guard to the entry's
+`ignore:` list, creating the list when the entry has none, and replaces an
+existing item for the action -- comment and line -- when one is there. That
+is a line transform, not a YAML round-trip, so the consumer's comments
+survive. A file whose guard differs from the template refuses without
+`--force`, the same way a differing workflow does; a file with no guard at all
+simply gains one.
+
+**`--check`.** `sd-review setup-github --check` renders both files at the
+repository's own pin -- read from the tracked workflow, or `--pin` when there
+is none -- and diffs them against what is tracked. One line per file, `same
+<path>` or `DIFFERS <path>`, a unified diff under each `DIFFERS`, exit 1 on
+any difference and 0 otherwise; nothing is written, and it asks nothing of the
+mode or the policy. `DIFFERS` is the word `machine-setup.sh status` already
+greps for in the system repository, so a fleet sweep can count drift without
+reading the diffs. It compares the template, not the pin: a pin behind the
+pack's HEAD is `same`, because moving it is a decision (`--pin <sha>
+--force`, in its own commit), not drift.
 
 **What the lane does is report.** It resolves the pull request's diff, runs
 `route()` over the policy, and prints the plan into the check output and the
@@ -199,7 +233,7 @@ Three refusals:
   action by commit; `--pin SHA` names a different one deliberately.
 
 Other flags: `--dry-run` (print what would be written, write nothing), `--json`,
-`--force` (replace an existing workflow that differs).
+`--force` (replace an existing workflow or guard that differs).
 
 ## Never
 
