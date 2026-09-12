@@ -392,16 +392,50 @@ class StableSourceCitationTests(unittest.TestCase):
         self.assertEqual(failures, [], "\n".join(failures))
 
 
-#: The one installed skill whose working directory is a *different* checkout.
-#: `sd-research-repo` is read while the reader stands in a research repo, so a
-#: repo-relative path it cites resolves against that repo and not against this
-#: pack. `.claude/rules/sd-planning-adversarial-review.md` exists here and in
-#: none of the six research repos on disk; step 7 told the reader to go and
-#: read a cap from a file their checkout does not have. It cannot be made to
-#: resolve by shipping a copy -- the caps table is allowed exactly two, and
-#: `tests/test_workflow_policy.py::ReviewTable` enforces that -- so the
-#: invariant is that the prose names the checkout that holds it.
-FOREIGN_SKILL = "skills/sd-research-repo"
+#: **Which skills must qualify the citation: all of them, and none is named.**
+#:
+#: The rule has no exception list because the reason is structural rather than
+#: per-skill. A skill is installed to the platform home and read with the
+#: reader's cwd in whatever checkout encloses it (R10-D6); nothing makes that
+#: checkout this one. `sd-research-repo` is read from a research repo,
+#: `sd-plan`/`sd-review`/`sd-ship` from whatever repository is being developed.
+#: So a rule path any of them cites resolves against a checkout that need not
+#: have the file. No skill is exempt, so no skill has to be remembered, and
+#: both ends of this scan are walked from the filesystem: the documents from
+#: `skills/`, the paths that matter from `.claude/rules/`.
+#:
+#: The predecessor hardcoded `FOREIGN_SKILL = "skills/sd-research-repo"`, which
+#: was narrower than the defect it was written for -- four skills carried the
+#: citation and one was watched.
+SKILLS_DIR = "skills"
+
+#: **Which paths are in scope: the pack's authored rules, enumerated.**
+#:
+#: Not "every path that happens to resolve in this checkout", which was the
+#: predecessor's test and is wrong the moment it leaves one skill. Run broadly
+#: it flags `.github/sd-review.json`, `.github/workflows/sd-review-route.yml`
+#: and `.github/sd-status.json` -- per-repository configuration that the
+#: *reader's* checkout is supposed to carry, which `bin/sd_setup_github.py`
+#: writes there. Those are correct unqualified, and rewriting them to name the
+#: pack would be the worse bug.
+#:
+#: What makes `.claude/rules/` different is that it is the one surface the pack
+#: authors, tells the reader to go and *read* for authoritative content, and
+#: cannot put in the reader's checkout:
+#:
+#:   * it is not installed -- `bin/sd_install.py` carries zero `.claude/rules`
+#:     references, so it cannot be fanned out;
+#:   * it cannot be shipped as a copy either -- the caps table is allowed
+#:     exactly two copies and `tests/test_workflow_policy.py::ReviewTable`
+#:     enforces that, so a third beside a skill fails the gate;
+#:   * and resolving it against the wrong checkout is silent. The reader finds
+#:     no file, reads no cap, and the review pass proceeds as if it had one.
+#:     Confirmed absent in all seven research repos on this machine.
+#:
+#: So the invariant is the only one left: the prose names the checkout that
+#: holds it. The rule files themselves are globbed, not listed, so a rule added
+#: next to this one is covered on the day it is written.
+RULES_DIR = ".claude/rules"
 
 #: A backticked path with a directory separator. Only those make a claim about
 #: some checkout's layout; a bare `CLAUDE.md` or `research.conf.py` is a name
@@ -422,73 +456,132 @@ QUALIFIER = re.compile(r"\bpack\b", re.IGNORECASE)
 
 #: Enough to reach back over "live in the sd-ai-command-pack checkout's" and a
 #: line wrap, and short enough that the word has to be about this citation.
+#:
+#: Read on *both* sides of the citation, which the first version did not.
+#: English puts the qualification either way round -- "the cap is in the
+#: sd-ai-command-pack checkout's `<path>`" and "`<path>` ... that file lives
+#: only in the sd-ai-command-pack checkout" are the same statement -- and a
+#: guard that accepts one word order and not the other enforces a house style
+#: instead of the invariant. Both forms are live in `skills/` today.
 QUALIFIER_WINDOW = 100
 
 
-def pack_path_citations(root: pathlib.Path) -> list[tuple[pathlib.Path, str, bool]]:
-    """Every pack-layout path the foreign-checkout skill cites, and whether
-    the prose beside it names the pack.
+def skill_documents(root: pathlib.Path) -> list[pathlib.Path]:
+    """Every authored `*.md` under `skills/`, walked from the filesystem.
 
-    Enumerated from disk in both directions: the documents come from globbing
-    the skill, and whether a cited path belongs to the pack is decided by
-    opening it here rather than by matching a list of known names. A citation
-    that resolves to nothing in this checkout is naming a third repository --
-    `local-adversarial-gate/core.md` in `system`, say -- and the prose around
-    it already says which, so it is left alone.
+    Enumeration, not a roster. A skill that acquires a pack-path citation next
+    month is covered the day it is written, with nobody updating anything --
+    which is the property the hardcoded predecessor did not have.
     """
 
-    skill = root / FOREIGN_SKILL
+    return contained(root, sorted((root / SKILLS_DIR).rglob("*.md")))
+
+
+def pack_rule_paths(root: pathlib.Path) -> set[str]:
+    """The pack's authored rule files, as the paths a skill would cite them by.
+
+    Globbed, so the scope grows with the directory rather than with anyone's
+    memory of what is in it.
+    """
+
+    rules = root / RULES_DIR
+    return {
+        str(rule.relative_to(root))
+        for rule in contained(root, sorted(rules.rglob("*.md")))
+    }
+
+
+def rule_path_citations(root: pathlib.Path) -> list[tuple[pathlib.Path, str, bool]]:
+    """Every citation of a pack rule file from any skill, and whether the prose
+    beside it names the checkout that holds it.
+
+    Enumerated from disk on both axes: the documents come from walking
+    `skills/`, and what counts as a rule path comes from walking
+    `.claude/rules/`. Neither is a list anybody maintains.
+    """
+
+    rule_paths = pack_rule_paths(root)
     found: list[tuple[pathlib.Path, str, bool]] = []
-    for doc in contained(root, sorted(skill.rglob("*.md"))):
+    for doc in skill_documents(root):
         # Newlines flattened: the qualifier routinely wraps away from the path.
         flat = doc.read_text(encoding="utf-8").replace("\n", " ")
         for match in BACKTICKED_PATH.finditer(flat):
             cited = match.group(1)
-            if "/" not in cited:
+            if cited not in rule_paths:
                 continue
-            # `references/x.md` ships beside the installed skill wherever the
-            # reader is standing -- the installer fans the shared ones out of
-            # `skills/_shared/references/` -- so it is relative on purpose.
-            if cited.startswith("references/"):
-                continue
-            try:
-                resolved = (root / cited).resolve()
-            except OSError:
-                continue
-            if not (resolved.is_file() and resolved.is_relative_to(root.resolve())):
-                continue
+            # The citation itself is excluded from the window on purpose: a
+            # cited path with `pack` as a segment would otherwise qualify
+            # itself, which is a citation vouching for its own resolution.
             before = flat[max(0, match.start() - QUALIFIER_WINDOW):match.start()]
-            found.append((doc, cited, bool(QUALIFIER.search(before))))
+            after = flat[match.end():match.end() + QUALIFIER_WINDOW]
+            found.append((doc, cited, bool(QUALIFIER.search(before) or QUALIFIER.search(after))))
     return found
 
 
-def unqualified_pack_paths(root: pathlib.Path) -> list[str]:
+def unqualified_rule_paths(root: pathlib.Path) -> list[str]:
     """The failures, as `<document>: <path>` lines."""
 
     return [
-        f"{doc.relative_to(root)}: `{cited}` is a path in this pack, cited to a reader"
-        " standing in a research repo without naming the pack"
-        for doc, cited, qualified in pack_path_citations(root)
+        f"{doc.relative_to(root)}: `{cited}` lives only in this pack, cited to a reader"
+        " standing in some other checkout without naming the pack"
+        for doc, cited, qualified in rule_path_citations(root)
         if not qualified
     ]
 
 
 class ForeignCheckoutCitationTests(unittest.TestCase):
-    def test_no_pack_path_is_cited_as_if_the_research_repo_had_it(self) -> None:
-        problems = unqualified_pack_paths(REPO_ROOT)
+    def test_no_rule_path_is_cited_as_if_the_reader_s_checkout_had_it(self) -> None:
+        problems = unqualified_rule_paths(REPO_ROOT)
         self.assertEqual(problems, [], "\n".join(problems))
 
-    def test_the_scan_reaches_the_skill(self) -> None:
+    def test_the_scan_reaches_the_skills(self) -> None:
         """The control, and it is not a formality.
 
         The first draft's regex rejected a leading dot, so it matched none of
         the `.claude/...` paths this check exists for and the test above passed
-        on the unfixed tree. Asserting that the skill was globbed is not
-        enough; a pack path has to have been classified.
+        on the unfixed tree. Asserting that the skills were globbed is not
+        enough; both ends of the walk have to have produced something and a
+        citation has to have been classified.
         """
 
-        self.assertTrue((REPO_ROOT / FOREIGN_SKILL / "SKILL.md").is_file())
-        self.assertNotEqual(pack_path_citations(REPO_ROOT), [], "no pack path was classified")
+        self.assertNotEqual(skill_documents(REPO_ROOT), [], "no skill document was walked")
+        self.assertNotEqual(pack_rule_paths(REPO_ROOT), set(), "no rule file was walked")
+        self.assertNotEqual(rule_path_citations(REPO_ROOT), [], "no rule citation was classified")
+
+    def test_the_walk_covers_every_skill_and_not_a_named_one(self) -> None:
+        """The generalisation, asserted rather than assumed.
+
+        The predecessor hardcoded `skills/sd-research-repo` and so watched one
+        skill while four carried the citation. Two things are checked. Every
+        directory holding a `SKILL.md` is reached by the walk -- computed from
+        disk on both sides, so adding a skill cannot quietly fall outside it.
+        And the citations actually classified come from more than one skill,
+        which a walk that had silently collapsed back to a single directory
+        could not satisfy.
+        """
+
+        authored = {
+            skill.parent for skill in (REPO_ROOT / SKILLS_DIR).rglob("SKILL.md")
+        }
+        self.assertGreater(len(authored), 1, "the skills tree did not enumerate")
+        walked = {doc.parent for doc in skill_documents(REPO_ROOT)}
+        self.assertEqual(authored - walked, set(), "a skill directory was not walked")
+
+        cited_by = {doc.relative_to(REPO_ROOT).parts[1] for doc, _, _ in rule_path_citations(REPO_ROOT)}
+        self.assertGreater(len(cited_by), 1, f"only one skill was scanned: {sorted(cited_by)}")
+
+    def fixture(self) -> pathlib.Path:
+        """A checkout with the cap file and an empty `skills/` tree."""
+
+        import tempfile
+
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = pathlib.Path(temporary.name)
+        (root / SKILLS_DIR).mkdir()
+        (root / ".claude" / "rules").mkdir(parents=True)
+        (root / ".claude" / "rules" / "caps.md").write_text("| Cap |\n", encoding="utf-8")
+        return root
 
     def test_an_unqualified_pack_path_is_caught_and_a_qualified_one_is_not(self) -> None:
         """The guard against the guard: the defect this class exists for.
@@ -498,23 +591,69 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
         deleted the next time someone needs the build green.
         """
 
-        import tempfile
-
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        root = pathlib.Path(temporary.name)
-        skill = root / FOREIGN_SKILL
+        root = self.fixture()
+        skill = root / SKILLS_DIR / "sd-example"
         (skill / "references").mkdir(parents=True)
-        (root / ".claude" / "rules").mkdir(parents=True)
-        (root / ".claude" / "rules" / "caps.md").write_text("| Cap |\n", encoding="utf-8")
 
         document = skill / "SKILL.md"
         document.write_text("its cap is in\n`.claude/rules/caps.md`.\n", encoding="utf-8")
-        self.assertEqual(len(unqualified_pack_paths(root)), 1)
+        self.assertEqual(len(unqualified_rule_paths(root)), 1)
 
         document.write_text(
             "its cap is in the pack's\n`.claude/rules/caps.md`.\n", encoding="utf-8")
-        self.assertEqual(unqualified_pack_paths(root), [])
+        self.assertEqual(unqualified_rule_paths(root), [])
+
+    def test_any_skill_is_watched_and_the_failure_names_the_one_at_fault(self) -> None:
+        """The generalisation, at fixture scale.
+
+        Three skills, none of them the one the predecessor hardcoded, and only
+        the middle one unqualified. A guard scoped to a named skill reports
+        nothing here; this one reports exactly the offender, by name. The two
+        well-written neighbours are the other direction -- a guard that fires
+        on correct prose is worse than the bug, because it gets deleted.
+        """
+
+        root = self.fixture()
+        for name, prose in (
+            ("sd-alpha", "its cap is in the sd-ai-command-pack checkout's"),
+            ("sd-beta", "its cap is in"),
+            ("sd-gamma", "read the caps in the pack's"),
+        ):
+            skill = root / SKILLS_DIR / name
+            skill.mkdir()
+            (skill / "SKILL.md").write_text(
+                f"{prose}\n`.claude/rules/caps.md`.\n", encoding="utf-8")
+
+        problems = unqualified_rule_paths(root)
+        self.assertEqual(len(problems), 1, "\n".join(problems))
+        self.assertIn(f"{SKILLS_DIR}/sd-beta/SKILL.md", problems[0])
+
+    def test_the_qualifier_counts_on_either_side_of_the_citation(self) -> None:
+        """The word order is prose, not the invariant.
+
+        "the pack's `<path>`" and "`<path>` ... that file lives only in the
+        sd-ai-command-pack checkout" say the same thing, and both are live in
+        `skills/` today. A window that reads only backwards passes the first
+        and fails the second, which makes the guard a style rule. The third
+        case is the one that must still fail: a mention far enough away to be
+        about something else does not qualify anything.
+        """
+
+        root = self.fixture()
+        skill = root / SKILLS_DIR / "sd-example"
+        skill.mkdir()
+        document = skill / "SKILL.md"
+
+        document.write_text(
+            "the cap is on that row in\n`.claude/rules/caps.md`.\nThat file lives only in"
+            " the sd-ai-command-pack checkout.\n", encoding="utf-8")
+        self.assertEqual(unqualified_rule_paths(root), [])
+
+        document.write_text(
+            "the cap is on that row in\n`.claude/rules/caps.md`.\n"
+            f"{'Read it before promoting the item. ' * 6}It ships with the pack.\n",
+            encoding="utf-8")
+        self.assertEqual(len(unqualified_rule_paths(root)), 1)
 
     def test_a_word_containing_pack_does_not_qualify_a_citation(self) -> None:
         """The false negative from the other side, and the reason for `\\b`.
@@ -531,15 +670,9 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
         correct citation and gets deleted the next time the build is red.
         """
 
-        import tempfile
-
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        root = pathlib.Path(temporary.name)
-        skill = root / FOREIGN_SKILL
-        skill.mkdir(parents=True)
-        (root / ".claude" / "rules").mkdir(parents=True)
-        (root / ".claude" / "rules" / "caps.md").write_text("| Cap |\n", encoding="utf-8")
+        root = self.fixture()
+        skill = root / SKILLS_DIR / "sd-example"
+        skill.mkdir()
         document = skill / "SKILL.md"
 
         for decoy in (
@@ -550,7 +683,7 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
         ):
             with self.subTest(lead=decoy):
                 document.write_text(f"{decoy}\n`.claude/rules/caps.md`.\n", encoding="utf-8")
-                self.assertEqual(len(unqualified_pack_paths(root)), 1)
+                self.assertEqual(len(unqualified_rule_paths(root)), 1)
 
         for real in (
             "the cap is in the sd-ai-command-pack checkout's",
@@ -559,28 +692,37 @@ class ForeignCheckoutCitationTests(unittest.TestCase):
         ):
             with self.subTest(lead=real):
                 document.write_text(f"{real}\n`.claude/rules/caps.md`.\n", encoding="utf-8")
-                self.assertEqual(unqualified_pack_paths(root), [])
+                self.assertEqual(unqualified_rule_paths(root), [])
 
-    def test_relative_and_third_repository_citations_are_left_alone(self) -> None:
-        """The two exclusions, each because the check would be wrong otherwise.
+    def test_paths_that_are_not_pack_rules_are_left_alone(self) -> None:
+        """The scope, and why it is the rules directory rather than everything.
 
-        `references/x.md` is correct unqualified -- it ships beside the skill.
-        A path this checkout does not have is naming another repository, which
-        is what the prose beside it says, and rewriting it to a pack path would
-        be the worse bug this test must not create.
+        Each of these is correct *because* it resolves against the reader's
+        checkout, and rewriting it to name the pack would be the worse bug this
+        test exists to prevent:
+
+        * `references/x.md` ships beside the installed skill.
+        * `.github/sd-review.json` and `.github/workflows/sd-review-route.yml`
+          are per-repository configuration written into the reader's checkout
+          by `bin/sd_setup_github.py`; the reader's copy is the one that
+          governs. A draft of this class that flagged every path resolving in
+          this checkout reported all three, plus `.github/sd-status.json`.
+        * a path this checkout does not have is naming another repository,
+          which is what the prose beside it says.
         """
 
-        import tempfile
-
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        root = pathlib.Path(temporary.name)
-        skill = root / FOREIGN_SKILL
-        skill.mkdir(parents=True)
+        root = self.fixture()
+        skill = root / SKILLS_DIR / "sd-example"
+        skill.mkdir()
+        (root / ".github" / "workflows").mkdir(parents=True)
+        (root / ".github" / "sd-review.json").write_text("{}\n", encoding="utf-8")
+        (root / ".github" / "workflows" / "route.yml").write_text("on: push\n", encoding="utf-8")
         (skill / "SKILL.md").write_text(
-            "read `references/conventions.md` and `local-adversarial-gate/core.md`\n",
+            "read `references/conventions.md`, the repository's `.github/sd-review.json`,"
+            " the route in `.github/workflows/route.yml`, and"
+            " `local-adversarial-gate/core.md`\n",
             encoding="utf-8")
-        self.assertEqual(unqualified_pack_paths(root), [])
+        self.assertEqual(unqualified_rule_paths(root), [])
 
 
 if __name__ == "__main__":
