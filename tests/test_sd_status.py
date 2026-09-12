@@ -2548,24 +2548,60 @@ class BannerTests(InventoryFixture):
 
     # -- sd:600: a class whose section could not be read ----------------------
 
+    #: Which collected section each check reads, as the design states it and
+    #: not as `CLASSES` happens to say today. A test that derives this from
+    #: the table cannot catch a deleted or mistyped `needs` entry, because the
+    #: expectation moves with the defect. Adding a dependency means adding it
+    #: here and in `CLASSES`, and the two are asserted equal below.
+    DECLARED_SECTIONS = {
+        "pull_requests": {
+            "pr-check-failing", "pr-check-missing", "dirty-tree-with-open-pr",
+        },
+        "protection": {"pr-check-missing", "protection-gap"},
+    }
+
+    def test_the_table_declares_exactly_the_dependencies_the_design_states(
+        self,
+    ) -> None:
+        """`CLASSES` against the design, so a deleted `needs` entry is loud."""
+        actual: dict[str, set[str]] = {}
+        for kind in status.CLASSES:
+            for name in kind.needs:
+                actual.setdefault(name, set()).add(kind.check)
+        self.assertEqual(self.DECLARED_SECTIONS, actual)
+
     def test_a_blind_section_marks_every_class_that_declares_it(self) -> None:
-        """Derived from `CLASSES.needs`, never from a list of check names.
+        """Every section any class declares, driven blind in turn.
 
-        The defect this replaces counted eleven of twelve classes clear on a
+        Derived from `CLASSES.needs`, never from a list of check names: the
+        defect this replaces counted eleven of twelve classes clear on a
         machine that could not reach GitHub at all, because `unchecked` had
-        exactly one producer. Asserting a hand-written list of affected checks
-        here would rebuild that defect in the test.
-        """
-        inventory = self.inventory(protection=self.BLIND)
-        expected = {
-            kind.check for kind in status.CLASSES if "protection" in kind.needs
-        }
-        self.assertTrue(expected, "no class declares protection; the table moved")
-        self.assertLessEqual(expected, set(inventory.unchecked))
-        for check in expected:
-            self.assertEqual("gh is not installed", inventory.unchecked[check])
+        exactly one producer.
 
-    def test_a_class_that_needs_no_section_stays_clear_when_github_is_blind(
+        Driving only `protection` was not enough, and a mutation proved it:
+        deleting all three `pull_requests` dependencies left this suite green
+        at 211 passing, so the merge checks would have gone on reporting clear
+        against a `pull_requests` section nothing could read.
+
+        Deriving the expectation from `CLASSES.needs` does not fix that, and
+        the same mutation proved that too. Blank an entry and the sections
+        looped over and the checks expected shrink together, so the assertion
+        agrees with whatever the table says. The expectation therefore comes
+        from `DECLARED_SECTIONS`, which states the design.
+        """
+        for name, expected in sorted(self.DECLARED_SECTIONS.items()):
+            with self.subTest(section=name):
+                # Blind the section in place, so it keeps the shape its
+                # producers expect and only the readability flag changes.
+                blinded = dict(self.sections()[name], **{
+                    "available": False, "reason": "gh is not installed"})
+                inventory = self.inventory(**{name: blinded})
+                self.assertLessEqual(expected, set(inventory.unchecked))
+                for check in expected:
+                    self.assertEqual(
+                        "gh is not installed", inventory.unchecked[check])
+
+    def test_a_class_that_needs_no_section_is_not_marked_unchecked(
         self,
     ) -> None:
         """The control. Without it the test above passes on a blanket mark.
