@@ -162,7 +162,7 @@ in the item, in a tracker that has never been collected from. Building a
 collector for a tracker nobody has configured produces a not-collected line and
 nothing else.
 
-**Retiring has a small positive cost too.** `dashboard/` is under a line-count
+**Retiring pays something back, too.** `dashboard/` is under a line-count
 cap that `tests/test_loc_caps.py` measures against and that the file's own
 header discusses at length; `dashboard/jira.py` is 363 lines of it.
 
