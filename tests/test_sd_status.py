@@ -1682,6 +1682,67 @@ class LowYieldProducerTests(InventoryFixture):
         self.assertFalse(found[0]["abnormal"])
         self.assertEqual(found[0]["key"], "skills/sd-thing/SKILL.md#bin/sd-thing")
 
+    def disclose(self, said: str) -> None:
+        """One skill saying one thing, so a row is about the resolver alone."""
+        skill = self.repo / "skills" / "sd-thing"
+        skill.mkdir(parents=True, exist_ok=True)
+        (skill / "SKILL.md").write_text(said + "\n", encoding="utf-8")
+        (self.repo / "bin").mkdir(exist_ok=True)
+
+    def test_a_disclosure_quoting_a_real_module_path_is_not_a_row(self) -> None:
+        """`_DISCLOSED_RE` stops at the `.`, so the suffix has to be restored.
+
+        This is two of the six findings the literal test produced in this
+        repository: `skills/sd-handoff` writes `bin/sd_handoff_rows.py` and
+        `skills/sd-review` writes `bin/sd_setup_github.py`, both of which are
+        the true paths of files that are on disk.
+        """
+        self.disclose("Rows come from `bin/sd_rows.py`.")
+        (self.repo / "bin" / "sd_rows.py").write_text("x = 1\n", encoding="utf-8")
+        self.assertEqual([], self.by_check(self.rows(), "undisclosed-tool"))
+
+    def test_a_disclosure_spelling_a_module_as_a_command_is_not_a_row(self) -> None:
+        """The third: a skill naming `bin/sd-suggest` for `bin/sd_suggest.py`.
+
+        A module is built. `bin/sd` imports it, and "build `bin/sd-suggest`"
+        is not an instruction anyone can act on when the code already ships.
+        """
+        self.disclose("Suggestions come from `bin/sd-rows`.")
+        (self.repo / "bin" / "sd_rows.py").write_text("x = 1\n", encoding="utf-8")
+        self.assertEqual([], self.by_check(self.rows(), "undisclosed-tool"))
+
+    def test_a_tool_absent_in_every_spelling_survives_the_widening(self) -> None:
+        """The failure mode of widening a resolver: silence, not noise.
+
+        Three neighbours that a glob or a prefix test would accept, and none
+        of them is a spelling of the disclosed name.
+        """
+        self.disclose("Planning will live in `bin/sd-gone`.")
+        for name in ("sd-goneish", "sd_gone_helper.py", "sd-other"):
+            (self.repo / "bin" / name).write_text("x = 1\n", encoding="utf-8")
+        found = self.by_check(self.rows(), "undisclosed-tool")
+        self.assertEqual([row["title"] for row in found], ["bin/sd-gone"])
+
+    def test_a_directory_under_bin_is_not_a_built_tool(self) -> None:
+        """`is_file`, not `exists`: a directory answers no disclosure."""
+        self.disclose("Planning will live in `bin/sd-gone`.")
+        (self.repo / "bin" / "sd-gone").mkdir()
+        found = self.by_check(self.rows(), "undisclosed-tool")
+        self.assertEqual([row["title"] for row in found], ["bin/sd-gone"])
+
+    def test_the_candidate_spellings_are_the_four_the_pack_uses(self) -> None:
+        """Pinned as a list, because the order is the order of preference and
+        the count is the whole argument against resolving by glob."""
+        self.assertEqual(
+            list(status._tool_candidates("sd-plan")),
+            ["sd-plan", "sd-plan.py", "sd_plan", "sd_plan.py"],
+        )
+        # A name already spelled with underscores collapses to two, rather
+        # than repeating itself: the candidates are names, not attempts.
+        self.assertEqual(
+            list(status._tool_candidates("sd_plan")), ["sd_plan", "sd_plan.py"]
+        )
+
 
 class BranchLandedTests(StatusFixture):
     """`branch_landed`, against real git and injected pull-request rows.
