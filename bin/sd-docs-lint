@@ -520,6 +520,7 @@ def check_manifest(
     checked = 0
     manifest = item / CITATION_MANIFEST
     cache: dict[str, list[str]] = {}
+    citing: dict[str, str] = {}
     for number, row in enumerate(manifest.read_text(encoding="utf-8").splitlines(), 1):
         fields = row.split("\t")
         if len(fields) != 5:
@@ -527,6 +528,28 @@ def check_manifest(
             continue
         source, citation, relative, start, snippet = fields
         snippet = snippet.rstrip()  # Older writers could truncate at a space.
+        # The source side, which this rule did not read until now. Every check
+        # below is about the target -- is the recorded text still at the
+        # recorded line -- so a row outlived the prose it was written for: a
+        # citation deleted in an edit stayed in the manifest and reported as
+        # checked forever, and `checked` counted manifest rows rather than
+        # citations. Falsified before it was fixed: deleting one citation from
+        # its citing page left `checked 25 citation(s)` and `clean`, EXIT 0.
+        #
+        # The page is searched rather than the recorded line, deliberately.
+        # An edit above the citation moves it, and failing on the line would
+        # turn ordinary editing red while catching nothing this does not.
+        page_name = source.rpartition(":")[0] or source
+        if page_name not in citing:
+            page = item / page_name
+            citing[page_name] = page.read_text(encoding="utf-8") if page.is_file() else ""
+        if citation not in citing[page_name]:
+            report.fail(
+                f"{item.name}/{source}",
+                f"`{citation}` is recorded but {page_name} no longer cites it; "
+                "re-record with sd-docs-lint --update-citations",
+            )
+            continue
         target = work_root.resolve() / relative
         if not target.is_file():
             report.fail(f"{item.name}/{source}", f"`{citation}` names {relative}, which is gone")

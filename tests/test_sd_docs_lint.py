@@ -630,6 +630,38 @@ class Rule6CitationTests(LintFixture):
         (item / "prd.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
         self.assert_fails("that text is gone from the file")
 
+    def test_red_the_citing_page_no_longer_carries_the_citation(self) -> None:
+        """Backbone item sd:572. The rule only ever read the target side.
+
+        Every other check here asks whether the recorded text is still at the
+        recorded line in the page being cited. None asked whether the citing
+        page still cites it, so an edit that deleted a citation left its
+        manifest row behind, and the row reported as checked forever. The
+        count said `checked 25 citation(s)` while one of the twenty-five had
+        not existed for some time.
+        """
+
+        self.record()
+        item = self.work / "2026-08-29-a-cited-item"
+        (item / "design.md").write_text("# design\n\nNo citation here.\n", encoding="utf-8")
+        self.assert_fails("design.md no longer cites it")
+
+    def test_green_a_citation_that_moved_down_its_own_page_is_not_a_failure(self) -> None:
+        """The source side is searched, not read at the recorded line.
+
+        An edit above a citation moves it without changing what it says. If
+        this rule read `design.md:3` literally it would go red on ordinary
+        editing while catching nothing the page-wide search does not.
+        """
+
+        self.record()
+        item = self.work / "2026-08-29-a-cited-item"
+        page = item / "design.md"
+        lines = page.read_text(encoding="utf-8").splitlines()
+        lines.insert(1, "An inserted paragraph above the citation.")
+        page.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.assert_clean()
+
     def test_red_a_malformed_manifest_row(self) -> None:
         item = self.cited_item()
         (item / lint.CITATION_MANIFEST).write_text("two\tfields\n", encoding="utf-8")
