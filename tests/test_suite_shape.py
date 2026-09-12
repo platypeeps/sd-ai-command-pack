@@ -15,6 +15,8 @@ its runner block is the one a hand-kept list would miss.
 from __future__ import annotations
 
 import ast
+import functools
+import inspect
 import pathlib
 import subprocess
 import tempfile
@@ -365,6 +367,24 @@ class EnumerationTests(unittest.TestCase):
 # test that reaches no assertion at all. Those are the flagrant forms, the
 # corpus carries none of the first two today, and a gate that is empty on the
 # day it lands is a guard rather than a negotiation.
+#
+# That "none today" is a measurement and it is only as good as the reader that
+# took it. The first one read `node.args`, which is not where an assertion's
+# operands are: `assertTrue(True, explain())` had its message counted as an
+# operand, `assertEqual(first=1, second=1)` presented no positional arguments
+# at all, and `assertEqual(x, x, 'message')` offered three operands to a rule
+# written for two -- three fixed assertions, none of them reported. It also
+# stopped folding at `ast.Constant`, so `assertEqual(2 + 2, 4)` read as a live
+# comparison. `comparands` and `_operands` below take the arity and the
+# message position from each method's own signature instead, and `_is_literal`
+# folds through the operators. Re-measured that way the corpus still carries
+# none, and every comparing assertion in it was readable -- no count is quoted
+# here because it moves with every test anyone adds, and a recited number that
+# nobody re-derives is the defect two doors down. It is enforced rather than
+# recited: `test_the_assertion_scan_reaches_the_real_suite` counts what the
+# reader actually read and fails if that collapses, because a reader answering
+# "unreadable" to everything would report the same clean zero having examined
+# nothing at all.
 
 #: Every assertion `unittest.TestCase` defines, read off the class instead of
 #: listed. A list would drift from the standard library, and it would also have
@@ -432,7 +452,14 @@ def _assertion_call(node: ast.AST) -> str | None:
 
 
 def _is_literal(node: ast.AST) -> bool:
-    """Whether `node` is a constant, or a container built only of constants."""
+    """Whether `node`'s value is fixed by the source, with no name read.
+
+    Constants, containers of constants, and the operators that fold over them.
+    `assertEqual(2 + 2, 4)` and `assertEqual('wheel-1.0.whl', 'w-1.0.whl2'[:9])`
+    reach no code under test either, and reading only `ast.Constant` at the top
+    let both through -- the arithmetic is the source asking itself a question
+    however many operators it is spelled with.
+    """
 
     if isinstance(node, ast.Constant):
         return True
@@ -447,7 +474,74 @@ def _is_literal(node: ast.AST) -> bool:
                    for part in pair if part is not None)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         return _is_literal(node.operand)
+    if isinstance(node, ast.BinOp):
+        return _is_literal(node.left) and _is_literal(node.right)
+    if isinstance(node, ast.Subscript):
+        return _is_literal(node.value) and _is_literal(node.slice)
+    if isinstance(node, ast.Slice):
+        return all(part is None or _is_literal(part)
+                   for part in (node.lower, node.upper, node.step))
     return False
+
+
+@functools.cache
+def comparands(name: str) -> tuple[str, ...]:
+    """The parameters of `unittest.TestCase.NAME` that name a thing compared.
+
+    Read from the method's own signature rather than assumed from argument
+    position, because every `assert*` takes a trailing `msg` and every one of
+    them accepts its operands by keyword. Reading `node.args` positionally got
+    all three shapes wrong: `assertTrue(True, built())` had the message counted
+    as an operand, so "all literals" was false and the unconditional truth
+    passed; `assertEqual(first=1, second=1)` presented no positional arguments
+    at all, so the rule short-circuited on an empty list; and
+    `assertEqual(x, x, 'message')` offered three operands to a check written
+    for two.
+
+    The required parameters are the compared ones: `msg`, and
+    `assertAlmostEqual`'s `places`/`delta` and `assertSequenceEqual`'s
+    `seq_type`, all carry defaults and none of them is a subject. `self` is
+    dropped by position; it is the only parameter that cannot be passed here.
+    """
+
+    try:
+        signature = inspect.signature(getattr(unittest.TestCase, name))
+    except (AttributeError, TypeError, ValueError):  # pragma: no cover - defensive
+        return ()
+    return tuple(
+        parameter.name
+        for parameter in list(signature.parameters.values())[1:]
+        if parameter.default is inspect.Parameter.empty
+        and parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD)
+
+
+def _operands(name: str, node: ast.Call) -> list[ast.expr] | None:
+    """The expression bound to each compared parameter of `node`, in order.
+
+    `None` when the call cannot be read with confidence, which is the direction
+    this whole check errs in: an unknown vocabulary, a `*args` or `**kwargs`
+    spread that hides which expression lands where, or a call that supplies
+    fewer subjects than the signature requires and so would not run anyway.
+    """
+
+    parameters = comparands(name)
+    if not parameters:
+        return None
+    if any(isinstance(argument, ast.Starred) for argument in node.args):
+        return None
+    if any(keyword.arg is None for keyword in node.keywords):
+        return None
+    # `strict=False` is the point rather than an omission: the truncation is
+    # what drops a trailing `msg` passed positionally, and the short side is
+    # equally allowed -- an operand given by keyword leaves `node.args` shorter
+    # than `parameters`, and the length check below is what rejects a call that
+    # really is missing one.
+    bound = dict(zip(parameters, node.args, strict=False))
+    bound.update({keyword.arg: keyword.value for keyword in node.keywords
+                  if keyword.arg in parameters})
+    if len(bound) != len(parameters):
+        return None
+    return [bound[parameter] for parameter in parameters]
 
 
 def methods(tree: ast.Module):
@@ -473,8 +567,12 @@ def decorative_assertions(tree: ast.Module) -> list[str]:
     answer to "what would have to differ for this to fail" is "nothing", and
     that holds whichever way the assertion points: `assertEqual(x, x)` can
     never fail and `assertNotEqual(x, x)` can never pass. And an assertion all
-    of whose arguments are literals, which asks the source about itself and
+    of whose operands are literals, which asks the source about itself and
     reaches no code under test at all.
+
+    The operands are the ones the method's signature names (`_operands`), not
+    the positional arguments. The message is not an operand, and an operand
+    does not stop being one for being passed by keyword.
     """
 
     found = []
@@ -483,11 +581,14 @@ def decorative_assertions(tree: ast.Module) -> list[str]:
             name = _assertion_call(node)
             if name not in COMPARING_ASSERTIONS or not isinstance(node, ast.Call):
                 continue
+            operands = _operands(name, node)
+            if operands is None:
+                continue
             where = f"{class_name}.{function.name} line {node.lineno}"
-            operands = [ast.unparse(argument) for argument in node.args]
-            if len(operands) >= 2 and operands[0] == operands[1]:
-                found.append(f"{where}: {name} compares {operands[0]} with itself")
-            elif node.args and all(_is_literal(argument) for argument in node.args):
+            source = [ast.unparse(operand) for operand in operands]
+            if len(source) >= 2 and source[0] == source[1]:
+                found.append(f"{where}: {name} compares {source[0]} with itself")
+            elif all(_is_literal(operand) for operand in operands):
                 found.append(f"{where}: {name} compares only literals")
     return found
 
@@ -660,7 +761,18 @@ class AssertionsCanFail(unittest.TestCase):
                         "self.assertNotEqual(value, value)",
                         "self.assertEqual(1, 1)",
                         "self.assertTrue(True)",
-                        "self.assertIn('a', ('a', 'b'))"):
+                        "self.assertIn('a', ('a', 'b'))",
+                        # The three shapes a positional read of `node.args`
+                        # let through: a message counted as an operand, an
+                        # all-keyword call with no positional arguments at
+                        # all, and a message offered to the self-same check
+                        # as a third operand.
+                        "self.assertTrue(True, dynamic_message)",
+                        "self.assertEqual(first=1, second=1)",
+                        "self.assertEqual(built(), built(), dynamic_message)",
+                        # And the two an `ast.Constant`-only reading missed.
+                        "self.assertEqual(2 + 2, 4)",
+                        "self.assertEqual('wheel-1.0.whl', 'wheel-1.0.whl2'[:13])"):
             self.assertEqual(len(findings(settled)), 1, settled)
         for near_miss in ("self.fail('never posts')",
                           "self.assert_fails('every work item has a prd.md')",
@@ -668,8 +780,41 @@ class AssertionsCanFail(unittest.TestCase):
                           "self.assertRaises(ValueError, build, build)",
                           "self.assertLogs('sd', 'INFO')",
                           "self.assertEqual(read(path), 'x')",
-                          "self.assertEqual(left, right, 'message')"):
+                          "self.assertEqual(left, right, 'message')",
+                          # A literal in a parameter that is not an operand:
+                          # the message, and `assertAlmostEqual`'s `places`.
+                          # Both carry defaults, so neither is a subject.
+                          "self.assertTrue(ready, 'the queue never drained')",
+                          "self.assertAlmostEqual(measured, 1.0, places=3)",
+                          # An operand by keyword is still an operand.
+                          "self.assertEqual(first=read(path), second='x')",
+                          # Folding stops at the first name: a subscript of a
+                          # variable reads the code under test.
+                          "self.assertEqual(rows[0], 'x')",
+                          # A spread hides which expression lands where, so
+                          # the call is not read rather than read wrongly.
+                          "self.assertEqual(*pair)"):
             self.assertEqual(findings(near_miss), [], near_miss)
+
+    def test_the_operand_reader_takes_its_arity_from_the_signature(self) -> None:
+        """The predicate's own input, asserted directly.
+
+        `comparands` answering `()` to everything would make `_operands`
+        return `None` for every call in the suite, and the sweep above would
+        report a clean zero having read nothing at all. That failure is
+        invisible from the findings, which are empty either way, so the
+        vocabulary is checked against `unittest.TestCase` itself.
+        """
+
+        self.assertEqual(comparands("assertEqual"), ("first", "second"))
+        self.assertEqual(comparands("assertTrue"), ("expr",))
+        self.assertEqual(comparands("assertIn"), ("member", "container"))
+        # `places`, `delta` and `seq_type` carry defaults, like `msg`.
+        self.assertEqual(comparands("assertAlmostEqual"), ("first", "second"))
+        self.assertEqual(comparands("assertSequenceEqual"), ("seq1", "seq2"))
+        for name in COMPARING_ASSERTIONS:
+            self.assertNotIn("msg", comparands(name), name)
+            self.assertNotEqual(comparands(name), (), name)
 
     def test_the_reachability_predicate_follows_helpers_and_mocks(self) -> None:
         """The other control, for the other check, failing for other reasons."""
@@ -699,13 +844,30 @@ class AssertionsCanFail(unittest.TestCase):
         """
 
         counted = 0
+        read = 0
+        unreadable = 0
         for path in suite_modules():
-            counted += sum(1 for _class_name, function in methods(parsed(path))
-                           if function.name.startswith("test"))
+            for _class_name, function in methods(parsed(path)):
+                counted += function.name.startswith("test")
+                for node in ast.walk(function):
+                    name = _assertion_call(node)
+                    if name not in COMPARING_ASSERTIONS or not isinstance(node, ast.Call):
+                        continue
+                    if _operands(name, node) is None:
+                        unreadable += 1
+                    else:
+                        read += 1
         self.assertNotEqual(suite_modules(), [], "the suite was not reached")
         self.assertGreater(counted, 500,
                            "far fewer test methods were parsed than this suite "
                            "holds, so the checks above swept almost nothing")
+        self.assertGreater(read, 1_000,
+                           "almost no assertion in the suite had its operands "
+                           "read, so the clean sweep above examined nothing")
+        self.assertLess(unreadable, read // 100,
+                        f"{unreadable} of {read + unreadable} assertions could "
+                        "not be read; the reader is skipping a shape this "
+                        "suite uses, and every skip is a finding not reported")
 
 
 if __name__ == "__main__":

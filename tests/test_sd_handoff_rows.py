@@ -32,8 +32,21 @@ def load(name: str, filename: str | None = None):
 
     The loader is named explicitly because two of the three modules here have
     no `.py` suffix, and `spec_from_file_location` infers no loader for those.
+
+    A module already in `sys.modules` from that same file is handed back
+    rather than executed again. Without the check this replaced
+    `sys.modules["sd_lib"]` with a second module object on import, and every
+    module that had already imported `sd_lib` the ordinary way was left
+    holding functions equal to the live ones and identical to none of them.
+    `unittest discover` imports this file and `test_sd_lib.py` into one
+    process, which is how
+    `SharedParserTests.test_docs_lint_imports_the_shared_parser` came to fail
+    there while passing when its module was run alone.
     """
     path = str(REPO_ROOT / "bin" / (filename or f"{name}.py"))
+    already = sys.modules.get(name)
+    if already is not None and getattr(already, "__file__", None) == path:
+        return already
     loader = importlib.machinery.SourceFileLoader(name, path)
     spec = importlib.util.spec_from_file_location(name, path, loader=loader)
     module = importlib.util.module_from_spec(spec)
@@ -336,6 +349,33 @@ class TheWriter(RowCase):
         code, _, err = self.note(["resolve", str(note)])
         self.assertEqual(code, 0, err)
         self.assertEqual(self.read(), [])
+
+
+class TheModuleLoader(unittest.TestCase):
+    """`load` returns what `sys.modules` holds rather than a second copy.
+
+    Asserted here rather than left to the module that noticed: the failure
+    lands in `test_sd_lib.py`, which does nothing wrong, and only under
+    `unittest discover`, which is the one way CI never runs the suite --
+    `.github/scripts/run-tests.sh` gives each module its own process. A
+    defect no gate can see needs its check next to its cause.
+    """
+
+    def test_a_module_already_imported_is_not_executed_again(self) -> None:
+        self.assertIs(load("sd_lib"), sys.modules["sd_lib"])
+        self.assertIs(load("sd_lib"), sd_lib)
+
+    def test_it_still_executes_a_module_that_is_not_imported_yet(self) -> None:
+        """The control: a guard returning early for everything would pass the
+        test above while loading nothing at all."""
+
+        name = "sd_lib_under_another_name"
+        sys.modules.pop(name, None)
+        self.addCleanup(sys.modules.pop, name, None)
+        fresh = load(name, "sd_lib.py")
+        self.assertIs(sys.modules[name], fresh)
+        self.assertIsNot(fresh, sd_lib)
+        self.assertTrue(callable(fresh.parse_frontmatter))
 
 
 if __name__ == "__main__":

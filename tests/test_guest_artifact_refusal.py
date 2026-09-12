@@ -242,11 +242,24 @@ class TheReviewGate(Fixture):
         self.assertNotIn("Traceback", done.stderr)
 
     def test_the_same_repository_unforked_reaches_the_reviewer(self) -> None:
-        """The control: the refusal is about the mode, not about the fixture."""
+        """The control: the refusal is about the mode, not about the fixture.
+
+        The success is asserted positively, because absence is not evidence.
+        Written as two `assertNotIn`s alone this passed on any failure that did
+        not happen to use the guest wording -- a usage error, a missing `gh`, an
+        `--explain` that fell over for its own reasons -- so the one thing its
+        name claims, that the reviewer was reached, was the one thing nothing in
+        it established. The exit code says the run succeeded and the explanation
+        naming the scope says it was this review that produced it.
+        """
 
         root = self.make_repo()
         self.write_item(root)
         done = self.run_review(root, OWN_JSON)
+        self.assertEqual(done.returncode, 0,
+                         f"stdout={done.stdout}\nstderr={done.stderr}")
+        self.assertIn("planning", done.stdout + done.stderr)
+        self.assertNotIn("Traceback", done.stderr)
         self.assertNotIn("guest mode", done.stderr)
         self.assertNotIn("fork's integration branch", done.stderr)
 

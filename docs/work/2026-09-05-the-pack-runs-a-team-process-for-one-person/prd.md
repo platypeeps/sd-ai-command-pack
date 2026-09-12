@@ -5179,7 +5179,7 @@ from a number the operator types.
   manifest, and none should. What closes it is the merge commit named above.
   The other half of the same sentence — `sd-propose-skills` writes no vault
   note — *is* asserted here, by
-  `tests/test_sd_suggest.py:288`, which greps the whole `contrib/sd-propose-skills/`
+  `tests/test_sd_suggest.py:300`, which greps the whole `contrib/sd-propose-skills/`
   directory rather than its `SKILL.md`; 25 tests, `OK`. The `commands.yaml`
   clause stays open behind item B's slice 4, because the file it enumerates is
   not in this checkout and `tests/test_sd_suggest.py:17` says so deliberately.
