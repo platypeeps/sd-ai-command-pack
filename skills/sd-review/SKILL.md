@@ -235,6 +235,67 @@ Three refusals:
 Other flags: `--dry-run` (print what would be written, write nothing), `--json`,
 `--force` (replace an existing workflow or guard that differs).
 
+## Reading a test: name what would have to differ
+
+For any assertion that two things are equal, name what would have to differ for
+it to fail. If the answer is "a clock tick", "a filesystem ordering", or
+"nothing", the test is decorative and its green is not evidence of anything.
+
+The instance this came from was named `test_the_build_is_reproducible`. It built
+a wheel twice and asserted the two artifacts matched. Both builds landed inside
+the same second, so the clock the builder was wrongly stamping into the archive
+read the same both times and the artifacts agreed — while the defect the test is
+named for was present throughout. A concurrent run that straddled a second
+boundary found it. The test never could, and had reported green for as long as
+it had existed.
+
+The replacement asserts the property instead of the agreement: every archive
+entry's stamp is the normalised `(1980, 1, 1, 0, 0, 0)`, and the sdist case
+mutates source mtimes between two builds and asserts the gzip MTIME field is
+zeroed. Both fail against the pre-fix code. That is the general remedy — assert
+what the code is supposed to produce, not that two runs of it matched.
+
+`tests/test_suite_shape.py::AssertionsCanFail` enforces the part of this a
+machine can decide: an assertion whose two operands are the same expression, an
+assertion whose operands are all literals, and a test that reaches no assertion
+at all. **It does not catch the case above, and no static check can** — whether
+two different expressions can differ at run time is a question about the world
+rather than about the source.
+
+### Reading is not enough either. Introduce the defect.
+
+The heuristic above is worth having and it is not sufficient, and this
+repository has the counterexample rather than an argument for one. While
+`tests/test_dashboard_plugins.py` was being fixed for an unrelated reason, its
+lane ran a mutation check it had named in advance: put a deliberate defect into
+`dashboard/plugins.py`, confirm each test goes red. One did not. The
+process-group test — a two-second pause asserted against a child writing at
+0.8s — passed against a mutant replacing `os.killpg` with `proc.kill()`, so the
+tile's child survived the group kill and kept running:
+
+    Ran 1 test in 10.992s
+
+    OK
+
+A test that could not fail on the defect it exists to catch, and it looked
+correct by every other method: it passed, it was named well, it exercised the
+right module, and its assertions had operands from the code under test. Reading
+it would not have found this. Mutation did.
+
+So when a test exists to catch a specific defect, the way to know it can is to
+put that defect in and watch it go red. Quote the failing run. This costs one
+edit and one test invocation for the narrow high-value surfaces — the
+installer, the archive builders, anything killing or timing a process — and it
+is the only instrument here that answers the question directly rather than by
+inspection.
+
+Asked in the other direction the same question finds the mirror defect: name
+what would have to change for the test to stop passing. If the answer is a slow
+machine, a loaded runner or a wall-clock deadline, the test fails for reasons
+unrelated to the code under test. Both shapes defeat the gate — one by never
+going red, the other by going red for nothing, and the process-group test
+above was both at once.
+
 ## Never
 
 - Never post, comment, label, or open anything. Disposition is local, full stop.

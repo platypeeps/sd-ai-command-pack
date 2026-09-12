@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+"""Report the size of `bin/` as a trend. A report, never a gate.
+
+`BIN_CAP` capped total lines under `bin/`. It was raised eighteen times in
+eleven days and lowered never, and R11-D48 retired it: every capability adds
+lines, so a total that must move to let work proceed is a record of growth
+wearing the costume of a limit.
+
+Bounding total size while adding capability is not a meaningful goal. The
+meaningful question is whether size grows *faster* than capability, and that
+ratio is close to invariant under "I added a feature" -- which is the property
+a useful signal needs and the one a total cannot have. Between v1.0.0 and
+2026-09-11 `bin/` went 7,947 lines to 20,803, a 2.6x, while top-level
+definitions went 273 to 618, a 2.26x, and the commands went 11 to 15. Average
+function length rose about 15%. That is what healthy growth looks like, and it
+is the distinction the cap could not make.
+
+So this prints four numbers, their movement across the change in hand, and
+their movement across the last thirty days:
+
+    lines            how much there is
+    definitions      top-level `def` and `async def`, the unit of capability
+    commands         tracked files under `bin/` carrying no `.py` suffix
+    lines/definition the ratio, which is the actual signal
+
+A sustained rise in lines per definition with the command count flat is
+accretion -- the mechanical shadow of slop. A rise in all of them together is
+capability. **Nothing here has a threshold and nothing here exits non-zero.**
+The moment it gates it acquires the ratchet the cap had, where the number gets
+raised rather than the trend investigated. Its value is that a human looks at
+it, which is why it prints on the pull request.
+
+The definitions are pinned by `tests/test_sd_size_report.py`, which asserts
+this tool reproduces the four figures recorded for v1.0.0 by hand, from the
+repository's own history: 7,947 lines, 273 definitions, 11 commands, 29.1
+lines per definition. A measurement that cannot be checked against a number
+somebody else arrived at separately is a measurement nobody has to believe.
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import datetime as dt
+import pathlib
+import subprocess
+import sys
+from dataclasses import dataclass
+
+_BIN = str(pathlib.Path(__file__).resolve().parent)
+if _BIN not in sys.path:
+    sys.path.insert(0, _BIN)
+
+from sd_lib import repo_root  # noqa: E402
+
+#: How far back the trend reaches, and how often it is sampled inside that.
+#: Weekly, because the interesting movement in this repository happens over
+#: days and a daily sample would print thirty rows nobody reads.
+TREND_DAYS = 30
+TREND_STEP = 7
+
+
+@dataclass(frozen=True)
+class Size:
+    """What `bin/` measured at one revision."""
+
+    lines: int
+    definitions: int
+    commands: int
+
+    @property
+    def ratio(self) -> float:
+        """Lines per top-level definition, or 0.0 where there are none."""
+
+        return self.lines / self.definitions if self.definitions else 0.0
+
+
+def _git(root: pathlib.Path, *argv: str) -> bytes:
+    """Git's raw stdout, or `b""` when the command fails.
+
+    Failure is quiet on purpose. Every caller here is asking a question whose
+    answer is optional -- is there an `origin/main`, was there a commit before
+    this date -- and a report that stops because one of them is no is a report
+    nobody leaves switched on.
+    """
+
+    done = subprocess.run(["git", *argv], cwd=root,
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                          check=False)
+    return done.stdout if done.returncode == 0 else b""
+
+
+def _blobs(root: pathlib.Path, revision: str) -> dict[str, str]:
+    """The `bin/` tree at `revision`, as path -> blob id.
+
+    `ls-tree` rather than a checkout: the trend reads thirty days of history
+    and touching the working tree to do it would be both slow and destructive.
+    """
+
+    listing = _git(root, "ls-tree", "-r", "-z", revision, "--", "bin").decode()
+    found = {}
+    for entry in listing.split("\0"):
+        if not entry:
+            continue
+        meta, path = entry.split("\t", 1)
+        _mode, kind, blob = meta.split()
+        if kind == "blob":
+            found[path] = blob
+    return found
+
+
+def _contents(root: pathlib.Path, blobs: list[str]) -> dict[str, str]:
+    """Every blob's text, read through a single `git cat-file --batch`.
+
+    One process for the whole tree rather than one per file. The trend samples
+    five revisions of a forty-file directory, and two hundred `git show`
+    invocations is most of a minute for an answer that takes under a second
+    this way.
+    """
+
+    if not blobs:
+        return {}
+    done = subprocess.run(["git", "cat-file", "--batch"], cwd=root,
+                          input=("\n".join(blobs) + "\n").encode(),
+                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                          check=False)
+    stream, texts, at = done.stdout, {}, 0
+    while at < len(stream):
+        end = stream.find(b"\n", at)
+        if end < 0:
+            break
+        header = stream[at:end].split()
+        if len(header) != 3:
+            break
+        blob, size = header[0].decode(), int(header[2])
+        texts[blob] = stream[end + 1:end + 1 + size].decode("utf-8", "replace")
+        at = end + 1 + size + 1
+    return texts
+
+
+def definitions_in(source: str) -> int:
+    """Top-level `def` and `async def` in `source`; 0 if it will not parse.
+
+    Top-level only, and methods deliberately uncounted. The question is how
+    many separately-named things the directory does, and a class's methods are
+    one thing's parts. A file that will not parse contributes its lines and no
+    definitions, which moves the ratio the wrong way -- but an unparseable file
+    under `bin/` fails the lint job long before anyone reads this.
+    """
+
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return 0
+    return sum(1 for node in tree.body
+               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
+
+
+def size_of(sources: dict[str, str]) -> Size:
+    """Measure a `bin/` tree given as path -> text.
+
+    A command is a tracked file with no `.py` suffix, which is what the
+    figures this is checked against counted, and not the executable bit: two
+    `.py` modules under `bin/` carry that bit today and are libraries, not
+    commands.
+    """
+
+    return Size(
+        lines=sum(len(text.splitlines()) for text in sources.values()),
+        definitions=sum(definitions_in(text) for text in sources.values()),
+        commands=sum(1 for path in sources if not path.endswith(".py")),
+    )
+
+
+def size_at(root: pathlib.Path, revision: str) -> Size | None:
+    """`bin/` as of `revision`, or None if the revision holds no `bin/`."""
+
+    blobs = _blobs(root, revision)
+    if not blobs:
+        return None
+    texts = _contents(root, sorted(set(blobs.values())))
+    return size_of({path: texts.get(blob, "") for path, blob in blobs.items()})
+
+
+def size_of_worktree(root: pathlib.Path) -> Size:
+    """`bin/` as it is on disk, which is what the change in hand has made.
+
+    The index, not a directory walk: `find bin -type f` once reported this
+    repository 900 lines heavier than it was by sweeping up `__pycache__`.
+    """
+
+    listing = _git(root, "ls-files", "-z", "--deduplicate", "--", "bin").decode()
+    sources = {}
+    for name in listing.split("\0"):
+        path = root / name
+        if name and path.is_file():
+            sources[name] = path.read_text(encoding="utf-8", errors="replace")
+    return size_of(sources)
+
+
+def baseline_revision(root: pathlib.Path) -> str | None:
+    """What this change should be compared against, or None if nothing fits.
+
+    The merge base with `origin/main` first, so the delta is the change's own
+    and not everything that landed on main while it was open. `origin/main`
+    itself next, then local `main`, then the previous commit, for a checkout
+    that has no remote -- a shallow CI clone, or a fresh one. None rather than
+    a guess when none of them resolve: a delta against an unknown base is
+    worse than no delta, because it looks like one.
+
+    **A candidate that resolves to `HEAD` is not a base.** Standing on `main`
+    with nothing committed yet, three of the four resolve to the commit being
+    measured, and the report printed a row of zeroes that read as "this change
+    adds nothing" rather than as "there is nothing to compare against". That
+    is the same defect in miniature as the one the item beside this is about:
+    an answer the environment supplies, which no reader can tell from a
+    measurement.
+    """
+
+    head = _git(root, "rev-parse", "--verify", "HEAD^{commit}").decode().strip()
+    merge_base = _git(root, "merge-base", "HEAD", "origin/main").decode().strip()
+    for candidate in (merge_base, "origin/main", "main", "HEAD~1"):
+        if not candidate:
+            continue
+        resolved = _git(root, "rev-parse", "--verify",
+                        f"{candidate}^{{commit}}").decode().strip()
+        if resolved and resolved != head:
+            return resolved
+    return None
+
+
+def trend_revisions(root: pathlib.Path, days: int = TREND_DAYS,
+                    step: int = TREND_STEP) -> list[tuple[str, str]]:
+    """`(date, commit)` for the newest commit at or before each sample point.
+
+    Sampled backwards from today at `step`-day intervals so the rows are
+    evenly spaced whatever the commit rate was, and de-duplicated: a quiet
+    fortnight otherwise prints the same commit three times and reads as three
+    weeks of flat growth rather than as no data.
+    """
+
+    today = dt.datetime.now(dt.timezone.utc).date()
+    seen, samples = set(), []
+    # `range(days, -1, -step)` reaches 0 only when `step` divides `days`, so a
+    # 30-day window stepped weekly stopped two days short and the newest row
+    # the trend printed was never the change's own.
+    for back in sorted({*range(days, 0, -step), 0}, reverse=True):
+        when = today - dt.timedelta(days=back)
+        found = _git(root, "rev-list", "-1", "--first-parent",
+                     f"--before={when.isoformat()}T23:59:59Z", "HEAD")
+        commit = found.decode().strip()
+        if commit and commit not in seen:
+            seen.add(commit)
+            samples.append((when.isoformat(), commit))
+    return samples
+
+
+def _cells(size: Size) -> str:
+    return (f"{size.lines:,} | {size.definitions:,} | "
+            f"{size.commands} | {size.ratio:.1f} |")
+
+
+def _row(label: str, size: Size) -> str:
+    return f"| {label} | {_cells(size)}"
+
+
+def _delta_row(now: Size, before: Size) -> str:
+    def moved(after: float, prior: float, places: int = 0) -> str:
+        change = after - prior
+        return f"{change:+,.{places}f}" if change else "0"
+
+    return (f"| **this change** | {moved(now.lines, before.lines)} | "
+            f"{moved(now.definitions, before.definitions)} | "
+            f"{moved(now.commands, before.commands)} | "
+            f"{moved(now.ratio, before.ratio, 1)} |")
+
+
+def render_report(root: pathlib.Path) -> list[str]:
+    """The whole report, as lines, ready for stdout or a CI step summary."""
+
+    now = size_of_worktree(root)
+    out = ["## `bin/` size", "",
+           "| | lines | definitions | commands | lines/definition |",
+           "|---|---:|---:|---:|---:|",
+           _row("now", now)]
+    base = baseline_revision(root)
+    # Both halves named in the condition rather than just `before`: there is no
+    # base when nothing resolved and no base when the resolved revision holds
+    # no `bin/`, the row to print is the same either way, and writing it as
+    # `if before is None` leaves `base` a `str | None` that the branch below
+    # then subscripts.
+    before = size_at(root, base) if base is not None else None
+    if base is None or before is None:
+        out.append("| **this change** | no comparable base revision | | | |")
+    else:
+        out += [_row(f"base `{base[:8]}`", before), _delta_row(now, before)]
+    out += ["", f"### The last {TREND_DAYS} days", "",
+            "| date | commit | lines | definitions | commands | lines/definition |",
+            "|---|---|---:|---:|---:|---:|"]
+    for when, commit in trend_revisions(root):
+        sampled = size_at(root, commit)
+        if sampled is not None:
+            out.append(f"| {when} | `{commit[:8]}` | {_cells(sampled)}")
+    out += ["",
+            "A rise in lines per definition with the command count flat is "
+            "accretion. A rise in all of them together is capability. This is "
+            "a report, never a gate: there is no threshold here and nothing "
+            "to raise."]
+    return out
+
+
+def run_size_report(argv: list[str] | None = None) -> int:
+    """Print the report. Always 0 unless there is no repository to measure.
+
+    Named for what it does rather than `main`, because `bin/` already carries
+    twenty functions called `main` and every one of them is invisible to the
+    dead-code check in `tests/test_code_health.py` for it. One more would cost
+    a ceiling move to buy nothing.
+    """
+
+    argparse.ArgumentParser(description=__doc__.splitlines()[0]).parse_args(argv)
+    root = repo_root(None)
+    if root is None:
+        print("not inside a repository; nothing to measure", file=sys.stderr)
+        return 1
+    print("\n".join(render_report(root)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(run_size_report())

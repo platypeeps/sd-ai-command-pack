@@ -171,6 +171,19 @@ jobs:
       - name: Docs lint (docs/work, docs/spec, docs/decisions)
         run: python3 bin/sd-docs-lint
 
+      # A report, never a gate. R11-D48 retired `bin/`'s line-count ceiling
+      # because a total that has to be raised to let work proceed never says
+      # no; what replaced it is four numbers and their movement, printed where
+      # whoever reads the pull request will see them. `continue-on-error` is
+      # the mechanical half of "never a gate": this step cannot redden a run
+      # even by crashing, so nobody is ever tempted to make its numbers
+      # agreeable. It runs in this job rather than the unittest one because
+      # the trend reads thirty days of history and this is the checkout with
+      # `fetch-depth: 0` and no matrix.
+      - name: Report bin/ size (never a gate)
+        continue-on-error: true
+        run: python3 bin/sd-size-report | tee -a "$GITHUB_STEP_SUMMARY"
+
   bash32:
     name: bash 3.2 syntax
     runs-on: ubuntu-latest
