@@ -548,8 +548,45 @@ class TheSeamToTheReader(InstallerHarness):
         sd_install.write_local_block(repo, consent="codex@codex")
         block = self.read_back(repo)
         self.assertNotEqual(block, {}, "the reader found no block the installer wrote")
-        self.assertEqual(block.get("mode"), "full")
         self.assertEqual(block.get(sd_install.CONSENT_KEY), "codex@codex")
+
+    def test_a_grant_is_the_only_key_the_block_sets(self):
+        """The block carries the answer this run was given and nothing else.
+
+        `--repo` wrote `mode: full` and three `<placeholder>` values into every
+        repository it touched. Each of those keys resolves for itself when it
+        is absent -- `mode` from the remote, the check names from the
+        repository's own build file -- so a written copy is a default that
+        drifts, and the fleet review found the file missing from fourteen of
+        sixteen repositories with nothing broken by its absence.
+        """
+        repo = self.make_repo("granted")
+        sd_install.write_local_block(repo, consent="codex@codex")
+        self.assertEqual(self.read_back(repo), {sd_install.CONSENT_KEY: "codex@codex"})
+
+    def test_without_a_grant_the_block_sets_nothing_at_all(self):
+        repo = self.make_repo("ungranted")
+        sd_install.write_local_block(repo)
+        self.assertEqual(self.read_back(repo), {})
+
+    def test_the_menu_of_keys_is_still_there_to_uncomment(self):
+        """Commented out, not deleted: the block is where an operator finds
+        the keys, and `WORKFLOW.md` is checked against this same template."""
+        repo = self.make_repo("menu")
+        sd_install.write_local_block(repo)
+        text = (repo / sd_install.LOCAL_BLOCK_FILE).read_text(encoding="utf-8")
+        for key in ("mode", "check", "test", "lint", sd_install.CONSENT_KEY):
+            with self.subTest(key=key):
+                self.assertIn(f"# {key}:", text)
+                self.assertNotIn(f"\n    {key}:", text)
+
+    def test_an_empty_grant_is_written_and_denies(self):
+        """Empty is an answer -- consent withheld -- and not the same as
+        unset, which inherits the machine's standing authorization."""
+        repo = self.make_repo("denied")
+        sd_install.write_local_block(repo, consent="")
+        self.assertEqual(self.read_back(repo), {sd_install.CONSENT_KEY: ""})
+        self.assertEqual(sd_install.standing_consent(repo), "")
 
     def test_a_block_written_under_the_old_markers_is_migrated_in_place(self):
         """Not appended beside. The operator's answers are in the old one.

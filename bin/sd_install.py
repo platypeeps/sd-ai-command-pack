@@ -912,10 +912,19 @@ LEGACY_BLOCK_MARKERS = (
 # `key: value`. Unmarked, these three lines raised `ConfigError` on every read
 # -- a second way the same block was unreadable, and one the marker fix alone
 # would have left standing.
+#: The menu of keys, not the answers. Every key line here is written out
+#: commented -- see `consent_body` -- so this is the template a reader
+#: uncomments a line of, and the one place the key set is spelled.
 DEFAULT_BLOCK_BODY = """\
 # sd-ai-command-pack, machine-scope. Work items live under `docs/work/`; nothing
 # else in this repo belongs to the framework. The workflow these keys override
 # is `WORKFLOW.md` in the pack checkout; the one page that states the policy.
+#
+# Every key below is written commented out, and a commented key is unset.
+# Uncomment one to override this repository, and only then: `mode` resolves
+# from the remote, `check`, `test` and `lint` resolve from whatever build file
+# this repository actually has, and an override that repeats the resolved
+# answer is a copy that goes stale the day the repository changes.
 
     mode: full
     check: <the command that verifies this repo, e.g. `make check`>
@@ -1006,19 +1015,38 @@ def path_is_tracked(repo: Path, relative: str) -> bool:
 # Local answers restrict standing machine authorization. Render every pair
 # through the canonical parser; malformed or unknown answers must not inherit.
 CONSENT_KEY = "reviewers"
-CONSENT_LINE = re.compile(rf"^[ \t]*{CONSENT_KEY}:(?P<value>.*)\n?", re.MULTILINE)
+
+#: Any `key: value` line of the template, whole.
+BLOCK_KEY_LINE = re.compile(r"^(?P<indent>[ \t]*)(?P<key>[a-z][a-z_]*):(?P<value>.*)\n", re.MULTILINE)
 
 
 def consent_body(consent: str | None) -> str:
-    """Quote an answer using the reader's grammar; None inherits, empty denies.
+    """The block's body: an answer this run was given, and nothing else.
 
+    Quote an answer using the reader's grammar; None inherits, empty denies.
     Quoting preserves # and backslashes in recipients. Callable replacement
     prevents re.sub from treating recipient backslashes as group references.
+
+    Every other key goes out commented, which the reader treats as unset.
+    Uncommented, they were answers nobody gave: `--repo` wrote `mode: full`
+    into all sixteen repositories it touched, plus three `<placeholder>`
+    values, and each of those keys resolves for itself when it is absent --
+    `mode` from the remote, `check`, `test` and `lint` from the repository's
+    own build file. A written-down copy of a resolved answer only drifts, and
+    the fleet review that found this found the block missing from fourteen of
+    sixteen repositories with nothing broken by its absence. `reviewers` is
+    the one key with no fallback, because consent cannot be inferred, so it is
+    the one key this writes live -- and only when a grant was given.
     """
-    if consent is None:
-        return CONSENT_LINE.sub(lambda _: "", DEFAULT_BLOCK_BODY)
-    quoted = consent.replace("\\", "\\\\").replace('"', '\\"')
-    return CONSENT_LINE.sub(lambda _: f'    {CONSENT_KEY}: "{quoted}"\n', DEFAULT_BLOCK_BODY)
+
+    def commented_unless_granted(match: re.Match) -> str:
+        indent, key, value = match["indent"], match["key"], match["value"]
+        if key == CONSENT_KEY and consent is not None:
+            quoted = consent.replace("\\", "\\\\").replace('"', '\\"')
+            return f'{indent}{CONSENT_KEY}: "{quoted}"\n'
+        return f"{indent}# {key}:{value}\n"
+
+    return BLOCK_KEY_LINE.sub(commented_unless_granted, DEFAULT_BLOCK_BODY)
 
 
 def standing_consent(repo: Path) -> str | None:

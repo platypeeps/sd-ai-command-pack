@@ -4104,9 +4104,9 @@ from a number the operator types.
       not — plus 3 for the call in `run` (`source:bin/sd-docs-lint::run`).
     - the `sd_db` installer step — **19**, and not the 38 it looks like.
       `prd.md:1538-1544` reads as unbuilt scope and is not: `system_checkout`
-      (`bin/sd_install.py:1194-1203`, 10), `library_source` (`:1206-1207`, 2),
-      `provision_library` (`:1239-1284`, 46) and `open_library`
-      (`:1287-1305`, 19) all landed with PR 6's consent work, and B's library
+      (`bin/sd_install.py:1217-1226`, 10), `library_source` (`:1229-1230`, 2),
+      `provision_library` (`:1262-1307`, 46) and `open_library`
+      (`:1314-1332`, 19) all landed with PR 6's consent work, and B's library
       is present at `~/repos/system/local-sd-db`, so the criterion's "Once B's
       library exists" is satisfied and it is the built branch that gets
       priced. What is left of the clause is the tag — the copy is installed
