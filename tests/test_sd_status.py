@@ -1701,15 +1701,26 @@ class LowYieldProducerTests(InventoryFixture):
         (self.repo / "bin" / "sd_rows.py").write_text("x = 1\n", encoding="utf-8")
         self.assertEqual([], self.by_check(self.rows(), "undisclosed-tool"))
 
-    def test_a_disclosure_spelling_a_module_as_a_command_is_not_a_row(self) -> None:
-        """The third: a skill naming `bin/sd-suggest` for `bin/sd_suggest.py`.
+    def test_a_module_sharing_a_stem_does_not_silence_a_missing_command(self) -> None:
+        """A hyphenated tool is not built by an underscored module beside it.
 
-        A module is built. `bin/sd` imports it, and "build `bin/sd-suggest`"
-        is not an instruction anyone can act on when the code already ships.
+        The regression guard. An earlier revision of `_tool_candidates` also
+        tried `-` respelled `_`, on the theory that `bin/sd_suggest.py` builds
+        `bin/sd-suggest`. It does not: that module is an implementation detail
+        `bin/sd` imports, the command is `sd suggest`, and the disclosing skill
+        says *"There is no `bin/sd-suggest` yet"* in the line the regex
+        matched -- the same sentence `skills/sd-help` writes about
+        `bin/sd-help`, which was reported. The transform gave two identical
+        sentences opposite verdicts.
+
+        Fails if the `underscored` candidates come back, which is the point:
+        the defect it guards was a silenced true finding, and a silenced
+        finding leaves nothing in the report to notice.
         """
-        self.disclose("Suggestions come from `bin/sd-rows`.")
+        self.disclose("There is no `bin/sd-rows` yet.")
         (self.repo / "bin" / "sd_rows.py").write_text("x = 1\n", encoding="utf-8")
-        self.assertEqual([], self.by_check(self.rows(), "undisclosed-tool"))
+        found = self.by_check(self.rows(), "undisclosed-tool")
+        self.assertEqual([row["title"] for row in found], ["bin/sd-rows"])
 
     def test_a_tool_absent_in_every_spelling_survives_the_widening(self) -> None:
         """The failure mode of widening a resolver: silence, not noise.
@@ -1730,17 +1741,23 @@ class LowYieldProducerTests(InventoryFixture):
         found = self.by_check(self.rows(), "undisclosed-tool")
         self.assertEqual([row["title"] for row in found], ["bin/sd-gone"])
 
-    def test_the_candidate_spellings_are_the_four_the_pack_uses(self) -> None:
-        """Pinned as a list, because the order is the order of preference and
-        the count is the whole argument against resolving by glob."""
+    def test_the_candidates_are_the_name_and_the_name_with_its_suffix(self) -> None:
+        """Pinned as a list: the shortness is the argument.
+
+        Two candidates, and the second exists only because `_DISCLOSED_RE`
+        truncates at the `.`. No respelling of `-` as `_` in either direction
+        -- see `_tool_candidates` for why the transform cannot come back.
+        """
         self.assertEqual(
-            list(status._tool_candidates("sd-plan")),
-            ["sd-plan", "sd-plan.py", "sd_plan", "sd_plan.py"],
+            list(status._tool_candidates("sd-plan")), ["sd-plan", "sd-plan.py"]
         )
-        # A name already spelled with underscores collapses to two, rather
-        # than repeating itself: the candidates are names, not attempts.
         self.assertEqual(
             list(status._tool_candidates("sd_plan")), ["sd_plan", "sd_plan.py"]
+        )
+        # Stated as a property too, so a third candidate cannot be added
+        # later in a spelling this pin happens not to name.
+        self.assertTrue(
+            all("_" not in name for name in status._tool_candidates("sd-plan"))
         )
 
 

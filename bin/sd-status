@@ -2257,30 +2257,42 @@ _MODULE_SUFFIX = ".py"
 
 
 def _tool_candidates(tool: str) -> tuple[str, ...]:
-    """Every filename under `bin/` that this disclosure could be naming.
+    """The filenames under `bin/` that this disclosure could be naming.
 
-    `bin/` ships two kinds of thing and a skill names whichever one it means:
-    executables spelled with a hyphen (`bin/sd-status`), and modules spelled
-    with an underscore and a `.py` that those executables import (`bin/sd` does
-    `import sd_suggest`). **Both are built.** The class asks whether the pack
-    ships the code a skill points at, not how that code is packaged, and the
-    finding's own remedy -- "build it" -- reads as nonsense against a file
-    already on disk.
+    Two, and the second only because `_DISCLOSED_RE` stops at the `.`: a skill
+    writing the true path `bin/sd_handoff_rows.py` discloses the tool
+    `sd_handoff_rows`, so restoring the suffix asks the question the skill
+    actually asked. Resolved by name, never by a directory listing or a
+    `bin/sd-*` glob, either of which would also swallow a disclosure no file
+    answers. A second suffix in `bin/` is a change to `_MODULE_SUFFIX` alone.
 
-    Four spellings, each one the pack actually uses, resolved by name: as
-    written, with the module suffix, and both of those with `-` respelled `_`.
-    Deliberately *not* a directory listing or a `bin/sd-*` glob, which would
-    swallow disclosures no file answers, and deliberately not the reverse
-    transform (`_` to `-`), which would resolve a mis-spelled executable onto a
-    module and spend the only sharpness the class has left. A second suffix in
-    `bin/` is a change to `_MODULE_SUFFIX` and to nothing else.
+    **Respelling `-` as `_` is deliberately *not* done here**, and an earlier
+    revision of this function that did it was wrong. The reasoning was that
+    `bin/` holds both executables and the modules they import, so a disclosure
+    of `bin/sd-suggest` could be answered by `bin/sd_suggest.py`. It cannot.
+    `bin/sd_suggest.py` is an implementation module `bin/sd` imports; the
+    command is `sd suggest`, and nothing named `bin/sd-suggest` exists. The
+    skill disclosing it says so in the very line the regex matches -- *"There
+    is no `bin/sd-suggest` yet"* -- which is word for word what `skills/sd-help`
+    says about `bin/sd-help`. The transform gave those two identical sentences
+    opposite verdicts, and silenced the one whose stem a module happened to
+    share.
+
+    Measured over this repository: of the thirteen disclosures in `skills/`,
+    the respelling changed exactly one verdict, and that one was a true
+    finding. It rescued nothing, because both paths it was meant to rescue --
+    `bin/sd_handoff_rows.py` and `bin/sd_setup_github.py` -- are already
+    written with underscores by the skills that disclose them, and are
+    resolved by the suffix candidate alone.
+
+    The deeper reason it cannot come back: under it, whether a roadmap note is
+    reported turns on whether an unrelated module happens to share a stem.
+    Someone adding `bin/sd_plan.py` as an implementation detail would silently
+    drop the `bin/sd-plan` finding, with nothing in a `sd-status` diff to show
+    for it. A check whose correctness rests on unrelated naming is the defect
+    this class exists to catch, not a resolution strategy.
     """
-    underscored = tool.replace("-", "_")
-    names = (
-        tool, tool + _MODULE_SUFFIX,
-        underscored, underscored + _MODULE_SUFFIX,
-    )
-    return tuple(dict.fromkeys(names))
+    return tuple(dict.fromkeys((tool, tool + _MODULE_SUFFIX)))
 
 
 def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
@@ -2290,11 +2302,11 @@ def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
     run, which is why it sits at rank 125 and is not abnormal.
 
     Low-yield only while it stays exact. A literal test for `bin/<tool>` called
-    three of its six findings against files that are on disk -- two skills
-    quoting a real `.py` path, one naming a module by its command spelling --
-    and noise in an abnormality report is worse than a missing check, because
-    it teaches the reader to skim the class. `_tool_candidates` says which
-    spellings resolve.
+    two of its six findings against files that are on disk, both of them skills
+    quoting a real `.py` path that `_DISCLOSED_RE` had truncated at the `.`,
+    and noise in an abnormality report is worse than a missing check because it
+    teaches the reader to skim the class. `_tool_candidates` says which
+    spellings resolve, and why it stops where it does.
 
     `design.md`'s natural-key table predates this class and names no key for
     the `k` letter. The key used here is the disclosing file and the tool, and
