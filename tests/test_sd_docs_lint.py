@@ -165,6 +165,63 @@ class Rule1ShapeTests(LintFixture):
         self.assert_fails("archive buckets are named YYYY-MM")
 
 
+class Rule1StatusSourceTests(LintFixture):
+    """The sign of rule 1's status check inverts on `docs/work/.status-source`.
+
+    #767 inverted it and tested nothing: a `row` root with a `status:` line
+    left in an active `prd.md` failed the lint, and no test said so, which is
+    how sd:382 found the contract prose and the code disagreeing with nothing
+    to arbitrate. Each case here is one cell of the sign table -- marker or
+    none, active or archived, line or no line.
+    """
+
+    RETIRED_PRD = GOOD_PRD.replace("status: ready\n", "")
+
+    def setUp(self) -> None:
+        super().setUp()
+        # A `row` marker opens the one database through `$HOME`. An empty home
+        # holds none, so the read answers "no database" and asks git, which
+        # has no remote here to fetch from -- the operator's rows are never
+        # consulted and nothing leaves the machine.
+        home = self.repo / "home"
+        home.mkdir()
+        patched = mock.patch.dict(os.environ, {"HOME": str(home)})
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def mark(self, word: str) -> None:
+        (self.work / lint.sd_lib.STATUS_MARKER).write_text(word + "\n", encoding="utf-8")
+
+    def test_green_row_root_with_a_retired_active_prd(self) -> None:
+        self.mark("row")
+        self.write_item("2026-08-29-a-workable-item", self.RETIRED_PRD)
+        self.assert_clean()
+
+    def test_red_row_root_with_a_status_line_in_an_active_prd(self) -> None:
+        self.mark("row")
+        failures = self.assert_fails("the row is the status; prd.md carries no status: line")
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("2026-08-29-a-workable-item/prd.md", failures[0])
+
+    def test_green_row_root_with_a_status_line_only_under_the_archive(self) -> None:
+        self.mark("row")
+        self.write_item("2026-08-29-a-workable-item", self.RETIRED_PRD)
+        self.write_item(
+            "2026-07-04-an-archived-item",
+            GOOD_PRD.replace("created: 2026-08-29", "created: 2026-07-04"),
+            month="2026-07",
+        )
+        self.assert_clean()
+
+    def test_green_unmarked_root_with_a_status_line(self) -> None:
+        self.assertFalse((self.work / lint.sd_lib.STATUS_MARKER).exists())
+        self.assert_clean()
+
+    def test_green_file_root_with_a_status_line(self) -> None:
+        self.mark("file")
+        self.assert_clean()
+
+
 class Rule2ReadyTests(LintFixture):
     def test_green_in_progress_with_a_branch(self) -> None:
         self.write_item(
