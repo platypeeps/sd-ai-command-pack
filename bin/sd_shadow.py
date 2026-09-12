@@ -99,13 +99,33 @@ def shadow_sync(args) -> int:
         # Named, because a truncated page means the next run starts from the
         # same watermark and there is more behind it than this run saw.
         print("coverage is incomplete; retry a smaller window or increase the request/time limits")
-    if result.ok:
-        if result.watermark_moved:
-            print(f"cursor moved to cover from {result.window_start}")
-        else:
-            print(f"coverage completed from {result.window_start}; existing cursor retained")
-        return 0
-    # The rows above are still written and still true. Only the cursor held,
-    # so the next run re-reads the same window rather than skipping it.
-    print(f"cursor held: {result.reason or 'the collect did not succeed'}")
-    return 1 if args.strict else 0
+    # `ok` is the SEARCH's success; `watermark_moved` is the CURSOR's. Reading
+    # the cursor line off `ok` said "cursor held" through two nights in which
+    # the watermark had in fact moved: one incomplete contribution observation
+    # made `ok` false while the search itself had advanced. So the cursor line
+    # is read off the cursor, and the reason off the collect.
+    if result.watermark_moved:
+        print(f"cursor moved to cover from {result.window_start}")
+    elif result.ok:
+        print(f"coverage completed from {result.window_start}; existing cursor retained")
+    else:
+        # The rows above are still written and still true. Only the cursor
+        # held, so the next run re-reads the same window rather than skipping.
+        print(f"cursor held: {result.reason or 'the collect did not succeed'}")
+    if not result.ok and result.watermark_moved:
+        print(f"the collect did not succeed: {result.reason or 'no reason given'}")
+    # The library's own lines, not a hand-written copy of them, so a line it
+    # learns to emit reaches the log without this verb being edited. That is
+    # sd:602's lesson: a reader that enumerates by hand drops what it does not
+    # name -- here, `contribution observation incomplete` and `contribution
+    # detail backlog`, neither of which this verb has ever printed. The three
+    # lines it HAS already put in its own words are dropped by the fields that
+    # produced them rather than by matching their text.
+    library = result.report()[1:]
+    if result.truncated and library and "truncated buckets" in library[0]:
+        library = library[1:]
+    if not result.ok and result.reason and library and result.reason in library[0]:
+        library = library[1:]
+    for line in library:
+        print(line)
+    return 0 if result.ok else (1 if args.strict else 0)

@@ -538,6 +538,75 @@ class TheShadowRecoveryWindow(SuggestCase):
         self.assertEqual(0, code)
         self.assertEqual({"max_requests": 4}, sync.call_args.kwargs)
 
+    def synced(self, **fields):
+        """A real `Synced`, so `report()` is the library's and not a stand-in."""
+        from sd_db.shadow_sync import Synced
+
+        defaults = {"ok": True, "reason": "", "written": 0, "truncated": [],
+                    "window_start": "2026-09-06T10:00:00Z", "watermark_moved": True}
+        return Synced(**{**defaults, **fields})
+
+    def sync_returning(self, result, *options):
+        with patch.object(sd_db, "sync_shadow", return_value=result):
+            return self.command_sync(*options)
+
+    def test_a_moved_cursor_says_moved_even_when_the_collect_failed(self):
+        """sd:614. `ok` is the search's success; `watermark_moved` is the cursor's.
+
+        Two nights of logs said the cursor was held when it had in fact moved,
+        because one incomplete contribution observation made `ok` false while
+        the search itself had advanced. Reading the cursor line off `ok` is
+        what produced that, so it is read off the cursor.
+        """
+        code, output = self.sync_returning(
+            self.synced(ok=False, reason="one observation incomplete",
+                        watermark_moved=True), "--strict")
+        self.assertIn("cursor moved", output)
+        self.assertNotIn("cursor held", output)
+        self.assertIn("one observation incomplete", output)
+        self.assertEqual(1, code, output)
+
+    def test_a_held_cursor_on_a_failed_collect_still_says_held(self):
+        """CONTROL. The case the existing tests cover must not change."""
+        code, output = self.sync_returning(
+            self.synced(ok=False, reason="request budget spent",
+                        watermark_moved=False), "--strict")
+        self.assertIn("cursor held: request budget spent", output)
+        self.assertNotIn("cursor moved", output)
+        self.assertEqual(1, code, output)
+
+    def test_a_held_cursor_on_a_good_collect_is_not_a_failure(self):
+        """CONTROL. Complete coverage of an old window keeps the later cursor."""
+        code, output = self.sync_returning(
+            self.synced(watermark_moved=False), "--strict")
+        self.assertIn("existing cursor retained", output)
+        self.assertNotIn("cursor held", output)
+        self.assertEqual(0, code, output)
+
+    def test_the_backlog_and_the_incomplete_observations_reach_the_log(self):
+        """sd:614. The verb printed neither, so a growing queue was invisible.
+
+        The 213-deep backlog of 2026-09-12 showed only in the contribution-sync
+        heartbeat; the nightly log said nothing. These lines are the library's
+        own, forwarded rather than re-worded, so one it learns to emit arrives
+        without this verb being edited.
+        """
+        code, output = self.sync_returning(
+            self.synced(queued=3, incomplete=["item:42: rate limited"]))
+        self.assertIn("contribution detail backlog: 3 queued", output)
+        self.assertIn("contribution observation incomplete: item:42: rate limited", output)
+        self.assertEqual(0, code, output)
+
+    def test_the_verb_does_not_say_the_same_thing_twice(self):
+        """CONTROL. Forwarding the report wholesale would duplicate three lines."""
+        _, output = self.sync_returning(
+            self.synced(ok=False, reason="request budget spent",
+                        truncated=["issues"], watermark_moved=False), "--strict")
+        self.assertEqual(1, output.count("request budget spent"), output)
+        self.assertEqual(1, len([line for line in output.splitlines()
+                                 if "truncated" in line or "coverage is incomplete" in line]),
+                         output)
+
     def test_saturated_single_second_window_fails_strict_and_holds_cursor(self):
         from sd_db.shadow_sync import read_watermark
 
