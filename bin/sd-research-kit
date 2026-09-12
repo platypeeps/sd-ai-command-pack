@@ -43,7 +43,8 @@ HERE = Path(__file__).resolve().parent
 CHECKOUT = HERE.parent
 CONVENTIONS = CHECKOUT / "skills" / "sd-research-repo" / "references" / "conventions.md"
 
-USAGE = """usage: sd-research-kit render|checklinks|review|pins|fleet-pins|conventions
+USAGE = """usage: sd-research-kit render|checklinks|review|pins|fleet-pins|
+                          init-claude-md|conventions
 
   render        render research.conf.py in this repo into build/
   checklinks    verify every relative markdown link and backticked in-repo path
@@ -59,6 +60,12 @@ USAGE = """usage: sd-research-kit render|checklinks|review|pins|fleet-pins|conve
   fleet-pins    every pack and system pin across the checkouts beside this one
                 -- `uses:`, `ref:`, `<NAME>_REVISION:`, a tarball manifest's
                 `source_commit` -- current or behind N. Report only; exit 0
+  init-claude-md
+                lay skills/sd-research-repo/templates/CLAUDE.md into this repo,
+                once, when it has none. Never overwrites an existing copy: from
+                then on `review` reports the disagreements and the repo's own
+                `## Local overrides of the shared template` records the ones
+                that are deliberate
   conventions   print the path of the standard every research repo follows
 
 Every verb acts on the current working directory. There is no repo argument.
@@ -140,6 +147,12 @@ def main(argv: list[str]) -> int:
 
     if verb == "render":
         return run_render(rest)
+    if verb == "init-claude-md":
+        # Lives in the review module rather than one of its own: the template
+        # path and the drift check are there, and a writer that resolved the
+        # template separately from the checker could lay a file the checker then
+        # calls drifted.
+        return int(load("sd_research_review").init_main())
     if verb == "fleet-pins":
         # Not `pins --fleet`: every verb here takes no argument, and a flag that
         # changes what a verb is pointed at is the argument R10-D6 removed.

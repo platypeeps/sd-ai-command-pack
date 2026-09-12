@@ -50,6 +50,22 @@ a document.
 
 ## Workflow
 
+Before the first step, once per repo: if the checkout has no `CLAUDE.md`, lay one.
+This is repo setup, and it is the only time the template is written.
+
+```bash
+sd-research-kit init-claude-md
+```
+
+It writes `templates/CLAUDE.md` and refuses if a copy is already there. There is
+deliberately no re-sync verb: a repo legitimately states parts of the template
+differently, and a writer that merged the template back over an existing copy
+would undo that silently. After the first copy the file is managed by
+`sd-research-kit review`, which reports where it has fallen behind the template,
+and by the repo's own `## Local overrides of the shared template` section, which
+records the differences that are on purpose. Both are in
+`references/conventions.md` under **The repo's own `CLAUDE.md`**.
+
 1. Confirm the repo is a research repo and name the document being acted on.
    Read `references/conventions.md` before the first edit — the layout and the
    type prefixes are not guessable, and a document filed in the wrong directory
