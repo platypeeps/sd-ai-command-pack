@@ -344,6 +344,120 @@ class TemplateDriftTests(unittest.TestCase):
         self.assertIn("CLAUDE.md: in sync with the template", result.stdout)
 
 
+class MainDocumentTests(unittest.TestCase):
+    """The `START HERE — ` convention, checked rather than only written down.
+
+    sd:534. `references/conventions.md` stated the convention and closed the
+    section with "`sd-research-kit review` does not currently enforce this
+    title convention" -- an admission, not a check. sd:387 then found three of
+    five research repos with no main document at all, and a person reading
+    found it, because nothing else could.
+
+    What is checkable is the half inside the checkout: the Markdown H1 and the
+    `title`/`h1` the config renders it under. The README's entry link and the
+    Notion page title are the other half and stay in the manual checklist, so
+    the passing line says which surfaces it covered instead of printing a bare
+    ok that a reader would take for all four.
+    """
+
+    def make_repo(self, tmp: Path, docs: str) -> Path:
+        (tmp / "research.conf.py").write_text(f'PROJECT = "probe"\nDOCS = {docs}\n')
+        (tmp / "CLAUDE.md").write_text(TEMPLATE.read_text(encoding="utf-8"))
+        subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+        return tmp
+
+    def entry(self, src: str, title: str) -> str:
+        return (
+            "{'src': %r, 'out': %r, 'title': %r, 'h1': %r}"
+            % (src, src.removesuffix(".md"), title, title)
+        )
+
+    def write(self, repo: Path, src: str, h1_line: str) -> None:
+        path = repo / src
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"# {h1_line}\n\nBody.\n")
+
+    def test_a_repo_with_no_main_document_fails(self) -> None:
+        """sd:387's defect, which went undetected because nothing looked."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw), "[%s]" % self.entry(
+                "30-brief/BRIEF-thing.md", "A brief about a thing"))
+            self.write(repo, "30-brief/BRIEF-thing.md", "A brief about a thing")
+            result = run("review", cwd=repo)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("no configured document's H1 starts with", result.stdout)
+
+    def test_two_main_documents_fail_and_both_are_named(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            docs = "[%s, %s]" % (
+                self.entry("30-brief/BRIEF-one.md", "START HERE — One"),
+                self.entry("30-brief/BRIEF-two.md", "START HERE — Two"),
+            )
+            repo = self.make_repo(Path(raw), docs)
+            self.write(repo, "30-brief/BRIEF-one.md", "START HERE — One")
+            self.write(repo, "30-brief/BRIEF-two.md", "START HERE — Two")
+            result = run("review", cwd=repo)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("2 carry", result.stdout)
+        self.assertIn("BRIEF-one.md", result.stdout)
+        self.assertIn("BRIEF-two.md", result.stdout)
+
+    def test_a_title_the_config_renders_differently_is_a_mismatch(self) -> None:
+        """The instance in sd:534: compliant in substance, wrong in title.
+
+        A repo can carry a real main document and still have the rendered page
+        and the Notion mirror disagree with its H1. That is the convention
+        failing in the direction nobody looks, so it is a finding of its own
+        rather than folded into the missing case.
+        """
+
+        with tempfile.TemporaryDirectory() as raw:
+            docs = "[{'src': '30-brief/BRIEF-one.md', 'out': 'one', " \
+                   "'title': 'Main document', 'h1': 'START HERE — One'}]"
+            repo = self.make_repo(Path(raw), docs)
+            self.write(repo, "30-brief/BRIEF-one.md", "START HERE — One")
+            result = run("review", cwd=repo)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("`title` renders it as 'Main document'", result.stdout)
+
+    def test_the_passing_line_names_the_half_it_did_not_check(self) -> None:
+        """A bare ok would claim the README and Notion surfaces were read."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw), "[%s]" % self.entry(
+                "30-brief/BRIEF-one.md", "START HERE — One"))
+            self.write(repo, "30-brief/BRIEF-one.md", "START HERE — One")
+            result = run("review", cwd=repo)
+        self.assertIn("ok   main document: 30-brief/BRIEF-one.md", result.stdout)
+        self.assertIn("checklist's half", result.stdout)
+
+    def test_a_repo_with_no_documents_yet_is_not_a_failure(self) -> None:
+        """`init-claude-md` lays the standard into exactly that repo."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw), "[]")
+            result = run("review", cwd=repo)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("FAIL main document", result.stdout)
+        self.assertNotIn("ok   main document", result.stdout)
+
+    def test_the_convention_is_stated_once_and_the_checker_reads_it(self) -> None:
+        """The marker lives in one place; the code carries no second copy.
+
+        sd:534's own argument: restating the rule in code would create a third
+        copy of a convention that already has two.
+        """
+
+        module = load_kit().load("sd_research_review")
+        conventions = (
+            REPO_ROOT / "skills" / "sd-research-repo" / "references"
+            / "conventions.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("`%s`" % module.MAIN_TITLE, conventions)
+        self.assertNotIn("does not currently enforce", conventions)
+
+
 class LocalOverrideTests(unittest.TestCase):
     """The case a one-directional check cannot read: a *replaced* block.
 

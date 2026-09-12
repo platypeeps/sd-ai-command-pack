@@ -51,9 +51,10 @@ USAGE = """usage: sd-research-kit render|checklinks|review|pins|fleet-pins|
                 resolves; exit 1 if anything is broken
   review        the mechanical half of the pre-publication adversarial review:
                 provenance block, Status section separating verified from not,
-                build freshness, and this repo's CLAUDE.md against the pack's
-                template. Then prints the checklist for the half no script can
-                do. Exit 1 if a check fails
+                build freshness, the one `START HERE -- ` main document across
+                the configured H1s and rendered titles, and this repo's
+                CLAUDE.md against the pack's template. Then prints the checklist
+                for the half no script can do. Exit 1 if a check fails
   pins          for every `source` @ `sha` the markdown asserts, say whether
                 upstream has moved past it. The list is read out of the
                 documents each run, never maintained

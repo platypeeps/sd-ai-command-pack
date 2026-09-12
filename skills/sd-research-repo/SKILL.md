@@ -57,7 +57,8 @@ This is repo setup, and it is the only time the template is written.
 sd-research-kit init-claude-md
 ```
 
-It writes `templates/CLAUDE.md` and refuses if a copy is already there. There is
+It writes this repository's own `CLAUDE.md`, copied from the pack's
+`templates/CLAUDE.md`, and refuses if a copy is already there. There is
 deliberately no re-sync verb: a repo legitimately states parts of the template
 differently, and a writer that merged the template back over an existing copy
 would undo that silently. After the first copy the file is managed by

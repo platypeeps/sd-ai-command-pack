@@ -455,6 +455,75 @@ def template_drift(repo):
     return len(findings) + faults
 
 
+#: The marker `references/conventions.md` puts on the one document a reader
+#: enters a research project through, under **Main document — START HERE**.
+#: The rule is stated there and nowhere else; this is the marker itself, not a
+#: second statement of the rule.
+MAIN_TITLE = "START HERE — "
+
+
+def h1(text):
+    """The document's `# ` heading, or None. A fenced `# ` is a comment."""
+    fenced = False
+    for line in text.splitlines():
+        if FENCE_LINE.match(line):
+            fenced = not fenced
+        elif not fenced and line.startswith("# "):
+            return line[2:].strip()
+    return None
+
+
+def main_document(repo, docs):
+    """Exactly one configured document carries the `START HERE — ` title.
+
+    This checks the half of the convention that is inside the checkout: the
+    Markdown H1, and the `title`/`h1` the config renders it under. The README's
+    entry link and the Notion page title are the other half, they are in no
+    file this kit reads, and they stay in the checklist -- which is why the ok
+    line names what it covered instead of reporting a bare pass. A check that
+    printed `ok` after reading two of the four surfaces would manufacture the
+    confidence it exists to earn.
+
+    Scope is the configured documents, not the tree. `90-scratch/` holds
+    superseded drafts that are never cited and never mirrored, so one still
+    carrying an old marker is not a duplicate -- and it is not configured.
+    """
+    if not docs:
+        # A repo that configures no documents has no main document to name, and
+        # `init-claude-md` lays the standard into exactly that repo. Demanding
+        # one before there is anything to title would fail every repo on the
+        # day it is set up, which is the day the standard is meant to arrive.
+        return 0
+    carriers, bad = [], 0
+    for cfg in docs:
+        src = os.path.join(repo, cfg["src"])
+        if not os.path.exists(src):
+            continue
+        with open(src, encoding="utf-8", errors="replace") as handle:
+            title = h1(handle.read())
+        if title is None or not title.startswith(MAIN_TITLE):
+            continue
+        carriers.append(cfg["src"])
+        for key in ("title", "h1"):
+            rendered = str(cfg.get(key, title)).strip()
+            if rendered != title:
+                print(f"  FAIL {cfg['src']}: H1 is {title!r} but `{key}` renders "
+                      f"it as {rendered!r} -- the standard is one title across "
+                      "the H1, `title` and `h1`")
+                bad += 1
+    if not carriers:
+        print("  FAIL main document: no configured document's H1 starts with "
+              f"`{MAIN_TITLE}` -- every project has exactly one")
+        return bad + 1
+    if len(carriers) > 1:
+        print(f"  FAIL main document: {len(carriers)} carry `{MAIN_TITLE}` "
+              f"({', '.join(sorted(carriers))}) -- exactly one may")
+        return bad + 1
+    print(f"  ok   main document: {carriers[0]}, H1 and rendered title. Its "
+          "README link and Notion title are the checklist's half")
+    return bad
+
+
 def check(repo):
     repo = os.path.abspath(repo)
     name = os.path.basename(repo)
@@ -493,7 +562,7 @@ def check(repo):
 
     if not bad:
         print(f"  ok   {len(docs)} document(s): provenance, Status, build freshness")
-    return bad + template_drift(repo) + work_items(repo)
+    return bad + main_document(repo, docs) + template_drift(repo) + work_items(repo)
 
 
 CHECKLIST = """
@@ -520,7 +589,10 @@ The half no script can do — work it before publishing, per document:
     7. Look for the load-bearing thing left implicit — the assumption doing the
        work that the document never states.
     8. Check the Notion mirror matches the source after the update, and that
-       handling restrictions survived the mirror.
+       handling restrictions survived the mirror. Include the main document's
+       other two surfaces, which no check above reaches: the README's entry
+       link and table, and the Notion page title and parent. `review` read its
+       H1 and rendered title and said so; these two nothing read.
 
   The second reader
     9. Run the independent pass through the `codex` CLI, from the repo, with
