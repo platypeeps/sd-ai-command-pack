@@ -373,12 +373,14 @@ class InstallTests(FleetHarness):
         self.assertIn(f"<string>{self.root}</string>", body)
 
     def test_the_installed_service_carries_the_reach_and_a_usable_path(self):
-        """launchd's PATH holds neither `git` nor `tailscale`.
+        """launchd's own PATH holds no `tailscale`.
 
-        Under the default one the fleet reads as zero repositories and the
-        tailnet bind silently does nothing -- both of which look like a quiet
-        dashboard rather than a broken one, which is why this is checked on
-        the parsed plist rather than trusted to a template.
+        Under the default one the tailnet bind silently does nothing, which
+        looks like a quiet dashboard rather than a broken one, and that is why
+        this is checked on the parsed plist rather than trusted to a template.
+        (It does hold `git`, at `/usr/bin/git`: the docstring here used to say
+        otherwise, and the entry that is actually load-bearing is pinned by
+        `test_the_launch_path_puts_both_brew_prefixes_first`.)
 
         The bind is on here and off in a hand-run `serve`: installing is
         asking for the service the system dashboard provided, and R11-D10 says
@@ -389,6 +391,45 @@ class InstallTests(FleetHarness):
         self.assertEqual(env[server.TAILNET_BIND], "1")
         self.assertIn("/opt/homebrew/bin", env["PATH"].split(":"))
         self.assertEqual(env["SD_REPO_ROOT"], str(self.root))
+
+    def test_the_launch_path_puts_both_brew_prefixes_first(self):
+        """The order is what keeps the service off macOS's own `python3`.
+
+        `ProgramArguments[0]` is `bin/sd-dashboard`, launched through
+        `/usr/bin/env python3`, so the PATH this plist declares is what picks
+        the interpreter -- not just what the collector's subprocesses see.
+        macOS ships `/usr/bin/python3` at 3.9 while this pack declares
+        `requires-python = ">=3.13"`, and `dashboard/collect.py` calls
+        `zip(..., strict=True)`, which 3.9 rejects outright. A PATH that
+        reaches `/usr/bin` first therefore yields a job `launchctl list` calls
+        healthy, bound to its port, raising on every page that needs the fleet.
+
+        Both prefixes, because `/opt/homebrew/bin` is Apple Silicon's and
+        `/usr/local/bin` is Intel's: one plist has to be right on either mac,
+        and whichever is absent costs a failed lookup and nothing more. This is
+        a pin, not a seam -- the value is a literal and is identical wherever
+        this suite runs, so what was missing was never injectability but a
+        statement of why the string is shaped the way it is. Until this test,
+        the suite asserted only that `/opt/homebrew/bin` appeared *somewhere*,
+        so dropping the Intel prefix as dead weight and moving both behind the
+        system pair were each a green change.
+        """
+        self.install()
+        plist = plistlib.loads(self.plist.read_bytes())
+        shebang = Path(plist["ProgramArguments"][0]).read_text(
+            encoding="utf-8").splitlines()[0]
+        self.assertEqual(
+            shebang, "#!/usr/bin/env python3",
+            "pin the interpreter in the shebang and this PATH stops choosing it, "
+            "which changes what the ordering below is protecting")
+        entries = plist["EnvironmentVariables"]["PATH"].split(":")
+        for prefix in ("/opt/homebrew/bin", "/usr/local/bin"):
+            self.assertIn(prefix, entries, f"{prefix} is a Homebrew prefix, not clutter")
+            self.assertLess(
+                entries.index(prefix), entries.index("/usr/bin"),
+                f"{prefix} must precede /usr/bin or the service gets python 3.9")
+        for system in ("/usr/bin", "/bin"):
+            self.assertIn(system, entries, f"{system} carries `git` and `ps`")
 
     def test_the_default_port_is_the_one_being_taken_over(self):
         """8768 was the side-by-side port; 8767 is what makes it a swap."""
