@@ -121,4 +121,4 @@ fixed here rather than carried.
 `tests/test_sd_sweep.py`, up from 18: one deleted, eleven added.
 
 The suite-shape rule caught the new class appended below the runner block
-(`tests/test_suite_shape.py:67`); the runner block moved to the end of the file.
+(`tests/test_suite_shape.py:69`); the runner block moved to the end of the file.

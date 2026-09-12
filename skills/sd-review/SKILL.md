@@ -296,6 +296,25 @@ unrelated to the code under test. Both shapes defeat the gate — one by never
 going red, the other by going red for nothing, and the process-group test
 above was both at once.
 
+### A control that asserts only absence is not a control
+
+A refusal test needs a companion showing the refusal is about the condition and
+not about the fixture. Written as `assertNotIn` alone, that companion passes on
+every failure that does not happen to use the refusal's wording — a usage
+error, a missing dependency, a crash before the code under test is reached —
+so the one thing its name claims is the one thing it does not establish. The
+instance was `test_the_same_repository_unforked_reaches_the_reviewer` in
+`tests/test_guest_artifact_refusal.py`: two `assertNotIn`s and no return code.
+A fault injected into `bin/sd-review` that had nothing to do with guest mode
+left it green. **Assert the success positively** — the exit code, and some
+output only the path under test produces — then the absence assertions are
+narrowing a result that is already known to be the right one.
+
+Nothing static catches this. The assertions are real, the operands come from
+the code under test, and only the test's purpose says they are the wrong
+assertions, which is why the sweep in `tests/test_suite_shape.py` did not see
+it and no widening of that sweep would.
+
 ## Never
 
 - Never post, comment, label, or open anything. Disposition is local, full stop.
