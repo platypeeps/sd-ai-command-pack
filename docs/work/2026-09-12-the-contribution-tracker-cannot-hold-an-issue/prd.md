@@ -46,18 +46,32 @@ one is how it ships half-done.** Four things make it a model change:
   *and* a branch. Uniqueness at `sd_db/contributions.py:219-224` keys on those
   same two things. Observation and attention are pull-request-shaped
   throughout. Requirement 9 enumerates this.
-- **Two recited lists, not one.** A contribution field must be named in three
-  places across two repositories, and the three already disagree: the enforced
-  allow-list holds **8** names at `sd_db/contributions.py:30-31`,
-  `bin/sd-status:3248-3250` recites **17**, and `bin/sd_work.py:417-418`
-  recites **10**. Both pack-side lists are `for key in (...)` loops guarded by
-  `.get()`, so a field the library stores and a reader does not name is dropped
-  with no error and no failing test. Adding four fields to the allow-list alone
-  would store all four and display none. That tax is filed separately as
-  **sd:602**, and requirement 7 sequences it.
-- **A five-place enumeration.** The `depends_on` kind is not one list either;
-  `design.md` decision D2 names all five and treats them as the same recited-list
-  defect rather than as five routine edits.
+- **Two recited reader lists, and they already drop a live field.** The write
+  allow-list at `sd_db/contributions.py:30-31` holds **8** names. The two
+  pack-side renderers each recite their own list of projection keys —
+  **17** at `bin/sd-status:3248-3250`, **10** at `bin/sd_work.py:417-418` —
+  and both are `for key in (...)` loops guarded by `.get()`. These are three
+  lists with three different jobs, not one list copied three times, so the
+  counts differing is not itself the defect. **The defect is demonstrable
+  today**: `blocking_labels` is in the allow-list at
+  `sd_db/contributions.py:31`, is projected at `sd_db/contributions.py:599`,
+  and appears in *neither* renderer list. It is silently dropped from both text
+  reports right now, with no error and no failing test. Adding four more fields
+  to the allow-list alone would do the same thing four more times. That tax is
+  filed separately as **sd:602**, and requirement 7 sequences it.
+
+  **Where the drop is not**, because getting this wrong makes the acceptance
+  criterion untestable: the `--json` paths do not touch either list.
+  `bin/sd_work.py:402-404` returns from `_emit_contributions` before reaching
+  its tuple, and `bin/sd-status:3343-3344` dumps the whole result object while
+  the tuple lives in `_render_contributions`, reached only through `render()`
+  at `bin/sd-status:3206`. `tests/test_sd_work_contributions.py:200` already
+  reads a field out of `list --json` and passes. The silent drop is in the
+  **text renderers only**.
+- **A nine-place enumeration.** The `depends_on` kind is not one list either;
+  `design.md` decision D2 names all nine and treats them as the same
+  recited-list defect rather than as nine routine edits. Four of the nine are
+  the ones where a new kind validates and then never resolves.
 - **A vocabulary collision.** "Unfiled" is already taken. In the existing model
   it means *a contribution with no `pull_url` yet* — see the refusal text at
   `sd_db/contributions.py:191-192` and the reason strings at
@@ -101,6 +115,53 @@ blocked behind it, and the landing order is a hard requirement below.
    refresh queue at `sd_db/contribution_sync.py:97`, which queues a row only
    when its URL matches the pull-request pattern, must queue it too.
 
+5. **Attention events for issues — two lists change, not one.** The accepted
+   event *vocabulary* at `sd_db/contributions.py:451-452` is seven kinds today
+   and gains `closed_completed` and `closed_not_planned`. Separately, the
+   *trigger predicates* in `_pull_attention` decide which of those kinds
+   actually raises attention, and for issues they must widen — which is a
+   deliberate behaviour change, not a port:
+   - `sd_db/contributions.py:359` fires on a `comment` only when
+     `event.get("maintainer") is True or event.get("mentions_operator") is True`.
+     A plain non-author comment raises nothing today. On an upstream issue the
+     operator filed, any non-author comment is the signal, so this predicate
+     widens for the issue path.
+   - `sd_db/contributions.py:361-362` fires `label_added` only for a label that
+     is in the row's configured `blocking_labels` *and* currently applied. That
+     rule is kept as-is; "label applied" is not by itself an issue event either.
+   - Closed is one event today. `sd_db/contributions.py:367` sets
+     `reason = "Closed without merge"` for it — see requirement 10.
+   In every case the operator's own comments must not fire: the actor-ID guard
+   at `sd_db/contributions.py:355-356` is reused, not re-implemented.
+6. **`depends_on` kind `issue`**, with a `url` and a resolved predicate
+   (closed as `completed`, or a referencing pull request merged). A new
+   dependency kind is a **nine**-place change; `design.md` D2 enumerates all
+   nine, four of which are places where a new kind validates and then never
+   resolves.
+7. **The two *text* renderers stop reciting field lists, before the new fields
+   are added.** Neither pack text renderer is field-agnostic:
+   `bin/sd-status:3248-3250` recites 17 projection keys and
+   `bin/sd_work.py:417-418` recites 10, each in a `for key in (...)` loop
+   guarded by `.get()`. A projected key absent from a tuple is dropped with no
+   error. The scope is exactly these two tuples: the `--json` paths do not
+   reach them (`bin/sd_work.py:402-404` returns first;
+   `bin/sd-status:3343-3344` dumps the whole result object), so no change to
+   either JSON surface is required or sufficient. `blocking_labels` is the
+   proof the defect is live: allowed at `sd_db/contributions.py:31`, projected
+   at `sd_db/contributions.py:599`, in neither tuple. This is sd:602's subject,
+   it taxes every future field equally, and it is cheaper to fix once than to
+   pay four times here. **sd:602 lands first**; if it does not, this item's
+   field work must carry the field-set assertion of criterion 7 by itself, and
+   say in its own PR that it is paying the tax rather than removing it.
+8. **Landing order is part of the requirement.** The pack's CI pins the
+   library at a commit — `.github/workflows/tests.yml:84` reads
+   `ref: 3c4c723a724c5922fb464042a036ded0408a3d51` — and installs a built copy
+   from it. A pack reader that names a field the pinned library does not carry
+   fails CI in a way no local run reproduces, because every local checkout
+   already has the newer library. The comment at
+   `.github/workflows/tests.yml:74-79` records that exact failure happening
+   once already, for `record_check`.
+
 9. **The row's shape changes, not just its field list.** The row is not a bag
    of optional fields with a pull request in one of them; the pull request is
    the model. Four consequences, each a required change rather than a remark:
@@ -125,14 +186,21 @@ blocked behind it, and the landing order is a hard requirement below.
      a malformed row and raises nothing. `design.md` D9 treats this as a
      precondition.
 
-10. **`merged` is pull-request vocabulary.** `LANES` at
-    `sd_db/contributions.py:32` is
-    `{"newly_unblocked", "awaiting_you", "awaiting_them", "merged"}` and is the
-    sort key of the whole projection at `sd_db/contributions.py:630`. Issues
-    close; they never merge. The lane set must either gain a neutral terminal
-    lane or define explicitly which lane a closed issue occupies — and whatever
-    is chosen, the sort must stay total, because every reader depends on that
-    order.
+10. **`merged` is pull-request vocabulary, and the fallback lane is not a free
+    answer.** `LANES` at `sd_db/contributions.py:32` is
+    `{"newly_unblocked": 0, "awaiting_you": 1, "awaiting_them": 2, "merged": 3}`
+    and is the sort key of the whole projection at
+    `sd_db/contributions.py:630`. Issues close; they never merge. The
+    assignment at `sd_db/contributions.py:580` already sends anything not
+    `merged` to `awaiting_them`, so "a closed issue is `awaiting_them`" is
+    today's behaviour and **is refused as the answer**: at index 2 a terminal,
+    closed issue would sort permanently among live awaiting-them work and ahead
+    of merged pull requests. The requirement is a *terminal* lane for a closed
+    issue that sorts at or after every non-terminal lane, with the sort still
+    total. The reason string travels with it: `sd_db/contributions.py:367`
+    reads `"Closed without merge"`, which is the same pull-request vocabulary
+    in the operator-facing text and is replaced on the issue path. `design.md`
+    D10 records the choice.
 
 11. **A distinct word for an issue that has not been filed.** "Unfiled" already
     means "no `pull_url` yet" in this model, and the rule carrying that meaning
@@ -143,32 +211,6 @@ blocked behind it, and the landing order is a hard requirement below.
     issue nor a draft. Reusing "unfiled" for both is refused: one word for two
     states in the same validator is how the contradiction above became
     invisible in the source issue in the first place.
-5. **Attention events for issues**, classified from the timeline the collector
-   already reads. Non-author comment, `@`-mention, label applied, closed as
-   `completed` and closed as `not_planned` are five distinct events; the
-   operator's own comments must not fire. The accepted event vocabulary at
-   `sd_db/contributions.py:451-452` is seven kinds today and is the list that
-   grows.
-6. **`depends_on` kind `issue`**, with a `url` and a resolved predicate
-   (closed as `completed`, or a referencing pull request merged). A new
-   dependency kind is a five-place change; `design.md` enumerates all five.
-7. **The recited field lists stop being recited, before the new fields are
-   added.** Neither pack reader is field-agnostic: `bin/sd-status:3248-3250`
-   recites 17 names and `bin/sd_work.py:417-418` recites 10, against an
-   enforced 8 in the library. A field absent from a list is dropped silently.
-   This is sd:602's subject, it taxes every future field equally, and it is
-   cheaper to fix once than to pay four times here. **sd:602 lands first**; if
-   it does not, this item's field work must carry the field-set assertion of
-   criterion 7 by itself, and say in its own PR that it is paying the tax
-   rather than removing it.
-8. **Landing order is part of the requirement.** The pack's CI pins the
-   library at a commit — `.github/workflows/tests.yml:84` reads
-   `ref: 3c4c723a724c5922fb464042a036ded0408a3d51` — and installs a built copy
-   from it. A pack reader that names a field the pinned library does not carry
-   fails CI in a way no local run reproduces, because every local checkout
-   already has the newer library. The comment at
-   `.github/workflows/tests.yml:74-79` records that exact failure happening
-   once already, for `record_check`.
 
 ## Acceptance criteria
 
@@ -178,21 +220,37 @@ blocked behind it, and the landing order is a hard requirement below.
       `draft_path`; editing the row to add `issue_url` keeps the same item ID,
       matching the existing filed-a-branch behaviour asserted at
       `tests/test_sd_work_contributions.py:205`.
-- [ ] A non-author comment on an issue produces one attention event; a comment
-      whose actor ID is the operator produces none.
+- [ ] A non-author comment on an issue produces one attention event — including
+      a comment from someone who is neither a maintainer nor `@`-mentioning the
+      operator, which raises nothing on the pull-request path today
+      (`sd_db/contributions.py:359`). A comment whose actor ID is the operator
+      produces none.
 - [ ] An issue closed as `not_planned` and one closed as `completed` produce
       two distinguishable events, not one `closed`.
 - [ ] A contribution that `depends_on` an `issue` moves to the
       `newly_unblocked` lane when that issue resolves, and a dependency cycle
       through an issue is still refused.
 - [ ] Re-collecting an unchanged issue produces no second notification.
-- [ ] A closed issue occupies a lane that is not `merged`, and the projection's
-      sort is still total over the lane set — asserted by a test that sorts a
-      mixed set of pull-request and issue rows, not by inspection.
-- [ ] `bin/sd-status --json` and `sd task contribution list --json` both emit
-      `issue_url`, `target_repo`, `draft_title` and `draft_path` for an issue
-      row. A test asserts the field list, not a sample row, so a future field
-      cannot be dropped silently.
+- [ ] A closed issue occupies a lane that is neither `merged` nor
+      `awaiting_them`, whose index in `LANES` is greater than or equal to every
+      non-terminal lane's, and the projection's sort is still total over the
+      lane set. Asserted by a test that sorts a mixed set of pull-request and
+      issue rows and checks the closed issue lands after every open row, not by
+      inspection. `awaiting_them` is excluded deliberately: it is the existing
+      fallback at `sd_db/contributions.py:580`, so a criterion permitting it
+      would pass with no code change at all.
+- [ ] No operator-facing string on the issue path reads `"Closed without
+      merge"` (`sd_db/contributions.py:367`).
+- [ ] The **default, non-`--json`** output of `bin/sd-status` and of
+      `sd task contribution list` both show `issue_url`, `target_repo`,
+      `draft_title` and `draft_path` for an issue row. The `--json` surfaces are
+      not the check: they bypass both recited tuples
+      (`bin/sd_work.py:402-404`, `bin/sd-status:3343-3344`) and would pass
+      unchanged. The regression test is the tax's own: a row carrying
+      `blocking_labels` — allowed at `sd_db/contributions.py:31` and projected
+      at `sd_db/contributions.py:599`, yet in neither tuple — must appear in
+      both text reports. That test fails on `origin/main` today and is the
+      evidence sd:602 actually landed.
 - [ ] `bin/sd-docs-lint` exits 0 and
       `python3 -m pytest tests/test_doc_citations.py tests/test_loc_caps.py`
       passes. Measured green on this branch at 730d4541 before any change.

@@ -16,11 +16,15 @@ at a system test that executes this pack's `bin/sd-ship`. Its stated fix has
 two halves — `sd_db` becomes a built, tagged package, and the two system tests
 driving `bin/sd-ship` move into the pack.
 
-**Half one has landed, and this pack already consumes it.** The library
-declares a PEP 517 backend of its own: `local-sd-db/pyproject.toml` sets
-`build-backend = "_build"` with `backend-path = ["."]` and no `requires`, so
-the build needs nothing from an index. System PR #237 is `MERGED`, at
-2026-09-11T03:56:34Z. Pack CI installs a built, non-editable copy —
+**Half one is under way, and this pack already consumes the part that exists.**
+The distinction matters, because half one as defined three lines above is a
+*tagged* package and there is no such tag: the library is built but not
+released. sd:392's own body calls the packaging half "under way", and its note
+records that system still does not own `sd_db` as a tagged release. What has
+landed is the build: `local-sd-db/pyproject.toml` sets
+`build-backend = "_build"` with `backend-path = ["."]` and an empty `requires`,
+so the build needs nothing from an index. Pack CI installs a built,
+non-editable copy —
 `.github/workflows/tests.yml:103` runs
 `python3 -m pip install "$HOME/repos/system/local-sd-db"`, and the comment
 directly above it states the rule ("A built copy, never `-e`") and names the
@@ -57,12 +61,15 @@ item, because holding it would leave sd:244 unwatched for the duration.
 
 **A drift worth recording.** sd:392's body says the pack pins
 `system@89dcd866` and that twenty pack test modules import `sd_db`. Measured
-today the pin is `3c4c723a72…`, and `grep -rl sd_db tests/` returns **28**
-modules. The collection-error count in the same item has drifted too: a
-`pytest tests/ --collect-only -q` at 730d4541 reports **21** errors, not 19,
-and all 21 are the single cause `ModuleNotFoundError: No module named 'sd_db'`.
-Those numbers belong to sd:392 and should be corrected there; they are recorded
-here because this design was written against them.
+today the pin is `3c4c723a72…`; the module count is **22** by an actual
+`import`/`from sd_db` statement and **28** by any mention of the string, so the
+right correction depends on which was meant and the import count is the one
+that governs collection. The collection-error count in the same item has
+drifted too: a `pytest tests/ --collect-only -q` at 730d4541 reports **21**
+errors, not 19, and all 21 are the single cause
+`ModuleNotFoundError: No module named 'sd_db'`. Those numbers belong to sd:392,
+and a note carrying all three corrections now exists on that item; they are
+recorded here because this design was written against them.
 
 ## Approach
 
@@ -106,11 +113,11 @@ CLI. Decided 2026-09-12 by this design. Reversed if a row ever legitimately
 needs both — an issue that became a pull request — at which point the answer is
 a `filed_as` transition, not two live URLs.
 
-**D2 — a new dependency kind is a five-place change, and that is the same
+**D2 — a new dependency kind is a nine-place change, and that is the same
 defect as the recited field lists, not a routine cost.** The `depends_on` kind
-is enumerated independently in five places across three modules and two
+is enumerated independently in **nine** places across three modules and two
 repositories, with nothing checking that they agree — exactly the shape sd:602
-names for the field lists. Listing five edits as though they were routine would
+names for the field lists. Listing nine edits as though they were routine would
 be recording the tax and calling it a plan. They are enumerated here so that
 none is missed *and* so that the count is on the record as an argument for
 collapsing them:
@@ -122,9 +129,24 @@ collapsing them:
    `release` at 7;
 5. the remote collector `dependency` at `sd_db/contribution_github.py:295`,
    whose guard at `sd_db/contribution_github.py:365-366` raises
-   `unsupported remote dependency kind` for anything but `merge`.
+   `unsupported remote dependency kind` for anything but `merge` and `release`
+   — `release` is handled just above at `sd_db/contribution_github.py:310`;
+6. the local-versus-remote split in `observe_dependencies` at
+   `sd_db/contributions.py:522`, where `item` is resolved in-process and
+   everything else must arrive as a supplied observation or the row is held at
+   `sd_db/contributions.py:528-529` with `Dependency state is unknown`;
+7. the mirror of that split in the collector, `sd_db/contribution_sync.py:181-182`,
+   which sends every non-`item` dependency to the GitHub collector — so a new
+   kind reaches place 5's guard whether or not place 5 was taught about it;
+8. the cost function `_cost` at `sd_db/contribution_sync.py:74`, whose
+   `DEPENDENCY_REQUESTS.get(dependency["kind"], 0)` prices an unknown kind at
+   **zero** requests, silently under-reserving budget rather than failing;
+9. the release/merge cross-proof at `sd_db/contributions.py:536-537`, which
+   names both kinds by string to check that a satisfied `release` contains the
+   configured merged commit.
 A change that stops after place 1 produces a kind that validates, never
-resolves, and never says why. Decided 2026-09-12; reversed only if the
+resolves, and never says why — and places 6, 7, 8 and 9 are precisely where
+that happens without an error. Decided 2026-09-12; reversed only if the
 dependency machinery is consolidated into one table first, which would be a
 better change and is not this one.
 
@@ -136,16 +158,37 @@ one.** The accepted kinds at `sd_db/contributions.py:451-452` are `comment`,
 genuinely new information: `closed_completed` and `closed_not_planned`, because
 the PRD requires them to be distinguishable and GitHub reports the reason as a
 separate field rather than a separate event. `converted_to_draft` and
-`ready_for_review` simply never occur on an issue. Decided 2026-09-12.
+`ready_for_review` simply never occur on an issue.
 
-**D4 — the pack readers get a field list that is asserted, not just extended.**
-Both readers carry a literal list — `bin/sd-status:3248-3250` and
-`bin/sd_work.py:417-418` — and an unknown field is dropped without a word.
-Extending the two lists fixes today's bug and leaves tomorrow's in place. The
-test added for criterion 7 asserts the *set of field names* a row projects, so
-the next field to be added fails loudly here instead of vanishing. Decided
-2026-09-12; this is the one place this item chooses to do slightly more than
-asked, and the reason is that the failure is silent.
+The kind list is not the only list. The *triggers* in `_pull_attention` decide
+which kinds raise attention, and they are narrower than the vocabulary: a
+`comment` fires only for a maintainer or an `@`-mention
+(`sd_db/contributions.py:359`), and a `label_added` fires only for a configured
+blocking label that is currently applied (`sd_db/contributions.py:361-362`).
+This design deliberately **widens the comment trigger on the issue path only**:
+on an upstream issue the operator filed, any non-author comment is the signal,
+because there is no review machinery to carry it. The label trigger is not
+widened. Recording this is the point — porting `_pull_attention` unchanged
+would satisfy requirement 5's vocabulary and still notify nobody. Decided
+2026-09-12; reversed if any-comment proves too noisy in practice, at which
+point the fallback is the existing maintainer/mention predicate, not silence.
+
+**D4 — the fix and its test both target the *text* renderers, not `--json`.**
+The two literal tuples are `bin/sd-status:3248-3250` and
+`bin/sd_work.py:417-418`, both `for key in (...)` loops guarded by `.get()`, so
+a projected key they do not name is dropped without a word. Neither `--json`
+path reaches them: `bin/sd_work.py:402-404` returns from `_emit_contributions`
+before its tuple, and `bin/sd-status:3343-3344` serialises the whole result
+object while the tuple lives in `_render_contributions`, reached only via
+`render()` at `bin/sd-status:3206`. A criterion written against `--json`
+therefore passes before and after any change and verifies nothing — which is
+why criterion 7 names the default output instead. The live witness is
+`blocking_labels`: allowed at `sd_db/contributions.py:31`, projected at
+`sd_db/contributions.py:599`, named in neither tuple, and missing from both
+text reports today. Extending the two lists fixes today's bug and leaves
+tomorrow's in place, so the test asserts the *set of keys* the text report
+renders. Decided 2026-09-12; this is the one place this item chooses to do
+slightly more than asked, and the reason is that the failure is silent.
 
 **D5 — the new state is called `draft`, not `unfiled`.** "Unfiled" already
 denotes a contribution with no `pull_url`, and the validator carrying that
@@ -163,7 +206,7 @@ field-set assertion itself, and its pull request says plainly that it paid the
 tax rather than removed it. Decided 2026-09-12.
 
 **D7 — this item is not split, and here is the test that would change that.**
-It spans two repositories, five dependency enumerations, three field lists and
+It spans two repositories, nine dependency enumerations, three field lists and
 a data-model widening, which is a legitimate case for splitting. It is kept
 whole because the parts are not independently useful: an `issue_url` that no
 collector observes produces a row that never updates, and an issue observer
@@ -214,6 +257,36 @@ Note for the same reason that a **draft** needs no key change at all: an
 unfiled contribution already lives entirely under `item:<id>`, because
 `sd_db/contributions.py:615-618` appends the second source only when
 `pull_url` is set. Only the *filed* issue reaches `_key`.
+
+**D10 — a closed issue gets a new terminal lane, `closed`, sorted last;
+`awaiting_them` is refused.** The lane assignment at
+`sd_db/contributions.py:580` is
+`lane = "awaiting_you" if needs_you else "merged" if observation.get("state") == "merged" else "awaiting_them"`,
+so `awaiting_them` is already the fallback for everything that is not merged.
+Choosing it would therefore be choosing the current behaviour, and a criterion
+written against it would pass with zero code change — while the defect
+requirement 10 names survives intact: `LANES` at `sd_db/contributions.py:32` is
+`{"newly_unblocked": 0, "awaiting_you": 1, "awaiting_them": 2, "merged": 3}`, so
+a terminal closed issue would sort at index 2, permanently among live
+awaiting-them work and permanently ahead of merged pull requests. Every reader
+inherits that order from the sort at `sd_db/contributions.py:630`.
+
+The decision is therefore a fourth lane: `closed`, at an index at or after
+every non-terminal lane. Adding it — rather than renaming `merged` to something
+neutral — keeps `merged` meaning exactly what it means today for pull requests,
+so no existing row moves and no existing reader's expectations change. The
+operator-facing reason string moves with it: `sd_db/contributions.py:367` reads
+`"Closed without merge"`, which is the same pull-request vocabulary one layer
+down, and the issue path states the close reason instead.
+
+Whether `closed` sorts equal to `merged` or after it is left to implementation;
+what is *not* left open is that it must not sort before a non-terminal lane, and
+that the sort stays total — `LANES` is a total map and the projection sorts on
+it directly, so a lane added to one and not the other is a `KeyError` at read
+time, not a silent misordering. Decided 2026-09-12. Reversed if lanes ever
+become per-contribution-kind rather than one shared vocabulary, at which point
+the terminal lane for an issue is named by its own kind and this decision is
+moot.
 
 ## Risks
 

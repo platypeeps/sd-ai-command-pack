@@ -1,5 +1,5 @@
 ---
-title: Shadowing Jira is a migration question with no demand behind it, not the construction sd:361 describes
+title: Shadowing Jira is a migration question, not the construction sd:361 describes
 created: 2026-09-12
 ---
 
@@ -12,8 +12,9 @@ sd:361 asks for a second tracker module beside the library's GitHub collector,
 configuration with no default host, and an unconfigured Jira reported as a
 not-collected line rather than a failure.
 
-**Every one of those four things already exists in this pack, and all four
-work.** Measured at 730d4541:
+**Every one of those four things is already implemented in this pack.** Each
+is cited to the line below; what no measurement here shows is the Jira branch
+of them carrying live rows, which is fact one. Measured at 730d4541:
 
 - **The iteration.** `TRACKERS` (`dashboard/collect.py:24`) is
   `(github, jira)`. The loop over it begins at `dashboard/collect.py:168`.
@@ -67,12 +68,21 @@ and the email are unset. (Presence was checked, never values.)
 The commit's own numbers are still directly re-checkable, because the legacy
 index was never deleted. Read on 2026-09-12 from
 `~/.cache/sd-ai-command-pack/index.sqlite`, the path
-`dashboard/store.py:78` builds: grouping its `issue` rows by tracker prefix
-still returns `github|1175` and nothing else, and its `tracker_watermark`
-table still holds one row, GitHub's, last moved 2026-09-01T05:23:37Z. So the
-two-tracker loop at `dashboard/collect.py:168` ran against this store, with
-Jira in `TRACKERS` the whole time, and produced zero Jira rows before it
-stopped running. The mechanism is not untested. It is tested and empty.
+`dashboard/store.py:78` builds: grouping its `issue` rows by their `tracker`
+column still returns `github|1175` and nothing else, and its
+`tracker_watermark` table still holds one row, GitHub's, last moved
+2026-09-01T05:23:37Z.
+
+How much running that represents is worth being precise about, because it is
+the weaker half of this argument. `git log -S jira -- dashboard/collect.py`
+returns exactly one commit, `0c6284da` on 2026-08-31, which is when Jira
+entered `TRACKERS`; the legacy watermark last moved 2026-09-01. That is on the
+order of a single collect run with both trackers configured in the loop — not
+weeks of evidence. **The weight sits on the other store**: the `shadow` table
+holds 3,668 rows accumulated over the six days since, and
+`select distinct tracker from shadow` returns `github` alone. The two-tracker
+loop is not untested; it ran, and across six days of collection into the live
+store not one Jira row exists.
 
 The operator's Jira credentials *do* exist on this machine — they are set in
 the `jira` MCP server's own environment block, not exported to the shell — so
