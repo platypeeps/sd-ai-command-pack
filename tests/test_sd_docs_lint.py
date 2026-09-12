@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import unittest
 from types import ModuleType
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -164,6 +165,63 @@ class Rule1ShapeTests(LintFixture):
         self.assert_fails("archive buckets are named YYYY-MM")
 
 
+class Rule1StatusSourceTests(LintFixture):
+    """The sign of rule 1's status check inverts on `docs/work/.status-source`.
+
+    #767 inverted it and tested nothing: a `row` root with a `status:` line
+    left in an active `prd.md` failed the lint, and no test said so, which is
+    how sd:382 found the contract prose and the code disagreeing with nothing
+    to arbitrate. Each case here is one cell of the sign table -- marker or
+    none, active or archived, line or no line.
+    """
+
+    RETIRED_PRD = GOOD_PRD.replace("status: ready\n", "")
+
+    def setUp(self) -> None:
+        super().setUp()
+        # A `row` marker opens the one database through `$HOME`. An empty home
+        # holds none, so the read answers "no database" and asks git, which
+        # has no remote here to fetch from -- the operator's rows are never
+        # consulted and nothing leaves the machine.
+        home = self.repo / "home"
+        home.mkdir()
+        patched = mock.patch.dict(os.environ, {"HOME": str(home)})
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def mark(self, word: str) -> None:
+        (self.work / lint.sd_lib.STATUS_MARKER).write_text(word + "\n", encoding="utf-8")
+
+    def test_green_row_root_with_a_retired_active_prd(self) -> None:
+        self.mark("row")
+        self.write_item("2026-08-29-a-workable-item", self.RETIRED_PRD)
+        self.assert_clean()
+
+    def test_red_row_root_with_a_status_line_in_an_active_prd(self) -> None:
+        self.mark("row")
+        failures = self.assert_fails("the row is the status; prd.md carries no status: line")
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("2026-08-29-a-workable-item/prd.md", failures[0])
+
+    def test_green_row_root_with_a_status_line_only_under_the_archive(self) -> None:
+        self.mark("row")
+        self.write_item("2026-08-29-a-workable-item", self.RETIRED_PRD)
+        self.write_item(
+            "2026-07-04-an-archived-item",
+            GOOD_PRD.replace("created: 2026-08-29", "created: 2026-07-04"),
+            month="2026-07",
+        )
+        self.assert_clean()
+
+    def test_green_unmarked_root_with_a_status_line(self) -> None:
+        self.assertFalse((self.work / lint.sd_lib.STATUS_MARKER).exists())
+        self.assert_clean()
+
+    def test_green_file_root_with_a_status_line(self) -> None:
+        self.mark("file")
+        self.assert_clean()
+
+
 class Rule2ReadyTests(LintFixture):
     def test_green_in_progress_with_a_branch(self) -> None:
         self.write_item(
@@ -224,6 +282,34 @@ class Rule2ReadyTests(LintFixture):
             ),
         )
         self.assert_fails("records the branch it lives on")
+
+
+class Rule2StatusSourceTests(LintFixture):
+    """The run says where rule 2 read its statuses, because the two sources
+    check different item sets and print the same `clean`."""
+
+    def source_note(self) -> str:
+        report = self.run_lint()
+        return next(note for note in report.notes if note.startswith("rule 2 status source:"))
+
+    def test_no_marker_reads_the_line(self) -> None:
+        self.assertIn("the status: line in prd.md", self.source_note())
+
+    def test_an_unreadable_marker_is_not_reported_as_the_line(self) -> None:
+        (self.work / ".status-source").write_text("column\n", encoding="utf-8")
+        note = self.source_note()
+        self.assertIn("nowhere", note)
+        self.assertIn("'column'", note)
+        self.assertNotIn("status: line", note)
+
+    def test_a_row_marker_with_no_database_says_git_and_names_the_gap(self) -> None:
+        (self.work / ".status-source").write_text("row\n", encoding="utf-8")
+        # An empty HOME is a machine with the library and no database: the
+        # CI lint job, and any checkout that never ran `sd-db.sh init`.
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {"HOME": home}):
+            note = self.source_note()
+        self.assertIn("git, not the row", note)
+        self.assertIn("rule 2 does not check it", note)
 
 
 class Rule3DecisionTests(LintFixture):

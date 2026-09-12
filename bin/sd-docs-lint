@@ -4,8 +4,8 @@
 Five rules, no more (adding a sixth is a decision record, not a patch):
 
 1. Shape         -- a work item is a `<YYYY-MM-DD>-<slug>` directory holding a
-                    `prd.md` whose frontmatter carries a title, a known status,
-                    and a creation date that agrees with the directory name.
+                    `prd.md` with a title, a date agreeing with the directory, and
+                    a known `status:` only where `.status-source` is not `row`.
 2. Ready         -- an item that claims to be workable can be worked: it states
                     acceptance criteria, carries no open BLOCKING line, and,
                     when `in_progress`, records the branch it lives on.
@@ -187,6 +187,30 @@ def check_ready(
                 report.fail(f"{prd}:{number}", f"a {status} item has no open BLOCKING line")
         if status == "in_progress" and not fields.get("branch"):
             report.fail(str(prd), "an in_progress item records the branch it lives on")
+
+
+def status_source_note(statuses: sd_lib.Statuses) -> str:
+    """Where rule 2 read each active item's status from, said once per run.
+
+    The fall-through `_from_row` takes when the row cannot be read answers
+    `planning` for any open item whose prd.md records no branch, and rule 2
+    only checks `ready` and `in_progress` items -- so a checkout with no
+    database runs rule 2 over fewer items than the one with the rows does,
+    and prints the same `clean`. CI is such a checkout. The reduced coverage
+    is the designed database-free case; the silence about it was not.
+    """
+    if not statuses.source:
+        return f"nowhere; {statuses.problem}, so every item is unknown"
+    if statuses.source == sd_lib.FROM_FILE:
+        return "the status: line in prd.md"
+    rows = statuses.rows
+    if rows is not None and rows.opened:
+        return "the row"
+    return (
+        "git, not the row this checkout's marker names; an open item with no "
+        "branch: line reads as planning here, so rule 2 does not check it, and "
+        "a shallow clone reads every open item as unknown"
+    )
 
 
 def check_decisions(decisions_root: pathlib.Path, report: Report) -> None:
@@ -525,9 +549,12 @@ def run(
     try:
         check_shape(work_root, report, statuses.source)
         check_ready(work_root, report, statuses)
+        # Read before `close()`, which resets `opened`.
+        source = status_source_note(statuses)
     finally:
         statuses.close()
     report.note(f"rules 1-2 work items: checked {len(item_directories(work_root))} item(s)")
+    report.note(f"rule 2 status source: {source}")
     check_decisions(repo / decisions_dir, report)
     check_spec_index(repo / spec_dir, report)
     check_pr_link(repo, work_root, pr_body, report)

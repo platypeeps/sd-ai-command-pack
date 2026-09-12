@@ -4,7 +4,7 @@ VENV ?= .venv
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
 
-.PHONY: setup test lint audit check
+.PHONY: setup test lint audit docs-lint check
 
 setup:
 	"$(PYTHON)" -m venv "$(VENV)"
@@ -110,7 +110,15 @@ audit:
 		printf '%s\n' "warning: zizmor not found; skipping workflow security audit."; \
 	fi
 
+# WORKFLOW.md said `make check` ran `sd-docs-lint`, and nothing did:
+# `test` lints temporary fixture repositories, `sd-ship` lints at delivery
+# time, and CI ran neither against this checkout's own docs/work. The lint
+# reads `sd_lib` and the working tree only, so it needs no database and no
+# provisioned library. Item 370.
+docs-lint:
+	"$(VENV_PYTHON)" bin/sd-docs-lint
+
 # `full-check` is gone with step 3e: it ran a shipped script that no longer
 # exists, and every lane it wrapped that still has a subject is already a target
-# here. `check` is now exactly the three gates CI runs.
-check: test lint audit
+# here. `check` is exactly the four gates CI runs.
+check: test lint audit docs-lint
