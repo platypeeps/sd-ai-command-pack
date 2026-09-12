@@ -13,9 +13,9 @@ while the directory stood at 4,190 against the 4,300 it replaced.
 
 **`bin/` no longer has one.** R11-D48 retired it on 2026-09-11; the record is
 the comment above `MIGRATE_CAP` below, where the derivation chain used to be.
-Its twenty-one values stay in `CEILING_HISTORY` as a closed record, because
-that history is the evidence the retirement was decided on and deleting it
-would delete the argument along with the number.
+Its values stay in `CEILING_HISTORY` as a closed record, because that history
+is the evidence the retirement was decided on and deleting it would delete the
+argument along with the number.
 
 **Downward-only now attaches to the code cap, not to the dashboard total.**
 R11-D17 said 4,000 could only fall; R11-D24 raised it anyway, and said so in
@@ -31,14 +31,25 @@ code.
 **R11-D41, 2026-09-06: the code cap is payable in kind, and the ceilings
 record their own history.** Two changes, from one reading of what these
 constants have actually done. `CEILING_HISTORY` below holds every value each
-one has held, read from this file's own git log: nine upward moves across the
-three of them, **not one downward move and not one refusal**, `bin/` going
-8,000 to 15,750 in seven days and four of those raises inside three days. That
-is the shape the paragraph below warns about -- 95,000 lines one defensible
-commit at a time -- arriving inside the mechanism built to prevent it, because
-each raise is priced in isolation and nothing ever looks at nine of them
-together. R11-D48 is what that finding eventually produced: the ceiling it was
-written about is the one that has been retired, and the other two kept.
+one has held, read from this file's own git log. R11-D41 read nine moves and
+found **not one downward move and not one refusal**, with `bin/` going 8,000 to
+15,750 in seven days and four of those raises inside three days. That is the
+shape the paragraph below warns about -- 95,000 lines one defensible commit at a
+time -- arriving inside the mechanism built to prevent it, because each raise is
+priced in isolation and nothing ever looks at them together. R11-D48 is what
+that finding eventually produced: the ceiling it was written about is the one
+that has been retired, and the other two kept.
+
+**No count of those moves is written in this file.** The nine above is dated
+and attributed because it is what one decision read on one day; every live
+figure is `ceiling_moves()` below, which counts recorded values and upward and
+downward transitions across every ceiling in `CEILING_HISTORY`, retired ones
+included, and `test_the_recorded_history_is_raises_only` prints all three when
+it fails. The reason is the defect this paragraph kept producing: the header
+said nine, the table said something else, the git log said a third thing and a
+review said a fourth, and each was defensible because each counted a different
+set -- which is precisely what made a stale number indistinguishable from a
+differently-scoped one. A reader who wants the number runs the test.
 
 *The code cap is payable in kind.* R11-D24's downward-only clause is
 superseded. `DASHBOARD_CODE_CAP` may rise when the same change removes or
@@ -57,12 +68,13 @@ now against a figure instead of against a belief.
 
 *Considered and not done: making the totals report rather than gate.* The
 per-raise derivation is expensive -- R11-D38 cost an agent twenty-two minutes
-and serialised four units of work behind it -- and in nine raises it had never
-once returned "no". But a ceiling that only reports is exactly what the
-retired stack had, and the paragraph below says what that produced. The gate
-stays for `dashboard/`. What is new is that the trend is data, so "should this
-still be rising" has somewhere to be asked other than inside the next raise --
-and for `bin/` the answer to that question was eventually no, which is R11-D48.
+and serialised four units of work behind it -- and across every raise R11-D41
+could see, it had never once returned "no". But a ceiling that only reports is
+exactly what the retired stack had, and the paragraph below says what that
+produced. The gate stays for `dashboard/`. What is new is that the trend is
+data, so "should this still be rising" has somewhere to be asked other than
+inside the next raise -- and for `bin/` the answer to that question was
+eventually no, which is R11-D48.
 
 Until now they were prose. The retired stack this repository is replacing
 reached 95,000 lines one defensible commit at a time, and no single one of
@@ -316,6 +328,34 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
 }
 
 
+def ceiling_moves() -> tuple[int, int, int]:
+    """What `CEILING_HISTORY` records, counted rather than remembered.
+
+    Returns `(values, upward, downward)`: recorded values summed across every
+    ceiling in the history, retired ones included, and the transitions between
+    consecutive values of the same ceiling by direction. A first value is not a
+    move, so `upward + downward` is `values` minus one per ceiling.
+
+    This exists because the count had four answers at once -- the header said
+    one number, the table another, the file's git log a third and a review a
+    fourth -- and every one was defensible, because none of them said what it
+    counted. Saying what it counts is this docstring's job; producing the
+    number is the code's. Nothing else in this file restates it, on the same
+    reasoning `bin/sd-status` uses for `CLASSES`: one table, and every reader
+    of it iterates rather than repeats.
+    """
+
+    values = upward = downward = 0
+    for history in CEILING_HISTORY.values():
+        values += len(history)
+        for (_, before), (_, after) in zip(history, history[1:]):
+            if after > before:
+                upward += 1
+            elif after < before:
+                downward += 1
+    return values, upward, downward
+
+
 def tracked(*pathspecs: str, root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:
     """Tracked files matching `pathspecs`, as the index reports them.
 
@@ -531,6 +571,37 @@ class LineCountCaps(unittest.TestCase):
                     f"moves a ceiling appends to its history in the same "
                     f"commit; R11-D41 is why the list is there at all.",
                 )
+
+    def test_the_recorded_history_is_raises_only(self) -> None:
+        """R11-D41's finding, asserted instead of recited.
+
+        The finding was that nothing ever looked at the raises together. This
+        is the looking, and it fails the day a ceiling finally comes down --
+        at which point the paragraph in R11-D41 that reasons from "not one
+        downward move" needs rewriting, which is what a failure here is for.
+
+        The message carries the live figures so the number lives in output
+        rather than in prose that goes stale between readings.
+        """
+
+        values, upward, downward = ceiling_moves()
+        self.assertEqual(
+            downward,
+            0,
+            f"CEILING_HISTORY now records a downward move: {values} recorded "
+            f"values, {upward} up, {downward} down across "
+            f"{len(CEILING_HISTORY)} ceilings. R11-D41 reasons from there "
+            f"being none; update that paragraph rather than this assertion.",
+        )
+        self.assertEqual(
+            upward,
+            values - len(CEILING_HISTORY),
+            f"a ceiling repeats a value: {values} recorded values across "
+            f"{len(CEILING_HISTORY)} ceilings leaves "
+            f"{values - len(CEILING_HISTORY)} moves, but only {upward} of "
+            f"them changed the number. A row that moves nothing is a raise "
+            f"nobody made.",
+        )
 
     def test_the_code_measure_does_not_count_prose_as_code(self) -> None:
         """The measure is the cap, so a measure that drifts is a cap that lies.
