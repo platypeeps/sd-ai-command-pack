@@ -67,10 +67,11 @@ necessarily the top-level `asOf`. Every pending item needs `key`, `sourceId`,
 - Version `1` is the only supported schema version. Reject a newer version
   without interpreting its fields or attempting a delta comparison.
 - A missing state or caller-specific explicit new-state sentinel starts shared
-  first-state behavior. No skill in this pack reads this schema yet; when one
-  does, it names its own sentinel (`baseline=new` for a monitor,
-  `checkpoint=new` for a watchlist) and rejects the other's under its strict
-  unknown-argument boundary. First-state behavior is not a zero-change delta.
+  first-state behavior. `contrib/sd-monitor` uses `baseline=new`;
+  `contrib/sd-watchlist` uses `checkpoint=new`. The names are not
+  interchangeable: each skill's own unknown-argument stop refuses the other's,
+  and that stop is the skill's instruction, checked by no test here. First-state
+  behavior is not a zero-change delta.
 - An unreadable or malformed state cannot support comparison. Report the exact
   validation failure and return a replacement-baseline proposal separately.
 - Classify a readable version-1 state with the deterministic staleness table
