@@ -70,7 +70,15 @@ These run without being asked.
   it, the dashboard sets it in one
   action on a repository you own, and an unattended merge into a branch
   that is not refuses naming the setting.
-- `make check` runs `sd-docs-lint` rules 1 to 4 whenever `docs/work/` exists.
+- `make check` and the pack's `lint` CI job run `sd-docs-lint` against the
+  checkout's own `docs/work/`, `docs/spec/` and `docs/decisions/`.
+  `sd-ship` runs it again at delivery time. A consumer that wants the gate
+  checks the pack out in its own workflow and runs `<pack>/bin/sd-docs-lint`
+  from there; the machine-scope installer puts no `bin/` in a consumer,
+  and nothing runs the lint there otherwise. A runner has no database, so
+  rule 2 reads statuses from git there, with full history, and checks
+  fewer items than the machine with the rows; each run prints which source
+  it read.
 - A commit to the pack, the system repository or the writing repository names
   what needed it: `Needed-by: <item id>` or `Needed-by: cost | efficiency |
   visibility`. `sd-ship` warns when the trailer is missing and ships anyway.

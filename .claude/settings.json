@@ -8,6 +8,7 @@
       "Bash(bin/sd-status:*)",
       "Bash(make audit)",
       "Bash(make check)",
+      "Bash(make docs-lint)",
       "Bash(make lint)",
       "Bash(make setup)",
       "Bash(make test)",
