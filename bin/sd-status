@@ -1801,18 +1801,11 @@ _CONCERN_RE = re.compile(
 #: absorption rests on, validated against a fixture and nothing else, for a
 #: shape no ledger in this repository writes. It stays recorded.
 #:
-#: The live sibling of it, also recorded rather than fixed: absorption ends
-#: only at a `C-<n>` row, so a row followed with no blank line by a bullet
-#: that is *not* one swallows it, and a foreign bullet's words can decide the
-#: row above. 54 of the 532 rows swallow such a bullet, and in 3 the
-#: swallowed text is what decides the verdict. Ending at any bullet instead
-#: is not the fix: measured, it rescues nothing, moves C-7 of the branch-field
-#: item from `parked` to `closed`, and returns C-89 and `archive/2026-07/
-#: 2026-07-30-silence-satisfied-scope-advisory/implement.md`'s C-11 to
-#: unreadable -- which is arguably right for both, since neither states a
-#: disposition of its own and both currently inherit one. That is a change
-#: that *adds* findings on a correctness argument, which is its own item and
-#: its own review, not a rider on a vocabulary change.
+#: The live sibling of it is no longer live and no longer here: a row used to
+#: swallow the ordinary bullet below it, because this pattern is the only
+#: thing that ended absorption and it recognises `C-<n>` rows alone. `_absorb`
+#: now ends at any bullet and carries that measurement, since the boundary it
+#: describes is the one that moved.
 _ROW_START_RE = re.compile(
     r"^\s*(?:\|\s*|[-*]\s*)(?:\*\*)?C-\d+"
     r"|^(?:\*\*)?C-\d+"
@@ -2135,15 +2128,57 @@ _SENTENCE_END_RE = re.compile(r"[.!?][\"')*`_\]]*\s*$")
 
 
 def _absorb(lines: list[str], number: int) -> str:
-    """The row plus its continuation, to the next blank line or next row.
+    """The row plus its continuation, to the next blank line, row or bullet.
 
-    Four lines, and the single largest defect the prototype had: dispositions
+    Five lines, and the single largest defect the prototype had: dispositions
     wrap, and reading the matched line alone left 18 rows unclassifiable inside
     the active items where absorbing takes it to 1.
+
+    **A bullet ends the row even when it carries no `C-` id.** Absorption used
+    to stop only at `_ROW_START_RE`, so a row followed with no blank line by an
+    ordinary bullet swallowed that bullet -- and a verdict is computed over the
+    whole absorbed extent, so the next bullet's words could decide the row
+    above it. Measured on the corpus: 50 of the 526 rows swallow a foreign
+    bullet, and this boundary moves exactly one of them.
+
+    That one is the argument, because the change *adds* a finding and rescues
+    none. C-89 of the solo-first item's `prd.md` writes no word from any of the
+    five vocabularies in its own ten lines -- it records an operator decision,
+    says both issues stay open, and rates itself blocking. It was reported
+    `closed` on the strength of `Recorded, not corrected here` in the bullet
+    below it, which is about criterion 4 naming a `templates/` directory that
+    does not exist. Reading it as unclassifiable is the truer report: an
+    unrecognised format has to inflate this count rather than empty it, and a
+    row credited with a neighbour's outcome is the quiet failure this section
+    is built not to have. The other 49 keep their verdicts and none of them
+    now takes it from text it does not own.
+
+    Rejected, measured: **ending at a numbered item too.** C-107 in the same
+    file wraps `... was cited at line` onto `21. Line 21 is about rendered
+    copies ...`, so its own continuation opens like a list item. Cutting there
+    loses the row's own `Addressed.` -- one more finding, again no rescue, and
+    this one against a row that was already right.
+
+    Measured and *identical*, so not chosen on evidence: **ending only at a
+    bullet at the same or shallower indent** than the row's own. All 50
+    over-run rows are bullets at indent 2 and every bullet they swallow sits
+    at 2 or at 0, so the two rules absorb the same characters on all 526 rows.
+    The narrower one would keep a row's nested child list, which no ledger
+    here writes, at the price of disagreeing with `_ROW_START_RE`, which
+    already reads a `C-` bullet nested deeper as a new row and not as a child.
+    **A blank line then a bullet** is not a boundary at all: absorption ends
+    at the blank before it can reach the bullet.
+
+    Item 485 measured 54 over-runs and 3 verdicts decided by foreign text.
+    Two of the three are already gone and not by this: C-7 of the branch-field
+    item and C-11 of `archive/2026-07/2026-07-30-silence-satisfied-scope-
+    advisory/implement.md` were prose-shaped wraps, and `_continues_a_sentence`
+    stopped reading either as a row. 50 and 1 are what was left to fix.
     """
     parts: list[str] = []
     for text in lines[number - 1:]:
-        if parts and (not text.strip() or _ROW_START_RE.match(text)):
+        if parts and (not text.strip() or _ROW_START_RE.match(text)
+                      or _BULLET_RE.match(text.lstrip())):
             break
         parts.append(text.strip())
     return " ".join(parts)
