@@ -12,6 +12,11 @@ requests no reviewer, posts no comment, and holds `contents: read`, so a pull
 request cannot be made worse by it -- which is the whole reason a repository is
 allowed to opt in at all.
 
+Since sd:435 it writes a second file: the Dependabot `ignore:` guard for the
+pin, into `.github/dependabot.yml`, from the one template in
+`bin/sd_setup_guard.py`. The guard is text the consumer's file gains or has
+replaced; the rest of that file stays the consumer's.
+
 Three refusals, each with a decision behind it:
 
   * `minimal` and `guest` repositories cannot install it (R10-D5), so a shared
@@ -36,6 +41,7 @@ if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
 import sd_lib  # noqa: E402
+import sd_setup_guard  # noqa: E402
 
 EXIT_OK = 0
 EXIT_USAGE = 2
@@ -223,7 +229,11 @@ def setup_github(
     pin = None if root == pack else resolve_pin(pack, args.pin)
     target = root / WORKFLOW_RELATIVE_PATH
     text = workflow_text(action_reference(pin))
-    existing = target.read_text(encoding="utf-8") if target.is_file() else None
+    existing = _read(target)
+    dependabot = root / sd_setup_guard.DEPENDABOT_RELATIVE_PATH
+    current = _read(dependabot)
+    found = sd_setup_guard.guard_state(current)
+    guard_text = sd_setup_guard.rendered(current)
 
     result: dict[str, Any] = {
         "repo": str(root),
@@ -233,6 +243,8 @@ def setup_github(
         "workflow": str(WORKFLOW_RELATIVE_PATH),
         "action": action_reference(pin),
         "pin": pin,
+        "dependabot": str(sd_setup_guard.DEPENDABOT_RELATIVE_PATH),
+        "guard": found,
         "legacy_found": legacy,
         "legacy_removed": [],
         "dry_run": bool(args.dry_run),
@@ -244,20 +256,57 @@ def setup_github(
             f"{WORKFLOW_RELATIVE_PATH} exists and differs from what this build writes; "
             "rerun with --force to replace it"
         )
-    if existing == text:
+    if found == "differs" and not args.force:
+        raise Refusal(
+            f"{sd_setup_guard.DEPENDABOT_RELATIVE_PATH} carries a guard for "
+            f"{sd_setup_guard.DEPENDENCY} that differs from what this build writes; rerun "
+            "with --force to replace it"
+        )
+    if existing == text and found == "same":
         result["status"] = "unchanged"
 
     if args.dry_run:
         result["status"] = "dry_run"
         result["would_write"] = text
+        result["would_write_dependabot"] = guard_text
         return result
 
     for rel in legacy:
         (root / rel).unlink()
         result["legacy_removed"].append(rel)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text, encoding="utf-8")
+    # The one write site in the lane; `tests/test_sd_review_boundary.py` counts it.
+    for path, content, before in ((target, text, existing), (dependabot, guard_text, current)):
+        if content != before:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
     return result
+
+
+def _read(path: pathlib.Path) -> str | None:
+    return path.read_text(encoding="utf-8") if path.is_file() else None
+
+
+def check_files(root: pathlib.Path, args: argparse.Namespace, stream: TextIO) -> int:
+    """`--check`: both files this build would write, against the tracked ones.
+
+    The pin is the repository's own, read from its tracked workflow, so the
+    comparison is "does the template still match", not "is the pin current" --
+    a stale pin is a decision for `--pin ... --force`, not a drift finding.
+    Writes nothing, and asks nothing of the mode or the policy: reading is
+    allowed everywhere.
+    """
+
+    tracked = _read(root / WORKFLOW_RELATIVE_PATH) or ""
+    pin = None if root == pack_root() else args.pin or sd_setup_guard.read_pin(tracked)
+    if pin is None and root != pack_root():
+        raise Refusal(f"{WORKFLOW_RELATIVE_PATH} names no pin to render at; pass --pin <sha>")
+    expected = {
+        WORKFLOW_RELATIVE_PATH: workflow_text(action_reference(pin)),
+        sd_setup_guard.DEPENDABOT_RELATIVE_PATH: sd_setup_guard.rendered(
+            _read(root / sd_setup_guard.DEPENDABOT_RELATIVE_PATH)
+        ),
+    }
+    return sd_setup_guard.report_drift(root, expected, stream)
 
 
 def render(result: Mapping[str, Any], stream: TextIO) -> None:
@@ -269,6 +318,7 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write(f"  authors     {authors}\n")
     write(f"  workflow    {result['workflow']}\n")
     write(f"  action      {result['action']}\n")
+    write(f"  dependabot  {result['dependabot']} (guard {result['guard']})\n")
     if result["legacy_found"]:
         state = "removed" if result["legacy_removed"] else "still present"
         write(f"  legacy      {', '.join(result['legacy_found'])} ({state})\n")
@@ -286,7 +336,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dry-run", action="store_true", help="print what would be written, write nothing")
     parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
-    parser.add_argument("--force", action="store_true", help="replace an existing workflow that differs")
+    parser.add_argument("--force", action="store_true", help="replace an existing workflow or guard that differs")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="diff both files against what this build writes; exit 1 on DIFFERS, write nothing",
+    )
     parser.add_argument(
         "--remove-legacy",
         action="store_true",
@@ -311,11 +366,13 @@ def main(
         root = sd_lib.repo_root(None)
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
+        if args.check:
+            return check_files(root, args, sys.stdout)
         result = setup_github(root, args, load_policy=load_policy)
     except (UsageError, sd_lib.ConfigError, OSError) as error:
         print(f"sd-review setup-github: error: {error}", file=sys.stderr)
         return EXIT_USAGE
-    except Refusal as error:
+    except (Refusal, sd_setup_guard.GuardError) as error:
         print(f"sd-review setup-github: refused: {error}", file=sys.stderr)
         return EXIT_REFUSED
 
