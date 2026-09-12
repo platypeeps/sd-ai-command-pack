@@ -80,9 +80,11 @@ Exit codes: `0` wrote or showed · `1` refused, with the reason on one line ·
 `sd-handoff-restore` runs on SessionStart matchers `startup|clear` **only** —
 never `compact` (a compact matcher would eat the packet into the dying session,
 so the following `/clear` finds nothing) and never `resume` (old context, no
-use for it). It exits silently when `SD_HANDOFF_RESTORE=0` is set — which
-`cron-jobs.sh` exports for every unattended `-p` job, so a packet is not eaten at
-3 a.m. — or when no unconsumed, unexpired packet exists. Otherwise it emits the
+use for it). It exits silently when `SD_HANDOFF_RESTORE=0` is set — the hook
+reads the variable and nothing sets it for you, so any unattended `-p` job
+must put it in its own environment or a packet is eaten at 3 a.m.; system's
+`local-cron-jobs` does for its prompt jobs — or when no unconsumed, unexpired
+packet exists. Otherwise it emits the
 packet as `additionalContext` stamped with its age, and marks it consumed by
 atomic rename, so two sessions racing in one directory cannot both claim it.
 
