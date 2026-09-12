@@ -519,6 +519,9 @@ class ClaimFailureTests(RestoreFixture):
         self.assertIn("was not restored", reason)
         # The packet is still here: nothing was consumed, so nothing is lost.
         self.assertTrue(self.path.is_file())
+        # And the reader is not sent to `--show` as a way around it. The
+        # next test proves that sentence rather than trusting it.
+        self.assertIn("this same rename", reason)
 
     def test_the_stated_reason_reaches_the_section_the_hook_emits(self) -> None:
         """Not stopping at `claim`: the caller has to hand it on."""
@@ -552,6 +555,23 @@ class ClaimFailureTests(RestoreFixture):
         self.assertIn("was not restored", context)
         self.assertIn("could not be renamed", context)
         self.assertNotIn("still pending after the refusal", context)
+        # The refusal tells the reader that `sd-handoff --show` refuses for
+        # the same reason rather than handing them the packet. That is a
+        # claim about another tool, so it is checked against that tool: the
+        # first draft said `--show` "reads it meanwhile", which was wrong in
+        # exactly the situation the line is printed in, because `--show`
+        # claims by the same rename into the same unwritable directory.
+        shown = subprocess.run(
+            [str(HANDOFF), "--show"],
+            cwd=str(self.repo),
+            env=self.env(self.repo),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(shown.returncode, 0, shown.stdout)
+        self.assertNotIn("still pending after the refusal", shown.stdout)
         os.chmod(self.handoff, stat.S_IMODE(mode))
         self.assertIsNone(self.packet()["consumed"])
 

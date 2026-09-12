@@ -19,8 +19,16 @@ stamp earns its keep.
 This hook gates nothing and blocks nothing. It is fast and silent when there
 is nothing to do -- `SD_HANDOFF_RESTORE=0` in the environment (headless
 `claude -p` cron jobs export it so a 3 a.m. run cannot eat a packet), no
-packet, a consumed packet, an expired packet -- and any internal error exits 0
-silently rather than break session startup.
+packet, a consumed packet, an expired packet -- and it exits 0 whatever
+happens, rather than break session startup.
+
+Exiting 0 and saying nothing were one sentence here, and they are not one
+thing. What is silent is a failure the hook has no words for: `main()` catches
+everything left and returns 0, because a traceback on the stream a
+SessionStart hook is read from is worse than a lost packet. A failure it *can*
+name is named -- the identity refusals below, and a claim that failed for
+something other than a lost race. Those exit 0 as well. They just do it out
+loud, into the context the session was going to be handed anyway.
 
 Identity is hashed on path and verified on content. Before injecting:
 
@@ -383,8 +391,10 @@ def claim(path: Path, packet: dict) -> str | None:
         return (
             "A handoff packet exists for this directory but was not restored: "
             f"claiming it failed, because {path} could not be renamed "
-            f"({error.strerror or error}). Fix that and the next session in "
-            "this directory gets it; `sd-handoff --show` reads it meanwhile."
+            f"({error.strerror or error}). The packet is still pending, so "
+            "fixing the cause is enough. `sd-handoff --show` is not a way "
+            "around it meanwhile: it claims by this same rename, and refuses "
+            "with the same reason until the cause is fixed."
         )
     # One reading of the clock for one restore: the log and the packet carry
     # the same `consumed`, and the logged age is derived from it.
