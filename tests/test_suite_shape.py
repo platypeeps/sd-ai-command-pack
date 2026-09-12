@@ -378,10 +378,13 @@ class EnumerationTests(unittest.TestCase):
 # comparison. `comparands` and `_operands` below take the arity and the
 # message position from each method's own signature instead, and `_is_literal`
 # folds through the operators. Re-measured that way the corpus still carries
-# none: 5,247 comparing-assertion calls, every one of them readable, nothing
-# found. `test_the_assertion_scan_reaches_the_real_suite` asserts those first
-# two numbers stay large, because a reader that answered "unreadable" to
-# everything would report the same clean zero having examined nothing.
+# none, and every comparing assertion in it was readable -- no count is quoted
+# here because it moves with every test anyone adds, and a recited number that
+# nobody re-derives is the defect two doors down. It is enforced rather than
+# recited: `test_the_assertion_scan_reaches_the_real_suite` counts what the
+# reader actually read and fails if that collapses, because a reader answering
+# "unreadable" to everything would report the same clean zero having examined
+# nothing at all.
 
 #: Every assertion `unittest.TestCase` defines, read off the class instead of
 #: listed. A list would drift from the standard library, and it would also have
