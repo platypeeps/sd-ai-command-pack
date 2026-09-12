@@ -131,6 +131,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Not shallow: the docs lint's rule 2 asks git whether each open item
+          # was delivered, and `delivered()` answers `unknown` for a shallow
+          # clone, which rule 2 does not check. Full history is what makes the
+          # reduced git coverage the comment below describes actually happen.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python

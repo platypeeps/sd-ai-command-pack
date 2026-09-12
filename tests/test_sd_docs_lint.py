@@ -238,6 +238,13 @@ class Rule2StatusSourceTests(LintFixture):
     def test_no_marker_reads_the_line(self) -> None:
         self.assertIn("the status: line in prd.md", self.source_note())
 
+    def test_an_unreadable_marker_is_not_reported_as_the_line(self) -> None:
+        (self.work / ".status-source").write_text("column\n", encoding="utf-8")
+        note = self.source_note()
+        self.assertIn("nowhere", note)
+        self.assertIn("'column'", note)
+        self.assertNotIn("status: line", note)
+
     def test_a_row_marker_with_no_database_says_git_and_names_the_gap(self) -> None:
         (self.work / ".status-source").write_text("row\n", encoding="utf-8")
         # An empty HOME is a machine with the library and no database: the

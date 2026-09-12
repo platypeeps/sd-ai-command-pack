@@ -199,14 +199,17 @@ def status_source_note(statuses: sd_lib.Statuses) -> str:
     and prints the same `clean`. CI is such a checkout. The reduced coverage
     is the designed database-free case; the silence about it was not.
     """
-    if statuses.source != sd_lib.FROM_ROW:
+    if not statuses.source:
+        return f"nowhere; {statuses.problem}, so every item is unknown"
+    if statuses.source == sd_lib.FROM_FILE:
         return "the status: line in prd.md"
     rows = statuses.rows
     if rows is not None and rows.opened:
         return "the row"
     return (
         "git, not the row this checkout's marker names; an open item with no "
-        "branch: line reads as planning here, so rule 2 does not check it"
+        "branch: line reads as planning here, so rule 2 does not check it, and "
+        "a shallow clone reads every open item as unknown"
     )
 
 
