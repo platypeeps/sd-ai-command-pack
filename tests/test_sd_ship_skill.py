@@ -2,7 +2,7 @@
 
 `tests/test_sd_ship.py` exercises the actual CLI with real Git and a local
 GitHub protocol server. These checks retain the prose guards for the manual
-eight-step sequence, which also supports changes without a database item.
+nine-step sequence, which also supports changes without a database item.
 
 **Absence carries the weight.** A test that greps for a sentence passes
 forever and catches nothing -- it breaks on a rewrite that preserves the
@@ -39,7 +39,7 @@ The later classes read the same file for the row the merge writes: criterion
 mechanical form that survives a rewrite, and those carry the weight. A row written by hand rather than through `sd_db` is a pattern, not a
 sentence. A reconciliation that calls a merge is a `gh pr merge` span in a
 section that must hold none, checked with the same command parser that finds
-the real merge in step 6. A cancel that opens a pull request is a `gh pr
+the real merge in step 7. A cancel that opens a pull request is a `gh pr
 create` where there must be none. The wordier assertions beside them -- that
 `shipped_at` does not move on a second merge, that a slice merge writes no
 status -- are anchored on the field and the status name rather than on the
@@ -128,9 +128,9 @@ def steps() -> dict[int, str]:
 
     A step owns the indented lines under it and stops at the next number or
     at the first unindented paragraph. That boundary is the point: the
-    paragraph excluding `sd-spec` from the sequence sits after step 8 and
+    paragraph excluding `sd-spec` from the sequence sits after step 9 and
     must not be read as part of it, or criterion 2's `sd-spec` check would
-    pass on a file that ran `sd-spec` in step 8.
+    pass on a file that ran `sd-spec` in step 9.
     """
 
     found: dict[int, str] = {}
@@ -311,8 +311,8 @@ class TheSequenceParses(unittest.TestCase):
     """The controls. Every check below reads one of these three things, and
     a parser returning nothing would make all of them pass over any file."""
 
-    def test_the_sequence_has_eight_numbered_steps(self) -> None:
-        self.assertEqual(sorted(steps()), list(range(1, 9)))
+    def test_the_sequence_has_nine_numbered_steps(self) -> None:
+        self.assertEqual(sorted(steps()), list(range(1, 10)))
 
     def test_every_step_has_a_body(self) -> None:
         for number, body in steps().items():
@@ -384,7 +384,7 @@ class AChangeWithNoWorkItem(unittest.TestCase):
     def test_the_last_step_leaves_the_remote_branch_to_the_repository(self) -> None:
         """Anchored on the setting's name, which is what does the removing."""
 
-        self.assertIn("delete_branch_on_merge", steps()[8])
+        self.assertIn("delete_branch_on_merge", steps()[9])
 
     def test_the_settle_step_issues_no_polling_loop(self) -> None:
         """Every backticked span, not only the command-shaped ones.
@@ -466,12 +466,48 @@ class TheNeededByTrailer(unittest.TestCase):
         )
 
 
+class ABranchAnotherPullRequestIsBasedOn(unittest.TestCase):
+    """Step 6: the lane asks whether this branch is some open PR's base.
+
+    Anchored on the query and on two absences, not on the paragraph. The
+    query is `gh pr list` carrying `--base`, which is the whole of the
+    question; a step that asked for open pull requests without scoping them
+    to this branch would be asking a different one. The absences are that
+    the step prescribes no merge -- it precedes the merge and must not
+    duplicate it -- and that it refuses rather than warns, because a warning
+    here is indistinguishable from no check at all.
+    """
+
+    def setUp(self) -> None:
+        self.step = steps()[6]
+
+    def test_the_step_asks_github_for_pull_requests_based_on_this_branch(self) -> None:
+        asks = [
+            c for c in commands(self.step)
+            if c.startswith("gh pr list") and "--base" in shlex.split(c)
+        ]
+        self.assertEqual(
+            len(asks), 1, f"step 6 issues {len(asks)} base queries, not one"
+        )
+
+    def test_the_step_prescribes_no_merge(self) -> None:
+        merges = [c for c in commands(self.step) if c.startswith("gh pr merge")]
+        self.assertEqual(merges, [], "step 6 merges; the merge is step 7's")
+
+    def test_a_non_empty_answer_stops_the_run(self) -> None:
+        lowered = self.step.lower()
+        self.assertTrue(
+            any(word in lowered for word in REFUSAL) or "ends the run" in lowered,
+            "step 6 never says a non-empty answer stops the run",
+        )
+
+
 class TheReviewedHead(unittest.TestCase):
     """Criterion 32: only a cleared reviewed head, or its verified fix, ships."""
 
     def merge_command(self) -> str:
-        found = [c for c in commands(steps()[6]) if c.startswith("gh pr merge")]
-        self.assertEqual(len(found), 1, f"step 6 prescribes {len(found)} merges")
+        found = [c for c in commands(steps()[7]) if c.startswith("gh pr merge")]
+        self.assertEqual(len(found), 1, f"step 7 prescribes {len(found)} merges")
         return found[0]
 
     def test_a_fix_gets_one_further_pass_over_its_own_diff(self) -> None:
@@ -595,15 +631,15 @@ class TheRowTheMergeWrites(unittest.TestCase):
     """Item B's clauses 7.21 and 15.25, as `sd-ship` states them.
 
     The row is written after the remote has confirmed the merge, through the
-    library and through nothing else, once. Everything here reads step 7,
+    library and through nothing else, once. Everything here reads step 8,
     which is where the closure already lived.
     """
 
     def setUp(self) -> None:
-        self.step = steps()[7]
+        self.step = steps()[8]
 
     def test_the_step_still_owns_the_closure(self) -> None:
-        """The control. A step 7 that stopped naming the trailers would make
+        """The control. A step 8 that stopped naming the trailers would make
         every check below vacuous rather than failing."""
 
         self.assertIn("Delivers:", self.step)
@@ -613,7 +649,7 @@ class TheRowTheMergeWrites(unittest.TestCase):
         self,
     ) -> None:
         for token in ("sd work deliver", "sd_db.progress.deliver_work", "current remote"):
-            self.assertIn(token, self.step, f"step 7 never names {token}")
+            self.assertIn(token, self.step, f"step 8 never names {token}")
 
     def test_the_row_waits_for_the_remote_to_confirm_the_merge(self) -> None:
         """A row written before the remote answered is a row that can outlive
@@ -622,7 +658,7 @@ class TheRowTheMergeWrites(unittest.TestCase):
 
         self.assertTrue(
             sentences_with(self.step, "row", "confirmed", "not before"),
-            "step 7 does not condition the row on a confirmed merge",
+            "step 8 does not condition the row on a confirmed merge",
         )
 
     def test_the_status_write_is_one_transition_and_one_note(self) -> None:
@@ -639,7 +675,7 @@ class TheRowTheMergeWrites(unittest.TestCase):
 
         carried = sentences_with(self.step, "second", "`done`", "no further note")
         self.assertTrue(
-            carried, "step 7 does not say what a second delivering merge does"
+            carried, "step 8 does not say what a second delivering merge does"
         )
         self.assertTrue(
             any("where it was" in line for line in carried),
@@ -666,7 +702,7 @@ class TheRowTheMergeWrites(unittest.TestCase):
 
         self.assertTrue(
             sentences_with(self.step, "no database", "no-op"),
-            "step 7 does not say what happens without a database",
+            "step 8 does not say what happens without a database",
         )
         self.assertTrue(
             sentences_with(self.step, "refuses no merge"),
@@ -695,7 +731,7 @@ class TheCancelPath(unittest.TestCase):
     """Cancellation completes in the database without requiring another merge."""
 
     def setUp(self) -> None:
-        self.step = steps()[7]
+        self.step = steps()[8]
 
     def test_the_cancel_writes_done_with_a_cancelled_note(self) -> None:
         self.assertTrue(
@@ -762,8 +798,8 @@ class AKilledRunIsReconciledByTheNext(unittest.TestCase):
         worth nothing unless this parser finds a merge where there is one."""
 
         self.assertTrue(
-            any(c.startswith("gh pr merge") for c in commands(steps()[6])),
-            "the parser finds no merge in step 6, so finding none elsewhere "
+            any(c.startswith("gh pr merge") for c in commands(steps()[7])),
+            "the parser finds no merge in step 7, so finding none elsewhere "
             "says nothing",
         )
 

@@ -89,13 +89,22 @@ A change with no work item needs no PRD or database row to ship.
    a loop that re-asks every few seconds. The merge waits for CI and nothing
    else, so one wait is one answer — a red one ends the run rather than
    starting a second wait, and a fix to it re-enters at step 1.
-6. **Merge**: `gh pr merge --squash --match-head-commit <the reviewed sha>
+6. **Refuse to merge a branch another open pull request is based on.** Ask
+   before the merge: `gh pr list --base <this branch> --state open`. A
+   non-empty answer ends the run here. GitHub does retarget those pull
+   requests onto this one's base, but this lane squashes, so what they
+   inherited from this branch is not the commit that landed; each retargeted
+   diff re-proposes this branch's changes as its own and conflicts with the
+   squash. Nobody reviewed that diff. Retarget each one yourself with
+   `gh pr edit <N> --base <this branch's base>`, let its checks settle, then
+   ask here again. The wait in step 5 stands: this branch's head did not move.
+7. **Merge**: `gh pr merge --squash --match-head-commit <the reviewed sha>
    -t "<title> (#N)" -b "<body>"`. The explicit `-t`/`-b` is the wip-eraser:
    `wip:` subjects must never reach main.
    GitHub CLI's --match-head-commit option refuses a head that moved after review.
    A merge with only a title and body cannot check that condition.
    Never use GitHub CLI's --delete-branch option: it deletes both local and remote branches.
-7. **Close the item on the default branch.** The closure is a trailer on that
+8. **Close the item on the default branch.** The closure is a trailer on that
    merge, never a commit or a pull request of its own. Every merge `sd-ship`
    makes for an associated item carries `Item: <item>`, which ties the commit to the item and closes
    nothing; the one merge that delivers carries `Delivers: <item>` as well —
@@ -133,7 +142,7 @@ A change with no work item needs no PRD or database row to ship.
    checkout has no database this paragraph is a no-op and the trailer on the
    merge is the whole of the record; `sd-ship` refuses no merge for want of
    a row.
-8. **`git fetch -p`, then report the local.** The remote branch is the
+9. **`git fetch -p`, then report the local.** The remote branch is the
    repository's to remove: `delete_branch_on_merge` is on here, so the branch
    is already gone and this step deletes nothing. Fetching prunes its tracking
    ref, which is what makes the report accurate; pruning other dead tracking
@@ -198,7 +207,7 @@ merge behind it being a branch and not a half-finished delivery.
 The pack provides `bin/sd-ship`. Each invocation uses the Git
 repository enclosing cwd. The matching `sd_db` library and an associated item
 with a registered repository are required by this mechanical interface. The
-manual eight-step sequence above also supports a change with no database item.
+manual nine-step sequence above also supports a change with no database item.
 `--database PATH` binds receipts and reviewer provider state to an explicitly
 provisioned runner database; otherwise both use the operator HOME. The runner
 invokes the adapter with its own provisioned Python interpreter.
