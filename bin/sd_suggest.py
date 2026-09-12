@@ -1,8 +1,8 @@
 """`sd suggest` — a framework suggestion is a row first and an issue only on request.
 
-`skills/sd-suggest/SKILL.md` describes filing to a tracker the moment friction
-costs a turn, and `:50` says in as many words that there is no `bin/sd-suggest`
-yet. What existed was a skill telling a model to call an API, which is the
+The skill this backs once told a model to file to a tracker the moment friction
+cost a turn, while its own tooling section pointed at a standalone command that
+was never built. A skill telling a model to call an API is the
 shape that files duplicates: nothing local records that a suggestion was made,
 so the only memory of it is the tracker, and reaching the tracker is exactly
 the step that fails on a fork, in `guest` mode, or with no credential.
