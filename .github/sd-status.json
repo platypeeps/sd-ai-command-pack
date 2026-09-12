@@ -2,15 +2,13 @@
   "$schema": "./sd-status.schema.json",
   "accepted_gaps": [
     {
-      "id": "reviews",
+      "id": "unprotected",
       "state": {
-        "required_pull_request_reviews": true,
-        "required_approving_review_count": 0,
-        "enforce_admins": true
+        "branch_protection": false
       },
-      "because": "one maintainer, enforce_admins on; GitHub forbids self-approval, so requiring 1 approval locks the repository, and deleting the review object loses the pull-request requirement. The required status checks still block a red pull request, which is what makes 0 approvals survivable here",
-      "since": "2026-09-01",
-      "until": "a second account with merge rights on this repository exists, or enforce_admins is turned off"
+      "because": "Sole operator on this repository (Sven, 2026-09-11: 'do not protect main. i am the only operator on these repos, and the goal of the framework i use is to ensure proper discipline'). Protection was deleted on 2026-09-12 with that instruction restated. What it was costing: `strict` made every merge leave every other open pull request BEHIND, so each landing charged the next one a fresh ~15-minute `unittest` re-run against a base that had moved for no reason the diff cared about, and a queue of six could not be landed in a day. What it was buying was already unbuyable here -- a review requirement on the one account that merges means self-approval, which GitHub forbids, and `enforce_admins` gated nobody but the sole admin. What is genuinely lost is the server-side backstop on a red merge, and the replacement is named rather than assumed: the merge lane reads every check on a pull request and refuses to merge unless each one concluded success, and refuses outright when a pull request reports no checks at all.",
+      "since": "2026-09-12",
+      "until": "a second account with push or merge rights on this repository exists"
     }
   ]
 }
