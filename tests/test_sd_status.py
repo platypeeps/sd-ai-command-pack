@@ -2484,6 +2484,147 @@ class ConcernLedgerTests(InventoryFixture):
         )
         self.assertEqual([], found.get("unreadable-concern-row", []))
 
+    def test_restated_closes_a_row_and_an_open_token_still_beats_it(self) -> None:
+        """`Restated` is the seventh closing word, and the tier order holds.
+
+        Measured whole-corpus: it rescues 3 of the 33 rows nothing could read
+        and reclassifies none, taking the floor to 30 of 532. Two of the three
+        are the real thing -- C-163 in the solo-first item ends `Restated as
+        the work.` and C-172 ends `Restated as a bare-token shape`, and in
+        both the sentence carrying the word is the disposition.
+
+        The second row here is the half that is easy to lose: closing words
+        are read after the open ones, so a row that restates *and* defers is
+        still open. Under-reporting an open concern is the worst failure this
+        feature can have, and a new closing word is exactly how it would
+        happen.
+        """
+        self.ledger("2026-08-01-seventh/prd.md", (
+            "# seventh\n\n"
+            "- C-1, minor: the requirement read as a description of the file "
+            "rather than as work. Restated as the work.\n"
+            "- C-2, blocking: the criterion could not pass as written. "
+            "Restated as a bare-token shape, but the vendor clause is "
+            "deferred to a later pull request.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-01-seventh/prd.md#C-2"],
+            found.get("unresolved-concern"),
+        )
+        self.assertEqual([], found.get("unreadable-concern-row", []))
+
+    def test_supersedes_closes_the_row_superseded_missed_by_one(self) -> None:
+        """`supersedes` is the inflection `superseded` does not cover.
+
+        One row in the corpus, C-175 in the solo-first item, opens
+        `supersedes C-173's split`. 1 rescue, 0 reclassifications. Carried as
+        a literal rather than by stemming, which would fold `noted` into
+        `note`/`notes`/`noting` to win it.
+        """
+        self.ledger("2026-08-01-inflected/prd.md", (
+            "# inflected\n\n"
+            "- C-1, blocking, supersedes C-2's split: the clause is PR 6's "
+            "whole, not two files of eight.\n"
+        ))
+        self.assertEqual([], self.scan())
+
+    def test_a_bold_header_disposes_the_row_its_own_prose_cannot(self) -> None:
+        """A row's bold header is the row saying what it is, and it is read
+        before the tiers see the prose after it.
+
+        The prose after the header is *about the defect*, so it carries the
+        subject's vocabulary -- a rule that defers, an unresolved path -- and
+        under tier order alone any of those outranks an `addressed` written
+        four words in. Measured: reading the header first moves 5 rows, every
+        one `open` to `closed`, rescues none and loses none. Four are
+        `**C-N -- <finding>. `addressed`.**` in the write-the-test-first item
+        and the fifth is `**C-18 addressed**` in the consolidate-git item.
+        Five of the fourteen rows this feature called open were this misread.
+
+        The second row is the half that must not move: with no bold header
+        there is nothing to read first, so the tiers decide as before and a
+        row whose prose defers is still open. That is what keeps this rule
+        off C-182, which says `accepted` before it says `Closed by
+        normalizing at the write` and which earliest-match-wins would break.
+        """
+        self.ledger("2026-08-02-header/prd.md", (
+            "# header\n\n"
+            "- **C-1 -- the bound rule contradicted the classifier. "
+            "`addressed`.** The safety rule said a bound closes `partial`, "
+            "in the section admitting the question is unresolved.\n"
+            "- C-2, blocking: the same finding without a header of its own, "
+            "and the wider gap is deferred.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-02-header/prd.md#C-2"],
+            found.get("unresolved-concern"),
+            "C-1 is disposed in its header; C-2 has none and defers",
+        )
+        self.assertEqual([], found.get("unreadable-concern-row", []))
+
+    def test_a_header_that_defers_opens_a_row_whose_prose_says_parked(self) -> None:
+        """The header decides whatever it says -- this is not a closing rule.
+
+        Tier order is preserved *inside* the header, so a header carrying
+        both a closing and an open token reads open exactly as a whole row
+        does. Were the header only allowed to close a row, it would be a way
+        to dispose of a concern by writing the right word first, which is the
+        failure the tier order exists to prevent moved one level in.
+
+        The row below is the case that separates the two rules: its header
+        defers and its body mentions something parked. `parked` is the first
+        tier, so the whole-row read calls it parked and a close-only header
+        rule would leave it there. The row's own header says the remainder is
+        deferred, and open is both the honest answer and the louder one.
+        """
+        self.ledger("2026-08-03-deferring/prd.md", (
+            "# deferring\n\n"
+            "- **C-1 -- addressed in part, the remainder deferred.** The "
+            "corrected clause landed; the rest waits behind the parked "
+            "refresh C-2 describes.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            ["docs/work/2026-08-03-deferring/prd.md#C-1"],
+            found.get("unresolved-concern"),
+        )
+        self.assertEqual([], found.get("parked-concern", []))
+
+    def test_the_verbs_that_were_measured_and_refused_stay_unreadable(self) -> None:
+        """`added` and `verified` are the two the counts argue for and the
+        reading argues against, so the refusal is written down as a test.
+
+        Whole-corpus, `added` rescues 7 rows and `verified` 2, both without
+        reclassifying anything today -- which is why a count alone cannot
+        decide this. Read instead: `added` appears in 41 row extents, 32 of
+        them already closed and 2 already open, and `verified` in 36. Both
+        sentences below are real, from C-20 in the write-the-test-first item
+        and C-183 in the solo-first one, and in both the word describes the
+        defect rather than disposing of it. They must keep reporting as rows
+        this reader cannot classify.
+
+        This one guards against an addition rather than a reversion: it fails
+        the day either word joins `CLOSED_WORDS` on the strength of its
+        rescue count.
+        """
+        self.ledger("2026-08-01-refused/prd.md", (
+            "# refused\n\n"
+            "- C-1 found a no-evidence exit written into the gate that was "
+            "added to close a no-evidence hole.\n"
+            "- C-2, material: the commit that claimed `make check exit 0` was "
+            "verified by the weaker of the two runs.\n"
+        ))
+        found = self.checks(self.scan())
+        self.assertEqual(
+            [
+                "docs/work/2026-08-01-refused/prd.md#C-1",
+                "docs/work/2026-08-01-refused/prd.md#C-2",
+            ],
+            sorted(found.get("unreadable-concern-row", [])),
+        )
+
     # -- the keying ---------------------------------------------------------
 
     def test_one_c_id_in_two_items_is_two_concerns(self) -> None:
