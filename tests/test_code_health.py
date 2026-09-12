@@ -88,21 +88,37 @@ SHEBANG_LIMIT = 4096
 AMBIGUOUS_CEILING = 155
 
 
-def tracked(*pathspecs: str) -> list[pathlib.Path]:
+def tracked(*pathspecs: str, root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:
     """Tracked files matching `pathspecs`, as the index reports them.
 
     The index rather than the directory, so a stray `__pycache__` entry or an
     untracked scratch file cannot join the measurement.
+
+    `--deduplicate` because the index holds an unmerged path three times, once
+    per merge stage, and plain `ls-files` prints it once per stage. Every
+    function in a conflicted file was therefore measured three times, and the
+    checks that count rather than compare -- the shared-key assertion in
+    `test_the_corpus_is_complete`, the clone detector, `AMBIGUOUS_CEILING` --
+    failed with exact numbers naming the one file the reader was editing. It
+    read as a regression they had just written; `git add` made it vanish. This
+    is on the path, not off it: the house rule puts writers in worktrees, and a
+    worktree is where a conflict gets resolved.
+
+    `root` is the test seam, kept off every caller's signature deliberately:
+    the suite injects a throwaway repository to build an index this repository
+    will not hold on demand. Nothing about a clean checkout tells the two
+    behaviours apart, so a test that does not build a real conflict guards
+    nothing.
     """
 
     output = subprocess.run(
-        ["git", "ls-files", "-z", "--", *pathspecs],
-        cwd=REPO_ROOT,
+        ["git", "ls-files", "-z", "--deduplicate", "--", *pathspecs],
+        cwd=root,
         capture_output=True,
         text=True,
         check=True,
     ).stdout
-    return [REPO_ROOT / name for name in output.split("\0") if name]
+    return [root / name for name in output.split("\0") if name]
 
 
 @functools.cache
@@ -1241,6 +1257,94 @@ class Detectors(unittest.TestCase):
             plain = pathlib.Path(home) / "notes"
             plain.write_bytes(b"just text\n")
             self.assertFalse(_is_python_script(plain))
+
+
+def _conflicted_repo(root: pathlib.Path) -> None:
+    """Leave `root` a git repository whose index holds `f.txt` unmerged.
+
+    A real merge, not a hand-written index: the three stages have to come from
+    git's own conflict machinery, or the fixture is a restatement of the belief
+    being tested rather than evidence for it.
+    """
+
+    def git(*argv: str, check: bool = True) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            # Identity and signing are set per invocation rather than read from
+            # the machine, so the fixture does not fail on a host that has no
+            # `user.email` or that signs every commit.
+            ["git", "-c", "user.email=health@example.invalid",
+             "-c", "user.name=code health", "-c", "commit.gpgsign=false",
+             *argv],
+            cwd=root, capture_output=True, text=True, check=check)
+
+    conflicted = root / "f.txt"
+    git("init", "-q", "-b", "main", ".")
+    conflicted.write_text("base\n")
+    git("add", "f.txt")
+    git("commit", "-qm", "base")
+    git("checkout", "-q", "-b", "other")
+    conflicted.write_text("other\n")
+    git("commit", "-qam", "other")
+    git("checkout", "-q", "main")
+    conflicted.write_text("mine\n")
+    git("commit", "-qam", "mine")
+    git("merge", "other", check=False)
+
+
+class Enumeration(unittest.TestCase):
+    """What `tracked` reports when the index is not in its ordinary shape."""
+
+    def test_a_conflicted_file_is_counted_once(self):
+        """An unmerged path must arrive once, not once per merge stage.
+
+        Nothing about a clean checkout separates the two behaviours, so the
+        conflict is built for real in a throwaway repository. The three
+        assertions are one argument: the index is unmerged, plain `ls-files`
+        does print the path three times there, and `tracked` still returns it
+        once. Drop either of the first two and the third stops meaning
+        anything -- it would pass against a repository with no conflict in it,
+        which is exactly how this defect survived.
+        """
+
+        with tempfile.TemporaryDirectory() as home:
+            root = pathlib.Path(home)
+            _conflicted_repo(root)
+
+            stages = subprocess.run(
+                ["git", "ls-files", "-u", "--", "f.txt"],
+                cwd=root, capture_output=True, text=True, check=True).stdout
+            self.assertEqual(
+                [line.split("\t")[0].split()[-1] for line in stages.splitlines()],
+                ["1", "2", "3"],
+                "the fixture did not leave an unmerged index, so the case "
+                "below proves nothing")
+
+            raw = subprocess.run(
+                ["git", "ls-files", "-z", "--", "f.txt"],
+                cwd=root, capture_output=True, text=True, check=True).stdout
+            self.assertEqual(
+                [name for name in raw.split("\0") if name],
+                ["f.txt", "f.txt", "f.txt"],
+                "this git no longer repeats an unmerged path; if that is now "
+                "the default, say so here rather than deleting the case")
+
+            self.assertEqual(tracked("f.txt", root=root), [root / "f.txt"],
+                             "a conflicted file joined the corpus once per "
+                             "merge stage; every function in it is counted "
+                             "three times")
+
+    def test_the_seam_reads_the_repository_it_is_pointed_at(self):
+        """`root` must actually move the enumeration, not just be accepted.
+
+        A seam that is ignored would let the case above read this repository,
+        find no conflict, and pass whatever `tracked` does.
+        """
+
+        with tempfile.TemporaryDirectory() as home:
+            root = pathlib.Path(home)
+            _conflicted_repo(root)
+            self.assertEqual(tracked(root=root), [root / "f.txt"])
+            self.assertNotIn(root / "f.txt", tracked("bin"))
 
 
 if __name__ == "__main__":  # pragma: no cover
