@@ -698,5 +698,94 @@ class Rule7WorkReferenceTests(LintFixture):
         self.assertIn("rule 7 read nothing", joined)
 
 
+class WorkDirSpellingTests(LintFixture):
+    """One root, spelled any accepted way, is read as one root.
+
+    `--work-dir` is a path to rules 1, 2, 5 and 6 and a *literal prefix* to
+    rule 7, which matches it against the text of tracked markdown where a
+    `docs/work/` reference is written repo-relative and nothing else. Before
+    sd:374 every spelling but the plain relative one made those two meanings
+    disagree without saying so: `./docs/work`, `docs/work/`,
+    `docs/../docs/work` and the tree's own absolute path each left rule 7
+    matching nothing, reporting `read 0 reference(s)`, and passing over the
+    dangling reference the relative spelling catches. A rule that reads
+    nothing has checked nothing, which is the failure the rule's own
+    `git could not list tracked markdown` branch already refuses to commit.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.repo / "NOTES.md").write_text(
+            "See `docs/work/2026-01-01-never-created/prd.md`.\n", encoding="utf-8"
+        )
+
+    def report_for(self, work_dir: str) -> lint.Report:
+        self.git("add", "-A")
+        return lint.run(self.repo, work_dir, "docs/spec", "docs/decisions", None)
+
+    def rule_7_note(self, report: lint.Report) -> str:
+        notes = [note for note in report.notes if note.startswith("rule 7")]
+        self.assertEqual(len(notes), 1, report.notes)
+        return notes[0]
+
+    def test_the_relative_spelling_is_the_baseline_and_catches_the_reference(self) -> None:
+        report = self.report_for("docs/work")
+        self.assertIn("read 1 reference(s)", self.rule_7_note(report))
+        self.assertIn("names nothing in the checkout", "\n".join(report.failures))
+
+    def test_an_absolute_root_inside_the_repository_reads_the_same_tree(self) -> None:
+        """The same directory, spelled the long way, is the same directory."""
+        baseline = self.report_for("docs/work")
+        absolute = self.report_for(str(self.work))
+        self.assertEqual(self.rule_7_note(absolute), self.rule_7_note(baseline))
+        self.assertEqual(absolute.failures, baseline.failures)
+
+    def test_every_accepted_spelling_reads_the_same_references(self) -> None:
+        baseline = self.rule_7_note(self.report_for("docs/work"))
+        for spelling in ("./docs/work", "docs/work/", "docs/../docs/work", "docs//work"):
+            with self.subTest(spelling=spelling):
+                self.assertEqual(self.rule_7_note(self.report_for(spelling)), baseline)
+
+    def test_a_root_outside_the_repository_refuses_rather_than_half_applies(self) -> None:
+        """The recorded case: rules 1-2-6 read there, rule 7 read here.
+
+        Rule 7's enumeration, rule 2's row database and rule 5's `Work:`
+        resolution are all rooted at the checkout the caller stands in, so a
+        foreign work root is not a root this run can honour. It says so.
+        """
+        with tempfile.TemporaryDirectory() as elsewhere:
+            outside = pathlib.Path(elsewhere) / "docs" / "work"
+            outside.mkdir(parents=True)
+            report = self.report_for(str(outside))
+        self.assertEqual(len(report.failures), 1, report.failures)
+        self.assertIn("is outside", report.failures[0])
+        self.assertEqual([note for note in report.notes if note.startswith("rule 7")], [])
+
+    def test_the_repository_root_is_not_a_work_directory(self) -> None:
+        report = self.report_for(".")
+        self.assertEqual(len(report.failures), 1, report.failures)
+        self.assertIn("itself, not a directory inside it", report.failures[0])
+
+    def test_cli_refuses_a_work_dir_outside_the_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as elsewhere, in_directory(self.repo):
+            outside = pathlib.Path(elsewhere) / "docs" / "work"
+            outside.mkdir(parents=True)
+            self.assertEqual(lint.main(["--work-dir", str(outside)]), 2)
+
+    def test_cli_refuses_a_spec_dir_outside_the_repository(self) -> None:
+        """No second meaning, but a verdict over a mixture is still wrong."""
+        with tempfile.TemporaryDirectory() as elsewhere, in_directory(self.repo):
+            outside = pathlib.Path(elsewhere) / "docs" / "spec"
+            outside.mkdir(parents=True)
+            self.assertEqual(lint.main(["--spec-dir", str(outside)]), 2)
+
+    def test_cli_accepts_an_absolute_work_dir_inside_the_repository(self) -> None:
+        self.git("add", "-A")
+        (self.repo / "NOTES.md").unlink()
+        self.git("add", "-A")
+        with in_directory(self.repo):
+            self.assertEqual(lint.main(["--work-dir", str(self.work)]), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

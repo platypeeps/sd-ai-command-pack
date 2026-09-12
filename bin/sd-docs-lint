@@ -531,6 +531,51 @@ def check_work_references(repo: pathlib.Path, work_dir: str, report: Report) -> 
     report.note(f"rule 7 work references: read {seen} reference(s) across {files} file(s)")
 
 
+def repo_relative(repo: pathlib.Path, value: str) -> tuple[str, str]:
+    """A directory flag's value as the repo-relative POSIX path it claims to be.
+
+    Returns `(normalised, problem)`; a non-empty problem means the value names
+    no directory inside `repo` and the run must stop rather than start.
+
+    `--work-dir` has two meanings at once. Rules 1, 2, 5 and 6 join it to the
+    repository root and read whatever tree that lands on; rule 7 splices it
+    into a regular expression and matches it against the *text* of tracked
+    markdown, where a `docs/work/` reference is written repo-relative and
+    nothing else. Every spelling that is not the plain relative path makes
+    those two meanings disagree, and the disagreement is silent: rule 7 then
+    matches nothing, reports `read 0 reference(s)`, and passes. Measured on a
+    fixture whose single dangling reference rule 7 catches as `docs/work`:
+    `./docs/work`, `docs/work/`, `docs/../docs/work` and the tree's own
+    absolute path each read 0 references and reported clean.
+
+    So normalise, and refuse only what cannot be normalised. An absolute path
+    inside the repository is that repository's `docs/work` spelled the long
+    way -- it has one unambiguous answer, and this gives it. A root outside
+    the repository has none: rule 7's enumeration (`git ls-files`), rule 2's
+    row database and rule 5's `Work:` resolution are all rooted at the
+    checkout the caller is standing in, so honouring it would mean re-rooting
+    four rules at a foreign repository -- a different feature, and one this
+    flag's own contract already denies: skills/sd-plan/SKILL.md calls it a
+    root within this repository, this parser's help calls it repo-relative,
+    and tests/test_verb_inventory.py records that it is not one of the
+    options that hand a command a repository other than the caller's.
+    Standing in that repository already lints it correctly, so the refusal
+    says to do that instead.
+    """
+    resolved = (repo / value).resolve()
+    try:
+        relative = resolved.relative_to(repo.resolve())
+    except ValueError:
+        return "", (
+            f"names {resolved}, which is outside {repo}; the flag is "
+            "repo-relative, so lint that repository by running this from its "
+            "own root instead"
+        )
+    if relative == pathlib.Path("."):
+        return "", f"names {repo} itself, not a directory inside it"
+    return relative.as_posix(), ""
+
+
 def run(
     repo: pathlib.Path,
     work_dir: str,
@@ -540,6 +585,14 @@ def run(
 ) -> Report:
     report = Report()
     repo = repo.resolve()
+    # Also here, and not only at the flag: `run` is the library entry point,
+    # and a caller reaching it directly must not be able to half-apply the run
+    # either.
+    normalised, problem = repo_relative(repo, work_dir)
+    if problem:
+        report.fail(f"--work-dir {work_dir}", problem)
+        return report
+    work_dir = normalised
     work_root = repo / work_dir
     if not work_root.is_dir():
         report.fail(str(work_root), "the work directory does not exist")
@@ -589,6 +642,19 @@ def main(argv: list[str] | None = None) -> int:
     if root is None:
         print(f"error: {pathlib.Path.cwd()} is not inside a git repository", file=sys.stderr)
         return 2
+
+    # Every directory flag is documented repo-relative and is checked to be,
+    # before any rule runs. `--spec-dir` and `--decisions-dir` carry no second
+    # meaning the way `--work-dir` does, but a root outside the checkout makes
+    # them lint one repository while the rest of the run lints another, and a
+    # verdict over a mixture is the same silent wrong answer.
+    for flag in ("work_dir", "spec_dir", "decisions_dir"):
+        given = getattr(args, flag)
+        normalised, problem = repo_relative(root, given)
+        if problem:
+            print(f"error: --{flag.replace('_', '-')} {given}: {problem}", file=sys.stderr)
+            return 2
+        setattr(args, flag, normalised)
 
     if args.update_citations:
         work_root = root / args.work_dir
