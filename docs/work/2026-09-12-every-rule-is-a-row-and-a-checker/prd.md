@@ -1,0 +1,141 @@
+---
+title: every quality rule is a registry row and a checker, and the skills cite it
+created: 2026-09-12
+branch: main
+---
+
+# PRD — the rules live in prose, and prose does not run
+
+## Problem
+
+This pack states quality rules in skills, in `WORKFLOW.md`, and in planning
+documents. A rule stated only in prose is advisory. Advisory rules are the ones
+that silently stop being true, because nothing fails when the sentence and the
+machinery disagree.
+
+The pack has already been bitten by exactly this. `WORKFLOW.md` claimed for
+weeks that every writing skill refuses the upstream tree, while nothing
+refused. That claim did not decay; it was never true, and no check existed that
+could have said so.
+
+### The pack already runs a rule registry, informally, and it is broken
+
+The sharpest evidence is not the missing system. It is the half-built one.
+
+The pack uses decision ids of the form `R<n>-D<n>`. Measured on `e6c2cb20`
+across all tracked files:
+
+| Fact | Count |
+|---|---|
+| Distinct R-ids cited in live prose, outside `docs/work/archive` | 47 |
+| Distinct R-ids defined anywhere | 50 |
+| Definitions that live inside `docs/work/archive` | 33 |
+| Live citations whose only definition is an archived page | 26 |
+| Live citations that resolve to no definition at all | 4 |
+
+The four that resolve nowhere are `R11-D1`, `R11-D30`, `R11-D46` and `R5-D1`.
+
+There is no registry file. A definition is a run of bold text inside a planning
+document, so "which rules exist" is answered by a grep whose pattern nobody
+wrote down. More than half the rule ids in live prose point only into the
+archive — into pages the pack's own citation gate treats as historical records
+rather than as current statements. The pack cites rules the way it would cite a
+source it had stopped maintaining, because that is what it is doing.
+
+### Enforcement claims do not cite anything
+
+A machinery claim is an enforcement verb — refuses, never, always, cannot — on
+a line that also names a pack tool or a test. Measured on `e6c2cb20`, over
+tracked markdown outside `docs/work/archive`:
+
+| Fact | Count |
+|---|---|
+| Machinery claims in live prose | 681 |
+| Of those, inside `skills/` | 264 |
+| Of those, citing any rule id | 1 |
+
+One in 681. Every other enforcement claim in this pack is a sentence asserting
+a behaviour with nothing linking it to the code that performs it.
+
+### What the pack has already got right, and is the model
+
+`CLASSES` in `bin/sd-status` is this pattern done correctly, in production, in
+this repository. One table answers "which checks exist". The renderer iterates
+it. The ranking reads `rank` off it. Adding a check means adding a row and a
+producer — never editing a renderer, a sort, or a list. The `sd-status` skill
+states the reason in one sentence: *"That is how those drift apart."*
+
+This item asks for the same shape, applied to quality rules rather than to
+status checks.
+
+## Requirements
+
+1. **One registry is the single answer to "which rules exist."** It is a table
+   in code, iterated by every consumer. No consumer carries a second list.
+2. **Every registry row names its checker.** A row whose checker does not exist
+   is a failure of the registry's own test, not a comment.
+3. **A registry row records: id, what it checks, its checker, its scope
+   (`code`, `prose`, or `both`), and the skill section that teaches it.**
+4. **A skill teaching a rule cites the rule id.** Restating the rule is how the
+   two copies drift, so a skill should not — but *"does not restate"* has no
+   mechanical check, and this item does not claim one. Citation is enforced;
+   non-restatement stays a review habit, and `design.md` records it as an
+   accepted gap rather than as a rule nothing performs. Asserting an enforcement
+   that does not exist is the defect this whole item is about, and it would be
+   absurd to commit it in the requirements list.
+5. **The meta-check has three legs, and each fails independently:**
+   - a. every registry rule is cited by at least one skill;
+   - b. every enforcement claim in a skill cites a rule id that the registry
+     carries;
+   - c. every rule id cited in live prose is defined in the registry.
+6. **Leg b and leg c carry a frozen baseline, not a flag day.** 681 live
+   machinery claims and 26 archive-only R-ids cannot be fixed in the pull
+   request that introduces the check. The baseline is a count that may fall and
+   may not rise, in the shape `tests/test_loc_caps.py` already uses.
+7. **The pre-commit tier is scoped by measurement, not by assumption.** A
+   checker runs over the whole repository when a whole-repository run is fast,
+   and is diff-scoped only where it is not. The backbone item asserts the
+   opposite of what the clock says; `design.md` carries the timings.
+8. **Rescoping is expected and must be recorded.** Two of the three prose rules
+   proposed in the backbone item do not survive measurement unchanged. See
+   `design.md`.
+
+## Acceptance criteria
+
+- [ ] A registry exists as a single code table, and a test asserts every row's
+      checker resolves to a callable that exists. Zero rows must pass, so the
+      table can land before any rule does.
+- [ ] A test asserts no consumer carries a second list: a rule id appearing as a
+      literal anywhere in tracked code outside the registry module is a failure.
+      This is requirement 1's only mechanical check, and it is the one that
+      would have caught the drift `CLASSES` was built to prevent.
+- [ ] Meta-check leg a fails when a registry row is added with no citing skill.
+      Demonstrated by mutation: add a row, see one named test go red, remove it,
+      `diff -q` reports the tree identical.
+- [ ] Meta-check leg b fails when a skill asserts an enforcement naming a rule
+      id the registry does not carry. Demonstrated by the same mutation
+      discipline.
+- [ ] Meta-check leg c reports the 4 currently dangling R-ids — `R11-D1`,
+      `R11-D30`, `R11-D46`, `R5-D1` — as failures on the first run over live
+      prose, and reports zero once they are resolved or registered.
+- [ ] The baselines for legs b and c are recorded with the measured numbers
+      above, and a test asserts a baseline may fall and may not rise.
+- [ ] `pytest tests/` passes with 0 new failures against the pre-existing
+      collection errors on `origin/main`.
+- [ ] `bin/sd-docs-lint` exits 0.
+
+## References
+
+- Backbone item sd:431. Depends on sd:430, which is `done` and delivered
+  `tests/test_code_health.py` with the code ceilings this item's code rules
+  cite.
+- `bin/sd-status` and its `CLASSES` table: the pattern this item copies.
+- sd:525, filed 2026-09-12: line-anchored citations shape code layout and
+  create cross-lane conflicts. It bears directly on this item's first prose
+  rule.
+- sd:568 and sd:569, in flight on pull request #870: the `[quoted: path:line]`
+  marker, which requires a line number by construction.
+
+## Log
+
+- 2026-09-12 created
