@@ -1651,3 +1651,65 @@ def guest_artifact_refusal(root: pathlib.Path, paths: Any, *, ask: Asker = gh_ap
         "(WORKFLOW.md, `mode: guest`). Detection is a ceiling: a `mode: full` line "
         "the remote lowers, and a remote that cannot be asked, both resolve guest here."
     )
+
+
+# --------------------------------------------------------------------------
+# The trailer block git actually reads, and the lines that fell out of it
+# --------------------------------------------------------------------------
+#
+# Appended at the end of the file for the reason stated above `GUEST_REFUSED_DIRS`:
+# `tests/test_doc_citations.py` anchors work items to `bin/sd_lib.py:<line>`,
+# and an insertion higher up invalidates every citation below it.
+
+
+#: The trailer names whose demotion costs something. `Delivers:` and `Closes:`
+#: close an item; `Item:` associates a merge with one. A line naming any of the
+#: three outside the block git reads is a statement the tools cannot see.
+STATED_TRAILERS = (DELIVERS_TRAILER, CLOSES_TRAILER, "Item:")
+
+#: A trailer as it has to be written to count: at column zero, a name, a colon,
+#: and a value. Indented and backticked forms are prose *about* a trailer --
+#: this repository's own commit messages quote them constantly -- and matching
+#: those would turn every message that explains the convention into a finding.
+_STATED_RE = re.compile(
+    r"^(?:" + "|".join(re.escape(name.rstrip(":")) for name in STATED_TRAILERS) + r"):[ \t]*\S"
+)
+
+
+def trailer_block(message: str) -> str:
+    """The last paragraph of `message`, which is the whole of what a trailer is.
+
+    The same slice `_closes` takes, and the same one `git interpret-trailers
+    --parse` takes: a trailer block is the final paragraph and nothing else. It
+    is spelled once here so the two readers cannot drift, and named so the
+    property has somewhere to be tested from.
+    """
+    return message.rstrip().rsplit("\n\n", 1)[-1]
+
+
+def demoted_trailers(message: str) -> tuple[str, ...]:
+    """The closing trailers this message states that git will not read back.
+
+    One blank line is the whole failure. `git interpret-trailers --parse` reads
+    only the last block, so a message ending
+
+        Delivers: sd:5
+
+        Co-Authored-By: ...
+
+    parses to `Co-Authored-By:` alone and the delivery is invisible: `sd work
+    deliver` refuses the commit, the item stays open, and the code is on main.
+    Nothing reported it, because a demoted trailer and an absent one look the
+    same to every reader downstream -- which is exactly why the check has to
+    run against the message *before* the reader that will not see it.
+
+    Measured over `origin/main` at 730d4541: 5 of 3,431 commits state a trailer
+    outside the block git reads, and one of them (193d8e87) is the `Delivers:
+    sd:5` that had to be re-recorded by an empty commit. No commit trips this
+    on a quoted trailer, which is what `_STATED_RE`'s column-zero anchor buys.
+    """
+    block = trailer_block(message).splitlines()
+    return tuple(
+        line for line in message.splitlines()
+        if _STATED_RE.match(line) and line not in block
+    )

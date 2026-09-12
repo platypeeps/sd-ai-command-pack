@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
+import re
 import shutil
 import subprocess  # nosec B404 - fixed argv gh/git reads, never a shell
 import sys
@@ -58,7 +59,23 @@ PR_FIELDS = (
     "headRepositoryOwner",
     "url",
     "statusCheckRollup",
+    # Read for its bodies, not for its verdict: `reviewDecision` above is
+    # already the verdict, and the findings this file counts are the ones that
+    # never became an inline comment at all. Same call, no extra round trip.
+    "reviews",
 )
+
+#: How an automated reviewer says a finding exists that it did not leave as an
+#: inline comment. `copilot-pull-request-reviewer` writes its real findings
+#: under this heading in the review *body*, so a reader counting inline
+#: comments sees zero and concludes the review was clean.
+#:
+#: Measured over the twelve pack PRs merged on 2026-09-12 (851, 852, 856-865):
+#: 9 inline comments and 12 findings stated only in a review body, with #859
+#: and #861 carrying four of those between them while showing no inline
+#: comment at all. Thirteen comments went unread in that round; the count that
+#: would have shown something was wrong was never printed anywhere.
+SUPPRESSED_RE = re.compile(r"Suppressed comments \((\d+)\)")
 
 #: Check outcomes collapsed into the buckets a human acts on. Anything
 #: unrecognised lands in `other` rather than being silently counted as green.
@@ -244,6 +261,37 @@ def behind_by(root: pathlib.Path, slug: str, pull: dict[str, Any]) -> int | None
     return value if isinstance(value, int) else None
 
 
+def review_findings(reviews: Any) -> dict[str, Any]:
+    """Findings a review states in its body and nowhere a comment count sees.
+
+    `reviewDecision` answers "did anyone block this" and the comment count
+    answers "did anyone write on a line". Neither answers "did the review find
+    something", and an automated reviewer that reports under `Suppressed
+    comments (N)` lands in the gap between them: the PR shows no inline
+    comment, the decision stays `NONE`, and three real defects sit in prose
+    nobody opened. That is how twelve merges consumed zero review passes while
+    nominally satisfying a review gate.
+
+    Counting only, and deliberately. Whether an unaddressed finding should
+    refuse a merge is a policy question with an owner; making the number
+    visible where the operator already looks is not, and every shape that
+    question can take needs this reader first.
+    """
+    rows = reviews if isinstance(reviews, list) else []
+    stated = 0
+    authors = []
+    for review in rows:
+        if not isinstance(review, dict):
+            continue
+        found = sum(int(count) for count in SUPPRESSED_RE.findall(review.get("body") or ""))
+        if found:
+            stated += found
+            login = (review.get("author") or {}).get("login")
+            if isinstance(login, str) and login not in authors:
+                authors.append(login)
+    return {"reviews": len(rows), "in_body": stated, "reviewers": authors}
+
+
 def describe(pull: dict[str, Any], root: pathlib.Path, slug: str) -> dict[str, Any]:
     rollup = pull.get("statusCheckRollup")
     return {
@@ -260,6 +308,7 @@ def describe(pull: dict[str, Any], root: pathlib.Path, slug: str) -> dict[str, A
         "checks_total": len(rollup) if isinstance(rollup, list) else 0,
         "failing": failing_checks(rollup),
         "behind_by": behind_by(root, slug, pull),
+        "review_findings": review_findings(pull.get("reviews")),
     }
 
 
@@ -331,6 +380,11 @@ def render_pulls(result: dict[str, Any], stream: TextIO, indent: str = "  ") -> 
         write(f"{indent}  checks: {check_summary(record)}\n")
         if record["failing"]:
             write(f"{indent}  failing: {', '.join(record['failing'])}\n")
+        findings = record.get("review_findings") or {}
+        if findings.get("in_body"):
+            who = ", ".join(findings["reviewers"]) or "a reviewer"
+            write(f"{indent}  review findings: {findings['in_body']} stated by "
+                  f"{who} in a review body, not as inline comments\n")
 
 
 def render(result: dict[str, Any], stream: TextIO) -> None:

@@ -155,6 +155,15 @@ sd task note 42 --body "Reproduced with the staging input"
 sd task status 42 done
 ```
 
+A task a commit delivered closes with that commit named:
+`sd task status 42 done --delivered-by <full-sha>`. The SHA is verified the
+way `sd work deliver` verifies one — reachable from the checkout's default
+branch and carrying a `Delivers: sd:42` trailer in the block
+`git interpret-trailers` reads — and is recorded on the transition, so the
+history answers "what delivered this" for a task and for a work item alike.
+A commit that states the trailer outside that block is refused by name rather
+than reported as carrying none.
+
 `sd store items --open` lists the backlog; `sd store item 42 --json` includes
 history and a revision that edits can require with `--if-revision`. Notes,
 priorities, due dates and task status save directly to the database. GitHub

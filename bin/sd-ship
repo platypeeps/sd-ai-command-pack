@@ -588,6 +588,26 @@ class Ship:
                            if line.startswith("Authored-with:"))
         for author in sorted(authors):
             body += f"Authored-with: {author}\n"
+        # The squash message is composed here and read by `git
+        # interpret-trailers --parse` afterwards, and those two only agree
+        # while the trailers sit in the message's *last* paragraph. One blank
+        # line between them is enough to demote a trailer to prose, and the
+        # demotion is invisible: `sd work deliver` then refuses the commit for
+        # carrying no `Delivers:`, and the item stays open with its code on
+        # main. That is sd:5, which had to be re-recorded by an empty commit
+        # (193d8e87) because nothing looked at the message before it landed.
+        # A pull-request body ending in a line that reads as a trailer is the
+        # ordinary way this happens, so the check is on the composed message
+        # rather than on the part this method wrote.
+        demoted = sd_lib.demoted_trailers(body)
+        if demoted:
+            raise Refusal(
+                "this squash message states "
+                + ", ".join(repr(line) for line in demoted)
+                + " outside the trailer block git reads, so the merge would land "
+                "without it; move the line into the message's last paragraph, "
+                "contiguously with the other trailers, or take it out of the body"
+            )
         self.check_review(head)
         if current_head(self.root) != head:
             raise Refusal("HEAD moved immediately before merge")

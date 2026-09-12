@@ -286,6 +286,128 @@ def _emit(value: Any, *, machine: bool) -> None:
         print(f"revision: {value['revision']}")
 
 
+#: A delivery commit as `sd_db.progress` requires it to be spelled: the full
+#: object name, lowercase, SHA-1 or SHA-256. Abbreviations are refused there
+#: and are refused here, so `--delivered-by` and `sd work deliver` accept
+#: exactly the same argument and a caller who learns one has learned both.
+COMMIT_LENGTHS = (40, 64)
+COMMIT_DIGITS = frozenset("0123456789abcdef")
+
+
+def _is_commit(value: str) -> bool:
+    """Whether `value` is a full lowercase object name, and nothing shorter."""
+    return len(value) in COMMIT_LENGTHS and COMMIT_DIGITS.issuperset(value)
+
+
+#: What `sd work deliver` writes on the transition it makes, and therefore
+#: what `--delivered-by` writes on the transition a task makes. One sentence,
+#: one format, so "which commit delivered this item" is one query over
+#: `note.kind = 'status'` rather than one per kind.
+DELIVERY_REASON = "delivered at {commit} on {ref}"
+
+
+def _verified_tip(root: pathlib.Path) -> tuple[str, str]:
+    """The default branch's current tip, fetched, and the ref it was read from.
+
+    The same thing `sd_db.progress._delivery_evidence` establishes before it
+    will record a delivery, asked here through `sd_lib.upstream` because a
+    checkout with no remote still has a default branch and a feature branch's
+    unpushed trailer must not stand in for its tip.
+    """
+    remote, default = sd_lib.upstream(root)
+    if not remote:
+        head = sd_lib.git_output(["symbolic-ref", "--quiet", "HEAD"], root)
+        if head not in ("refs/heads/main", "refs/heads/master"):
+            raise WorkRefusal("a local-only delivery must be verified on main or master")
+        tip = sd_lib.git_output(["rev-parse", "--verify", "HEAD^{commit}"], root)
+        if not tip:
+            raise WorkRefusal(f"{root} has no commit on {head} to verify against")
+        return tip, head
+    if sd_lib.git_output(["fetch", "--no-tags", remote, default], root) is None:
+        raise WorkRefusal(f"could not fetch {remote} {default}; delivery cannot be verified")
+    tip = sd_lib.git_output(["rev-parse", "--verify", "FETCH_HEAD^{commit}"], root)
+    if not tip:
+        raise WorkRefusal(f"{remote}/{default} yielded no tip to verify against")
+    return tip, f"{remote}/{default}"
+
+
+def _delivery_reason(row: Any, commit: str) -> str:
+    """The delivery sentence for `commit`, or a refusal naming what failed.
+
+    `sd work deliver` is the only writer of delivery evidence and it refuses a
+    `kind=task` row outright, so an ordinary task closed with `task status
+    done` recorded who and when and nothing about what shipped it. The
+    verification is not the part that belonged to work items -- reachability
+    and a `Delivers:` trailer are facts about a commit, not about a kind -- so
+    it is asked here and the answer goes on the transition.
+
+    A trailer git will not read back is named as that, and never as a missing
+    one. `demoted_trailers` is the whole of sd:590 in this path: the blank line
+    that costs an item its evidence looks exactly like an author who forgot.
+    """
+    if not _is_commit(commit):
+        raise WorkRefusal("--delivered-by takes the full lowercase commit ID")
+    if not row["repo"]:
+        raise WorkRefusal(
+            f"item {row['id']} belongs to no checkout, so no commit can be verified "
+            "for it; `sd task edit` with `--belongs-to` names one")
+    root = pathlib.Path(row["repo"])
+    if not root.is_dir():
+        raise WorkRefusal(f"{root} is unavailable; delivery cannot be verified")
+    if sd_lib.git_output(["rev-parse", "--verify", f"{commit}^{{commit}}"], root) != commit:
+        raise WorkRefusal(f"{root} has no commit {commit}")
+    tip, ref = _verified_tip(root)
+    if sd_lib.git_output(["merge-base", "--is-ancestor", commit, tip], root) is None:
+        raise WorkRefusal(f"{commit} is not reachable from {ref}")
+    message = sd_lib.git_output(["show", "-s", "--format=%B", commit], root) or ""
+    wanted = f"sd:{row['id']}"
+    demoted = [line for line in sd_lib.demoted_trailers(message)
+               if line.partition(":")[0] == "Delivers" and line.partition(":")[2].strip() == wanted]
+    if demoted:
+        raise WorkRefusal(
+            f"{commit} states {demoted[0]!r} outside the trailer block git reads, so "
+            "nothing can see it; re-record it contiguously with the other trailers")
+    block = sd_lib.trailer_block(message).splitlines()
+    if not any(line.partition(":")[0] == "Delivers" and line.partition(":")[2].strip() == wanted
+               for line in block):
+        raise WorkRefusal(f"{commit} carries no `Delivers: {wanted}` trailer")
+    return DELIVERY_REASON.format(commit=commit, ref=ref)
+
+
+def _status_reason(workflow: Any, connection: Any, args: argparse.Namespace) -> str | None:
+    """What the transition records, verifying `--delivered-by` before it moves.
+
+    Read and refused before the write, because a status that landed and then
+    failed to record what shipped it is the hole the flag exists to close.
+    """
+    if not args.delivered_by:
+        return args.reason
+    if args.status != "done":
+        raise WorkRefusal("--delivered-by belongs on the move to done")
+    row = workflow.item_state(connection, args.item)["item"]
+    if row["kind"] != "task":
+        raise WorkRefusal(
+            f"item {args.item} is a work item; `sd work deliver {args.item} "
+            f"{args.delivered_by}` records its delivery")
+    return _delivery_reason(row, args.delivered_by)
+
+
+def _refuse_task_delivery(workflow: Any, connection: Any, args: argparse.Namespace) -> None:
+    """Refuse `deliver` on an ordinary task, saying where the evidence goes.
+
+    The library refuses it one call later and says only that the operation is
+    for work items, which leaves a caller holding a real merged SHA with
+    nowhere to put it -- four items closed on 2026-09-12 lost theirs that way,
+    and the workaround was a note written by hand. A dead end that knows the
+    way out and does not say it is the defect here, not the kind check.
+    """
+    if workflow.item_state(connection, args.item)["item"]["kind"] == "task":
+        raise WorkRefusal(
+            f"item {args.item} is an ordinary task, and delivery evidence for one "
+            f"is recorded by `sd task status {args.item} done --delivered-by "
+            f"{args.commit}`, which verifies the same commit")
+
+
 def run(args: argparse.Namespace) -> int:
     sd_db, workflow = _library()
     write = args.work_action not in {"today", "items", "item"}
@@ -317,7 +439,8 @@ def run(args: argparse.Namespace) -> int:
         elif action == "status":
             result = workflow.change_status(
                 connection, args.item, args.status, who=who,
-                expected_revision=revision, reason=args.reason)
+                expected_revision=revision,
+                reason=_status_reason(workflow, connection, args))
         elif action == "note":
             result = workflow.add_item_note(
                 connection, args.item, body=args.body, kind=args.kind, who=who,
@@ -338,6 +461,7 @@ def run(args: argparse.Namespace) -> int:
                     connection, args.item, reason=args.reason, who=who,
                     expected_revision=revision)
             else:
+                _refuse_task_delivery(workflow, connection, args)
                 result = progress.deliver_work(
                     connection, args.item, args.commit, who=who,
                     expected_revision=revision)
@@ -538,7 +662,15 @@ def register(groups: Any, store: Any) -> None:
     status = verbs.add_parser("status", help="change status with an atomic history entry")
     status.add_argument("item", type=int)
     status.add_argument("status")
-    status.add_argument("--reason")
+    reason = status.add_mutually_exclusive_group()
+    reason.add_argument("--reason")
+    # `--delivered-by` and not `--commit`: the row records what delivered the
+    # task, and the word says so where `--commit` would only say which one.
+    # Exclusive with `--reason` because both write the same field and a caller
+    # supplying both would have one of them silently dropped.
+    reason.add_argument("--delivered-by", metavar="SHA",
+                        help="full SHA carrying `Delivers: sd:<id>`, verified against "
+                             "the default branch and recorded on the transition")
     _output(status, "status", revision=True)
 
     note = verbs.add_parser("note", help="add an item note or follow-up")
