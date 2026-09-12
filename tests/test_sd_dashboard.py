@@ -425,18 +425,33 @@ class InstallTests(FleetHarness):
         Looking is the whole of this test, and it looks at the parsed plist
         rather than at the two keys known to have leaked: a key rendered later
         out of another home-derived constant leaks the same way and is caught
-        by the same assertion. The single path under the real home that
-        belongs here is the program, which is this checkout and has to be --
-        launchd is given an absolute path to the script it runs.
+        by the same assertion.
+
+        The program is *excluded* rather than expected, and that difference is
+        the whole portability of this test. `cmd_install` renders an absolute
+        path to this script because launchd is given one, so the program is
+        the one path in the body that may sit under the real home -- but only
+        may. A checkout outside the home directory renders a perfectly correct
+        plist with nothing under the home in it at all, and an assertion that
+        the program is present fails on it. That shape passes here, where the
+        worktree lives inside the repository and so inside the home, and on a
+        CI runner under `/home/runner`, and nowhere else -- a latent failure
+        that both of the places it would be noticed are blind to. Excluded,
+        the expected answer is the empty list from either location, and a
+        `LOGS`-class leak fails it from either location too.
+
+        The comparison is an equality against `[]` rather than an absence
+        check so that a failure prints the paths it found.
         """
         self.install()
         home = str(Path.home())
+        program = str(REPO_ROOT / "bin" / "sd-dashboard")
         body = plistlib.loads(self.plist.read_bytes())
         leaked = sorted(
             found for found in plist_strings(body)
-            if found == home or found.startswith(home + "/")
+            if (found == home or found.startswith(home + "/")) and found != program
         )
-        self.assertEqual(leaked, [str(REPO_ROOT / "bin" / "sd-dashboard")])
+        self.assertEqual(leaked, [])
 
     def test_launchd_refusing_is_reported_and_not_an_exit_code(self):
         """The plist is written and correct; failing would say it was not."""
