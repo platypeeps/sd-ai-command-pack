@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import pathlib
 import subprocess
+import tempfile
 import unittest
 import warnings
 
@@ -98,6 +99,53 @@ class SuiteShapeTests(unittest.TestCase):
         self.assertNotEqual(list(TESTS.glob("test_*.py")), [], "the suite was not reached")
 
 
+def tracked_sources(root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:
+    """Every tracked Python source under `root`, found by asking git.
+
+    `-z` and a NUL split rather than `.split()` on whitespace. Git prints a
+    path containing a space *unquoted* -- `has space.py` arrives verbatim, not
+    as `"has space.py"` -- so splitting on whitespace tore it into `has` and
+    `space.py`. Neither of those is a file, the `is_file()` guard below dropped
+    both, and the source left the scan with nothing printed and the run still
+    green. That is the failure worth naming: not a wrong answer but a check
+    that had quietly stopped covering a file while continuing to report
+    success. No tracked path in this repository holds whitespace today, so this
+    was latent rather than live; what it cost was that the first one added
+    would have been skipped in silence.
+
+    `--deduplicate` because the index holds an unmerged path once per merge
+    stage and plain `ls-files` prints it once per stage, so a file being merged
+    was parsed three times and named three times in one failure message. The
+    verdict was never wrong here -- results are collected into lists and
+    compared -- which is precisely why nothing ever surfaced it.
+
+    `root` is the test seam and is kept off the callers below deliberately: the
+    cases point the enumeration at a throwaway repository, because nothing
+    about a clean checkout tells any of these behaviours apart.
+    """
+
+    listed = subprocess.run(
+        ["git", "ls-files", "-z", "--deduplicate"],
+        cwd=root, capture_output=True, text=True, check=True)
+    found = []
+    for name in listed.stdout.split("\0"):
+        if not name:
+            continue
+        path = root / name
+        if not path.is_file():
+            continue
+        if path.suffix == ".py":
+            found.append(path)
+            continue
+        # The `bin/sd-*` commands carry no suffix; a shebang naming python
+        # is what makes them python, and reading it is how the check finds
+        # a command added later without being told about it.
+        head = path.read_bytes()[:64]
+        if head.startswith(b"#!") and b"python" in head:
+            found.append(path)
+    return found
+
+
 class SourceWarningTests(unittest.TestCase):
     """No tracked source emits a `SyntaxWarning` when Python reads it.
 
@@ -113,28 +161,9 @@ class SourceWarningTests(unittest.TestCase):
     were wrong once.
     """
 
-    def tracked_sources(self) -> list[pathlib.Path]:
-        listed = subprocess.run(
-            ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True)
-        found = []
-        for name in listed.stdout.split():
-            path = REPO_ROOT / name
-            if not path.is_file():
-                continue
-            if path.suffix == ".py":
-                found.append(path)
-                continue
-            # The `bin/sd-*` commands carry no suffix; a shebang naming python
-            # is what makes them python, and reading it is how the check finds
-            # a command added later without being told about it.
-            head = path.read_bytes()[:64]
-            if head.startswith(b"#!") and b"python" in head:
-                found.append(path)
-        return found
-
     def test_no_tracked_source_warns_when_python_reads_it(self) -> None:
         noisy = []
-        for path in self.tracked_sources():
+        for path in tracked_sources():
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
                 try:
@@ -149,9 +178,168 @@ class SourceWarningTests(unittest.TestCase):
     def test_the_source_scan_reaches_the_commands(self) -> None:
         """The control: an empty list would make the test above vacuous."""
 
-        found = self.tracked_sources()
+        found = tracked_sources()
         self.assertNotEqual(found, [], "no tracked source was scanned")
         self.assertIn(REPO_ROOT / "bin" / "sd", found, "the main entry point was not scanned")
+
+
+def _git(root: pathlib.Path):
+    """A git runner bound to `root`.
+
+    Identity and signing are passed per invocation rather than read from the
+    machine, so neither fixture fails on a host with no `user.email` or one
+    that signs every commit.
+    """
+
+    def run(*argv: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-c", "user.email=shape@example.invalid",
+             "-c", "user.name=suite shape", "-c", "commit.gpgsign=false", *argv],
+            cwd=root, capture_output=True, text=True, check=check)
+
+    return run
+
+
+def _repo_with_a_source_being_merged(root: pathlib.Path) -> None:
+    """Leave `root` holding `f.py` unmerged in the index, resolved on disk.
+
+    A real merge rather than a hand-built index: the three stages have to come
+    from git's own conflict machinery, or the fixture restates the belief under
+    test instead of evidencing it.
+
+    The working tree is then repaired and deliberately not staged, because that
+    is the state this is actually met in -- the conflict has been fixed in the
+    editor, the file on disk is valid Python again so nothing warns about it,
+    and the index still carries three stages until somebody runs `git add`.
+    """
+
+    git = _git(root)
+    source = root / "f.py"
+    git("init", "-q", "-b", "main", ".")
+    source.write_text("VALUE = 0\n")
+    git("add", "f.py")
+    git("commit", "-qm", "base")
+    git("checkout", "-q", "-b", "other")
+    source.write_text("VALUE = 1\n")
+    git("commit", "-qam", "other")
+    git("checkout", "-q", "main")
+    source.write_text("VALUE = 2\n")
+    git("commit", "-qam", "mine")
+    git("merge", "other", check=False)
+    source.write_text("VALUE = 3\n")  # resolved in the editor, left unstaged
+
+
+def _repo_with_a_spaced_path(root: pathlib.Path) -> None:
+    """Leave `root` tracking `has space.py` beside an ordinary source.
+
+    The second file is the point of the pair: it is what keeps the scan
+    looking healthy while the first one is being dropped.
+    """
+
+    git = _git(root)
+    (root / "has space.py").write_text("SPACED = True\n")
+    (root / "plain.py").write_text("PLAIN = True\n")
+    git("init", "-q", "-b", "main", ".")
+    git("add", "-A")
+    git("commit", "-qm", "base")
+
+
+class EnumerationTests(unittest.TestCase):
+    """What `tracked_sources` reports when a name or an index is unusual.
+
+    Nothing about a clean checkout separates the fixed behaviour from the
+    broken one, so each case builds a real repository and asserts its premise
+    before its conclusion. Drop a premise and the conclusion would pass against
+    any ordinary repository, which is how both of these survived.
+    """
+
+    def test_a_path_with_a_space_arrives_once_and_whole(self) -> None:
+        """The unconditional defect of the two, and the one that loses a file.
+
+        Splitting git's output on whitespace turns one real path into two that
+        do not exist. The `is_file()` guard then drops both, so the source is
+        not reported wrongly -- it is not reported at all, while the scan goes
+        on looking healthy because the other file is still in the list.
+        """
+
+        with tempfile.TemporaryDirectory() as home:
+            root = pathlib.Path(home)
+            _repo_with_a_spaced_path(root)
+
+            raw = subprocess.run(
+                ["git", "ls-files"], cwd=root,
+                capture_output=True, text=True, check=True).stdout
+            self.assertIn(
+                "has space.py\n", raw,
+                "this git quoted the spaced path instead of printing it "
+                "plainly, so the defect is not reproduced here; say so rather "
+                "than deleting the case")
+            self.assertEqual(
+                raw.split(), ["has", "space.py", "plain.py"],
+                "whitespace splitting no longer tears the path in two, so the "
+                "assertion below would prove nothing")
+            self.assertFalse(
+                (root / "has").exists() or (root / "space.py").exists(),
+                "both fragments must be nonexistent paths; that is what makes "
+                "the file's disappearance silent rather than an error")
+
+            self.assertEqual(
+                tracked_sources(root=root),
+                [root / "has space.py", root / "plain.py"],
+                "a tracked path containing a space was split into two "
+                "nonexistent paths and dropped, so the source left the scan "
+                "with nothing printed and the run still green")
+
+    def test_a_source_being_merged_arrives_once(self) -> None:
+        """An unmerged path must arrive once, not once per merge stage.
+
+        Cosmetic, and recorded as such: these results are collected into lists
+        and compared, so no verdict moves. What moves is the failure message,
+        which names the file being merged three times to a reader who is
+        already looking for what they just broke.
+        """
+
+        with tempfile.TemporaryDirectory() as home:
+            root = pathlib.Path(home)
+            _repo_with_a_source_being_merged(root)
+
+            stages = subprocess.run(
+                ["git", "ls-files", "-u", "--", "f.py"], cwd=root,
+                capture_output=True, text=True, check=True).stdout
+            self.assertEqual(
+                [line.split("\t")[0].split()[-1] for line in stages.splitlines()],
+                ["1", "2", "3"],
+                "the fixture did not leave an unmerged index, so the case "
+                "below proves nothing")
+
+            repeated = subprocess.run(
+                ["git", "ls-files", "-z", "--", "f.py"], cwd=root,
+                capture_output=True, text=True, check=True).stdout
+            self.assertEqual(
+                [name for name in repeated.split("\0") if name],
+                ["f.py", "f.py", "f.py"],
+                "this git no longer repeats an unmerged path; if that is now "
+                "the default, say so here rather than deleting the case")
+
+            self.assertEqual(
+                tracked_sources(root=root), [root / "f.py"],
+                "a file being merged joined the scan once per merge stage, so "
+                "it is parsed three times and named three times in one report")
+
+    def test_the_seam_reads_the_repository_it_is_pointed_at(self) -> None:
+        """`root` must move the enumeration, not merely be accepted.
+
+        A seam that were ignored would let both cases above read this
+        repository, find neither a spaced path nor a conflict, and pass
+        whatever the helper does.
+        """
+
+        with tempfile.TemporaryDirectory() as home:
+            root = pathlib.Path(home)
+            _repo_with_a_spaced_path(root)
+            self.assertEqual(tracked_sources(root=root),
+                             [root / "has space.py", root / "plain.py"])
+            self.assertNotIn(root / "plain.py", tracked_sources())
 
 
 if __name__ == "__main__":
