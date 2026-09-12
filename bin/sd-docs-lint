@@ -151,8 +151,8 @@ def check_shape(
 
 def check_ready(
     work_root: pathlib.Path, report: Report, statuses: sd_lib.Statuses
-) -> None:
-    """Rule 2.
+) -> int:
+    """Rule 2, returning how many items its three checks actually ran on.
 
     The status is read wherever `docs/work/.status-source` says, because the
     early return below is a switch: once the retire commit removes the
@@ -166,7 +166,16 @@ def check_ready(
     lives, and there is one archived item here whose line still says
     `in_progress`. Reading that as `done` would quietly stop checking it,
     which is the same switch in miniature.
+
+    The count comes back because the item total this rule shares with rule 1 is
+    not this rule's coverage and never was. Measured on this repository:
+    `checked 497 item(s)` while the three checks above ran on **two** of them,
+    the rest being `planning` or archived `done`. `status_source_note` already
+    describes the mechanism that narrows it, which is not the same as saying
+    how far it narrowed -- a reader given one number cannot tell 497 of 497
+    from 2 of 497, and both print the same clean line.
     """
+    workable = 0
     for item in item_directories(work_root):
         prd = item / "prd.md"
         if not prd.is_file():
@@ -180,6 +189,7 @@ def check_ready(
             status = sd_lib.status_report(item, statuses=statuses).status
         if status not in WORKABLE_STATUSES:
             continue
+        workable += 1
 
         if not any(ACCEPTANCE_HEADING_RE.match(line) for line in text.split("\n")):
             report.fail(str(prd), f"a {status} item states acceptance criteria")
@@ -188,6 +198,7 @@ def check_ready(
                 report.fail(f"{prd}:{number}", f"a {status} item has no open BLOCKING line")
         if status == "in_progress" and not fields.get("branch"):
             report.fail(str(prd), "an in_progress item records the branch it lives on")
+    return workable
 
 
 def status_source_note(statuses: sd_lib.Statuses) -> str:
@@ -221,6 +232,11 @@ def check_decisions(decisions_root: pathlib.Path, report: Report) -> None:
         return
 
     records = sorted(path for path in decisions_root.rglob("*.md") if path.is_file())
+    # An index is a table of contents, not a decision, and skipping it is
+    # right. Counting it anyway is not: `len(records)` is the enumeration, and
+    # reporting the enumeration as the coverage is how a rule says it checked
+    # more than it did. Both numbers, as rule 6 already does.
+    indexes = sum(1 for record in records if record.name == "index.md")
     for record in records:
         if record.name == "index.md":
             continue
@@ -248,7 +264,10 @@ def check_decisions(decisions_root: pathlib.Path, report: Report) -> None:
         if not any(DECISION_HEADING_RE.match(line) for line in text.split("\n")):
             report.fail(str(record), "a decision record states its decision under a Decision heading")
 
-    report.note(f"rule 3 decision shape: checked {len(records)} record(s)")
+    report.note(
+        f"rule 3 decision shape: checked {len(records) - indexes} record(s), "
+        f"skipping {indexes} index.md"
+    )
 
 
 def check_spec_index(spec_root: pathlib.Path, report: Report) -> None:
@@ -360,9 +379,20 @@ def resolve_citation(item: pathlib.Path, work_root: pathlib.Path, cited: str) ->
 
 LOG_HEADING_RE = re.compile(r"^#{1,3} +Log *$", re.IGNORECASE)
 
+# The reasons a citation this rule can see is not one this rule will check.
+# A closed vocabulary, because every one of them used to be a bare `continue`
+# and the point of naming them is that a reader can count them by name.
+ELSEWHERE = "name no markdown under the work directory"
+QUOTATION = "sit below a Log heading, where a citation quotes rather than claims"
+UNRECORDABLE = "could not be recorded"
 
-def item_citations(item: pathlib.Path, work_root: pathlib.Path) -> list[tuple[str, str, str, int]]:
-    """Every resolvable document citation in one item, above its Log.
+Skip = tuple[str, str, str, str]  # citing source, citation, reason, detail
+
+
+def item_citations(
+    item: pathlib.Path, work_root: pathlib.Path
+) -> tuple[list[tuple[str, str, str, int]], list[Skip]]:
+    """Every document citation in one item, sorted into checked and declined.
 
     A Log entry is a dated record of what a page said on the day it was
     reviewed, so its citations are quotations and not claims about the file as
@@ -370,23 +400,42 @@ def item_citations(item: pathlib.Path, work_root: pathlib.Path) -> list[tuple[st
     reported four such entries as drifted, and "correcting" them silently
     edited a finding's account of the citation that was wrong at the time.
     Same reasoning as skipping `archive/`.
+
+    Both exemptions stand. What does not stand is that they were spent in
+    silence: a `continue` per citation, no count, and a run that declined 123
+    citations in this repository while reporting on 25 printed exactly what a
+    run that checked all 148 would have printed. So the declined ones come
+    back too, each carrying why, and the caller says so.
+
+    The reasons are not symmetrical and the census keeps them apart. A
+    citation into code is another gate's work -- tests/test_doc_citations.py
+    checks the symbol beside it -- so `ELSEWHERE` is a handoff. A citation
+    below the Log is nobody's, deliberately. Only the caller's own
+    `UNRECORDABLE` is a citation this rule owns and did not check.
     """
     found: list[tuple[str, str, str, int]] = []
+    skipped: list[Skip] = []
     for name in ITEM_DOCUMENTS:
         source = item / name
         if not source.is_file():
             continue
+        below_log = False
         for number, line in enumerate(source.read_text(encoding="utf-8").splitlines(), 1):
             if LOG_HEADING_RE.match(line):
-                break
+                below_log = True
             for match in CITATION_RE.finditer(line):
+                citation = match.group(0).strip("`")
+                where = f"{name}:{number}"
+                if below_log:
+                    skipped.append((where, citation, QUOTATION, ""))
+                    continue
                 target = resolve_citation(item, work_root, match.group("path"))
                 if target is None:
+                    skipped.append((where, citation, ELSEWHERE, ""))
                     continue
                 relative = target.relative_to(work_root.resolve()).as_posix()
-                found.append((f"{name}:{number}", match.group(0).strip("`"), relative,
-                              int(match.group("start"))))
-    return found
+                found.append((where, citation, relative, int(match.group("start"))))
+    return found, skipped
 
 
 ANCHOR_WINDOW = 4
@@ -409,22 +458,118 @@ def anchor_line(lines: list[str], start: int) -> int | None:
     return None
 
 
-def write_citation_manifest(item: pathlib.Path, work_root: pathlib.Path) -> int:
-    """Record what each citation points at today. The recording is the baseline."""
-    rows = []
-    for source, citation, relative, start in item_citations(item, work_root):
+def citation_survey(
+    item: pathlib.Path, work_root: pathlib.Path
+) -> tuple[list[str], list[Skip]]:
+    """The manifest rows one item yields, and every citation that yielded none.
+
+    One walk, read by both the writer and the rule, so the two cannot disagree
+    about what was recorded -- and so the rule can see what the writer refused
+    without re-deriving the refusal from a file that no longer mentions it.
+
+    That refusal is the silencer this function exists to end. A citation whose
+    line does not exist in the file it names is a stale citation, which is the
+    single thing rule 6 was built to catch; `--update-citations` dropped it
+    from the recording without a word, and rule 6, reading only the recording,
+    then reported clean forever. Recording is where the evidence was lost, so
+    recording is where it is now kept. Three in this repository today, and
+    they had been invisible since the rule was written.
+    """
+    rows: list[str] = []
+    found, skipped = item_citations(item, work_root)
+    for source, citation, relative, start in found:
         lines = (work_root.resolve() / relative).read_text(encoding="utf-8").splitlines()
         if not 1 <= start <= len(lines):
+            skipped.append((source, citation, UNRECORDABLE,
+                            f"names line {start} of {relative}, which has {len(lines)}"))
             continue
         anchored = anchor_line(lines, start)
         if anchored is None:
+            skipped.append((source, citation, UNRECORDABLE,
+                            f"{relative}:{start} and the {ANCHOR_WINDOW - 1} lines under it "
+                            "are blank, so there is nothing to anchor to"))
             continue
         rows.append(
             "\t".join((source, citation, relative, str(anchored), snippet_of(lines[anchored - 1])))
         )
+    return rows, skipped
+
+
+def write_citation_manifest(
+    item: pathlib.Path, work_root: pathlib.Path
+) -> tuple[int, list[Skip]]:
+    """Record what each citation points at today. The recording is the baseline."""
+    rows, skipped = citation_survey(item, work_root)
     body = "\n".join(rows)
     (item / CITATION_MANIFEST).write_text(body + ("\n" if body else ""), encoding="utf-8")
-    return len(rows)
+    return len(rows), skipped
+
+
+def check_manifest(
+    item: pathlib.Path, work_root: pathlib.Path, report: Report
+) -> int:
+    """Compare one item's recording against the pages it was recorded from.
+
+    Lifted out of `check_citations` whole, unchanged, when the census this
+    item added took that function past the branch and length ceilings in
+    tests/test_code_health.py. Neither ceiling was raised and no baseline
+    entry was added: the two halves of rule 6 -- reading a recording, and
+    counting what never reached one -- are separable, so the shape was the
+    thing to fix.
+    """
+    checked = 0
+    manifest = item / CITATION_MANIFEST
+    cache: dict[str, list[str]] = {}
+    for number, row in enumerate(manifest.read_text(encoding="utf-8").splitlines(), 1):
+        fields = row.split("\t")
+        if len(fields) != 5:
+            report.fail(f"{manifest}:{number}", "a manifest row is not five fields")
+            continue
+        source, citation, relative, start, snippet = fields
+        snippet = snippet.rstrip()  # Older writers could truncate at a space.
+        target = work_root.resolve() / relative
+        if not target.is_file():
+            report.fail(f"{item.name}/{source}", f"`{citation}` names {relative}, which is gone")
+            continue
+        if relative not in cache:
+            cache[relative] = target.read_text(encoding="utf-8").splitlines()
+        lines = cache[relative]
+        checked += 1
+        index = int(start) - 1
+        if 0 <= index < len(lines) and snippet_of(lines[index]) == snippet:
+            continue
+        moved = [n for n, line in enumerate(lines, 1) if snippet_of(line) == snippet]
+        if len(moved) == 1:
+            where = f"that text is now at line {moved[0]}"
+        elif moved:
+            where = f"that text is now at lines {', '.join(str(n) for n in moved)}"
+        else:
+            where = "that text is gone from the file"
+        report.fail(
+            f"{item.name}/{source}",
+            f"`{citation}` was written against {relative}:{start} {snippet!r}; {where}",
+        )
+    return checked
+
+
+def census_note(declined: list[Skip]) -> str:
+    """The citations rule 6 saw and declined, counted by which decline it was.
+
+    Kept apart rather than summed, because they are not the same kind of gap:
+    a citation into another tree is a handoff to the adjacency rule, one below
+    a Log heading is a deliberate exemption, and one that could not be
+    recorded is rule 6 failing to watch its own corpus. On this repository the
+    third is 3 against the other two's 123, so a single total would bury it.
+    """
+    by_reason = {ELSEWHERE: 0, QUOTATION: 0, UNRECORDABLE: 0}
+    for _, _, reason, _ in declined:
+        by_reason[reason] = by_reason.get(reason, 0) + 1
+    return (
+        f"rule 6 not checked: {len(declined)} citation(s) -- "
+        f"{by_reason[ELSEWHERE]} {ELSEWHERE} (the adjacency rule's), "
+        f"{by_reason[QUOTATION]} {QUOTATION}, "
+        f"{by_reason[UNRECORDABLE]} {UNRECORDABLE}"
+    )
 
 
 def check_citations(work_root: pathlib.Path, report: Report) -> None:
@@ -459,53 +604,32 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
     checked = 0
     manifests = 0
     active = 0
+    declined: list[Skip] = []
+    unrecordable: list[str] = []
     for item in item_directories(work_root):
         if "archive" in item.parts:
             continue
         active += 1
+        recordable, skipped = citation_survey(item, work_root)
+        declined.extend(skipped)
+        unrecordable.extend(
+            f"{item.name}/{source}: `{citation}` {detail}"
+            for source, citation, reason, detail in skipped
+            if reason == UNRECORDABLE
+        )
         manifest = item / CITATION_MANIFEST
         if not manifest.is_file():
-            unrecorded = item_citations(item, work_root)
-            if unrecorded:
-                source, citation = unrecorded[0][0], unrecorded[0][1]
+            if recordable:
+                source, citation = recordable[0].split("\t")[:2]
                 report.fail(
                     f"{item.name}/{CITATION_MANIFEST}",
-                    f"missing, so {len(unrecorded)} citation(s) in this item are "
+                    f"missing, so {len(recordable)} citation(s) in this item are "
                     f"unwatched -- the first is `{citation}` at {source}; run "
                     "sd-docs-lint --update-citations to record the baseline",
                 )
             continue
         manifests += 1
-        cache: dict[str, list[str]] = {}
-        for number, row in enumerate(manifest.read_text(encoding="utf-8").splitlines(), 1):
-            fields = row.split("\t")
-            if len(fields) != 5:
-                report.fail(f"{manifest}:{number}", "a manifest row is not five fields")
-                continue
-            source, citation, relative, start, snippet = fields
-            snippet = snippet.rstrip()  # Older writers could truncate at a space.
-            target = work_root.resolve() / relative
-            if not target.is_file():
-                report.fail(f"{item.name}/{source}", f"`{citation}` names {relative}, which is gone")
-                continue
-            if relative not in cache:
-                cache[relative] = target.read_text(encoding="utf-8").splitlines()
-            lines = cache[relative]
-            checked += 1
-            index = int(start) - 1
-            if 0 <= index < len(lines) and snippet_of(lines[index]) == snippet:
-                continue
-            moved = [n for n, line in enumerate(lines, 1) if snippet_of(line) == snippet]
-            if len(moved) == 1:
-                where = f"that text is now at line {moved[0]}"
-            elif moved:
-                where = f"that text is now at lines {', '.join(str(n) for n in moved)}"
-            else:
-                where = "that text is gone from the file"
-            report.fail(
-                f"{item.name}/{source}",
-                f"`{citation}` was written against {relative}:{start} {snippet!r}; {where}",
-            )
+        checked += check_manifest(item, work_root, report)
     # Both numbers, always, and on one line. A reader who is told only how
     # many items were recorded cannot tell a complete run from a partial one;
     # told how many are active beside it, a gap reads as a gap at a glance.
@@ -513,6 +637,18 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
         f"rule 6 citations: checked {checked} citation(s) across {manifests} recorded item(s) "
         f"of {active} active item(s)"
     )
+    # The same argument, one level down. The line above counts items; this one
+    # counts the citations inside them that were seen and declined. On this
+    # repository it reads 126 against the 25 above -- five times as many
+    # citations declined as checked, a ratio the rule had never once stated.
+    if declined:
+        report.note(census_note(declined))
+    # Named one by one, and only this class. The other two are exemptions with
+    # a stated reason and a gate elsewhere; this one is rule 6's own corpus,
+    # rule 6 declining to watch it, and the only way to act on that is to know
+    # which citation it was.
+    for line in unrecordable:
+        report.note(f"rule 6 not recorded: {line}")
 
 
 # A metavariable makes a token a pattern rather than a path. Skipping on the
@@ -555,8 +691,12 @@ def check_work_references(repo: pathlib.Path, work_dir: str, report: Report) -> 
     )
     archive = f"{work_dir}/{sd_lib.ARCHIVE_DIR}/"
     files = seen = 0
+    unread = templates = 0
     for name in tracked.split("\0"):
-        if not name or name.startswith(archive) or name.endswith("CHANGELOG.md"):
+        if not name:
+            continue
+        if name.startswith(archive) or name.endswith("CHANGELOG.md"):
+            unread += 1
             continue
         try:
             text = (repo / name).read_text(encoding="utf-8")
@@ -567,11 +707,21 @@ def check_work_references(repo: pathlib.Path, work_dir: str, report: Report) -> 
         for match in reference_re.finditer(text):
             reference = match.group(0)
             if METAVARIABLE_RE.search(reference):
+                templates += 1
                 continue
             seen += 1
             if not (repo / reference).exists():
                 report.fail(name, f"{reference} names nothing in the checkout")
-    report.note(f"rule 7 work references: read {seen} reference(s) across {files} file(s)")
+    # Both exemptions keep their reason and lose their silence. `read 77
+    # reference(s) across 143 file(s)` was the whole report while 954 tracked
+    # documents went unread and 11 references were passed over as templates;
+    # a reader with one number cannot tell a narrow corpus from a whole one,
+    # and a skip nobody can count is a skip nobody can audit.
+    report.note(
+        f"rule 7 work references: read {seen} reference(s) across {files} file(s); "
+        f"skipped {unread} file(s) under {archive} or named CHANGELOG.md, "
+        f"and {templates} template reference(s)"
+    )
 
 
 def spelled_on_disk(base: pathlib.Path, name: str) -> str:
@@ -717,12 +867,15 @@ def run(
     statuses = sd_lib.Statuses.of(repo, work_dir)
     try:
         check_shape(work_root, report, statuses.source)
-        check_ready(work_root, report, statuses)
+        workable = check_ready(work_root, report, statuses)
         # Read before `close()`, which resets `opened`.
         source = status_source_note(statuses)
     finally:
         statuses.close()
-    report.note(f"rules 1-2 work items: checked {len(item_directories(work_root))} item(s)")
+    report.note(
+        f"rules 1-2 work items: checked {len(item_directories(work_root))} item(s), "
+        f"{workable} of them workable by rule 2"
+    )
     report.note(f"rule 2 status source: {source}")
     check_decisions(repo / decisions_dir, report)
     check_spec_index(repo / spec_dir, report)
@@ -780,8 +933,15 @@ def main(argv: list[str] | None = None) -> int:
         for item in item_directories(work_root):
             if "archive" in item.parts:
                 continue
-            count = write_citation_manifest(item, work_root)
-            print(f"{item.name}: recorded {count} citation(s)")
+            count, skipped = write_citation_manifest(item, work_root)
+            # The recorder's own count was a count of what it wrote, so a
+            # citation it refused to record was invisible at recording time
+            # too -- the one moment a person is looking straight at it. Both
+            # numbers here, and the refusals it owns named in full.
+            print(f"{item.name}: recorded {count} of {count + len(skipped)} citation(s)")
+            for source, citation, reason, detail in skipped:
+                if reason == UNRECORDABLE:
+                    print(f"  not recorded: {source} `{citation}` {detail}")
         return 0
 
     body: str | None = None

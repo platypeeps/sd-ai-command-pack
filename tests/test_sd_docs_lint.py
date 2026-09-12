@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
+import io
 import os
 import pathlib
 import subprocess
@@ -116,6 +117,20 @@ class LintFixture(unittest.TestCase):
     def assert_clean(self) -> None:
         report = self.run_lint()
         self.assertEqual(report.failures, [])
+
+    def notes(self) -> str:
+        """Every note one run printed, joined. What a rule says it did."""
+        return "\n".join(self.run_lint().notes)
+
+    def cited_item(self) -> pathlib.Path:
+        item = self.write_item("2026-08-29-a-cited-item", GOOD_PRD)
+        (item / "design.md").write_text(
+            "# design\n\nThe ladder is at `prd.md:3`.\n", encoding="utf-8"
+        )
+        return item
+
+    def record(self) -> tuple[int, list[tuple[str, str, str, str]]]:
+        return lint.write_citation_manifest(self.cited_item(), self.work)
 
     def assert_fails(self, needle: str, pr_body: str | None = None) -> list[str]:
         report = self.run_lint(pr_body)
@@ -283,6 +298,29 @@ class Rule2ReadyTests(LintFixture):
         )
         self.assert_fails("records the branch it lives on")
 
+    def test_red_the_note_says_how_many_items_rule_2_actually_checked(self) -> None:
+        """Backbone item sd:5. The item total was never rule 2's coverage.
+
+        Rule 2's three checks run on `ready` and `in_progress` items only, and
+        the note it shares with rule 1 counts every item on disk. On this
+        repository that reads `checked 497 item(s)` for a rule that ran on
+        two. `status_source_note` describes the mechanism that narrows it,
+        which is not the same as saying how far: one number cannot tell 497 of
+        497 from 2 of 497, and both print `clean`.
+
+        Here: one `ready` fixture item, one `planning` item beside it.
+        """
+        self.write_item(
+            "2026-08-30-idea",
+            "---\ntitle: An idea\nstatus: planning\ncreated: 2026-08-30\n---\n\n# PRD\n",
+        )
+        report = self.run_lint()
+        self.assertEqual(report.failures, [])
+        self.assertIn(
+            "rules 1-2 work items: checked 2 item(s), 1 of them workable by rule 2",
+            "\n".join(report.notes),
+        )
+
 
 class Rule2StatusSourceTests(LintFixture):
     """The run says where rule 2 read its statuses, because the two sources
@@ -348,6 +386,24 @@ class Rule3DecisionTests(LintFixture):
             "2026-08-29-json-config.md", GOOD_DECISION.replace("## Decision", "## Notes")
         )
         self.assert_fails("states its decision under a Decision heading")
+
+    def test_red_the_count_is_records_checked_not_files_enumerated(self) -> None:
+        """Backbone item sd:5, smallest of the set.
+
+        An `index.md` is a table of contents, and skipping it is right.
+        Counting it as a checked record is not: `len(records)` was the
+        enumeration, and reporting an enumeration as coverage is how a rule
+        claims to have checked what it passed over. One record, one index,
+        and the note has to say one.
+        """
+        self.write_decision("2026-08-29-json-config.md", GOOD_DECISION)
+        self.write_decision("index.md", "# decisions\n\n- one\n")
+        report = self.run_lint()
+        self.assertEqual(report.failures, [])
+        self.assertIn(
+            "rule 3 decision shape: checked 1 record(s), skipping 1 index.md",
+            "\n".join(report.notes),
+        )
 
 
 class Rule4SpecIndexTests(LintFixture):
@@ -522,16 +578,6 @@ class Rule6CitationTests(LintFixture):
     from there.
     """
 
-    def cited_item(self) -> pathlib.Path:
-        item = self.write_item("2026-08-29-a-cited-item", GOOD_PRD)
-        (item / "design.md").write_text(
-            "# design\n\nThe ladder is at `prd.md:3`.\n", encoding="utf-8"
-        )
-        return item
-
-    def record(self) -> int:
-        return lint.write_citation_manifest(self.cited_item(), self.work)
-
     def test_green_a_recorded_citation_that_has_not_moved(self) -> None:
         self.record()
         self.assert_clean()
@@ -543,7 +589,7 @@ class Rule6CitationTests(LintFixture):
         lines.append(prefix + " beyond the first phrase.")
         (item / "prd.md").write_text("\n".join(lines) + "\n")
         (item / "design.md").write_text(f"# design\n\nSee `prd.md:{len(lines)}`.\n")
-        self.assertEqual(lint.write_citation_manifest(item, self.work), 1)
+        self.assertEqual(lint.write_citation_manifest(item, self.work), (1, []))
         return item, prefix, len(lines)
 
     def test_manifest_writer_emits_no_space_at_the_truncation_boundary(self) -> None:
@@ -651,16 +697,35 @@ class Rule6CitationTests(LintFixture):
         self.assert_clean()
 
     def test_a_citation_that_leaves_the_work_root_does_not_resolve(self) -> None:
+        """Still not checked, and no longer not mentioned.
+
+        The escape stands -- this must never open `/etc/passwd` -- but a
+        refusal that vanishes is indistinguishable from a citation that was
+        read and found sound, which is the whole of this item.
+        """
         item = self.cited_item()
         (item / "design.md").write_text(
             "See `../../../etc/passwd.md:1`.\n", encoding="utf-8"
         )
-        self.assertEqual(lint.item_citations(item, self.work), [])
+        found, skipped = lint.item_citations(item, self.work)
+        self.assertEqual(found, [])
+        self.assertEqual(
+            skipped, [("design.md:1", "../../../etc/passwd.md:1", lint.ELSEWHERE, "")]
+        )
 
     def test_a_citation_into_code_is_left_to_the_adjacency_rule(self) -> None:
+        """And is not even seen: `CITATION_RE` requires a `.md` target.
+
+        Recorded rather than fixed. A code citation is another gate's work by
+        design, so rule 6 declining it is right; what this pins is that rule 6
+        cannot count what its own regex never matched, so `bin/sd:1378` is
+        absent from both halves rather than present in the census. The
+        citations the census does count as elsewhere are markdown outside the
+        work directory, which the regex does match.
+        """
         item = self.cited_item()
         (item / "design.md").write_text("The reader is at `bin/sd:1378`.\n", encoding="utf-8")
-        self.assertEqual(lint.item_citations(item, self.work), [])
+        self.assertEqual(lint.item_citations(item, self.work), ([], []))
 
     def test_a_citation_below_the_log_heading_is_a_quotation_not_a_claim(self) -> None:
         item = self.cited_item()
@@ -669,8 +734,13 @@ class Rule6CitationTests(LintFixture):
             "## Log\n\n- C-1: `prd.md:3` was wrong on the day.\n",
             encoding="utf-8",
         )
-        citations = lint.item_citations(item, self.work)
-        self.assertEqual([entry[0] for entry in citations], ["design.md:3"])
+        found, skipped = lint.item_citations(item, self.work)
+        self.assertEqual([entry[0] for entry in found], ["design.md:3"])
+        # The exemption keeps its reason and loses its silence: the quotation
+        # is still not compared, and is now counted as a quotation.
+        self.assertEqual(
+            skipped, [("design.md:7", "prd.md:3", lint.QUOTATION, "")]
+        )
 
     def test_a_blank_target_line_anchors_to_the_text_under_it(self) -> None:
         item = self.cited_item()
@@ -681,6 +751,109 @@ class Rule6CitationTests(LintFixture):
         lint.write_citation_manifest(item, self.work)
         recorded = (item / lint.CITATION_MANIFEST).read_text(encoding="utf-8").split("\t")
         self.assertNotEqual(recorded[4].strip(), "")
+
+
+class Rule6SilencerTests(LintFixture):
+    """Backbone item sd:5. Every decline rule 6 makes now says so.
+
+    Rule 6 declined more citations than it checked and reported only what it
+    checked. Measured on this repository at `06fb9de0`: 25 citations compared,
+    126 declined -- 69 naming markdown outside the work directory, 54 below a
+    Log heading, and 3 that the recorder silently refused to record. The run
+    printed `checked 25 citation(s)` and `clean`, which is the same output a
+    run that compared all 151 would have produced.
+
+    The three refusals are the ones that matter, because they are rule 6's own
+    corpus: a citation to a line the file does not have is a stale citation,
+    exactly what this rule exists to catch, and `--update-citations` dropped it
+    from the baseline so the rule never saw it again.
+
+    They are reported, not failed. Two of the three live instances are a
+    document *quoting* a citation while explaining this defect, and the gate
+    cannot tell a quotation from a claim -- open question 3 on the item, still
+    open. Failing them would make this repository red over prose that is
+    correct. The precedent is the item's own answer to open question 1:
+    compared and reported, nothing red, until there is a way to write an inert
+    citation.
+    """
+
+    def out_of_range_item(self) -> pathlib.Path:
+        """An item citing a line its own prd.md does not have."""
+        item = self.write_item("2026-08-29-a-citing-item", GOOD_PRD)
+        (item / "design.md").write_text(
+            "# design\n\nThe ladder is at `prd.md:900`.\n", encoding="utf-8"
+        )
+        return item
+
+    def test_red_a_citation_the_recorder_refused_is_named(self) -> None:
+        """The silencer, at its narrowest and most damning.
+
+        `prd.md:900` names a line of a twelve-line file. `write_citation_manifest`
+        dropped it, the manifest came out empty, rule 6 read an empty manifest
+        and reported a clean run, and no output anywhere in the program
+        mentioned the citation. Against the unfixed code the assertion below
+        finds nothing to match.
+        """
+        item = self.out_of_range_item()
+        lint.write_citation_manifest(item, self.work)
+        self.assertEqual((item / lint.CITATION_MANIFEST).read_text(encoding="utf-8"), "")
+        length = len((item / "prd.md").read_text(encoding="utf-8").splitlines())
+        notes = self.notes()
+        self.assertIn("rule 6 not recorded:", notes)
+        self.assertIn("`prd.md:900`", notes)
+        self.assertIn(f"names line 900 of 2026-08-29-a-citing-item/prd.md, which has {length}", notes)
+
+    def test_red_the_census_counts_each_kind_of_decline_apart(self) -> None:
+        """One line, three buckets, and a total that conserves them.
+
+        Kept apart on purpose: a citation into another tree is a handoff to
+        the adjacency rule, a citation below a Log heading is a deliberate
+        exemption, and a citation that could not be recorded is rule 6
+        failing to watch its own corpus. Rolling them into one number would
+        hide the third behind the first two, which outnumber it 41 to 1 in
+        this repository.
+        """
+        item = self.out_of_range_item()
+        (item / "implement.md").write_text(
+            "# implement\n\nSee `../../../etc/passwd.md:1`.\n\n"
+            "## Log\n\n- C-1: `prd.md:3` was right on the day.\n",
+            encoding="utf-8",
+        )
+        notes = self.notes()
+        self.assertIn("rule 6 not checked: 3 citation(s)", notes)
+        self.assertIn(f"1 {lint.ELSEWHERE}", notes)
+        self.assertIn(f"1 {lint.QUOTATION}", notes)
+        self.assertIn(f"1 {lint.UNRECORDABLE}", notes)
+
+    def test_red_update_citations_says_what_it_would_not_record(self) -> None:
+        """The recorder's own count was a count of what it wrote.
+
+        A person running `--update-citations` is looking straight at the
+        citation at the one moment it could have been caught, and was told
+        `recorded 0 citation(s)` with no hint that there had been one to
+        record.
+        """
+        self.out_of_range_item()
+        self.git("add", "-A")
+        with in_directory(self.repo):
+            with mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+                self.assertEqual(lint.main(["--update-citations"]), 0)
+        printed = out.getvalue()
+        self.assertIn("2026-08-29-a-citing-item: recorded 0 of 1 citation(s)", printed)
+        self.assertIn("not recorded: design.md:3 `prd.md:900`", printed)
+
+    def test_a_recordable_citation_is_not_reported_as_declined(self) -> None:
+        """The control for this class: a sound citation stays out of the census.
+
+        Green before this change and after it. If the census ever starts
+        naming citations that were checked, the two halves have stopped
+        conserving and every count above is meaningless.
+        """
+        self.record()
+        notes = self.notes()
+        self.assertIn("checked 1 citation(s)", notes)
+        self.assertNotIn("rule 6 not recorded:", notes)
+        self.assertNotIn("rule 6 not checked:", notes)
 
 
 class Rule7WorkReferenceTests(LintFixture):
@@ -724,6 +897,35 @@ class Rule7WorkReferenceTests(LintFixture):
         """It names paths as they were, which is where a stale one is correct."""
         self.name_it("docs/work/2026-01-01-long-gone/prd.md", page="CHANGELOG.md")
         self.assert_clean()
+
+    def test_red_the_note_counts_the_files_and_references_it_skipped(self) -> None:
+        """Backbone item sd:5. Both exemptions keep their reason, lose their silence.
+
+        `read 77 reference(s) across 143 file(s)` was rule 7's whole report on
+        this repository while 954 tracked documents went unread under
+        `archive/` or as `CHANGELOG.md`, and 11 references were passed over as
+        templates. Neither skip is wrong and neither is being removed. What
+        was wrong is that a reader given one number cannot tell a narrow
+        corpus from a whole one, and a skip nobody can count is a skip nobody
+        can audit.
+
+        Here: one archived document and one `CHANGELOG.md` unread, one
+        metavariable reference passed over, one real reference read.
+        """
+        self.write_item("2026-08-29-an-archived-item", GOOD_PRD, month="2026-08")
+        self.name_it("docs/work/2026-01-01-long-gone/prd.md", page="CHANGELOG.md")
+        self.name_it(
+            "docs/work/<YYYY-MM-DD>-<slug>/prd.md and "
+            "docs/work/2026-08-29-a-workable-item/prd.md"
+        )
+        report = self.run_lint()
+        self.assertEqual(report.failures, [])
+        self.assertIn(
+            "rule 7 work references: read 1 reference(s) across 4 file(s); "
+            "skipped 2 file(s) under docs/work/archive/ or named CHANGELOG.md, "
+            "and 1 template reference(s)",
+            "\n".join(report.notes),
+        )
 
     def test_an_untracked_page_is_not_a_document_this_repository_publishes(self) -> None:
         self.assert_clean()
@@ -848,12 +1050,18 @@ class Rule7UnmergedIndexTests(unittest.TestCase):
         Two files are readable here -- `NOTES.md` and the item's `prd.md` --
         and between them they name one `docs/work/` path. Both numbers are
         read rather than computed, so the case cannot agree with the defect.
+
+        Matched as a prefix of the note rather than as the whole of it, so
+        that the skip counts the note gained for sd:5 -- and anything else it
+        gains later -- cannot make this case pass or fail for a reason that
+        has nothing to do with merge stages. The two numbers it is about are
+        still pinned exactly.
         """
         self.assert_the_index_is_unmerged()
         report = lint.run(self.repo, "docs/work", "docs/spec", "docs/decisions", None)
         self.assertIn(
             "rule 7 work references: read 1 reference(s) across 2 file(s)",
-            report.notes,
+            "\n".join(report.notes),
             f"inflated totals: {report.notes}",
         )
 
