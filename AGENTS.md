@@ -85,10 +85,6 @@ Route by intent:
 - **Publishing a branch, working its review, and merging it** — use the pack's
   ship workflow rather than invoking the create-PR, review, and merge steps
   separately. It sequences them and owns the stop-points between them.
-- **Finishing a task** — use the pack's finish-work workflow. It produces the
-  bookkeeping receipt the merge gate independently revalidates.
-- **Merging** — go through the pack's housekeeping gate. It is the only merge
-  authority; nothing else in the chain merges.
 - **Reviewing changes locally before publishing** — use the pack's review
   workflow, which runs the deterministic checks the remote review assumes.
 - **Anything with no pack wrapper** — use the Trellis command directly. The
