@@ -95,9 +95,16 @@ A change with no work item needs no PRD or database row to ship.
    requests onto this one's base, but this lane squashes, so what they
    inherited from this branch is not the commit that landed; each retargeted
    diff re-proposes this branch's changes as its own and conflicts with the
-   squash. Nobody reviewed that diff. Retarget each one yourself with
-   `gh pr edit <N> --base <this branch's base>`, let its checks settle, then
-   ask here again. The wait in step 5 stands: this branch's head did not move.
+   squash. Nobody reviewed that diff.
+   Retargeting alone does not repair it. `gh pr edit <N> --base <base>` moves
+   the pull request's metadata and nothing else, so a child whose head
+   descends from this branch still carries this branch's commits and its diff
+   against the new base still re-proposes them. Each child has to be rebased
+   off this branch's commit range as well —
+   `git rebase --onto <base> <this branch> <child branch>` — force-pushed, and
+   reviewed again on the head that produces. The run stays stopped until that
+   is done, then ask here again. The wait in step 5 stands for this branch:
+   its own head did not move.
 7. **Merge**: `gh pr merge --squash --match-head-commit <the reviewed sha>
    -t "<title> (#N)" -b "<body>"`. The explicit `-t`/`-b` is the wip-eraser:
    `wip:` subjects must never reach main.

@@ -515,6 +515,27 @@ class ABranchAnotherPullRequestIsBasedOn(unittest.TestCase):
             "the query is not scoped to open pull requests, so a merged or "
             "closed child would stop the run")
 
+    def test_the_repair_is_a_rebase_and_not_only_a_retarget(self) -> None:
+        """The defect a reviewer found in the first draft of this step.
+
+        `gh pr edit --base` moves the pull request's metadata and nothing
+        else. A child whose head descends from this branch keeps this branch's
+        commits, so after the retarget its diff against the new base still
+        re-proposes them and still conflicts with the squash -- the exact
+        outcome the step was written to prevent, reached by following the
+        step. The repair has to move the child's *commits*, so the step has to
+        prescribe a rebase; asserting on the metadata command alone would pass
+        the wrong instruction.
+        """
+
+        rebases = [c for c in commands(self.step) if c.startswith("git rebase")]
+        self.assertEqual(
+            len(rebases), 1,
+            f"step 6 prescribes {len(rebases)} rebases; a retarget alone "
+            "leaves the child carrying this branch's commits")
+        self.assertIn("--onto", shlex.split(rebases[0]),
+                      "the rebase does not drop this branch's commit range")
+
     def test_the_step_prescribes_no_merge(self) -> None:
         merges = [c for c in commands(self.step) if c.startswith("gh pr merge")]
         self.assertEqual(merges, [], "step 6 merges; the merge is step 7's")
