@@ -123,7 +123,7 @@ rather than on a fixture.
 
 **The marker read is line-aware, and the flattening does not prevent it.**
 `classify` flattens with `.replace("\n", " ")`
-(`tests/test_doc_citations.py:451`), which a reviewer read as making 0.71.34's
+(`tests/test_doc_citations.py:466`), which a reviewer read as making 0.71.34's
 "same line" rule unimplementable. It does not: the substitution is one
 character for one character, so offsets in the flattened text are offsets in
 the original. `marker_after()` matches against the flattened text and then
@@ -241,7 +241,7 @@ and it covers one citation, not a document, a region or a path.
 
 **Delivered, and demonstrated here rather than described.** This page can now
 show the literal shape it is about.
-`frontmatter` (`bin/sd:1231`) [quoted: tests/test_doc_citations.py:337]
+`frontmatter` (`bin/sd:1231`) [quoted: tests/test_doc_citations.py:343]
 is the citation that went stale, quoted here as the example it is and carrying
 a marker that tells the gate not to read it as a claim. The live one is `frontmatter` (`bin/sd:1257`),
 and 1231 now sits inside another function's docstring -- which is the whole
@@ -251,13 +251,12 @@ and was wrong in the document arguing against exactly that.
 The quoted citation lands in the `quoted` bucket and is counted, which is this
 design's standard: a silencer that is counted is visible, and a bucket that
 moves is a defect that shows. The marker's reason was free text when this
-shipped, so `[quoted: anything]` exempted a citation; D4a, delivered as
-sd:568, made the reason a `path:line` the gate opens. D4a
-below is where that reason becomes a `path:line` the gate checks. Until then
-this exemption is counted and not falsifiable, and the honest thing is to say
-so here rather than let the paragraph imply the check already runs. That this
-paragraph survives `make check` is question 3's acceptance test, and no fixture
-could have been it.
+shipped, so `[quoted: anything]` exempted a citation. D4a below is where that
+reason becomes a `path:line` the gate opens, and it is delivered as sd:568:
+the reason above is now one, and if the line it names stops carrying this
+citation the row goes red in `quoted-not-there`. That this paragraph survives
+`make check` is question 3's acceptance test, and no fixture could have been
+it.
 
 *A metavariable line number* — `` `bin/sd:NN` `` — reusing rule 7's own device.
 It is genuinely the closest precedent and it is what this document was forced

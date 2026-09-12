@@ -336,11 +336,13 @@ pass.
 **Not verifiable here.** Whether the census line is *read* by anyone is a
 property of the people running `make check`, not of this repository; the
 conservation assertion is what stands in for it and is the reason the design
-does not rely on the printing. Whether `[quoted: <reason>]` is used honestly —
+does not rely on the printing. Whether `[quoted: <path:line>]` is used honestly —
 to mark an example rather than to silence a claim someone could not be bothered
-to fix — cannot be tested at all. The census makes its population visible,
-which is the most a gate can do about a marker whose whole purpose is to be
-unfalsifiable.
+to fix — cannot be tested at all, and that limit is the only one left. D4a
+closed the rest: the reason names a line, the gate opens it, and a reason that
+does not carry the citation lands in `quoted-not-there` and fails. What a gate
+cannot check is the intent behind an honest-looking reason; the census makes
+the population visible, which is the most it can do about that.
 
 ## Verification results
 

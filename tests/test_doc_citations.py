@@ -58,12 +58,14 @@ reason                         live  archiv   total
 `target-missing`                  0       0       0
 `escapes-checkout`                0       0       0
 `quoted`                          1       0       1
+`quoted-not-there`                0       0       0
 ===========================  ======  ======  ======
 
 Each reason, with why it exists:
 
 * **`compared`** -- the anchor was checked against the cited line. One of the
-  three buckets that can fail, with `target-missing` and `absent-but-present`;
+  four buckets that can fail, with `target-missing`, `absent-but-present`
+  and `quoted-not-there`;
   `test_the_red_buckets_are_empty` is what spends the other two.
 * **`no-adjacent-anchor`** and **`elided-path`** -- the token matched no
   anchoring shape, or names a line and no file because the prose named the
@@ -94,7 +96,11 @@ Each reason, with why it exists:
   fired on real content, and it is its own bucket so that the silence stays
   visible instead of being inferred from one it used to share with a live
   defect.
-* **`quoted`** -- the citation carries `[quoted: <reason>]`. See below.
+* **`quoted`** -- the citation carries `[quoted: <path:line>]` and that line
+  really carries this citation. See below.
+* **`quoted-not-there`** -- it carries one whose line does not. Red: a reason
+  that parses but does not hold is worse than free text, because it looks
+  checked.
 
 **The corpus is every tracked markdown file, asked of git**, with
 `CHANGELOG.md` excluded by name carrying rule 7's reason: the changelog names
@@ -410,8 +416,17 @@ def quotes(reason: str, token: str) -> bool:
     source = REPO_ROOT / path
     if not is_under_repo(source) or not source.is_file():
         return False
+    try:
+        number = int(line)
+    except ValueError:
+        # `\d+` is unbounded and CPython refuses to convert a string of more
+        # than 4,300 digits, so a long enough run of digits parses as a reason
+        # and then raises out of `classify`. A gate that crashes on a document
+        # is worse than one that fails it: the run reports nothing at all
+        # rather than one bad row. An unconvertible line number is a line the
+        # file does not have, which is already a failed quote.
+        return False
     lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
-    number = int(line)
     return 1 <= number <= len(lines) and token in lines[number - 1]
 
 
@@ -631,7 +646,7 @@ class DocCitationTests(unittest.TestCase):
             self.assertEqual(names, ["kept.md"], f"corpus was {names}")
 
     def test_the_red_buckets_are_empty(self) -> None:
-        """The docstring calls three buckets red. Until this, nothing made them so.
+        """The docstring calls four buckets red. Until this, nothing made them so.
 
         `anchored_citations()` filters to `compared`, so the stale-symbol test
         never sees `target-missing` or `absent-but-present`: a live citation to
@@ -765,9 +780,15 @@ class TheMarkerGrammar(unittest.TestCase):
         is checked like any other claim.
         """
 
-        self.assertNotEqual(
+        # The exact bucket, not merely "not quoted". A regression that kept
+        # treating the sentence as a marker would land in `quoted-not-there`
+        # and pass an assertNotEqual, while the contract here is stronger:
+        # a malformed reason is not a marker at all, so the citation falls
+        # through and is checked like any other -- and `bin/x.py` does not
+        # exist, so it is `target-missing`.
+        self.assertEqual(
             self.reason_for("`f` (`bin/x.py:1`) [quoted: an English sentence]"),
-            "quoted")
+            "target-missing")
 
     def test_a_reason_naming_a_line_that_does_not_carry_the_citation(self) -> None:
         """The failing direction, which is the whole point of D4a.
@@ -784,6 +805,20 @@ class TheMarkerGrammar(unittest.TestCase):
     def test_a_reason_naming_a_file_that_is_not_there(self) -> None:
         self.assertEqual(
             self.reason_for(f"`f` ({self.QUOTABLE}) [quoted: no-such-file-here.md:1]"),
+            "quoted-not-there")
+
+    def test_a_reason_whose_line_number_will_not_convert(self) -> None:
+        """`\\d+` is unbounded; CPython refuses more than 4,300 digits.
+
+        Found by Copilot on #870 and real: `int()` raises `ValueError` there,
+        which would leave `classify` crashing on a document instead of
+        failing one row, so the whole gate reports nothing.
+        """
+
+        digits = "9" * 4301
+        self.assertEqual(
+            self.reason_for(
+                f"`f` ({self.QUOTABLE}) [quoted: tests/test_doc_citations.py:{digits}]"),
             "quoted-not-there")
 
     def test_a_reason_naming_a_line_past_the_end_of_its_file(self) -> None:
