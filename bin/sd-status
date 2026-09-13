@@ -1132,12 +1132,12 @@ def residue_section(root: pathlib.Path) -> list[dict[str, Any]]:
 
 
 def _database_issues(slug: str) -> dict[str, Any] | None:
-    """Prefer the shared database; an unreadable one never falls back to old data."""
+    """Prefer the shared database; only its absence falls back, never a failure to read it."""
     try:
         import sd_db
         from sd_db.progress import tracker_freshness, tracker_items
     except ImportError:
-        return None
+        return {"available": False, "reason": "shared tracker library is not installed", "needs_you": [], "other": []}
     if not sd_db.default_path().exists():
         return None
     try:
