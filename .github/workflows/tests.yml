@@ -187,11 +187,12 @@ jobs:
       # folded them in here. Same commands, same pins, same scanner set; what
       # changed is that they no longer pay a second checkout, a second Python
       # and a second dependency install to run for well under a minute. The
-      # `bash 3.2 syntax` job left in the same change: it built bash 3.2 from
-      # source to parse this repository's own three scripts under
+      # same change removed the `bash 3.2 syntax` job from this file: it built
+      # bash 3.2 from source to parse this repository's own three scripts under
       # `.github/scripts/`, a premise that stopped being true when the shipped
-      # shell was deleted. `make lint` still parses them with `/bin/bash` on the
-      # maintainer's macOS, which is the interpreter the check was ever about.
+      # shell was deleted. No job here runs that gate now; `make lint` still
+      # parses the three scripts with `/bin/bash` on the maintainer's macOS,
+      # which is the interpreter the check was ever about.
       #
       # Scans pack-owned Python only. After step 3e that is bin/: nothing is
       # shipped into consumer repos any more, so "shipped Python" and "the

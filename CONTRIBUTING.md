@@ -33,8 +33,10 @@ make docs-lint
 make check
 ```
 
-`make check` is exactly `test lint audit docs-lint`, which is exactly what CI
-runs.
+`make check` is exactly `test lint audit docs-lint`, and CI runs the same
+commands with one difference: the `lint` target's bash 3.2 parse runs only
+locally, because no runner has bash 3.2 and the job that built one was cut
+(sd:10, criterion 17). Everything else `make check` runs, CI runs.
 `make full-check` and `make generate` are gone: the first wrapped a shipped
 script that no longer exists, and the second regenerated committed per-platform
 copies that no longer exist either — the installer renders from `skills/` at
@@ -101,12 +103,15 @@ and had silently omitted every `bin/` file.
 
 ## Main Branch Policy
 
-Every change to `main` goes through a pull request. Merge authority is the
-merge lane, which reads every check on the pull request and refuses to merge
-unless each one concluded success; GitHub branch protection is deleted, as the
-next paragraph but one records, and there is no local pre-push hook, no
-server-side path policy, and no bookkeeping fast lane. A pull-request head and
-a push to `main` run the
+Every change to `main` goes through a pull request. Nothing server-side
+enforces that today: GitHub branch protection is deleted, as the next
+paragraph but one records, and there is no local pre-push hook, no server-side
+path policy, and no bookkeeping fast lane. Merges land by hand with `gh pr
+merge` after the maintainer reads the checks; `sd-ship merge` does not run
+against an unprotected branch, because it reads the protection object before
+the pull request's checks and refuses a missing one
+(`bin/sd_ship_remote.py`, `protection()`, called from `bin/sd-ship` ahead of
+`ready()`). A pull-request head and a push to `main` run the
 same two unconditional jobs in `tests.yml` — the `unittest` matrix and `lint`
 — producing two contexts, `unittest (ubuntu-latest, 3.13)` and `lint`; a pull
 request also runs the advisory `route` job from `sd-review-route.yml`.
@@ -124,9 +129,10 @@ That sentence is only true while protection is actually enforcing, so state the
 condition rather than the conclusion. Protection on `main` was deleted on
 2026-09-12 and `.github/sd-status.json` records why, as an accepted gap with
 the condition that ends it; while it is gone there are no required contexts,
-and what refuses a red merge is the merge lane reading every check on the
-pull request. When protection returns, the contexts to require are the ones
-the workflow files produce at that time, not a list kept here.
+and what refuses a red merge is the maintainer reading the checks before
+`gh pr merge`, one person and not a gate. When protection returns, the
+contexts to require are the ones the workflow files produce at that time, not
+a list kept here, and `sd-ship merge` becomes runnable again.
 
 One was, briefly: `bash 3.2 syntax` began reporting when R11-D5 merged but was
 not added to the protection object until 2026-08-30, so for a few hours a red

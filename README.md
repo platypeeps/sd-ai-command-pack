@@ -296,26 +296,29 @@ make setup   # once
 make check   # test + lint + audit + docs-lint
 ```
 
-CI is two gating jobs in `tests.yml`, named here as their status contexts
-read, plus the advisory `route` job in `sd-review-route.yml`:
+CI is two gating jobs in `tests.yml`, named here by the status context GitHub
+emits for each (the matrix job's context carries its matrix values), plus the
+advisory `route` job in `sd-review-route.yml`:
 
-| Job | What it runs |
+| Context | What it runs |
 |---|---|
-| `unittest` | The suite on Ubuntu, Python 3.13, plus the installer coverage gate |
-| `lint` | Ruff and mypy over `bin/`, `sd-docs-lint` over this checkout's `docs/`, then Bandit over `bin/`, zizmor over the workflows, and ShellCheck |
+| `unittest (ubuntu-latest, 3.13)` | The suite on Ubuntu, Python 3.13, plus the installer coverage gate |
+| `lint` | Ruff over `dashboard`, `bin/` and `tests/` and mypy over `dashboard` and `bin/` (the path lists are `LINT_RUFF_PATHS` and `LINT_MYPY_PATHS` in the `Makefile`, read rather than restated), `sd-docs-lint` over this checkout's `docs/`, then Bandit over `bin/`, zizmor over the workflows, and ShellCheck over the tracked shell |
 
 `sd-status` compares the live protection object with the contexts the
 workflow files produce, not with this table, so a row here can go stale
 without anything saying so; the workflow files are the inventory.
 
-One protection state on `main` is accepted rather than open, and it is recorded
-in tracked `.github/sd-status.json` rather than in prose: a pull request is
-required and asks for **zero** approving reviews, because with `enforce_admins`
-on and one maintainer, GitHub's refusal of self-approval makes requiring one
-approval a lock and deleting the review object a loss of the pull-request
-requirement. `sd-status` prints it every run as `ok  [reviews] accepted …` with
-the condition that ends it, and stops accepting it the moment the live
-protection state stops matching what the file pins.
+`main` is currently unprotected, and that is an accepted gap rather than an
+open one, recorded in tracked `.github/sd-status.json` under the id
+`unprotected` with the reason and the condition that ends it (a second
+account with push or merge rights). `sd-status` reports it every run as
+accepted and stops accepting it the moment the live state stops matching what
+the file pins. While protection is gone there are no required contexts, and
+`sd-ship merge` refuses to run: it reads the protection object before it
+reads the pull request's checks and refuses a missing one
+(`bin/sd_ship_remote.py`, `protection()`). Merges land by hand with
+`gh pr merge` after the maintainer reads the checks.
 
 **Installer coverage is gated at 100% line and branch.** The gate enumerates its
 subject from git rather than matching a glob, and declares a statement floor, so
