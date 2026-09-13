@@ -209,6 +209,47 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual([note["kind"] for note in added], ["comment"])
         self.assertIn("repo", added[0]["body"])
 
+    def test_the_move_is_visible_without_asking_for_json(self):
+        """The other half of sd:452: `repo` was the field no output showed.
+
+        `--belongs-to` wrote the database and printed the same five words back,
+        so the only way to see the move was `--json`. It prints now -- but only
+        where it says something, because a path on every row of every listing
+        is a field nobody reads.
+        """
+        root = self._checkout("visible")
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.repos.add(connection, root, home=self.home)
+        item = json.loads(self.call("task", "add", "Mis-filed", "--json").stdout)["item"]["id"]
+
+        # The move, made from inside the destination, where "which repository"
+        # is otherwise answered by where the caller is standing.
+        moved = self.call("task", "edit", item, "--belongs-to", ".", cwd=root)
+        self.assertIn(f"repo: {root.resolve()}", moved.stdout)
+
+        # Read back from outside every checkout: nothing else answers it.
+        self.assertIn(f"repo: {root.resolve()}",
+                      self.call("store", "item", item).stdout)
+
+        # The control. Standing in the row's own checkout, an ordinary listing
+        # does not grow a repo line.
+        listed = self.call("store", "items", cwd=root)
+        self.assertIn("Mis-filed", listed.stdout)
+        self.assertNotIn("repo:", listed.stdout)
+
+        # And a linked worktree of it is still standing in it: the row carries
+        # the main checkout, which is the spelling `add` resolved it to.
+        linked = self.home / "visible-linked"
+        subprocess.run(["git", "worktree", "add", "-q", "-b", "side", str(linked)],
+                       cwd=str(root), check=True, capture_output=True, text=True)
+        self.assertNotIn("repo:", self.call("store", "items", cwd=linked).stdout)
+
+        # Clearing it is a move too, and says so rather than printing a blank.
+        cleared = self.call("task", "edit", item, "--no-repo", cwd=root)
+        self.assertIn(f"repo: {sd_work.NO_CHECKOUT}", cleared.stdout)
+        # ...and afterwards there is no path to name, so nothing is named.
+        self.assertNotIn("repo:", self.call("store", "item", item).stdout)
+
     def test_an_unregistered_repository_is_refused_without_moving_the_row(self):
         """The `repo` table is the authority, and a refusal changes nothing."""
         stranger = self._checkout("stranger")
@@ -297,7 +338,8 @@ class WorkRegister(unittest.TestCase):
         self.assertEqual(row["status"], "planning")
         self.assertEqual(row["repo"], str(self.root))
         self.assertEqual(row["path"], path)
-        self.assertEqual(row["branch"], "origin/main")
+        # On the default branch there is no working branch to name yet.
+        self.assertIsNone(row["branch"])
         # The commit is read from git, not asserted by the caller.
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(self.root),
                               capture_output=True, text=True, check=True).stdout.strip()
@@ -318,23 +360,54 @@ class WorkRegister(unittest.TestCase):
         self.assertEqual(first["item"]["id"], again["item"]["id"])
         self.assertIn("already registered", self.call("work", "register", path).stdout)
 
-    def test_the_row_records_the_landing_branch_not_the_one_checked_out(self):
-        """Registration happens before the work branch exists.
+    def test_the_row_records_a_local_working_branch_or_none(self):
+        """`item.branch` is the branch the work happens ON, so it is a local head.
 
-        `sd-plan` writes the plan at step 2 and branches at step 6, so the
-        branch checked out while registering is whatever the planner was
-        standing on -- and on a detached checkout `--abbrev-ref HEAD` is the
-        literal string `HEAD`. Neither is the branch this work lands on.
+        A runner clone standing on `plan/<slug>` names that branch. The
+        default branch and a detached HEAD name nothing, because neither is a
+        branch anyone is going to do the work on, and a row whose branch is
+        the remote-tracking `origin/main` passes the runner's shape check,
+        names no local head and fails only inside the clone -- which is the
+        whole of system sd:462 and the reason this column may never carry one.
         """
 
-        self.git("checkout", "-q", "-b", "some-other-work")
-        path = self.item()
-        state = json.loads(self.call("work", "register", path, "--json").stdout)
-        self.assertEqual(state["item"]["branch"], "origin/main")
+        # `main` has to exist as a ref before anything can come back to it.
+        self.git("commit", "-q", "--allow-empty", "-m", "root")
+        self.git("checkout", "-q", "-b", "plan/a-thing")
+        state = json.loads(self.call("work", "register", self.item(), "--json").stdout)
+        self.assertEqual(state["item"]["branch"], "plan/a-thing")
+        self.git("checkout", "-q", "main")
+        default = json.loads(
+            self.call("work", "register", self.item("second"), "--json").stdout)
+        self.assertIsNone(default["item"]["branch"])
         self.git("checkout", "-q", "--detach")
         detached = json.loads(
+            self.call("work", "register", self.item("third"), "--json").stdout)
+        self.assertIsNone(detached["item"]["branch"])
+
+    def test_the_branch_column_never_carries_a_remote_tracking_name(self):
+        """The defect stated as the thing it produced, not as an implementation.
+
+        `master` is the second name the fleet's defaults go by, and a checkout
+        with no `origin/HEAD` to read is exactly the one where `default_branch`
+        guesses `origin/main`; registering from it used to write that guess
+        into the column verbatim.
+        """
+
+        self.git("checkout", "-q", "-b", "master")
+        on_master = json.loads(
+            self.call("work", "register", self.item(), "--json").stdout)
+        self.assertIsNone(on_master["item"]["branch"])
+        self.git("checkout", "-q", "-b", "fix/late")
+        on_work = json.loads(
             self.call("work", "register", self.item("second"), "--json").stdout)
-        self.assertEqual(detached["item"]["branch"], "origin/main")
+        self.assertEqual(on_work["item"]["branch"], "fix/late")
+        # Read back through the surface anyone else would use, because the
+        # column is what the runner and `sd-plan` consume, not the return.
+        row = json.loads(
+            self.call("store", "item", on_work["item"]["id"], "--json").stdout)["item"]
+        self.assertEqual(row["branch"], "fix/late")
+        self.assertNotIn("origin/", row["branch"])
 
     def test_a_path_that_is_not_a_prd_is_refused_by_the_rule_it_breaks(self):
         """The shape is the library's rule; this proves the sentence arrives.

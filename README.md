@@ -175,6 +175,9 @@ and `sd work deliver`. `sd work register docs/work/<item>/prd.md` makes the row
 that owns a planning folder already on disk, reading its title and date from
 the file's own frontmatter; it applies only where the repository's status
 source is the database, and refuses a repository whose files still own status.
+The row's branch is the branch the work happens on — the checkout's own local
+branch when that is not the default, and otherwise nothing at all, never a
+remote-tracking name.
 Delivery verifies a full commit and its delivery trailer against the default
 branch before recording completion. Cancelling work requires a reason and
 completes immediately in the database. Neither operation writes a status file

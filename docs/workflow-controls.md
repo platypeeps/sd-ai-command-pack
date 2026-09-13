@@ -16,11 +16,11 @@ progress belongs to the database.
 | --- | --- |
 | Capture work without a PRD | Today, or `sd task add "Title"` — it takes the registered checkout enclosing cwd; `--no-repo` files one that belongs to none |
 | Prioritize, schedule, add details | Item screen, or `sd task edit ID` |
-| Move a task to the right checkout | `sd task edit ID --belongs-to PATH` — `.` names the checkout enclosing cwd; `--no-repo` leaves it belonging to none, as it does on `add`. An unregistered path is refused, and the move is recorded as an item note |
+| Move a task to the right checkout | `sd task edit ID --belongs-to PATH` — `.` names the checkout enclosing cwd; `--no-repo` leaves it belonging to none, as it does on `add`. An unregistered path is refused, and the move is recorded as an item note. The move prints the checkout it landed in; ordinary output names a row's checkout only when it is not the one you are standing in |
 | Change task status | Item screen, or `sd task status ID STATUS` |
 | Record and resolve a followup | Item notes, or `sd task note ID --kind followup --body TEXT` / `sd task resolve NOTE_ID` |
 | See the same inventory as the dashboard | `sd today --json`, `sd store items --json` |
-| Register a planning folder as a row (row-status repositories only) | `sd work register docs/work/<item>/prd.md` |
+| Register a planning folder as a row (row-status repositories only) | `sd work register docs/work/<item>/prd.md` — the row's branch is the local branch the checkout is on when it is not the default, and otherwise nothing; `sd runner prepare --branch` fills it in later |
 | Relink a moved work artifact | Item screen, or `sd work relink ID PATH` |
 | Cancel repository work | Item screen, or `sd work cancel ID --reason TEXT` |
 | Record verified code delivery | `sd work deliver ID FULL_COMMIT_SHA` |

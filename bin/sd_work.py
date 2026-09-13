@@ -211,6 +211,48 @@ def _frontmatter(prd: pathlib.Path) -> tuple[str, str]:
     return str(title), str(created)
 
 
+def _working_branch(docs_work: Any, root: pathlib.Path) -> str | None:
+    """The local branch this row is to be worked on, or None when there is none.
+
+    `item.branch` is read one way everywhere: as the branch the work happens
+    ON. The runner refuses a row without one, `configure_item` refuses the
+    remote default for it, `sd-plan` checks it out and pushes to it. So what
+    goes in the column is a local head, or nothing.
+
+    This verb used to write `docs_work.default_branch(root)` -- `origin/main`,
+    a remote-tracking name that passes the runner's shape check and names no
+    local head, so a row carrying it reads as runnable everywhere and fails
+    only inside the clone. System sd:462 (platypeeps/system#265) established
+    that, repaired the 65 rows that carried it, and changed the library's own
+    verb; this verb was not in that enumeration, so it went on writing the
+    value the repair removed. `default_branch` still means what its docstring
+    says -- the branch a merge lands on -- and is still read below for the
+    comparison; it was the wrong source for this column, not a wrong function.
+
+    One case names a working branch honestly: the checkout is on a local
+    branch that is not the default, as a runner clone on `plan/<slug>` is when
+    `sd-plan` registers the folder it just wrote. On the default, or detached,
+    the answer is None -- the state a task row starts in, and the one
+    `sd runner prepare --branch` exists to fill.
+
+    Mirrored from `sd_db.jobs.cli._working_branch` rather than imported: that
+    module is a CLI whose import opens the library's own argument parser, and
+    this verb's contract with `sd_db` is the three attributes `REGISTER_NEEDS`
+    names. The agreement that matters is the value in the column, which
+    `tests/test_sd_work.py` pins on both sides of the default.
+    """
+    current = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
+    if not current:
+        return None
+    # `origin/main` -> `main`. `main` and `master` are the two names the
+    # fleet's defaults go by, and the pair a checkout with no remote falls
+    # back to, where `origin/HEAD` is unreadable and `default_branch` guesses.
+    _, _, default = docs_work.default_branch(root).partition("/")
+    if current in {default, "main", "master"}:
+        return None
+    return current
+
+
 def _register(sd_db, connection, args, who: str) -> Any:
     """Make the row that owns a `docs/work` folder already on disk.
 
@@ -247,32 +289,84 @@ def _register(sd_db, connection, args, who: str) -> Any:
     repo = repos.registered_for(connection, str(root), origin or None)
     commit = sd_lib.git_output(
         ["log", "-1", "--format=%H", "--", relative], root)
-    # The branch the work will land on, read from `origin/HEAD`, and never the
-    # one that happens to be checked out. Registration comes before the work
-    # branch exists (`sd-plan` writes the plan at step 2 and branches at step
-    # 6), so the checked-out branch is whatever the planner was standing on --
-    # `main`, or some unrelated feature branch, or the literal string `HEAD`
-    # on a detached checkout. The library's own reader answers it, so a folder
-    # registered here and one registered by `sd-db work register` get the same
-    # row rather than two spellings of the branch.
     return workflow.register_work_item(
         connection, repo=repo, path=relative, title=title, created_at=created,
-        branch=docs_work.default_branch(root),
+        branch=_working_branch(docs_work, root),
         source_commit=commit or None, who=who,
     )
 
 
-def _emit(value: Any, *, machine: bool) -> None:
+#: The row belongs to no checkout, said as a sentence rather than as a blank.
+#: Only `--no-repo` prints it: on an ordinary listing the absence is the answer
+#: already, and a row saying "none" on every line is the noise this avoids.
+NO_CHECKOUT = "belongs to no checkout"
+
+
+def _standing_in(rows: list[Any]) -> str | None:
+    """The checkout this command ran in, spelled the way a row carries it.
+
+    Resolved through the same two steps `_task_repo` uses, so the comparison
+    below is between one spelling and itself: a linked worktree answers as its
+    main checkout, which is what `add` wrote into the row in the first place.
+
+    Read once per command and only when some row names a repository, because
+    it costs a `git` call and most of what this prints has nothing to compare
+    against.
+    """
+    if not any(row.get("repo") for row in rows):
+        return None
+    root = sd_lib.repo_root()
+    return None if root is None else str(sd_lib.main_worktree_root(root))
+
+
+def _repo_line(row: Any, *, here: str | None, moved: bool) -> str | None:
+    """The row's checkout, printed only where it tells the reader something.
+
+    `repo` is the field `sd task edit --belongs-to` exists to change, and
+    until this line it was the one field no output ever showed: the move
+    landed in the database and the caller saw the same five words back
+    (sd:452). Unconditionally, though, a path on every row of every listing is
+    noise, and a field that is always there is a field nobody reads. So two
+    cases, and no third.
+
+    **A move prints it, always.** The change is what is being reported, and
+    `--belongs-to .` inside the destination checkout is exactly the case the
+    rule below would hide. Clearing it prints `NO_CHECKOUT` rather than
+    nothing, for the same reason: the caller asked, so the answer is a
+    sentence.
+
+    **Otherwise, only a row that is somewhere else.** Standing in the row's
+    own checkout, "which repository" is answered by where you are; standing
+    outside every checkout, nothing answers it, so every row that names one
+    says so. A row that belongs to no checkout prints nothing here -- there is
+    no path to name, and `--no-repo` already said it where it mattered.
+
+    No `sd_lib.display_fields` here, and deliberately: that function exists so
+    a hand-written *membership* tuple stops dropping keys a producer adds
+    (sd:602). This prints one named field under a fixed header sentence and
+    keeps no tuple, so there is nothing for a new key to fall out of.
+    """
+    repo = row.get("repo")
+    if moved:
+        return f"  repo: {repo}" if repo else f"  repo: {NO_CHECKOUT}"
+    return f"  repo: {repo}" if repo and repo != here else None
+
+
+def _emit(value: Any, *, machine: bool, moved: bool = False) -> None:
     if machine:
         print(json.dumps(value, ensure_ascii=False))
         return
     rows = value if isinstance(value, list) else [value["item"]]
     if not rows:
         print("No items.")
+    here = _standing_in(rows)
     for row in rows:
         priority = f" · P{row['priority']}" if row.get("priority") else ""
         due = f" · due {row['due']}" if row.get("due") else ""
         print(f"#{row['id']}  {row['status']}  {row['title']}{priority}{due}")
+        line = _repo_line(row, here=here, moved=moved)
+        if line:
+            print(line)
     if isinstance(value, dict):
         # `register` is the one verb that can do nothing and still succeed.
         # Registering twice is deliberately not an error -- the unique index
@@ -416,6 +510,10 @@ def run(args: argparse.Namespace) -> int:
         action = args.work_action
         who = getpass.getuser()
         revision = getattr(args, "if_revision", None)
+        # Whether this command changed the row's checkout, which is the one
+        # thing `_emit` cannot read off the result: a row that already sat in
+        # the destination looks the same afterwards as one that just moved.
+        moved = False
         result: Any
         if action == "today":
             result = [dict(row) for row in sd_db.reads.today_items(connection)]
@@ -434,6 +532,7 @@ def run(args: argparse.Namespace) -> int:
             )
         elif action == "edit":
             changes = _edit_changes(args)
+            moved = "repo" in changes
             result = workflow.edit_item(
                 connection, args.item, changes, who=who, expected_revision=revision)
         elif action == "status":
@@ -467,7 +566,7 @@ def run(args: argparse.Namespace) -> int:
                     expected_revision=revision)
         else:
             raise WorkRefusal(f"unknown workflow operation: {action}")
-        _emit(result, machine=args.json)
+        _emit(result, machine=args.json, moved=moved)
         return 0
     except sd_db.SdDbError as error:
         raise WorkRefusal(str(error)) from error
