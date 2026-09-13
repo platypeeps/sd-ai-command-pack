@@ -7,9 +7,12 @@
 # error, when it surfaces, quotes a line number at the end of the file rather
 # than the defect.
 #
-# This runs in two places: a local "make lint", and the bash32 CI job, which
-# builds bash 3.2 from source (no Linux distro packages it) and invokes this
-# script with STRICT=1 so a missing interpreter fails instead of skipping.
+# This runs in one place: a local "make lint", which on macOS finds the real
+# bash 3.2 at /bin/bash. A CI job used to build bash 3.2 from source (no Linux
+# distro packages it) and run this under STRICT=1; sd:10 criterion 17 cut it,
+# because the pack ships no shell any more and the only scripts left are this
+# repository's own three under .github/scripts/, which "make check" already
+# runs through /bin/bash on the maintainer's machine.
 #
 # Scripts are enumerated from the tracked set at run time (every "*.sh" plus
 # any tracked git hook carrying a shell shebang), never from a list kept here,
@@ -108,7 +111,7 @@ if [ -z "$BASH32" ]; then
     exit 1
   fi
   printf '%s\n' \
-    "warning: no bash 3.2 interpreter found; skipping bash 3.2 syntax checks here. The bash32 CI job builds bash 3.2 and runs this gate under STRICT=1, so the lane is enforced there even though this run skipped it. Set STRICT=1 to make the absence an error locally too."
+    "warning: no bash 3.2 interpreter found; skipping bash 3.2 syntax checks here. No CI job runs this gate; it is enforced by 'make lint' on a machine with bash 3.2 at /bin/bash (macOS). Set STRICT=1 to make the absence an error."
   exit 0
 fi
 

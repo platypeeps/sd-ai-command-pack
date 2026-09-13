@@ -296,14 +296,13 @@ make setup   # once
 make check   # test + lint + audit + docs-lint
 ```
 
-CI is four jobs, named here as branch protection sees them:
+CI is two gating jobs in `tests.yml`, named here as their status contexts
+read, plus the advisory `route` job in `sd-review-route.yml`:
 
 | Job | What it runs |
 |---|---|
 | `unittest` | The suite on Ubuntu, Python 3.13, plus the installer coverage gate |
-| `lint` | Ruff and mypy over `bin/`, then `sd-docs-lint` over this checkout's `docs/` |
-| `bash 3.2 syntax` | Every tracked shell script parsed by a bash 3.2 built from source |
-| `security` | Bandit over `bin/`, zizmor over the workflows, ShellCheck |
+| `lint` | Ruff and mypy over `bin/`, `sd-docs-lint` over this checkout's `docs/`, then Bandit over `bin/`, zizmor over the workflows, and ShellCheck |
 
 `sd-status` compares the live protection object with the contexts the
 workflow files produce, not with this table, so a row here can go stale
@@ -328,11 +327,12 @@ why the floor moved from files to statements at step 3e.
 PYTHON_BIN=python bash .github/scripts/check-installer-coverage.sh
 ```
 
-The `bash 3.2 syntax` gate survives on a narrower rationale than it had. It
-existed because the pack shipped shell that ran on whatever bash a consumer's
-macOS provided, which is 3.2. Nothing is shipped now; what it still protects is
-this repo's own three scripts under `.github/scripts/`, which `make check` runs
-through `/bin/bash` on macOS.
+The bash 3.2 syntax gate runs in `make lint` and in no CI job. It existed
+because the pack shipped shell that ran on whatever bash a consumer's macOS
+provided, which is 3.2. Nothing is shipped now; what it still protects is this
+repo's own three scripts under `.github/scripts/`, which `make check` runs
+through `/bin/bash` on macOS. The CI job that built bash 3.2 from source to
+run the same gate on Linux was cut for that reason (sd:10, criterion 17).
 
 **No macOS CI leg currently runs.** It was dropped to save runner cost, which
 GitHub bills at ten times the Linux rate. macOS-specific behaviour is covered

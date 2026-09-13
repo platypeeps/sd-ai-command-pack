@@ -49,16 +49,20 @@ to turn those missing-tool skips into hard errors for parity with CI.
 `make lint` also parses every tracked shell script with bash 3.2 — the
 interpreter macOS keeps at `/bin/bash` — through
 `.github/scripts/check-bash32-syntax.sh`, so syntax that only bash 3.2 rejects
-fails before the push. That gate matters more while the macOS CI leg is
-dropped (R11-D4): it is now the only automated check that runs anything
-against the interpreter macOS actually ships.
+fails before the push. That local run is the only place the gate runs: no CI
+job invokes it, and no CI job runs on macOS (R11-D4), so it is the one
+automated check that runs anything against the interpreter macOS actually
+ships, and it runs on the maintainer's machine rather than on a runner.
 
 Its rationale narrowed at step 3e, and the narrowing is worth stating rather
 than leaving the old reason in place. The gate existed because the pack shipped
 shell scripts that ran on whatever bash a consumer's macOS had. Nothing is
 shipped now. What it still protects is this repository's own three scripts under
 `.github/scripts/`, which `make check` runs through `/bin/bash` locally — a real
-subject, just a much smaller one. The script
+subject, just a much smaller one. That narrowing is also why the CI job that
+built bash 3.2 from source to run the gate on Linux was cut (sd:10, criterion
+17): a from-source interpreter build was guarding three scripts the local run
+already executes under the real interpreter. The script
 list is enumerated from `git ls-files` at run time, never maintained inside the
 gate. A platform with no bash 3.2 (any Linux) prints
 `warning: no bash 3.2 interpreter found` and passes; `STRICT=1` turns that
@@ -97,25 +101,32 @@ and had silently omitted every `bin/` file.
 
 ## Main Branch Policy
 
-Every change to `main` goes through a pull request. Merge authority is GitHub
-branch protection; there is no local pre-push hook, no server-side path policy,
-and no bookkeeping fast lane. A pull-request head and a push to `main` run the
-same four unconditional jobs — the `unittest` matrix, `lint`, `bash 3.2 syntax`,
-and `security` — producing five contexts. Contexts are named
-by a job's `name:`, not its YAML key, so the bash lane is required as
-`bash 3.2 syntax` and never as `bash32`; requiring the key would pin a context
-that never reports and block every pull request. Three changes moved this set
-inside two days. The macOS leg was dropped for the duration of the
-artifacts-as-product rollout (R11-D4; restored by hand at the end of the
-rollout, no date); `bash32` was added because the bash 3.2 syntax gate turned
-out never to have run in CI at all (R11-D5); and `Shell coverage` was removed at
-step 3e, because the shipped shell it measured was deleted (R11-D6).
+Every change to `main` goes through a pull request. Merge authority is the
+merge lane, which reads every check on the pull request and refuses to merge
+unless each one concluded success; GitHub branch protection is deleted, as the
+next paragraph but one records, and there is no local pre-push hook, no
+server-side path policy, and no bookkeeping fast lane. A pull-request head and
+a push to `main` run the
+same two unconditional jobs in `tests.yml` — the `unittest` matrix and `lint`
+— producing two contexts, `unittest (ubuntu-latest, 3.13)` and `lint`; a pull
+request also runs the advisory `route` job from `sd-review-route.yml`.
+Contexts are named by a job's `name:` when it has one and by its YAML key
+otherwise; requiring a name no job produces would pin a context that never
+reports and block every pull request. Four changes moved this set. The macOS
+leg was dropped for the duration of the artifacts-as-product rollout (R11-D4;
+restored by hand at the end of the rollout, no date); `bash32` was added
+because the bash 3.2 syntax gate turned out never to have run in CI at all
+(R11-D5); `Shell coverage` was removed at step 3e, because the shipped shell it
+measured was deleted (R11-D6); and sd:10 criterion 17 cut `bash 3.2 syntax`
+on the same premise and folded the three `security` steps into `lint`.
 
 That sentence is only true while protection is actually enforcing, so state the
-condition rather than the conclusion. Protection here is enforcing as of
-2026-08-30: `enforce_admins: true`, `strict: true`, and the five required
-contexts match the five the workflow produces. No dimension is currently out
-of step.
+condition rather than the conclusion. Protection on `main` was deleted on
+2026-09-12 and `.github/sd-status.json` records why, as an accepted gap with
+the condition that ends it; while it is gone there are no required contexts,
+and what refuses a red merge is the merge lane reading every check on the
+pull request. When protection returns, the contexts to require are the ones
+the workflow files produce at that time, not a list kept here.
 
 One was, briefly: `bash 3.2 syntax` began reporting when R11-D5 merged but was
 not added to the protection object until 2026-08-30, so for a few hours a red
@@ -167,16 +178,15 @@ this removal falsifiable, and "when the rollout is done" is not a date. This
 paragraph is the record instead, and it has no expiry -- it stands, in the
 present tense, until a macOS job actually reports.
 
-An earlier draft of this paragraph claimed the bash 3.2 syntax gate in `lint`
-covered macOS in CI. It did not -- no CI job invoked `check-bash32-syntax.sh`
-at all, and that gate had only ever run in a local `make lint`. Finding that
-gap is what prompted closing it: the **`bash32`** job now builds bash 3.2 from
-source and runs the gate under `STRICT=1`.
-
-That covers bash 3.2 *syntax*, which is a real slice of macOS compatibility and
-not the whole of it. macOS-only Python behaviour, filesystem
-case-insensitivity, and platform path handling stay unverified in CI until the
-macOS leg is restored.
+No CI job invokes `check-bash32-syntax.sh`. One did between R11-D5 and sd:10
+criterion 17: the `bash32` job built bash 3.2 from source and ran the gate
+under `STRICT=1`, to cover bash 3.2 *syntax* on Linux runners while no macOS
+leg ran. It was cut because its subject had shrunk to this repository's own
+three scripts under `.github/scripts/`, which the local `make check` already
+executes under the real `/bin/bash` 3.2. So bash 3.2 syntax, macOS-only Python
+behaviour, filesystem case-insensitivity, and platform path handling are all
+unverified in CI until the macOS leg is restored; the first of those is
+verified by the maintainer's local run and the other three by nothing.
 
 ## Payload Rules
 

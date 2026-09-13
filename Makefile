@@ -52,20 +52,22 @@ lint-mypy-paths:
 	@printf '%s\n' "$(LINT_MYPY_PATHS)"
 
 # Pass STRICT=1 to turn missing-tool skips below into hard errors (CI
-# parity: the CI lint/security jobs always run the Node and ShellCheck
-# lanes). Ruff and mypy cover the paths named in LINT_RUFF_PATHS and
-# LINT_MYPY_PATHS above, which after step 3e is just the bin/ tools: the
-# installer package and the shipped payload are gone.
+# parity: the CI lint job always runs the ShellCheck lane). Ruff and mypy
+# cover the paths named in LINT_RUFF_PATHS and LINT_MYPY_PATHS above, which
+# after step 3e is just the bin/ tools: the installer package and the shipped
+# payload are gone.
 #
 # The bash 3.2 lane survives 3e on a narrower rationale than it had, and the
 # narrowing is worth stating. It existed because the pack shipped shell scripts
 # that ran on whatever bash a consumer's macOS had, which is 3.2. Nothing is
 # shipped now. What it still protects is this repo's own three scripts under
 # .github/scripts/, which `make check` runs through /bin/bash on the
-# maintainer's machine -- a real subject, just a smaller one. The bash32 CI job
-# enforces the same lane on a bash 3.2 it builds itself, so this is a fast local
-# echo of a real gate rather than the only place it runs. A platform without
-# bash 3.2 prints a skip line; STRICT=1 makes it fatal.
+# maintainer's machine -- a real subject, just a smaller one. This is the only
+# place the lane runs: the CI job that built bash 3.2 from source to run it on
+# Linux was cut by sd:10 criterion 17, because a from-source interpreter build
+# was guarding three scripts the local run already executes under the real
+# thing. A platform without bash 3.2 prints a skip line; STRICT=1 makes it
+# fatal, so do not pass STRICT=1 on Linux and expect this target to pass.
 lint:
 	"$(VENV_PYTHON)" -m ruff check $(LINT_RUFF_PATHS)
 	"$(VENV_PYTHON)" -m mypy $(LINT_MYPY_PATHS)
