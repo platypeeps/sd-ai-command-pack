@@ -100,12 +100,81 @@ class TaskCLI(unittest.TestCase):
         self.assertIn("{" + ",".join(NOTE_KINDS) + "}", help_text)
         self.assertIn("default: comment", help_text)
 
-    def test_task_add_remains_task_only(self):
-        state = json.loads(self.call("task", "add", "Standalone work", "--json").stdout)
-        self.assertEqual(state["item"]["kind"], "task")
-        self.call("task", "add", "Not another task", "--kind", "proposal", code=2)
+    def test_task_add_files_every_hand_filed_kind_and_no_produced_one(self):
+        """sd:730. Four item kinds shipped in migration 009 with no producer.
+
+        `--kind` is the producer, and it is deliberately narrower than the
+        CHECK: the six kinds left out each have a maker of their own, and
+        `idea` is the sharp one -- it is a draft article, selected as
+        `kind = 'idea' AND piece IS NOT NULL`, so filing one here would write
+        a row the publishing queue cannot see.
+        """
+        self.assertEqual(sd_work.ADD_KINDS,
+                         ("task", "personal", "followup", "work-idea", "personal-idea"))
+        default = json.loads(self.call("task", "add", "Standalone work", "--json").stdout)
+        self.assertEqual(default["item"]["kind"], "task")
+
+        filed = {}
+        for kind in sd_work.ADD_KINDS:
+            with self.subTest(kind=kind):
+                state = json.loads(
+                    self.call("task", "add", f"A {kind}", "--kind", kind, "--json").stdout)
+                self.assertEqual(state["item"]["kind"], kind)
+                readback = json.loads(
+                    self.call("store", "item", state["item"]["id"], "--json").stdout)
+                self.assertEqual(readback["item"]["kind"], kind)
+                self.assertEqual(readback["revision"], state["revision"])
+                filed[kind] = state["item"]["id"]
+
+        for kind in ("work", "report", "dep", "skill-review", "proposal", "idea", "nonsense"):
+            with self.subTest(refused=kind):
+                refused = self.call("task", "add", f"Not a {kind}", "--kind", kind, code=2)
+                self.assertIn("invalid choice", refused.stderr)
+
         rows = json.loads(self.call("store", "items", "--json").stdout)
-        self.assertEqual([row["id"] for row in rows], [state["item"]["id"]])
+        self.assertEqual(sorted(row["id"] for row in rows),
+                         sorted([default["item"]["id"], *filed.values()]))
+
+    def test_a_repo_less_kind_is_filed_off_the_checkout_it_was_typed_in(self):
+        """The four kinds after `proposal` carry no repository, by definition.
+
+        The group is read by asking for exactly that -- `backlog_items(repo=
+        NO_REPO)` -- so a `personal` row that took the checkout cwd happened
+        to be in would be absent from the one query written to list it.
+        `--no-repo` is implied and not required; `--here` asks for the
+        repository the kind cannot have and is refused rather than ignored.
+        """
+        root = self._checkout("project")
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.repos.add(connection, root, home=self.home)
+
+        ordinary = json.loads(self.call("task", "add", "Ordinary", "--json", cwd=root).stdout)
+        self.assertEqual(ordinary["item"]["repo"], str(root.resolve()))
+
+        for kind in sorted(sd_work.REPO_LESS_KINDS):
+            with self.subTest(kind=kind):
+                filed = json.loads(
+                    self.call("task", "add", f"A {kind}", "--kind", kind, "--json",
+                              cwd=root).stdout)
+                self.assertIsNone(filed["item"]["repo"])
+                refused = self.call("task", "add", "Insisting", "--kind", kind, "--here",
+                                    cwd=root, code=1)
+                self.assertIn(f"a {kind} item carries no repository", refused.stderr)
+
+        redundant = json.loads(
+            self.call("task", "add", "Said twice", "--kind", "personal", "--no-repo",
+                      "--json", cwd=root).stdout)
+        self.assertIsNone(redundant["item"]["repo"])
+
+        with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
+            grouped = sorted(row["kind"] for row in
+                             sd_db.reads.backlog_items(connection, repo=sd_db.reads.NO_REPO))
+        self.assertEqual(grouped, ["followup", "personal", "personal", "personal-idea",
+                                   "work-idea"])
+        self.assertEqual(
+            [row["kind"] for row in
+             json.loads(self.call("store", "items", "--kind", "task", "--json").stdout)],
+            ["task"])
 
     def _checkout(self, name):
         """A real checkout, because the repository is resolved by asking git."""
