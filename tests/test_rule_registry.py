@@ -74,6 +74,19 @@ ENFORCEMENT = re.compile(r"\b(refuses|never|always|cannot)\b")
 #: there was no registry -- which is the finding, not an accident.
 DEFINITION = re.compile(r"\*\*(R\d+-D\d+)\b")
 
+#: A quoted run in a file no Python parser will read. Single and double quotes
+#: stop at a newline; a backtick run does not, because a JavaScript template
+#: literal spans lines and a reader that stopped at the first one would miss
+#: every line but its opening.
+QUOTED = re.compile(r"'[^'\n]*'|\"[^\"\n]*\"|`[^`]*`", re.DOTALL)
+
+#: A fence opening or closing a code block. A `#` line inside one is shell or
+#: Python, never a heading.
+FENCE = re.compile(r"^\s*(?:```|~~~)")
+
+#: An ATX heading, and the only form this repository's skills use.
+HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
+
 
 # --------------------------------------------------------------------------
 # The baselines. Every number below was measured, not chosen.
@@ -254,34 +267,34 @@ def registered_rule_ids() -> set[str]:
     return {rule.id for rule in sd_rules.RULES}
 
 
-def python_sources() -> list[tuple[str, str]]:
-    """Tracked `bin/` and `dashboard/` files that parse as Python.
+def consumer_sources() -> list[tuple[str, str]]:
+    """Every tracked file under `bin/` and `dashboard/`, Python or not.
 
-    Parsed rather than selected by suffix, because half of `bin/` is
-    extensionless scripts with a shebang. A file that will not parse is not
-    Python and drops out on its own.
+    Not "every file that parses as Python", which is what this was and which
+    made `dashboard/app.js` invisible -- the one tracked file here that is not
+    Python, and the same file an independent sd:525 pass named as the blind
+    spot of this repository's other AST-only locator. A scope that silently
+    drops the only file it cannot parse is the defect this module exists to
+    end, committed inside the check built to end it.
     """
 
     return [(relative, text) for relative, text in read_corpus("bin", "dashboard")
-            if _parses(text)]
-
-
-def _parses(text: str) -> bool:
-    try:
-        ast.parse(text)
-    except (SyntaxError, ValueError):
-        return False
-    return True
+            if relative != "bin/sd_rules.py"]
 
 
 def second_list_entries() -> list[tuple[str, int, str]]:
     """Registry rule ids written as data outside the registry module.
 
     A rule id in a *comment or a docstring* is a citation, and citing a rule is
-    the point. A rule id in any other string constant is data: a consumer
-    restating what the table already says, which is the second list `CLASSES`
-    in `bin/sd-status` was shaped to make impossible. So docstrings and bare
-    string statements are dropped and every other string constant is read.
+    the point. A rule id in any other string is data: a consumer restating what
+    the table already says, which is the second list `CLASSES` in
+    `bin/sd-status` was shaped to make impossible.
+
+    Two readers, because the corpus has two kinds of file. Python goes through
+    `ast`, which tells a docstring from a string constant exactly. Everything
+    else has no parser here and goes through `QUOTED`, which reads quoted runs
+    only -- so `// see R11-D20` in `dashboard/app.js` stays a citation while
+    `["R11-D20"]` does not. What neither reader sees is stated on the test.
 
     Empty while the table is empty, which is what lets the table land first.
     The first row for a rule some consumer already names in a string fails
@@ -291,14 +304,34 @@ def second_list_entries() -> list[tuple[str, int, str]]:
 
     registered = registered_rule_ids()
     offenders = []
-    for relative, text in python_sources():
-        if relative == "bin/sd_rules.py":
-            continue
-        for node in _data_strings(ast.parse(text)):
-            for identifier in sd_rules.RULE_ID.findall(node.value):
-                if identifier in registered:
-                    offenders.append((relative, node.lineno, identifier))
+    for relative, text in consumer_sources():
+        for number, identifier in _data_rule_ids(text):
+            if identifier in registered:
+                offenders.append((relative, number, identifier))
     return offenders
+
+
+def _data_rule_ids(text: str) -> list[tuple[int, str]]:
+    """Rule ids written as data, as `(line, id)`, by whichever reader fits."""
+
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return _quoted_rule_ids(text)
+    return [(node.lineno, identifier)
+            for node in _data_strings(tree)
+            for identifier in sd_rules.RULE_ID.findall(node.value)]
+
+
+def _quoted_rule_ids(text: str) -> list[tuple[int, str]]:
+    """Rule ids inside quoted runs of a file no Python parser will read."""
+
+    found = []
+    for run in QUOTED.finditer(text):
+        for match in sd_rules.RULE_ID.finditer(run.group()):
+            offset = run.start() + match.start()
+            found.append((text.count("\n", 0, offset) + 1, match.group()))
+    return found
 
 
 def _data_strings(tree: ast.AST) -> list[ast.Constant]:
@@ -309,6 +342,57 @@ def _data_strings(tree: ast.AST) -> list[ast.Constant]:
     return [node for node in ast.walk(tree)
             if isinstance(node, ast.Constant) and isinstance(node.value, str)
             and id(node) not in prose]
+
+
+def markdown_headings(text: str) -> set[str]:
+    """Every real heading in a document, with fenced blocks excluded.
+
+    The fence tracking is the half that is easy to skip and wrong to skip: a
+    `# install the thing` line inside a ```sh block is a shell comment, and a
+    registry row naming it would point at a section that does not exist while
+    passing a check that said it did.
+    """
+
+    headings: set[str] = set()
+    fenced = False
+    for line in text.splitlines():
+        if FENCE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        match = HEADING.match(line)
+        if match:
+            headings.add(match.group(1).strip())
+    return headings
+
+
+def teaching_section_errors() -> list[str]:
+    """Every live row whose `teaches` does not resolve to a real section.
+
+    `teaches` is `path#heading` and both halves have to be there. The first
+    draft of this used `str.partition`, which returns an empty heading for a
+    `teaches` carrying no `#` at all, and then skipped the check on exactly
+    that case -- so the malformed value was the one value that passed. The
+    second half matched the heading as a *substring of the whole document*,
+    which any phrase in any paragraph satisfies.
+    """
+
+    documents = dict(skill_documents())
+    broken = []
+    for rule in sd_rules.RULES:
+        if rule.state != sd_rules.LIVE:
+            continue
+        path, separator, heading = rule.teaches.partition("#")
+        heading = heading.strip()
+        if not (separator and path and heading):
+            broken.append(
+                f"{rule.id}: teaches={rule.teaches!r} is not `path#heading`")
+        elif path not in documents:
+            broken.append(f"{rule.id}: no skill document at {path!r}")
+        elif heading not in markdown_headings(documents[path]):
+            broken.append(f"{rule.id}: {path} carries no heading {heading!r}")
+    return broken
 
 
 def skill_documents() -> list[tuple[str, str]]:
@@ -388,6 +472,25 @@ Scopes are {sd_rules.SCOPES}. States are {sd_rules.STATES}.""")
         would have caught the drift `CLASSES` was built to prevent: a consumer
         that names a rule in a string has taken a copy of the table, and a copy
         is a thing that can disagree.
+
+        **What it reads.** Every tracked file under `bin/` and `dashboard/`,
+        including the ones that are not Python. `dashboard/app.js` is the only
+        such file today and it was invisible until review said so.
+
+        **What it cannot see, which is stated rather than left to be found.**
+
+        1. In a non-Python file there is no parser, only quoted runs. A rule id
+           inside a quoted run *in a comment* reads as data, and one built by
+           concatenation -- `"R11-" + "D20"` -- reads as neither.
+        2. In Python, a string constant holding embedded CSS or JavaScript
+           reads as data throughout, including where the id sits in that
+           embedded language's own comment. `dashboard/server.py` carries
+           `R11-D20` exactly that way today, so registering `R11-D20` would
+           report it.
+
+        Both are over-reports rather than misses, which is the safe direction
+        for this check: the failure names a line, and a reader can see at once
+        whether it is a copy of the table or a citation that needs rephrasing.
         """
 
         offenders = second_list_entries()
@@ -398,7 +501,12 @@ A registry rule id appears as data outside `bin/sd_rules.py`.
 
 Read the id off `sd_rules.RULES` or `sd_rules.BY_RULE_ID` instead. A rule id in
 a comment or a docstring is a citation and is fine; one in any other string is
-a copy of the table.""")
+a copy of the table.
+
+Two shapes are reported that are citations rather than copies, because neither
+reader can tell: a rule id inside a quoted run in a non-Python comment, and one
+inside embedded CSS or JavaScript held in a Python string. Rephrase the
+citation so it sits outside the quotes.""")
 
 
 # --------------------------------------------------------------------------
@@ -433,26 +541,26 @@ A live registry rule is taught by no skill.
 Cite the id from the skill section named in the row's `teaches` field.""")
 
     def test_every_live_rule_points_at_a_skill_section_that_exists(self):
-        """`teaches` is `path#heading`, and both halves have to resolve.
+        """`teaches` is `path#heading`, and every part of that has to resolve.
 
-        A row pointing at a deleted skill, or at a heading somebody renamed, is
-        the registry's own version of the drift it exists to catch.
+        A row pointing at a deleted skill, at a heading somebody renamed, or at
+        a phrase that is only body prose is the registry's own version of the
+        drift it exists to catch. The heading is matched against the document's
+        real headings, fenced blocks excluded -- not as a substring of the
+        whole document, which any paragraph would satisfy.
+
+        Fires on nothing while `RULES` is empty. The first row added is what it
+        would otherwise wrongly accept, which is the whole point of the leg.
         """
 
-        documents = dict(skill_documents())
-        broken = []
-        for rule in sd_rules.RULES:
-            if rule.state != sd_rules.LIVE:
-                continue
-            path, _, heading = rule.teaches.partition("#")
-            if path not in documents:
-                broken.append(f"{rule.id}: no skill document at {path!r}")
-            elif heading and heading not in documents[path]:
-                broken.append(f"{rule.id}: {path} carries no heading {heading!r}")
+        broken = teaching_section_errors()
         self.assertEqual(broken, [], f"""
 A registry row teaches from a section that does not exist.
 
-{_lines(broken)}""")
+{_lines(broken)}
+
+`teaches` is `path#heading`. Both halves are required, and the heading must be
+a real markdown heading in that document.""")
 
 
 # --------------------------------------------------------------------------
