@@ -525,21 +525,43 @@ def fix_verdict(root: pathlib.Path, commit: str, ref: str) -> str:
     return "landed" if landed is not None else "fix-not-landed"
 
 
-def verdict(root: pathlib.Path, found: dict, rows: dict[str, dict], ref: str) -> dict:
-    """One finding, with what is on record about it and what that is worth."""
-    record = rows.get(found["id"])
+def id_verdict(root: pathlib.Path, found_id: str, rows: dict[str, dict], ref: str) -> str:
+    """What the record says about one finding id, and what that is worth.
+
+    Separate from `verdict` so a caller holding ids and no finding bodies --
+    `sd-status`, counting what stands unacknowledged on each pull request --
+    asks the same question through the same answer, rather than reimplementing
+    "is this addressed" next to the one place that defines it.
+    """
+    record = rows.get(found_id)
     if not record:
-        return dict(found, verdict="unread", record=None)
+        return "unread"
     disposition = record.get("disposition")
     if disposition not in DISPOSITIONS:
         # A store this tool did not write, or one written by a later version.
         # Neither is an acknowledgement this version can honour, and guessing
         # would be the whole defect in miniature.
-        return dict(found, verdict="unknown-disposition", record=record)
+        return "unknown-disposition"
     if disposition == "dismissed":
-        state = "dismissed" if str(record.get("reason") or "").strip() else "unread"
-        return dict(found, verdict=state, record=record)
-    return dict(found, verdict=fix_verdict(root, str(record.get("commit") or ""), ref), record=record)
+        return "dismissed" if str(record.get("reason") or "").strip() else "unread"
+    return fix_verdict(root, str(record.get("commit") or ""), ref)
+
+
+def verdict(root: pathlib.Path, found: dict, rows: dict[str, dict], ref: str) -> dict:
+    """One finding, with what is on record about it and what that is worth."""
+    state = id_verdict(root, found["id"], rows, ref)
+    return dict(found, verdict=state, record=rows.get(found["id"]))
+
+
+def unacknowledged(root: pathlib.Path, ids: Iterable[str], ref: str | None = None) -> list[str]:
+    """Which of these finding ids nobody has answered. The whole public gate.
+
+    One call, so a reader that only wants the number -- `sd-status`'s row --
+    needs neither the store's shape nor the verdict vocabulary.
+    """
+    rows, _ = read_store(root)
+    landing = ref or landing_ref(root)
+    return [found for found in ids if id_verdict(root, found, rows, landing) not in SATISFIED]
 
 
 def review_state(root: pathlib.Path, rounds: dict[int, dict], ref: str) -> dict:

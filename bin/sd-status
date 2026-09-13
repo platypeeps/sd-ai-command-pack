@@ -1285,6 +1285,10 @@ CLASSES = (
     Class("dirty-tree-with-open-pr", "p", True, 30, "git + open PRs",
           "uncommitted work on a branch that already has a pull request",
           ("pull_requests",)),
+    Class("pr-review-unacknowledged", "p", True, 35,
+          "review findings + local acknowledgements",
+          "an open pull request carrying a review finding nobody has answered",
+          ("pull_requests",)),
     Class("protection-gap", "g", True, 40, "protection",
           "an enforcement leg missing on the default branch", ("protection",)),
     Class("accepted-gap-standing", "g", False, 45,
@@ -1485,6 +1489,7 @@ def actionable_inventory(
     )
     rows += _step_rows(root, work)
     rows += _pull_rows(root, pulls, protection)
+    rows += _review_rows(root, pulls, unchecked)
     rows += _protection_rows(protection)
     rows += _issue_rows(sections.get("issues") or {})
     rows += _branch_rows(root, pulls, protection)
@@ -2657,6 +2662,64 @@ def _pull_rows(
                 f"{pull['review_decision']}",
                 f"review or merge {pull['url']}",
             ))
+    return rows
+
+
+def _review_rows(
+    root: pathlib.Path, pulls: dict[str, Any], unchecked: dict[str, str]
+) -> list[dict[str, Any]]:
+    """Open pull requests carrying a review finding nobody has answered.
+
+    The class this repository learned the hard way. Twelve pull requests merged
+    on green CI in one session with an automated review on every one of them;
+    the reviews were opened afterwards, and the unread comments held real
+    defects, three of which reached the default branch. A review that runs and
+    is never read produces exactly the signal a review that found nothing
+    produces, and nothing in the report told those two apart.
+
+    An adapter and not a producer, the same way `_pull_rows` is one. Which
+    findings a pull request carries was decided by `sd-pr-state.describe`,
+    which reads both places a reviewer states one; whether a finding has been
+    answered is decided by `sd-review-ack`, which owns the acknowledgement
+    record and the rule that a cited fix must have actually landed. Nothing
+    here holds a second opinion about either, and no call here touches the
+    network -- `actionable_inventory` reads `sections`, local git and the
+    filesystem, and that is the whole of it.
+
+    A pull request whose inline comments could not be read marks the entire
+    class `unchecked` rather than reporting the body findings alone as the
+    total, because a partial count presented as a count is precisely the
+    failure this class is about. `_mark_unasked` uses `setdefault` so this more
+    specific sentence survives the generic one.
+    """
+    ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
+    slug = pulls.get("repo") or "?"
+    _, broken = ack.read_store(root)
+    if broken:
+        unchecked.setdefault("pr-review-unacknowledged", broken)
+        return []
+    ref = ack.landing_ref(root)
+    rows: list[dict[str, Any]] = []
+    for pull in pulls.get("pull_requests") or []:
+        stated = pull.get("review_findings") or {}
+        if stated.get("unreadable"):
+            unchecked.setdefault(
+                "pr-review-unacknowledged",
+                f"the inline comments on #{pull['number']} could not be read "
+                f"({stated['unreadable']})",
+            )
+            return []
+        found = list(stated.get("ids") or [])
+        standing = ack.unacknowledged(root, found, ref)
+        if not standing:
+            continue
+        rows.append(_row(
+            "pr-review-unacknowledged", f"{slug}!{pull['number']}",
+            f"#{pull['number']} {pull['title']}",
+            f"{len(standing)} of {len(found)} review finding(s) unanswered",
+            f"read them with `sd-review-ack --pr {pull['number']}`, then "
+            "acknowledge each with --fixed SHA or --dismiss 'why'",
+        ))
     return rows
 
 

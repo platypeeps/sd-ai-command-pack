@@ -273,6 +273,33 @@ class ThePrStateCountUsesTheSameReader(unittest.TestCase):
                     self.assertIn("body", review)
                     self.assertIsInstance(review["body"], str)
 
+    def test_both_halves_reach_ids_and_an_unreadable_half_says_so(self):
+        """`ids` is body plus inline, and the reason the inline half failed.
+
+        `in_body` stays the count this file has always printed. `ids` is what
+        `sd-status` walks: dropping the inline half there would restore the
+        original defect in the one place that now reports it, with a pull
+        request reading clear while its inline comments sat unread. And when
+        the inline call fails, `unreadable` carries why -- a partial count
+        presented as a total is this item's defect exactly, so the sentence has
+        to survive the trip rather than being swallowed into a smaller number.
+        """
+        pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
+        pull = {"reviews": [{"body": self.BODY, "author": {"login": "bot"}}], "number": 880}
+        original = pr_state.inline_findings
+        try:
+            pr_state.inline_findings = lambda *a: ([], "gh api exited 1")
+            blind = pr_state._findings(pull, REPO_ROOT, "acme/widget")
+            pr_state.inline_findings = lambda *a: (["inline-id"], "")
+            whole = pr_state._findings(pull, REPO_ROOT, "acme/widget")
+        finally:
+            pr_state.inline_findings = original
+        self.assertEqual(blind["unreadable"], "gh api exited 1")
+        self.assertEqual(whole["unreadable"], "")
+        self.assertEqual(whole["in_body"], 3)
+        self.assertEqual(len(whole["ids"]), 4)
+        self.assertIn("inline-id", whole["ids"])
+
     def test_a_body_with_nothing_in_it_still_counts_nothing(self):
         """The clean case stays clean: the line prints only on a non-zero count."""
         pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
@@ -405,6 +432,23 @@ class AFixIsSatisfiedByLanding(RoundFixture):
         row = next(r for r in result["findings"] if r["id"] == found)
         self.assertEqual(row["verdict"], "landed")
 
+    def test_findings_answered_only_by_fixes_that_never_landed_stay_red(self):
+        """What counts as answered, asserted as a set rather than per verdict.
+
+        Every finding on #860 acknowledged, every acknowledgement truthful,
+        every cited commit still off the branch. Widening `SATISFIED` by one
+        entry turns this tool back into the thing it replaced, and no other
+        test here can see that edit: each of them names one verdict and checks
+        the verdict, not whether the gate treats it as an answer.
+        """
+        result, _ = payload(self.repo.root, "--pr", "860", *self.ref)
+        for row in result["findings"]:
+            payload(self.repo.root, "--pr", "860", "--ack", row["id"],
+                    "--fixed", self.repo.stranded, *self.ref)
+        after, code = payload(self.repo.root, "--pr", "860", "--check", *self.ref)
+        self.assertEqual(len(after["unsatisfied"]), len(result["findings"]))
+        self.assertEqual(code, 1)
+
     def test_a_dismissal_without_a_reason_is_refused(self):
         done = run(self.repo.root, "--pr", "860", "--ack", self._first(860), "--dismiss", "   ")
         self.assertEqual(done.returncode, 2)
@@ -532,6 +576,38 @@ class TheRecord(RoundFixture):
         result, code = payload(self.repo.root, "--pr", "863", "--check", *self.ref)
         self.assertEqual(result["findings"][0]["verdict"], "unknown-disposition")
         self.assertEqual(code, 1)
+
+    def test_a_disposition_the_caller_invents_is_refused_at_the_write(self):
+        """The read side above refuses one it finds; this refuses one offered.
+
+        Unreachable from the command line, where argparse offers `--fixed` and
+        `--dismiss` and nothing else, and reachable from every library caller --
+        `sd-status` among them. A guard no test can reach is a guard that gets
+        deleted as dead code, and this one is what keeps an invented
+        disposition out of the record rather than merely unhonoured in it.
+        """
+        result, _ = payload(self.repo.root, "--pr", "863", *self.ref)
+        found = [row for row in ack.findings(
+            863, ROUND["863"]["reviews"], ROUND["863"]["comments"],
+        ) if row["id"] == result["findings"][0]["id"]][0]
+        with self.assertRaises(ack.UsageError) as raised:
+            ack.acknowledge(self.repo.root, found, "wontfix", "because")
+        self.assertIn("fixed or dismissed", str(raised.exception))
+        self.assertEqual(ack.read_store(self.repo.root)[0], {})
+
+    def test_a_capture_that_is_not_json_is_refused_rather_than_read_as_empty(self):
+        """`--from` pointed at a broken file must not report a clean round.
+
+        The live path refuses when `gh` cannot be reached; this is the same
+        claim for the replay path, and it is the one a CI job would hit -- a
+        truncated artefact download reads as valid-and-empty unless something
+        says otherwise.
+        """
+        broken = pathlib.Path(self.stack.name) / "torn.json"
+        broken.write_text('{"pull_requests": {"7": {"reviews"', encoding="utf-8")
+        done = run(self.repo.root, "--from", str(broken), "--check")
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("is not valid JSON", done.stderr)
 
     def test_the_store_is_replaced_in_one_step(self):
         """A torn write would read as empty and discard real acknowledgements."""

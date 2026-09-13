@@ -248,7 +248,7 @@ def behind_by(root: pathlib.Path, slug: str, pull: dict[str, Any]) -> int | None
     return value if isinstance(value, int) else None
 
 
-def review_findings(reviews: Any) -> dict[str, Any]:
+def review_findings(reviews: Any, number: Any = 0) -> dict[str, Any]:
     """Findings a review states in its body and nowhere a comment count sees.
 
     `reviewDecision` answers "did anyone block this" and the comment count
@@ -265,21 +265,24 @@ def review_findings(reviews: Any) -> dict[str, Any]:
     question can take needs this reader first.
     """
     rows = reviews if isinstance(reviews, list) else []
-    stated = 0
+    stated: list[str] = []
     authors = []
     for review in rows:
         if not isinstance(review, dict):
             continue
-        found = len(_body_findings(review.get("body") or ""))
+        found = _body_findings(review.get("body") or "", number)
         if found:
-            stated += found
+            stated.extend(row["id"] for row in found)
             login = (review.get("author") or {}).get("login")
             if isinstance(login, str) and login not in authors:
                 authors.append(login)
-    return {"reviews": len(rows), "in_body": stated, "reviewers": authors}
+    # `ids` so a caller can ask whether each of them has been *read*, which is
+    # a different question from how many there are and the one `sd-status`'s
+    # `pr-review-unacknowledged` row is built on.
+    return {"reviews": len(rows), "in_body": len(stated), "reviewers": authors, "ids": stated}
 
 
-def _body_findings(body: str) -> list:
+def _body_findings(body: str, number: Any = 0) -> list:
     """Every finding this review body states, from `sd-review-ack`'s reader.
 
     Counted here and acknowledged there, from one parser. The count used to be
@@ -292,7 +295,27 @@ def _body_findings(body: str) -> list:
     pull request with no review body worth reading -- costs no import.
     """
     module = sd_lib.sibling("sd_review_ack", "sd-review-ack")
-    return module.findings(0, [{"body": body}], [])
+    pull = number if isinstance(number, int) else 0
+    return module.findings(pull, [{"body": body}], [])
+
+
+def inline_findings(root: pathlib.Path, slug: str, number: Any) -> tuple[list[str], str]:
+    """Finding ids for the inline comments on one pull request, or why not.
+
+    Not in the `gh pr list` payload, so this is one `gh api` call per pull
+    request -- the same per-pull-request price `behind_by` above already pays,
+    and paid for the same reason: the round that produced this reader had
+    thirteen inline comments in it, and a report that skipped them would miss
+    the case it exists for.
+
+    A reply is not a finding, which `sd-review-ack` decides rather than this.
+    """
+    payload, error = gh_json(["api", f"repos/{slug}/pulls/{number}/comments", "--paginate"], root)
+    if error:
+        return [], error
+    module = sd_lib.sibling("sd_review_ack", "sd-review-ack")
+    rows = payload if isinstance(payload, list) else []
+    return [row["id"] for row in module.findings(number, [], rows)], ""
 
 
 def describe(pull: dict[str, Any], root: pathlib.Path, slug: str) -> dict[str, Any]:
@@ -311,8 +334,25 @@ def describe(pull: dict[str, Any], root: pathlib.Path, slug: str) -> dict[str, A
         "checks_total": len(rollup) if isinstance(rollup, list) else 0,
         "failing": failing_checks(rollup),
         "behind_by": behind_by(root, slug, pull),
-        "review_findings": review_findings(pull.get("reviews")),
+        "review_findings": _findings(pull, root, slug),
     }
+
+
+def _findings(pull: dict[str, Any], root: pathlib.Path, slug: str) -> dict[str, Any]:
+    """Both places a reviewer states a finding, in one record.
+
+    `in_body` stays exactly what it was -- the count this file has always
+    printed -- and `ids` is the union, so a caller asking "has anybody answered
+    these" gets every finding rather than the free half. `unreadable` carries
+    the sentence when the inline half could not be read, because a partial
+    count presented as a total is the defect this whole record exists for.
+    """
+    stated = review_findings(pull.get("reviews"), pull.get("number"))
+    inline, error = inline_findings(root, slug, pull.get("number"))
+    stated["inline"] = len(inline)
+    stated["ids"] = stated["ids"] + inline
+    stated["unreadable"] = error
+    return stated
 
 
 def collect(root: pathlib.Path, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
