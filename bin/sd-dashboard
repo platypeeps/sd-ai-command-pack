@@ -45,10 +45,29 @@ def cmd_serve(args: argparse.Namespace, out) -> int:
     return 0
 
 
-# The one LaunchAgent this pack owns (design: "Sole pack-owned LaunchAgent =
-# `sd-dashboard install`"). Named for the command rather than for the machine,
-# so it cannot collide with the system dashboard's plist while both exist --
-# 6b-8 is where one replaces the other, and until then they are two services.
+# The LaunchAgent this pack's design claimed (design: "Sole pack-owned
+# LaunchAgent = `sd-dashboard install`"). **The shared name does not prevent a
+# collision with the system dashboard -- it is the collision.** Naming it for
+# the command rather than the machine was meant to keep two services apart
+# until 6b-8 replaced one with the other. 6b-8 happened and then reversed: the
+# system repository rebuilt its workflow server, took :8767 back at its #221,
+# and this label went with the port, so they are not two services and this one
+# is not the pack's. Measured 2026-09-13 -- `launchctl list` shows
+# `com.sven.sd-dashboard` held by PID 37095, and that plist's
+# `ProgramArguments` is `~/repos/system/local-project-dashboard/dashboard.sh
+# serve --config ... --port 8767`: the system's program, under this name. The
+# file's mode is 600 where `write_text` below leaves 644, which is independent
+# of any claim in either repository about who owns it.
+#
+# **Which makes `install` destructive today, and that is the part to read
+# before running it.** It writes `PLIST`, boots this label out and bootstraps
+# its own (:181-183), so it stops a live service, overwrites the system's plist
+# body with the pack's, and repoints the name at this file; `--uninstall`
+# (:170-171) unlinks that plist outright. Nothing in the pack's tests or docs
+# notices, because every one of them asserts against a plist the pack wrote.
+# Whether the pack should take a distinct label, refuse a plist it did not
+# write, or stop shipping `install` at all is the owner's call on sd:705,
+# alongside the port question in `dashboard/server.py`. Unchanged until then.
 LABEL = "com.sven.sd-dashboard"
 PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 LOGS = Path.home() / "Library" / "Logs"
