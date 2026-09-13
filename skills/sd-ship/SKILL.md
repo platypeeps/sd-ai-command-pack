@@ -119,13 +119,23 @@ A change with no work item needs no PRD or database row to ship.
    and on no other the item is closed, nothing is written into a file for it,
    and its directory stays. A change with no associated item omits `Item:` and
    `Delivers:`, creates no item or row, and uses no placeholder trailer.
-   **Write the trailers contiguously, with no blank line among them.**
-   `git interpret-trailers --parse` reads only the message's last paragraph,
-   so one blank line above `Co-Authored-By:` turns `Delivers:` into body text
-   no tool can see, and the item stays open with its code on main — sd:5,
-   which then needed an empty commit (`193d8e87`) to state what the first
-   commit already stated. `sd-ship` refuses a squash message that would do
-   this; a merge message written by hand carries no such guard.
+   **Write the trailers contiguously, as the message's last paragraph, with
+   nothing after them.** `git interpret-trailers --parse` reads only the
+   message's last paragraph, so one blank line above `Co-Authored-By:` turns
+   `Delivers:` into body text no tool can see, and the item stays open with
+   its code on main — sd:5, which then needed an empty commit (`193d8e87`)
+   to state what the first commit already stated. The attribution paragraph
+   (`🤖 Generated with [Claude Code](...)` and the session URL) goes *above*
+   the trailer block, never below it: a squash concatenates the pull-request
+   body into the commit message verbatim, and GitHub then appends its own
+   `Co-authored-by:` line — contiguously when the message already ends in a
+   trailer block, which is fine because that is a trailer too, and as a new
+   paragraph otherwise, which demotes every trailer above it. Four of the
+   seven `Delivers:` merges on main were unreadable for exactly that reason
+   (sd:640). `.github/PULL_REQUEST_TEMPLATE.md` ends in that order, and the
+   `-b "<body>"` in step 7 has to keep it. `sd-ship` refuses a squash
+   message that would do this; a merge message written by hand carries no
+   such guard.
    A delivery whose merge went out without the trailer remains unverified;
    report the missing evidence rather than silently inventing completion.
    Cancel with `sd work cancel <row-id> --reason TEXT`: the cancel writes
