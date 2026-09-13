@@ -73,15 +73,18 @@ jobs:
       # using something the old pin does not carry, and only then: the suite
       # fails on a skip, so a capability the library lacks is a red run here
       # rather than a quietly unexercised test. It last moved for
-      # `record_check`, which `bin/sd-review` reads to skip a gate the runner
-      # has already run, and which `4c9ebff4` predates: the reader landed
-      # before this pin could see the writer, so CI failed on an ImportError
-      # that no local run reproduced, every local venv already carrying it.
+      # `Synced.queued` and `Synced.incomplete`, which `sd shadow sync` now
+      # forwards and which `3c4c723a` predates: a test constructing
+      # `Synced(queued=3)` passes on every local venv and can only fail here,
+      # so sd:614's forwarding tests had to be written against a stub instead.
+      # The new pin is the merge that closed sd:603, chosen over the branch
+      # head so the jump carries the two commits this pack needs and not the
+      # collector work landing beside them.
       - name: Check out the system checkout, for sd_db
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          ref: 3c4c723a724c5922fb464042a036ded0408a3d51
+          ref: 940c045a93311aba30607bb1123a54d0b7f14fb9
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false
