@@ -2713,10 +2713,17 @@ def _review_rows(
         standing = ack.unacknowledged(root, found, ref)
         if not standing:
             continue
+        # A reviewer that writes `(3 votes each)` has stated more than one
+        # finding under one marker and has not said where they split, so the
+        # count is a floor rather than a total. `sd-review-ack` decides which
+        # rows those are and phrases the hedge; this asks it, so the report and
+        # the tool cannot disagree about the same pull request.
+        many = set(stated.get("indeterminate") or ())
         rows.append(_row(
             "pr-review-unacknowledged", f"{slug}!{pull['number']}",
             f"#{pull['number']} {pull['title']}",
-            f"{len(standing)} of {len(found)} review finding(s) unanswered",
+            f"{ack.at_least_ids(standing, many)} of {ack.at_least_ids(found, many)}"
+            " review finding(s) unanswered",
             f"read them with `sd-review-ack --pr {pull['number']}`, then "
             "acknowledge each with --fixed SHA or --dismiss 'why'",
         ))

@@ -337,6 +337,25 @@ class ThePrStateCountUsesTheSameReader(unittest.TestCase):
                 self.assertEqual(len(set(union)), len(union))
                 self.assertEqual(len(union), len(ack.findings(int(number), reviews, comments)))
 
+    def test_the_grouped_markers_are_named_for_the_report(self):
+        """`sd-status` hedges its count from this list, not from a second parser.
+
+        The row says "at least N" only because the ids that cover an unknown
+        number travel with the count. A report that decided that for itself
+        would be the two-surfaces-one-fact drift again, one field along.
+        """
+        pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
+        body = ("| File | Summary |\n|---|---|\n"
+                "| `a.py` | Moderate findings (3 votes each): one and another. |\n"
+                "| `b.py` | Moderate finding (2 votes): a single one. |\n")
+        reviews = [{"body": body, "author": {"login": "bot"}}]
+        stated = pr_state.review_findings(reviews, 1)
+        rows = ack.findings(1, reviews, [])
+        self.assertEqual(len(stated["ids"]), 2)
+        self.assertEqual(len(stated["indeterminate"]), 1)
+        self.assertEqual(stated["indeterminate"],
+                         [row["id"] for row in rows if row["indeterminate"]])
+
     def test_a_comment_response_that_is_not_a_list_is_refused(self):
         """`gh` exits 0 and returns an error object. That is not zero findings.
 
@@ -432,6 +451,68 @@ class BothOrdersOfATableCell(unittest.TestCase):
         # the reviewer's heading pretending to be part of the finding.
         self.assertNotIn("Findings", first["text"])
         self.assertEqual(first["text"], "moderate: pagination handling")
+
+    def test_a_marker_that_says_each_covers_a_number_it_does_not_state(self):
+        """#885's own review: two markers, four findings, and no split stated.
+
+        `Moderate findings (3 votes each)` is the reviewer saying "more than
+        one" in its own words. Where they split is not stated, and splitting on
+        "and" or on a semicolon would be this parser guessing. So the row keeps
+        its whole text and is marked indeterminate, and every count built on it
+        says "at least". Counting it flat as one is the worse of the two
+        errors: an undercount on a gate reads as progress.
+        """
+        rows = ack.findings(885, [{"body": (
+            "| File | Summary |\n|---|---|\n"
+            "| `bin/sd-pr-state` | Collects ids. Moderate findings (3 votes each): "
+            "deduplicate repeated IDs and reject non-list comment responses. "
+            "Nit findings (1 vote each): add coverage and update the contract. |\n"
+        ), "author": {"login": "bot"}}], [])
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(row["indeterminate"] for row in rows))
+        self.assertIn("deduplicate repeated IDs", rows[0]["text"])
+        self.assertIn("reject non-list", rows[0]["text"])
+        self.assertEqual(ack.at_least(rows, len(rows)), "at least 2")
+
+    def test_a_singular_marker_is_counted_flat(self):
+        """The control. Hedging every count would make the hedge meaningless."""
+        rows = ack.findings(880, [{"body": (
+            "| File | Summary |\n|---|---|\n"
+            "| `bin/sd_work.py` | Uses row-aware rendering. Moderate finding (2 votes): "
+            "field orders still differ between surfaces. Moderate finding (1 vote): "
+            "dictionary results can print `revision` twice. |\n"
+            "| `bin/sd_lib.py` | Adds `display_fields`. Moderate finding (3 votes): "
+            "duplicate fields in `order` are rendered twice. |\n"
+        ), "author": {"login": "bot"}}], [])
+        self.assertEqual(len(rows), 3)
+        self.assertFalse(any(row["indeterminate"] for row in rows))
+        self.assertEqual(ack.at_least(rows, len(rows)), "3")
+
+    def test_the_marker_is_the_only_evidence_of_plurality_that_is_used(self):
+        """`N and M votes` is the reviewer's other way of saying more than one.
+
+        And a plural `Findings:` label is *not* used as evidence: the reviewer
+        writes that label in front of a single finding too, so reading it as
+        plural would hedge counts that are exact.
+        """
+        self.assertTrue(ack.PLURAL_MARKER.search("(2 and 1 votes)"))
+        self.assertTrue(ack.PLURAL_MARKER.search("(1 vote each)"))
+        self.assertIsNone(ack.PLURAL_MARKER.search("(3 votes)"))
+        rows = ack.findings(1, [{"body": (
+            "| File | Summary |\n|---|---|\n"
+            "| `a.py` | Findings: the order differs (2 votes). |\n"
+        ), "author": {"login": "bot"}}], [])
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0]["indeterminate"])
+
+    def test_an_acknowledgement_survives_a_row_becoming_indeterminate(self):
+        """The flag is not in the id, so an answer already on record still counts."""
+        body = ("| File | Summary |\n|---|---|\n"
+                "| `a.py` | Moderate findings (3 votes each): one thing and another. |\n")
+        row = ack.findings(1, [{"body": body, "author": {"login": "bot"}}], [])[0]
+        self.assertTrue(row["indeterminate"])
+        flat = ack.finding_id(1, row["source"], row["path"], row["line"], row["text"])
+        self.assertEqual(row["id"], flat)
 
     def test_a_label_with_no_sentence_before_it_is_still_stripped(self):
         """The period fallback cannot help when the cell opens with the label."""

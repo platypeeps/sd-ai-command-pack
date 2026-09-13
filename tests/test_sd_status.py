@@ -1431,7 +1431,7 @@ class ReviewUnacknowledgedTests(InventoryFixture):
 
     def reviewed(self, ids: list[str], **extra: Any) -> dict[str, Any]:
         found = {"reviews": 1, "in_body": len(ids), "reviewers": ["bot"],
-                 "ids": ids, "inline": 0, "unreadable": ""}
+                 "ids": ids, "inline": 0, "unreadable": "", "indeterminate": []}
         found.update(extra)
         return {"repo": "acme/widget",
                 "pull_requests": [self.pull(failing=[], review_findings=found)]}
@@ -1442,6 +1442,21 @@ class ReviewUnacknowledgedTests(InventoryFixture):
         self.assertEqual(len(rows), 1)
         self.assertIn("2 of 2 review finding(s) unanswered", rows[0]["detail"])
         self.assertIn("sd-review-ack --pr 7", rows[0]["suggest"])
+
+    def test_a_grouped_marker_makes_the_row_say_at_least(self) -> None:
+        """The count is a floor when a marker covers a number it does not state."""
+        section = self.reviewed(["aa11", "bb22"], indeterminate=["aa11"])
+        rows = self.by_check(self.rows(pull_requests=section),
+                             "pr-review-unacknowledged")
+        self.assertIn("at least 2 of at least 2 review finding(s) unanswered",
+                      rows[0]["detail"])
+
+    def test_a_row_with_no_grouped_marker_states_a_flat_count(self) -> None:
+        """The control: hedging every row would make the hedge say nothing."""
+        rows = self.by_check(self.rows(pull_requests=self.reviewed(["aa11", "bb22"])),
+                             "pr-review-unacknowledged")
+        self.assertIn("2 of 2 review finding(s) unanswered", rows[0]["detail"])
+        self.assertNotIn("at least", rows[0]["detail"])
 
     def test_a_pull_request_with_no_finding_is_not_a_row(self) -> None:
         self.assertEqual(

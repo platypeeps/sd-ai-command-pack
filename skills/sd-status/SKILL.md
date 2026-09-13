@@ -122,6 +122,14 @@ already pays. A pull request whose comments cannot be read marks the class
 `unchecked` rather than reporting the body findings as the total — a partial
 count presented as a count is the failure this class is about.
 
+The count is sometimes a floor. A reviewer that writes `Moderate findings
+(3 votes each)` has stated more than one finding under one marker and has not
+said where they split; `sd-review-ack` keeps the whole text, marks the row
+indeterminate, and the detail then reads `at least 2 of at least 2` rather
+than `2 of 2`. Splitting that text on "and" would be guessing how many, and
+counting it flat as one would understate — an undercount on a gate reads as
+progress. Rows with no such marker keep an exact count.
+
 ## Ids: `<letter><4 hex digits, 8 on collision>`, from the data alone
 
 Every actionable row carries an id like `w0a35` — short enough to type, and a

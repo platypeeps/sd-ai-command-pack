@@ -289,8 +289,12 @@ def review_findings(reviews: Any, number: Any = 0) -> dict[str, Any]:
     # `ids` so a caller can ask whether each of them has been *read*, which is
     # a different question from how many there are and the one `sd-status`'s
     # `pr-review-unacknowledged` row is built on.
+    # `indeterminate` names the findings that cover an unknown number of
+    # findings each, so `sd-status` can hedge its count the same way
+    # `sd-review-ack` hedges its own rather than holding a second opinion.
     return {"reviews": len(rows), "in_body": len(stated),
-            "reviewers": authors, "ids": [row["id"] for row in stated]}
+            "reviewers": authors, "ids": [row["id"] for row in stated],
+            "indeterminate": [row["id"] for row in stated if row["indeterminate"]]}
 
 
 def inline_findings(root: pathlib.Path, slug: str, number: Any) -> tuple[list[str], str]:
@@ -358,6 +362,7 @@ def _findings(pull: dict[str, Any], root: pathlib.Path, slug: str) -> dict[str, 
     # drop a row; it is here so that the union carries the same guarantee the
     # halves do, rather than resting on that detail staying true.
     stated["ids"] = list(dict.fromkeys(stated["ids"] + inline))
+    stated["indeterminate"] = [row for row in stated["indeterminate"] if row in stated["ids"]]
     stated["unreadable"] = error
     return stated
 
