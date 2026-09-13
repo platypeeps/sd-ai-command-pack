@@ -296,27 +296,29 @@ make setup   # once
 make check   # test + lint + audit + docs-lint
 ```
 
-CI is four jobs, named here as branch protection sees them:
+CI is two gating jobs in `tests.yml`, named here by the status context GitHub
+emits for each (the matrix job's context carries its matrix values), plus the
+advisory `route` job in `sd-review-route.yml`:
 
-| Job | What it runs |
+| Context | What it runs |
 |---|---|
-| `unittest` | The suite on Ubuntu, Python 3.13, plus the installer coverage gate |
-| `lint` | Ruff and mypy over `bin/`, then `sd-docs-lint` over this checkout's `docs/` |
-| `bash 3.2 syntax` | Every tracked shell script parsed by a bash 3.2 built from source |
-| `security` | Bandit over `bin/`, zizmor over the workflows, ShellCheck |
+| `unittest (ubuntu-latest, 3.13)` | The suite on Ubuntu, Python 3.13, plus the installer coverage gate |
+| `lint` | Ruff over `dashboard`, `bin/` and `tests/` and mypy over `dashboard` and `bin/` (the path lists are `LINT_RUFF_PATHS` and `LINT_MYPY_PATHS` in the `Makefile`, read rather than restated), `sd-docs-lint` over this checkout's `docs/`, then Bandit over `bin/`, zizmor over the workflows, and ShellCheck over the tracked shell |
 
 `sd-status` compares the live protection object with the contexts the
 workflow files produce, not with this table, so a row here can go stale
 without anything saying so; the workflow files are the inventory.
 
-One protection state on `main` is accepted rather than open, and it is recorded
-in tracked `.github/sd-status.json` rather than in prose: a pull request is
-required and asks for **zero** approving reviews, because with `enforce_admins`
-on and one maintainer, GitHub's refusal of self-approval makes requiring one
-approval a lock and deleting the review object a loss of the pull-request
-requirement. `sd-status` prints it every run as `ok  [reviews] accepted …` with
-the condition that ends it, and stops accepting it the moment the live
-protection state stops matching what the file pins.
+`main` is currently unprotected, and that is an accepted gap rather than an
+open one, recorded in tracked `.github/sd-status.json` under the id
+`unprotected` with the reason and the condition that ends it (a second
+account with push or merge rights). `sd-status` reports it every run as
+accepted and stops accepting it the moment the live state stops matching what
+the file pins. While protection is gone there are no required contexts, and
+`sd-ship merge` refuses to run: it reads the protection object before it
+reads the pull request's checks and refuses a missing one
+(`bin/sd_ship_remote.py`, `protection()`). Merges land by hand with
+`gh pr merge` after the maintainer reads the checks.
 
 **Installer coverage is gated at 100% line and branch.** The gate enumerates its
 subject from git rather than matching a glob, and declares a statement floor, so
@@ -328,11 +330,12 @@ why the floor moved from files to statements at step 3e.
 PYTHON_BIN=python bash .github/scripts/check-installer-coverage.sh
 ```
 
-The `bash 3.2 syntax` gate survives on a narrower rationale than it had. It
-existed because the pack shipped shell that ran on whatever bash a consumer's
-macOS provided, which is 3.2. Nothing is shipped now; what it still protects is
-this repo's own three scripts under `.github/scripts/`, which `make check` runs
-through `/bin/bash` on macOS.
+The bash 3.2 syntax gate runs in `make lint` and in no CI job. It existed
+because the pack shipped shell that ran on whatever bash a consumer's macOS
+provided, which is 3.2. Nothing is shipped now; what it still protects is this
+repo's own three scripts under `.github/scripts/`, which `make check` runs
+through `/bin/bash` on macOS. The CI job that built bash 3.2 from source to
+run the same gate on Linux was cut for that reason (sd:10, criterion 17).
 
 **No macOS CI leg currently runs.** It was dropped to save runner cost, which
 GitHub bills at ten times the Linux rate. macOS-specific behaviour is covered

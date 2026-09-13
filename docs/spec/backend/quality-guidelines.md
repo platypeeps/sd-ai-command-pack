@@ -19,11 +19,12 @@
 > **"Silent Paths Must Say Why"** is a general rule with no deleted
 > subject, and the four defects it was adopted from are still the argument for
 > it. The **bash 3.2 warning block** inside Testing Requirements is
-> **live** with one clause gone: `.github/scripts/check-bash32-syntax.sh` exists, `make
-> lint` runs it, and CI runs it under `STRICT=1` in the `bash32` job, but it
-> enumerates every tracked shell script and nothing else -- the tracked git hooks
-> it also parsed left with `.githooks/` at step 0 (#597), and the block below
-> no longer claims them. `CONTRIBUTING.md` carries the same account. The surrounding
+> **live** with two clauses gone: `.github/scripts/check-bash32-syntax.sh`
+> exists and `make lint` runs it, but no CI job does -- the `bash32` job that
+> ran it under `STRICT=1` was cut by sd:10 criterion 17 -- and it enumerates
+> every tracked shell script and nothing else: the tracked git hooks it also
+> parsed left with `.githooks/` at step 0 (#597), and the block below no longer
+> claims them. `CONTRIBUTING.md` carries the same account. The surrounding
 > Testing Requirements prose is not: it names a Ruff scope over `install.py`,
 > `installer/`, `scripts/` and `templates/scripts/` (the live scope is
 > `LINT_RUFF_PATHS` in the Makefile) and a macOS unittest leg that R11-D4
@@ -2007,8 +2008,9 @@ leg protects BSD-tool and bash-3.2 behavior that Ubuntu cannot exercise.
 > the same rule.
 >
 > A developer machine with a modern bash on `PATH` accepts the file, so a
-> gate that parses shell with the `PATH` interpreter passes and the macOS CI
-> leg is the first thing to see it. `make lint` therefore runs
+> gate that parses shell with the `PATH` interpreter passes and the defect
+> surfaces only when the script is next run under `/bin/bash` on a Mac, with
+> no CI leg to see it first. `make lint` therefore runs
 > `.github/scripts/check-bash32-syntax.sh`, which parses every tracked `*.sh`
 > with a probed bash 3.2 (`/bin/bash` on macOS). Run it
 > directly when iterating on shell:
@@ -2023,10 +2025,12 @@ leg protects BSD-tool and bash-3.2 behavior that Ubuntu cannot exercise.
 > silently; `STRICT=1` makes that state fatal, and `SD_AI_COMMAND_PACK_BASH32`
 > overrides the interpreter search.
 >
-> CI enforces the same gate in the `bash32` job. No Linux distribution packages
-> bash 3.2, so the job builds 3.2.57 from source (cached per version), asserts
-> the binary really reports 3.2 before trusting it, and runs the gate with
-> `STRICT=1` — the skip path is a failure there, never a silent pass.
+> No CI job runs this gate. One did: because no Linux distribution packages
+> bash 3.2, the `bash32` job built 3.2.57 from source, asserted the binary
+> really reported 3.2, and ran the gate with `STRICT=1`. sd:10 criterion 17
+> cut it, since the pack ships no shell and the three scripts left under
+> `.github/scripts/` are executed by `make check` under the real `/bin/bash`
+> on macOS, so the local run is the gate.
 
 Add or update tests when changing:
 

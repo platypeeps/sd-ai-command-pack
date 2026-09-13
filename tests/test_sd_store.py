@@ -428,8 +428,8 @@ class ManifestTests(StoreFixture):
         this pull request and the one before it. On POSIX a backslash is a
         filename character and not a separator, so `..\\..\\etc` names one
         strangely-spelled directory *inside* the vault; `C:\\vault` likewise.
-        The pack's CI gates bash 3.2 and `/usr/bin/python3`, so there is no
-        Windows path to protect -- but the last thing declined on reasoning
+        The pack's gates run under macOS bash 3.2 locally and Ubuntu in CI,
+        so there is no Windows path to protect -- but the last thing declined on reasoning
         alone turned out to be real on an interpreter the reasoning never ran,
         so this one is a test: the base registers, and the path the driver then
         fails to find is under the vault root.
