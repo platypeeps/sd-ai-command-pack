@@ -1,11 +1,11 @@
-"""The rule registry and the three-legged meta-check that keeps it honest.
+"""The rule registry and the four-legged meta-check that keeps it honest.
 
 `bin/sd_rules.py` answers "which rules exist". This module is what stops that
-answer and the repository drifting apart, and it is the deliverable: legs a, b
-and c below are worth more than any number of rules, because rules with no
-meta-check start drifting the day they land.
+answer and the repository drifting apart, and it is the deliverable: legs a to d
+below are worth more than any number of rules, because rules with no meta-check
+start drifting the day they land.
 
-The three legs fail independently, and each one catches a different way the
+The four legs fail independently, and each one catches a different way the
 sentence and the machinery come apart:
 
     a. a registry rule no skill teaches -- a rule authors meet only as a CI
@@ -15,7 +15,17 @@ sentence and the machinery come apart:
        let `WORKFLOW.md` claim for weeks that every writing skill refuses the
        upstream tree while nothing refused;
     c. a rule id cited in live prose that the registry does not carry -- a
-       deleted checker leaving live prose behind.
+       deleted checker leaving live prose behind;
+    d. a row whose named checker does not redden when its rule is violated --
+       a checker that exists and enforces nothing.
+
+**Leg d is why the other three are worth anything.** Legs a to c landed first
+and each asserted a *link*: a row is taught, a claim cites a row, a citation
+resolves to a row. None of them looks at what the checker does. A row naming
+`sd_lib.repo_root` -- the resolver by which its own rule would be violated --
+passed every one of them, and the only reason it is not in the table today is
+that a human reviewer read it. Leg d is that reader made mechanical: the row
+states the mutation, and this module executes it.
 
 **Every population here is enumerated, never listed.** The pack nouns come
 from `bin/` and `tests/` as they are on disk, the corpus comes from the git
@@ -36,11 +46,15 @@ from __future__ import annotations
 
 import ast
 import collections
+import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
+from typing import NamedTuple
 from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -48,6 +62,14 @@ if str(REPO_ROOT / "bin") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "bin"))
 
 import sd_rules  # noqa: E402 - the table under test, imported for its own sake
+
+# The resolver for a `path::symbol` location, borrowed rather than rebuilt. It is
+# the same function that resolves the `source:path::symbol` citations in this
+# pack's documentation, which is the whole reason `Rule.checker` could stop being
+# a callable: one resolver for both, so the registry did not bring a second
+# source of truth about which declarations exist. A second AST walk here would be
+# the defect this module exists to end.
+from tests.test_doc_citations import source_declaration_error  # noqa: E402
 
 #: Where the historical record lives. Archived planning documents are read for
 #: *definitions*, because a rule defined there still answers a live citation,
@@ -169,27 +191,27 @@ DANGLING_RULE_IDS = frozenset({"R11-D1", "R11-D30", "R11-D46", "R5-D1"})
 #: one was newly stranded in the same change -- two baselines in one file
 #: keeping two different standards, which review caught.
 #:
-#: **25 on this branch, down from the 26 measured on `cddd3b98`.** `R10-D5` is
-#: a row in `bin/sd_rules.py` now.
+#: **24 on this branch, down from the 26 measured on `cddd3b98`.** `R10-D5` and
+#: `R10-D6` are rows in `bin/sd_rules.py` now.
 #:
-#: `R10-D6` is NOT, and the reason is worth keeping because it is a gap in the
-#: registry rather than in the rule. Its enforcement exists and is good --
+#: `R10-D6` took two slices to land, and what held it is worth keeping. Its
+#: enforcement was never in doubt --
 #: `tests/test_verb_inventory.py::test_no_command_accepts_a_repository_path`
 #: enumerates `bin/` with `iterdir()`, parses each file, and asserts no command
-#: declares a repo-path option. But that is a TEST, and `Rule.checker` holds a
-#: function object imported by `bin/sd_rules.py`, which cannot import `tests/`.
-#: `R10-D5`'s checker is runtime code carrying its own refusal; `R10-D6`'s is a
-#: test over the tree. The field means two different things and the registry has
-#: no way to name the second. Registering `sd_lib.repo_root` papered over that:
-#: it is the resolver the rule CONSTRAINS, not a guard -- it accepts a `start`
-#: path, so it is the mechanism by which the rule would be broken. Settle what
-#: `checker` names before this row returns.
+#: declares a repo-path option. The obstacle was the registry: `Rule.checker`
+#: held a function object imported by `bin/sd_rules.py`, which cannot import a
+#: test module, so the field could not name a test at all. The first attempt
+#: papered over that with `sd_lib.repo_root`, which is the resolver the rule
+#: CONSTRAINS rather than a guard on it -- it accepts a `start` path, so the row
+#: named the mechanism by which the rule would be broken as its enforcement, and
+#: the meta-check passed it. `checker` is a `path::symbol` location now, so a
+#: test is nameable, and leg d is what makes naming one mean something.
 #:
 #: The other twenty-four were each looked at and each has a recorded reason it
 #: is not a row yet, in the backfill section of this item's `implement.md`,
 #: rather than left for the next reader to rediscover.
 STRANDED_RULE_IDS = frozenset({
-    "R10-D1", "R10-D2", "R10-D3", "R10-D4", "R10-D6", "R10-D7",
+    "R10-D1", "R10-D2", "R10-D3", "R10-D4", "R10-D7",
     "R11-D10", "R11-D12", "R11-D13", "R11-D14", "R11-D15", "R11-D16",
     "R11-D17", "R11-D18", "R11-D19", "R11-D20", "R11-D21", "R11-D23",
     "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D4", "R11-D5", "R11-D6",
@@ -584,6 +606,24 @@ def skill_documents() -> list[tuple[str, str]]:
     return read_corpus(f"{SKILLS}*.md", f"{SKILLS}**/*.md")
 
 
+def checker_location_errors(rule: sd_rules.Rule) -> list[str]:
+    """Why a live row's `checker` does not resolve, or nothing at all.
+
+    Three failures, and the first is the one the field's old shape made
+    impossible to reach: a live row naming no checker. While `checker` held a
+    function object, `callable(None)` caught that; now it is a string, so the
+    emptiness is checked here rather than assumed away.
+    """
+
+    if not (rule.checker or "").strip():
+        return [f"{rule.id}: live, but names no checker"]
+    location = sd_rules.CHECKER.fullmatch(rule.checker or "")
+    if not location:
+        return [f"{rule.id}: checker={rule.checker!r} is not `path::symbol`"]
+    failure = source_declaration_error(REPO_ROOT, *location.groups())
+    return [f"{rule.id}: {failure}"] if failure else []
+
+
 def _lines(rows) -> str:
     return "\n".join(f"  {row}" for row in rows)
 
@@ -599,31 +639,61 @@ class Registry(unittest.TestCase):
     def test_every_live_rule_names_a_checker_that_exists(self):
         """A row whose checker is missing is a failure, never a comment.
 
-        The checker is held as the function object, so a row naming something
-        that does not exist raises at import. This asserts the two things the
-        import cannot: that a live row's checker is callable, and that a
-        repealed row holds `None` exactly -- a withdrawn rule has nothing left
-        to run, and a stale name left in its place is a tombstone that still
-        looks like a checker.
+        `checker` is a `path::symbol` location, resolved by the function that
+        resolves this pack's documentation citations, so a row naming a
+        declaration that was renamed, moved or deleted fails here. That is the
+        whole of what the field's old shape bought: a callable resolved at
+        import, and an import proves only that the name is there. What it does
+        is leg d's question, and asking it was the point of the change.
+
+        A repealed row holds `None` exactly -- a withdrawn rule has nothing
+        left to run, and a stale name left in its place is a tombstone that
+        still looks like a checker.
         """
 
         wrong = []
         for rule in sd_rules.RULES:
-            if rule.state == sd_rules.LIVE and not callable(rule.checker):
-                wrong.append(f"{rule.id}: live, but its checker "
-                             f"{rule.checker!r} is not callable")
-            elif rule.state == sd_rules.REPEALED and rule.checker is not None:
-                wrong.append(f"{rule.id}: repealed, but still holds "
-                             f"{rule.checker!r}")
+            if rule.state == sd_rules.REPEALED:
+                if rule.checker is not None:
+                    wrong.append(f"{rule.id}: repealed, but still holds "
+                                 f"{rule.checker!r}")
+                continue
+            wrong += checker_location_errors(rule)
         self.assertEqual(wrong, [], f"""
 A registry row's checker does not match its state.
 
 {_lines(wrong)}
 
-A `live` row must hold a callable. A `repealed` row must hold `None` -- not a
-leftover name, which the first form of this check accepted: `(state == LIVE)
-!= callable(checker)` is False for a repealed row holding the *string*
-"stale_name", because neither side is true.""")
+A `live` row must name one declaration that exists, as `path::symbol`. A
+`repealed` row must hold `None` -- not a leftover name, which the first form of
+this check accepted: `(state == LIVE) != callable(checker)` is False for a
+repealed row holding the *string* "stale_name", because neither side is true.""")
+
+    def test_a_checker_and_a_proof_arrive_together(self):
+        """A checker with no proof is a name nobody ran.
+
+        The pair is the row's whole claim to enforce anything: `checker` says
+        where the enforcement is declared and `proof` says what makes it
+        redden. Either one alone is the defect this slice closes -- a location
+        with no proof is exactly the row that named `sd_lib.repo_root` and
+        passed, and a proof with no location is a sentence about nothing.
+
+        This is the cheap half. Leg d runs the sentence.
+        """
+
+        wrong = []
+        for rule in sd_rules.RULES:
+            if rule.checker and not (rule.proof or "").strip():
+                wrong.append(f"{rule.id}: names {rule.checker} and no proof")
+            if (rule.proof or "").strip() and not rule.checker:
+                wrong.append(f"{rule.id}: states a proof and names no checker")
+        self.assertEqual(wrong, [], f"""
+A registry row carries a checker without a proof, or the other way round.
+
+{_lines(wrong)}
+
+`proof` is the mutation that makes the checker redden, in one sentence a reader
+can execute, and `MUTATIONS` below has to carry it as code.""")
 
     def test_every_rule_id_is_unique_and_well_formed(self):
         """Two rows sharing an id make the lookup silently drop one.
@@ -1091,6 +1161,297 @@ in the same change.""")
 {_lines(dead)}
 
 Delete these entries.""")
+
+
+# --------------------------------------------------------------------------
+# Leg d -- the named checker reddens when the rule is violated
+# --------------------------------------------------------------------------
+
+
+class Mutation(NamedTuple):
+    """One violation of one rule, and the test that must notice it.
+
+    `old` has to occur exactly once in `path`. A mutation whose pattern matches
+    nothing edits nothing, the test it names stays green, and the leg reports
+    that the checker enforces -- which is the false pass this leg exists to
+    stop, arriving inside the leg. Two changes on this repository in one week
+    were verified by a mutation script that matched nothing, so the count is
+    asserted and never assumed.
+    """
+
+    path: str
+    old: str
+    new: str
+    test: str
+
+
+class Outcome(NamedTuple):
+    """What one exercised mutation reported, with nothing inferred.
+
+    Five numbers rather than a boolean, because "the checker reddened" is four
+    separate claims and a boolean would let three of them fail silently: the
+    edit landed, the test was green before it, the test was red after it, and
+    the tree came back.
+    """
+
+    applied: int    # how many times the mutated text was found
+    reverted: int   # how many times the mutation was found on the way back
+    control: int    # the named test's exit code before the mutation
+    violated: int   # its exit code after it
+    restored: int   # `diff -rq` between the restored copy and this tree
+    report: str     # the mutated run's output, for a failure message
+
+
+#: The mutation per checker, keyed by the location a registry row names.
+#:
+#: **Keyed by the checker location, not by the rule id.** A rule id written as
+#: data outside `bin/sd_rules.py` is the second list
+#: `test_no_consumer_carries_a_second_list` refuses, and that check reads `bin/`
+#: and `dashboard/` -- it would not see a dictionary here, so the discipline has
+#: to be kept rather than relied on. A checker location is the row's own value,
+#: read back off `RULES` by `test_every_live_checker_carries_a_mutation` as an
+#: equality: a row added with no mutation fails, and a mutation outliving the row
+#: that needed it fails too.
+MUTATIONS: dict[str, Mutation] = {
+    "bin/sd_setup_github.py::setup_github": Mutation(
+        path="bin/sd_setup_github.py",
+        old='    if repo_mode != "full":',
+        new="    if False:  # leg d: the mode guard, defeated",
+        test="tests.test_mode_detection.TheInstallerGate"
+             ".test_a_fork_with_no_mode_line_is_refused",
+    ),
+    "tests/test_verb_inventory.py::test_no_command_accepts_a_repository_path":
+        Mutation(
+            path="bin/sd_work.py",
+            old='belongs.add_argument("--belongs-to", metavar="PATH",',
+            new='belongs.add_argument("--repo", metavar="PATH",',
+            test="tests.test_verb_inventory.InventoryTests"
+                 ".test_no_command_accepts_a_repository_path",
+        ),
+}
+
+
+def child_environment() -> dict[str, str]:
+    """This process's environment, minus the coverage harness.
+
+    `.github/scripts/run-tests.sh` exports `PYTHONPATH`, `COVERAGE_FILE` and
+    `COVERAGE_PROCESS_START` so that every subprocess it spawns files a coverage
+    shard. A run inside a temporary copy would file shards for paths that are
+    gone by the time `coverage combine` reads them, so the three are dropped.
+    `PYTHONDONTWRITEBYTECODE` is set for the reason the tree is copied at all:
+    the run has to leave nothing behind that the restoration check would then
+    report as a difference.
+    """
+
+    environment = dict(os.environ)
+    for name in ("PYTHONPATH", "COVERAGE_FILE", "COVERAGE_PROCESS_START"):
+        environment.pop(name, None)
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    return environment
+
+
+def edit(tree: pathlib.Path, mutation: Mutation, *, violate: bool) -> int:
+    """Write the violation into the copy, or write the original back.
+
+    Returns how many times the text it looked for occurred, so the caller
+    asserts it was exactly one in both directions. Restoration is a replacement
+    like the mutation, never a checkout: this tree has no index of its own, and
+    a leg that restored with git would be proving something about git.
+    """
+
+    target = tree / mutation.path
+    text = target.read_text(encoding="utf-8")
+    before = mutation.old if violate else mutation.new
+    after = mutation.new if violate else mutation.old
+    found = text.count(before)
+    if found == 1:
+        target.write_text(text.replace(before, after), encoding="utf-8")
+    return found
+
+
+def run_one_test(tree: pathlib.Path, node: str) -> subprocess.CompletedProcess:
+    """The named unittest node, run with the copy as the working directory."""
+
+    return subprocess.run([sys.executable, "-m", "unittest", node],
+                          cwd=tree, env=child_environment(),
+                          capture_output=True, text=True)
+
+
+def copy_tracked(destination: pathlib.Path) -> None:
+    """Every tracked file, copied into a private tree with its mode.
+
+    The index rather than a directory walk, for two reasons. It is stable:
+    nothing in the suite writes a tracked file, while the repository root
+    collects coverage shards, logs and other suites' scratch directories for as
+    long as a run lasts -- copying those is waste at best and, if one vanishes
+    mid-walk, a failure in the copy rather than in anything being tested. And it
+    is the enumeration every other population in this module already comes from.
+
+    `.git` is left behind with them. No test leg d runs reads the index, and in
+    a worktree `.git` is a pointer to a gitdir this copy has no business
+    writing to.
+    """
+
+    for path in tracked_paths():
+        target = destination / path.relative_to(REPO_ROOT)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+
+
+def exercise(mutation: Mutation) -> Outcome:
+    """Run one mutation end to end in a private copy of this tree.
+
+    The protocol, in order: copy, run the named test clean, apply the mutation,
+    run it again, put the original text back, and prove the copy is identical to
+    this tree again.
+
+    **In a copy rather than in place, and the runner is the reason.**
+    `.github/scripts/run-tests.sh` shards the suite by module across workers, so
+    a leg that edited `bin/sd_work.py` in the live tree would be editing it
+    while another shard imports it -- a flake that costs a week to find and is
+    caused by the check meant to prevent defects. The copy is the *save a copy*
+    half of the mutation protocol made structural: the pristine bytes stay where
+    nothing can touch them, the edit happens where nothing else is looking, and
+    the restoration is compared against the original rather than against a
+    remembered string.
+    """
+
+    with tempfile.TemporaryDirectory() as scratch:
+        tree = pathlib.Path(scratch) / "tree"
+        copy_tracked(tree)
+        control = run_one_test(tree, mutation.test)
+        applied = edit(tree, mutation, violate=True)
+        violated = run_one_test(tree, mutation.test)
+        reverted = edit(tree, mutation, violate=False)
+        top = pathlib.PurePosixPath(mutation.path).parts[0]
+        identical = subprocess.run(
+            ["diff", "-rq", "-x", "__pycache__", "-x", "*.pyc",
+             str(tree / top), str(REPO_ROOT / top)],
+            capture_output=True, text=True)
+        return Outcome(applied, reverted, control.returncode,
+                       violated.returncode, identical.returncode,
+                       (violated.stdout + violated.stderr)[-2000:]
+                       + identical.stdout)
+
+
+class LegD(unittest.TestCase):
+    """A checker that exists and enforces nothing."""
+
+    def test_every_live_checker_carries_a_mutation(self):
+        """The coverage is enumerated from the registry, never from the table.
+
+        An equality, so it fails from both sides: a row registered with no
+        mutation is a checker nobody proved, and a mutation left behind by a
+        deleted row is a fixture pointing at nothing. Reading the coverage off
+        `MUTATIONS` instead would make the leg's scope whatever somebody
+        remembered to add, which is the listed-roster defect this item is about.
+        """
+
+        expected = {rule.checker for rule in sd_rules.RULES
+                    if rule.state == sd_rules.LIVE and rule.checker}
+        self.assertEqual(set(MUTATIONS), expected, """
+`MUTATIONS` and the registry's live checkers are not the same set.
+
+Above: the mutations first, the registry's live checkers second. A live row with
+a checker needs a mutation proving that checker reddens; a mutation whose row is
+gone needs deleting.""")
+
+    def test_every_proof_names_the_file_and_the_test_its_mutation_uses(self):
+        """The sentence and the code say the same thing, or this fails.
+
+        `proof` is prose and `MUTATIONS` is what runs, so they are two copies of
+        one fact -- the shape this whole item exists to refuse. They cannot be
+        collapsed into one: a sentence a reader can follow is not a tuple, and a
+        tuple is not a sentence. So they are held to naming the same file and the
+        same test, which is the part of the agreement a check can reach.
+        """
+
+        wrong = []
+        for rule in sd_rules.RULES:
+            mutation = MUTATIONS.get(rule.checker or "")
+            if mutation is None:
+                continue
+            for token in (mutation.path, mutation.test.rsplit(".", 1)[-1]):
+                if token not in (rule.proof or ""):
+                    wrong.append(f"{rule.id}: proof does not name {token}")
+        self.assertEqual(wrong, [], f"""
+A registry row's proof does not name what its mutation actually touches.
+
+{_lines(wrong)}
+
+The proof sentence has to name the file the mutation edits and the test that
+goes red, or a reader following it runs something else.""")
+
+    def test_every_live_checker_reddens_when_its_rule_is_violated(self):
+        """The leg itself: violate the rule, and the named checker must notice.
+
+        Four assertions per row, because "it went red" on its own is not
+        evidence. The edit has to have landed, the test has to have been green
+        before it, red after it, and the tree has to come back.
+        """
+
+        for location, mutation in sorted(MUTATIONS.items()):
+            with self.subTest(checker=location):
+                outcome = exercise(mutation)
+                self.assertEqual(outcome.applied, 1, f"""
+The mutation for {location} did not match exactly once in {mutation.path}.
+
+Found {outcome.applied} occurrences of the text it replaces, so the edit either
+landed nowhere or landed twice. A mutation that matches nothing leaves the test
+green and reports that the checker enforces.""")
+                self.assertEqual(outcome.control, 0, f"""
+{mutation.test} was already failing before the mutation for {location}.
+
+A test that was red anyway proves nothing about the violation.
+
+{outcome.report}""")
+                self.assertNotEqual(outcome.violated, 0, f"""
+{mutation.test} stayed green while {location}'s rule was violated.
+
+That is the defect leg d exists to catch: the checker exists, and it does not
+enforce. Either the row names the wrong checker, or the rule has no enforcement
+and the row should not be live.
+
+{outcome.report}""")
+                self.assertEqual(outcome.reverted, 1, "the restore matched once")
+                self.assertEqual(outcome.restored, 0, f"""
+The copy did not come back identical after {location}'s mutation.
+
+{outcome.report}""")
+
+    def test_a_mutation_that_violates_nothing_leaves_the_checker_green(self):
+        """The control on leg d itself, without which the leg is vacuous.
+
+        `exercise` reports red for any non-zero exit: a copy that cannot import,
+        a node id that does not resolve, a child that cannot start. Every one of
+        those would read as "every checker enforces", which is the same class of
+        false pass as a mutation that matches nothing.
+
+        So the sentinel edits the very file the `R10-D6` mutation edits, and runs
+        the very test that mutation runs -- it rewrites a docstring phrase rather
+        than an option name. The only difference between the two runs is whether
+        the edit is a violation, so a green result here is evidence that the red
+        result above came from the violation.
+        """
+
+        sentinel = Mutation(
+            path="bin/sd_work.py",
+            old="Which checkout `--belongs-to` names",
+            new="Which checkout the misfiling flag names",
+            test="tests.test_verb_inventory.InventoryTests"
+                 ".test_no_command_accepts_a_repository_path")
+        outcome = exercise(sentinel)
+        self.assertEqual(outcome.applied, 1, "the sentinel edit did not land")
+        self.assertEqual(outcome.control, 0, f"already red: {outcome.report}")
+        self.assertEqual(outcome.violated, 0, f"""
+The sentinel edit reddened {sentinel.test}, and it violates no rule.
+
+It rewrites a sentence in a docstring. A checker that notices that is not
+reading what it claims to read, and every red result leg d reports is suspect
+until this passes.
+
+{outcome.report}""")
+        self.assertEqual(outcome.restored, 0, "the copy did not come back")
 
 
 if __name__ == "__main__":  # pragma: no cover - the suite runs this by module

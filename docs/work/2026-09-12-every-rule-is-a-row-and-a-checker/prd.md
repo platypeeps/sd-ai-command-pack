@@ -72,9 +72,14 @@ status checks.
 
 1. **One registry is the single answer to "which rules exist."** It is a table
    in code, iterated by every consumer. No consumer carries a second list.
-2. **Every registry row names its checker.** A row whose checker does not exist
-   is a failure of the registry's own test, not a comment.
-3. **A registry row records: id, what it checks, its checker, its scope
+2. **Every registry row names its checker, and proves it enforces.** A row whose
+   checker does not exist is a failure of the registry's own test, not a
+   comment — and so is a row whose checker exists and enforces nothing. The
+   second half was added on 2026-09-13, after a row naming `sd_lib.repo_root`
+   passed the first half: the resolver a rule constrains is not a guard on it,
+   and "the checker exists" cannot tell the two apart. See requirement 5d.
+3. **A registry row records: id, what it checks, its checker as a
+   `path::symbol` location, the proof that makes that checker redden, its scope
    (`code`, `prose`, or `both`), and the skill section that teaches it.**
 4. **A skill teaching a rule cites the rule id.** Restating the rule is how the
    two copies drift, so a skill should not — but *"does not restate"* has no
@@ -83,11 +88,16 @@ status checks.
    accepted gap rather than as a rule nothing performs. Asserting an enforcement
    that does not exist is the defect this whole item is about, and it would be
    absurd to commit it in the requirements list.
-5. **The meta-check has three legs, and each fails independently:**
+5. **The meta-check has four legs, and each fails independently:**
    - a. every registry rule is cited by at least one skill;
    - b. every enforcement claim in a skill cites a rule id that the registry
      carries;
-   - c. every rule id cited in live prose is defined in the registry.
+   - c. every rule id cited in live prose is defined in the registry;
+   - d. every live row's checker goes red when that row's rule is violated,
+     proved by applying the row's `proof` as a mutation rather than by reading
+     it. Added 2026-09-13. Legs a to c each assert a link between a row and the
+     corpus and none of them asks what the checker does, which is how a row
+     naming a non-enforcing symbol passed all three.
 6. **Leg b and leg c carry a frozen baseline, not a flag day.** The uncited
    claims in `skills/` — held per document in `UNCITED_SKILL_CLAIMS`, the
    count `uncited_skill_claims()` projects from what `claims_in` finds — and
@@ -119,9 +129,14 @@ status checks.
 
 ## Acceptance criteria
 
-- [ ] A registry exists as a single code table, and a test asserts every row's
-      checker resolves to a callable that exists. Zero rows must pass, so the
-      table can land before any rule does.
+- [ ] A registry exists as a single code table, and a test asserts every live
+      row's checker resolves to exactly one declaration in the checkout. Zero
+      rows must pass, so the table can land before any rule does.
+- [ ] Leg d fails when a live row names a checker that does not redden under the
+      row's own `proof`. Demonstrated by mutation on the leg itself: repoint one
+      row's mutation at a test that the violation leaves green, see leg d go red,
+      and — the control, without which the leg is vacuous — apply an edit that
+      violates nothing and see the same machinery report green.
 - [ ] A test asserts no consumer carries a second list: a rule id appearing as a
       literal anywhere in tracked code outside the registry module is a failure.
       This is requirement 1's only mechanical check, and it is the one that
@@ -178,3 +193,9 @@ status checks.
   reason in `implement.md`. `R10-D6` was registered in the first round and
   unregistered in review: its named checker, `sd_lib.repo_root`, accepts a
   path and enforces nothing
+- 2026-09-13 step 4 second slice: the hole that admitted that row is closed.
+  `checker` is a `path::symbol` location, every checker carries a `proof`, and
+  leg d executes the proof in a private copy of the tree. `R10-D6` is a row
+  again — this time with a mutation that reddens
+  `test_no_command_accepts_a_repository_path` — and the stranded baseline falls
+  25 → 24

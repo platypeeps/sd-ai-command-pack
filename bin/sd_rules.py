@@ -13,15 +13,42 @@ producer rather than editing a renderer, a sort, or a list in a skill. The
 `sd-status` skill states the reason in one sentence: *"That is how those drift
 apart."*
 
-**Why a code table and not a YAML or JSON file.** A data file reads better, and
-that is why the rejection has to be explicit. A data file cannot name a
-callable; it names a string, and something must resolve that string back to a
-function. That resolver would be a second source of truth about which checkers
-exist, and it would fail at run time rather than at import time. This table
-holds the function object itself, so a row naming a checker that does not exist
-raises on the first import, before any test runs.
+**`checker` is a source location, and `proof` is how it is held to enforcing.**
+A row names its checker as `path::symbol` -- a string -- and states in one
+sentence the mutation that makes that checker redden. The pair is what leg d of
+the meta-check runs: it applies the mutation in a private copy of the tree and
+requires the named test to go from green to red. Until leg d existed the only
+thing asserted about a checker was that it *existed*, and a row was drafted
+naming `sd_lib.repo_root` -- the resolver by which its rule would be violated,
+not a guard on it -- which passed. That is the hole this field pair closes.
 
-**The meta-check is the deliverable, not the rules.** Legs a, b and c in
+**Why the location is a string and not the function object.** It was the
+function object until sd:431's second slice, and two things cost more than the
+import-time resolution bought. A callable field makes this module import every
+checker's module at load time, so the registry acquires an import edge to every
+enforcement in the pack and anything reading the table pays for all of them. And
+an import cannot reach the two places enforcement actually lives: an
+extensionless entrypoint such as `bin/sd-review`, where `R10-D4`'s
+`codex_preflight` sits, and a test over the tree, which this module must never
+import. Both were recorded as blockers on the backfill; the string answers both.
+
+**Why a code table and not a YAML or JSON file.** The rejection needs restating,
+because the argument it used to rest on is gone. It used to be that a data file
+cannot name a callable, so something would have to resolve a string back to a
+function, and that resolver would be a second source of truth failing at run
+time rather than at import time. The field is a string now, so that argument has
+expired -- and the answer does not depend on it. The string is resolved by
+`source_declaration_error` in `tests/test_doc_citations.py`, which is the
+resolver this pack already uses for the `source:path::symbol` citations in its
+documentation, so there is still exactly one resolver and this table did not
+bring a second. What a data file would cost instead is the rest of a row: a
+`subject` and a `proof` are paragraphs whose whole value is that a reader meets
+them beside the row, they are reviewed as code is reviewed, and their shape is
+checked by the type of this tuple rather than by a schema file somebody has to
+keep honest. And what the import used to buy is bought better: leg d proves the
+checker enforces, which is more than resolution ever proved.
+
+**The meta-check is the deliverable, not the rules.** Legs a to d in
 `tests/test_rule_registry.py` are what keep the system from drifting, and a
 registry with the meta-check and no rules is worth more than fifteen rules with
 no meta-check, because the second one starts drifting the day it lands. Zero
@@ -39,20 +66,11 @@ ceiling.
 
 from __future__ import annotations
 
-import pathlib
 import re
-import sys
-from collections.abc import Callable
 from typing import NamedTuple
 
-_BIN = str(pathlib.Path(__file__).resolve().parent)
-if _BIN not in sys.path:  # pragma: no cover - import bootstrap, not behaviour
-    sys.path.insert(0, _BIN)
-
-import sd_setup_github  # noqa: E402 - after the bootstrap that makes `bin/` importable
-
 #: What a rule id looks like, in one place. Every reader of rule ids -- the
-#: meta-check's three legs, and anything that grows later -- compiles nothing
+#: meta-check's four legs, and anything that grows later -- compiles nothing
 #: of its own against this shape, for the reason the table exists at all.
 #:
 #: The form is the pack's existing `R<round>-D<decision>` id, deliberately.
@@ -60,6 +78,15 @@ import sd_setup_github  # noqa: E402 - after the bootstrap that makes `bin/` imp
 #: `cddd3b98` resolving to nothing, and "a rule id cited nowhere in the registry
 #: fails" is leg c's whole job.
 RULE_ID = re.compile(r"\bR\d+-D\d+\b")
+
+#: What a checker location looks like: `path::symbol`, the same spelling the
+#: pack's documentation citations use inside `source:...`. Held here rather than
+#: in the test module for the reason `RULE_ID` is: one grammar, one source.
+#:
+#: The path deliberately does not require a suffix. `bin/sd-review` is a Python
+#: file with no `.py`, and the first checker this registry could not name was in
+#: one -- which is half of why the field stopped being a callable.
+CHECKER = re.compile(r"([A-Za-z0-9_./-]+)::([A-Za-z_][A-Za-z0-9_]*)")
 
 #: A rule that is in force. Its checker runs and its skill teaches it.
 LIVE = "live"
@@ -85,11 +112,15 @@ STATES = (LIVE, REPEALED)
 class Rule(NamedTuple):
     """One quality rule that exists, and everything a consumer needs of it.
 
-    `checker` is the callable that enforces the rule, held as the function
-    object rather than as its name. A row naming a checker that does not exist
-    is an `ImportError` at the top of this module, which is the loud form of
-    "every registry row names its checker". A `REPEALED` row carries `None`,
-    because a withdrawn rule has nothing left to run.
+    `checker` names where the enforcement is declared, as `path::symbol`
+    matching `CHECKER`. A live row must carry one and it must resolve to exactly
+    one declaration in the checkout; a `REPEALED` row carries `None`, because a
+    withdrawn rule has nothing left to run.
+
+    `proof` is the mutation that makes that checker redden, in one sentence a
+    reader can execute, and it is what stops `checker` from being a name nobody
+    ran. A row with a checker and no proof fails the meta-check, and leg d
+    executes the mutation rather than trusting the sentence.
 
     `teaches` names the skill section that teaches the rule, as
     `path#heading`. The skill cites the rule id; it does not restate the rule,
@@ -101,7 +132,8 @@ class Rule(NamedTuple):
 
     id: str
     subject: str
-    checker: Callable[..., object] | None
+    checker: str | None
+    proof: str | None
     scope: str
     teaches: str
     state: str = LIVE
@@ -110,33 +142,42 @@ class Rule(NamedTuple):
 #: The enumeration. This tuple is the *only* answer to "which rules exist".
 #: Every consumer iterates it; no consumer carries a second list, which
 #: `test_no_consumer_carries_a_second_list` holds them to. Adding a rule means
-#: adding a row here and a checker -- never editing a skill's list of rules,
-#: which is how the sentence and the machinery come apart.
+#: adding a row here with a checker and a proof -- never editing a skill's list
+#: of rules, which is how the sentence and the machinery come apart.
 #:
-#: `checker` holds a callable that lives in `bin/`, not a test. A test proves a
-#: rule holds; the code is what performs it, and a row pointing at the code
-#: breaks at import the day that code is deleted -- which is the signal worth
-#: having. It also keeps this module out of `tests/`, which nothing under
-#: `bin/` imports.
-#:
-#: The cost of that is an import edge from here to every module a row names, so
-#: a consumer importing this table imports them too, and a module named by a
-#: row must never import this one back. Neither of today's two does. The day a
-#: rule's enforcement lives in a suffixless tool -- `R10-D4`'s
-#: `codex_preflight` in `bin/sd-review` is the first -- that edge is not
-#: payable: `source:bin/sd_lib.py::sibling` is the pack's way to import one and
-#: its contract is that every caller defers it, which a module-level row cannot
-#: do. That is the open question the next backfill slice has to answer, and it
-#: is recorded in this item's `implement.md` rather than discovered again.
+#: `checker` may name code or a test, and the distinction that used to be made
+#: between them is not one this table needs to carry. `R10-D5`'s enforcement is
+#: runtime code refusing an install; `R10-D6`'s is a test enumerating `bin/`.
+#: Both are enforcement, both redden when the rule is violated, and leg d asks
+#: each of them the same question. What the table refuses is a row whose named
+#: checker does not redden -- the failure that a callable field, checked only
+#: for existence, let through.
 RULES: tuple[Rule, ...] = (
     Rule(
         id="R10-D5",
         subject="only a full-mode repository installs the review routing "
                 "lane; `minimal` and `guest` refuse it, so a shared or "
                 "upstream repository can never grow the framework's workflow",
-        checker=sd_setup_github.setup_github,
+        checker="bin/sd_setup_github.py::setup_github",
+        proof="replace the mode guard in `bin/sd_setup_github.py` with a "
+              "condition that is never true; the installer then accepts a "
+              "guest-mode fork and "
+              "`test_a_fork_with_no_mode_line_is_refused` goes red",
         scope="code",
         teaches="skills/sd-review/SKILL.md#setup-github",
+    ),
+    Rule(
+        id="R10-D6",
+        subject="an `sd-*` command resolves its repository from the working "
+                "directory and takes no path to another one, so a session "
+                "that can be pointed at another checkout cannot exist",
+        checker="tests/test_verb_inventory.py::"
+                "test_no_command_accepts_a_repository_path",
+        proof="rename the `--belongs-to` option in `bin/sd_work.py` to the "
+              "banned spelling; the scan of `bin/` finds it and "
+              "`test_no_command_accepts_a_repository_path` goes red",
+        scope="code",
+        teaches="skills/sd-check/SKILL.md#Never",
     ),
 )
 
