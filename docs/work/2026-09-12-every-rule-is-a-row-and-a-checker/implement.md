@@ -16,14 +16,32 @@
 - [ ] **2. Meta-check legs a and b, with the baseline.** Leg a: every registry
       row is cited by at least one skill. Leg b: every tool-behaviour claim in
       a skill cites a rule id the registry carries.
-      **The baseline is 263, not 681.** 681 is the whole live-prose population,
-      of which 264 are in `skills/` — leg b's scope — and 263 of those cite no
-      rule id. A downward-only ratchet on 681 would be wrong twice: it counts
-      claims leg b never examines, and it counts the *population* rather than
-      the *violations*, so adding a new, correctly cited claim would redden it.
-      Verify: each leg reddens under its own mutation; the baseline test reddens
-      when 263 is raised to 264; adding a correctly cited claim does NOT redden
-      it, which is the control that separates a violation count from a census.
+      **The baseline is `UNCITED_SKILL_CLAIMS`, a projection of `claims_in`
+      and not its return value.** `claims_in` finds every claim, cited or not;
+      `uncited_skill_claims()` keeps the ones citing no id and counts them per
+      document. It counts *violations* within leg b's scope —
+      the claims in `skills/` citing no rule id — and never the *population*.
+      A ratchet over the whole live-prose population would be wrong twice: it
+      counts claims leg b never examines, and adding a new, correctly cited
+      claim would redden it.
+      Verify: each leg reddens under its own mutation; the baseline test
+      reddens when a document's uncited count RISES; adding a correctly cited
+      claim does NOT redden it, which is the control that separates a
+      violation count from a census.
+      Do not verify against a 263→264 mutation. That instruction stood here
+      until 2026-09-12 and cannot be run: 263 was never reproducible, so there
+      is no such transition to induce. The correction below has the history.
+
+      > **Correction, 2026-09-12 (sd:622).** 263 could not be reproduced, and
+      > the three readings offered in its place could not be reproduced either:
+      > an independent reconstruction of the same three shapes gave different
+      > figures again, because each reconstruction had to invent the counting
+      > rule the original never recorded. The shape of the requirement is
+      > unchanged — violations, not population, downward only. The number is
+      > now `UNCITED_SKILL_CLAIMS`: the per-document count `uncited_skill_claims()`
+      > projects from `claims_in`, and the three properties of that predicate that
+      > were load-bearing and unstated are pinned by `TheClaimPredicate`.
+      > `design.md` carries the correction in full.
 
 - [ ] **3. Meta-check leg c, over the R-id corpus.** Every rule id cited in live
       prose is defined in the registry. On the first run this reports 4
@@ -35,6 +53,54 @@
       whether it is a live rule or a historical decision. This is the expensive
       step. It lands in slices; each slice reduces the leg c baseline and the
       baseline test proves it fell.
+
+      **Slice 1, 2026-09-12. `STRANDED_RULE_IDS` 26 → 25.** `R10-D5` is a
+      row. It was already taught by a skill section that cites the id, and its
+      checker is a plain function in `bin/` — `sd_setup_github.setup_github` —
+      that is runtime code carrying its own refusal. Registering it turned the
+      second-list check red on the refusal message in `bin/sd_setup_github.py`,
+      which carried the id inside a string; the citation moved to the comment
+      above it, which is the rephrasing that check's own failure text
+      prescribes.
+
+      `R10-D6` was a row for one review round and is not one now. The row
+      named `sd_lib.repo_root` as its checker, and `repo_root(start=None)`
+      accepts a path: it is the resolver the rule constrains, not a guard, so
+      the row named the mechanism by which the rule would be broken as its
+      enforcement. The meta-check passed it because leg a's checker test
+      asserts the checker EXISTS and never that it ENFORCES; leg d, "the
+      checker fails when the rule is violated", is recorded on sd:431 as the
+      fix. The rule's real enforcement is
+      `tests/test_verb_inventory.py::test_no_command_accepts_a_repository_path`,
+      a test over the tree that `bin/sd_rules.py` cannot import. Settle what
+      `Rule.checker` names before the row returns; the same obstacle holds
+      `R10-D6` in the table below.
+
+      **Two obstacles decide the rest of the backfill, and neither is the
+      judgement the step was sized for.** Twenty of the twenty-five remaining
+      ids are taught by no skill section at all, so leg a cannot pass for them:
+      registering one means writing the teaching section first, which is step 8
+      and not this step. The other five are taught, and each is held up by
+      something specific:
+
+      | Id | Taught in | Why it is not a row yet |
+      |---|---|---|
+      | `R10-D6` | `skills/sd-status/SKILL.md` and four others | Its checker is a test, and `Rule.checker` holds a function `bin/sd_rules.py` imports. The registry has no way to name the second kind. See the paragraph above. |
+      | `R10-D1` | `skills/sd-status/SKILL.md` | `bin/sd-status` carries the id in two strings, one of them the `CLASSES` row whose text the skill's table mirrors. The second-list check wants it out of the string; leg a reads the skill table it would have to change. The two checks pull opposite ways and that needs a decision, not an edit. |
+      | `R10-D2` | `skills/sd-handoff/SKILL.md` | The section that teaches it says Lane B is *not implemented*. A live row with a checker would assert an enforcement that does not exist, which is the defect this item is about. |
+      | `R10-D3` | `skills/sd-handoff/SKILL.md` | Its enforcement lives in `bin/sd-handoff-restore`, which has no `.py` suffix. `source:bin/sd_lib.py::sibling` is the pack's way to import one, and its own contract says every caller defers it — so importing it to fill a registry row at module load contradicts it. |
+      | `R10-D4` | `skills/sd-review/SKILL.md` | Same obstacle: `codex_preflight` lives in the suffixless `bin/sd-review`. This is the best-taught rule in the corpus — the heading cites the id — and it is the first candidate for slice 2, once a row can name a suffixless tool's function without importing the tool. |
+
+      **A finding about leg c's four dangling ids, measured on `239ff624`.**
+      They are not undefined. Three of them carry a definition in a form
+      `DEFINITION` cannot see, because that pattern requires a bold run
+      *opening* with the id: `R5-D1` is written `**Obsidian vault stays
+      system-of-record** (R5-D1)`, `R11-D1` sits in a table cell with no bold at
+      all, and `R11-D30` is a heading. The fourth, `R11-D46`, is defined in no
+      document in any form — its derivation was recorded as a comment in
+      `tests/test_loc_caps.py`. Widening the grammar would move ids between two
+      baselines at once and is a change to the measurement, so it is left for
+      its own slice rather than folded into this one.
 
 - [ ] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become

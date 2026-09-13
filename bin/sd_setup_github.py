@@ -208,12 +208,12 @@ def setup_github(
     review: it does not.
     """
 
+    # R10-D5 is a registry row now, cited here and not in the message: an id in
+    # a string reads as a copy of the table, and no check can tell the two apart.
     repo_mode = sd_lib.mode(root)
     if repo_mode != "full":
-        raise Refusal(
-            f"this repository is in {repo_mode} mode; only a full-mode repository installs "
-            "the routing lane (R10-D5)"
-        )
+        raise Refusal(f"this repository is in {repo_mode} mode; only a full-mode "
+                      "repository installs the routing lane")
 
     legacy = [rel for rel in LEGACY_ROUTER_PATHS if (root / rel).exists()]
     if legacy and not args.remove_legacy:

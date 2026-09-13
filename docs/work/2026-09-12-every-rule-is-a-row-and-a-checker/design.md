@@ -24,14 +24,59 @@ and it cites nothing because there is nothing to cite.
 
 **Narrowed form.** The rule applies to a claim that asserts a *tool behaviour*:
 an enforcement verb whose grammatical subject is a pack tool or a test. It
-carries a frozen baseline — of the 263 uncited claims in `skills/`, which is
-leg b's scope, not of the 681 live-prose population. A baseline counts
+carries a frozen baseline — of the uncited claims in `skills/`, which is
+leg b's scope, not of the whole live-prose population. A baseline counts
 violations, never a population; on the population, a new and correctly cited
 claim would redden it. The baseline may fall and may not rise, which makes the
 rule bite on every new uncited claim while costing nothing on the existing
 corpus. This is the same device `tests/test_loc_caps.py`
 already uses for line counts, and the same rule applies to it: a baseline is
 never raised in the pull request that busts it.
+
+#### Correction, 2026-09-12 (sd:622) — 263 had no predicate behind it
+
+Every figure in the paragraph above, and in requirement 6 of `prd.md`, was
+produced by a predicate that was never written down. Steps 1 to 3 could not
+reproduce 263 and offered three readings of the same corpus instead. A second
+independent reconstruction of those same three readings produced a third set of
+figures again, for the plainest possible reason: each reconstruction had to
+invent the counting rule the original never recorded, and each invented a
+different one.
+
+So no number here is safe to act on, including the ones the delivery note
+offered as replacements. The correction is not a better number. It is that the
+predicate now exists as code, in one place —
+`source:tests/test_rule_registry.py::claims_in` — and the only figure recorded
+anywhere is `UNCITED_SKILL_CLAIMS`, which is a PROJECTION of that predicate and
+not its return value. `claims_in` returns every matching
+`(first line, run, rule ids)` tuple; `uncited_skill_claims()` then filters to
+the tuples whose ids are empty and counts them per document, and that per-
+document mapping is what is recorded. The distinction is load-bearing: reading
+the dictionary as "what `claims_in` returns" sends the next baseline update to
+the wrong value.
+
+Three properties of the predicate were load-bearing and unstated, and each is
+now pinned by a test rather than remembered:
+
+1. **The scope is one line.** A verb and a tool name in the same paragraph are
+   not a claim about that tool. The paragraph and whole-document readings are
+   kept as runnable code beside the shipped one, so a rejected reading can be
+   re-measured instead of re-argued.
+2. **The verbs are matched as written, in lower case.** A bullet opening
+   *"**Never accept a repo path**"* — this pack's commonest way of writing a
+   rule — is invisible to leg b. Measured on `239ff624`, reading the verbs
+   case-insensitively finds 12 claims where the shipped predicate finds 8.
+   Left standing deliberately: widening the predicate is a change to the rule,
+   which this correction is not, and the risk section below accepted false
+   negatives in writing.
+3. **The subject is enumerated from `bin/` and `tests/`, never listed**, so a
+   tool built next month is covered the day it is written.
+
+Counts do not even order across the three readings, which is the mechanical
+reason three people measuring "the same thing" each thought the others had
+miscounted: a document read whole is one span, so the widest reading yields the
+*fewest* spans while reaching the *most* documents. The test asserts
+containment of the documents reached, not a count.
 
 ### Prose rule 1 is half-delivered, and now conflicts with sd:568
 
@@ -185,9 +230,22 @@ apply to the checkers the item aims it at.
   consumer outside Python needs to read the registry; at that point the table
   gains a serializer, and the table stays the source.
 - **2026-09-12 — prose rule 3 is narrowed to tool-behaviour claims and carries
-  a frozen baseline of 263**, the uncited claims in `skills/`. Reversed if the
+  a frozen baseline**, the uncited claims in `skills/`, held per document. Reversed if the
   corpus is deliberately swept and the baseline reaches a number small enough
-  to fix outright.
+  to fix outright. **Superseded 2026-09-12 by the correction above (sd:622):
+  263 has no predicate behind it and neither do its proposed replacements. The
+  baseline is whatever `claims_in` returns, recorded per document in
+  `UNCITED_SKILL_CLAIMS`.**
+- **2026-09-12 (sd:622) — leg b's predicate has one recorded definition, and
+  the rejected readings are kept as code rather than as numbers.** The scope is
+  the line, the verbs are matched as written, and the subject is enumerated;
+  each is pinned by a test. Reversed only by a change that says which property
+  it is changing and what that costs, measured.
+- **2026-09-12 — the backfill lands in slices, and a slice records the reason
+  for every id it did not take.** Registering a rule needs a checker reachable
+  from `bin/` and a skill section that teaches it; most stranded ids fail one
+  or the other, and rediscovering which is most of the cost. Reversed if the
+  remaining ids turn out to share one obstacle that can be removed at once.
 - **2026-09-12 — prose rule 2 gains an exemption for counts reported against a
   commit.** Without it the rule reddens its own design document. Reversed if a
   cheaper discriminator than "carries a commit or a date" is found.
@@ -207,8 +265,20 @@ apply to the checkers the item aims it at.
 
 **Accepted: the baseline can be gamed.** Anyone may add a machinery claim if
 they delete another. The baseline catches drift in aggregate, not per line.
-Accepted because the alternative — fixing 263 claims before the check can land
-— means the check never lands.
+Accepted because the alternative — fixing every uncited claim before the check
+can land — means the check never lands.
+
+> **Re-examined 2026-09-12 (sd:622), because the correction above dissolves the
+> reason this risk was accepted.** The acceptance rested on 263 being too many
+> to fix outright. It is not 263, and whatever the true figure is it is small
+> enough that "fix them all" is no longer obviously unreachable. The
+> *conclusion* survives, but on different ground and only partly: the baseline
+> is held per document, so a new uncited claim in one skill cannot be netted
+> off against a cleanup in another, and the aggregate game the risk describes
+> is closed. What remains open is the within-document trade, which is the
+> narrower risk this paragraph should have described. Sweeping the corpus to
+> zero is now a real option and is left to its own item rather than smuggled in
+> here.
 
 **Accepted: leg b needs a parser for "the subject of this verb is a tool", and
 English does not oblige.** The narrowed rule will have false negatives. It is a
