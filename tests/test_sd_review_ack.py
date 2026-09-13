@@ -35,6 +35,8 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 BIN = REPO_ROOT / "bin"
 FIXTURE = REPO_ROOT / "tests" / "fixtures" / "sd-543-review-round.json"
 UNANSWERED = REPO_ROOT / "tests" / "fixtures" / "sd-631-unanswered-round.json"
+COUNT_ONLY = REPO_ROOT / "tests" / "fixtures" / "sd-655-count-only-round.json"
+CAPTURES = sorted((REPO_ROOT / "tests" / "fixtures").glob("*-round.json"))
 
 sys.path.insert(0, str(BIN))
 import sd_lib  # noqa: E402
@@ -1324,6 +1326,172 @@ class TheRoundNobodyHasAnswered(unittest.TestCase):
             [row["id"] for row in rows],
             "ten findings stated and none answered is ten findings standing",
         )
+
+
+class AMarkerWithNoNoun(unittest.TestCase):
+    """#893's round, where the reviewer stopped writing the word `votes`.
+
+    `tests/fixtures/sd-655-count-only-round.json` is pull request 893 read from
+    the API on 2026-09-13, both of its reviews, bodies and all. The first one
+    states five findings in a three-column file-summary table and spells every
+    marker as a bare count -- `**Critical (1):**`, `**Moderate (2):**` -- and a
+    reader that required `votes?` called that pull request clean while it
+    carried five. Hand-counted against the review on GitHub, in the order the
+    table states them:
+
+      `bin/sd-ship`       Critical (1)  the pre-squash SHA is the one recorded
+      `bin/sd-ship`       Moderate (2)  helper loading outside the guarded block
+      `bin/sd-review-ack` Critical (2)  a plain pathspec is a glob
+      `bin/sd-review-ack` Critical (1)  an older acknowledgement satisfies a restatement
+      `bin/sd-review-ack` Moderate (1)  a corrupt store is indistinguishable from empty
+
+    Five, and item sd:655 recorded six. The sixth is not in a marker: the
+    round's *second* review names four more defects in its summary sentence
+    only, with no table and no marker anywhere in the body, and this reader
+    counts markers on purpose. What it cannot count it must not pretend to, so
+    the number pinned below is the five the reviewer marked.
+    """
+
+    ROUND = json.loads(COUNT_ONLY.read_text(encoding="utf-8"))
+
+    def rows(self) -> list[dict]:
+        payload = self.ROUND["pull_requests"]["893"]
+        return ack.findings(893, payload["reviews"], payload["comments"])
+
+    def test_the_round_that_read_clean_reads_as_five_findings(self) -> None:
+        """The defect, measured: a bare count is a marker or the round is silent."""
+        self.assertEqual(len(self.rows()), 5)
+
+    def test_the_captured_round_is_refused_by_the_gate(self) -> None:
+        """End to end, through the CLI, on the real body."""
+        stack = tempfile.TemporaryDirectory()
+        self.addCleanup(stack.cleanup)
+        repo = Repo(stack)
+        done = subprocess.run(
+            [sys.executable, str(BIN / "sd-review-ack"), "--from", str(COUNT_ONLY),
+             "--check", "--landed-in", "main", "--json"],
+            cwd=str(repo.root), capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        result = json.loads(done.stdout)
+        self.assertEqual(len(result["findings"]), 5)
+        self.assertEqual(len(result["unsatisfied"]), 5)
+
+    def test_the_severity_survives_a_table_with_three_columns(self) -> None:
+        """`File | Summary | Findings`, so a cell separator precedes the label.
+
+        The count and the text were both right before this and the severity of
+        the first finding in each row read `| **Critical`, which is a garbled
+        finding that still looks like a finding somebody read -- the failure
+        `_cell` was written for, in a column layout it had not seen.
+        """
+        self.assertEqual(
+            [(row["path"], row["text"]) for row in self.rows()],
+            [("bin/sd-ship",
+              "Critical: Records the pre-squash SHA, preventing normal squash merges "
+              "from reaching `landed`"),
+             ("bin/sd-ship",
+              "Moderate: Helper loading outside the guarded block can abort `prepare` "
+              "instead of producing an advisory warning"),
+             ("bin/sd-review-ack", "Critical: Normal pathspecs can match unrelated files"),
+             ("bin/sd-review-ack",
+              "Critical: Older acknowledgements can satisfy findings restated on newer commits"),
+             ("bin/sd-review-ack",
+              "Moderate: Corrupt stores are indistinguishable from empty results and "
+              "produce no warning")],
+        )
+
+    def test_a_bare_count_is_flat_unless_the_reviewer_says_otherwise(self) -> None:
+        """The control for the hedge: five exact counts stay exact."""
+        rows = self.rows()
+        self.assertFalse(any(row["indeterminate"] for row in rows))
+        self.assertEqual(ack.at_least(rows, len(rows)), "5")
+
+    def test_the_second_review_states_nothing_this_reader_will_invent(self) -> None:
+        """A body with no table and no marker yields nothing, not a guess.
+
+        The honest half of the count above. The reviewer's summary sentence
+        lists four defects in prose; a reader that mined prose for findings
+        would be writing them, and `_reconciled` is what makes the gap loud
+        when the reviewer next moves them into a shape.
+        """
+        second = self.ROUND["pull_requests"]["893"]["reviews"][1]
+        self.assertNotIn("|", second["body"])
+        self.assertEqual(ack.findings(893, [second], []), [])
+
+    def test_the_suppressed_headings_own_count_is_not_a_finding_marker(self) -> None:
+        """Why the bare-count marker needs the colon after it.
+
+        `### Suppressed comments (4)` is a bare count in parentheses in every
+        body that has that section, and it is the reviewer's own heading rather
+        than a severity label. A marker that matched it would count the section
+        twice -- once as the heading's own assertion, which `_suppressed`
+        already checks, and once as a marker `_reconciled` cannot place, which
+        is a phantom finding nothing states and nobody can acknowledge.
+
+        Enumerated from `tests/fixtures/` rather than asserted from the one
+        example: every captured round on disk, every review body in it, every
+        heading against every marker.
+        """
+        self.assertIsNone(ack.VOTE_MARKER.search("### Suppressed comments (4)"))
+        headings = 0
+        for capture in CAPTURES:
+            payload = json.loads(capture.read_text(encoding="utf-8"))
+            for number, record in payload["pull_requests"].items():
+                for review in record.get("reviews") or []:
+                    body = review.get("body") or ""
+                    marks = [mark.span() for mark in ack.VOTE_MARKER.finditer(body)]
+                    for heading in ack.SUPPRESSED_HEADING.finditer(body):
+                        headings += 1
+                        overlap = [body[start:stop] for start, stop in marks
+                                   if start < heading.end() and heading.start() < stop]
+                        self.assertEqual(
+                            overlap, [],
+                            f"{capture.name} #{number}: {heading.group(0)!r} read as a marker",
+                        )
+        self.assertGreater(headings, 0, "no capture carries the heading this guards")
+
+
+class TwoCountsInOneMarker(unittest.TestCase):
+    """`**Nits (2 votes, 1 vote):**`, from #889's captured review.
+
+    One cell, one run of prose, two counts. It read as exactly one finding,
+    which is an undercount, and an undercount on a gate reads as progress. The
+    comma is the reviewer saying "more than one" the same way `each` and
+    `N and M votes` already did, so it is read the same way: the row keeps its
+    whole text and is marked indeterminate, and every count built on it says
+    "at least". Splitting the prose would be this reader guessing which half of
+    a sentence is which finding, and two rows out of one run would need the id
+    to carry an index -- the id is over the content so that an acknowledgement
+    survives the reviewer re-rendering the same words.
+    """
+
+    ROUND = json.loads(UNANSWERED.read_text(encoding="utf-8"))
+
+    def rows(self) -> list[dict]:
+        payload = self.ROUND["pull_requests"]["889"]
+        return ack.findings(889, payload["reviews"], payload["comments"])
+
+    def test_the_captured_marker_is_read_as_more_than_one_finding(self) -> None:
+        grouped = [row for row in self.rows() if row["indeterminate"]]
+        self.assertEqual(len(grouped), 1)
+        self.assertTrue(grouped[0]["text"].startswith("Nits:"))
+        self.assertIn("2 votes, 1 vote", self.ROUND["pull_requests"]["889"]["reviews"][0]["body"])
+
+    def test_the_round_that_carried_it_stops_claiming_an_exact_count(self) -> None:
+        rows = self.rows()
+        self.assertEqual(len(rows), 10)
+        self.assertEqual(ack.at_least(rows, len(rows)), "at least 10")
+
+    def test_the_comma_is_the_evidence_and_not_the_plural_noun(self) -> None:
+        """`Nits` is not read as plural; the reviewer writes it over one finding too."""
+        self.assertTrue(ack.PLURAL_MARKER.search("(2 votes, 1 vote)"))
+        self.assertTrue(ack.PLURAL_MARKER.search("(2, 1)"))
+        self.assertIsNone(ack.PLURAL_MARKER.search("(3 votes)"))
+        self.assertIsNone(ack.PLURAL_MARKER.search("(1)"))
+        rows = ack._table(1, "| `a.py` | Nits (2 votes): one thing. |\n", "bot")
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0]["indeterminate"])
 
 
 if __name__ == "__main__":

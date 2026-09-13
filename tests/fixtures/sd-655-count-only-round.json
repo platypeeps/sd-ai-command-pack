@@ -1,0 +1,29 @@
+{
+ "captured": "2026-09-13",
+ "head": "3123cb707e59b802afea7637ccabe646e404ed83",
+ "pull_requests": {
+  "893": {
+   "comments": [],
+   "pull": {
+    "head": {
+     "sha": "3123cb707e59b802afea7637ccabe646e404ed83"
+    },
+    "merge_commit_sha": "a1cb409d928e78672e356a828de3afec7085dd73",
+    "merged": true
+   },
+   "reviews": [
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udd35 Needs a closer look\n\nUnresolved critical issues affect path matching, stale acknowledgements, and squash-merge reconciliation.\n\n<details>\n<summary>Pull request overview</summary>\n\nAdds automatic `fixed <commit>` acknowledgements for review findings answered by pushed commits, with reviewed-commit tracking, documentation, and tests.\n\n**Changes:**\n- Integrates evidence-based acknowledgement recording into `sd-ship`.\n- Adds provenance and path/reachability checks.\n- Documents behavior and expands regression coverage.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Summary | Findings |\r\n|---|---|---|\r\n| `tests/test_sd_status.py` | Tests acknowledgement status outcomes. | No findings. |\r\n| `tests/test_sd_ship.py` | Tests push integration and warnings. | No findings. |\r\n| `tests/test_sd_review_ack.py` | Tests automatic acknowledgement rules and edge cases. | No findings. |\r\n| `tests/fixtures/sd-631-unanswered-round.json` | Captures an unanswered review round. | No findings. |\r\n| `skills/sd-status/SKILL.md` | Documents acknowledgement behavior. | No findings. |\r\n| `skills/sd-ship/SKILL.md` | Documents post-push recording. | No findings. |\r\n| `bin/sd-ship` | Integrates acknowledgement recording after pushes. | **Critical (1):** Records the pre-squash SHA, preventing normal squash merges from reaching `landed`. **Moderate (2):** Helper loading outside the guarded block can abort `prepare` instead of producing an advisory warning. |\r\n| `bin/sd-review-ack` | Implements provenance and automatic acknowledgement logic. | **Critical (2):** Normal pathspecs can match unrelated files. **Critical (1):** Older acknowledgements can satisfy findings restated on newer commits. **Moderate (1):** Corrupt stores are indistinguishable from empty results and produce no warning. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 6/8 changed files\n- **Comments generated:** 0\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/platypeeps/sd-ai-command-pack/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+     "commit_id": "d2c7e39d58e14d326ab191e68145c175f67c2277"
+    },
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udd35 Needs a closer look\n\nUnresolved findings include shared-store write races, partial writes, missing provenance parsing, and uncaught helper import failures.\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 6/10 changed files\n- **Comments generated:** 0 new\n- **Review effort level:** Lite\n</details>",
+     "commit_id": "3123cb707e59b802afea7637ccabe646e404ed83"
+    }
+   ]
+  }
+ },
+ "repo": "platypeeps/sd-ai-command-pack"
+}

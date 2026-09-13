@@ -139,13 +139,44 @@ SECTION_END = re.compile(r"^(?:</details>|- \*\*Files reviewed:|#+\s)", re.MULTI
 #:
 #: So the vote marker, not the shape, is what a finding is counted by.
 #: `_reconciled` compares the markers in a body against the findings located in
-#: it and turns any difference into findings of its own. A fourth shape, next
-#: time the reviewer changes its template, becomes unparsed findings that keep
-#: the gate red -- not silence.
+#: it and turns any difference into findings of its own. A fourth *place* the
+#: reviewer states a finding becomes unparsed findings that keep the gate red --
+#: not silence.
+#:
+#: THE GUARD DOES NOT COVER THE MARKER ITSELF, AND #893 PROVED IT. Every shape
+#: above is reconciled against the markers, so the markers are the one thing
+#: that cannot be reconciled against anything: when the reviewer respells the
+#: marker, `stated` and `located` both fall to zero and the round reads clean.
+#: That is not a hole this pattern can close from the inside, which is why the
+#: alternatives below are widened to whatever the reviewer has been seen to
+#: write and each spelling is pinned to a captured body in `tests/fixtures/`
+#: rather than to a sentence somebody typed here.
+#:
 #: Deliberately loose inside the parentheses: the reviewer writes `(3 votes)`,
-#: `(1 vote each)` and `(2 and 1 votes)`, and a pattern that admits only the
-#: first silently loses the other two.
-VOTE_MARKER = re.compile(r"\([^()]*?\b\d+\s+votes?\b[^()]*?\)")
+#: `(1 vote each)`, `(2 and 1 votes)` and `(2 votes, 1 vote)`, and a pattern
+#: that admits only the first silently loses the other three.
+#:
+#: THE NOUN IS OPTIONAL, WHICH IS THE FIFTH SHAPE. Copilot's review of #893
+#: dropped the word entirely -- `**Critical (1):**`, `**Moderate (2):**` -- and
+#: a pattern that required `votes?` read that round as clean: five stated
+#: findings, `no review findings on 1 pull request(s)`, on the very tool that
+#: exists to stop exactly that. So the second alternative below takes a
+#: parenthetical of bare counts.
+#:
+#: It has to earn it, though. `\(\d+\)` on its own also matches the reviewer's
+#: own `### Suppressed comments (4)` heading, and every count this file prints
+#: goes through `_reconciled`, which turns a marker it cannot place into a
+#: finding -- so a loose second alternative would invent a phantom finding on
+#: every body carrying that section. The trailing colon is what separates the
+#: two: a severity label is written `Critical (1):`, a section heading is not
+#: followed by a colon at all. Measured rather than assumed: across the two
+#: captured rounds in `tests/fixtures/`, the only bare-count parentheticals in
+#: any real review body are those headings, and none of them is followed by one
+#: (see `test_the_suppressed_headings_own_count_is_not_a_finding_marker`).
+VOTE_MARKER = re.compile(
+    r"\([^()]*?\b\d+\s+votes?\b[^()]*?\)"
+    r"|\(\s*\d+(?:\s*,\s*\d+)*\s*\)(?=\s*\**\s*:)"
+)
 
 #: A row of the file-summary table: a file in the first cell, prose in the
 #: second. Only the second cell is searched, and only when it carries a vote
@@ -155,18 +186,36 @@ TABLE_ROW = re.compile(r"^\|\s*`?(?P<path>[^`|\n]+?)`?\s*\|(?P<summary>.*)\|\s*$
 #: A label the reviewer puts in front of a run of findings inside one cell.
 FINDING_LABEL = re.compile(r"\bFindings?\s*:", re.IGNORECASE)
 
+#: Where the text in front of a marker stops belonging to the finding: at the
+#: end of the preceding sentence, or at the cell before it. The `|` is #893's
+#: contribution -- that table has three columns, `File`, `Summary` and
+#: `Findings`, so the first marker of a row has a whole other cell and a cell
+#: separator in front of it. Cutting at the sentence alone read the severity of
+#: its first finding as `| **Critical`, which is a garbled finding that still
+#: looks like a finding somebody read.
+LABEL_START = re.compile(r"[.|]")
+
 #: A marker that covers more than one finding without saying where they split.
-#: `(3 votes each)` and `(2 and 1 votes)` are both the reviewer saying "more
-#: than one" in its own words, which is a fact this reader can place. *How
-#: many*, and which text belongs to which, is not -- splitting on "and" or on
-#: a semicolon would be this file guessing, which is the failure every other
-#: shape here exists to avoid.
+#: `(3 votes each)`, `(2 and 1 votes)` and `(2 votes, 1 vote)` are all the
+#: reviewer saying "more than one" in its own words, which is a fact this
+#: reader can place. *How many*, and which text belongs to which, is not --
+#: splitting on "and" or on a semicolon would be this file guessing, which is
+#: the failure every other shape here exists to avoid.
 #:
 #: So the finding carries its whole text, as it already did, and is marked
 #: indeterminate. Every surface that prints a count then says "at least N".
 #: Silently counting it as one is the worse error of the two: an undercount on
 #: a gate reads as progress.
-PLURAL_MARKER = re.compile(r"\beach\b|\d+\s+and\s+\d+", re.IGNORECASE)
+#:
+#: THE COMMA IS THE SAME FACT AS "AND". `**Nits (2 votes, 1 vote):**` on #889
+#: is one cell, one run of prose, and two counts -- the reviewer's own way of
+#: saying it filed two things here. It read as exactly one finding before this
+#: clause, which is the undercount above, so the comma joins `each` and
+#: `N and M` rather than getting a splitter of its own. Two rows out of one
+#: prose run would need the id to carry an index, and the id is over the
+#: content by design: an acknowledgement has to survive the reviewer
+#: re-rendering the same finding.
+PLURAL_MARKER = re.compile(r"\beach\b|\d+\s*(?:votes?)?\s*(?:,|and)\s*\d+", re.IGNORECASE)
 
 DISPOSITIONS = ("fixed", "dismissed")
 
@@ -335,7 +384,7 @@ def _cell(pull: int, path: str, cell: str, author: str) -> list[dict]:
         tail = cell[marker.end() : (marks[index + 1].start() if index + 1 < len(marks) else len(cell))]
         after = tail.lstrip().lstrip("*").lstrip()
         if after.startswith(":"):
-            severity = head.strip(" *").rsplit(".", 1)[-1]
+            severity = LABEL_START.split(head.strip(" *"))[-1]
             text = after[1:]
             # The next finding's severity label sits at the end of this text.
             if index + 1 < len(marks) and "." in text:
@@ -356,8 +405,7 @@ def _unlabelled(head: str) -> str:
     label = list(FINDING_LABEL.finditer(head))
     if label:
         return head[label[-1].end() :]
-    trimmed = head.strip(" *;,")
-    return trimmed.rsplit(".", 1)[-1] if "." in trimmed else trimmed
+    return LABEL_START.split(head.strip(" *;,"))[-1]
 
 
 def _reconciled(pull: int, body: str, author: str, located: list[dict]) -> list[dict]:
