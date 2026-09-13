@@ -123,6 +123,19 @@ TABLE_ROW = re.compile(r"^\|\s*`?(?P<path>[^`|\n]+?)`?\s*\|(?P<summary>.*)\|\s*$
 #: A label the reviewer puts in front of a run of findings inside one cell.
 FINDING_LABEL = re.compile(r"\bFindings?\s*:", re.IGNORECASE)
 
+#: A marker that covers more than one finding without saying where they split.
+#: `(3 votes each)` and `(2 and 1 votes)` are both the reviewer saying "more
+#: than one" in its own words, which is a fact this reader can place. *How
+#: many*, and which text belongs to which, is not -- splitting on "and" or on
+#: a semicolon would be this file guessing, which is the failure every other
+#: shape here exists to avoid.
+#:
+#: So the finding carries its whole text, as it already did, and is marked
+#: indeterminate. Every surface that prints a count then says "at least N".
+#: Silently counting it as one is the worse error of the two: an undercount on
+#: a gate reads as progress.
+PLURAL_MARKER = re.compile(r"\beach\b|\d+\s+and\s+\d+", re.IGNORECASE)
+
 DISPOSITIONS = ("fixed", "dismissed")
 
 #: A verdict in this set means the finding is answered and the gate may pass.
@@ -169,7 +182,15 @@ def finding_id(pull: int, source: str, path: str, line: Any, text: str) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()[:12]
 
 
-def _finding(pull: int, source: str, path: str, line: Any, text: str, author: str) -> dict:
+def _finding(pull: int, source: str, path: str, line: Any, text: str, author: str,
+             indeterminate: bool = False) -> dict:
+    """One finding row.
+
+    `indeterminate` says this row is known to cover more than one finding and
+    not how many. It is deliberately not part of `finding_id`: the id is over
+    the content, so a row that gains or loses this flag keeps its id and any
+    acknowledgement already recorded against it stays valid.
+    """
     return {
         "id": finding_id(pull, source, path, line, text),
         "pr": pull,
@@ -178,6 +199,7 @@ def _finding(pull: int, source: str, path: str, line: Any, text: str, author: st
         "line": line,
         "text": normalise(text),
         "author": author,
+        "indeterminate": indeterminate,
     }
 
 
@@ -289,6 +311,7 @@ def _cell(pull: int, path: str, cell: str, author: str) -> list[dict]:
         rows.append(_finding(
             pull, "body", path, None,
             f"{severity.strip(' *')}: {text.strip(' *.,;')}", author,
+            bool(PLURAL_MARKER.search(marker.group(0))),
         ))
     return rows
 
@@ -525,21 +548,43 @@ def fix_verdict(root: pathlib.Path, commit: str, ref: str) -> str:
     return "landed" if landed is not None else "fix-not-landed"
 
 
-def verdict(root: pathlib.Path, found: dict, rows: dict[str, dict], ref: str) -> dict:
-    """One finding, with what is on record about it and what that is worth."""
-    record = rows.get(found["id"])
+def id_verdict(root: pathlib.Path, found_id: str, rows: dict[str, dict], ref: str) -> str:
+    """What the record says about one finding id, and what that is worth.
+
+    Separate from `verdict` so a caller holding ids and no finding bodies --
+    `sd-status`, counting what stands unacknowledged on each pull request --
+    asks the same question through the same answer, rather than reimplementing
+    "is this addressed" next to the one place that defines it.
+    """
+    record = rows.get(found_id)
     if not record:
-        return dict(found, verdict="unread", record=None)
+        return "unread"
     disposition = record.get("disposition")
     if disposition not in DISPOSITIONS:
         # A store this tool did not write, or one written by a later version.
         # Neither is an acknowledgement this version can honour, and guessing
         # would be the whole defect in miniature.
-        return dict(found, verdict="unknown-disposition", record=record)
+        return "unknown-disposition"
     if disposition == "dismissed":
-        state = "dismissed" if str(record.get("reason") or "").strip() else "unread"
-        return dict(found, verdict=state, record=record)
-    return dict(found, verdict=fix_verdict(root, str(record.get("commit") or ""), ref), record=record)
+        return "dismissed" if str(record.get("reason") or "").strip() else "unread"
+    return fix_verdict(root, str(record.get("commit") or ""), ref)
+
+
+def verdict(root: pathlib.Path, found: dict, rows: dict[str, dict], ref: str) -> dict:
+    """One finding, with what is on record about it and what that is worth."""
+    state = id_verdict(root, found["id"], rows, ref)
+    return dict(found, verdict=state, record=rows.get(found["id"]))
+
+
+def unacknowledged(root: pathlib.Path, ids: Iterable[str], ref: str | None = None) -> list[str]:
+    """Which of these finding ids nobody has answered. The whole public gate.
+
+    One call, so a reader that only wants the number -- `sd-status`'s row --
+    needs neither the store's shape nor the verdict vocabulary.
+    """
+    rows, _ = read_store(root)
+    landing = ref or landing_ref(root)
+    return [found for found in ids if id_verdict(root, found, rows, landing) not in SATISFIED]
 
 
 def review_state(root: pathlib.Path, rounds: dict[int, dict], ref: str) -> dict:
@@ -607,19 +652,50 @@ def live_round(root: pathlib.Path, only: int | None, limit: int) -> tuple[dict[i
         numbers = [row["number"] for row in payload if isinstance(row, dict) and "number" in row]
     out: dict[int, dict] = {}
     for number in numbers:
-        reviews, error = pr_state.gh_json(["api", f"repos/{slug}/pulls/{number}/reviews", "--paginate"], root)
-        if error:
-            return {}, error
-        comments, error = pr_state.gh_json(["api", f"repos/{slug}/pulls/{number}/comments", "--paginate"], root)
-        if error:
-            return {}, error
-        out[int(number)] = {"reviews": reviews or [], "comments": comments or []}
+        record = {}
+        for field in ("reviews", "comments"):
+            payload, error = pr_state.gh_json(
+                ["api", f"repos/{slug}/pulls/{number}/{field}", "--paginate"], root
+            )
+            if error:
+                return {}, error
+            # `gh` exited 0 and handed back something that is not a list: an
+            # error object, a null, a rate-limit message. `payload or []` used
+            # to stand here, and it turns any of those into a clean pull
+            # request, which is this gate passing hardest on the day GitHub is
+            # having trouble. The same refusal `pr list` above already makes.
+            if not isinstance(payload, list):
+                return {}, (f"the {field} endpoint for #{number} returned "
+                            f"{type(payload).__name__}, not a list of {field}")
+            record[field] = payload
+        out[int(number)] = record
     return out, ""
 
 
 # --------------------------------------------------------------------------
 # Output
 # --------------------------------------------------------------------------
+
+
+def at_least(rows: Iterable[Any], count: int) -> str:
+    """`N`, or `at least N` when a row in scope covers an unknown number.
+
+    Every surface that prints a count goes through here, so a grouped marker
+    cannot be reported as a flat number by one of them and hedged by another.
+    """
+    return f"at least {count}" if any(row.get("indeterminate") for row in rows) else str(count)
+
+
+def at_least_ids(ids: Iterable[str], many: Iterable[str]) -> str:
+    """`at_least` for a caller holding finding ids rather than finding rows.
+
+    `sd-status` has the ids and the indeterminate subset and no bodies, and a
+    report that phrased this hedge itself would be a second opinion about the
+    same pull request.
+    """
+    grouped = set(many)
+    rows = list(ids)
+    return at_least([{"indeterminate": found in grouped} for found in rows], len(rows))
 
 
 def render_findings(result: dict, stream: TextIO, indent: str = "  ") -> None:
@@ -639,14 +715,18 @@ def render_findings(result: dict, stream: TextIO, indent: str = "  ") -> None:
         if not here:
             continue
         open_here = [row for row in here if row["verdict"] not in SATISFIED]
-        write(f"{indent}#{pull}: {len(here)} finding(s), {len(open_here)} unacknowledged\n")
+        write(f"{indent}#{pull}: {at_least(here, len(here))} finding(s), "
+              f"{at_least(open_here, len(open_here))} unacknowledged\n")
         for row in here:
             where = f"{row['path']}:{row['line']}" if row["line"] else row["path"]
             answered = f"  (replied {row['replies']}x)" if row.get("replies") else ""
-            write(f"{indent}  {row['id']}  {row['verdict']:<14} {row['source']:<6} {where}{answered}\n")
+            many = "  (one marker, more than one finding)" if row.get("indeterminate") else ""
+            write(f"{indent}  {row['id']}  {row['verdict']:<14} {row['source']:<6} "
+                  f"{where}{answered}{many}\n")
             write(f"{indent}    {row['text'][:140]}\n")
     write(
-        f"{indent}{len(result['unsatisfied'])} of {len(rows)} finding(s) stand unacknowledged "
+        f"{indent}{at_least(result['unsatisfied'], len(result['unsatisfied']))} of "
+        f"{at_least(rows, len(rows))} finding(s) stand unacknowledged "
         f"against {result['landing_ref']}\n"
     )
     if result["unsatisfied"]:

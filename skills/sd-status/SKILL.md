@@ -79,6 +79,7 @@ predict `pending` from this table before running the command.
 | 30 | `pr-check-failing` | `p` | yes | `open pull requests` | an open pull request with a failing check |
 | 30 | `pr-check-missing` | `p` | yes | `open PRs + protection` | an open pull request reporting no check the branch requires |
 | 30 | `dirty-tree-with-open-pr` | `p` | yes | `git + open PRs` | uncommitted work on a branch that already has a pull request |
+| 35 | `pr-review-unacknowledged` | `p` | yes | `review findings + local acknowledgements` | an open pull request carrying a review finding nobody has answered |
 | 40 | `protection-gap` | `g` | yes | `protection` | an enforcement leg missing on the default branch |
 | 45 | `accepted-gap-standing` | `g` | no | `.github/sd-status.json accepted_gaps[]` | a written acceptance whose until condition nothing re-reads |
 | 50 | `issue-needs-you` | `i` | no | `dashboard index` | an indexed issue the index says is waiting on you |
@@ -91,6 +92,43 @@ predict `pending` from this table before running the command.
 | 110 | `issue-open` | `i` | no | `dashboard index` | an indexed issue open against this repository |
 | 120 | `source-marker` | `t` | no | `marker scan over the index` | a marker left in tracked source |
 | 125 | `undisclosed-tool` | `k` | no | `skill claims bin/<tool>` | a skill disclosing a tool that is not built |
+
+### `pr-review-unacknowledged`, and why it sits at 35
+
+A review that runs and is never read produces exactly the signal a review that
+found nothing produces. Twelve pull requests merged on green CI in one session
+with an automated review on each; the reviews were opened afterwards and held
+real defects, three of which reached the default branch under threads that all
+read as answered. Nothing in this report told the two apart.
+
+The rank is deliberate. Below the three rank-30 `p` classes, because a red
+check is a machine-verified fact and a review finding still needs a human to
+judge it. Above `protection-gap` at 40, because a gap in branch protection is a
+standing configuration question while an unanswered finding is attached to a
+pull request that is about to merge, and stops mattering the moment it does.
+Abnormal, so it reaches the banner: the whole failure was that this was
+invisible where the operator already looked.
+
+A finding is answered when `bin/sd-review-ack` says so — acknowledged as fixed
+by a commit that actually reached the landing ref, or dismissed with a reason.
+`sd-status` holds no second opinion about either; it counts what that tool
+reports unanswered.
+
+Findings are read from inline comments **and** from review bodies, where an
+automated reviewer states the ones no comment count sees. The bodies arrive in
+the `gh pr list` call this report already makes; the inline comments cost one
+`gh api` call per pull request, the same per-pull-request price `behind_by`
+already pays. A pull request whose comments cannot be read marks the class
+`unchecked` rather than reporting the body findings as the total — a partial
+count presented as a count is the failure this class is about.
+
+The count is sometimes a floor. A reviewer that writes `Moderate findings
+(3 votes each)` has stated more than one finding under one marker and has not
+said where they split; `sd-review-ack` keeps the whole text, marks the row
+indeterminate, and the detail then reads `at least 2 of at least 2` rather
+than `2 of 2`. Splitting that text on "and" would be guessing how many, and
+counting it flat as one would understate — an undercount on a gate reads as
+progress. Rows with no such marker keep an exact count.
 
 ## Ids: `<letter><4 hex digits, 8 on collision>`, from the data alone
 

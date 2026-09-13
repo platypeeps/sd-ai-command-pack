@@ -1418,6 +1418,113 @@ class InventoryFixture(StatusFixture):
         return [row for row in rows if row["check"] == check]
 
 
+class ReviewUnacknowledgedTests(InventoryFixture):
+    """`pr-review-unacknowledged`: the class this repository learned the hard way.
+
+    Twelve pull requests merged on green CI with an automated review on each,
+    and the report said nothing, because a review that runs and is never read
+    produces exactly the signal a review that found nothing produces.
+    """
+
+    def ack(self) -> Any:
+        return status.sd_lib.sibling("sd_review_ack_status", "sd-review-ack")
+
+    def reviewed(self, ids: list[str], **extra: Any) -> dict[str, Any]:
+        found = {"reviews": 1, "in_body": len(ids), "reviewers": ["bot"],
+                 "ids": ids, "inline": 0, "unreadable": "", "indeterminate": []}
+        found.update(extra)
+        return {"repo": "acme/widget",
+                "pull_requests": [self.pull(failing=[], review_findings=found)]}
+
+    def test_an_unanswered_finding_is_a_row(self) -> None:
+        rows = self.by_check(self.rows(pull_requests=self.reviewed(["aa11", "bb22"])),
+                             "pr-review-unacknowledged")
+        self.assertEqual(len(rows), 1)
+        self.assertIn("2 of 2 review finding(s) unanswered", rows[0]["detail"])
+        self.assertIn("sd-review-ack --pr 7", rows[0]["suggest"])
+
+    def test_a_grouped_marker_makes_the_row_say_at_least(self) -> None:
+        """The count is a floor when a marker covers a number it does not state."""
+        section = self.reviewed(["aa11", "bb22"], indeterminate=["aa11"])
+        rows = self.by_check(self.rows(pull_requests=section),
+                             "pr-review-unacknowledged")
+        self.assertIn("at least 2 of at least 2 review finding(s) unanswered",
+                      rows[0]["detail"])
+
+    def test_a_row_with_no_grouped_marker_states_a_flat_count(self) -> None:
+        """The control: hedging every row would make the hedge say nothing."""
+        rows = self.by_check(self.rows(pull_requests=self.reviewed(["aa11", "bb22"])),
+                             "pr-review-unacknowledged")
+        self.assertIn("2 of 2 review finding(s) unanswered", rows[0]["detail"])
+        self.assertNotIn("at least", rows[0]["detail"])
+
+    def test_a_pull_request_with_no_finding_is_not_a_row(self) -> None:
+        self.assertEqual(
+            self.by_check(self.rows(pull_requests=self.reviewed([])),
+                          "pr-review-unacknowledged"),
+            [],
+        )
+
+    def test_answering_every_finding_clears_the_row(self) -> None:
+        """The control: the row goes when the findings are answered, not before."""
+        ack = self.ack()
+        ack.write_store(self.repo, {found: {
+            "pr": 7, "disposition": "dismissed", "commit": None,
+            "reason": "read, and wrong about the fixture",
+            "path": "x", "line": 1, "at": "2026-09-12T00:00:00+00:00",
+        } for found in ("aa11", "bb22")})
+        self.assertEqual(
+            self.by_check(self.rows(pull_requests=self.reviewed(["aa11", "bb22"])),
+                          "pr-review-unacknowledged"),
+            [],
+        )
+
+    def test_answering_one_of_two_leaves_the_row_naming_the_other(self) -> None:
+        ack = self.ack()
+        ack.write_store(self.repo, {"aa11": {
+            "pr": 7, "disposition": "dismissed", "commit": None, "reason": "read",
+            "path": "x", "line": 1, "at": "2026-09-12T00:00:00+00:00",
+        }})
+        rows = self.by_check(self.rows(pull_requests=self.reviewed(["aa11", "bb22"])),
+                             "pr-review-unacknowledged")
+        self.assertIn("1 of 2 review finding(s) unanswered", rows[0]["detail"])
+
+    def test_unreadable_inline_comments_are_unchecked_and_never_clear(self) -> None:
+        """A partial count presented as a count is the failure this class is about."""
+        section = self.reviewed(["aa11"], unreadable="gh api exited 1")
+        found = status.actionable_inventory(
+            self.repo, self.sections(pull_requests=section), self.TODAY
+        )
+        self.assertEqual(self.by_check(found.rows, "pr-review-unacknowledged"), [])
+        self.assertIn("pr-review-unacknowledged", found.unchecked)
+        self.assertIn("#7", found.unchecked["pr-review-unacknowledged"])
+        self.assertNotIn("clear", status.banner(found)["summary"])
+
+    def test_an_unreadable_record_is_unchecked_rather_than_answered(self) -> None:
+        """A store nothing can parse must not read as nobody having findings."""
+        self.ack().store_path(self.repo).write_text("{not json", encoding="utf-8")
+        found = status.actionable_inventory(
+            self.repo, self.sections(pull_requests=self.reviewed(["aa11"])), self.TODAY
+        )
+        self.assertIn("pr-review-unacknowledged", found.unchecked)
+        self.assertNotIn("clear", status.banner(found)["summary"])
+
+    def test_the_id_is_keyed_on_the_check_and_not_the_class_letter(self) -> None:
+        """#7 is both `pr-check-failing` and `pr-review-unacknowledged`.
+
+        Two `p` checks on one pull request is the routine case the id rule
+        exists for: keyed on the letter these would hash identically and one id
+        would name two different actions.
+        """
+        section = self.reviewed(["aa11"])
+        section["pull_requests"][0]["failing"] = ["lint"]
+        rows = self.rows(pull_requests=section)
+        ids = {row["check"]: row["id"] for row in rows if row["check"].startswith("pr-")}
+        self.assertIn("pr-check-failing", ids)
+        self.assertIn("pr-review-unacknowledged", ids)
+        self.assertNotEqual(ids["pr-check-failing"], ids["pr-review-unacknowledged"])
+
+
 class ClassTableTests(unittest.TestCase):
     """`CLASSES` is the enumeration, so the enumeration is what gets asserted."""
 
@@ -1426,7 +1533,7 @@ class ClassTableTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(len(names), len(status.BY_CHECK))
 
-    def test_the_table_carries_the_twenty_one_checks_the_design_enumerates(self) -> None:
+    def test_the_table_carries_the_twenty_two_checks_the_design_enumerates(self) -> None:
         # Pinned as a set, not a count: a count passes when a check is renamed
         # into a duplicate of another, which is the drift this table exists to
         # make impossible.
@@ -1440,7 +1547,7 @@ class ClassTableTests(unittest.TestCase):
                 "pr-needs-action", "open-step", "unmerged-branch",
                 "parked-concern", "idle-planning", "undated-planning",
                 "issue-open", "source-marker", "unreadable-concern-row",
-                "undisclosed-tool",
+                "undisclosed-tool", "pr-review-unacknowledged",
             },
         )
 
@@ -2556,6 +2663,7 @@ class BannerTests(InventoryFixture):
     DECLARED_SECTIONS = {
         "pull_requests": {
             "pr-check-failing", "pr-check-missing", "dirty-tree-with-open-pr",
+            "pr-review-unacknowledged",
         },
         "protection": {"pr-check-missing", "protection-gap"},
     }
@@ -3484,12 +3592,12 @@ class ReportSectionTests(InventoryFixture):
         self.item("2026-08-01-alpha", status="in_progress")
         summary = status.banner(self.inventory())["summary"]
         self.assertIn("1 finding across 1 check;", summary)
-        self.assertIn("the other 11 checks clear", summary)
+        self.assertIn("the other 12 checks clear", summary)
         self.assertNotIn("all 12 checks clear", summary)
 
     def test_nothing_found_still_says_all_of_them_are_clear(self) -> None:
         summary = status.banner(self.inventory())["summary"]
-        self.assertEqual("no findings; all 12 checks clear", summary)
+        self.assertEqual("no findings; all 13 checks clear", summary)
 
     def test_a_blind_class_keeps_the_word_out_even_when_others_fired(self) -> None:
         """The never-say-clear rule outranks the new middle tail.

@@ -273,6 +273,127 @@ class ThePrStateCountUsesTheSameReader(unittest.TestCase):
                     self.assertIn("body", review)
                     self.assertIsInstance(review["body"], str)
 
+    def test_both_halves_reach_ids_and_an_unreadable_half_says_so(self):
+        """`ids` is body plus inline, and the reason the inline half failed.
+
+        `in_body` stays the count this file has always printed. `ids` is what
+        `sd-status` walks: dropping the inline half there would restore the
+        original defect in the one place that now reports it, with a pull
+        request reading clear while its inline comments sat unread. And when
+        the inline call fails, `unreadable` carries why -- a partial count
+        presented as a total is this item's defect exactly, so the sentence has
+        to survive the trip rather than being swallowed into a smaller number.
+        """
+        pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
+        pull = {"reviews": [{"body": self.BODY, "author": {"login": "bot"}}], "number": 880}
+        original = pr_state.inline_findings
+        try:
+            pr_state.inline_findings = lambda *a: ([], "gh api exited 1")
+            blind = pr_state._findings(pull, REPO_ROOT, "acme/widget")
+            pr_state.inline_findings = lambda *a: (["inline-id"], "")
+            whole = pr_state._findings(pull, REPO_ROOT, "acme/widget")
+        finally:
+            pr_state.inline_findings = original
+        self.assertEqual(blind["unreadable"], "gh api exited 1")
+        self.assertEqual(whole["unreadable"], "")
+        self.assertEqual(whole["in_body"], 3)
+        self.assertEqual(len(whole["ids"]), 4)
+        self.assertIn("inline-id", whole["ids"])
+
+    def test_a_re_review_does_not_double_what_it_restates(self):
+        """Two surfaces, one fact. A restated finding is one finding.
+
+        A reviewer that runs again after a push restates what still stands,
+        and #860 carries four reviews for exactly that reason. `findings`
+        deduplicates by id across every review it is given, in one pass; a
+        caller that instead loops and calls it once per review gets that
+        deduplication per review and none across them, so this surface and
+        `sd-review-ack` report different totals for the same pull request.
+
+        The body here is #859's real review body from the capture. The only
+        construction is that it appears twice, which is what a second pass on
+        an unchanged finding produces. Measured before the fix: 8 against 4.
+        """
+        pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
+        once = ROUND["859"]["reviews"][0]
+        again = [once, dict(once)]
+        truth = ack.findings(859, again, [])
+        stated = pr_state.review_findings(again, 859)
+        self.assertEqual(len(ack.findings(859, [once], [])), 4)
+        self.assertEqual(len(truth), 4)
+        self.assertEqual(stated["in_body"], len(truth))
+        self.assertEqual(stated["ids"], [row["id"] for row in truth])
+        self.assertEqual(stated["reviewers"], ["copilot-pull-request-reviewer[bot]"])
+
+    def test_no_pull_request_in_the_round_is_counted_twice_over(self):
+        """The same question across all twelve, enumerated rather than sampled."""
+        pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
+        for number, record in ROUND.items():
+            with self.subTest(pr=number):
+                reviews, comments = record["reviews"], record["comments"]
+                body = pr_state.review_findings(reviews, int(number))["ids"]
+                inline = [row["id"] for row in ack.findings(int(number), [], comments)]
+                union = list(dict.fromkeys(body + inline))
+                self.assertEqual(len(set(union)), len(union))
+                self.assertEqual(len(union), len(ack.findings(int(number), reviews, comments)))
+
+    def test_the_grouped_markers_are_named_for_the_report(self):
+        """`sd-status` hedges its count from this list, not from a second parser.
+
+        The row says "at least N" only because the ids that cover an unknown
+        number travel with the count. A report that decided that for itself
+        would be the two-surfaces-one-fact drift again, one field along.
+        """
+        pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
+        body = ("| File | Summary |\n|---|---|\n"
+                "| `a.py` | Moderate findings (3 votes each): one and another. |\n"
+                "| `b.py` | Moderate finding (2 votes): a single one. |\n")
+        reviews = [{"body": body, "author": {"login": "bot"}}]
+        stated = pr_state.review_findings(reviews, 1)
+        rows = ack.findings(1, reviews, [])
+        self.assertEqual(len(stated["ids"]), 2)
+        self.assertEqual(len(stated["indeterminate"]), 1)
+        self.assertEqual(stated["indeterminate"],
+                         [row["id"] for row in rows if row["indeterminate"]])
+
+    def test_a_comment_response_that_is_not_a_list_is_refused(self):
+        """`gh` exits 0 and returns an error object. That is not zero findings.
+
+        The third time this shape has come up in this item, after `gh` missing
+        and after a capture that is not JSON. An error object or a null
+        iterates as nothing, the row prints clean, and the gate passes hardest
+        on the day GitHub is having trouble.
+        """
+        pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
+        original = pr_state.gh_json
+        try:
+            for payload in ({"message": "API rate limit exceeded"}, None, "nope"):
+                with self.subTest(payload=type(payload).__name__):
+                    pr_state.gh_json = lambda *a, _p=payload: (_p, "")
+                    ids, reason = pr_state.inline_findings(REPO_ROOT, "acme/widget", 7)
+                    self.assertEqual(ids, [])
+                    self.assertIn("not a list of comments", reason)
+                    self.assertIn(type(payload).__name__, reason)
+        finally:
+            pr_state.gh_json = original
+
+    def test_a_real_comment_list_is_read_through_the_shared_reader(self):
+        """The success half, so the refusal above is not the only path covered."""
+        pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
+        comments = ROUND["860"]["comments"]
+        original = pr_state.gh_json
+        try:
+            pr_state.gh_json = lambda *a: (comments, "")
+            ids, reason = pr_state.inline_findings(REPO_ROOT, "acme/widget", 860)
+        finally:
+            pr_state.gh_json = original
+        self.assertEqual(reason, "")
+        # Six inline rows on #860: three findings and three replies. The reader
+        # decides which is which, and this asserts it was asked.
+        self.assertEqual(len(comments), 6)
+        self.assertEqual(ids, [row["id"] for row in ack.findings(860, [], comments)])
+        self.assertEqual(len(ids), 3)
+
     def test_a_body_with_nothing_in_it_still_counts_nothing(self):
         """The clean case stays clean: the line prints only on a non-zero count."""
         pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
@@ -330,6 +451,68 @@ class BothOrdersOfATableCell(unittest.TestCase):
         # the reviewer's heading pretending to be part of the finding.
         self.assertNotIn("Findings", first["text"])
         self.assertEqual(first["text"], "moderate: pagination handling")
+
+    def test_a_marker_that_says_each_covers_a_number_it_does_not_state(self):
+        """#885's own review: two markers, four findings, and no split stated.
+
+        `Moderate findings (3 votes each)` is the reviewer saying "more than
+        one" in its own words. Where they split is not stated, and splitting on
+        "and" or on a semicolon would be this parser guessing. So the row keeps
+        its whole text and is marked indeterminate, and every count built on it
+        says "at least". Counting it flat as one is the worse of the two
+        errors: an undercount on a gate reads as progress.
+        """
+        rows = ack.findings(885, [{"body": (
+            "| File | Summary |\n|---|---|\n"
+            "| `bin/sd-pr-state` | Collects ids. Moderate findings (3 votes each): "
+            "deduplicate repeated IDs and reject non-list comment responses. "
+            "Nit findings (1 vote each): add coverage and update the contract. |\n"
+        ), "author": {"login": "bot"}}], [])
+        self.assertEqual(len(rows), 2)
+        self.assertTrue(all(row["indeterminate"] for row in rows))
+        self.assertIn("deduplicate repeated IDs", rows[0]["text"])
+        self.assertIn("reject non-list", rows[0]["text"])
+        self.assertEqual(ack.at_least(rows, len(rows)), "at least 2")
+
+    def test_a_singular_marker_is_counted_flat(self):
+        """The control. Hedging every count would make the hedge meaningless."""
+        rows = ack.findings(880, [{"body": (
+            "| File | Summary |\n|---|---|\n"
+            "| `bin/sd_work.py` | Uses row-aware rendering. Moderate finding (2 votes): "
+            "field orders still differ between surfaces. Moderate finding (1 vote): "
+            "dictionary results can print `revision` twice. |\n"
+            "| `bin/sd_lib.py` | Adds `display_fields`. Moderate finding (3 votes): "
+            "duplicate fields in `order` are rendered twice. |\n"
+        ), "author": {"login": "bot"}}], [])
+        self.assertEqual(len(rows), 3)
+        self.assertFalse(any(row["indeterminate"] for row in rows))
+        self.assertEqual(ack.at_least(rows, len(rows)), "3")
+
+    def test_the_marker_is_the_only_evidence_of_plurality_that_is_used(self):
+        """`N and M votes` is the reviewer's other way of saying more than one.
+
+        And a plural `Findings:` label is *not* used as evidence: the reviewer
+        writes that label in front of a single finding too, so reading it as
+        plural would hedge counts that are exact.
+        """
+        self.assertTrue(ack.PLURAL_MARKER.search("(2 and 1 votes)"))
+        self.assertTrue(ack.PLURAL_MARKER.search("(1 vote each)"))
+        self.assertIsNone(ack.PLURAL_MARKER.search("(3 votes)"))
+        rows = ack.findings(1, [{"body": (
+            "| File | Summary |\n|---|---|\n"
+            "| `a.py` | Findings: the order differs (2 votes). |\n"
+        ), "author": {"login": "bot"}}], [])
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0]["indeterminate"])
+
+    def test_an_acknowledgement_survives_a_row_becoming_indeterminate(self):
+        """The flag is not in the id, so an answer already on record still counts."""
+        body = ("| File | Summary |\n|---|---|\n"
+                "| `a.py` | Moderate findings (3 votes each): one thing and another. |\n")
+        row = ack.findings(1, [{"body": body, "author": {"login": "bot"}}], [])[0]
+        self.assertTrue(row["indeterminate"])
+        flat = ack.finding_id(1, row["source"], row["path"], row["line"], row["text"])
+        self.assertEqual(row["id"], flat)
 
     def test_a_label_with_no_sentence_before_it_is_still_stripped(self):
         """The period fallback cannot help when the cell opens with the label."""
@@ -405,6 +588,23 @@ class AFixIsSatisfiedByLanding(RoundFixture):
         row = next(r for r in result["findings"] if r["id"] == found)
         self.assertEqual(row["verdict"], "landed")
 
+    def test_findings_answered_only_by_fixes_that_never_landed_stay_red(self):
+        """What counts as answered, asserted as a set rather than per verdict.
+
+        Every finding on #860 acknowledged, every acknowledgement truthful,
+        every cited commit still off the branch. Widening `SATISFIED` by one
+        entry turns this tool back into the thing it replaced, and no other
+        test here can see that edit: each of them names one verdict and checks
+        the verdict, not whether the gate treats it as an answer.
+        """
+        result, _ = payload(self.repo.root, "--pr", "860", *self.ref)
+        for row in result["findings"]:
+            payload(self.repo.root, "--pr", "860", "--ack", row["id"],
+                    "--fixed", self.repo.stranded, *self.ref)
+        after, code = payload(self.repo.root, "--pr", "860", "--check", *self.ref)
+        self.assertEqual(len(after["unsatisfied"]), len(result["findings"]))
+        self.assertEqual(code, 1)
+
     def test_a_dismissal_without_a_reason_is_refused(self):
         done = run(self.repo.root, "--pr", "860", "--ack", self._first(860), "--dismiss", "   ")
         self.assertEqual(done.returncode, 2)
@@ -477,6 +677,76 @@ class TheControl(RoundFixture):
         self.assertIn("unavailable:", report.stdout)
         self.assertIn("nothing was read, so nothing is acknowledged", report.stdout)
 
+    def test_an_endpoint_that_answers_with_something_other_than_a_list_stops_the_round(self):
+        """The live half of the same refusal, for both endpoints it reads.
+
+        `payload or []` used to stand here and turned an error object into a
+        clean pull request: a rate-limit body is a dict, iterates as nothing,
+        and the pull request prints with no findings on it. `pr list` above
+        already refused a non-list; these two did not.
+
+        Driven through a real `gh` on `PATH` rather than a patched module,
+        because `sd_lib.sibling` loads a fresh module object on every call --
+        an in-process patch here would leave the code under test reading the
+        real GitHub and the test passing for the wrong reason.
+        """
+        for bad in ("reviews", "comments"):
+            with self.subTest(endpoint=bad):
+                rounds, reason = self._round_with_fake_gh(bad)
+                self.assertEqual(rounds, {})
+                self.assertIn(f"not a list of {bad}", reason)
+                self.assertIn("dict", reason)
+
+    def test_a_live_round_that_reads_two_real_lists_is_not_refused(self):
+        """The control for the refusal above: valid lists still produce a round."""
+        rounds, reason = self._round_with_fake_gh(None)
+        self.assertEqual(reason, "")
+        self.assertEqual(sorted(rounds), [7])
+        self.assertEqual(rounds[7], {"reviews": [], "comments": []})
+
+    #: A `gh` that authenticates, lists one pull request, and answers every
+    #: API path with an empty list -- except the one named, which answers with
+    #: the rate-limit object GitHub really returns.
+    FAKE_GH = """#!/bin/sh
+case "$*" in
+  *'auth status'*) exit 0 ;;
+  *'pr list'*) echo '[{"number":7}]' ;;
+%s  *) echo '[]' ;;
+esac
+"""
+
+    def _round_with_fake_gh(self, broken: str | None) -> tuple[dict, str]:
+        """`live_round` against a `gh` that answers one endpoint with an object."""
+        if "origin" not in self.repo._git("remote"):
+            self.repo._git("remote", "add", "origin", "https://github.com/acme/widget.git")
+        bin_dir = pathlib.Path(self.stack.name) / f"fake-{broken or 'ok'}"
+        bin_dir.mkdir()
+        (bin_dir / "git").symlink_to(shutil.which("git") or "/usr/bin/git")
+        arm = f"""  *{broken}*) echo '{{"message":"API rate limit exceeded"}}' ;;\n""" if broken else ""
+        fake = bin_dir / "gh"
+        fake.write_text(self.FAKE_GH % arm, encoding="utf-8")
+        fake.chmod(0o755)
+        return self._live_round_under(bin_dir)
+
+    def _live_round_under(self, bin_dir: pathlib.Path) -> tuple[dict, str]:
+        """`live_round` in a subprocess, so `PATH` is the only thing that changed."""
+        script = (
+            "import json,pathlib,sys;"
+            f"sys.path.insert(0, {str(BIN)!r});"
+            "import sd_lib;"
+            "m = sd_lib.sibling('a', 'sd-review-ack');"
+            f"r, why = m.live_round(pathlib.Path({str(self.repo.root)!r}), None, 10);"
+            "print(json.dumps({'rounds': {str(k): v for k, v in r.items()}, 'why': why}))"
+        )
+        done = subprocess.run(
+            [sys.executable, "-c", script], cwd=str(self.repo.root), text=True,
+            capture_output=True, check=False,
+            env=dict(os.environ, PATH=str(bin_dir), PYTHONDONTWRITEBYTECODE="1"),
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        payload = json.loads(done.stdout)
+        return {int(k): v for k, v in payload["rounds"].items()}, payload["why"]
+
     def test_a_named_pull_request_the_capture_lacks_is_an_error(self):
         """Not "no findings": the file never held it, so the question is wrong."""
         done = run(self.repo.root, "--pr", "9999", "--check", *self.ref)
@@ -532,6 +802,38 @@ class TheRecord(RoundFixture):
         result, code = payload(self.repo.root, "--pr", "863", "--check", *self.ref)
         self.assertEqual(result["findings"][0]["verdict"], "unknown-disposition")
         self.assertEqual(code, 1)
+
+    def test_a_disposition_the_caller_invents_is_refused_at_the_write(self):
+        """The read side above refuses one it finds; this refuses one offered.
+
+        Unreachable from the command line, where argparse offers `--fixed` and
+        `--dismiss` and nothing else, and reachable from every library caller --
+        `sd-status` among them. A guard no test can reach is a guard that gets
+        deleted as dead code, and this one is what keeps an invented
+        disposition out of the record rather than merely unhonoured in it.
+        """
+        result, _ = payload(self.repo.root, "--pr", "863", *self.ref)
+        found = [row for row in ack.findings(
+            863, ROUND["863"]["reviews"], ROUND["863"]["comments"],
+        ) if row["id"] == result["findings"][0]["id"]][0]
+        with self.assertRaises(ack.UsageError) as raised:
+            ack.acknowledge(self.repo.root, found, "wontfix", "because")
+        self.assertIn("fixed or dismissed", str(raised.exception))
+        self.assertEqual(ack.read_store(self.repo.root)[0], {})
+
+    def test_a_capture_that_is_not_json_is_refused_rather_than_read_as_empty(self):
+        """`--from` pointed at a broken file must not report a clean round.
+
+        The live path refuses when `gh` cannot be reached; this is the same
+        claim for the replay path, and it is the one a CI job would hit -- a
+        truncated artefact download reads as valid-and-empty unless something
+        says otherwise.
+        """
+        broken = pathlib.Path(self.stack.name) / "torn.json"
+        broken.write_text('{"pull_requests": {"7": {"reviews"', encoding="utf-8")
+        done = run(self.repo.root, "--from", str(broken), "--check")
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("is not valid JSON", done.stderr)
 
     def test_the_store_is_replaced_in_one_step(self):
         """A torn write would read as empty and discard real acknowledgements."""
