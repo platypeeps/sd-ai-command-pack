@@ -88,9 +88,10 @@ status checks.
    - b. every enforcement claim in a skill cites a rule id that the registry
      carries;
    - c. every rule id cited in live prose is defined in the registry.
-6. **Leg b and leg c carry a frozen baseline, not a flag day.** 263 uncited
-   claims in `skills/` and 26 archive-only R-ids cannot be fixed in the pull
-   request that introduces the check. A baseline counts *violations*, never a
+6. **Leg b and leg c carry a frozen baseline, not a flag day.** The uncited
+   claims in `skills/` — held per document in `UNCITED_SKILL_CLAIMS`, which is
+   what `claims_in` measures — and the archive-only R-ids cannot be fixed in
+   the pull request that introduces the check. A baseline counts *violations*, never a
    population: it may fall and may not rise, in the shape
    `tests/test_loc_caps.py` already uses, and adding a correctly cited claim
    must not move it.
@@ -131,9 +132,11 @@ status checks.
       id the registry does not carry, **and equally when it names no rule id at
       all.** Both mutations are required. The unknown-id case alone would be
       satisfied by a checker that only validates ids it finds, which would pass
-      over the uncited shape — and the uncited shape is 263 of the 264 claims in
-      `skills/` today, so a leg b that missed it would miss essentially
-      everything it exists to catch.
+      over the uncited shape — and the uncited shape is the large majority of
+      the claims in `skills/` today, so a leg b that missed it would miss
+      essentially everything it exists to catch. The exact figure is
+      `UNCITED_SKILL_CLAIMS`; no single number is quoted here, because the one
+      that used to be could not be reproduced.
 - [x] ~~The leg b baseline is 263~~ — **superseded 2026-09-12 by sd:622: 263
       cannot be reproduced and neither can its proposed replacements.** The
       baseline is what `claims_in` returns, held per document in

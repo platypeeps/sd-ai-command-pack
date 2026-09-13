@@ -82,7 +82,11 @@ ENFORCEMENT = re.compile(r"\b(refuses|never|always|cannot)\b")
 #: The rejected readings are kept as code instead: `PARAGRAPH` and `DOCUMENT`
 #: are runnable, their answer is whatever they return on the day you run them,
 #: and `TheClaimPredicate` runs all three. The only figure this module records
-#: is `UNCITED_SKILL_CLAIMS`, which is what `claims_in` returns.
+#: is `UNCITED_SKILL_CLAIMS`, which is a PROJECTION of `claims_in` and not its
+#: return value: `claims_in` yields every matching `(line, run, ids)` tuple, and
+#: `uncited_skill_claims` filters those to the ones with empty `ids` and counts
+#: them per document. Reading the dict as "what `claims_in` returns" is how the
+#: next baseline update goes to the wrong value.
 LINE = "line"
 PARAGRAPH = "paragraph"
 DOCUMENT = "document"
@@ -164,13 +168,27 @@ DANGLING_RULE_IDS = frozenset({"R11-D1", "R11-D30", "R11-D46", "R5-D1"})
 #: one was newly stranded in the same change -- two baselines in one file
 #: keeping two different standards, which review caught.
 #:
-#: **24 on this branch, down from the 26 measured on `cddd3b98`.** `R10-D5` and
-#: `R10-D6` are rows in `bin/sd_rules.py` now. The other twenty-four were each
-#: looked at and each has a recorded reason it is not a row yet, in the backfill
-#: section of this item's `implement.md`, rather than left for the next reader
-#: to rediscover.
+#: **25 on this branch, down from the 26 measured on `cddd3b98`.** `R10-D5` is
+#: a row in `bin/sd_rules.py` now.
+#:
+#: `R10-D6` is NOT, and the reason is worth keeping because it is a gap in the
+#: registry rather than in the rule. Its enforcement exists and is good --
+#: `tests/test_verb_inventory.py::test_no_command_accepts_a_repository_path`
+#: enumerates `bin/` with `iterdir()`, parses each file, and asserts no command
+#: declares a repo-path option. But that is a TEST, and `Rule.checker` holds a
+#: function object imported by `bin/sd_rules.py`, which cannot import `tests/`.
+#: `R10-D5`'s checker is runtime code carrying its own refusal; `R10-D6`'s is a
+#: test over the tree. The field means two different things and the registry has
+#: no way to name the second. Registering `sd_lib.repo_root` papered over that:
+#: it is the resolver the rule CONSTRAINS, not a guard -- it accepts a `start`
+#: path, so it is the mechanism by which the rule would be broken. Settle what
+#: `checker` names before this row returns.
+#:
+#: The other twenty-four were each looked at and each has a recorded reason it
+#: is not a row yet, in the backfill section of this item's `implement.md`,
+#: rather than left for the next reader to rediscover.
 STRANDED_RULE_IDS = frozenset({
-    "R10-D1", "R10-D2", "R10-D3", "R10-D4", "R10-D7",
+    "R10-D1", "R10-D2", "R10-D3", "R10-D4", "R10-D6", "R10-D7",
     "R11-D10", "R11-D12", "R11-D13", "R11-D14", "R11-D15", "R11-D16",
     "R11-D17", "R11-D18", "R11-D19", "R11-D20", "R11-D21", "R11-D23",
     "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D4", "R11-D5", "R11-D6",

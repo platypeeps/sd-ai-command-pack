@@ -24,8 +24,8 @@ and it cites nothing because there is nothing to cite.
 
 **Narrowed form.** The rule applies to a claim that asserts a *tool behaviour*:
 an enforcement verb whose grammatical subject is a pack tool or a test. It
-carries a frozen baseline — of the 263 uncited claims in `skills/`, which is
-leg b's scope, not of the 681 live-prose population. A baseline counts
+carries a frozen baseline — of the uncited claims in `skills/`, which is
+leg b's scope, not of the whole live-prose population. A baseline counts
 violations, never a population; on the population, a new and correctly cited
 claim would redden it. The baseline may fall and may not rise, which makes the
 rule bite on every new uncited claim while costing nothing on the existing
@@ -47,7 +47,13 @@ So no number here is safe to act on, including the ones the delivery note
 offered as replacements. The correction is not a better number. It is that the
 predicate now exists as code, in one place —
 `source:tests/test_rule_registry.py::claims_in` — and the only figure recorded
-anywhere is `UNCITED_SKILL_CLAIMS`, which is what that function returns.
+anywhere is `UNCITED_SKILL_CLAIMS`, which is a PROJECTION of that predicate and
+not its return value. `claims_in` returns every matching
+`(first line, run, rule ids)` tuple; `uncited_skill_claims()` then filters to
+the tuples whose ids are empty and counts them per document, and that per-
+document mapping is what is recorded. The distinction is load-bearing: reading
+the dictionary as "what `claims_in` returns" sends the next baseline update to
+the wrong value.
 
 Three properties of the predicate were load-bearing and unstated, and each is
 now pinned by a test rather than remembered:
@@ -224,7 +230,7 @@ apply to the checkers the item aims it at.
   consumer outside Python needs to read the registry; at that point the table
   gains a serializer, and the table stays the source.
 - **2026-09-12 — prose rule 3 is narrowed to tool-behaviour claims and carries
-  a frozen baseline of 263**, the uncited claims in `skills/`. Reversed if the
+  a frozen baseline**, the uncited claims in `skills/`, held per document. Reversed if the
   corpus is deliberately swept and the baseline reaches a number small enough
   to fix outright. **Superseded 2026-09-12 by the correction above (sd:622):
   263 has no predicate behind it and neither do its proposed replacements. The
@@ -259,8 +265,8 @@ apply to the checkers the item aims it at.
 
 **Accepted: the baseline can be gamed.** Anyone may add a machinery claim if
 they delete another. The baseline catches drift in aggregate, not per line.
-Accepted because the alternative — fixing 263 claims before the check can land
-— means the check never lands.
+Accepted because the alternative — fixing every uncited claim before the check
+can land — means the check never lands.
 
 > **Re-examined 2026-09-12 (sd:622), because the correction above dissolves the
 > reason this risk was accepted.** The acceptance rested on 263 being too many

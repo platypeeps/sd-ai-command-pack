@@ -16,14 +16,19 @@
 - [ ] **2. Meta-check legs a and b, with the baseline.** Leg a: every registry
       row is cited by at least one skill. Leg b: every tool-behaviour claim in
       a skill cites a rule id the registry carries.
-      **The baseline is 263, not 681.** 681 is the whole live-prose population,
-      of which 264 are in `skills/` — leg b's scope — and 263 of those cite no
-      rule id. A downward-only ratchet on 681 would be wrong twice: it counts
-      claims leg b never examines, and it counts the *population* rather than
-      the *violations*, so adding a new, correctly cited claim would redden it.
-      Verify: each leg reddens under its own mutation; the baseline test reddens
-      when 263 is raised to 264; adding a correctly cited claim does NOT redden
-      it, which is the control that separates a violation count from a census.
+      **The baseline is what `claims_in` returns, held per document in
+      `UNCITED_SKILL_CLAIMS`.** It counts *violations* within leg b's scope —
+      the claims in `skills/` citing no rule id — and never the *population*.
+      A ratchet over the whole live-prose population would be wrong twice: it
+      counts claims leg b never examines, and adding a new, correctly cited
+      claim would redden it.
+      Verify: each leg reddens under its own mutation; the baseline test
+      reddens when a document's uncited count RISES; adding a correctly cited
+      claim does NOT redden it, which is the control that separates a
+      violation count from a census.
+      Do not verify against a 263→264 mutation. That instruction stood here
+      until 2026-09-12 and cannot be run: 263 was never reproducible, so there
+      is no such transition to induce. The correction below has the history.
 
       > **Correction, 2026-09-12 (sd:622).** 263 could not be reproduced, and
       > the three readings offered in its place could not be reproduced either:

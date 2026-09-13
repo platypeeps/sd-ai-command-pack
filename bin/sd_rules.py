@@ -49,8 +49,7 @@ _BIN = str(pathlib.Path(__file__).resolve().parent)
 if _BIN not in sys.path:  # pragma: no cover - import bootstrap, not behaviour
     sys.path.insert(0, _BIN)
 
-import sd_lib  # noqa: E402 - after the bootstrap that makes `bin/` importable
-import sd_setup_github  # noqa: E402 - same
+import sd_setup_github  # noqa: E402 - after the bootstrap that makes `bin/` importable
 
 #: What a rule id looks like, in one place. Every reader of rule ids -- the
 #: meta-check's three legs, and anything that grows later -- compiles nothing
@@ -138,16 +137,6 @@ RULES: tuple[Rule, ...] = (
         checker=sd_setup_github.setup_github,
         scope="code",
         teaches="skills/sd-review/SKILL.md#setup-github",
-    ),
-    Rule(
-        id="R10-D6",
-        subject="an `sd-*` command resolves its repository from the working "
-                "directory and takes no path to another one, because a "
-                "session that can be pointed elsewhere acts on the wrong "
-                "checkout",
-        checker=sd_lib.repo_root,
-        scope="code",
-        teaches="skills/sd-check/SKILL.md#Never",
     ),
 )
 
