@@ -86,9 +86,11 @@ description to the same thing.
 
 ## Acceptance criteria
 
-- [ ] `make check` ends with `0 FAILED` and its `^OK` count is unchanged from
-      the commit this branch left `main` at, because this adds tests to
-      `tests/test_sd_status.py` and no new test module. The count is read at
+- [ ] `make check` ends with `0 FAILED` and its `^OK` count moves only by
+      the modules this item adds or deletes: tests land in
+      `tests/test_sd_status.py`, and the sd:10 residue cleanup in the same
+      change deleted `tests/test_selector_contract_drift.py`, so the count is
+      one below the commit this branch left `main` at. The count is read at
       branch time rather than written here: it was `40` on `8cf99431` and is
       `56` today, and a criterion carrying a number that other items move is a
       criterion that fails for reasons this item did not cause
@@ -109,7 +111,7 @@ description to the same thing.
       `branch-already-merged`: `./bin/sd-status --json | python3 -c "import
       json,sys; d=json.load(sys.stdin); print(sum(1 for a in d['abnormalities']
       ['findings'] if a['check']=='branch-already-merged'))"` prints `1`
-- [ ] the section skeleton is fixed: this command prints the twelve section
+- [ ] the section skeleton is fixed: this command prints the thirteen section
       headings in order, and prints them identically for a repository with no
       work items —
       `./bin/sd-status | grep -nE '^[a-z][a-z ()/,-]*$'`

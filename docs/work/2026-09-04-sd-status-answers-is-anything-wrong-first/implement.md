@@ -78,7 +78,7 @@ The ceiling is what checks this, not this paragraph.
       reader learns what was looked at and not only what was found.
 
       **The summary is assembled so the word `clear` cannot be printed while
-      any class is unchecked**, which is `prd.md:143`'s substring test written
+      any class is unchecked**, which is `prd.md:145`'s substring test written
       as a construction rather than as a wording convention: with something
       unread the tail reads `n of 11 checks could not run`, and only with
       nothing unread does it read `all 11 checks clear`.
@@ -451,7 +451,7 @@ The ceiling is what checks this, not this paragraph.
       Cost: `bin/` 18,367 to **18,402**, 35 lines, and **148 of headroom** left
       under `BIN_CAP` 18,550 for steps 6 and 7. Neither of those touches
       `bin/`.
-- [ ] **6. `skills/sd-status/SKILL.md`.** The twelve-section order, the ranking
+- [x] **6. `skills/sd-status/SKILL.md`.** The thirteen-section order, the ranking
       table, the id scheme, and the `AskUserQuestion` contract with its
       4-option/4-question limit and the resolution.
 - [x] **7. Tests.** Every new behaviour in `tests/test_sd_status.py` — no new
