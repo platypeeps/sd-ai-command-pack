@@ -51,9 +51,33 @@ TOKEN_SLOT = "__SD_DASHBOARD_TOKEN__"
 
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
-# 8767, which the system dashboard held until 6b-8. It landed on 8768 at P3 so
-# the two could run side by side while the parity checks ran; taking the port
-# is what makes the swap a swap rather than a second dashboard.
+# **8767 is not this dashboard's any more, and 8768 is not a second dashboard
+# today.** The swap at 6b-8 happened and then was undone: the pack held :8767 for
+# one week of 2026-09, and the system repository's workflow server in
+# `local-project-dashboard/sd_dashboard/` took the port back at its #221 and
+# serves it now. 8768 was this pack's own port through the parity window --
+# `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`
+# records `:8768/api/state` answering with 78 repos while :8767 answered 200, and
+# `tests/test_sd_dashboard.py` still calls it "the side-by-side port" -- but that
+# process is gone. What answers there now is the system dashboard's optional
+# `ip_origin` listener on this node's tailnet IP: one program on two sockets,
+# which is why "the two could run side by side" describes nothing that is
+# running, however exactly it described 2026-08. Measured
+# 2026-09-13: `lsof` gives PID 37095 for both ports, and `/health` on 8767
+# answers `service: sd-dashboard` -- an endpoint this file does not implement,
+# so the responder cannot be this program.
+#
+# The sentences above replace three that said the reverse, and they are this
+# long because the reverse was believed. A note on sd:452 quoted the old
+# comment as a reason the item screen "may need building here rather than
+# editing there", which aimed an audit away from a screen that had been live in
+# the system repository the whole time. A comment that decides where work
+# happens has earned a line about its own history.
+#
+# So this default now collides with a live listener, and is deliberately left
+# alone: what this dashboard's port should be -- or whether it should still
+# start, given the workflow server serves these screens -- is the owner's call
+# on sd:705, which carries the enumeration of everything that reads the number.
 DEFAULT_PORT = 8767
 # A POST body names an action id and nothing else. Anything larger is not a
 # request this server has a shape for, and reading it would be reading it.

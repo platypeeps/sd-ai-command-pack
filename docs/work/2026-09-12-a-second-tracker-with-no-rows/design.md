@@ -170,10 +170,10 @@ differently, and the difference is deliberate:
 |---|---|---|
 | `sd shadow sync` | `shadow sync[jira]: not collected (JIRA_BASE_URL and JIRA_EMAIL not set)` | 0, even with `--strict` |
 | `sd-status`, `jira` section | `never collected (JIRA_BASE_URL and JIRA_EMAIL not set)`, then the stored rows if any | unchanged |
-| `sd-dashboard index` | `issues[jira]: not collected (JIRA_BASE_URL and JIRA_EMAIL not set)` | 0 — already today, `bin/sd-dashboard:220-221` |
+| `sd-dashboard index` | `issues[jira]: not collected (JIRA_BASE_URL and JIRA_EMAIL not set)` | 0 — already today, `bin/sd-dashboard:239-240` |
 
 The verb's line is the new one. Its wording matches the dashboard's because
-`issue_lines` (`bin/sd-dashboard:200`) settled it: "a tracker that cannot be
+`issue_lines` (`bin/sd-dashboard:219`) settled it: "a tracker that cannot be
 reached is a reported row, never an exit code." The reason text comes from the
 collector's `missing` list, joined as "A, B and C", the same sentence
 `collect` (`dashboard/jira.py:285`) already builds. With every variable set
@@ -329,7 +329,7 @@ The section is added to the heading order the skeleton test recites at
 the key `jira`.
 
 **The dashboard.** `sd-dashboard` reads `index.sqlite` through `store.issues`
-(`dashboard/server.py:638`), not `shadow`, and its collector is
+(`dashboard/server.py:662`), not `shadow`, and its collector is
 `refresh_issues` with Jira already in `TRACKERS`. A Jira row reaches the
 page the moment the same three variables are exported and `sd-dashboard
 index` runs — that is the PRD's proving step, and it is step 2 of
@@ -342,7 +342,7 @@ otherwise:
   as `issue.repo || issue.tracker`, which for `LOG-23818` is the project
   key `LOG` — every ticket in the project reads the same. The key is in the
   link target, not in the text.
-- `dashboard/server.py:638` asks `store.issues` for `state="open"` only, and
+- `dashboard/server.py:662` asks `store.issues` for `state="open"` only, and
   the table has no state column: the page is an open worklist, and a
   ticket that has closed is not on it.
 
