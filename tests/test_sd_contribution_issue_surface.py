@@ -19,6 +19,7 @@ change.
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import sys
@@ -154,6 +155,38 @@ class TheKeyHelpNamesEveryFormTheLibraryAccepts(unittest.TestCase):
         """
         for form in ("item:ID", "/pull/NUMBER", "issue:", "/issues/NUMBER"):
             self.assertIn(form, sd_work.CONTRIBUTION_KEY_HELP)
+
+    def test_the_parser_hands_the_reader_the_recited_help(self):
+        """Read off the BUILT parser, not off the constant.
+
+        The test above pins what the string says. It cannot see whether the
+        string ever reaches a reader: rewire `add_argument` back to a literal
+        and the constant is still correct, still tested, and `sd task
+        contribution show --help` still omits `issue:`. So this walks the
+        parser the verb actually builds and asks the `key` action for its
+        help, which is the text a reader gets.
+
+        Both actions that take a key are checked. `show` and `ack` are
+        registered by one loop today; a future edit that splits them could
+        leave one behind, and a test naming only `show` would not notice.
+        """
+        parser = argparse.ArgumentParser()
+        verbs = parser.add_subparsers(dest="noun", required=True)
+        sd_work._register_contributions(verbs)
+        contribution = verbs.choices["contribution"]
+        actions = next(
+            action for action in contribution._actions
+            if isinstance(action, argparse._SubParsersAction)
+        )
+        seen = {}
+        for name in ("show", "ack"):
+            key = next(
+                action for action in actions.choices[name]._actions
+                if action.dest == "key"
+            )
+            seen[name] = key.help
+        self.assertEqual(
+            seen, {"show": sd_work.CONTRIBUTION_KEY_HELP, "ack": sd_work.CONTRIBUTION_KEY_HELP})
 
 
 if __name__ == "__main__":  # pragma: no cover

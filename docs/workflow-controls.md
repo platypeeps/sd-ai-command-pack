@@ -74,7 +74,8 @@ and `issue_url` is refused.
 
 Unfiled *branch* work requires the local clone and branch. Supply the tested
 commit and evidence group to record verified test results. Missing evidence
-remains explicitly unverified. A filed contribution can supply only `pull_url`.
+remains explicitly unverified. A filed contribution supplies `pull_url` or
+`issue_url` instead of the clone and branch, and never both of them.
 
 ```json
 {
