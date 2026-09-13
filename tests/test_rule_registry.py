@@ -83,6 +83,12 @@ SELF = "tests/test_rule_registry.py"
 #: Where the skills live, and the only scope leg b reads.
 SKILLS = "skills/"
 
+#: Where the suites live. A checker declared under here *is* the enforcement,
+#: rather than the code an enforcement reads, and leg d binds the two shapes to
+#: their mutation differently. See
+#: `test_every_mutation_touches_what_its_rows_checker_names`.
+TESTS = "tests/"
+
 #: The four verbs that turn a sentence into an enforcement claim. Narrowed
 #: from every occurrence of them -- 4,652 lines of tracked markdown on
 #: `cddd3b98` carry one
@@ -609,10 +615,20 @@ def skill_documents() -> list[tuple[str, str]]:
 def checker_location_errors(rule: sd_rules.Rule) -> list[str]:
     """Why a live row's `checker` does not resolve, or nothing at all.
 
-    Three failures, and the first is the one the field's old shape made
-    impossible to reach: a live row naming no checker. While `checker` held a
-    function object, `callable(None)` caught that; now it is a string, so the
-    emptiness is checked here rather than assumed away.
+    Four failures, and two of them the field's old shape made impossible to
+    reach. A live row naming no checker: while `checker` held a function
+    object, `callable(None)` caught that; now it is a string, so the emptiness
+    is checked here rather than assumed away.
+
+    And a checker path that leaves the checkout, which this caller has to
+    reject itself. `source_declaration_error` returns `None` for a path
+    resolving outside the tree, and that is deliberate -- it is how the
+    citation rule keeps its containment exclusion, and other callers depend on
+    it. Read here as *"valid checker"*, it is a hole: measured,
+    `../outside.py` and `/etc/passwd` both come back `None` while
+    `bin/nope.py` comes back `bin/nope.py: target is missing`. So the escape is
+    refused before the shared resolver is asked, rather than by changing what
+    the resolver means.
     """
 
     if not (rule.checker or "").strip():
@@ -620,7 +636,11 @@ def checker_location_errors(rule: sd_rules.Rule) -> list[str]:
     location = sd_rules.CHECKER.fullmatch(rule.checker or "")
     if not location:
         return [f"{rule.id}: checker={rule.checker!r} is not `path::symbol`"]
-    failure = source_declaration_error(REPO_ROOT, *location.groups())
+    path, symbol = location.groups()
+    if not (REPO_ROOT / path).resolve().is_relative_to(REPO_ROOT):
+        return [f"{rule.id}: checker path {path!r} resolves outside the "
+                f"checkout, so no declaration here can answer it"]
+    failure = source_declaration_error(REPO_ROOT, path, symbol)
     return [f"{rule.id}: {failure}"] if failure else []
 
 
@@ -668,6 +688,34 @@ A `live` row must name one declaration that exists, as `path::symbol`. A
 `repealed` row must hold `None` -- not a leftover name, which the first form of
 this check accepted: `(state == LIVE) != callable(checker)` is False for a
 repealed row holding the *string* "stale_name", because neither side is true.""")
+
+    def test_a_checker_outside_the_checkout_is_refused(self):
+        """An escaping checker path is a failure here, not a silent pass.
+
+        `source_declaration_error` answers `None` -- its word for *"nothing
+        wrong"* -- for any path that resolves outside the checkout, and that is
+        deliberate: it is how the citation rule keeps its containment exclusion,
+        and the citation tests depend on it. Read by this caller as "the checker
+        resolves", the exclusion becomes a hole through which `../outside.py`
+        and `/etc/passwd` both pass while `bin/nope.py` fails. So the
+        containment is the registry's own check, made before the shared resolver
+        is asked.
+        """
+
+        for path in ("../outside.py", "/etc/passwd"):
+            with self.subTest(path=path):
+                escaping = sd_rules.Rule(
+                    id="R0-D0", subject="a checker that is not in this tree",
+                    checker=f"{path}::name", proof="nothing runs this",
+                    scope="code", teaches="skills/sd-check/SKILL.md#Never")
+                self.assertEqual(
+                    checker_location_errors(escaping),
+                    [f"R0-D0: checker path {path!r} resolves outside the "
+                     f"checkout, so no declaration here can answer it"])
+                self.assertIsNone(
+                    source_declaration_error(REPO_ROOT, path, "name"),
+                    "the shared resolver's containment exclusion changed; it "
+                    "is what this check exists to cover")
 
     def test_a_checker_and_a_proof_arrive_together(self):
         """A checker with no proof is a name nobody ran.
@@ -1192,6 +1240,12 @@ class Outcome(NamedTuple):
     separate claims and a boolean would let three of them fail silently: the
     edit landed, the test was green before it, the test was red after it, and
     the tree came back.
+
+    The mutated run's own output is carried whole, because its *exit code* is
+    not the evidence leg d needs and `enforcement_error` has to read what the
+    child printed. The truncated copy stays for the failure messages; the whole
+    one is what the predicate reads, so no verdict ever rests on a summary line
+    a truncation cut in half.
     """
 
     applied: int    # how many times the mutated text was found
@@ -1200,6 +1254,84 @@ class Outcome(NamedTuple):
     violated: int   # its exit code after it
     restored: int   # `diff -rq` between the restored copy and this tree
     report: str     # the mutated run's output, for a failure message
+    violated_output: str  # that run's stdout and stderr, whole, for the predicate
+
+
+#: The line `unittest` prints once it has run something. Its absence is the
+#: broken-child case in `enforcement_error`: a child that never got as far as a
+#: test, and whose non-zero exit says nothing about any checker.
+RAN_TESTS = re.compile(r"^Ran (\d+) tests? in ", re.MULTILINE)
+
+#: The verdict line after it: `OK`, `OK (skipped=1)`, `FAILED (failures=1)`,
+#: `FAILED (failures=1, errors=2)`.
+VERDICT = re.compile(r"^(?:OK|FAILED)(?: \((.*)\))?$", re.MULTILINE)
+
+#: One `name=number` inside that line's parentheses. The name may carry a
+#: space, as `expected failures=1` does.
+VERDICT_COUNT = re.compile(r"([a-z ]+)=(\d+)")
+
+
+def unittest_counts(output: str) -> dict[str, int] | None:
+    """What a `python -m unittest` run reported, or `None` if it ran nothing.
+
+    `ran`, plus whatever the verdict line counted, under the names unittest
+    prints (`failures`, `errors`, `skipped`, `expected_failures`). Parsed from
+    the child's output rather than from its exit code, which says only that
+    something went wrong somewhere.
+    """
+
+    ran = RAN_TESTS.search(output)
+    if ran is None:
+        return None
+    counts = {"ran": int(ran.group(1))}
+    verdict = VERDICT.search(output, ran.end())
+    detail = (verdict.group(1) or "") if verdict else ""
+    counts.update({name.strip().replace(" ", "_"): int(number)
+                   for name, number in VERDICT_COUNT.findall(detail)})
+    return counts
+
+
+def enforcement_error(mutation: Mutation, outcome: Outcome) -> str | None:
+    """Why the violated run is not evidence that the checker enforces.
+
+    **A non-zero exit code is not that evidence**, and the measurement is the
+    reason this function exists. Replacing `R10-D5`'s mode guard with
+    `if repo_mode != "full": ((((` keeps the guard text, so the rule is not
+    violated at all, and breaks only the parse. The child exits 1 with a
+    `SyntaxError` and no `Ran` line -- and leg d's first form, `violated != 0`,
+    read that as *"the checker enforces"*. An unresolvable node id walks in
+    through the next door along: `FAILED (errors=1)` over
+    `unittest.loader._FailedTest`, with a `Ran 1 test` line in front of it.
+
+    So the run has to have *run the named test* and reported a genuine
+    assertion failure. Measured on this Python, over the four cases leg d can
+    produce:
+
+        a violation      `Ran 1 test`, `FAILED (failures=1)`, exit 1
+        a broken parse   no `Ran` line at all, `SyntaxError`, exit 1
+        a node id typo   `Ran 1 test`, `FAILED (errors=1)`, exit 1
+        no violation     `Ran 1 test`, `OK`, exit 0
+
+    **An error is refused even though it is red.** A checker that reddens by
+    raising is indistinguishable from a child this leg broke, and the row has
+    the cheaper answer available: state a mutation whose named test fails an
+    assertion. Both rows in `MUTATIONS` do.
+    """
+
+    counts = unittest_counts(outcome.violated_output)
+    if counts is None:
+        return (f"the child printed no `Ran N tests` line, so {mutation.test} "
+                f"never ran -- the mutated copy did not get that far")
+    if not counts["ran"]:
+        return f"the child ran no tests at all, so {mutation.test} did not run"
+    if counts.get("errors"):
+        return (f"{mutation.test} reported errors={counts['errors']} and not a "
+                f"failure; an error is a broken child or an unresolved node "
+                f"id, which is not a checker noticing anything")
+    if not counts.get("failures"):
+        return (f"{mutation.test} ran and reported no failures, so nothing "
+                f"noticed the violation")
+    return None
 
 
 #: The mutation per checker, keyed by the location a registry row names.
@@ -1257,8 +1389,20 @@ def edit(tree: pathlib.Path, mutation: Mutation, *, violate: bool) -> int:
     asserts it was exactly one in both directions. Restoration is a replacement
     like the mutation, never a checkout: this tree has no index of its own, and
     a leg that restored with git would be proving something about git.
+
+    **The target is held inside the copy.** `MUTATIONS` is a literal in this
+    module, so no mutation today can escape and this is hardening rather than a
+    live defect. But `tree / mutation.path` follows an absolute path or a `..`
+    straight out of the copy, and the tree immediately outside it is this
+    checkout -- so the escape would read and write the very files the copy
+    exists to keep untouched. It raises instead of being written.
     """
 
+    root = tree.resolve()
+    if not (tree / mutation.path).resolve().is_relative_to(root):
+        raise ValueError(
+            f"mutation path {mutation.path!r} resolves outside the copy at "
+            f"{root}; a mutation only ever edits the copy")
     target = tree / mutation.path
     text = target.read_text(encoding="utf-8")
     before = mutation.old if violate else mutation.new
@@ -1328,10 +1472,10 @@ def exercise(mutation: Mutation) -> Outcome:
             ["diff", "-rq", "-x", "__pycache__", "-x", "*.pyc",
              str(tree / top), str(REPO_ROOT / top)],
             capture_output=True, text=True)
+        printed = violated.stdout + violated.stderr
         return Outcome(applied, reverted, control.returncode,
                        violated.returncode, identical.returncode,
-                       (violated.stdout + violated.stderr)[-2000:]
-                       + identical.stdout)
+                       printed[-2000:] + identical.stdout, printed)
 
 
 class LegD(unittest.TestCase):
@@ -1355,6 +1499,83 @@ class LegD(unittest.TestCase):
 Above: the mutations first, the registry's live checkers second. A live row with
 a checker needs a mutation proving that checker reddens; a mutation whose row is
 gone needs deleting.""")
+
+    def test_no_two_live_rows_share_one_checker(self):
+        """Two rows on one checker collapse this leg's coverage to one.
+
+        `MUTATIONS` is keyed by checker location and the coverage above compares
+        it against a *set* of locations, so a second live row naming a checker
+        some row already names needs no mutation of its own. Its rule then goes
+        unproven while the coverage equality still passes -- the leg reports full
+        coverage of a rule nothing mutated.
+
+        The contract is one checker per live row, which is the statement rather
+        than the workaround: a rule needing enforcement some other rule already
+        names needs its own mutation, and a mutation needs its own key. In
+        practice that is the test that proves *this* rule rather than the one
+        that proves the other.
+        """
+
+        rows = collections.defaultdict(list)
+        for rule in sd_rules.RULES:
+            if rule.state == sd_rules.LIVE and rule.checker:
+                rows[rule.checker].append(rule.id)
+        shared = [f"{location}: {', '.join(sorted(ids))}"
+                  for location, ids in sorted(rows.items()) if len(ids) > 1]
+        self.assertEqual(shared, [], f"""
+Live registry rows share a checker location.
+
+{_lines(shared)}
+
+`MUTATIONS` is keyed by that location, so only one of the rows above is proved
+and the coverage check cannot see the other. Give each row its own checker.""")
+
+    def test_every_mutation_touches_what_its_rows_checker_names(self):
+        """The mutation is bound to the row's `path::symbol`, not to a label.
+
+        Leg d ran with the checker location as nothing but a `subTest` label:
+        `exercise` receives the `Mutation` and never reads the row it came from.
+        So repointing `R10-D5` at any other declaration that exists, and
+        renaming the dict key to match, leaves the leg green while it proves a
+        different pair -- the leg would report that a checker reddens without
+        ever having touched the checker the row names. The proof check below
+        does not close that, because `proof` is prose the same author rewrites
+        in the same edit.
+
+        The relationship is derived from the row, in the two shapes a checker
+        has. A checker under `tests/` *is* the enforcement, so the mutation has
+        to run that module and that symbol. A checker in code is enforcement
+        some test reads, so the mutation has to edit that file.
+        """
+
+        wrong = []
+        for rule in sd_rules.RULES:
+            mutation = MUTATIONS.get(rule.checker or "")
+            location = sd_rules.CHECKER.fullmatch(rule.checker or "")
+            if mutation is None or location is None:
+                continue  # a malformed checker is the registry's own failure
+            path, symbol = location.groups()
+            if path.startswith(TESTS):
+                module = path.removesuffix(".py").replace("/", ".")
+                if not mutation.test.startswith(f"{module}."):
+                    wrong.append(f"{rule.id}: checker is declared in {path}, "
+                                 f"and its mutation runs {mutation.test}, "
+                                 f"which is not in {module}")
+                if mutation.test.rsplit(".", 1)[-1] != symbol:
+                    wrong.append(f"{rule.id}: checker names {symbol}, and its "
+                                 f"mutation runs {mutation.test}")
+            elif mutation.path != path:
+                wrong.append(f"{rule.id}: checker is declared in {path}, and "
+                             f"its mutation edits {mutation.path}")
+        self.assertEqual(wrong, [], f"""
+A mutation does not touch the checker its registry row names.
+
+{_lines(wrong)}
+
+Leg d passes the mutation to `exercise` and the location only labels the
+subtest, so an unbound pair proves a checker nobody asked about. A checker under
+`{TESTS}` has to be the test the mutation runs; a checker in code has to be the
+file the mutation edits.""")
 
     def test_every_proof_names_the_file_and_the_test_its_mutation_uses(self):
         """The sentence and the code say the same thing, or this fails.
@@ -1405,12 +1626,20 @@ green and reports that the checker enforces.""")
 A test that was red anyway proves nothing about the violation.
 
 {outcome.report}""")
-                self.assertNotEqual(outcome.violated, 0, f"""
-{mutation.test} stayed green while {location}'s rule was violated.
+                reason = enforcement_error(mutation, outcome)
+                self.assertIsNone(reason, f"""
+{location}'s rule was violated and {mutation.test} did not fail on it.
+
+{reason}
 
 That is the defect leg d exists to catch: the checker exists, and it does not
 enforce. Either the row names the wrong checker, or the rule has no enforcement
 and the row should not be live.
+
+A non-zero exit code is not what is asserted here, and the reason is measured:
+a mutation that keeps the guard text and breaks the parse violates nothing and
+still exits 1. See `enforcement_error` and
+`test_a_child_that_never_ran_the_test_does_not_read_as_enforcement`.
 
 {outcome.report}""")
                 self.assertEqual(outcome.reverted, 1, "the restore matched once")
@@ -1420,18 +1649,20 @@ The copy did not come back identical after {location}'s mutation.
 {outcome.report}""")
 
     def test_a_mutation_that_violates_nothing_leaves_the_checker_green(self):
-        """The control on leg d itself, without which the leg is vacuous.
+        """The first control on leg d, without which the leg is vacuous.
 
-        `exercise` reports red for any non-zero exit: a copy that cannot import,
-        a node id that does not resolve, a child that cannot start. Every one of
-        those would read as "every checker enforces", which is the same class of
-        false pass as a mutation that matches nothing.
-
-        So the sentinel edits the very file the `R10-D6` mutation edits, and runs
+        The sentinel edits the very file the `R10-D6` mutation edits, and runs
         the very test that mutation runs -- it rewrites a docstring phrase rather
         than an option name. The only difference between the two runs is whether
         the edit is a violation, so a green result here is evidence that the red
         result above came from the violation.
+
+        **This control cannot reach the broken-child case**, and the concession
+        used to sit in this docstring rather than in a test: the sentinel leaves
+        the file parseable, so the run it produces is a clean `OK`. A child that
+        cannot parse, or a node id that does not resolve, exits non-zero having
+        noticed nothing at all. `enforcement_error` is what refuses those, and
+        the control below is what proves it refuses them.
         """
 
         sentinel = Mutation(
@@ -1452,6 +1683,66 @@ until this passes.
 
 {outcome.report}""")
         self.assertEqual(outcome.restored, 0, "the copy did not come back")
+
+    def test_a_child_that_never_ran_the_test_does_not_read_as_enforcement(self):
+        """The second control: red for the wrong reason is not evidence.
+
+        This sentinel keeps `R10-D5`'s mode guard exactly as the mutation's
+        `old` text has it -- built from that text, so the two cannot drift -- and
+        breaks the parse straight after it. The rule is not violated; the file
+        merely stops importing. The child then exits non-zero having run no
+        test, and that is what leg d accepted as proof of enforcement until
+        `enforcement_error` read the child's output instead of its exit code.
+
+        Both halves are asserted, because the pair is the finding: the exit code
+        *is* non-zero, and the predicate still refuses it.
+        """
+
+        guard = MUTATIONS["bin/sd_setup_github.py::setup_github"]
+        sentinel = guard._replace(new=f"{guard.old} ((((")
+        outcome = exercise(sentinel)
+        self.assertEqual(outcome.applied, 1, "the sentinel edit did not land")
+        self.assertEqual(outcome.control, 0, f"already red: {outcome.report}")
+        self.assertNotEqual(outcome.violated, 0, f"""
+The parse-breaking sentinel exited 0, so this control proves nothing.
+
+It has to be the case leg d's first predicate would have passed: a child that
+exits non-zero having noticed no violation. If the exit code is 0 the sentinel
+no longer breaks anything, and it has to be rewritten until it does.
+
+{outcome.report}""")
+        reason = enforcement_error(sentinel, outcome) or ""
+        self.assertIn("never ran", reason, f"""
+A child that never ran {sentinel.test} read as enforcement.
+
+`enforcement_error` returned {reason!r}. The sentinel keeps the mode guard and
+breaks the parse, so no rule is violated and no test runs -- and leg d must not
+report that the checker reddened. Any predicate that reads only the exit code
+fails this control, which is why it exists.
+
+{outcome.report}""")
+        self.assertEqual(outcome.restored, 0, "the copy did not come back")
+
+    def test_a_mutation_cannot_edit_outside_the_copy(self):
+        """`edit` refuses a path that leaves the private tree.
+
+        Hardening rather than a live defect: `MUTATIONS` is a literal in this
+        module and both entries name a tracked file. But `tree / mutation.path`
+        follows an absolute path or a `..` out of the copy, and the tree just
+        outside it is this checkout -- so the escape would write the files the
+        copy exists to keep untouched, which is the one guarantee leg d makes
+        about itself.
+        """
+
+        with tempfile.TemporaryDirectory() as scratch:
+            tree = pathlib.Path(scratch) / "tree"
+            tree.mkdir()
+            for path in ("../escaped.py", str(REPO_ROOT / "bin/sd_work.py")):
+                escape = Mutation(path=path, old="a", new="b", test="none")
+                with self.subTest(path=path):
+                    with self.assertRaises(ValueError) as caught:
+                        edit(tree, escape, violate=True)
+                    self.assertIn("outside the copy", str(caught.exception))
 
 
 if __name__ == "__main__":  # pragma: no cover - the suite runs this by module

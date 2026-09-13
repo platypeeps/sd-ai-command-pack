@@ -72,13 +72,16 @@ status checks.
 
 1. **One registry is the single answer to "which rules exist."** It is a table
    in code, iterated by every consumer. No consumer carries a second list.
-2. **Every registry row names its checker, and proves it enforces.** A row whose
-   checker does not exist is a failure of the registry's own test, not a
+2. **Every live registry row names its checker, and proves it enforces.** A row
+   whose checker does not exist is a failure of the registry's own test, not a
    comment — and so is a row whose checker exists and enforces nothing. The
    second half was added on 2026-09-13, after a row naming `sd_lib.repo_root`
    passed the first half: the resolver a rule constrains is not a guard on it,
    and "the checker exists" cannot tell the two apart. See requirement 5d.
-3. **A registry row records: id, what it checks, its checker as a
+   A `repealed` row is the one row this does not reach, and it carries no
+   checker at all: a withdrawn rule has nothing left to run, and a name left
+   in its place is a tombstone that still reads as enforcement.
+3. **A live registry row records: id, what it checks, its checker as a
    `path::symbol` location, the proof that makes that checker redden, its scope
    (`code`, `prose`, or `both`), and the skill section that teaches it.**
 4. **A skill teaching a rule cites the rule id.** Restating the rule is how the
