@@ -536,6 +536,48 @@ def _provisioned_library_paths() -> list[str]:
     return [path for _, path in sorted(found, reverse=True)]
 
 
+def import_sd_db() -> tuple[Any, str]:
+    """`sd_db` for an entrypoint running under whatever `python3` is on PATH.
+
+    The one place the two tries live. `_provisioned_library_paths` above says
+    why there has to be a second try; this says why every caller has to make
+    it. No `python3` on a developer's PATH carries `sd_db` -- the pack
+    provisions it into its own virtualenv and every entrypoint starts
+    `#!/usr/bin/env python3` -- so an entrypoint that tries once and gives up
+    is not degraded on an unusual machine, it is broken on all of them. That
+    is sd:745: `bin/sd-ship` refused every verb with "install matching
+    sd_db" while `bin/sd`, which had this fallback, answered fine, and the
+    only difference between the two was a copy of these six lines.
+
+    Returns the module and an empty string, or `None` and the problem, so each
+    caller still decides for itself whether an absent library is a refusal, a
+    fall back to the revision history, or a field on a report. The two problem
+    sentences stay apart for the reason the retry below states: a provisioned
+    copy that will not import is not a machine without the library, and one
+    message over both sends half its readers to the wrong remedy.
+    """
+    try:
+        import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
+    except ImportError as error:
+        offered = _provisioned_library_paths()
+        for path in offered:
+            if path not in sys.path:
+                sys.path.append(path)
+        try:
+            import sd_db  # noqa: PLC0415 - the provisioned copy, second and last try
+        except ImportError as retry:
+            # Two faults, two sentences. A provisioned copy that will not
+            # import is not a machine without the library, and saying "not
+            # installed" over the top of one sends the reader to `make
+            # setup` for a package that is already there. Where nothing
+            # was offered, the first error is the only one there is.
+            return None, (
+                f"sd_db is provisioned at {offered[0]} but will not import: {retry}"
+                if offered else f"sd_db is not installed here: {error}"
+            )
+    return sd_db, ""
+
+
 class Rows:
     """This checkout's item rows, read through `sd_db` and through nothing else.
 
@@ -578,26 +620,9 @@ class Rows:
         self._artifact_read: Any = None
         self._completion_read: Any = None
         self._notes_read: Any = None
-        try:
-            import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
-        except ImportError as error:
-            offered = _provisioned_library_paths()
-            for path in offered:
-                if path not in sys.path:
-                    sys.path.append(path)
-            try:
-                import sd_db  # noqa: PLC0415 - the provisioned copy, second and last try
-            except ImportError as retry:
-                # Two faults, two sentences. A provisioned copy that will not
-                # import is not a machine without the library, and saying "not
-                # installed" over the top of one sends the reader to `make
-                # setup` for a package that is already there. Where nothing
-                # was offered, the first error is the only one there is.
-                self.problem = (
-                    f"sd_db is provisioned at {offered[0]} but will not import: {retry}"
-                    if offered else f"sd_db is not installed here: {error}"
-                )
-                return
+        sd_db, self.problem = import_sd_db()
+        if sd_db is None:
+            return
         self.installed = True
         try:
             self._connection = sd_db.connect(write=False)

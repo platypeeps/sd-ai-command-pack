@@ -764,6 +764,18 @@ def parser():
 
 def main(argv=None) -> int:
     args = parser().parse_args(argv)
+    # Two refusals, because there are two faults and one remedy each.
+    # `sd_lib.import_sd_db` owns the first: it makes the second attempt this
+    # entrypoint used not to make -- the provisioned copy, which is the only
+    # `sd_db` on the machine -- and it names either an absent library or a
+    # provisioned one that will not import. Only the submodules below are
+    # still this file's own refusal, and there "install matching" is the
+    # accurate word: a top-level `sd_db` that imported while a submodule this
+    # verb needs did not is a version that does not match this pack.
+    library, problem = sd_lib.import_sd_db()
+    if library is None:
+        print(json.dumps({"ok": False, "manualRequired": True, "error": problem}))
+        return 3
     try:
         from sd_db import ship
         from sd_db.database import connect, default_path

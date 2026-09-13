@@ -42,7 +42,6 @@ module raises and lets each caller decide.
 from __future__ import annotations
 
 import pathlib
-import sys
 
 #: Why the reader cannot run yet, when it cannot. Printed by `bin/sd-note`;
 #: swallowed by the hooks, which exit 0 silently rather than break a session.
@@ -69,25 +68,20 @@ class RowsRefusal(Exception):
 
 def library():
     """Import `sd_db`, or refuse with the remedy rather than a traceback."""
-    try:
-        # May or may not be resolvable at type-check time: `sd_db` is built
-        # into this virtualenv by the pack's installer, from the `system`
-        # checkout, and this repository does not vendor it. `pyproject.toml`
-        # carries the override rather than an inline ignore here, which
-        # `warn_unused_ignores` turns into a failure on any machine that has
-        # run `make setup`. The ImportError below is a supported state.
-        import sd_db
-    except ImportError:
-        import sd_lib
+    # May or may not be resolvable at type-check time: `sd_db` is built into
+    # this virtualenv by the pack's installer, from the `system` checkout, and
+    # this repository does not vendor it. `pyproject.toml` carries the
+    # override rather than an inline ignore here, which `warn_unused_ignores`
+    # turns into a failure on any machine that has run `make setup`. An absent
+    # library is a supported state, and the helper's two tries are what makes
+    # the ordinary machine -- the pack's `sd_db`, the PATH `python3` -- the
+    # present one.
+    import sd_lib
 
-        for path in sd_lib._provisioned_library_paths():
-            if path not in sys.path:
-                sys.path.append(path)
-        try:
-            import sd_db
-        except ImportError:
-            raise RowsRefusal(NOT_INSTALLED) from None
-    return sd_db
+    module, _ = sd_lib.import_sd_db()
+    if module is None:
+        raise RowsRefusal(NOT_INSTALLED) from None
+    return module
 
 
 def connect(sd_db, *, write: bool = False):

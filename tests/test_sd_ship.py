@@ -18,12 +18,19 @@ from http.server import BaseHTTPRequestHandler
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
+import sd_db
 from sd_db import connect, create_assignment, create_item, initialise, upsert_repo
 from sd_db import ship as receipts
 from sd_db.testing.github import GitHubDouble
 from sd_db.testing.remote import FixtureRemote, RemoteRefusal, _git
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+#: The directory `make setup` provisioned the library into, read off the copy
+#: this run imported rather than off `ROOT / ".venv"`. A test that asks the
+#: checkout for a virtualenv has to skip where there is none, and a skipped
+#: test in CI asserts nothing; a run that got this far has the library by
+#: definition, so this path always exists.
+SITE_PACKAGES = pathlib.Path(sd_db.__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bin"))
 loader = importlib.machinery.SourceFileLoader("sd_ship_tested", str(ROOT / "bin/sd-ship"))
 spec = importlib.util.spec_from_loader(loader.name, loader)
@@ -540,6 +547,92 @@ roles:
         self.assertEqual(list(self.connection.iterdump()), before)
         self.assertEqual(_git(self.root, "show-ref"), refs)
         self.assertEqual(len(self.remote.calls), calls)
+
+    def unsited(self, command, *extra, library="provisioned"):
+        """`bin/sd-ship` under an interpreter that can see no site-packages at all.
+
+        `-S` is the point of the helper. The test run itself necessarily has
+        `sd_db` importable, so it is the only honest way to describe the
+        machine every developer actually has: a `python3` on PATH that is not
+        the pack's virtualenv. Patching `sys.modules` cannot describe it,
+        because a name bound to `None` defeats the second attempt as well as
+        the first, which is exactly the attempt under test.
+
+        The run happens in a copy of the pack rather than in this checkout so
+        that `library` is the only thing that varies between the cases below.
+        Pointed at the real `.venv` there would be no way to write the absent
+        case at all, and the provisioned case would quietly depend on whether
+        CI had run `make setup` before the tests.
+        """
+        pack = self.directory / f"pack-{library}"
+        shutil.copytree(ROOT / "bin", pack / "bin")
+        site = pack / f".venv/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+        site.parent.mkdir(parents=True)
+        if library == "provisioned":
+            site.symlink_to(SITE_PACKAGES)
+        else:
+            site.mkdir()
+        if library == "broken":
+            (site / "sd_db").mkdir()
+            (site / "sd_db/__init__.py").write_text("raise ImportError('the provisioned copy is broken')\n")
+        return subprocess.run([sys.executable, "-S", str(pack / "bin/sd-ship"), command, "--item", str(self.item), "--json", *extra],
+                              cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=60)
+
+    def test_a_python3_without_the_library_ships_off_the_provisioned_copy(self):
+        """The defect was every verb on every machine, not a verb on a rare one.
+
+        `make setup` provisions `sd_db` into the pack's virtualenv and this
+        entrypoint starts `#!/usr/bin/env python3`, so the import at the top
+        of `main` failed under every interpreter anyone actually invokes it
+        with, and the tool answered "install matching sd_db" about a library
+        that was installed. `bin/sd` never showed it because `sd_lib` has
+        always made the second attempt; the difference between the two tools
+        was six lines, and this asserts they no longer differ.
+
+        Asserting the happy path proves nothing here: run under an
+        interpreter that already has the library, the one-try code passes.
+        """
+        self.prepare()
+        result = self.unsited("observe")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        observed = json.loads(result.stdout)
+        self.assertTrue(observed["ok"], result.stdout)
+        self.assertEqual(observed["phase"], "ready_to_send")
+
+    def test_a_library_absent_everywhere_still_refuses_in_the_shape_callers_read(self):
+        """A machine before `make setup` must get a refusal, not a traceback.
+
+        The fallback is allowed to find the library; it is not allowed to
+        change what happens when there is nothing to find. Hooks and skills
+        branch on this object rather than on the exit status alone, so the
+        shape is the contract and the sentence has to name the library.
+        """
+        self.prepare()
+        result = self.unsited("observe", library="absent")
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        refusal = json.loads(result.stdout)
+        self.assertFalse(refusal["ok"])
+        self.assertTrue(refusal["manualRequired"])
+        self.assertIn("sd_db is not installed here", refusal["error"])
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_a_provisioned_copy_that_will_not_import_is_not_called_absent(self):
+        """Two faults, two remedies, and the old message named the wrong one.
+
+        A virtualenv holding an `sd_db` that raises on import is not a machine
+        without the library, and telling its reader to install one sends them
+        to `make setup` for a package already sitting there. The refusal is
+        the same shape as the one above -- what differs is the sentence.
+        """
+        self.prepare()
+        result = self.unsited("observe", library="broken")
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        refusal = json.loads(result.stdout)
+        self.assertFalse(refusal["ok"])
+        self.assertTrue(refusal["manualRequired"])
+        self.assertIn("the provisioned copy is broken", refusal["error"])
+        self.assertIn("will not import", refusal["error"])
+        self.assertNotIn("is not installed here", refusal["error"])
 
     def test_repository_lock_cannot_be_owned_by_two_clones(self):
         from sd_db.workflow import WorkflowError
