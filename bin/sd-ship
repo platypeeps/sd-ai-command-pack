@@ -532,7 +532,41 @@ class Ship:
         if str(pull.get("html_url", "")).lower() != reference["url"]:
             raise Refusal("GitHub pull-request URL does not match the prepared repository")
         self.save(pull_request=reference, phase="ready_to_send")
+        self.save(warnings=list(self.state.get("warnings") or []) + self.answer_review(number, head))
         return self.result("ready_to_send")
+
+    def answer_review(self, number: int, head: str) -> list[str]:
+        """Record the review findings this push answers, and never block on it.
+
+        `sd-status` reports a pull request carrying a review finding nobody has
+        answered, and until now nothing on the way to a merge ever wrote an
+        acknowledgement: the store stayed empty, so the row fired on every
+        reviewed pull request and went on firing. This is the write that was
+        missing, placed where the evidence for it exists -- the push has
+        happened, the head is known, and `sd-review-ack` can ask git which of
+        those commits changed the file each finding names.
+
+        `fixed` only. A finding the reviewer got wrong needs a reason a person
+        writes, so `dismissed` stays a manual acknowledgement, and there is no
+        bulk form of either here.
+
+        Deliberately advisory. Nothing about a push becomes invalid because
+        GitHub would not enumerate its reviews, and a refusal here would stop a
+        merge over bookkeeping. Failures come back as a warning on the receipt.
+        """
+        ack = sd_lib.sibling("sd_review_ack_ship", "sd-review-ack")
+        try:
+            rows = ack.findings(
+                number,
+                self.api.pages(f"{self.api.prefix}/pulls/{number}/reviews"),
+                self.api.pages(f"{self.api.prefix}/pulls/{number}/comments"),
+            )
+            written = ack.record_answers(self.root, rows, head)
+        except (Refusal, OSError, ValueError, ack.UsageError) as error:
+            return [f"review findings on #{number} were not read ({error}); "
+                    "acknowledge them with sd-review-ack"]
+        return [f"recorded {len(written)} review finding(s) on #{number} as fixed by "
+                f"commits this push carries"] if written else []
 
     def _mode_ask(self, endpoint):
         try:

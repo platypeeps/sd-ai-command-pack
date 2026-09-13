@@ -33,6 +33,7 @@ import unittest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 BIN = REPO_ROOT / "bin"
 FIXTURE = REPO_ROOT / "tests" / "fixtures" / "sd-543-review-round.json"
+UNANSWERED = REPO_ROOT / "tests" / "fixtures" / "sd-631-unanswered-round.json"
 
 sys.path.insert(0, str(BIN))
 import sd_lib  # noqa: E402
@@ -847,6 +848,243 @@ class TheRecord(RoundFixture):
         done = run(self.repo.root, "--pr", "863", "--ack", "deadbeefcafe", "--dismiss", "read")
         self.assertEqual(done.returncode, 2)
         self.assertIn("no finding here has the id", done.stderr)
+
+
+class Branch:
+    """A repository holding the two commits an automatic record has to tell apart.
+
+    One commit answers a finding and reaches `main`. One commit answers a
+    different finding and never leaves its own branch -- the 371495dc shape
+    again, in the automatic path this time rather than the typed one.
+    """
+
+    FILES = ("bin/thing.py", "bin/other.py", "docs/untouched.md")
+
+    def __init__(self, stack: tempfile.TemporaryDirectory) -> None:
+        self.root = pathlib.Path(stack.name) / "branch"
+        self.root.mkdir()
+        self._git("init", "-q", "--initial-branch=main", ".")
+        for name in self.FILES:
+            self._write(name, "as the reviewer read it\n")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "the state the reviewer read")
+        self.reviewed = self._git("rev-parse", "HEAD")
+        self._git("checkout", "-q", "-b", "stranded")
+        self._write("bin/other.py", "answered, and never pushed anywhere that lands\n")
+        self._git("commit", "-qam", "answer the other thing")
+        self.stranded = self._git("rev-parse", "HEAD")
+        self._git("checkout", "-q", "main")
+        self._write("bin/thing.py", "answered\n")
+        self._git("commit", "-qam", "answer the thing")
+        self.landed = self._git("rev-parse", "HEAD")
+
+    def _write(self, name: str, text: str) -> None:
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def _git(self, *args: str) -> str:
+        done = subprocess.run(["git", *GIT_IDENTITY, *args], cwd=str(self.root),
+                              capture_output=True, text=True, check=True)
+        return done.stdout.strip()
+
+
+class APushIsEvidenceOrItIsNothing(unittest.TestCase):
+    """What an automatic `fixed` record may be written from.
+
+    `sd-status` grew a row for a pull request carrying a review finding nobody
+    has answered, and nothing on the way to a merge wrote an acknowledgement,
+    so the store stayed empty and the row fired on every reviewed pull request
+    forever. The fix is a record written by the merge path -- and a record the
+    merge path writes for *every* finding is worse than the noise it replaces,
+    because it reads exactly like a finding somebody answered.
+
+    So the automatic record is bound to the one thing a push can prove: a
+    commit that did not exist when the reviewer read the file, that changes the
+    file the finding names, reachable from the head being pushed. Every test
+    here is a way that binding could come loose.
+    """
+
+    #: The file-summary table the reviewer actually writes, one finding per
+    #: file. Three files; the push touches one of them.
+    REVIEW = (
+        "| File | Summary |\n"
+        "|---|---|\n"
+        "| `bin/thing.py` | Moderate finding (2 votes): the thing is wrong. |\n"
+        "| `bin/other.py` | Moderate finding (1 vote): the other thing is wrong. |\n"
+        "| `docs/untouched.md` | Moderate finding (1 vote): nobody went near this. |\n"
+    )
+
+    def setUp(self) -> None:
+        self.stack = tempfile.TemporaryDirectory()
+        self.addCleanup(self.stack.cleanup)
+        self.branch = Branch(self.stack)
+
+    def rows(self, commit: str | None = None) -> list[dict]:
+        return ack.findings(7, [{
+            "author": "bot",
+            "commit_id": self.branch.reviewed if commit is None else commit,
+            "body": self.REVIEW,
+        }], [])
+
+    def verdicts(self) -> dict[str, str]:
+        """Every finding's path and what the record now says about it."""
+        store, _ = ack.read_store(self.branch.root)
+        return {row["path"]: ack.id_verdict(self.branch.root, row["id"], store, "main")
+                for row in self.rows()}
+
+    def test_a_commit_that_changed_the_file_answers_the_finding(self) -> None:
+        """The whole point: the push carried a fix, so the finding is answered."""
+        written = ack.record_answers(self.branch.root, self.rows(), "main")
+        self.assertEqual([row["path"] for row in written], ["bin/thing.py"])
+        self.assertEqual(written[0]["disposition"], "fixed")
+        self.assertEqual(written[0]["commit"], self.branch.landed)
+        self.assertEqual(self.verdicts()["bin/thing.py"], "landed")
+
+    def test_a_finding_on_a_file_the_push_never_touched_is_not_answered(self) -> None:
+        """The failure mode this record is one loose predicate away from.
+
+        A record written for every finding on the pull request satisfies the
+        gate and says nothing, which is the state the gate was built to end.
+        Two of these three files are untouched by anything reachable from
+        `main` after the review, and both must still read `unread`.
+        """
+        ack.record_answers(self.branch.root, self.rows(), "main")
+        self.assertEqual(self.verdicts()["docs/untouched.md"], "unread")
+        self.assertEqual(self.verdicts()["bin/other.py"], "unread")
+        self.assertEqual(len(ack.read_store(self.branch.root)[0]), 1)
+
+    def test_pushing_is_not_landing(self) -> None:
+        """An answered finding whose answer never reached `main` stays open.
+
+        The record is written from the push, and what it is worth is still
+        decided by `fix_verdict` against the branch the work lands on. Nothing
+        here is allowed to shortcut that.
+        """
+        written = ack.record_answers(self.branch.root, self.rows(), "stranded")
+        self.assertEqual([row["path"] for row in written], ["bin/other.py"])
+        self.assertEqual(self.verdicts()["bin/other.py"], "fix-not-landed")
+        self.assertEqual(
+            ack.unacknowledged(self.branch.root, [row["id"] for row in self.rows()], "main"),
+            [row["id"] for row in self.rows()],
+            "a push that has not landed answers nothing the gate counts",
+        )
+
+    def test_a_dismissal_is_never_overwritten_by_a_later_push(self) -> None:
+        """The one record a machine must not touch is the one a person wrote."""
+        found = [row for row in self.rows() if row["path"] == "bin/thing.py"][0]
+        ack.acknowledge(self.branch.root, found, "dismissed", "the reviewer misread the diff")
+        self.assertEqual(ack.record_answers(self.branch.root, self.rows(), "main"), [])
+        record = ack.read_store(self.branch.root)[0][found["id"]]
+        self.assertEqual(record["disposition"], "dismissed")
+        self.assertEqual(record["reason"], "the reviewer misread the diff")
+
+    def test_a_second_push_does_not_move_a_record_somebody_has_read(self) -> None:
+        ack.record_answers(self.branch.root, self.rows(), "main")
+        before = dict(ack.read_store(self.branch.root)[0])
+        self.assertEqual(ack.record_answers(self.branch.root, self.rows(), "main"), [])
+        self.assertEqual(ack.read_store(self.branch.root)[0], before)
+
+    def test_a_review_that_names_no_commit_answers_nothing(self) -> None:
+        """A payload with no `commit_id` cannot date a finding, so nothing is dated.
+
+        The captured rounds in `tests/fixtures/` are pruned to author and body,
+        and an older API shape carries no commit either. Absence of evidence
+        must not read as evidence of an answer.
+        """
+        self.assertEqual(ack.record_answers(self.branch.root, self.rows(""), "main"), [])
+        self.assertEqual(ack.read_store(self.branch.root)[0], {})
+
+    def test_a_finding_this_reader_could_not_place_is_never_answered(self) -> None:
+        """`?` is the path of a finding the parser failed on; it stays unread.
+
+        Deciding that an unparsed finding has been answered because some file
+        changed is the parser's blind spot laundered into a clean gate.
+        """
+        rows = ack.findings(7, [{
+            "author": "bot", "commit_id": self.branch.reviewed,
+            "body": "## Suppressed comments (2)\n\n**bin/thing.py:1**\nreal\n",
+        }], [])
+        shortfall = [row for row in rows if row["path"] == "?"]
+        self.assertEqual(len(shortfall), 1)
+        written = ack.record_answers(self.branch.root, rows, "main")
+        self.assertEqual([row["path"] for row in written], ["bin/thing.py"])
+
+    def test_a_finding_restated_against_a_later_commit_is_not_answered(self) -> None:
+        """A reviewer repeating itself is a reviewer saying the finding stands.
+
+        The same words in a second review read against a newer head. Dating
+        that finding to the first read would let the very commit the reviewer
+        looked at and still objected to count as its answer.
+        """
+        body = ("| File | Summary |\n|---|---|\n"
+                "| `bin/thing.py` | Moderate finding (2 votes): the thing is wrong. |\n")
+        rows = ack.findings(7, [
+            {"author": "bot", "commit_id": self.branch.reviewed, "body": body},
+            {"author": "bot", "commit_id": self.branch.landed, "body": body},
+        ], [])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["reviewed"], "")
+        self.assertEqual(ack.record_answers(self.branch.root, rows, "main"), [])
+
+    def test_a_corrupt_record_is_not_replaced_by_an_automatic_one(self) -> None:
+        """A store nothing can read is not a store with nothing in it."""
+        ack.store_path(self.branch.root).write_text("{not json", encoding="utf-8")
+        self.assertEqual(ack.record_answers(self.branch.root, self.rows(), "main"), [])
+        self.assertEqual(ack.store_path(self.branch.root).read_text(), "{not json")
+
+
+class TheRoundNobodyHasAnswered(unittest.TestCase):
+    """#889 as captured, which is what an unanswered pull request looks like.
+
+    `tests/fixtures/sd-631-unanswered-round.json` is pull request 889 read from
+    the API on 2026-09-13: one automated review, ten findings across a
+    file-summary table, a `Suppressed comments` section and one inline comment,
+    and not one of them answered. It is the control for the automatic record --
+    a machine that acknowledges this round acknowledges everything.
+    """
+
+    ROUND = json.loads(UNANSWERED.read_text(encoding="utf-8"))
+
+    def setUp(self) -> None:
+        self.stack = tempfile.TemporaryDirectory()
+        self.addCleanup(self.stack.cleanup)
+        self.branch = Branch(self.stack)
+
+    def payload(self) -> dict:
+        return self.ROUND["pull_requests"]["889"]
+
+    def test_the_review_was_read_against_the_head_that_is_still_the_head(self) -> None:
+        """The measured fact behind "unanswered": no commit came after the review."""
+        reviews = self.payload()["reviews"]
+        self.assertEqual(len(reviews), 1)
+        self.assertEqual(reviews[0]["commit_id"], self.ROUND["head"])
+        self.assertEqual(
+            len(ack.findings(889, reviews, self.payload()["comments"])), 10,
+            "the capture carries ten findings and the reader must see all ten",
+        )
+
+    def test_a_push_that_touches_none_of_the_named_files_answers_nothing(self) -> None:
+        """The real ten findings, replayed against a real push that is not a fix.
+
+        The capture's commit ids name commits no test repository can have, so
+        the review is re-dated onto this fixture's first commit and every
+        finding keeps its real path and its real text. `main` then carries a
+        commit made after that review -- which is the whole of what "somebody
+        pushed" proves -- and it touches none of the ten files.
+        """
+        reviews = [dict(row, commit_id=self.branch.reviewed)
+                   for row in self.payload()["reviews"]]
+        comments = [dict(row, original_commit_id=self.branch.reviewed, commit_id=None)
+                    for row in self.payload()["comments"]]
+        rows = ack.findings(889, reviews, comments)
+        self.assertEqual(len(rows), 10)
+        self.assertEqual(ack.record_answers(self.branch.root, rows, "main"), [])
+        self.assertEqual(
+            ack.unacknowledged(self.branch.root, [row["id"] for row in rows], "main"),
+            [row["id"] for row in rows],
+            "ten findings stated and none answered is ten findings standing",
+        )
 
 
 if __name__ == "__main__":

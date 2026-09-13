@@ -41,6 +41,7 @@ class ShipDouble(GitHubDouble):
         self.lose_create = False
         self.no_create_result = False
         self.statuses = []
+        self.review_payload = {"reviews": [], "comments": []}
 
     def _pull(self, pull):
         head = getattr(pull, "merged_head", None) or pull.head_sha(self.remote)
@@ -79,6 +80,11 @@ class ShipDouble(GitHubDouble):
             return 200, [self._pull(pull) for pull in self.remote.pull_requests.values()]
         if path.endswith("/statuses"):
             return 200, self.statuses
+        # The review a `prepare` reads to record the findings its push answers.
+        # Empty unless a test says otherwise, and answered here rather than by
+        # the shared double because the adapter is the only caller of it.
+        if method == "GET" and path.startswith(f"{prefix}/pulls/") and path.rsplit("/", 1)[1] in self.review_payload:
+            return 200, self.review_payload[path.rsplit("/", 1)[1]]
         if method == "GET" and path.startswith(f"{prefix}/pulls/"):
             return 200, self._pull(self.remote.pull(int(path.rsplit("/", 1)[1])))
         if method == "PUT" and path.endswith("/merge"):
@@ -271,6 +277,45 @@ roles:
         self.assertEqual(len(lint), 1, calls)
         body = pathlib.Path(lint[0][lint[0].index("--pr-body") + 1])
         self.assertFalse(body.exists(), "the body file is temporary")
+
+    def test_prepare_records_the_review_findings_its_push_answers(self):
+        """The write that was missing between a review and a merge.
+
+        `sd-status` reports a pull request carrying a review finding nobody has
+        answered, and nothing on the way to a merge ever wrote an
+        acknowledgement, so the row stood on every reviewed pull request. Here
+        the reviewer states two findings, the next push answers one of them,
+        and only that one is recorded -- a `prepare` that acknowledged both
+        would clear the row for the act of pushing.
+        """
+        acknowledgements = ship.sd_lib.sibling("sd_review_ack_ship_case", "sd-review-ack")
+        self.prepare()
+        self.double.review_payload["reviews"] = [{
+            "user": {"login": "copilot-pull-request-reviewer[bot]"},
+            "commit_id": _git(self.root, "rev-parse", "HEAD"),
+            "body": ("| File | Summary |\n|---|---|\n"
+                     "| `src.py` | Moderate finding (2 votes): the value is wrong. |\n"
+                     "| `Makefile` | Moderate finding (1 vote): nobody went near this. |\n"),
+        }]
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "commit", "-am", "answer the finding\n\nAuthored-with: human")
+        answered = _git(self.root, "rev-parse", "HEAD")
+        result = self.prepare()
+        recorded = list(acknowledgements.read_store(self.root)[0].values())
+        self.assertEqual([row["path"] for row in recorded], ["src.py"])
+        self.assertEqual(recorded[0]["disposition"], "fixed")
+        self.assertEqual(recorded[0]["commit"], answered)
+        self.assertIn("recorded 1 review finding(s) on #1 as fixed", "\n".join(result["warnings"]))
+
+    def test_a_review_github_will_not_enumerate_warns_and_never_refuses(self):
+        """Bookkeeping may not stop a push that has already happened."""
+        self.prepare()
+        self.double.review_payload["reviews"] = {"message": "Not Found"}
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "commit", "-am", "answer the finding\n\nAuthored-with: human")
+        result = self.prepare()
+        self.assertEqual(result["phase"], "ready_to_send")
+        self.assertIn("review findings on #1 were not read", "\n".join(result["warnings"]))
 
     def test_real_cli_review_prepare_slice_merge_and_repeat_reconcile(self):
         prepared = self.cli("prepare")

@@ -231,6 +231,17 @@ invokes the adapter with its own provisioned Python interpreter.
   its pull request. Repreparing a combined head preserves the saved description
   and explicit delivery claim. It returns `ready_to_send` and never merges. `--title` and
   `--body-file` provide the reviewable PR description.
+- After the push, `prepare` records the review findings that push answers.
+  `sd-status` reports a pull request carrying a finding nobody has answered,
+  and nothing between a review and a merge used to write an acknowledgement,
+  so the row stood on every reviewed pull request for as long as it was open.
+  The record is `fixed <commit>` and it is bound to evidence: a commit that
+  did not exist when the reviewer read the file, that changes the file the
+  finding names, reachable from the head being pushed. A finding on a file the
+  push never touched is left unanswered, an acknowledgement already on record
+  is never moved, and `dismissed <reason>` stays something a person types. The
+  step is advisory — a pull request whose reviews GitHub will not enumerate
+  produces a warning on the receipt, never a refusal.
 - The optional commit stage requires one `--path FILE` per enumerated file,
   `--message-file FILE`, and `--author ENTRY`. It refuses directories and a
   pre-populated index. It records the actual registry provider/vendor and the

@@ -33,6 +33,18 @@ being cited; it is satisfied by that SHA being an ancestor of the branch the
 work is landing on. A commit nobody can find is `fix-missing`, a commit that
 exists but never landed is `fix-not-landed`, and both keep the gate red.
 
+WHO WRITES THE RECORD. `--ack` writes one, and so does `bin/sd-ship`, from the
+push it has just made. A gate whose store nothing ever fills is a gate that
+only ever says no, and `sd-status` grew a row from this store before anything
+on the way to a merge wrote to it -- the row stood on every reviewed pull
+request, which is how a report earns the reputation that gets it turned off.
+`record_answers` is the automatic half, and only `fixed` is automatic: it is
+bound to a commit that did not exist when the reviewer read the file, that
+changes the file the finding names, and that is reachable from the head being
+pushed, so the record it writes is a measurement rather than a claim. A
+`dismissed` record needs a reason, a reason is a sentence somebody means, and
+neither disposition has a bulk form here.
+
 THE GATE CAN FAIL, WHICH IS THE POINT. `--check` exits 1 while any finding is
 unread, dismissed without a reason, or fixed by a commit that did not land.
 `tests/fixtures/sd-543-review-round.json` is the frozen capture of the twelve
@@ -361,9 +373,10 @@ def findings(pull: int, reviews: Iterable[Any], comments: Iterable[Any]) -> list
         body = review.get("body") or ""
         author = _login(review)
         voted = _outstanding(pull, body, author) + _table(pull, body, author)
-        rows.extend(voted)
-        rows.extend(_reconciled(pull, body, author, voted))
-        rows.extend(_suppressed(pull, body, author))
+        here = voted + _reconciled(pull, body, author, voted) + _suppressed(pull, body, author)
+        for row in here:
+            row["reviewed"] = _reviewed_at(review)
+        rows.extend(here)
     roots, answers = _threads(comments)
     for comment in roots:
         row = _finding(
@@ -371,10 +384,17 @@ def findings(pull: int, reviews: Iterable[Any], comments: Iterable[Any]) -> list
             comment.get("body") or "", _login(comment),
         )
         row["replies"] = len(answers.get(comment.get("id"), ()))
+        row["reviewed"] = _reviewed_at(comment)
         rows.append(row)
     seen: dict[str, dict] = {}
     for row in rows:
-        seen.setdefault(row["id"], row)
+        first = seen.setdefault(row["id"], row)
+        if first is not row and first.get("reviewed") != row.get("reviewed"):
+            # The same finding stated twice against two different commits is
+            # the reviewer saying it still stands at the later one. Keeping the
+            # earlier date would let a commit made in between read as its
+            # answer, so the finding stops carrying a date at all.
+            first["reviewed"] = ""
     return list(seen.values())
 
 
@@ -412,6 +432,26 @@ def _login(record: dict) -> str:
             return value
         if isinstance(value, dict) and isinstance(value.get("login"), str):
             return value["login"]
+    return ""
+
+
+def _reviewed_at(record: dict) -> str:
+    """The commit the reviewer was reading when it stated this finding.
+
+    `original_commit_id` first, because it is the state the reviewer actually
+    read: GitHub moves an inline comment's `commit_id` forward as the branch
+    grows, and anchoring on the moved value would date a finding to *after*
+    the commit that answers it and lose the evidence entirely.
+
+    Empty when the payload does not carry one -- a captured round pruned to
+    author and body, an older API shape -- and empty means no commit can be
+    shown to come after it, so nothing is recorded. Absent evidence is not
+    evidence of an answer.
+    """
+    for field in ("original_commit_id", "commit_id"):
+        value = record.get(field)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return ""
 
 
@@ -516,6 +556,72 @@ def acknowledge(root: pathlib.Path, found: dict, disposition: str, detail: str) 
     }
     write_store(root, rows)
     return rows[found["id"]]
+
+
+def answering_commit(root: pathlib.Path, found: dict, head: str) -> str:
+    """The commit reachable from `head` that answers this finding, or ``""``.
+
+    The whole question an automatic record has to answer, and the reason one
+    is safe to write at all. It is not "did somebody push", which every push
+    satisfies and which would acknowledge a pull request for the act of
+    working on it. It is: *is there a commit that did not exist when the
+    reviewer read this file, that changes the file the finding names, and that
+    is reachable from the head being pushed*. All three are facts `git`
+    settles, so the record this produces is a measurement rather than a claim.
+
+    The newest such commit is the one recorded, because a finding reopened and
+    re-fixed is answered by the last word on the file, not the first.
+
+    Empty for a finding with no reviewed commit, no path, or the `?` path the
+    shortfall and reconciliation rows carry -- a finding this reader could not
+    place is a finding it may not decide has been answered. Empty too when
+    `git` cannot answer, which is the same direction: `unread` stands.
+    """
+    reviewed, path = str(found.get("reviewed") or ""), str(found.get("path") or "")
+    if not reviewed or not path or path == "?":
+        return ""
+    found_at = sd_lib.git_output(
+        ["rev-list", "--max-count=1", f"{reviewed}..{head}", "--", path], root
+    )
+    return (found_at or "").strip()
+
+
+def record_answers(root: pathlib.Path, rows: Iterable[dict], head: str) -> list[dict]:
+    """Record `fixed <commit>` for every finding the push to `head` answers.
+
+    The half the merge path was missing. `sd-status` grew a row for an
+    unanswered review finding and nothing on the way to a merge ever wrote an
+    acknowledgement, so the row fired on every pull request that had ever been
+    reviewed and kept firing -- a gate whose store nobody fills is a gate that
+    only ever says no, which is how a report earns the reputation that gets it
+    turned off.
+
+    Only `fixed` is written here, and only from `answering_commit`. A finding
+    the reviewer got wrong is answered by `dismissed <reason>`, and a reason is
+    a sentence a person writes; automating it would turn the record into a
+    rubber stamp, which is the failure this file exists to prevent rather than
+    to automate. There is deliberately no bulk form of either.
+
+    A finding already on record is left exactly as it is, whoever wrote it. An
+    operator's dismissal is not something a later push may overwrite, and
+    re-recording a fix would move the commit under a verdict somebody has
+    already read.
+    """
+    store, broken = read_store(root)
+    if broken:
+        # The store cannot be read, so which findings are already answered is
+        # unknown, and writing would replace the whole file with a record built
+        # from that ignorance. `sd-status` already reports the breakage.
+        return []
+    written: list[dict] = []
+    for found in rows:
+        if found["id"] in store:
+            continue
+        commit = answering_commit(root, found, head)
+        if not commit:
+            continue
+        written.append(dict(acknowledge(root, found, "fixed", commit), id=found["id"]))
+    return written
 
 
 # --------------------------------------------------------------------------
