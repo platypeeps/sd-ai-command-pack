@@ -1291,6 +1291,77 @@ class IssueSectionTests(StatusFixture):
         self.assertEqual(result["issues"]["needs_you"], [])
         self.assertFalse(any(row["check"].startswith("issue-") for row in result["actions"]))
 
+    #: `import sd_db` raises `ImportError` while a `None` sits under the name.
+    #: Nothing is written anywhere for this: a fixture site-packages directory
+    #: would be a second installed copy of the library to keep true, and the
+    #: branch under test is reached by the import failing, not by where it
+    #: failed from.
+    NO_SHARED_LIBRARY = {"sd_db": None, "sd_db.progress": None}
+
+    def test_a_missing_shared_library_is_a_reported_gap_and_not_a_read_of_the_index(
+        self,
+    ) -> None:
+        """sd:746. `_database_issues` had two `None` returns; only one is honest.
+
+        `None` is this function's word for "ask the index instead", and the
+        library being unimportable is not grounds for it. It says nothing about
+        the shared database, which can be on disk and current while this
+        checkout simply has no reader for it -- and the index the caller then
+        read is the *older* store, served with no `source` key and no
+        `freshness` line, so neither the text report nor `--json` said the rows
+        were old. That is the one thing the function's own docstring undertakes
+        not to do.
+
+        The surviving `None`, one line below, is the honest one: the library
+        imports and there is no shared database yet, so the index is the only
+        store that has ever held these rows.
+
+        This runs in process because the branch is reached by an import
+        failing, and the fixture's child process runs on this interpreter,
+        where `sd_db` is installed. The `store` double would hand back a row if
+        it were reached, so the assertions falsify in two independent ways --
+        the fallback is called, or `#99` reaches a reader.
+        """
+        self.with_github(pulls=[])
+        double = mock.Mock()
+        double.issues.return_value = [self.row("acme/widget", 99, ["assigned"])]
+        double.needs_you.return_value = True
+        with mock.patch.dict(sys.modules, self.NO_SHARED_LIBRARY), mock.patch.object(
+            status, "store", double
+        ):
+            section = status.issues_section(self.repo)
+
+        double.index_path.assert_not_called()
+        double.connect.assert_not_called()
+        double.issues.assert_not_called()
+        self.assertFalse(section["available"])
+        self.assertIn("not installed", section["reason"])
+        self.assertEqual(section["needs_you"], [])
+        self.assertEqual(section["other"], [])
+
+    def test_the_missing_library_answer_is_shaped_like_the_sections_other_gaps(
+        self,
+    ) -> None:
+        """`needs_you` and `other` are indexed by readers that never check first.
+
+        `_render_issues` returns on `available` alone, but the `--json` object
+        is one shape per section and every other unavailable answer here --
+        `no GitHub remote`, `not importable from this checkout`, `no index yet`,
+        `shared database unreadable` -- carries both empty lists. A gap that
+        dropped them would be the only one, and a consumer indexing `needs_you`
+        would raise on exactly the machine that is already missing a library.
+        """
+        with mock.patch.dict(sys.modules, self.NO_SHARED_LIBRARY):
+            answer = status._database_issues("acme/widget")
+
+        self.assertIsNotNone(answer, "None sends `issues_section` to the index")
+        assert answer is not None
+        self.assertEqual(
+            sorted(answer), ["available", "needs_you", "other", "reason"]
+        )
+        self.assertEqual(answer["needs_you"], [])
+        self.assertEqual(answer["other"], [])
+
 
 class ReadOnlyTests(StatusFixture):
     def test_nothing_under_the_temp_root_changes(self) -> None:
