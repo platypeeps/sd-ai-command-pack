@@ -38,6 +38,10 @@ from tests.test_skill_frontmatter import surfaces as frontmatter_surfaces
 
 SD_HANDOFF = BIN / "sd-handoff"
 
+#: Pull request 889 read from the API on 2026-09-13: ten review findings and
+#: no answer to any of them. The control for the automatic acknowledgement.
+UNANSWERED_ROUND = BIN.parent / "tests" / "fixtures" / "sd-631-unanswered-round.json"
+
 
 def _load(name: str, module_name: str) -> Any:
     path = BIN / name
@@ -1523,6 +1527,121 @@ class ReviewUnacknowledgedTests(InventoryFixture):
         self.assertIn("pr-check-failing", ids)
         self.assertIn("pr-review-unacknowledged", ids)
         self.assertNotEqual(ids["pr-check-failing"], ids["pr-review-unacknowledged"])
+
+
+class ReviewAnsweredByTheMergePathTests(InventoryFixture):
+    """The row as the merge path now leaves it, with nobody typing anything.
+
+    `pr-review-unacknowledged` shipped with no writer: nothing between a review
+    and a merge ever recorded an acknowledgement, so the store stayed empty and
+    the row stood on every reviewed pull request for as long as it was open. A
+    row that is always on is a row that gets ignored, and then turned off.
+
+    `sd-ship` now records `fixed <commit>` for the findings its push answers,
+    and the two cases below are the whole argument for trusting it. They are
+    deliberately a pair: either one alone is passed by a wrong implementation.
+    """
+
+    #: The file-summary table the reviewer writes, one finding per file.
+    REVIEW = (
+        "| File | Summary |\n"
+        "|---|---|\n"
+        "| `bin/thing.py` | Moderate finding (2 votes): the thing is wrong. |\n"
+        "| `docs/untouched.md` | Moderate finding (1 vote): nobody went near this. |\n"
+    )
+
+    def ack(self) -> Any:
+        return status.sd_lib.sibling("sd_review_ack_answers", "sd-review-ack")
+
+    def reviewed(self, ids: list[str], **extra: Any) -> dict[str, Any]:
+        """The `pull_requests` section `sd-pr-state` returns for one reviewed PR."""
+        found = {"reviews": 1, "in_body": len(ids), "reviewers": ["bot"],
+                 "ids": ids, "inline": 0, "unreadable": "", "indeterminate": []}
+        found.update(extra)
+        return {"repo": "acme/widget",
+                "pull_requests": [self.pull(failing=[], review_findings=found)]}
+
+    def setUp(self) -> None:
+        super().setUp()
+        # `landing_ref` looks for `origin/main`, and a fixture repository has
+        # a remote URL and no remote refs. Without this every `fixed` record
+        # reads `fix-not-landed` and the pair below proves nothing.
+        self.git("update-ref", "refs/remotes/origin/main", "main")
+        self.reviewed_at = self.git("rev-parse", "HEAD").strip()
+
+    def commit(self, name: str, text: str) -> str:
+        path = self.repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", f"touch {name}")
+        self.git("update-ref", "refs/remotes/origin/main", "main")
+        return self.git("rev-parse", "HEAD").strip()
+
+    def stated(self, body: str, number: int = 7) -> list[dict[str, Any]]:
+        return self.ack().findings(
+            number, [{"author": "bot", "commit_id": self.reviewed_at, "body": body}], []
+        )
+
+    def test_a_finding_answered_by_a_commit_that_landed_is_not_a_row(self) -> None:
+        """Half one: the push carried the fix, and the report says nothing.
+
+        Nobody ran `--ack`. The record was written by the merge path from a
+        commit that changed the file the finding names and reached the branch
+        the work lands on, and that is the whole of what cleared the row.
+        """
+        self.commit("bin/thing.py", "answered\n")
+        rows = self.stated("| File | Summary |\n|---|---|\n"
+                           "| `bin/thing.py` | Moderate finding (2 votes): wrong. |\n")
+        written, _ = self.ack().record_answers(self.repo, rows, "main")
+        self.assertEqual([row["path"] for row in written], ["bin/thing.py"])
+        self.assertEqual(
+            self.by_check(self.rows(pull_requests=self.reviewed([row["id"] for row in rows])),
+                          "pr-review-unacknowledged"),
+            [],
+        )
+
+    def test_a_finding_no_commit_answered_is_still_a_row(self) -> None:
+        """Half two, and the one that makes half one worth anything.
+
+        The same push, the same automatic record, and a second finding on a
+        file it never touched. An implementation that acknowledges a pull
+        request because somebody pushed to it passes the test above and fails
+        this one.
+        """
+        self.commit("bin/thing.py", "answered\n")
+        rows = self.stated(self.REVIEW)
+        self.ack().record_answers(self.repo, rows, "main")
+        found = self.by_check(
+            self.rows(pull_requests=self.reviewed([row["id"] for row in rows])),
+            "pr-review-unacknowledged",
+        )
+        self.assertEqual(len(found), 1)
+        self.assertIn("1 of 2 review finding(s) unanswered", found[0]["detail"])
+
+    def test_the_captured_unanswered_round_stays_a_row(self) -> None:
+        """#889 as captured: ten findings, a push after the review, no answers.
+
+        Real finding text and real paths, re-dated onto this repository's first
+        commit because the capture's commit ids name objects no fixture can
+        have. The commit made after the review touches none of the ten files,
+        which is exactly the pull request the row exists for.
+        """
+        self.commit("unrelated.txt", "pushed, and not a fix for anything\n")
+        payload = json.loads(UNANSWERED_ROUND.read_text(encoding="utf-8"))["pull_requests"]["889"]
+        rows = self.ack().findings(
+            889,
+            [dict(row, commit_id=self.reviewed_at) for row in payload["reviews"]],
+            [dict(row, original_commit_id=self.reviewed_at, commit_id=None)
+             for row in payload["comments"]],
+        )
+        self.assertEqual(len(rows), 10)
+        self.assertEqual(self.ack().record_answers(self.repo, rows, "main"), ([], ""))
+        section = self.reviewed([row["id"] for row in rows])
+        section["pull_requests"][0]["number"] = 889
+        found = self.by_check(self.rows(pull_requests=section), "pr-review-unacknowledged")
+        self.assertEqual(len(found), 1)
+        self.assertIn("10 of 10 review finding(s) unanswered", found[0]["detail"])
 
 
 class ClassTableTests(unittest.TestCase):

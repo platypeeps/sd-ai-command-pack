@@ -29,10 +29,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 BIN = REPO_ROOT / "bin"
 FIXTURE = REPO_ROOT / "tests" / "fixtures" / "sd-543-review-round.json"
+UNANSWERED = REPO_ROOT / "tests" / "fixtures" / "sd-631-unanswered-round.json"
 
 sys.path.insert(0, str(BIN))
 import sd_lib  # noqa: E402
@@ -288,9 +290,9 @@ class ThePrStateCountUsesTheSameReader(unittest.TestCase):
         pull = {"reviews": [{"body": self.BODY, "author": {"login": "bot"}}], "number": 880}
         original = pr_state.inline_findings
         try:
-            pr_state.inline_findings = lambda *a: ([], "gh api exited 1")
+            pr_state.inline_findings = lambda *a: ([], {}, "gh api exited 1")
             blind = pr_state._findings(pull, REPO_ROOT, "acme/widget")
-            pr_state.inline_findings = lambda *a: (["inline-id"], "")
+            pr_state.inline_findings = lambda *a: (["inline-id"], {"inline-id": ["abc"]}, "")
             whole = pr_state._findings(pull, REPO_ROOT, "acme/widget")
         finally:
             pr_state.inline_findings = original
@@ -299,6 +301,8 @@ class ThePrStateCountUsesTheSameReader(unittest.TestCase):
         self.assertEqual(whole["in_body"], 3)
         self.assertEqual(len(whole["ids"]), 4)
         self.assertIn("inline-id", whole["ids"])
+        self.assertEqual(whole["stated"]["inline-id"], ["abc"],
+                         "the commits a finding was stated against survive the union")
 
     def test_a_re_review_does_not_double_what_it_restates(self):
         """Two surfaces, one fact. A restated finding is one finding.
@@ -370,8 +374,8 @@ class ThePrStateCountUsesTheSameReader(unittest.TestCase):
             for payload in ({"message": "API rate limit exceeded"}, None, "nope"):
                 with self.subTest(payload=type(payload).__name__):
                     pr_state.gh_json = lambda *a, _p=payload: (_p, "")
-                    ids, reason = pr_state.inline_findings(REPO_ROOT, "acme/widget", 7)
-                    self.assertEqual(ids, [])
+                    ids, read_at, reason = pr_state.inline_findings(REPO_ROOT, "acme/widget", 7)
+                    self.assertEqual((ids, read_at), ([], {}))
                     self.assertIn("not a list of comments", reason)
                     self.assertIn(type(payload).__name__, reason)
         finally:
@@ -384,10 +388,11 @@ class ThePrStateCountUsesTheSameReader(unittest.TestCase):
         original = pr_state.gh_json
         try:
             pr_state.gh_json = lambda *a: (comments, "")
-            ids, reason = pr_state.inline_findings(REPO_ROOT, "acme/widget", 860)
+            ids, read_at, reason = pr_state.inline_findings(REPO_ROOT, "acme/widget", 860)
         finally:
             pr_state.gh_json = original
         self.assertEqual(reason, "")
+        self.assertEqual(sorted(read_at), sorted(ids), "every inline id carries the commits it was stated at")
         # Six inline rows on #860: three findings and three replies. The reader
         # decides which is which, and this asserts it was asked.
         self.assertEqual(len(comments), 6)
@@ -847,6 +852,478 @@ class TheRecord(RoundFixture):
         done = run(self.repo.root, "--pr", "863", "--ack", "deadbeefcafe", "--dismiss", "read")
         self.assertEqual(done.returncode, 2)
         self.assertIn("no finding here has the id", done.stderr)
+
+
+class Branch:
+    """A repository holding the two commits an automatic record has to tell apart.
+
+    One commit answers a finding and reaches `main`. One commit answers a
+    different finding and never leaves its own branch -- the 371495dc shape
+    again, in the automatic path this time rather than the typed one.
+    """
+
+    FILES = ("bin/thing.py", "bin/other.py", "docs/untouched.md")
+
+    def __init__(self, stack: tempfile.TemporaryDirectory) -> None:
+        self.root = pathlib.Path(stack.name) / "branch"
+        self.root.mkdir()
+        self._git("init", "-q", "--initial-branch=main", ".")
+        for name in self.FILES:
+            self._write(name, "as the reviewer read it\n")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "the state the reviewer read")
+        self.reviewed = self._git("rev-parse", "HEAD")
+        self._git("checkout", "-q", "-b", "stranded")
+        self._write("bin/other.py", "answered, and never pushed anywhere that lands\n")
+        self._git("commit", "-qam", "answer the other thing")
+        self.stranded = self._git("rev-parse", "HEAD")
+        self._git("checkout", "-q", "main")
+        self._write("bin/thing.py", "answered\n")
+        self._git("commit", "-qam", "answer the thing")
+        self.landed = self._git("rev-parse", "HEAD")
+
+    def _write(self, name: str, text: str) -> None:
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def _git(self, *args: str) -> str:
+        done = subprocess.run(["git", *GIT_IDENTITY, *args], cwd=str(self.root),
+                              capture_output=True, text=True, check=True)
+        return done.stdout.strip()
+
+
+class APushIsEvidenceOrItIsNothing(unittest.TestCase):
+    """What an automatic `fixed` record may be written from.
+
+    `sd-status` grew a row for a pull request carrying a review finding nobody
+    has answered, and nothing on the way to a merge wrote an acknowledgement,
+    so the store stayed empty and the row fired on every reviewed pull request
+    forever. The fix is a record written by the merge path -- and a record the
+    merge path writes for *every* finding is worse than the noise it replaces,
+    because it reads exactly like a finding somebody answered.
+
+    So the automatic record is bound to the one thing a push can prove: a
+    commit that did not exist when the reviewer read the file, that changes the
+    file the finding names, reachable from the head being pushed. Every test
+    here is a way that binding could come loose.
+    """
+
+    #: The file-summary table the reviewer actually writes, one finding per
+    #: file. Three files; the push touches one of them.
+    REVIEW = (
+        "| File | Summary |\n"
+        "|---|---|\n"
+        "| `bin/thing.py` | Moderate finding (2 votes): the thing is wrong. |\n"
+        "| `bin/other.py` | Moderate finding (1 vote): the other thing is wrong. |\n"
+        "| `docs/untouched.md` | Moderate finding (1 vote): nobody went near this. |\n"
+    )
+
+    def setUp(self) -> None:
+        self.stack = tempfile.TemporaryDirectory()
+        self.addCleanup(self.stack.cleanup)
+        self.branch = Branch(self.stack)
+
+    def rows(self, commit: str | None = None) -> list[dict]:
+        return ack.findings(7, [{
+            "author": "bot",
+            "commit_id": self.branch.reviewed if commit is None else commit,
+            "body": self.REVIEW,
+        }], [])
+
+    def verdicts(self) -> dict[str, str]:
+        """Every finding's path and what the record now says about it."""
+        store, _ = ack.read_store(self.branch.root)
+        return {row["path"]: ack.id_verdict(self.branch.root, row["id"], store, "main")
+                for row in self.rows()}
+
+    def test_a_commit_that_changed_the_file_answers_the_finding(self) -> None:
+        """The whole point: the push carried a fix, so the finding is answered."""
+        written, _ = ack.record_answers(self.branch.root, self.rows(), "main")
+        self.assertEqual([row["path"] for row in written], ["bin/thing.py"])
+        self.assertEqual(written[0]["disposition"], "fixed")
+        self.assertEqual(written[0]["commit"], self.branch.landed)
+        self.assertEqual(self.verdicts()["bin/thing.py"], "landed")
+
+    def test_a_finding_on_a_file_the_push_never_touched_is_not_answered(self) -> None:
+        """The failure mode this record is one loose predicate away from.
+
+        A record written for every finding on the pull request satisfies the
+        gate and says nothing, which is the state the gate was built to end.
+        Two of these three files are untouched by anything reachable from
+        `main` after the review, and both must still read `unread`.
+        """
+        ack.record_answers(self.branch.root, self.rows(), "main")
+        self.assertEqual(self.verdicts()["docs/untouched.md"], "unread")
+        self.assertEqual(self.verdicts()["bin/other.py"], "unread")
+        self.assertEqual(len(ack.read_store(self.branch.root)[0]), 1)
+
+    def test_pushing_is_not_landing(self) -> None:
+        """An answered finding whose answer never reached `main` stays open.
+
+        The record is written from the push, and what it is worth is still
+        decided by `fix_verdict` against the branch the work lands on. Nothing
+        here is allowed to shortcut that.
+        """
+        written, _ = ack.record_answers(self.branch.root, self.rows(), "stranded")
+        self.assertEqual([row["path"] for row in written], ["bin/other.py"])
+        self.assertEqual(self.verdicts()["bin/other.py"], "fix-not-landed")
+        self.assertEqual(
+            ack.unacknowledged(self.branch.root, [row["id"] for row in self.rows()], "main"),
+            [row["id"] for row in self.rows()],
+            "a push that has not landed answers nothing the gate counts",
+        )
+
+    def test_a_dismissal_is_never_overwritten_by_a_later_push(self) -> None:
+        """The one record a machine must not touch is the one a person wrote."""
+        found = [row for row in self.rows() if row["path"] == "bin/thing.py"][0]
+        ack.acknowledge(self.branch.root, found, "dismissed", "the reviewer misread the diff")
+        self.assertEqual(ack.record_answers(self.branch.root, self.rows(), "main"), ([], ""))
+        record = ack.read_store(self.branch.root)[0][found["id"]]
+        self.assertEqual(record["disposition"], "dismissed")
+        self.assertEqual(record["reason"], "the reviewer misread the diff")
+
+    def test_a_second_push_does_not_move_a_record_somebody_has_read(self) -> None:
+        ack.record_answers(self.branch.root, self.rows(), "main")
+        before = dict(ack.read_store(self.branch.root)[0])
+        self.assertEqual(ack.record_answers(self.branch.root, self.rows(), "main"), ([], ""))
+        self.assertEqual(ack.read_store(self.branch.root)[0], before)
+
+    def test_a_review_that_names_no_commit_answers_nothing(self) -> None:
+        """A payload with no `commit_id` cannot date a finding, so nothing is dated.
+
+        The captured rounds in `tests/fixtures/` are pruned to author and body,
+        and an older API shape carries no commit either. Absence of evidence
+        must not read as evidence of an answer.
+        """
+        self.assertEqual(ack.record_answers(self.branch.root, self.rows(""), "main"), ([], ""))
+        self.assertEqual(ack.read_store(self.branch.root)[0], {})
+
+    def test_a_finding_this_reader_could_not_place_is_never_answered(self) -> None:
+        """`?` is the path of a finding the parser failed on; it stays unread.
+
+        Deciding that an unparsed finding has been answered because some file
+        changed is the parser's blind spot laundered into a clean gate.
+        """
+        rows = ack.findings(7, [{
+            "author": "bot", "commit_id": self.branch.reviewed,
+            "body": "## Suppressed comments (2)\n\n**bin/thing.py:1**\nreal\n",
+        }], [])
+        shortfall = [row for row in rows if row["path"] == "?"]
+        self.assertEqual(len(shortfall), 1)
+        written, _ = ack.record_answers(self.branch.root, rows, "main")
+        self.assertEqual([row["path"] for row in written], ["bin/thing.py"])
+
+    def test_a_finding_restated_against_a_later_commit_is_not_answered(self) -> None:
+        """A reviewer repeating itself is a reviewer saying the finding stands.
+
+        The same words in a second review read against a newer head. Dating
+        that finding to the first read would let the very commit the reviewer
+        looked at and still objected to count as its answer.
+        """
+        body = ("| File | Summary |\n|---|---|\n"
+                "| `bin/thing.py` | Moderate finding (2 votes): the thing is wrong. |\n")
+        rows = ack.findings(7, [
+            {"author": "bot", "commit_id": self.branch.reviewed, "body": body},
+            {"author": "bot", "commit_id": self.branch.landed, "body": body},
+        ], [])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["reviewed"], "")
+        self.assertEqual(ack.record_answers(self.branch.root, rows, "main"), ([], ""))
+
+    def test_a_corrupt_record_is_not_replaced_by_an_automatic_one(self) -> None:
+        """A store nothing can read is not a store with nothing in it."""
+        ack.store_path(self.branch.root).write_text("{not json", encoding="utf-8")
+        written, broken = ack.record_answers(self.branch.root, self.rows(), "main")
+        self.assertEqual(written, [])
+        self.assertIn("is not valid JSON", broken,
+                      "an empty result with no sentence is indistinguishable from nothing to record")
+        self.assertEqual(ack.store_path(self.branch.root).read_text(), "{not json")
+
+
+class ThePathIsTheReviewersText(unittest.TestCase):
+    """A finding's path is passed to git as a name, never as a pattern.
+
+    `git rev-list -- <path>` reads its path as a pathspec, and a pathspec is a
+    glob. A reviewer that writes `bin/*.py` would have its finding answered by
+    any commit that touched any file under `bin/`, and a file whose real name
+    carries `[` would never be matched at all. Both directions are here,
+    because either alone is passed by an implementation that quotes wrongly.
+    """
+
+    def setUp(self) -> None:
+        self.stack = tempfile.TemporaryDirectory()
+        self.addCleanup(self.stack.cleanup)
+        self.branch = Branch(self.stack)
+
+    def rows(self, path: str) -> list[dict]:
+        return ack.findings(7, [{
+            "author": "bot", "commit_id": self.branch.reviewed,
+            "body": f"| File | Summary |\n|---|---|\n| `{path}` | Moderate finding (2 votes): wrong. |\n",
+        }], [])
+
+    def test_a_glob_in_the_path_answers_nothing_it_would_have_matched(self) -> None:
+        """`bin/*.py` names no file; `bin/thing.py` changing is not its answer."""
+        self.assertEqual(ack.answering_commit(self.branch.root, self.rows("bin/*.py")[0], "main"), "")
+        self.assertEqual(ack.record_answers(self.branch.root, self.rows("bin/*.py"), "main"), ([], ""))
+
+    def test_a_bracket_in_a_finding_path_is_a_bracket(self) -> None:
+        """`bin/[a].py` as a pattern matches `bin/a.py`; as a name it matches itself only."""
+        self.branch._write("bin/a.py", "the file the pattern would match\n")
+        self.branch._git("add", "-A")
+        self.branch._git("commit", "-qm", "touch bin/a.py")
+        self.assertEqual(ack.answering_commit(self.branch.root, self.rows("bin/[a].py")[0], "main"), "")
+        self.branch._write("bin/[a].py", "answered\n")
+        self.branch._git("add", "-A")
+        self.branch._git("commit", "-qm", "answer the bracketed thing")
+        answered = self.branch._git("rev-parse", "HEAD")
+        self.assertEqual(ack.answering_commit(self.branch.root, self.rows("bin/[a].py")[0], "main"), answered)
+
+
+class Squash(Branch):
+    """`Branch`, plus the shape every merge in this repository leaves behind.
+
+    `topic` carries the commit that answers the finding and one more; `main`
+    carries their squash and nothing from `topic`'s own history. A second
+    branch, `elsewhere`, carries a merge-shaped commit that is on no landing
+    ref at all -- the control for a pull request GitHub calls merged whose
+    merge commit this repository cannot find on `main`.
+    """
+
+    def __init__(self, stack: tempfile.TemporaryDirectory) -> None:
+        super().__init__(stack)
+        self._git("checkout", "-q", "-b", "topic", self.reviewed)
+        self._write("bin/other.py", "answered on the topic branch\n")
+        self._git("commit", "-qam", "answer the other thing, on the branch")
+        self.answer = self._git("rev-parse", "HEAD")
+        self._write("docs/untouched.md", "a second commit on the branch\n")
+        self._git("commit", "-qam", "more on the branch")
+        self.head = self._git("rev-parse", "HEAD")
+        self._git("checkout", "-q", "main")
+        self._git("merge", "-q", "--squash", "topic")
+        self._git("commit", "-qm", "the other thing, squashed (#7)")
+        self.squash = self._git("rev-parse", "HEAD")
+        self._git("checkout", "-q", "-b", "elsewhere", self.reviewed)
+        self._write("bin/other.py", "a landing that is not on main\n")
+        self._git("commit", "-qam", "squashed somewhere else")
+        self.elsewhere = self._git("rev-parse", "HEAD")
+        self._git("checkout", "-q", "main")
+
+
+class ASquashIsALanding(unittest.TestCase):
+    """The commit a record names is never on `main` here; its squash is.
+
+    Found on the first two pull requests the automatic record was run
+    against: #889 and #890 merged by squash, and every one of their fifteen
+    records read `fix-not-landed` afterwards, forever, because `main` never
+    contains a branch commit. The model stays "the commit claiming to answer
+    is in the history that landed"; the history that landed is read through
+    the pull request, and each of the three facts it rests on is checked.
+    """
+
+    REVIEW = ("| File | Summary |\n|---|---|\n"
+              "| `bin/other.py` | Moderate finding (1 vote): the other thing is wrong. |\n")
+
+    def setUp(self) -> None:
+        self.stack = tempfile.TemporaryDirectory()
+        self.addCleanup(self.stack.cleanup)
+        self.repo = Squash(self.stack)
+        self.rows = ack.findings(7, [{"author": "bot", "commit_id": self.repo.reviewed,
+                                      "body": self.REVIEW}], [])
+        written, _ = ack.record_answers(self.repo.root, self.rows, "topic")
+        self.assertEqual([row["commit"] for row in written], [self.repo.answer])
+
+    def merged(self, head: str | None = None, merge: str | None = None, **extra) -> dict:
+        pull = {"merged": True, "merge_commit_sha": merge or self.repo.squash,
+                "head": {"sha": head or self.repo.head}}
+        pull.update(extra)
+        return pull
+
+    def state(self, pull: dict | None) -> str:
+        payload = {"reviews": [{"author": "bot", "commit_id": self.repo.reviewed, "body": self.REVIEW}],
+                   "comments": []}
+        if pull is not None:
+            payload["pull"] = pull
+        return ack.review_state(self.repo.root, {7: payload}, "main")["findings"][0]["verdict"]
+
+    def test_ancestry_alone_never_sees_a_squash_land(self) -> None:
+        """The defect, kept as the baseline the rest of this class moves from."""
+        self.assertEqual(self.state(None), "fix-not-landed")
+
+    def test_a_merged_pull_request_whose_head_carried_the_commit_landed(self) -> None:
+        """The fix: merged, the commit is in the merged head, the squash is on main."""
+        self.assertEqual(self.state(self.merged()), "landed")
+
+    def test_the_captured_shape_replays_offline(self) -> None:
+        """`--from` with the merge facts in the file is enough; no second trip."""
+        capture = pathlib.Path(self.stack.name) / "squash.json"
+        capture.write_text(json.dumps({"pull_requests": {"7": {
+            "reviews": [{"author": "bot", "commit_id": self.repo.reviewed, "body": self.REVIEW}],
+            "comments": [], "pull": self.merged(),
+        }}}), encoding="utf-8")
+        done = subprocess.run(
+            [sys.executable, str(BIN / "sd-review-ack"), "--from", str(capture), "--check",
+             "--landed-in", "main", "--json"],
+            cwd=str(self.repo.root), capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertEqual(json.loads(done.stdout)["findings"][0]["verdict"], "landed")
+
+    def test_a_merge_commit_that_is_not_on_the_landing_ref_is_not_a_landing(self) -> None:
+        """GitHub says merged; `main` does not have the commit it merged as."""
+        self.assertEqual(self.state(self.merged(merge=self.repo.elsewhere)), "fix-not-landed")
+
+    def test_a_commit_the_merged_head_never_carried_is_not_a_landing(self) -> None:
+        """The pull request merged, but the cited commit is from some other branch."""
+        self.assertEqual(self.state(self.merged(head=self.repo.elsewhere)), "fix-not-landed")
+
+    def test_an_unmerged_pull_request_carries_no_landing(self) -> None:
+        """`merge_commit_sha` is set on open pull requests too; `merged` decides."""
+        self.assertEqual(self.state(self.merged(merged=False)), "fix-not-landed")
+        self.assertEqual(self.state({"merge_commit_sha": self.repo.squash,
+                                     "head": {"sha": self.repo.head}}), "fix-not-landed")
+        self.assertEqual(ack.landing_evidence({"pull": "merged"}), {})
+
+    def test_a_live_round_reads_the_pull_request_beside_its_reviews(self) -> None:
+        """`live_round` is where the merge facts come from, so it has to ask for them."""
+        calls: list[list[str]] = []
+
+        class PrState:
+            @staticmethod
+            def probe(root):
+                return {"available": True, "slug": "acme/widget", "reason": ""}
+
+            @staticmethod
+            def gh_json(args, root):
+                calls.append(args)
+                return ({"merged": True} if args[1].endswith("/pulls/7") else []), ""
+
+        with unittest.mock.patch.object(ack.sd_lib, "sibling", return_value=PrState):
+            rounds, error = ack.live_round(self.repo.root, 7, 5)
+        self.assertEqual(error, "")
+        self.assertEqual(rounds[7]["pull"], {"merged": True})
+        self.assertIn(["api", "repos/acme/widget/pulls/7"], calls)
+
+
+class ARestatedFindingIsNotAnswered(unittest.TestCase):
+    """A record the reviewer has read and overruled stops satisfying the gate.
+
+    The real order of events: the push answers the finding and `sd-ship`
+    records `fixed <commit>` at once; the reviewer then reads that commit and
+    states the finding again. The record is on file and is never moved, so
+    without this the restatement read as answered -- by the very commit the
+    reviewer looked at and objected to.
+    """
+
+    BODY = ("| File | Summary |\n|---|---|\n"
+            "| `bin/thing.py` | Moderate finding (2 votes): the thing is wrong. |\n")
+
+    def setUp(self) -> None:
+        self.stack = tempfile.TemporaryDirectory()
+        self.addCleanup(self.stack.cleanup)
+        self.branch = Branch(self.stack)
+        # The first review, and the push that answered it, recorded as it happened.
+        written, _ = ack.record_answers(self.branch.root, self.review(self.branch.reviewed), "main")
+        self.assertEqual([row["commit"] for row in written], [self.branch.landed])
+        # A later head that contains the fix, for the reviewer to read.
+        self.branch._write("notes.txt", "later\n")
+        self.branch._git("add", "-A")
+        self.branch._git("commit", "-qm", "later, on top of the fix")
+        self.later = self.branch._git("rev-parse", "HEAD")
+
+    def review(self, *commits: str) -> list[dict]:
+        return ack.findings(7, [{"author": "bot", "commit_id": commit, "body": self.BODY}
+                                for commit in commits], [])
+
+    def state(self, rows: list[dict]) -> dict:
+        return ack.review_state(self.branch.root, {7: {"reviews": [
+            {"author": "bot", "commit_id": commit, "body": self.BODY} for commit in rows
+        ], "comments": []}}, "main")
+
+    def test_restated_against_a_head_that_contains_the_fix_is_fix_restated(self) -> None:
+        result = self.state([self.branch.reviewed, self.later])
+        self.assertEqual(result["findings"][0]["verdict"], "fix-restated")
+        self.assertEqual(len(result["unsatisfied"]), 1, "the gate stays red")
+        rows = self.review(self.branch.reviewed, self.later)
+        self.assertEqual(
+            ack.unacknowledged(self.branch.root, [rows[0]["id"]], "main",
+                               {rows[0]["id"]: rows[0]["stated_at"]}),
+            [rows[0]["id"]],
+            "the id-only gate `sd-status` uses reaches the same verdict from the map",
+        )
+
+    def test_the_record_is_left_on_file_for_a_person_to_move(self) -> None:
+        before = dict(ack.read_store(self.branch.root)[0])
+        self.state([self.branch.reviewed, self.later])
+        self.assertEqual(ack.read_store(self.branch.root)[0], before)
+
+    def test_restated_against_a_head_without_the_fix_keeps_the_record(self) -> None:
+        """The other direction: the reviewer repeated itself before the fix existed."""
+        result = self.state([self.branch.reviewed, self.branch.stranded])
+        self.assertEqual(result["findings"][0]["verdict"], "landed")
+        self.assertEqual(result["unsatisfied"], [])
+
+    def test_stated_once_and_answered_after_stays_landed(self) -> None:
+        result = self.state([self.branch.reviewed])
+        self.assertEqual(result["findings"][0]["verdict"], "landed")
+
+    def test_without_the_map_the_id_gate_cannot_see_the_restatement(self) -> None:
+        """Documented, not hidden: a caller without `stated` gets ancestry alone."""
+        rows = self.review(self.branch.reviewed, self.later)
+        self.assertEqual(ack.unacknowledged(self.branch.root, [rows[0]["id"]], "main"), [])
+
+
+class TheRoundNobodyHasAnswered(unittest.TestCase):
+    """#889 as captured, which is what an unanswered pull request looks like.
+
+    `tests/fixtures/sd-631-unanswered-round.json` is pull request 889 read from
+    the API on 2026-09-13: one automated review, ten findings across a
+    file-summary table, a `Suppressed comments` section and one inline comment,
+    and not one of them answered. It is the control for the automatic record --
+    a machine that acknowledges this round acknowledges everything.
+    """
+
+    ROUND = json.loads(UNANSWERED.read_text(encoding="utf-8"))
+
+    def setUp(self) -> None:
+        self.stack = tempfile.TemporaryDirectory()
+        self.addCleanup(self.stack.cleanup)
+        self.branch = Branch(self.stack)
+
+    def payload(self) -> dict:
+        return self.ROUND["pull_requests"]["889"]
+
+    def test_the_review_was_read_against_the_head_that_is_still_the_head(self) -> None:
+        """The measured fact behind "unanswered": no commit came after the review."""
+        reviews = self.payload()["reviews"]
+        self.assertEqual(len(reviews), 1)
+        self.assertEqual(reviews[0]["commit_id"], self.ROUND["head"])
+        self.assertEqual(
+            len(ack.findings(889, reviews, self.payload()["comments"])), 10,
+            "the capture carries ten findings and the reader must see all ten",
+        )
+
+    def test_a_push_that_touches_none_of_the_named_files_answers_nothing(self) -> None:
+        """The real ten findings, replayed against a real push that is not a fix.
+
+        The capture's commit ids name commits no test repository can have, so
+        the review is re-dated onto this fixture's first commit and every
+        finding keeps its real path and its real text. `main` then carries a
+        commit made after that review -- which is the whole of what "somebody
+        pushed" proves -- and it touches none of the ten files.
+        """
+        reviews = [dict(row, commit_id=self.branch.reviewed)
+                   for row in self.payload()["reviews"]]
+        comments = [dict(row, original_commit_id=self.branch.reviewed, commit_id=None)
+                    for row in self.payload()["comments"]]
+        rows = ack.findings(889, reviews, comments)
+        self.assertEqual(len(rows), 10)
+        self.assertEqual(ack.record_answers(self.branch.root, rows, "main"), ([], ""))
+        self.assertEqual(
+            ack.unacknowledged(self.branch.root, [row["id"] for row in rows], "main"),
+            [row["id"] for row in rows],
+            "ten findings stated and none answered is ten findings standing",
+        )
 
 
 if __name__ == "__main__":

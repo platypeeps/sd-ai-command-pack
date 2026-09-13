@@ -114,8 +114,23 @@ invisible where the operator already looked.
 
 A finding is answered when `bin/sd-review-ack` says so — acknowledged as fixed
 by a commit that actually reached the landing ref, or dismissed with a reason.
-`sd-status` holds no second opinion about either; it counts what that tool
-reports unanswered.
+Reached it directly, or through a squash: the commit is in the head of a pull
+request GitHub merged and the commit it merged as is on the ref, both facts
+local `git` settles. A fix the reviewer had already read when it stated the
+finding again is `fix-restated`, not answered, and the row stays up.
+`sd-status` holds no second opinion about any of this; it counts what that
+tool reports unanswered.
+
+Most of those acknowledgements are written by `bin/sd-ship`, not typed. A row
+whose store nothing ever fills is a row that is always on, and a report that is
+always red is a report nobody reads, so the push records `fixed <commit>` for
+each finding it can show an answer for: a commit that did not exist when the
+reviewer read the file, that changes the file the finding names, and that is
+reachable from the head being pushed. Those are facts `git` settles, and a
+finding on a file the push never touched stays unanswered — which is the half
+that makes the other half worth anything. `dismissed <reason>` is never
+written by a machine: a finding the reviewer got wrong is answered by a
+sentence a person writes, and there is no bulk form of either disposition.
 
 Findings are read from inline comments **and** from review bodies, where an
 automated reviewer states the ones no comment count sees. The bodies arrive in

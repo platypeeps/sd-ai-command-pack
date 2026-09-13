@@ -2710,7 +2710,7 @@ def _review_rows(
             )
             return []
         found = list(stated.get("ids") or [])
-        standing = ack.unacknowledged(root, found, ref)
+        standing = ack.unacknowledged(root, found, ref, stated.get("stated") or {})
         if not standing:
             continue
         # A reviewer that writes `(3 votes each)` has stated more than one
