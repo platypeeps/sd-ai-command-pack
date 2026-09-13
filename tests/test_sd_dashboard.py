@@ -364,6 +364,39 @@ class InstallTests(FleetHarness):
         sd_dashboard.main(["install", *argv], out=out)
         return out.getvalue()
 
+    def run_install(self, *argv: str) -> tuple[int, str]:
+        """`install`, with the exit code kept.
+
+        `install` above throws the code away, which was fine while every path
+        through the verb returned 0. The guard below is the first one that
+        fails, so the tests for it need both halves.
+        """
+        out = io.StringIO()
+        code = sd_dashboard.main(["install", *argv], out=out)
+        return code, out.getvalue()
+
+    # The program that actually holds `com.sven.sd-dashboard` on the machine
+    # this pack is developed on -- the system repository's workflow server. A
+    # literal rather than a fixture, because what is under test is "not this
+    # checkout's own path", and any other string would prove it equally well.
+    FOREIGN_PROGRAM = "/Users/sven/repos/system/local-project-dashboard/dashboard.sh"
+
+    def stage_foreign_plist(self, body: bytes | None = None) -> bytes:
+        """Put a plist this checkout did not write where `install` will find it.
+
+        Returns the exact bytes on disk so a test can assert they survived.
+        "Refused" is only worth something if the file is byte-identical
+        afterwards: a re-render that happened to produce the same keys in a
+        different order would slip past a comparison of parsed structures.
+        """
+        self.plist.parent.mkdir(parents=True, exist_ok=True)
+        self.plist.write_bytes(body if body is not None else plistlib.dumps({
+            "Label": "com.sven.sd-dashboard",
+            "ProgramArguments": [
+                self.FOREIGN_PROGRAM, "serve", "--port", "8767"],
+        }))
+        return self.plist.read_bytes()
+
     def test_the_plist_names_this_checkout_and_the_port_it_was_given(self):
         """Rendered from the command, so a reinstall cannot keep old arguments."""
         self.install("--port", "8767")
@@ -502,6 +535,180 @@ class InstallTests(FleetHarness):
         self.assertEqual(code, 0)
         self.assertIn("Bootstrap failed", out.getvalue())
         self.assertTrue(self.plist.exists())
+
+    def test_install_refuses_a_plist_this_checkout_did_not_write(self):
+        """The label is shared with a live service, so writing is the danger.
+
+        `com.sven.sd-dashboard` is held on this machine by the system
+        repository's workflow server, not by this pack. Until this guard,
+        `install` rendered its own body over that plist, booted the label out
+        -- stopping the running service -- and bootstrapped itself in its
+        place, and nothing in the suite noticed, because every other test in
+        this class asserts against a plist the pack wrote.
+
+        The property is not that the command complains. It is that it
+        complains *first*: the file is untouched to the byte and `launchctl`
+        is never reached, so a refusal cannot half-happen.
+        """
+        before = self.stage_foreign_plist()
+        code, output = self.run_install()
+        self.assertEqual(code, 1)
+        self.assertEqual(self.plist.read_bytes(), before)
+        self.assertEqual(self.said, [])
+        self.assertIn(str(self.plist), output)
+        self.assertIn(self.FOREIGN_PROGRAM, output)
+        self.assertIn("--force", output)
+
+    def test_uninstall_refuses_a_plist_this_checkout_did_not_write(self):
+        """Deleting someone else's plist is the worse half of the same bug.
+
+        `--uninstall` unlinks unconditionally, so aimed at a foreign plist it
+        removes a service definition this pack cannot regenerate -- the
+        install path at least writes something back. Same guard, same
+        position: ahead of the unlink and ahead of the bootout.
+        """
+        before = self.stage_foreign_plist()
+        code, output = self.run_install("--uninstall")
+        self.assertEqual(code, 1)
+        self.assertTrue(self.plist.exists())
+        self.assertEqual(self.plist.read_bytes(), before)
+        self.assertEqual(self.said, [])
+        self.assertNotIn("removed", output)
+
+    def test_force_overwrites_a_plist_this_checkout_did_not_write(self):
+        """A guard with no override makes a broken plist unfixable.
+
+        The file the guard protects is the same file the verb owns when the
+        plist is the pack's. Hand-edit it, or truncate it mid-write, and every
+        later `install` refuses -- so the command that exists to repair that
+        state becomes the one thing that cannot. `--force` is the operator
+        saying they have looked at what is there.
+        """
+        self.stage_foreign_plist()
+        code, output = self.run_install("--force")
+        self.assertEqual(code, 0)
+        args = plistlib.loads(self.plist.read_bytes())["ProgramArguments"]
+        self.assertEqual(args[0], str(REPO_ROOT / "bin" / "sd-dashboard"))
+        self.assertEqual([argv[0] for argv in self.said], ["bootout", "bootstrap"])
+        self.assertIn("wrote", output)
+
+    def test_reinstalling_over_this_checkouts_own_plist_still_works(self):
+        """The regression a careless guard ships: refusing your own file.
+
+        Reinstall is the ordinary way to change the port or to pick up a moved
+        checkout, and it always runs against a plist that already exists. A
+        guard keyed on existence rather than on authorship would break it, and
+        the break would only appear on the second install -- which is the one
+        nobody runs while writing the guard.
+        """
+        self.install()
+        self.said.clear()
+        code, output = self.run_install("--port", "8899")
+        self.assertEqual(code, 0)
+        args = plistlib.loads(self.plist.read_bytes())["ProgramArguments"]
+        self.assertEqual(args[-2:], ["--port", "8899"])
+        self.assertEqual([argv[0] for argv in self.said], ["bootout", "bootstrap"])
+        self.assertIn("wrote", output)
+
+    def test_a_plist_that_will_not_parse_counts_as_foreign(self):
+        """The guard asks "can we show it is ours", and garbage answers no.
+
+        Reading an unreadable file as ours would make corruption the way
+        through: anything that damages the header -- a truncated write, a
+        hand-edit, a format this parser does not read -- would turn the
+        protected case into the unprotected one. So it refuses, and `--force`
+        is still there for the operator who knows what the file is.
+        """
+        before = self.stage_foreign_plist(body=b"this is not a plist")
+        code, output = self.run_install()
+        self.assertEqual(code, 1)
+        self.assertEqual(self.plist.read_bytes(), before)
+        self.assertEqual(self.said, [])
+        self.assertIn("--force", output)
+
+    def test_a_valid_plist_with_no_program_arguments_counts_as_foreign(self):
+        """The guard's own docstring promises this arm; nothing pinned it.
+
+        A plist can parse perfectly and still say nothing about who runs it.
+        `foreign_owner` reads `["ProgramArguments"][0]`, so a missing key
+        raises `KeyError` and an empty array raises `IndexError` -- both land
+        in the same refusal as garbage bytes, and neither was covered while
+        only unparseable input was tested. The distinction matters because
+        this file *is* a plist: a reader checking "does it parse" rather than
+        "does it name us" would let it through.
+        """
+        for body in (plistlib.dumps({"Label": "com.sven.sd-dashboard"}),
+                     plistlib.dumps({"Label": "com.sven.sd-dashboard",
+                                     "ProgramArguments": []})):
+            with self.subTest(body=body):
+                before = self.stage_foreign_plist(body=body)
+                self.said.clear()
+                code, output = self.run_install()
+                self.assertEqual(code, 1)
+                self.assertEqual(self.plist.read_bytes(), before)
+                self.assertEqual(self.said, [])
+                self.assertIn("--force", output)
+
+    def test_force_over_a_symlink_replaces_it_rather_than_writing_through(self):
+        """`--force` means overwrite this plist, not write past it.
+
+        `write_text` follows a link, so forcing over one left `PLIST` a
+        symlink and put the body at the target -- the operator's own override
+        placing the file at a path they did not name, and `launchctl` then
+        handed a link out of `~/Library/LaunchAgents`. The refusal path never
+        reached this, because the guard turns a symlink away; only `--force`
+        gets here, which is exactly why it needed its own test.
+        """
+        self.plist.parent.mkdir(parents=True, exist_ok=True)
+        target = self.root / "elsewhere.plist"
+        self.plist.symlink_to(target)
+
+        code, output = self.run_install("--force")
+
+        self.assertEqual(code, 0)
+        self.assertFalse(self.plist.is_symlink())
+        self.assertFalse(target.exists())
+        args = plistlib.loads(self.plist.read_bytes())["ProgramArguments"]
+        self.assertEqual(args[0], str(REPO_ROOT / "bin" / "sd-dashboard"))
+        self.assertEqual([argv[0] for argv in self.said], ["bootout", "bootstrap"])
+        self.assertIn("wrote", output)
+
+    def test_a_symlink_counts_as_foreign_even_when_it_dangles(self):
+        """`Path.exists()` follows the link, and that is the hole.
+
+        A dangling symlink reports `exists() is False`, which the guard read
+        as "no file, first install" -- and then `write_text` follows the link
+        and creates the *target*, so the pack's plist body landed at a path
+        nobody chose and `launchctl` was handed a file outside
+        `~/Library/LaunchAgents`. Absence and a broken link are not the same
+        state, so the symlink test has to come first.
+
+        The resolving case is here too, and it refuses as well: `cmd_install`
+        only ever writes a regular file, so a link is not this checkout's
+        work whatever sits at the other end of it.
+        """
+        for target_exists in (False, True):
+            with self.subTest(target_exists=target_exists):
+                self.plist.parent.mkdir(parents=True, exist_ok=True)
+                self.plist.unlink(missing_ok=True)
+                target = self.root / "elsewhere.plist"
+                target.unlink(missing_ok=True)
+                if target_exists:
+                    target.write_bytes(plistlib.dumps({
+                        "ProgramArguments": [
+                            str(REPO_ROOT / "bin" / "sd-dashboard")]}))
+                self.plist.symlink_to(target)
+                self.said.clear()
+
+                code, output = self.run_install()
+
+                self.assertEqual(code, 1)
+                self.assertEqual(self.said, [])
+                # The link survives as a link, and nothing was created at the
+                # far end of a broken one -- which is the actual damage.
+                self.assertTrue(self.plist.is_symlink())
+                self.assertEqual(target.exists(), target_exists)
+                self.assertIn("--force", output)
 
 
 class ServerRouteTests(FleetHarness):
