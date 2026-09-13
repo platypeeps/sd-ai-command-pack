@@ -103,15 +103,20 @@ def sessions_root(environ: dict[str, str] | None = None) -> pathlib.Path:
 
 def _library():
     """Import `sd_db`, or refuse with the remedy rather than a traceback."""
-    try:
-        # May or may not be resolvable at type-check time: `sd_db` is built
-        # into this virtualenv by the pack's installer, from the `system`
-        # checkout, and this repository does not vendor it. `pyproject.toml`
-        # carries the override rather than an inline ignore here.
-        import sd_db  # noqa: PLC0415 - see the module docstring
-    except ImportError as problem:
-        raise CodexRefusal(f"{NOT_INSTALLED} ({problem})") from problem
-    return sd_db
+    # Through `sd_lib.import_sd_db`, which makes the second try against the
+    # copy `make setup` provisioned (sd:746): `sd` runs under whatever
+    # `python3` is on PATH, and one try here refused on every machine with the
+    # installer as the remedy for a library already installed. A provisioned
+    # copy that will not import gets the helper's sentence, which names it and
+    # quotes its error; `NOT_INSTALLED` is for a machine with nothing to try.
+    import sd_lib  # noqa: PLC0415 - a sibling; `bin/sd` puts `bin/` on the path
+
+    imported = sd_lib.import_sd_db()
+    if imported.module is None:
+        raise CodexRefusal(
+            imported.problem if imported.provisioned else f"{NOT_INSTALLED} ({imported.problem})"
+        )
+    return imported.module
 
 
 def _open(sd_db):

@@ -1133,6 +1133,7 @@ def residue_section(root: pathlib.Path) -> list[dict[str, Any]]:
 
 def _database_issues(slug: str) -> dict[str, Any] | None:
     """Prefer the shared database; only its absence falls back, never a failure to read it."""
+    sd_lib.import_sd_db()  # the provisioned copy's second try, before the first import (sd:746)
     try:
         import sd_db
         from sd_db.progress import tracker_freshness, tracker_items
@@ -1156,6 +1157,7 @@ def _database_issues(slug: str) -> dict[str, Any] | None:
 
 def contributions_section(root: pathlib.Path) -> dict[str, Any]:
     """Read the shared contribution projection without collecting or opening a writer."""
+    sd_lib.import_sd_db()  # the provisioned copy's second try, before the first import (sd:746)
     try:
         import sd_db
         from sd_db import contributions

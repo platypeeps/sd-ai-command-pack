@@ -53,18 +53,18 @@ class RestoreRefusal(Exception):
 
 def _library():
     """Import `sd_db`, or refuse with the remedy rather than a traceback."""
-    try:
-        # May or may not be resolvable at type-check time: `sd_db` is built
-        # into this virtualenv by the pack's installer, from the `system`
-        # checkout, and this repository does not vendor it. `pyproject.toml`
-        # carries the override rather than an inline ignore here, which
-        # `warn_unused_ignores` turns into a failure on any machine that has
-        # run `make setup`. The ImportError below is a supported state, not
-        # an edge case.
-        import sd_db
-    except ImportError:
-        raise RestoreRefusal(NOT_INSTALLED) from None
-    return sd_db
+    # Through `sd_lib.import_sd_db`, which makes the second try against the
+    # copy `make setup` provisioned (sd:746). An absent library is a supported
+    # state, not an edge case, and `NOT_INSTALLED` is its refusal; a
+    # provisioned copy that will not import is a different fault, and the
+    # helper's sentence names that copy and its error instead of sending the
+    # reader to an installer that has already run.
+    import sd_lib  # noqa: PLC0415 - a sibling; `bin/sd` puts `bin/` on the path
+
+    imported = sd_lib.import_sd_db()
+    if imported.module is None:
+        raise RestoreRefusal(imported.problem if imported.provisioned else NOT_INSTALLED)
+    return imported.module
 
 
 def _open(sd_db):
