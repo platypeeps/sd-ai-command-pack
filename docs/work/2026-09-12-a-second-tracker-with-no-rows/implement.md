@@ -261,11 +261,11 @@ since R11-D48. The pack half is on the order of forty lines in
       `bin/sd-status:3365-3368`; then every closed row the producer kept as
       `KEY  closed  <title>`; then `none` if there were no rows. Nothing
       formats `number` and nothing slices a title. `ORDER`
-      (`tests/test_sd_status.py:3746`) gains the heading after
+      (`tests/test_sd_status.py:3675`) gains the heading after
       `issues (this repo, from the index)`, and the skeleton test's count
       moves from thirteen to fourteen. Every hand-built result the suite
       passes to `render()` gains a `jira` entry, starting with
-      `report` (`tests/test_sd_status.py:3712`) on `ReportSectionTests`,
+      `report` (`tests/test_sd_status.py:3641`) on `ReportSectionTests`,
       which builds `issues` and `contributions` and no `jira` — without
       that edit the existing skeleton tests fail with `KeyError` before
       any new case runs. `skills/sd-status/SKILL.md` is rewritten in three
