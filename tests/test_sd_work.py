@@ -409,6 +409,30 @@ class WorkRegister(unittest.TestCase):
         self.assertEqual(row["branch"], "fix/late")
         self.assertNotIn("origin/", row["branch"])
 
+    def test_a_local_main_is_a_working_branch_when_the_default_is_dev(self):
+        """sd:639. The `{main, master}` pair belongs inside the no-remote guess.
+
+        Every other fixture here has `main` as its default, so none of them
+        can see the difference between "not the default" and "not named main
+        or master". This one reads `origin/HEAD` as `dev`, stands on a local
+        `main`, and expects `main` back -- and stands on `dev` for the control.
+        """
+
+        self.git("commit", "-q", "--allow-empty", "-m", "root")
+        upstream = self.root.parent / "upstream.git"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "dev", str(upstream)],
+                       check=True, capture_output=True, text=True)
+        self.git("remote", "add", "origin", str(upstream))
+        self.git("push", "-q", "origin", "main:dev")
+        self.git("remote", "set-head", "origin", "dev")
+        on_main = json.loads(
+            self.call("work", "register", self.item(), "--json").stdout)
+        self.assertEqual(on_main["item"]["branch"], "main")
+        self.git("checkout", "-q", "-b", "dev", "origin/dev")
+        on_dev = json.loads(
+            self.call("work", "register", self.item("second"), "--json").stdout)
+        self.assertIsNone(on_dev["item"]["branch"])
+
     def test_a_path_that_is_not_a_prd_is_refused_by_the_rule_it_breaks(self):
         """The shape is the library's rule; this proves the sentence arrives.
 

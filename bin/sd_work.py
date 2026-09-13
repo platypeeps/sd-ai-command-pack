@@ -244,11 +244,18 @@ def _working_branch(docs_work: Any, root: pathlib.Path) -> str | None:
     current = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
     if not current:
         return None
-    # `origin/main` -> `main`. `main` and `master` are the two names the
-    # fleet's defaults go by, and the pair a checkout with no remote falls
-    # back to, where `origin/HEAD` is unreadable and `default_branch` guesses.
+    # `origin/main` -> `main`. When `origin/HEAD` is unreadable -- a checkout
+    # with no remote -- `default_branch` guesses `origin/main`, and `main` and
+    # `master` are the two names the fleet's defaults go by, so the guess is
+    # widened to the pair. When it was read, the read name alone is the
+    # default: a local `main` in a repository whose default is `dev` is a
+    # working branch by this function's own definition, and the unconditional
+    # pair discarded it (sd:639).
     _, _, default = docs_work.default_branch(root).partition("/")
-    if current in {default, "main", "master"}:
+    read = sd_lib.git_output(
+        ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], root)
+    defaults = {default} if read else {default, "main", "master"}
+    if current in defaults:
         return None
     return current
 
