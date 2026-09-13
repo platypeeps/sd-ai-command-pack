@@ -31,6 +31,22 @@ behind `try`, and spelled four ways, and a textual search for the helper's
 name is satisfied by a comment. "Earlier line" is textual order, not control
 flow -- a helper call in a branch that did not run still counts -- which is
 the price of a check that does not execute anything.
+
+Known limits, found by adversarial review on PR #907 and left open because
+each needs data flow or execution this check does not do. The rule passes,
+wrongly, on:
+
+  - an import inside a `lambda`, which is not a scope the walk visits;
+  - a helper call in a conditional branch, or inside a conditional wrapper
+    (one that calls the helper on only some paths);
+  - a helper call on the same line as the import, or after it on that line;
+  - resolution by name only: `self.import_sd_db()`, `anything.import_sd_db()`
+    or a local `def import_sd_db` all count as the helper, whatever the owner;
+  - a module name that is not a literal (`import_module(name)`), including an
+    f-string whose leading part is a variable;
+  - a function whose `sd_db` parameter has a default, so a caller can omit it;
+  - a generator whose helper call precedes the import but never runs because
+    the generator is not consumed.
 """
 
 from __future__ import annotations

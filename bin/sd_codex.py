@@ -113,9 +113,9 @@ def _library():
 
     imported = sd_lib.import_sd_db()
     if imported.module is None:
-        raise CodexRefusal(
-            imported.problem if imported.provisioned else f"{NOT_INSTALLED} ({imported.problem})"
-        )
+        # `NOT_INSTALLED` already says "not installed"; the helper's sentence
+        # for that fault would only say it a second time.
+        raise CodexRefusal(imported.problem if imported.provisioned else NOT_INSTALLED)
     return imported.module
 
 

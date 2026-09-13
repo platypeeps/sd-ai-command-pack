@@ -1326,7 +1326,7 @@ def open_library(ctx: Context):
     """
     imported = sibling("sd_lib").import_sd_db()
     if imported.module is None:
-        return None, f"sd_db not importable ({imported.problem}); trials unavailable"
+        return None, f"{imported.problem}; trials unavailable"
     sd_db = imported.module
     path = sd_db.default_path(ctx.home)
     if not path.exists():

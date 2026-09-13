@@ -431,8 +431,7 @@ class TheRefusalNamesTheFault(unittest.TestCase):
 
     def test_nothing_to_import_gets_the_installer(self):
         said = self.refusal("sd_db is not installed here: No module named 'sd_db'", "")
-        self.assertIn("sd-install", said)
-        self.assertIn("No module named 'sd_db'", said)
+        self.assertEqual(said, sd_codex.NOT_INSTALLED, "said once, not NOT_INSTALLED plus the helper's echo")
 
     def test_a_provisioned_copy_that_will_not_import_is_not_called_absent(self):
         said = self.refusal("sd_db is provisioned at /pack/site but will not import: broken", "/pack/site")
