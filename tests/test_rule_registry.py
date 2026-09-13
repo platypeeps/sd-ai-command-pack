@@ -72,7 +72,12 @@ ENFORCEMENT = re.compile(r"\b(refuses|never|always|cannot)\b")
 #: A definition of a rule id, as this repository has always written one: a run
 #: of bold text opening with the id. There is no other form, because until now
 #: there was no registry -- which is the finding, not an accident.
-DEFINITION = re.compile(r"\*\*(R\d+-D\d+)\b")
+#:
+#: Built from `sd_rules.RULE_ID` rather than restating it. A second copy of the
+#: grammar is the second-list defect this module exists to end, and writing one
+#: here -- inside the check that ends it -- is the shape review already caught
+#: once in this branch. `test_the_rule_id_grammar_has_one_source` holds it.
+DEFINITION = re.compile(r"\*\*(" + sd_rules.RULE_ID.pattern + r")")
 
 #: A quoted run in a file no Python parser will read. Single and double quotes
 #: stop at a newline; a backtick run does not, because a JavaScript template
@@ -105,13 +110,24 @@ HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
 DANGLING_RULE_IDS = frozenset({"R11-D1", "R11-D30", "R11-D46", "R5-D1"})
 
 #: Live prose citations whose only definition sits inside `docs/work/archive`.
-#: Measured at 26 on `cddd3b98`. More than half the rule ids in live prose
-#: point only into the archive -- into pages this pack's own citation gate
-#: treats as historical records rather than as current statements.
+#: 26 of them on `cddd3b98`. More than half the rule ids in live prose point
+#: only into the archive -- into pages this pack's own citation gate treats as
+#: historical records rather than as current statements.
 #:
-#: This is the backfill's meter. Each id moved into a registry row takes this
-#: number down by one, and the assertion below proves it fell.
-ARCHIVE_ONLY_CITATIONS = 26
+#: This is the backfill's meter. Each id moved into a registry row takes one
+#: entry out, and the assertion below proves it went.
+#:
+#: A set, not a count, for the reason `DANGLING_RULE_IDS` already gives: no
+#: arithmetic can hide one behind another being fixed. Held as a count, this
+#: baseline passed unchanged when one stranded id was resolved and a different
+#: one was newly stranded in the same change -- two baselines in one file
+#: keeping two different standards, which review caught.
+STRANDED_RULE_IDS = frozenset({
+    "R10-D1", "R10-D2", "R10-D3", "R10-D4", "R10-D5", "R10-D6", "R10-D7",
+    "R11-D10", "R11-D12", "R11-D13", "R11-D14", "R11-D15", "R11-D16",
+    "R11-D17", "R11-D18", "R11-D19", "R11-D20", "R11-D21", "R11-D23",
+    "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D4", "R11-D5", "R11-D6",
+})
 
 #: Tool-behaviour claims in skills that cite no rule id, per document.
 #: Measured on `cddd3b98` by `uncited_skill_claims` below.
@@ -148,26 +164,55 @@ def tracked_paths(*pathspecs: str) -> list[pathlib.Path]:
     return [REPO_ROOT / name for name in output.split("\0") if name]
 
 
+#: Tracked files the walk could not read, or that resolve outside the
+#: repository. Never silently dropped: `test_the_corpus_is_whole` names them.
+UNREADABLE: list[str] = []
+
+
 def read_corpus(*pathspecs: str) -> list[tuple[str, str]]:
     """Every tracked file matching `pathspecs`, as `(path, text)`, minus this one.
 
     Read with `errors="replace"` rather than filtered by suffix: a rule id
     cited from a shell script, a JSON schema or a workflow is still a citation,
     and picking suffixes by hand would be the listed-roster mistake one layer
-    down. A file the process cannot open is skipped rather than fatal, because
-    a permission accident should not silently empty a baseline.
+    down.
+
+    **Never `continue` without recording.** The first draft swallowed `OSError`
+    so that "a permission accident should not silently empty a baseline" -- and
+    silently emptying a baseline is exactly what it did. A tracked file that
+    cannot be read drops out of leg b's measured set, the count falls, and an
+    equality baseline that only ever fires upward reports success on a smaller
+    corpus. `tests/test_code_health.py` states the rule this now follows: *"The
+    measurement must fail loudly rather than pass on a smaller corpus."*
+
+    **Resolved and contained before it is opened.** `git ls-files` lists a
+    symlink as readily as a regular file and `read_text` follows it, so a
+    tracked `skills/x.md -> /etc/passwd` would read a file of the tree's
+    choosing into the census. `contained` in `tests/test_doc_citations.py`
+    already guards its corpus this way, for the same reason and against the
+    same hole.
     """
 
     corpus = []
+    inside = REPO_ROOT.resolve()
     for path in tracked_paths(*pathspecs):
         relative = path.relative_to(REPO_ROOT).as_posix()
         if relative == SELF:
             continue
         try:
+            resolved = path.resolve(strict=True)
+        except OSError as failure:
+            UNREADABLE.append(f"{relative}: will not resolve ({failure})")
+            continue
+        if not resolved.is_relative_to(inside):
+            UNREADABLE.append(f"{relative}: resolves outside the repository, "
+                              f"to {resolved}")
+            continue
+        try:
             corpus.append((relative, path.read_text(encoding="utf-8",
                                                     errors="replace")))
-        except OSError:
-            continue
+        except OSError as failure:
+            UNREADABLE.append(f"{relative}: will not read ({failure})")
     return corpus
 
 
@@ -367,6 +412,37 @@ def markdown_headings(text: str) -> set[str]:
     return headings
 
 
+def section_body(text: str, heading: str) -> str:
+    """The lines under `heading`, to the next heading of the same or higher level.
+
+    Leg a's guarantee is that the rule is taught *where the row says it is
+    taught*. Aggregating ids across every skill document, which is what this
+    replaced, satisfied that sentence with a citation in an unrelated skill --
+    the row could point at a real heading whose section never mentions the id,
+    and both leg a and the section check passed.
+    """
+
+    body: list[str] = []
+    depth = None
+    fenced = False
+    for line in text.splitlines():
+        if FENCE.match(line):
+            fenced = not fenced
+            if depth is not None:
+                body.append(line)
+            continue
+        match = None if fenced else HEADING.match(line)
+        level = len(line) - len(line.lstrip("#")) if match else 0
+        if match and match.group(1).strip() == heading and depth is None:
+            depth = level
+            continue
+        if depth is not None:
+            if match and level <= depth:
+                break
+            body.append(line)
+    return "\n".join(body)
+
+
 def teaching_section_errors() -> list[str]:
     """Every live row whose `teaches` does not resolve to a real section.
 
@@ -417,20 +493,30 @@ class Registry(unittest.TestCase):
         """A row whose checker is missing is a failure, never a comment.
 
         The checker is held as the function object, so a row naming something
-        that does not exist raises at import. This asserts the weaker thing the
-        import cannot: that the object a row does hold is callable, and that a
-        repealed row holds nothing, because a withdrawn rule has nothing left
-        to run.
+        that does not exist raises at import. This asserts the two things the
+        import cannot: that a live row's checker is callable, and that a
+        repealed row holds `None` exactly -- a withdrawn rule has nothing left
+        to run, and a stale name left in its place is a tombstone that still
+        looks like a checker.
         """
 
-        wrong = [rule.id for rule in sd_rules.RULES
-                 if (rule.state == sd_rules.LIVE) != callable(rule.checker)]
+        wrong = []
+        for rule in sd_rules.RULES:
+            if rule.state == sd_rules.LIVE and not callable(rule.checker):
+                wrong.append(f"{rule.id}: live, but its checker "
+                             f"{rule.checker!r} is not callable")
+            elif rule.state == sd_rules.REPEALED and rule.checker is not None:
+                wrong.append(f"{rule.id}: repealed, but still holds "
+                             f"{rule.checker!r}")
         self.assertEqual(wrong, [], f"""
 A registry row's checker does not match its state.
 
 {_lines(wrong)}
 
-A `live` row must hold a callable. A `repealed` row must hold `None`.""")
+A `live` row must hold a callable. A `repealed` row must hold `None` -- not a
+leftover name, which the first form of this check accepted: `(state == LIVE)
+!= callable(checker)` is False for a repealed row holding the *string*
+"stale_name", because neither side is true.""")
 
     def test_every_rule_id_is_unique_and_well_formed(self):
         """Two rows sharing an id make the lookup silently drop one.
@@ -451,19 +537,33 @@ A `live` row must hold a callable. A `repealed` row must hold `None`.""")
         self.assertEqual(len(sd_rules.BY_RULE_ID), len(sd_rules.RULES),
                          "BY_RULE_ID dropped a row; two rows share an id")
 
-    def test_every_rule_declares_a_known_scope_and_state(self):
-        """`scope` and `state` are read by consumers, so a typo must fail here."""
+    def test_every_row_is_completely_filled_in(self):
+        """Every field a consumer reads is present and recognised.
 
-        wrong = [f"{rule.id}: scope={rule.scope!r} state={rule.state!r}"
-                 for rule in sd_rules.RULES
-                 if rule.scope not in sd_rules.SCOPES
-                 or rule.state not in sd_rules.STATES]
+        `scope` and `state` are read by consumers, so a typo must fail here.
+        `subject` -- what the rule checks, in words -- was checked by nothing,
+        so a row with `subject=""` passed every test and the registry could
+        carry a rule nobody could describe. `tests/test_sd_status.py` holds
+        `CLASSES` to the same standard, asserting `kind.source and kind.what`
+        on the table this one is modelled on.
+        """
+
+        wrong = []
+        for rule in sd_rules.RULES:
+            if not rule.subject.strip():
+                wrong.append(f"{rule.id}: no subject -- say what it checks")
+            if not rule.teaches.strip():
+                wrong.append(f"{rule.id}: no teaches -- say where it is taught")
+            if rule.scope not in sd_rules.SCOPES:
+                wrong.append(f"{rule.id}: scope={rule.scope!r} is not one of "
+                             f"{sd_rules.SCOPES}")
+            if rule.state not in sd_rules.STATES:
+                wrong.append(f"{rule.id}: state={rule.state!r} is not one of "
+                             f"{sd_rules.STATES}")
         self.assertEqual(wrong, [], f"""
-A row declares a scope or a state nothing recognises.
+A registry row is missing a field a consumer reads.
 
-{_lines(wrong)}
-
-Scopes are {sd_rules.SCOPES}. States are {sd_rules.STATES}.""")
+{_lines(wrong)}""")
 
     def test_no_consumer_carries_a_second_list(self):
         """A rule id written as data outside the registry is a second list.
@@ -509,6 +609,51 @@ inside embedded CSS or JavaScript held in a Python string. Rephrase the
 citation so it sits outside the quotes.""")
 
 
+    def test_the_rule_id_grammar_has_one_source(self):
+        """`DEFINITION` is built from `sd_rules.RULE_ID`, never beside it.
+
+        Two regular expressions describing one grammar are two things that can
+        disagree, which is the defect the registry exists to end. This holds
+        the derivation structurally -- the id pattern is *inside* the
+        definition pattern -- and behaviourally, so a derivation that compiled
+        but matched differently still fails.
+        """
+
+        self.assertIn(sd_rules.RULE_ID.pattern, DEFINITION.pattern,
+                      "DEFINITION restates the rule-id grammar instead of "
+                      "building on sd_rules.RULE_ID")
+        for sample in ("R1-D1", "R11-D46", "R123-D7"):
+            self.assertTrue(sd_rules.RULE_ID.fullmatch(sample), sample)
+            self.assertEqual(DEFINITION.findall(f"**{sample}**, a rule."),
+                             [sample], sample)
+        for reject in ("Q1-D1", "R1-E1", "RD1"):
+            self.assertIsNone(sd_rules.RULE_ID.fullmatch(reject), reject)
+            self.assertEqual(DEFINITION.findall(f"**{reject}**, not a rule."),
+                             [], reject)
+
+    def test_the_corpus_is_whole(self):
+        """Every tracked file was read, and every one of them is in the tree.
+
+        The measurement must fail loudly rather than pass on a smaller corpus,
+        which is the rule `tests/test_code_health.py` states for its own walk.
+        A tracked file that cannot be read drops out of leg b's measured set
+        and the count falls, and an equality baseline reports success on the
+        smaller corpus. A tracked symlink pointing out of the repository is the
+        same hole from the other side: it reads a file of the tree's choosing
+        into the census.
+        """
+
+        UNREADABLE.clear()
+        read_corpus()
+        self.assertEqual(UNREADABLE, [], f"""
+A tracked file could not be read, or resolves outside the repository.
+
+{_lines(UNREADABLE)}
+
+Every baseline in this module is measured over that corpus, so none of them
+means anything until this is clear.""")
+
+
 # --------------------------------------------------------------------------
 # Leg a -- every rule is taught
 # --------------------------------------------------------------------------
@@ -517,8 +662,14 @@ citation so it sits outside the quotes.""")
 class LegA(unittest.TestCase):
     """A rule nobody teaches is a rule authors meet only as a CI failure."""
 
-    def test_every_live_rule_is_cited_by_a_skill(self):
-        """The rule id appears in at least one skill document.
+    def test_every_live_rule_is_cited_by_the_section_that_teaches_it(self):
+        """The rule id appears in the body of the section the row names.
+
+        Not "somewhere in `skills/`", which is what this asked first. A row can
+        point at a real heading whose section never mentions the id while an
+        unrelated skill happens to cite it, and the aggregate form passed on
+        exactly that -- so leg a's stated guarantee, that the rule is taught
+        where the row says it is taught, was not what it checked.
 
         Citation is what is checked. *Not restating the rule* is the other half
         of the convention and it has no mechanical check -- judging whether two
@@ -528,17 +679,26 @@ class LegA(unittest.TestCase):
         the check built to end it would be absurd.
         """
 
-        taught = set()
-        for _, text in skill_documents():
-            taught.update(sd_rules.RULE_ID.findall(text))
-        untaught = sorted(rule.id for rule in sd_rules.RULES
-                          if rule.state == sd_rules.LIVE and rule.id not in taught)
+        documents = dict(skill_documents())
+        untaught = []
+        for rule in sd_rules.RULES:
+            if rule.state != sd_rules.LIVE:
+                continue
+            path, _, heading = rule.teaches.partition("#")
+            if path not in documents:
+                # Reported by the section check, which owns that failure.
+                continue
+            body = section_body(documents[path], heading.strip())
+            if rule.id not in body:
+                untaught.append(f"{rule.id}: {rule.teaches} does not cite it")
         self.assertEqual(untaught, [], f"""
-A live registry rule is taught by no skill.
+A live registry rule is not cited by the section that teaches it.
 
 {_lines(untaught)}
 
-Cite the id from the skill section named in the row's `teaches` field.""")
+Cite the id inside that section. A citation elsewhere in `skills/` does not
+count: the row names where the rule is taught, and that is where a reader who
+follows the row will look.""")
 
     def test_every_live_rule_points_at_a_skill_section_that_exists(self):
         """`teaches` is `path#heading`, and every part of that has to resolve.
@@ -643,25 +803,29 @@ no document defines and the registry does not carry -- register it in
 from `DANGLING_RULE_IDS` in the same change.""")
 
     def test_live_citations_resolving_only_into_the_archive_match_their_baseline(self):
-        """The backfill's meter.
+        """The backfill's meter, held as a set rather than as a count.
 
         A live document citing a rule whose only definition is an archived
         planning page is citing a source the pack has stopped maintaining. Each
-        id moved into a registry row takes this number down by one, and this
-        assertion is what proves it fell rather than being asserted to have.
+        id moved into a registry row takes one entry out, and this assertion is
+        what proves it went rather than being asserted to have.
+
+        The count form of this passed a change that resolved one stranded id
+        and stranded a different one, because 26 is 26. `DANGLING_RULE_IDS` was
+        already a set, and its reason applies here word for word: no arithmetic
+        can hide one behind another being fixed.
         """
 
         cited = cited_rule_ids(live_only=True)
         archive_only = defined_rule_ids(live_only=False) - defined_rule_ids(live_only=True)
-        stranded = sorted((cited & archive_only) - registered_rule_ids())
-        self.assertEqual(len(stranded), ARCHIVE_ONLY_CITATIONS, f"""
+        stranded = (cited & archive_only) - registered_rule_ids()
+        self.assertEqual(stranded, STRANDED_RULE_IDS, """
 Live prose citations resolving only into `docs/work/archive` changed.
 
-{_lines(stranded)}
-
-Measured {len(stranded)} against a baseline of {ARCHIVE_ONLY_CITATIONS}. Moving
-one into a registry row lowers it; lower `ARCHIVE_ONLY_CITATIONS` in the same
-change. A rise means a new live document started citing an archived ruling.""")
+Above: measured first, baseline second. An id that appeared is a live document
+newly citing an archived ruling. An id that went is the good case -- moved into
+a registry row, or its prose repointed -- so drop it from `STRANDED_RULE_IDS`
+in the same change.""")
 
     def test_every_dangling_baseline_entry_still_earns_its_place(self):
         """A baseline entry for an id nobody cites any more is a stale record.
