@@ -2,8 +2,10 @@
 
 ## Budget and shape
 
-Eight steps, most of them a pair of pull requests across two repositories. The
-boundary is sd:392's: views and collectors land in `platypeeps/system`, verbs and
+Ten steps, numbered 0 to 9. Step 0 is a dependency, steps 1 to 7 are the
+migration and most of them are a pair of pull requests across two repositories,
+and steps 8 and 9 are the citation sweep and the closing notes. The boundary is
+sd:392's: views and collectors land in `platypeeps/system`, verbs and
 caps land here, and nothing in the pack half depends on the newer system side
 until the step that says so.
 
