@@ -27,19 +27,21 @@ tests.
       `local-cron-jobs/cron-jobs.sh` sources before the nightly job and what
       a login shell reads. This is the operator's step; the PRD's "if yes"
       branch puts it first and this checklist does not reorder it.
-      Verify: in a fresh login shell, a presence check over the three names
-      prints `set` three times and prints no value —
+      Verify: in a fresh login shell, a presence check that prints the
+      *missing* names and never a value —
       `python3 -c 'import os; print([n for n in ("JIRA_BASE_URL","JIRA_EMAIL","JIRA_API_TOKEN") if not os.environ.get(n)])'`
-      prints `[]`. Today it prints `['JIRA_BASE_URL', 'JIRA_EMAIL']`.
+      — prints `[]`. Today it prints `['JIRA_BASE_URL', 'JIRA_EMAIL']`.
 
 - [ ] **2. One proving collect against the loop that exists.** Run
-      `sd-dashboard index` — the verb at `bin/sd-dashboard:250` — with the
-      three variables exported. This is the PRD's "one successful collect
+      `bin/sd-dashboard index` from the checkout — the verb at
+      `bin/sd-dashboard:250`; the pack links no executable anywhere
+      (`AGENTS.md:57-69`) — with the three variables exported. This is the PRD's "one successful collect
       against the existing `dashboard/collect.py:168` loop proving a row can
       be produced at all", and it costs no code.
       Verify: the run prints `issues[jira]: N new, 0 updated, M open` rather
       than `issues[jira]: not collected (...)`, and
-      `sqlite3 ~/.cache/sd-ai-command-pack/index.sqlite "select tracker, count(*) from issue group by tracker"`
+      `sqlite3 "$(python3 -c 'from dashboard import store; print(store.index_path())')" "select tracker, count(*) from issue group by tracker"`
+      — the path derived, because `index_path` honours `XDG_CACHE_HOME` —
       returns a `jira` row where today it returns `github|1175` alone. Then
       `select url, state from issue where tracker='jira' and url like '%/browse/LOG-23818'`
       returns one row. **If it returns none while the run succeeded**, stop:
@@ -53,25 +55,45 @@ tests.
       `platypeeps/system`, lift `dashboard/jira.py` whole — module docstring
       with both lists, `settings`, `missing`, `window_start`,
       `window_minutes`, `_request`, `account_id`, `search`, `state_of`,
-      `normalize`, `collect` — with three changes and no others: `collect`
-      returns `Collected` rather than the pack's dict; `window_start` calls
-      the library's `parse_iso` at `sd_db/shadow_sync.py:119` instead of
-      importing the pack's `github` module; and `fetch_issue`
-      (`dashboard/jira.py:330`) does not move, because it belongs to
-      `sd-trackers ref`, which the item says needs no change. `TRACKER =
+      `normalize`, `collect` — with four changes and no others. (i) `collect`
+      returns `Collected` rather than the pack's dict. (ii) Every use of the
+      pack's `github` module goes: `window_start` calls the library's
+      `parse_iso` at `sd_db/shadow_sync.py:119`, and the three `github.iso`
+      calls in `collect` (`dashboard/jira.py:285`, on its missing-variable,
+      failed-`myself` and normal returns) call the library's `iso` at
+      `sd_db/shadow_sync.py:114`; `from . import github` appears nowhere in
+      the new module, and an import of it is the first thing the ported test
+      module would fail on. (iii) `ok` folds truncation in: the pack's
+      `collect` sets `ok` from `not error` alone at `dashboard/jira.py:322`
+      and reports `truncated` beside it, because `refresh_issues` reads only
+      `ok` and the pack never advanced a cursor over a truncated page only
+      because `truncated` was reported, not because it was guarded. The
+      library's `Collected` is `ok=not errors and not truncated`
+      (`sd_db/shadow_sync.py:466`), and the port returns
+      `ok=not error and not cut`, so the watermark guard on `ok` in step 4
+      is sound. (iv) `fetch_issue` (`dashboard/jira.py:330`) does not move,
+      because it belongs to `sd-trackers ref`, which the item says needs no
+      change. `TRACKER =
       "jira"`, `OVERLAP` and `FIRST_RUN_WINDOW` are declared in the module,
       not shared, for the reason `window_start` (`dashboard/jira.py:114`)
       gives. Port `JiraTests` (`tests/test_sd_dashboard_index.py:465`) with
       its `jira_issue` and `jira_transport` fixtures to
       `local-sd-db/tests/test_shadow_jira.py`, asserting on `Collected`
       fields.
-      Verify: the ported suite passes; the three named rules each have a
-      test that reddens under mutation — swap `account_id` for a search
-      (the empty-200 case), compare by email when both ids are present,
-      and format the JQL with an absolute timestamp — and `diff -q` reports
-      the tree identical after each is reverted. Control: a transport
-      returning one `To Do` issue yields exactly one `Collected.issues` row
-      with `tracker == "jira"`, `number is None`, `state == "open"`.
+      Verify: the ported suite passes, and each of the three carried-over
+      rules is guarded by a test that goes red under the mutation that
+      breaks it. The rules, as `dashboard/jira.py:254-258` implements them:
+      `myself` is the availability check; account ids are compared when both
+      sides have one and email only as the fallback; the JQL window is
+      relative minutes. The mutations, each of which must redden its test
+      and be reverted with `diff -q` reporting the tree identical: replace
+      the `myself` call with the search itself (the empty-200 case passes
+      as "no issues"); compare by email even when both ids are present;
+      format the JQL with an absolute timestamp. A fourth, for (iii): set
+      `ok` from `not error` alone and the truncation test in step 4 (c)
+      reddens. Control: a transport returning one `To Do` issue yields
+      exactly one `Collected.issues` row with `tracker == "jira"`,
+      `number is None`, `state == "open"`.
 
 - [ ] **4. The library dispatch, the export, and the docstring.** In
       `sd_db/shadow_sync.py`: `sync` keeps its signature; `tracker="github"`
@@ -102,8 +124,10 @@ tests.
       no row, writes no watermark, makes no request, writes one
       `tracker-sync:jira` heartbeat whose body carries the reason, and
       returns `ok False, configured False`; (c) a transport that returns `isLast: false` with
-      no token returns `truncated == ["jql"]` and the watermark is not
-      written — mutation: drop the `result.ok` guard and (c) reddens; (d)
+      no token returns `ok False, truncated == ["jql"]`, the rows it did
+      return are stored, and the watermark is not written — two mutations,
+      each of which reddens (c): drop the `result.ok` guard in `_sync_jira`,
+      and set `ok` from `not error` alone in `shadow_jira.collect`; (d)
       `sync(connection, tracker="nope")` raises `ValueError`; (e) the
       GitHub path's existing tests are unchanged and green, which is the
       control that the dispatch did not touch them. Then
@@ -126,12 +150,24 @@ tests.
       For each name it calls `sd_db.sync_shadow(connection, tracker=name,
       **options)` and `report_sync` (`bin/sd_shadow.py:73`), which gains the
       name and prefixes every line it prints with `shadow sync[<name>]:`.
+      The lines `_library_lines` (`bin/sd_shadow.py:106`) forwards already
+      begin `shadow sync: ` — `Synced.report` at `sd_db/shadow_sync.py:547`
+      writes that head on each, and the test double at
+      `tests/test_sd_suggest.py:606-607` reproduces it — so the verb strips
+      that head before adding its own, and never prints
+      `shadow sync[jira]: shadow sync: ...`. A forwarded line that does not
+      carry the head is prefixed as it is.
       When `getattr(result, "configured", True)` is false, `report_sync`
       prints the single line `shadow sync[<name>]: not collected (<reason>)`
       and returns 0 regardless of `--strict`. The exit code is the maximum
-      over trackers. `docs/workflow-controls.md:197-205` gains two
-      sentences: the flags are GitHub's, and an unconfigured tracker is a
-      line.
+      over trackers. `docs/workflow-controls.md:197-205` is rewritten, not
+      appended to: its first sentence, "`sd shadow sync --strict` fails when
+      any requested tracker interval remains incomplete", becomes "fails
+      when any *configured* tracker's interval remains incomplete; a tracker
+      whose variables are unset is reported as not collected and does not
+      fail the run", and a sentence follows saying the recovery flags bound
+      GitHub only. Left as it stands, the paragraph would tell the operator
+      that an unconfigured Jira fails the nightly.
       Verify: in `tests/test_sd_suggest.py`, beside `TheShadowSync`
       (`tests/test_sd_suggest.py:412`): (a) with the pinned library, the
       four existing tests pass unchanged — the substring assertions such as
@@ -140,7 +176,11 @@ tests.
       is `("github", "jira")` and whose `sync_shadow` returns a `Synced`
       with `configured=False` for `jira`, `--strict` exits 0 and the output
       carries `shadow sync[jira]: not collected (JIRA_BASE_URL and
-      JIRA_EMAIL not set)` — the item's second acceptance line; (c) same
+      JIRA_EMAIL not set)` — the item's second acceptance line — and, with
+      the fake's `report()` returning a `shadow sync: contribution detail
+      backlog: 3 queued` line for `github`, the output carries exactly
+      `shadow sync[github]: contribution detail backlog: 3 queued` and no
+      line containing `shadow sync[github]: shadow sync:`; (c) same
       fake, `jira` returning `ok=False, configured=True, reason="Jira
       rejected the credentials (401 Unauthorized); check JIRA_EMAIL and
       JIRA_API_TOKEN"`, `--strict` exits 1 and the reason is printed — the
@@ -149,32 +189,56 @@ tests.
       Mutation: make the unconfigured branch fall through to `cursor held`
       and (b) reddens on the exit code.
 
-- [ ] **7. `sd-status` shows the row.** `_database_issues`
-      (`bin/sd-status:1134`) keeps its GitHub call as it is. A new
-      `_jira_issues(connection)` calls `tracker_items(connection,
-      tracker="jira", state="open")` — no `repo` — and
-      `tracker_freshness(connection, "jira")`, and `_render_issues`
-      (`bin/sd-status:3378`) gains a block after the GitHub rows: the
-      freshness line for `jira`, then one row per issue as
-      `KEY  state  title[:60]` with `KEY` = `row["url"].rpartition("/")[2]`,
-      through a renderer that never formats `number`. When
-      `last_success_at` is `None` the block is the one line
-      `jira: never collected`, with ` (<reason>)` appended when the latest
-      heartbeat carries one; it is keyed on `last_success_at` and not on the
-      state word because `tracker_freshness` says `degraded`, not `never`,
-      once a failed heartbeat exists (design, "Readers"). `skills/sd-status/SKILL.md:41` gains the
-      block's description.
+- [ ] **7. `sd-status` shows the row, in its own section.** The issues
+      section cannot carry it: `issues_section` (`bin/sd-status:1181`)
+      returns `no GitHub remote` at `bin/sd-status:1197-1199` before any
+      database is opened, `_database_issues` (`bin/sd-status:1134`) closes
+      its connection before `_render_issues` (`bin/sd-status:3378`) runs,
+      and the heading says `this repo, from the index`. Neither function is
+      touched. A new producer `jira_section()` opens its own read-only
+      connection when `sd_db.default_path()` exists — the same gate
+      `_database_issues` uses, and the same `available: False, reason`
+      shape when it does not — and calls `tracker_items(connection,
+      tracker="jira", state=None)` with no `repo`, and
+      `tracker_freshness(connection, "jira")`. It is added to the status
+      dict beside `"issues"` at `bin/sd-status:3061` under the key `jira`,
+      so `--json` carries it. A new `_render_jira` prints the heading
+      `jira (shared database, all repositories)` after the issues section:
+      the freshness line, keyed on `last_success_at` and not on the state
+      word because `tracker_freshness` says `degraded`, not `never`, once a
+      failed heartbeat exists (design, "Readers") — `never collected`, with
+      ` (<reason>)` when the latest heartbeat carries one, else the
+      `external context` pair; then every open row as
+      `KEY  open  title[:60]` with `KEY` = `row["url"].rpartition("/")[2]`;
+      then every closed row whose `last_seen` is within seven days as
+      `KEY  closed  title[:60]`; then `none` if there were no rows. Nothing
+      formats `number`. `ORDER` (`tests/test_sd_status.py:3555`) gains the
+      heading after `issues (this repo, from the index)`, and the skeleton
+      test's count moves from thirteen to fourteen.
+      `skills/sd-status/SKILL.md:41` is rewritten, not appended to: the
+      issues row keeps saying "for this repository", and a new row for the
+      `jira` section says it is the operator's Jira involvement from the
+      shared database, across every repository, and is not scoped to the
+      checkout.
       Verify, in `tests/test_sd_status.py`: (a) a fixture database holding
       one `jira` row with `number NULL` and `url .../browse/LOG-23818`
-      renders `LOG-23818  open  Benchmark harness` and raises nothing — the
+      renders `LOG-23818  open  Benchmark harness` under the new heading in
+      a checkout **with no GitHub remote**, and raises nothing — the
       regression for the `:<6` format at `bin/sd-status:3394`, which raises
-      `TypeError` on `None` today; (b) the same database with no `jira`
-      rows and no heartbeat renders `jira: never collected`; (c) a
-      `tracker-sync:jira` heartbeat with `ok False` and a reason, and no
-      watermark, renders `jira: never collected (<reason>)` even though
-      `tracker_freshness` reports `degraded`; (d) the GitHub block's existing assertions are unchanged —
-      the control. Mutation: route the Jira row through the GitHub renderer
-      and (a) reddens with the `TypeError`.
+      `TypeError` on `None` today, and the proof the section does not sit
+      behind the slug gate; (b) the same database with no `jira` rows and
+      no heartbeat renders `never collected` then `none`; (c) a
+      `tracker-sync:jira` heartbeat with `ok False` and a reason, no
+      watermark, and two stored rows — the partial-collect fixture —
+      renders `never collected (<reason>)` **and** both rows, because a
+      truncated first run stores what it saw; (d) a closed row with
+      `last_seen` eight days old is absent and the same row at six days
+      prints as `closed`;
+      (e) the issues section's existing assertions are unchanged, including
+      `no GitHub remote` in a checkout without one — the control. Mutation:
+      route the Jira row through `_render_issues` and (a) reddens with the
+      `TypeError`; gate `jira_section` on the slug and (a) reddens on the
+      missing heading.
 
 - [ ] **8. The first real sync, and the measurement.** With steps 1 to 7
       landed and the venv reinstalled at the new pin, run
@@ -186,8 +250,9 @@ tests.
       today it returns one; `select key from state where kind='watermark'
       group by key` returns `github` and `jira`; `select url, state from
       shadow where tracker='jira' and url like '%/browse/LOG-23818'` returns
-      one row; `sd-status` in any checkout prints `LOG-23818` in the issues
-      section. The nightly's next run, read from its log the following
+      one row; `bin/sd-status` in any checkout, with or without a GitHub
+      remote, prints `LOG-23818` under `jira (shared database, all
+      repositories)`. The nightly's next run, read from its log the following
       morning, carries both prefixes.
 
 - [ ] **9. Correct the item.** The PRD's last acceptance line: sd:361's body

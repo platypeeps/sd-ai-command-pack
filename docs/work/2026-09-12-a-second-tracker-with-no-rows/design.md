@@ -29,18 +29,20 @@ What remains is exactly the port.
 
 The counts note #1149 ran, re-run today against the live database
 `sd_db.default_path()` opened read-only, and the legacy index at the path
-`index_path` (`dashboard/store.py:66`) builds:
+`index_path` (`dashboard/store.py:66`) builds — derived, not spelled, because
+that function honours `XDG_CACHE_HOME` (unset on this machine when this ran):
 
 ```
 python - <<'EOF'
-import sd_db, sqlite3, os
+import sd_db, sqlite3
+from dashboard import store
 c = sqlite3.connect(f"file:{sd_db.default_path()}?mode=ro", uri=True)
 print(c.execute("pragma user_version").fetchone()[0])
 print([r[0] for r in c.execute("select name from sqlite_master where type='index' and tbl_name='shadow'")])
 print(list(c.execute("select tracker, count(*) from shadow group by tracker")))
 print(list(c.execute("select key, count(*), max(timestamp) from state where kind='watermark' group by key")))
 print(c.execute("select body from state where kind='watermark' and resolved_at is not null order by timestamp desc, id desc limit 1").fetchone()[0])
-l = sqlite3.connect(f"file:{os.path.expanduser('~/.cache/sd-ai-command-pack/index.sqlite')}?mode=ro", uri=True)
+l = sqlite3.connect(f"file:{store.index_path()}?mode=ro", uri=True)
 print(list(l.execute("select tracker, count(*) from issue group by tracker")), list(l.execute("select * from tracker_watermark")))
 EOF
 ```
@@ -53,7 +55,7 @@ EOF
 | `tracker-sync:*` heartbeats | — | `tracker-sync:github` only, 10 rows |
 | `sd.db` `user_version` | 7 (note #1181, "until it runs") | **8**; the only index on `shadow` is `shadow_by_tracker_url` |
 | Legacy `index.sqlite` `issue` by tracker | `github` 1,175 | **`github` 1,175**; watermark `2026-09-01T05:23:37Z`, unmoved |
-| `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_JQL` in this shell | 1 of 3 set | **token set; base URL, email and JQL unset** (presence only) |
+| `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` (required) and `JIRA_JQL` (optional) in this shell | 1 of 3 required set | **1 of 3 required set — the token; base URL and email unset; the optional JQL unset** (presence only) |
 | Same four in the nightly and dashboard launch agents | — | none of the four named in either plist |
 
 Nothing has moved since note #1149: same 3,668, same ten watermark rows, same
@@ -110,7 +112,14 @@ Per tracker, already. `read_watermark` at `sd_db/shadow_sync.py:143` binds
 `(WATERMARK, tracker)` and `write_watermark` at `sd_db/shadow_sync.py:164`
 records `key=tracker`. Jira's cursor lives under key `jira` in the same
 `state` kind, written only when Jira's own collect returned `ok` — no
-errors, no truncation — under the same transaction shape GitHub uses at
+errors, no truncation. **That is a change from the pack module**, whose
+`collect` (`dashboard/jira.py:285`) sets `ok` from `not error` alone at
+`dashboard/jira.py:322` and reports truncation beside it, leaving the
+watermark decision to `refresh_issues`, which reads only `ok`. The library's
+`Collected` convention folds truncation in — `ok=not errors and not
+truncated` at `sd_db/shadow_sync.py:466` — and the port adopts it, so a
+guard on `ok` alone is correct there and a truncated page holds the cursor.
+Written under the same transaction shape GitHub uses at
 `sd_db/shadow_sync.py:629-637`, including the re-read of the cursor under
 the write lock. GitHub's success never moves Jira's cursor; Jira being
 unconfigured never holds GitHub's. That is the rule `refresh_issues` states
@@ -125,8 +134,9 @@ recovery flags do not reach Jira (below).
 
 ### Configuration: environment only, no default host
 
-The four names are the ones `dashboard/jira.py:84-86` already declares and
-`settings` (`dashboard/jira.py:89`) already reads:
+The three required names are the `ENV_*` constants `dashboard/jira.py:84-86`
+declares; the optional fourth is read as a literal inside `settings`
+(`dashboard/jira.py:89`) at `dashboard/jira.py:96`:
 
 | Variable | Required | Read as |
 |---|---|---|
@@ -159,7 +169,7 @@ differently, and the difference is deliberate:
 | Surface | Line | Exit |
 |---|---|---|
 | `sd shadow sync` | `shadow sync[jira]: not collected (JIRA_BASE_URL and JIRA_EMAIL not set)` | 0, even with `--strict` |
-| `sd-status`, issues section | `jira: never collected (JIRA_BASE_URL and JIRA_EMAIL not set)` | unchanged |
+| `sd-status`, `jira` section | `never collected (JIRA_BASE_URL and JIRA_EMAIL not set)`, then the stored rows if any | unchanged |
 | `sd-dashboard index` | `issues[jira]: not collected (JIRA_BASE_URL and JIRA_EMAIL not set)` | 0 — already today, `bin/sd-dashboard:220-221` |
 
 The verb's line is the new one. Its wording matches the dashboard's because
@@ -226,7 +236,7 @@ The PRD records that `LOG-23818`'s state was not re-measured, and this
 document does not re-measure it either. If it has closed since 2026-09-10 the
 row's `state` is `closed`, which is the *correct* answer and is itself the
 third acceptance line. The first window is 90 days
-(`FIRST_RUN_WINDOW`, `dashboard/jira.py:63`), so the tail of Done tickets the
+(`FIRST_RUN_WINDOW`, `dashboard/jira.py:64`), so the tail of Done tickets the
 item lists (`LOG-21060`, `LOG-21118`, `LOG-21119`, `LOG-21338`, `RS-6`
 through `RS-41`) lands as `closed` rows in the same run if their `updated`
 falls inside it.
@@ -249,21 +259,54 @@ hard-coded. Two things are wrong with widening it naively:
    confirmed on this interpreter. The first Jira row the section tried to
    print would take `sd-status` down with a traceback.
 
-So the design is: the issues section gains a **second, unscoped block** for
-Jira, after the GitHub block. It calls `tracker_items(connection,
-tracker="jira", state="open")` with no `repo`, because the operator's Jira
-involvement is not a property of the checkout, and it prints
-`tracker_freshness(connection, "jira")` on its own line. Rows print as
-`KEY  state  title`, key derived from the URL, through a renderer that never
-formats `number`. The block's first line is keyed on `last_success_at`, not
-on the state word: `tracker_freshness` at `sd_db/progress.py:314` answers
-`never` only when there is no success *and* no failed heartbeat, and
-`degraded` the moment a heartbeat with `ok False` exists — which an
-unconfigured Jira writes every night. So when `last_success_at` is `None`
-the block is the one line `jira: never collected`, with ` (<reason>)`
-appended when the latest heartbeat carries one, and nothing else. The sixth
+And a third thing, which rules out a block *inside* the issues section:
+`issues_section` (`bin/sd-status:1181`) returns at `bin/sd-status:1197-1199`
+with `no GitHub remote` before any database is opened, and `_database_issues`
+closes its only connection before `_render_issues` runs. There is no path
+through that section that reaches a Jira row in every checkout, and its
+heading is `issues (this repo, from the index)`, which a global row would
+contradict.
+
+So the design is: a **fourteenth section**, `jira (shared database, all
+repositories)`, rendered after the issues section, with its own producer and
+its own renderer. `jira_section()` opens its own read-only connection when
+`sd_db.default_path()` exists — the same gate `_database_issues` uses — and
+never depends on the checkout's slug. It calls `tracker_items(connection,
+tracker="jira", state=None)` with no `repo`, because the operator's Jira
+involvement is not a property of the checkout, and
+`tracker_freshness(connection, "jira")`. The renderer prints:
+
+1. A freshness line, keyed on `last_success_at` rather than on the state
+   word: `tracker_freshness` at `sd_db/progress.py:314` answers `never` only
+   when there is no success *and* no failed heartbeat, and `degraded` the
+   moment a heartbeat with `ok False` exists — which an unconfigured Jira
+   writes every night. When `last_success_at` is `None` the line is
+   `never collected`, with ` (<reason>)` appended when the latest heartbeat
+   carries one; otherwise it is the `external context: <state>; last
+   successful sync <stamp>` pair the issues section already prints.
+2. **Every stored row, whatever the freshness line says.** The library keeps
+   rows from a partial collect on purpose — `store` runs before the cursor
+   decision at `sd_db/shadow_sync.py:630` — and a first run that truncated
+   has written rows the verb reported as written. Hiding them behind a
+   `never collected` line would contradict the verb. Open rows print first
+   as `KEY  open  title`; closed rows print after them, as
+   `KEY  closed  title`, but only those whose `last_seen` is within seven
+   days, because a Done ticket stops being re-seen once it leaves the JQL
+   window and a permanent list of every ticket ever closed is not a
+   worklist. The key is derived from the URL; nothing formats `number`.
+3. `none` when there are no rows at all.
+
+`state=None` rather than `"open"` because the item's fourth "what to build"
+line and third acceptance line require a close to be *recorded*, and this
+document allows `LOG-23818` to have closed before the first run. A reader
+that filtered to open would store the close and hide it. The sixth
 acceptance line — `sd-status` shows `LOG-23818` with its key and state — is
-met by that block.
+met by that section in either state, on the first run, because a seed row's
+`last_seen` is that run.
+
+The section is added to the heading order the skeleton test recites at
+`tests/test_sd_status.py:3555-3560`, and the JSON output carries it under
+the key `jira`.
 
 **The dashboard.** `sd-dashboard` reads `index.sqlite` through `store.issues`
 (`dashboard/server.py:638`), not `shadow`, and its collector is
@@ -309,9 +352,14 @@ acceptance line is a grep.
 - **2026-09-12 — `Synced.configured`, defaulting `True`.** One field, so the
   verb can tell "not configured" from "failed" without parsing a reason
   string. Reversed if the library grows a typed reason.
-- **2026-09-12 — `sd-status` prints Jira in an unscoped block, not inside the
-  per-repo one.** Reversed if items gain a Jira `external_id` and a
-  per-repo join becomes meaningful.
+- **2026-09-12 — `sd-status` prints Jira as its own section, not inside the
+  per-repo issues section.** The issues section is gated on a GitHub remote
+  and closes its connection before rendering; a Jira row has no slug. Reversed
+  if items gain a Jira `external_id` and a per-repo join becomes meaningful.
+- **2026-09-12 — closed Jira rows print for seven days after they were last
+  seen, then drop from the section; they stay in `shadow`.** Reversed if the
+  operator wants a `--closed` switch, at which point the seven days become
+  that switch's default.
 
 ## Rejected alternatives
 
