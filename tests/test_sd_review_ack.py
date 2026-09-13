@@ -22,7 +22,9 @@ memory, and the two cases that matter most are named individually:
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -178,7 +180,7 @@ class TheHistoricalRound(RoundFixture):
         body = [row for row in result["findings"] if row["source"] == "body"]
         self.assertEqual(len(body), 4)
         self.assertIn(
-            ("bin/sd_work.py", "Critical: update the command inventory guard for this scoped exception."),
+            ("bin/sd_work.py", "Critical: update the command inventory guard for this scoped exception"),
             {(row["path"], row["text"]) for row in body},
         )
 
@@ -252,12 +254,87 @@ class ThePrStateCountUsesTheSameReader(unittest.TestCase):
         self.assertEqual(counted["in_body"], 3)
         self.assertEqual(counted["reviewers"], ["copilot-pull-request-reviewer"])
 
+    def test_review_bodies_are_actually_asked_for(self):
+        """The count is only as good as the field that carries it.
+
+        `review_findings` reads `reviews[].body`. If `reviews` ever left
+        `PR_FIELDS`, `gh pr list` would stop returning it, every body would be
+        empty and every pull request would report clean -- the item's defect,
+        reintroduced by a one-word edit in a tuple nothing else guards.
+        """
+        pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
+        self.assertIn("reviews", pr_state.PR_FIELDS)
+
+    def test_every_captured_review_carries_the_body_the_parser_reads(self):
+        """The fixture is only evidence if it holds what the live call returns."""
+        for number, record in ROUND.items():
+            for review in record["reviews"]:
+                with self.subTest(pr=number):
+                    self.assertIn("body", review)
+                    self.assertIsInstance(review["body"], str)
+
     def test_a_body_with_nothing_in_it_still_counts_nothing(self):
         """The clean case stays clean: the line prints only on a non-zero count."""
         pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
         counted = pr_state.review_findings([{"body": "Looks good to me.", "author": {"login": "bot"}}])
         self.assertEqual(counted["in_body"], 0)
         self.assertEqual(counted["reviewers"], [])
+
+
+class BothOrdersOfATableCell(unittest.TestCase):
+    """The reviewer writes a finding two ways round, and both are real.
+
+    The suffix row below is copied from the review of the pull request that
+    added this file. An earlier version of the parser knew only the prefix
+    order and gave that review the right count with mangled text -- "pagination
+    handling: ; fail-" -- which reads like a finding somebody looked at. A
+    wrong finding that looks read is worse than one that does not parse.
+    """
+
+    PREFIX = (
+        "| `bin/sd_work.py` | Uses row-aware rendering. Moderate finding (2 votes): "
+        "field orders still differ between surfaces. Moderate finding (1 vote): "
+        "dictionary results can print `revision` twice. |\n"
+    )
+    SUFFIX = (
+        "| `bin/sd-review-ack` | Implements finding parsing, acknowledgement storage, "
+        "and gate verdicts. Findings: pagination handling (moderate, 3 votes); "
+        "fail-closed behavior on API errors (critical, 3 votes); unknown dispositions "
+        "(critical, 1 vote). |\n"
+    )
+
+    def test_the_severity_leads_and_the_text_follows_a_colon(self):
+        rows = ack._table(880, self.PREFIX, "bot")
+        self.assertEqual(
+            [(row["path"], row["text"]) for row in rows],
+            [("bin/sd_work.py", "Moderate finding: field orders still differ between surfaces"),
+             ("bin/sd_work.py", "Moderate finding: dictionary results can print `revision` twice")],
+        )
+
+    def test_the_text_leads_and_the_severity_sits_in_the_marker(self):
+        rows = ack._table(883, self.SUFFIX, "bot")
+        self.assertEqual(
+            [(row["path"], row["text"]) for row in rows],
+            [("bin/sd-review-ack", "moderate: pagination handling"),
+             ("bin/sd-review-ack", "critical: fail-closed behavior on API errors"),
+             ("bin/sd-review-ack", "critical: unknown dispositions")],
+        )
+
+    def test_the_summary_prose_is_not_mistaken_for_the_first_finding(self):
+        """`Implements finding parsing...` is what changed, not what is wrong."""
+        first = ack._table(883, self.SUFFIX, "bot")[0]
+        self.assertNotIn("Implements", first["text"])
+        self.assertNotIn("acknowledgement storage", first["text"])
+        # The label goes too, and not only the prose before it. Cutting at the
+        # last sentence would leave `Findings: pagination handling`, which is
+        # the reviewer's heading pretending to be part of the finding.
+        self.assertNotIn("Findings", first["text"])
+        self.assertEqual(first["text"], "moderate: pagination handling")
+
+    def test_a_label_with_no_sentence_before_it_is_still_stripped(self):
+        """The period fallback cannot help when the cell opens with the label."""
+        rows = ack._table(883, "| `a.py` | Findings: only this one (moderate, 1 vote). |\n", "bot")
+        self.assertEqual([row["text"] for row in rows], ["moderate: only this one"])
 
 
 class ASuppressedHeadingIsAnAssertion(RoundFixture):
@@ -292,15 +369,32 @@ class AFixIsSatisfiedByLanding(RoundFixture):
         self.assertEqual(row["verdict"], "fix-not-landed")
         self.assertEqual(code, 1)
 
-    def test_a_commit_nobody_has_is_not_a_fix_either(self):
+    def test_a_commit_nobody_has_cannot_be_acknowledged_at_all(self):
+        """Refused when it is recorded, rather than recorded and disbelieved."""
+        done = run(self.repo.root, "--pr", "860", "--ack", self._first(860),
+                   "--fixed", "0" * 40, *self.ref)
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("names no commit in this repository", done.stderr)
+
+    def test_a_record_naming_a_vanished_commit_reads_as_fix_missing(self):
+        """The verdict still exists, for a store written before a commit was lost."""
         found = self._first(860)
-        result, code = payload(
-            self.repo.root, "--pr", "860", "--check",
-            "--ack", found, "--fixed", "0" * 40, *self.ref,
-        )
+        ack.write_store(self.repo.root, {found: {
+            "pr": 860, "disposition": "fixed", "commit": "0" * 40, "reason": "",
+            "path": "x", "line": 1, "at": "2026-09-12T00:00:00+00:00",
+        }})
+        result, code = payload(self.repo.root, "--pr", "860", "--check", *self.ref)
         row = next(r for r in result["findings"] if r["id"] == found)
         self.assertEqual(row["verdict"], "fix-missing")
         self.assertEqual(code, 1)
+
+    def test_a_branch_name_is_recorded_as_the_commit_it_meant_today(self):
+        """`--fixed main` must not record a name whose meaning moves."""
+        found = self._first(860)
+        payload(self.repo.root, "--pr", "860", "--ack", found, "--fixed", "main", *self.ref)
+        record = ack.read_store(self.repo.root)[0][found]
+        self.assertEqual(record["commit"], self.repo.landed)
+        self.assertEqual(record["cited"], "main")
 
     def test_a_commit_on_the_branch_satisfies_the_finding(self):
         found = self._first(860)
@@ -360,6 +454,35 @@ class TheControl(RoundFixture):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("no review findings", done.stdout)
 
+    def test_a_round_that_could_not_be_read_fails_the_gate(self):
+        """`gh` missing is not evidence that a pull request is clean.
+
+        The gate passing when it cannot read is the gate passing hardest on the
+        day GitHub is having trouble. Without `--check` this is a report and
+        still exits 0; with it, the run refuses.
+        """
+        # `git` stays reachable and `gh` does not: the tool must still know
+        # which repository it is in, and must not be able to read GitHub.
+        bare = pathlib.Path(self.stack.name) / "no-gh"
+        bare.mkdir(exist_ok=True)
+        (bare / "git").symlink_to(shutil.which("git") or "/usr/bin/git")
+        empty = dict(os.environ, PATH=str(bare))
+        base = [sys.executable, str(BIN / "sd-review-ack"), *self.ref]
+        report = subprocess.run(base, cwd=str(self.repo.root), capture_output=True,
+                                text=True, check=False, env=empty)
+        gated = subprocess.run([*base, "--check"], cwd=str(self.repo.root),
+                               capture_output=True, text=True, check=False, env=empty)
+        self.assertEqual(report.returncode, 0)
+        self.assertEqual(gated.returncode, 1)
+        self.assertIn("unavailable:", report.stdout)
+        self.assertIn("nothing was read, so nothing is acknowledged", report.stdout)
+
+    def test_a_named_pull_request_the_capture_lacks_is_an_error(self):
+        """Not "no findings": the file never held it, so the question is wrong."""
+        done = run(self.repo.root, "--pr", "9999", "--check", *self.ref)
+        self.assertEqual(done.returncode, 2)
+        self.assertIn("holds no pull request 9999", done.stderr)
+
     def test_an_empty_round_passes_the_gate(self):
         """The gate is not green-by-default and not red-by-default either."""
         empty = pathlib.Path(self.stack.name) / "empty.json"
@@ -391,10 +514,32 @@ class TheRecord(RoundFixture):
         )
 
     def test_an_unreadable_record_reads_as_nothing_acknowledged(self):
-        """A corrupt store makes the gate refuse, never pass."""
+        """A corrupt store makes the gate refuse, never pass -- and says so."""
         ack.store_path(self.repo.root).write_text("{not json")
-        _, code = payload(self.repo.root, "--check", *self.ref)
+        result, code = payload(self.repo.root, "--check", *self.ref)
         self.assertEqual(code, 1)
+        self.assertIn("not valid JSON", result["store_error"])
+        self.assertIn("record unreadable", run(self.repo.root, *self.ref).stdout)
+
+    def test_a_disposition_this_version_does_not_define_is_not_an_acknowledgement(self):
+        """A store written by a later version is not honoured by guessing."""
+        result, _ = payload(self.repo.root, "--pr", "863", *self.ref)
+        found = result["findings"][0]["id"]
+        ack.write_store(self.repo.root, {found: {
+            "pr": 863, "disposition": "wontfix", "commit": None, "reason": "because",
+            "path": "x", "line": 1, "at": "2026-09-12T00:00:00+00:00",
+        }})
+        result, code = payload(self.repo.root, "--pr", "863", "--check", *self.ref)
+        self.assertEqual(result["findings"][0]["verdict"], "unknown-disposition")
+        self.assertEqual(code, 1)
+
+    def test_the_store_is_replaced_in_one_step(self):
+        """A torn write would read as empty and discard real acknowledgements."""
+        path = ack.store_path(self.repo.root)
+        ack.write_store(self.repo.root, {"a": {"pr": 1}})
+        leftovers = [p.name for p in path.parent.glob(f".{ack.STORE_NAME}.*")]
+        self.assertEqual(leftovers, [])
+        self.assertEqual(json.loads(path.read_text())["acknowledgements"], {"a": {"pr": 1}})
 
     def test_an_id_that_names_no_finding_is_a_usage_error(self):
         done = run(self.repo.root, "--pr", "863", "--ack", "deadbeefcafe", "--dismiss", "read")

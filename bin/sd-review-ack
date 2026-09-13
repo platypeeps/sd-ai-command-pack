@@ -51,7 +51,9 @@ import hashlib
 import json
 import pathlib
 import re
+import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 from typing import Any, Iterable, TextIO
 
@@ -113,15 +115,13 @@ SECTION_END = re.compile(r"^(?:</details>|- \*\*Files reviewed:|#+\s)", re.MULTI
 #: first silently loses the other two.
 VOTE_MARKER = re.compile(r"\([^()]*?\b\d+\s+votes?\b[^()]*?\)")
 
-#: One finding inside a file-summary table cell: `Moderate finding (2 votes):
-#: field orders still differ`. The severity word is free-form and the text runs
-#: to the next finding in the same cell or to the end of it.
+#: A row of the file-summary table: a file in the first cell, prose in the
+#: second. Only the second cell is searched, and only when it carries a vote
+#: marker -- most cells are a summary of what changed, not a finding.
 TABLE_ROW = re.compile(r"^\|\s*`?(?P<path>[^`|\n]+?)`?\s*\|(?P<summary>.*)\|\s*$", re.MULTILINE)
-TABLE_FINDING = re.compile(
-    r"(?P<severity>[A-Za-z][A-Za-z ]*?)\s*\([^()]*?\b\d+\s+votes?\b[^()]*?\)\s*:?\**\s*"
-    r"(?P<text>.*?)(?=(?:[A-Za-z][A-Za-z ]*?\([^()]*?\b\d+\s+votes?\b[^()]*?\))|$)",
-    re.DOTALL,
-)
+
+#: A label the reviewer puts in front of a run of findings inside one cell.
+FINDING_LABEL = re.compile(r"\bFindings?\s*:", re.IGNORECASE)
 
 DISPOSITIONS = ("fixed", "dismissed")
 
@@ -134,6 +134,7 @@ VERDICT_HELP = {
     "fix-not-landed": "acknowledged as fixed by a commit that never reached the landing ref",
     "fix-missing": "acknowledged as fixed by a commit this repository does not have",
     "dismissed": "read and dismissed, with a reason on the record",
+    "unknown-disposition": "the record carries a disposition this version does not define",
 }
 
 
@@ -249,12 +250,56 @@ def _table(pull: int, body: str, author: str) -> list[dict]:
         summary = row.group("summary")
         if not VOTE_MARKER.search(summary):
             continue
-        path = row.group("path").strip()
-        for found in TABLE_FINDING.finditer(summary):
-            severity = found.group("severity").strip(" *")
-            text = found.group("text").strip(" *")
-            rows.append(_finding(pull, "body", path, None, f"{severity}: {text}", author))
+        rows.extend(_cell(pull, row.group("path").strip(), summary, author))
     return rows
+
+
+def _cell(pull: int, path: str, cell: str, author: str) -> list[dict]:
+    """The findings in one table cell, whichever way round the reviewer wrote them.
+
+    Two orders are in use and both are this reviewer's, months apart:
+
+        Moderate finding (2 votes): field orders still differ between surfaces.
+        pagination handling (moderate, 3 votes); fail-closed behavior (critical, 3 votes)
+
+    The first puts the severity in front and the text after a colon; the second
+    puts the text first and the severity inside the marker. A parser that knows
+    only one of them does not fail loudly on the other -- it reports the right
+    *count* with the wrong *text*, which is worse, because a garbled finding
+    still looks like a finding that was read. This tool did exactly that to its
+    own review before this function existed.
+
+    So the marker is the anchor and the colon after it decides the direction.
+    """
+    marks = list(VOTE_MARKER.finditer(cell))
+    rows: list[dict] = []
+    for index, marker in enumerate(marks):
+        head = cell[(marks[index - 1].end() if index else 0) : marker.start()]
+        tail = cell[marker.end() : (marks[index + 1].start() if index + 1 < len(marks) else len(cell))]
+        after = tail.lstrip().lstrip("*").lstrip()
+        if after.startswith(":"):
+            severity = head.strip(" *").rsplit(".", 1)[-1]
+            text = after[1:]
+            # The next finding's severity label sits at the end of this text.
+            if index + 1 < len(marks) and "." in text:
+                text = text[: text.rfind(".") + 1]
+        else:
+            severity = marker.group(0).strip("()").split(",")[0]
+            text = _unlabelled(head)
+        rows.append(_finding(
+            pull, "body", path, None,
+            f"{severity.strip(' *')}: {text.strip(' *.,;')}", author,
+        ))
+    return rows
+
+
+def _unlabelled(head: str) -> str:
+    """One finding's text, cut away from the summary prose that precedes it."""
+    label = list(FINDING_LABEL.finditer(head))
+    if label:
+        return head[label[-1].end() :]
+    trimmed = head.strip(" *;,")
+    return trimmed.rsplit(".", 1)[-1] if "." in trimmed else trimmed
 
 
 def _reconciled(pull: int, body: str, author: str, located: list[dict]) -> list[dict]:
@@ -364,29 +409,51 @@ def store_path(root: pathlib.Path) -> pathlib.Path:
     return pathlib.Path(common or (root / ".git")) / STORE_NAME
 
 
-def read_store(root: pathlib.Path) -> dict[str, dict]:
-    """Acknowledgements on record, or an empty set when there are none.
+def read_store(root: pathlib.Path) -> tuple[dict[str, dict], str]:
+    """Acknowledgements on record, and the sentence saying the record is broken.
 
     A store that cannot be parsed reads as empty, and empty means every finding
     is unread, which is the safe direction: a corrupt record makes the gate
-    refuse rather than pass.
+    refuse rather than pass. Safe is not the same as silent, though, and
+    discarding somebody's acknowledgements without saying so is its own version
+    of this item's defect -- so the reason comes back with the rows and is
+    printed. A missing file is not broken and returns no sentence.
     """
     path = store_path(root)
+    if not path.exists():
+        return {}, ""
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+    except OSError as error:
+        return {}, f"{path} cannot be read ({error.strerror}); every finding reads as unread"
+    except ValueError as error:
+        return {}, f"{path} is not valid JSON ({error}); every finding reads as unread"
     rows = payload.get("acknowledgements") if isinstance(payload, dict) else None
-    return {k: v for k, v in rows.items() if isinstance(v, dict)} if isinstance(rows, dict) else {}
+    if not isinstance(rows, dict):
+        return {}, f"{path} has no acknowledgements object; every finding reads as unread"
+    return {k: v for k, v in rows.items() if isinstance(v, dict)}, ""
 
 
 def write_store(root: pathlib.Path, rows: dict[str, dict]) -> pathlib.Path:
+    """Replace the store in one step, so a crash cannot leave half a record.
+
+    `os.replace` is atomic within a directory, and the temporary file is made
+    in the same directory for that reason. A torn store would read as empty on
+    the next run, silently discarding acknowledgements that were made.
+    """
     path = store_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"schema": SCHEMA_VERSION, "acknowledgements": rows}, indent=1, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    body = json.dumps({"schema": SCHEMA_VERSION, "acknowledgements": rows}, indent=1, sort_keys=True)
+    handle, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=f".{STORE_NAME}.", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(body + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except OSError:
+        pathlib.Path(temporary).unlink(missing_ok=True)
+        raise
     return path
 
 
@@ -400,11 +467,25 @@ def acknowledge(root: pathlib.Path, found: dict, disposition: str, detail: str) 
             if disposition == "fixed" else
             "--dismiss needs the reason, which is the whole value of dismissing"
         )
-    rows = read_store(root)
+    commit = ""
+    if disposition == "fixed":
+        # Resolved here and stored resolved. `--fixed main` would otherwise
+        # record a name whose meaning moves: the ancestry check passes today
+        # and says nothing tomorrow, which is a claim that decays into a lie
+        # without anybody editing it.
+        resolved = sd_lib.git_output(["rev-parse", "--verify", f"{detail.strip()}^{{commit}}"], root)
+        if not resolved:
+            raise UsageError(
+                f"--fixed {detail.strip()!r} names no commit in this repository; "
+                "acknowledge a commit that exists"
+            )
+        commit = resolved
+    rows, _ = read_store(root)
     rows[found["id"]] = {
         "pr": found["pr"],
         "disposition": disposition,
-        "commit": detail.strip() if disposition == "fixed" else None,
+        "commit": commit or None,
+        "cited": detail.strip() if disposition == "fixed" else "",
         "reason": detail.strip() if disposition == "dismissed" else "",
         "path": found["path"],
         "line": found["line"],
@@ -449,16 +530,21 @@ def verdict(root: pathlib.Path, found: dict, rows: dict[str, dict], ref: str) ->
     record = rows.get(found["id"])
     if not record:
         return dict(found, verdict="unread", record=None)
-    if record.get("disposition") == "dismissed":
+    disposition = record.get("disposition")
+    if disposition not in DISPOSITIONS:
+        # A store this tool did not write, or one written by a later version.
+        # Neither is an acknowledgement this version can honour, and guessing
+        # would be the whole defect in miniature.
+        return dict(found, verdict="unknown-disposition", record=record)
+    if disposition == "dismissed":
         state = "dismissed" if str(record.get("reason") or "").strip() else "unread"
         return dict(found, verdict=state, record=record)
-    state = fix_verdict(root, str(record.get("commit") or ""), ref)
-    return dict(found, verdict=state, record=record)
+    return dict(found, verdict=fix_verdict(root, str(record.get("commit") or ""), ref), record=record)
 
 
 def review_state(root: pathlib.Path, rounds: dict[int, dict], ref: str) -> dict:
     """Every finding across every pull request read, with its verdict."""
-    rows = read_store(root)
+    rows, broken = read_store(root)
     out: list[dict] = []
     for pull in sorted(rounds):
         payload = rounds[pull]
@@ -466,6 +552,7 @@ def review_state(root: pathlib.Path, rounds: dict[int, dict], ref: str) -> dict:
             out.append(verdict(root, found, rows, ref))
     return {
         "landing_ref": ref,
+        "store_error": broken,
         "findings": out,
         "unsatisfied": [row for row in out if row["verdict"] not in SATISFIED],
         "pull_requests": sorted(rounds),
@@ -537,8 +624,11 @@ def live_round(root: pathlib.Path, only: int | None, limit: int) -> tuple[dict[i
 
 def render_findings(result: dict, stream: TextIO, indent: str = "  ") -> None:
     write = stream.write
+    if result.get("store_error"):
+        write(f"{indent}record unreadable: {result['store_error']}\n")
     if result.get("reason"):
         write(f"{indent}unavailable: {result['reason']}\n")
+        write(f"{indent}nothing was read, so nothing is acknowledged; --check refuses\n")
         return
     rows = result["findings"]
     if not rows:
@@ -605,9 +695,17 @@ def _chosen_round(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict[in
     if not args.source:
         return live_round(root, args.pr, args.limit)
     rounds = captured_round(pathlib.Path(args.source))
-    if args.pr is not None:
-        rounds = {args.pr: rounds[args.pr]} if args.pr in rounds else {}
-    return rounds, ""
+    if args.pr is None:
+        return rounds, ""
+    if args.pr not in rounds:
+        # Reporting "no findings" for a pull request the file never held is the
+        # gate answering a question it was not asked, in the reassuring
+        # direction. Named pull requests either exist here or the run stops.
+        raise UsageError(
+            f"{args.source} holds no pull request {args.pr}; "
+            f"it has {', '.join(str(number) for number in sorted(rounds)) or 'none'}"
+        )
+    return {args.pr: rounds[args.pr]}, ""
 
 
 def _record_one(args: argparse.Namespace, root: pathlib.Path, rounds: dict[int, dict]) -> None:
@@ -626,7 +724,13 @@ def review_report(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict, i
     _refuse_bad_arguments(args)
     rounds, reason = _chosen_round(args, root)
     if reason:
-        return {"reason": reason, "findings": [], "unsatisfied": [], "pull_requests": []}, 0
+        # Fail closed. `gh` missing, unauthenticated, rate-limited or erroring
+        # is not evidence that a pull request has no findings -- it is the
+        # absence of evidence either way, and a gate that passes on it is a
+        # gate that passes hardest exactly when GitHub is having a bad day.
+        # Without `--check` this stays exit 0: reporting is not gating.
+        return {"reason": reason, "findings": [], "unsatisfied": [],
+                "pull_requests": [], "store_error": ""}, (1 if args.check else 0)
     if args.ack:
         _record_one(args, root, rounds)
     result = review_state(root, rounds, landing_ref(root, args.landed_in))
