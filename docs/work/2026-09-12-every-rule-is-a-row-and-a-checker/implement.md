@@ -3,15 +3,20 @@
 ## Step checklist
 
 - [ ] **1. The empty registry and its own tests.** Add the registry table with
-      zero rows, and the test asserting every row's checker is a callable that
-      exists. Zero rows passes. This step is independently landable and
-      independently green, and it fixes the shape before any rule argues about
-      content. It also carries requirement 1's check: a rule id appearing as a
-      literal in tracked code outside the registry module is a failure.
+      zero rows, and the test asserting every row's checker resolves to a
+      declaration that exists. Zero rows passes. This step is independently
+      landable and independently green, and it fixes the shape before any rule
+      argues about content. It also carries requirement 1's check: a rule id
+      appearing as a literal in tracked code outside the registry module is a
+      failure.
       Verify: the new tests pass; mutation — add a row naming a checker that
-      does not exist, confirm import fails; separately, paste a rule id literal
-      into a consumer and confirm the second-list test reddens. Remove both and
-      `diff -q` reports the tree identical.
+      does not exist, confirm `test_every_live_rule_names_a_checker_that_exists`
+      reddens; separately, paste a rule id literal into a consumer and confirm
+      the second-list test reddens. Remove both and `diff -q` reports the tree
+      identical. (As delivered, the checker was the function object and the
+      first mutation failed at *import*. Since 2026-09-13 it is a
+      `path::symbol` string, so the same mutation fails in the test named
+      above — the check moved, the mutation did not.)
 
 - [ ] **2. Meta-check legs a and b, with the baseline.** Leg a: every registry
       row is cited by at least one skill. Leg b: every tool-behaviour claim in
@@ -63,33 +68,55 @@
       above it, which is the rephrasing that check's own failure text
       prescribes.
 
-      `R10-D6` was a row for one review round and is not one now. The row
-      named `sd_lib.repo_root` as its checker, and `repo_root(start=None)`
-      accepts a path: it is the resolver the rule constrains, not a guard, so
-      the row named the mechanism by which the rule would be broken as its
-      enforcement. The meta-check passed it because leg a's checker test
-      asserts the checker EXISTS and never that it ENFORCES; leg d, "the
-      checker fails when the rule is violated", is recorded on sd:431 as the
-      fix. The rule's real enforcement is
+      `R10-D6` was a row for one review round, was pulled, and came back in
+      slice 2. The first row named `sd_lib.repo_root` as its checker, and
+      `repo_root(start=None)` accepts a path: it is the resolver the rule
+      constrains, not a guard, so the row named the mechanism by which the rule
+      would be broken as its enforcement. The meta-check passed it because the
+      checker test asserts the checker EXISTS and never that it ENFORCES. Slice
+      2 is that fix, and `R10-D6` is its first beneficiary rather than its
+      casualty.
+
+      **Slice 2, 2026-09-13. `STRANDED_RULE_IDS` 25 → 24, and the hole that
+      admitted the bad row is closed.** Three changes, in the order they depend
+      on each other:
+
+      1. `Rule.checker` is a `path::symbol` string, resolved by
+         `source:tests/test_doc_citations.py::source_declaration_error` — the
+         resolver the pack's documentation citations already use. The callable
+         form made `bin/sd_rules.py` import every checker's module at load time,
+         and it could not name an extensionless entrypoint or a test at all.
+      2. `Rule.proof` is new and required beside a checker: the mutation that
+         makes that checker redden, in one sentence a reader can execute.
+      3. Leg d runs it. For every live row with a checker it copies the tree,
+         runs the named test clean, applies the mutation, requires the test to
+         go red, restores the text and proves the copy identical again. It runs
+         in a copy because `.github/scripts/run-tests.sh` shards the suite by
+         module across workers, so editing `bin/` in the live tree would be
+         editing it while another shard imports it.
+         The leg carries its own control: a sentinel edit to a docstring in the
+         same file, run through the same machinery, must leave the same test
+         green. Without it, any failure to start a child would read as every
+         checker enforcing.
+
+      `R10-D6` is a row on that basis. Its checker is
       `tests/test_verb_inventory.py::test_no_command_accepts_a_repository_path`,
-      a test over the tree that `bin/sd_rules.py` cannot import. Settle what
-      `Rule.checker` names before the row returns; the same obstacle holds
-      `R10-D6` in the table below.
+      and its proof renames `--belongs-to` in `bin/sd_work.py` to the banned
+      spelling, which that test's `iterdir()` scan of `bin/` finds.
 
       **Two obstacles decide the rest of the backfill, and neither is the
-      judgement the step was sized for.** Twenty of the twenty-five remaining
+      judgement the step was sized for.** Twenty of the twenty-four remaining
       ids are taught by no skill section at all, so leg a cannot pass for them:
       registering one means writing the teaching section first, which is step 8
-      and not this step. The other five are taught, and each is held up by
+      and not this step. The other four are taught, and each is held up by
       something specific:
 
       | Id | Taught in | Why it is not a row yet |
       |---|---|---|
-      | `R10-D6` | `skills/sd-status/SKILL.md` and four others | Its checker is a test, and `Rule.checker` holds a function `bin/sd_rules.py` imports. The registry has no way to name the second kind. See the paragraph above. |
       | `R10-D1` | `skills/sd-status/SKILL.md` | `bin/sd-status` carries the id in two strings, one of them the `CLASSES` row whose text the skill's table mirrors. The second-list check wants it out of the string; leg a reads the skill table it would have to change. The two checks pull opposite ways and that needs a decision, not an edit. |
       | `R10-D2` | `skills/sd-handoff/SKILL.md` | The section that teaches it says Lane B is *not implemented*. A live row with a checker would assert an enforcement that does not exist, which is the defect this item is about. |
-      | `R10-D3` | `skills/sd-handoff/SKILL.md` | Its enforcement lives in `bin/sd-handoff-restore`, which has no `.py` suffix. `source:bin/sd_lib.py::sibling` is the pack's way to import one, and its own contract says every caller defers it — so importing it to fill a registry row at module load contradicts it. |
-      | `R10-D4` | `skills/sd-review/SKILL.md` | Same obstacle: `codex_preflight` lives in the suffixless `bin/sd-review`. This is the best-taught rule in the corpus — the heading cites the id — and it is the first candidate for slice 2, once a row can name a suffixless tool's function without importing the tool. |
+      | `R10-D3` | `skills/sd-handoff/SKILL.md` | Its enforcement lives in `bin/sd-handoff-restore`, which has no `.py` suffix. **The import obstacle recorded here is gone** — a `path::symbol` location needs no import and the path needs no suffix. What is left is leg d: the row needs a mutation that reddens a named test, and finding one for a restore path is the work. |
+      | `R10-D4` | `skills/sd-review/SKILL.md` | `codex_preflight` lives in the suffixless `bin/sd-review`, and that obstacle is gone with `R10-D3`'s. This is the best-taught rule in the corpus — the heading cites the id — and it is the first candidate for slice 3, needing only a proof that reddens a named test. |
 
       **A finding about leg c's four dangling ids, measured on `239ff624`.**
       They are not undefined. Three of them carry a definition in a form
@@ -139,6 +166,12 @@ into fewer pull requests to reduce CI churn.
   identical. A mutation script asserts its own edit applied — `assert
   t.count(old) == 1` — because a script whose pattern matches nothing reports a
   false pass. That has happened twice on this repository in one week.
+- **Leg d is that protocol executed by the suite rather than by a person**, once
+  per live row with a checker, and it is held to the same bar it applies: the
+  edit-landed count, the green control run, the red mutated run, and the
+  restoration are four separate assertions, and a sentinel edit that violates
+  nothing must leave the same test green. A leg that reports red for a child it
+  could not start would otherwise read as every checker enforcing.
 - A fixture must be checked for vacuity. A test that exercises a guard through
   several layers can fail earlier, for the wrong reason, and still pass. Where a
   guard can be called directly, call it directly, and include a control

@@ -163,22 +163,45 @@ anything.
 
 **The registry is a table in code, in the shape of `CLASSES` in `bin/sd-status`.**
 A tuple of rows; every consumer iterates it; nothing carries a second list.
-Each row records id, subject, checker, scope, and teaching section.
+Each row records id, subject, checker, proof, scope, and teaching section.
+
+**`checker` is a source location and `proof` is the mutation that reddens it.**
+The checker is written `path::symbol` — a string — and the proof states, in one
+sentence a reader can execute, what has to be broken for that checker to fail. A
+row with a checker and no proof fails the meta-check, and leg d executes the
+mutation rather than trusting the sentence. This is a correction, made on
+2026-09-13: the field held the function object until then, and holding a
+callable made the registry import every checker's module at load time and left
+it unable to name the two places enforcement actually lives — an extensionless
+entrypoint such as `bin/sd-review`, and a test over the tree.
 
 **The rejected alternative: a YAML or JSON registry file.** It reads better and
-it is the obvious choice, which is why it needs the explicit rejection. A data
-file cannot name a callable; it names a string, and something must resolve that
-string to a function. That resolver is a second source of truth about which
-checkers exist, and it fails at run time rather than at import time. A code
-table holds the function object itself, so a row naming a checker that does not
-exist is an `ImportError` on the first import, before any test runs. The whole
-point of this item is to stop rules and machinery drifting; choosing a format
-that reintroduces a gap between them would be the same defect one layer down.
+it is the obvious choice, which is why it needs the explicit rejection. The
+argument this rejection first rested on has expired: it was that a data file
+cannot name a callable, so something would have to resolve a string back to a
+function, and that resolver would be a second source of truth failing at run
+time rather than at import time. `checker` *is* a string now. The rejection
+stands on two other grounds. The string is resolved by
+`source:tests/test_doc_citations.py::source_declaration_error`, the resolver
+this pack already uses for its documentation citations, so there is still one
+resolver and the registry did not bring a second. And what a data file would
+cost is the rest of a row: `subject` and `proof` are paragraphs whose value is
+that a reader meets them beside the row, they are reviewed as code is reviewed,
+and their shape is checked by the tuple's own type rather than by a schema file
+somebody has to keep honest. What the import used to buy is bought better by leg
+d, which proves the checker enforces rather than only that its name resolves.
 
-**The meta-check is the deliverable, not the rules.** Legs a, b and c are what
+**The meta-check is the deliverable, not the rules.** Legs a to d are what
 make the system self-maintaining. The initial rules are a payload; a registry
 with the meta-check and two rules is worth more than fifteen rules with no
 meta-check, because the second one starts drifting the day it lands.
+
+**Leg d is what makes legs a to c worth anything.** Each of the first three
+asserts a *link* — a row is taught, a claim cites a row, a citation resolves to
+a row — and none of them looks at what the checker does. A row naming
+`sd_lib.repo_root`, the resolver by which its own rule would be violated, passed
+all three; the only thing that stopped it was a human reviewer reading the diff.
+Leg d is that reader made mechanical.
 
 **The three tiers are three call sites of one registry, not three
 implementations.**
@@ -229,6 +252,20 @@ apply to the checkers the item aims it at.
 - **2026-09-12 — the registry is a code table, not a data file.** Reversed if a
   consumer outside Python needs to read the registry; at that point the table
   gains a serializer, and the table stays the source.
+- **2026-09-13 — `checker` is a `path::symbol` location, not a callable, and
+  every checker carries a `proof`.** The callable form cost an import edge from
+  the registry to every enforcement in the pack, and it could not name a
+  suffixless entrypoint or a test, which was the recorded obstacle on three of
+  the four best-taught stranded ids. Reversed only by a reason stronger than
+  either, since the resolution the import performed is now performed by the
+  resolver the documentation citations already use.
+- **2026-09-13 — the meta-check has a fourth leg, and it executes the proof.**
+  Legs a to c assert links between a row and the corpus; none of them asks what
+  the checker does, and a row naming a non-enforcing symbol passed all three.
+  Leg d applies each row's mutation in a private copy of the tree and requires
+  the named test to go green-then-red. Reversed if the copy-and-run cost stops
+  being affordable, at which point the leg is scoped rather than dropped — a
+  registry whose checkers are unproven is the state this item exists to end.
 - **2026-09-12 — prose rule 3 is narrowed to tool-behaviour claims and carries
   a frozen baseline**, the uncited claims in `skills/`, held per document. Reversed if the
   corpus is deliberately swept and the baseline reaches a number small enough
