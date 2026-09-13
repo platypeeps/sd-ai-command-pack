@@ -528,6 +528,54 @@ class TheRowDecides(Fixture):
         self.assertNotIn("is not installed here", result.stdout)
         self.assertIn("will not import", result.stdout)
 
+    def test_an_incompatible_copy_earlier_on_the_path_does_not_keep_the_answer(
+        self,
+    ) -> None:
+        """The retry has to go in front, or the copy that broke it wins again.
+
+        The second attempt only happens because the first one failed, and one
+        of the two ways it fails is an `sd_db` already on `sys.path` that
+        raises -- a stale checkout on `PYTHONPATH`, a half-removed install, a
+        package of that name belonging to something else. Offered at the
+        *end* of the path the pack's copy is behind that one, the finder walks
+        the path in order and reaches the incompatible package a second time,
+        and the retry fails for the same reason the first try did.
+
+        The message is what makes it a defect rather than a missed
+        opportunity: it names the provisioned path and attributes to it an
+        error raised somewhere else entirely, so the one reader who could fix
+        this is sent to inspect a copy that was never imported. Both halves
+        are asserted, because prepending is invisible in the first one alone.
+        """
+        pack = self.tmp / "pack"
+        (pack / "bin").mkdir(parents=True)
+        (pack / "bin" / "sd_lib.py").write_bytes(
+            (REPO_ROOT / "bin" / "sd_lib.py").read_bytes())
+        provisioned = pack / ".venv" / "lib" / "python3.13" / "site-packages" / "sd_db"
+        provisioned.mkdir(parents=True)
+        (provisioned / "__init__.py").write_text("", encoding="utf-8")
+        earlier = self.tmp / "earlier"
+        (earlier / "sd_db").mkdir(parents=True)
+        (earlier / "sd_db" / "__init__.py").write_text(
+            "raise ImportError('the earlier copy is incompatible')", encoding="utf-8")
+        script = (
+            "import sd_lib, sys;"
+            " rows = sd_lib.Rows(sys.argv[1]);"
+            " print(int(rows.installed), rows.problem)"
+        )
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", script, str(self.root)],
+            capture_output=True, text=True,
+            env={**os.environ,
+                 "PYTHONPATH": f"{pack / 'bin'}{os.pathsep}{earlier}"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.split()[0], "1",
+            f"the provisioned copy did not get to answer: {result.stdout!r}",
+        )
+        self.assertNotIn("the earlier copy is incompatible", result.stdout)
+
     def test_no_provisioned_copy_is_offered_from_a_virtualenv_without_one(
         self,
     ) -> None:

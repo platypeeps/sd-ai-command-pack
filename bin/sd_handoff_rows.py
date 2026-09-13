@@ -43,8 +43,12 @@ from __future__ import annotations
 
 import pathlib
 
-#: Why the reader cannot run yet, when it cannot. Printed by `bin/sd-note`;
-#: swallowed by the hooks, which exit 0 silently rather than break a session.
+#: Why the reader cannot run yet on a machine that has no library at all.
+#: Printed by `bin/sd-note`; swallowed by the hooks, which exit 0 silently
+#: rather than break a session. Not the only reason the reader cannot run:
+#: `library` below picks this sentence for one of the two faults and
+#: `sd_lib`'s own for the other, which is a provisioned copy that will not
+#: import and wants its error rather than an installer it already ran.
 NOT_INSTALLED = (
     "sd_db is not installed in this virtualenv. Followups are rows; install "
     "the library with the pack's installer (`sd-install`), which provisions "
@@ -78,10 +82,19 @@ def library():
     # present one.
     import sd_lib
 
-    module, _ = sd_lib.import_sd_db()
-    if module is None:
-        raise RowsRefusal(NOT_INSTALLED) from None
-    return module
+    imported = sd_lib.import_sd_db()
+    if imported.module is None:
+        # Two faults, two remedies, and this is the caller that used to hand
+        # both readers the same one. `NOT_INSTALLED` says the library is
+        # absent and to run the installer; over a provisioned copy that
+        # raised on import that is false in its first clause and useless in
+        # its second, and it swallows the only thing that would let anybody
+        # fix it -- what the copy actually raised. The helper's own sentence
+        # names the copy and quotes the error, so for that fault it *is* the
+        # refusal. `bin/sd-note` and `bin/sd` print whichever one arrives
+        # verbatim, which is why the choice has to be made here.
+        raise RowsRefusal(imported.problem if imported.provisioned else NOT_INSTALLED) from None
+    return imported.module
 
 
 def connect(sd_db, *, write: bool = False):

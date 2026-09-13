@@ -772,9 +772,9 @@ def main(argv=None) -> int:
     # still this file's own refusal, and there "install matching" is the
     # accurate word: a top-level `sd_db` that imported while a submodule this
     # verb needs did not is a version that does not match this pack.
-    library, problem = sd_lib.import_sd_db()
-    if library is None:
-        print(json.dumps({"ok": False, "manualRequired": True, "error": problem}))
+    imported = sd_lib.import_sd_db()
+    if imported.module is None:
+        print(json.dumps({"ok": False, "manualRequired": True, "error": imported.problem}))
         return 3
     try:
         from sd_db import ship

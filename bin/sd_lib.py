@@ -17,7 +17,7 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
 LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
@@ -536,7 +536,25 @@ def _provisioned_library_paths() -> list[str]:
     return [path for _, path in sorted(found, reverse=True)]
 
 
-def import_sd_db() -> tuple[Any, str]:
+class Imported(NamedTuple):
+    """What one entrypoint's attempt to reach `sd_db` came to.
+
+    Three fields because "did it work" is not the whole question. `problem`
+    is the sentence to show; `provisioned` says which of the two faults
+    produced it -- a path when the pack's own copy was there and would not
+    import, empty when there was no copy to try. A caller with a canned
+    remedy of its own needs that distinction, and the alternative is matching
+    on the wording of the sentences below, which is a coupling that breaks
+    the first time somebody rewords one. Both are meaningful only when
+    `module` is `None`.
+    """
+
+    module: Any
+    problem: str
+    provisioned: str
+
+
+def import_sd_db() -> Imported:
     """`sd_db` for an entrypoint running under whatever `python3` is on PATH.
 
     The one place the two tries live. `_provisioned_library_paths` above says
@@ -549,20 +567,46 @@ def import_sd_db() -> tuple[Any, str]:
     sd_db" while `bin/sd`, which had this fallback, answered fine, and the
     only difference between the two was a copy of these six lines.
 
-    Returns the module and an empty string, or `None` and the problem, so each
-    caller still decides for itself whether an absent library is a refusal, a
-    fall back to the revision history, or a field on a report. The two problem
-    sentences stay apart for the reason the retry below states: a provisioned
-    copy that will not import is not a machine without the library, and one
-    message over both sends half its readers to the wrong remedy.
+    Returns the module, or `None` and the problem, so each caller still
+    decides for itself whether an absent library is a refusal, a fall back to
+    the revision history, or a field on a report. The two problem sentences
+    stay apart for the reason the retry below states: a provisioned copy that
+    will not import is not a machine without the library, and one message over
+    both sends half its readers to the wrong remedy.
     """
     try:
         import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
     except ImportError as error:
         offered = _provisioned_library_paths()
+        # Prepended, and that is the difference between the provisioned copy
+        # answering and an incompatible one keeping the answer. The retry
+        # only runs because the first try failed, and it can fail two ways:
+        # nothing on `sys.path` held an `sd_db`, or something earlier on it
+        # held one that raised. Appended, the pack's copy sits behind that
+        # second one, the finder walks the path in order and reaches the same
+        # incompatible package again, and the sentence below then names the
+        # provisioned path as the thing that would not import -- about a copy
+        # that was never tried. At the front, the copy `make setup` chose is
+        # the copy this run gets, and any error reported is that copy's own.
+        #
+        # No deliberate `PYTHONPATH` is overridden by this. An `sd_db` a
+        # developer put there that imports has already answered the first try
+        # and never reaches here; the only thing that loses is one that
+        # raised. Ordering among the offered paths is preserved -- newest
+        # interpreter first, which is `_provisioned_library_paths`'s contract
+        # and pointless anywhere but the front of the list.
+        #
+        # What is prepended is a whole `site-packages`, so in principle it
+        # shadows more than `sd_db`. In this pack it shadows nothing: the
+        # header above says stdlib only, and every import in `bin/` and
+        # `dashboard/` is stdlib, a sibling module, or `sd_db` itself, so
+        # there is no second name for the provisioned copy to answer to. A
+        # third-party dependency arriving in either tree is what would make
+        # this worth narrowing to the one module it is for.
         for path in offered:
-            if path not in sys.path:
-                sys.path.append(path)
+            if path in sys.path:
+                sys.path.remove(path)
+        sys.path[:0] = offered
         try:
             import sd_db  # noqa: PLC0415 - the provisioned copy, second and last try
         except ImportError as retry:
@@ -571,11 +615,11 @@ def import_sd_db() -> tuple[Any, str]:
             # installed" over the top of one sends the reader to `make
             # setup` for a package that is already there. Where nothing
             # was offered, the first error is the only one there is.
-            return None, (
+            return Imported(None, (
                 f"sd_db is provisioned at {offered[0]} but will not import: {retry}"
                 if offered else f"sd_db is not installed here: {error}"
-            )
-    return sd_db, ""
+            ), offered[0] if offered else "")
+    return Imported(sd_db, "", "")
 
 
 class Rows:
@@ -620,9 +664,11 @@ class Rows:
         self._artifact_read: Any = None
         self._completion_read: Any = None
         self._notes_read: Any = None
-        sd_db, self.problem = import_sd_db()
-        if sd_db is None:
+        imported = import_sd_db()
+        self.problem = imported.problem
+        if imported.module is None:
             return
+        sd_db = imported.module
         self.installed = True
         try:
             self._connection = sd_db.connect(write=False)

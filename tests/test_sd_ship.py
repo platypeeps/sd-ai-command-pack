@@ -563,6 +563,16 @@ roles:
         Pointed at the real `.venv` there would be no way to write the absent
         case at all, and the provisioned case would quietly depend on whether
         CI had run `make setup` before the tests.
+
+        `PYTHONPATH` is set rather than inherited, and `-S` is why that is not
+        redundant: no `site` module runs, but the interpreter still reads the
+        variable, so a developer or a harness with one pointing at another
+        `sd_db` hands the child a library the case did not put there. That is
+        not hypothetical -- `.github/scripts/run-tests.sh` exports one, and
+        the tests below turned green for the wrong reason under any value of
+        it that holds the package. The copied pack's `bin` is what the child
+        needs and all it needs, which is the same override the analogous
+        `tests/test_status_source.py` cases make.
         """
         pack = self.directory / f"pack-{library}"
         shutil.copytree(ROOT / "bin", pack / "bin")
@@ -575,8 +585,9 @@ roles:
         if library == "broken":
             (site / "sd_db").mkdir()
             (site / "sd_db/__init__.py").write_text("raise ImportError('the provisioned copy is broken')\n")
+        environment = {**self.environment, "PYTHONPATH": str(pack / "bin")}
         return subprocess.run([sys.executable, "-S", str(pack / "bin/sd-ship"), command, "--item", str(self.item), "--json", *extra],
-                              cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=60)
+                              cwd=self.root, env=environment, text=True, capture_output=True, timeout=60)
 
     def test_a_python3_without_the_library_ships_off_the_provisioned_copy(self):
         """The defect was every verb on every machine, not a verb on a rare one.
@@ -633,6 +644,39 @@ roles:
         self.assertIn("the provisioned copy is broken", refusal["error"])
         self.assertIn("will not import", refusal["error"])
         self.assertNotIn("is not installed here", refusal["error"])
+
+    def test_the_three_library_cases_do_not_read_an_sd_db_from_the_run_around_them(self):
+        """The three above describe machines, so no ambient variable may pick one.
+
+        `-S` stops `site` from running; it does not stop the interpreter from
+        reading `PYTHONPATH`. Inherit that from the test run and the child's
+        library is whatever the developer or the harness happened to export:
+        with an `sd_db` on it the absent case imports one and stops being
+        absent, the broken case never reaches the copy it broke, and the
+        provisioned case passes without the fallback it exists to prove --
+        three green tests asserting nothing about the code under them.
+
+        A stub is enough to show it. The cases turn on *which* `sd_db`
+        answers, and a package with no `ship` submodule is a different answer
+        from the pack's copy in every one of the three.
+        """
+        decoy = self.directory / "decoy"
+        (decoy / "sd_db").mkdir(parents=True)
+        (decoy / "sd_db/__init__.py").write_text("# importable, and not the pack's library\n")
+        self.environment["PYTHONPATH"] = str(decoy)
+        self.prepare()
+
+        absent = self.unsited("observe", library="absent")
+        self.assertEqual(absent.returncode, 3, absent.stdout + absent.stderr)
+        self.assertIn("sd_db is not installed here", json.loads(absent.stdout)["error"])
+
+        broken = self.unsited("observe", library="broken")
+        self.assertEqual(broken.returncode, 3, broken.stdout + broken.stderr)
+        self.assertIn("the provisioned copy is broken", json.loads(broken.stdout)["error"])
+
+        provisioned = self.unsited("observe")
+        self.assertEqual(provisioned.returncode, 0, provisioned.stdout + provisioned.stderr)
+        self.assertEqual(json.loads(provisioned.stdout)["phase"], "ready_to_send")
 
     def test_repository_lock_cannot_be_owned_by_two_clones(self):
         from sd_db.workflow import WorkflowError
