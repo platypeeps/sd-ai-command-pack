@@ -186,7 +186,13 @@ already available and asks only for missing decisions. Then the small-change
 path runs with the applicable review points. An item can span several pull
 requests. `Item: <item>` associates a merge without closing the item;
 `Delivers: <item>` declares the delivering merge. Changes without an associated
-item omit those trailers and create no placeholder record.
+item omit those trailers and create no placeholder record. The trailers are the
+last paragraph of the pull-request body, contiguous, with the attribution
+paragraph above them and nothing below: a squash merge concatenates the body
+into the commit message, git reads trailers only out of the final paragraph,
+and GitHub's appended `Co-authored-by:` joins a trailer block that ends the
+message but opens a new paragraph after anything else.
+`.github/PULL_REQUEST_TEMPLATE.md` ends in that order.
 
 After the remote confirms the delivering merge, `sd work deliver <row-id>
 <full-commit-sha>` verifies the commit, default branch and delivery trailer. It

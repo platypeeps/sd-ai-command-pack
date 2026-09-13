@@ -107,9 +107,24 @@ def _library_lines(result) -> list[str]:
     """The library's report, minus the lines this verb already said.
 
     Forwarded rather than re-worded, so a line the library learns to emit
-    reaches the log without this verb being edited -- sd:602's lesson. The
-    three lines the verb has put in its own words are dropped by the FIELDS
-    that produced them, never by matching their text.
+    reaches the log without this verb being edited -- sd:602's lesson.
+
+    Two guards drop the two lines the verb has already put in its own words,
+    and they are not symmetric. The reason line is matched by the FIELD that
+    produced it: `result.reason` is the same string the library interpolated,
+    so the guard cannot drift from it. The truncation line has no field to
+    match -- `result.truncated` is the bucket list, not the sentence -- so
+    that guard names a phrase the LIBRARY owns, `truncated buckets`.
+
+    Each guard is also conditioned on the field, so a line is only ever
+    considered for dropping when the verb in fact said it above.
+
+    Matching a phrase is the deliberate choice here, because of which way it
+    fails. If the library rewords its truncation line, the guard stops
+    matching and the line is forwarded and printed TWICE. Dropping by
+    position instead -- second line when truncated, third when not ok --
+    would fail the other way, and silently eat a real line the moment the
+    library stops emitting one. A duplicate is visible; a loss is not.
 
     The installed library decides how many lines there are. A pin that
     predates `queued` and `incomplete` simply yields fewer, which is why this

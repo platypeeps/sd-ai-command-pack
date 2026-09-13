@@ -54,8 +54,105 @@ CONTIGUOUS = (
 )
 
 
+#: What GitHub appends to a squash whose message already ends in a trailer
+#: block: its co-author line, contiguously. Measured over `origin/main` at
+#: a593db65: every one of the 187 squashes whose body did *not* end in a
+#: trailer block got the line as a new paragraph, and both of the 2 whose
+#: body did (dependabot's `Signed-off-by:`) got it joined to the block.
+GITHUB_COAUTHOR = "Co-authored-by: Someone <nobody@example.invalid>\n"
+
+#: The attribution paragraph every assistant-written pull-request body ends
+#: with, spelled as the template spells it.
+ATTRIBUTION = (
+    "🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+    "https://claude.ai/code/session_01EXAMPLE\n"
+)
+
+#: A squashed pull request composed per `.github/PULL_REQUEST_TEMPLATE.md`
+#: since sd:640: attribution paragraph, then the trailer block, then what
+#: GitHub appends. The trailers stay the last paragraph.
+SQUASHED_TEMPLATE = (
+    "fix(thing): the change (#99)\n"
+    "\n"
+    "## Summary\n"
+    "\n"
+    "- The change.\n"
+    "\n"
+    + ATTRIBUTION
+    + "\n"
+    "Item: sd:7\n"
+    "Delivers: sd:7\n"
+    "Refs: sd:8\n"
+    + GITHUB_COAUTHOR
+)
+
+#: The same pull request in the order the template had before sd:640, which
+#: is the shape of 9c789ad3 (#887): trailers, then attribution, then GitHub's
+#: line as a paragraph of its own. Four of the seven `Delivers:` merges on
+#: main had this shape, and `--delivered-by` refused every one.
+SQUASHED_ATTRIBUTION_LAST = (
+    "fix(thing): the change (#99)\n"
+    "\n"
+    "## Summary\n"
+    "\n"
+    "- The change.\n"
+    "\n"
+    "Item: sd:7\n"
+    "Delivers: sd:7\n"
+    "Refs: sd:8\n"
+    "\n"
+    + ATTRIBUTION
+    + "\n"
+    + GITHUB_COAUTHOR
+)
+
+TEMPLATE = ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md"
+
+
+def git_trailers(message: str) -> set[str]:
+    """The trailer names `git interpret-trailers --parse` reads out of `message`."""
+    parsed = subprocess.run(
+        ["git", "interpret-trailers", "--parse"], input=message,
+        capture_output=True, text=True, check=True, timeout=30)
+    return {line.partition(":")[0] for line in parsed.stdout.splitlines() if line}
+
+
 class TrailerBlockTests(unittest.TestCase):
     """`sd_lib.trailer_block` and `sd_lib.demoted_trailers`, on their own."""
+
+    def test_a_squash_in_the_template_order_keeps_its_trailers(self) -> None:
+        """sd:640. Attribution above, trailers last, GitHub's line joined on.
+
+        Asserted against git as well as against the two readers, because git
+        is the reader whose answer decides whether the delivery exists.
+        """
+        self.assertEqual((), sd_lib.demoted_trailers(SQUASHED_TEMPLATE))
+        block = sd_lib.trailer_block(SQUASHED_TEMPLATE).splitlines()
+        self.assertIn("Delivers: sd:7", block)
+        self.assertIn("Refs: sd:8", block)
+        self.assertEqual({"Item", "Delivers", "Refs", "Co-authored-by"},
+                         git_trailers(SQUASHED_TEMPLATE))
+
+    def test_a_squash_with_the_attribution_last_loses_its_trailers(self) -> None:
+        """The control, and the defect: the same body in the old order."""
+        self.assertEqual(("Item: sd:7", "Delivers: sd:7"),
+                         sd_lib.demoted_trailers(SQUASHED_ATTRIBUTION_LAST))
+        self.assertNotIn("Delivers: sd:7",
+                         sd_lib.trailer_block(SQUASHED_ATTRIBUTION_LAST).splitlines())
+        self.assertEqual({"Co-authored-by"}, git_trailers(SQUASHED_ATTRIBUTION_LAST))
+
+    def test_the_pull_request_template_ends_in_the_trailer_block(self) -> None:
+        """The template is the shape every hand-written body starts from, so
+        it is pinned here: its last paragraph is trailers and nothing else,
+        `Delivers:` is among them, and the attribution line sits above it."""
+        template = TEMPLATE.read_text(encoding="utf-8")
+        block = sd_lib.trailer_block(template).splitlines()
+        self.assertTrue(block)
+        for line in block:
+            self.assertRegex(line, r"^[A-Za-z-]+: \S")
+        self.assertIn("Delivers:", {line.partition(" ")[0] for line in block})
+        self.assertLess(template.index("Generated with"), template.index(block[0]))
+        self.assertEqual((), sd_lib.demoted_trailers(template))
 
     def test_a_blank_line_before_the_last_block_demotes_the_trailer(self) -> None:
         self.assertEqual(("Delivers: sd:7",), sd_lib.demoted_trailers(DEMOTED))
@@ -161,6 +258,37 @@ class DeliveryReasonTests(unittest.TestCase):
         commit = self.git("rev-parse", "HEAD")
         with self.assertRaisesRegex(sd_work.WorkRefusal, "carries no `Delivers: sd:7`"):
             sd_work._delivery_reason(self.row, commit)
+
+    def test_two_delivers_trailers_on_one_commit_are_read_one_per_line(self) -> None:
+        """e6c2cb20 (#869) carries `Delivers: sd:580` and `Delivers: sd:572`.
+
+        `git log --format=%(trailers:key=Delivers,valueonly)` prints those as
+        `sd:580sd:572` when the caller drops the newlines, and a reader that
+        joined the values would hold one id naming nothing (sd:640, note
+        #1225). Every reader in `bin/` takes the block a line at a time; this
+        pins that for the one a task's closure goes through, and for the one
+        `sd work deliver` and `sd-status` share.
+        """
+        (self.root / "file.txt").write_text("five\n", encoding="utf-8")
+        message = (
+            "fix(gates): two gates in one squash\n"
+            "\n"
+            "Delivers: sd:7\n"
+            "Delivers: sd:9\n"
+            "Co-Authored-By: Someone <nobody@example.invalid>\n"
+        )
+        self.git("commit", "-q", "-a", "-m", message)
+        commit = self.git("rev-parse", "HEAD")
+        for item in (7, 9):
+            with self.subTest(item=item):
+                self.assertEqual(
+                    f"delivered at {commit} on refs/heads/main",
+                    sd_work._delivery_reason({"id": item, "repo": str(self.root)}, commit),
+                )
+                self.assertTrue(sd_lib._closes(message, f"sd:{item}"))
+        self.assertFalse(sd_lib._closes(message, "sd:7sd:9"))
+        with self.assertRaisesRegex(sd_work.WorkRefusal, "carries no `Delivers: sd:8`"):
+            sd_work._delivery_reason({"id": 8, "repo": str(self.root)}, commit)
 
     def test_a_delivers_trailer_for_another_item_is_refused(self) -> None:
         """The row's own id, never any `Delivers:` line the commit happens to
