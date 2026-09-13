@@ -578,11 +578,31 @@ roles:
         shutil.copytree(ROOT / "bin", pack / "bin")
         site = pack / f".venv/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
         site.parent.mkdir(parents=True)
+        site.mkdir()
+        # A real copy of the package, and deliberately NOT a symlink to
+        # `SITE_PACKAGES`. Symlinking the whole directory worked -- the only
+        # writes below are in the `broken` arm, which never symlinks -- but it
+        # handed a live path into the developer's own virtualenv to a
+        # subprocess, one careless future case away from writing through it.
+        # That is not hypothetical: it happened while this change was being
+        # reviewed, through exactly this shape, and truncated the installed
+        # `sd_db/__init__.py`. Copying costs 36ms for 2.1MB and the fixture
+        # then owns every byte under `site`. Only `sd_db` is copied, not the
+        # 92MB directory around it, which is enough because its dist-info
+        # declares no `Requires-Dist`.
         if library == "provisioned":
-            site.symlink_to(SITE_PACKAGES)
-        else:
-            site.mkdir()
-        if library == "broken":
+            # `__pycache__` is excluded rather than copied: `copy2` preserves
+            # mtime, so a copied `.pyc` validates against its copied `.py` and
+            # the child would load bytecode whose embedded `co_filename` names
+            # the original absolute path. Harmless for these three cases --
+            # `__file__` comes from the loader, not the bytecode -- but the
+            # fixture exists to make the child's library unambiguous, and
+            # leaving the question open costs more than the one argument.
+            shutil.copytree(SITE_PACKAGES / "sd_db", site / "sd_db",
+                            ignore=shutil.ignore_patterns("__pycache__"))
+        elif library == "broken":
+            # `elif`, so the exclusivity the safety of this rests on is stated
+            # rather than left to the caller's three string literals.
             (site / "sd_db").mkdir()
             (site / "sd_db/__init__.py").write_text("raise ImportError('the provisioned copy is broken')\n")
         environment = {**self.environment, "PYTHONPATH": str(pack / "bin")}
