@@ -329,7 +329,7 @@ The section is added to the heading order the skeleton test recites at
 the key `jira`.
 
 **The dashboard.** `sd-dashboard` reads `index.sqlite` through `store.issues`
-(`dashboard/server.py:657`), not `shadow`, and its collector is
+(`dashboard/server.py:662`), not `shadow`, and its collector is
 `refresh_issues` with Jira already in `TRACKERS`. A Jira row reaches the
 page the moment the same three variables are exported and `sd-dashboard
 index` runs — that is the PRD's proving step, and it is step 2 of
@@ -342,7 +342,7 @@ otherwise:
   as `issue.repo || issue.tracker`, which for `LOG-23818` is the project
   key `LOG` — every ticket in the project reads the same. The key is in the
   link target, not in the text.
-- `dashboard/server.py:657` asks `store.issues` for `state="open"` only, and
+- `dashboard/server.py:662` asks `store.issues` for `state="open"` only, and
   the table has no state column: the page is an open worklist, and a
   ticket that has closed is not on it.
 
