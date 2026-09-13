@@ -51,13 +51,18 @@ TOKEN_SLOT = "__SD_DASHBOARD_TOKEN__"
 
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
 
-# **8767 is not this dashboard's any more, and 8768 never was a dashboard.**
-# The swap at 6b-8 happened and then was undone: the pack held :8767 for one
-# week of 2026-09, and the system repository's workflow server in
+# **8767 is not this dashboard's any more, and 8768 is not a second dashboard
+# today.** The swap at 6b-8 happened and then was undone: the pack held :8767 for
+# one week of 2026-09, and the system repository's workflow server in
 # `local-project-dashboard/sd_dashboard/` took the port back at its #221 and
-# serves it now. 8768 is that same process's optional `ip_origin` listener on
-# this node's tailnet IP -- one program on two sockets, which is why "the two
-# could run side by side" describes nothing that is running. Measured
+# serves it now. 8768 was this pack's own port through the parity window --
+# `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`
+# records `:8768/api/state` answering with 78 repos while :8767 answered 200, and
+# `tests/test_sd_dashboard.py` still calls it "the side-by-side port" -- but that
+# process is gone. What answers there now is the system dashboard's optional
+# `ip_origin` listener on this node's tailnet IP: one program on two sockets,
+# which is why "the two could run side by side" describes nothing that is
+# running, however exactly it described 2026-08. Measured
 # 2026-09-13: `lsof` gives PID 37095 for both ports, and `/health` on 8767
 # answers `service: sd-dashboard` -- an endpoint this file does not implement,
 # so the responder cannot be this program.
