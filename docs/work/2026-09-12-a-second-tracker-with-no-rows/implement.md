@@ -22,7 +22,7 @@ since R11-D48. The pack half is on the order of forty lines in
 
 ## Step checklist
 
-- [ ] **1. Configure, before any code.** Export `JIRA_BASE_URL` and
+- [x] **1. Configure, before any code.** Export `JIRA_BASE_URL` and
       `JIRA_EMAIL` in `~/.config/shell/env.sh`, beside the `JIRA_API_TOKEN`
       that is already there, because that file is what
       `local-cron-jobs/cron-jobs.sh` sources before the nightly job and what
@@ -31,29 +31,52 @@ since R11-D48. The pack half is on the order of forty lines in
       Verify: in a fresh login shell, a presence check that prints the
       *missing* names and never a value —
       `python3 -c 'import os; print([n for n in ("JIRA_BASE_URL","JIRA_EMAIL","JIRA_API_TOKEN") if not os.environ.get(n, "").strip()])'`
-      — prints `[]`. Today it prints `['JIRA_BASE_URL', 'JIRA_EMAIL']`. The
+      — prints `[]`. The
       `.strip()` matches `settings` (`dashboard/jira.py:89-96`), which strips
       before `missing` (`dashboard/jira.py:100`) looks; a value of spaces
       would otherwise pass this check and fail step 2.
+      Done 2026-09-13: the operator exported both names beside the token, and
+      the check prints `[]` where before this step it printed
+      `['JIRA_BASE_URL', 'JIRA_EMAIL']`.
 
-- [ ] **2. One proving collect against the loop that exists.** Run
+- [x] **2. One proving collect against the loop that exists.** Run
       `bin/sd-dashboard index` from the checkout — the verb at
       `bin/sd-dashboard:250`; the pack links no executable anywhere
       (`AGENTS.md:57-69`) — with the three variables exported. This is the PRD's "one successful collect
       against the existing `dashboard/collect.py:168` loop proving a row can
       be produced at all", and it costs no code.
-      Verify: the run prints `issues[jira]: N new, 0 updated, M open` rather
-      than `issues[jira]: not collected (...)`, and
-      `sqlite3 "$(python3 -c 'from dashboard import store; print(store.index_path())')" "select tracker, count(*) from issue group by tracker"`
+      Verify, in four checks. None of them reads a missing row as a verdict:
+      an absent row is ambiguous, because the JQL window excludes issues the
+      credentials reach perfectly well, so a query for one named key cannot
+      tell a wrong account from an old ticket.
+      (a) The run prints `issues[jira]: N new, 0 updated, M open` with
+      `N > 0`, rather than `issues[jira]: not collected (...)`. It printed
+      `issues[jira]: 12 new, 0 updated, 11 open` on 2026-09-13.
+      (b) `sqlite3 "$(python3 -c 'from dashboard import store; print(store.index_path())')" "select tracker, count(*) from issue group by tracker"`
       — the path derived, because `index_path` honours `XDG_CACHE_HOME` —
-      returns a `jira` row where today it returns `github|1175` alone. Then
-      `sqlite3 "$(python3 -c 'from dashboard import store; print(store.index_path())')" "select url, state from issue where tracker='jira' and url like '%/browse/LOG-23818'"`
-      — its own invocation; the first one has exited — returns one row. **If it returns none while the run succeeded**, stop:
-      check the `accountId` `myself` returned against the operator's own
-      (design, last risk), because a token minted for another account
-      collects that account's involvement and reports success. If the run
-      prints `Jira rejected the credentials`, stop: the port does not start
-      on credentials that do not reach Jira.
+      returns a `jira` row where before this step it returned `github` alone.
+      It returned `github|1824` and `jira|12`.
+      (c) `python3 -c 'from dashboard import jira; print(jira.account_id(jira.settings())[0])'`
+      equals the operator's own accountId, read from Jira by hand. This is
+      the direct question, and it is the check that carries the design's last
+      risk: a token minted for another account collects that account's
+      involvement and reports success. It answered
+      `5e9a44b37bc0680c2ccd38af`, the account that both files and is assigned
+      `LOG-23818`, so the token is the operator's own.
+      (d) A specific issue key is named only after asserting that its
+      `updated` date falls inside `FIRST_RUN_WINDOW` (`dashboard/jira.py:64`);
+      otherwise take the newest key the query itself returned. `LOG-23818`,
+      the key the item seeds, does not qualify: it was last updated
+      2026-05-05, 131 days before the run, and `DEFAULT_JQL`
+      (`dashboard/jira.py:78-82`) filters `updated >= -{minutes}m`, so the
+      collector is never asked for it. The run returned `LOG-21895`,
+      `LOG-23702`, `LOG-23929`, `RS-8`, `RS-9`, `RS-45`, `RS-47`, `RS-48`,
+      `RS-49`, `RS-50` and `RS-51` open, and `RS-54` closed — eleven open and
+      one closed, which is the docstring's window in place of an open-only
+      filter. `LOG-23929` is the newest of them and is the key later steps
+      name.
+      If the run prints `Jira rejected the credentials`, stop: the port does
+      not start on credentials that do not reach Jira.
 
 - [ ] **3. The library module: `sd_db/shadow_jira.py`.** In
       `platypeeps/system`, lift `dashboard/jira.py` whole — module docstring
@@ -296,7 +319,8 @@ since R11-D48. The pack half is on the order of forty lines in
       `DASHBOARD_CODE_CAP` (`tests/test_loc_caps.py:231`) unmoved. Mutation:
       restore `issue.repo || issue.tracker` as the first branch and the
       test reddens. Manual check after step 2 has run: the issues tab shows
-      `LOG-23818`, linked, where before this step it showed `LOG`.
+      `LOG-23929`, linked, where before this step it showed `LOG`. The key is
+      step 2 (d)'s, not the seeded `LOG-23818`, which no collect returns.
 
 - [ ] **8. The first real sync, and the measurement.** With steps 1 to 7
       landed and the venv reinstalled at the new pin, run
@@ -308,9 +332,11 @@ since R11-D48. The pack half is on the order of forty lines in
       tracker, count(*) from shadow group by tracker` returns two rows where
       today it returns one; `select key from state where kind='watermark'
       group by key` returns `github` and `jira`; `select url, state from
-      shadow where tracker='jira' and url like '%/browse/LOG-23818'` returns
-      one row; `bin/sd-status` in any checkout, with or without a GitHub
-      remote, prints `LOG-23818` under `jira (shared database, all
+      shadow where tracker='jira' and url like '%/browse/LOG-23929'` returns
+      one row — step 2 (d)'s key, inside `FIRST_RUN_WINDOW`, rather than the
+      seeded `LOG-23818`, which the window excludes, so the query can answer
+      at all; `bin/sd-status` in any checkout, with or without a GitHub
+      remote, prints `LOG-23929` under `jira (shared database, all
       repositories)`. The nightly's next run, read from its log the following
       morning, carries both prefixes.
 
@@ -319,9 +345,10 @@ since R11-D48. The pack half is on the order of forty lines in
       exist. Add a note to the item, and edit issue #805's "What to build"
       into the migration this document describes, citing `design.md`, and
       restate its fifth acceptance line the way design.md's "The dashboard"
-      reads it: `sd-status` shows `LOG-23818` with its key and state; the
-      dashboard shows the key and, as an open worklist, shows the ticket
-      while it is open.
+      reads it: `sd-status` shows a collected ticket with its key and state;
+      the dashboard shows the key and, as an open worklist, shows the ticket
+      while it is open. Name `LOG-23929` there, not the seeded `LOG-23818`,
+      which `FIRST_RUN_WINDOW` excludes — step 2 (d).
       Verify: `bin/sd store item 361` shows the note; the issue body no
       longer contains the sentence "The caller iterates trackers" as a thing
       to build, and its fifth acceptance line names the two readers
@@ -361,7 +388,9 @@ Steps 1 and 2 are the operator's and gate everything after them. Steps 3 and
   on the item — line 6 to step 4's grep.
 
 **What cannot be verified from the repository, stated rather than invented:**
-that the token authenticates the operator's own account (step 2 stops on
-it); that `LOG-23818` is still open (either answer is correct and the row
-says which); and that the nightly job's environment carries the variables,
-which only the morning-after log shows.
+that the token authenticates the operator's own account — step 2 (c) puts
+that question to Jira directly rather than inferring it from a row that is
+absent for any of several reasons, and it answered the operator's own
+accountId; that any collected ticket is still open (either answer is correct
+and the row says which); and that the nightly job's environment carries the
+variables, which only the morning-after log shows.
