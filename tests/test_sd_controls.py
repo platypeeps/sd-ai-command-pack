@@ -98,7 +98,9 @@ class Controls(unittest.TestCase):
         beat = json.loads(clean.stdout)
         self.assertEqual(beat["recorded"], "heartbeat")
         self.assertNotIn("item", beat)
-        replayed = json.loads(self.cli(*quiet).stdout)
+        replay = self.cli(*quiet)
+        self.assertEqual(replay.returncode, 0, replay.stderr)
+        replayed = json.loads(replay.stdout)
         self.assertEqual(replayed["recorded"], "nothing")
         self.assertNotIn("item", replayed)
         self.assertEqual(self.reports(), [])
@@ -114,7 +116,9 @@ class Controls(unittest.TestCase):
         self.assertEqual(state["recorded"], "report")
         self.assertEqual(state["item"]["kind"], "report")
         self.assertIs(json.loads(state["item"]["fields"])["attention"], True)
-        again = json.loads(self.cli(*findings).stdout)
+        replay = self.cli(*findings)
+        self.assertEqual(replay.returncode, 0, replay.stderr)
+        again = json.loads(replay.stdout)
         self.assertEqual(state["item"]["id"], again["item"]["id"])
         report = str(state["item"]["id"])
 
@@ -123,7 +127,7 @@ class Controls(unittest.TestCase):
         refused = self.cli(
             "reports", "acknowledge", report, "--if-revision", state["revision"], "--json"
         )
-        self.assertNotEqual(refused.returncode, 0)
+        self.assertEqual(refused.returncode, 1)
         self.assertIn("resolve the report's followups", refused.stderr)
         self.assertNotIn("Traceback", refused.stderr)
         [followup] = [note for note in state["notes"] if note["kind"] == "followup"]
