@@ -64,12 +64,16 @@ def cmd_serve(args: argparse.Namespace, out) -> int:
 # destructive half.** `foreign_owner()` below is the guard and
 # `ProgramArguments[0]` is what it reads: `cmd_install` renders this file's
 # resolved path there, so a plist naming anything else -- or one that will not
-# parse, or that carries no `ProgramArguments` at all -- is not this
-# checkout's. Both `install` and `--uninstall` then exit 1 having written
-# nothing and having called `launchctl` not once, which is the property
-# `InstallTests` pins; reinstalling over the pack's own plist is untouched.
-# `--force` overwrites anyway, because without it a plist that got corrupted
-# or hand-edited is unfixable by the command that owns it. What the guard does
+# parse, or that carries no `ProgramArguments` at all, or that is a symlink
+# whatever it resolves to -- is not this checkout's. Both `install` and
+# `--uninstall` then exit 1 having written nothing and having called
+# `launchctl` not once, which is the property `InstallTests` pins;
+# reinstalling over the pack's own plist is untouched. `--force` acts anyway,
+# overwriting or, with `--uninstall`, deleting: without that escape hatch a
+# plist that got corrupted or hand-edited is unfixable by the command that
+# owns it. The symlink arm is the one a first version of this guard missed --
+# `Path.exists()` follows the link, so a dangling one read as "no file yet"
+# and `write_text` then created the *target*. What the guard does
 # not settle is the name: the label and the port are still the system's, and
 # whether this pack takes a distinct label or stops shipping `install` at all
 # is sd:719's call, alongside the port question in `dashboard/server.py`.
@@ -175,7 +179,19 @@ def foreign_owner() -> str | None:
     not "did someone else write this" but "can we show that we did", and a
     file that will not parse, or that has no `ProgramArguments`, answers no.
     Reading corruption as ours would make corruption the way past the guard.
+
+    A symlink is foreign whatever it points at, and it is checked *before*
+    absence because `Path.exists()` follows the link: a dangling one reports
+    `False`, which reads as "no file, first install", and then `write_text`
+    creates the target rather than the link -- so the guard would wave through
+    the one case where the pack's plist body lands at a path nobody chose.
+    Measured: `link.exists()` is `False` while `link.is_symlink()` is `True`,
+    and the write afterwards leaves the body at the target. Even a symlink
+    resolving to a plist this checkout wrote is foreign, because `cmd_install`
+    only ever writes a regular file, so the link is not ours either way.
     """
+    if PLIST.is_symlink():
+        return f"a symlink to {os.readlink(PLIST)}"
     if not PLIST.exists():
         return None
     try:
@@ -311,9 +327,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--uninstall", action="store_true", help="unload it and delete the plist")
     install_verb.add_argument(
         "--force", action="store_true",
-        help="write over a plist this checkout did not write; without this "
-             "escape hatch a corrupted or hand-edited one is unfixable by the "
-             "command that owns it")
+        help="act on a plist this checkout did not write -- overwrite it, or "
+             "with --uninstall delete it; without this escape hatch a "
+             "corrupted or hand-edited one is unfixable by the command that "
+             "owns it")
     install_verb.set_defaults(handler=cmd_install)
     index_verb = verbs.add_parser("index", help="collect the fleet once")
     index_verb.add_argument(

@@ -626,6 +626,66 @@ class InstallTests(FleetHarness):
         self.assertEqual(self.said, [])
         self.assertIn("--force", output)
 
+    def test_a_valid_plist_with_no_program_arguments_counts_as_foreign(self):
+        """The guard's own docstring promises this arm; nothing pinned it.
+
+        A plist can parse perfectly and still say nothing about who runs it.
+        `foreign_owner` reads `["ProgramArguments"][0]`, so a missing key
+        raises `KeyError` and an empty array raises `IndexError` -- both land
+        in the same refusal as garbage bytes, and neither was covered while
+        only unparseable input was tested. The distinction matters because
+        this file *is* a plist: a reader checking "does it parse" rather than
+        "does it name us" would let it through.
+        """
+        for body in (plistlib.dumps({"Label": "com.sven.sd-dashboard"}),
+                     plistlib.dumps({"Label": "com.sven.sd-dashboard",
+                                     "ProgramArguments": []})):
+            with self.subTest(body=body):
+                before = self.stage_foreign_plist(body=body)
+                self.said.clear()
+                code, output = self.run_install()
+                self.assertEqual(code, 1)
+                self.assertEqual(self.plist.read_bytes(), before)
+                self.assertEqual(self.said, [])
+                self.assertIn("--force", output)
+
+    def test_a_symlink_counts_as_foreign_even_when_it_dangles(self):
+        """`Path.exists()` follows the link, and that is the hole.
+
+        A dangling symlink reports `exists() is False`, which the guard read
+        as "no file, first install" -- and then `write_text` follows the link
+        and creates the *target*, so the pack's plist body landed at a path
+        nobody chose and `launchctl` was handed a file outside
+        `~/Library/LaunchAgents`. Absence and a broken link are not the same
+        state, so the symlink test has to come first.
+
+        The resolving case is here too, and it refuses as well: `cmd_install`
+        only ever writes a regular file, so a link is not this checkout's
+        work whatever sits at the other end of it.
+        """
+        for target_exists in (False, True):
+            with self.subTest(target_exists=target_exists):
+                self.plist.parent.mkdir(parents=True, exist_ok=True)
+                self.plist.unlink(missing_ok=True)
+                target = self.root / "elsewhere.plist"
+                target.unlink(missing_ok=True)
+                if target_exists:
+                    target.write_bytes(plistlib.dumps({
+                        "ProgramArguments": [
+                            str(REPO_ROOT / "bin" / "sd-dashboard")]}))
+                self.plist.symlink_to(target)
+                self.said.clear()
+
+                code, output = self.run_install()
+
+                self.assertEqual(code, 1)
+                self.assertEqual(self.said, [])
+                # The link survives as a link, and nothing was created at the
+                # far end of a broken one -- which is the actual damage.
+                self.assertTrue(self.plist.is_symlink())
+                self.assertEqual(target.exists(), target_exists)
+                self.assertIn("--force", output)
+
 
 class ServerRouteTests(FleetHarness):
     def test_the_handler_reads_and_writes_by_one_verb_each(self):
