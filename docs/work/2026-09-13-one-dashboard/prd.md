@@ -118,9 +118,10 @@ operator was reading.
 `LABEL` (line 52 of `bin/sd-dashboard` at `e80153ee`) declares `com.sven.sd-dashboard` as the one
 LaunchAgent the pack owns, and `PLIST` (line 53 of `bin/sd-dashboard` at `e80153ee`) renders to that
 name. `cmd_install` (line 139 of `bin/sd-dashboard` at `e80153ee`) writes that file and then boots the
-label out and bootstraps its own, at `bin/sd-dashboard:163-164`. Run today it
-stops PID 37095, overwrites the system's plist body with the pack's, and
-repoints the name at the pack. The live file's mode is 600 where the pack's
+label out and bootstraps its own, at lines 163-164 of that commit. Run then, it
+would have stopped PID 37095, overwritten the system's plist body with the
+pack's, and repointed the name at the pack; sd:719 step 1 has since deleted the
+verb. The live file's mode is 600 where the pack's
 `write_text` would leave 644, which is evidence independent of either
 repository's claims that the pack did not write it.
 

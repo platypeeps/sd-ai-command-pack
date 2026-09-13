@@ -311,7 +311,7 @@ this document does not dress it up as a gate.
   `dashboard/server.py:54-56`, saying the system dashboard "landed on 8768 at P3
   so the two could run side by side" and that taking the port "is what makes the
   swap a swap". The swap reversed.
-- `LABEL` (line 52 of `bin/sd-dashboard` at `e80153ee`) carries one at `bin/sd-dashboard:48-51` saying
+- `LABEL` (line 52 of `bin/sd-dashboard` at `e80153ee`) carried one at lines 48-51 of that commit saying
   the name "cannot collide with the system dashboard's plist while both exist".
   It is the cause of the collision, not a guard against it, and it sits directly
   above a destructive verb.

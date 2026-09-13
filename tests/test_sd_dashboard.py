@@ -327,7 +327,7 @@ class CommandLineTests(FleetHarness):
                     contextlib.redirect_stderr(io.StringIO()) as err, \
                     self.assertRaises(SystemExit) as raised:
                 sd_dashboard.main([gone])
-            self.assertNotEqual(raised.exception.code, 0)
+            self.assertEqual(raised.exception.code, 2)
             self.assertIn("invalid choice", err.getvalue())
 
 
