@@ -40,6 +40,18 @@ Capture defaults to Task. Followup, Comment, Question, Decision and Proposal
 require a Related item; the short inline CLI hint follows that selection.
 `sd task note` defaults to Comment and accepts all five note kinds through
 `--kind`. Use `--kind followup` for an action that should appear in Today.
+
+Two of those five words are also item kinds, and Capture's list is the note
+side of both. `sd task note <item> --kind followup` hangs a followup off an
+item and resolves against it; `sd task add --kind followup` files one that
+belongs to nothing and is worked in its own right, and it needs no Related
+item because there is no parent. The test is whether it survives the parent
+being deleted. `proposal` is the same collision with only one live half: the
+note exists, the item kind is reserved and nothing creates it, so
+`sd task add` does not offer it. The other three -- Comment, Question,
+Decision -- are notes and nothing else. `local-sd-db/README.md` holds the
+full table of both closed lists.
+
 The `sd` launcher is installed at `~/bin/common/sd` and is also managed by the
 system repository's bin-links installer.
 
