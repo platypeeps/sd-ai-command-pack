@@ -51,11 +51,12 @@ lint-ruff-paths:
 lint-mypy-paths:
 	@printf '%s\n' "$(LINT_MYPY_PATHS)"
 
-# Pass STRICT=1 to turn missing-tool skips below into hard errors (CI
-# parity: the CI lint job always runs the ShellCheck lane). Ruff and mypy
-# cover the paths named in LINT_RUFF_PATHS and LINT_MYPY_PATHS above, which
-# after step 3e is just the bin/ tools: the installer package and the shipped
-# payload are gone.
+# Pass STRICT=1 to turn missing-tool skips below into hard errors. That is
+# parity with the CI lint job, which always runs the ShellCheck lane and
+# never skips it. Ruff and mypy cover the paths named in LINT_RUFF_PATHS and
+# LINT_MYPY_PATHS above: Ruff over dashboard, the tracked bin/ files and
+# tests/, mypy over dashboard and the tracked bin/ files. The installer
+# package and the shipped payload that step 3e removed are not in either.
 #
 # The bash 3.2 lane survives 3e on a narrower rationale than it had, and the
 # narrowing is worth stating. It existed because the pack shipped shell scripts
@@ -126,5 +127,8 @@ docs-lint:
 
 # `full-check` is gone with step 3e: it ran a shipped script that no longer
 # exists, and every lane it wrapped that still has a subject is already a target
-# here. `check` is exactly the four gates CI runs.
+# here. `check` is the four gates CI runs, with one lane CI does not have: the
+# bash 3.2 parse inside `lint` runs only where a bash 3.2 exists, which is
+# this machine when it is a Mac and no runner (sd:10 criterion 17 cut the job
+# that built one).
 check: test lint audit docs-lint

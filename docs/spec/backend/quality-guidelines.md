@@ -2008,8 +2008,9 @@ leg protects BSD-tool and bash-3.2 behavior that Ubuntu cannot exercise.
 > the same rule.
 >
 > A developer machine with a modern bash on `PATH` accepts the file, so a
-> gate that parses shell with the `PATH` interpreter passes and the macOS CI
-> leg is the first thing to see it. `make lint` therefore runs
+> gate that parses shell with the `PATH` interpreter passes and the defect
+> surfaces only when the script is next run under `/bin/bash` on a Mac, with
+> no CI leg to see it first. `make lint` therefore runs
 > `.github/scripts/check-bash32-syntax.sh`, which parses every tracked `*.sh`
 > with a probed bash 3.2 (`/bin/bash` on macOS). Run it
 > directly when iterating on shell:
