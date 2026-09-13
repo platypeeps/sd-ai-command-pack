@@ -69,6 +69,47 @@ SKILLS = "skills/"
 #: cite.
 ENFORCEMENT = re.compile(r"\b(refuses|never|always|cannot)\b")
 
+#: The runs a claim may occupy. sd:622 exists because these three were all
+#: defensible readings of one corpus and none of them had ever been written
+#: down as code, so "how many uncited claims are there" had no reproducible
+#: answer. `prd.md` pinned 263. The delivery note for steps 1 to 3 offered 8,
+#: 97 and 275 for the three shapes. Reconstructing those same three shapes
+#: independently on `239ff624` produced a third set of figures again, because
+#: each reconstruction had to invent the counting rule the original never
+#: recorded.
+#:
+#: So no rival number is quoted here, and none should be quoted anywhere else.
+#: The rejected readings are kept as code instead: `PARAGRAPH` and `DOCUMENT`
+#: are runnable, their answer is whatever they return on the day you run them,
+#: and `TheClaimPredicate` runs all three. The only figure this module records
+#: is `UNCITED_SKILL_CLAIMS`, which is what `claims_in` returns.
+LINE = "line"
+PARAGRAPH = "paragraph"
+DOCUMENT = "document"
+CLAIM_SCOPES = (LINE, PARAGRAPH, DOCUMENT)
+
+#: **The reading in force, and the whole of it.** A claim is one line carrying
+#: an enforcement verb *and* naming a pack tool or a test.
+#:
+#: Three properties of that sentence were load-bearing and unrecorded, and each
+#: is now pinned by a test in `TheClaimPredicate` so that changing one is a
+#: decision somebody makes rather than a number that moves:
+#:
+#: 1. **The scope is one line**, not a paragraph and not a document. A verb and
+#:    a tool name in the same paragraph are not a claim about that tool.
+#: 2. **The verbs are matched as written**, in lower case. `ENFORCEMENT` carries
+#:    no `IGNORECASE`, so a bullet opening *"**Never accept a repo path**"* --
+#:    this pack's most common way of writing a rule -- is invisible to leg b.
+#:    Measured on `239ff624`, reading the verbs case-insensitively would find 12
+#:    claims where the shipped predicate finds 8. That is a false negative worth
+#:    naming and it is left standing: widening the predicate is a change to the
+#:    rule, not a recording of it, and `design.md` accepted false negatives in
+#:    writing because a ratchet with them still only moves one way.
+#: 3. **The subject is enumerated, never listed** -- `pack_nouns` reads `bin/`
+#:    and `tests/` off the index, so a tool built next month is covered the day
+#:    it is written.
+CLAIM_SCOPE = LINE
+
 #: A definition of a rule id, as this repository has always written one: a run
 #: of bold text opening with the id. There is no other form, because until now
 #: there was no registry -- which is the finding, not an accident.
@@ -122,15 +163,24 @@ DANGLING_RULE_IDS = frozenset({"R11-D1", "R11-D30", "R11-D46", "R5-D1"})
 #: baseline passed unchanged when one stranded id was resolved and a different
 #: one was newly stranded in the same change -- two baselines in one file
 #: keeping two different standards, which review caught.
+#:
+#: **24 on this branch, down from the 26 measured on `cddd3b98`.** `R10-D5` and
+#: `R10-D6` are rows in `bin/sd_rules.py` now. The other twenty-four were each
+#: looked at and each has a recorded reason it is not a row yet, in the backfill
+#: section of this item's `implement.md`, rather than left for the next reader
+#: to rediscover.
 STRANDED_RULE_IDS = frozenset({
-    "R10-D1", "R10-D2", "R10-D3", "R10-D4", "R10-D5", "R10-D6", "R10-D7",
+    "R10-D1", "R10-D2", "R10-D3", "R10-D4", "R10-D7",
     "R11-D10", "R11-D12", "R11-D13", "R11-D14", "R11-D15", "R11-D16",
     "R11-D17", "R11-D18", "R11-D19", "R11-D20", "R11-D21", "R11-D23",
     "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D4", "R11-D5", "R11-D6",
 })
 
 #: Tool-behaviour claims in skills that cite no rule id, per document.
-#: Measured on `cddd3b98` by `uncited_skill_claims` below.
+#: Measured on `cddd3b98`, and unchanged on `239ff624`, by `uncited_skill_claims`
+#: below -- which is to say by `claims_in`, and by nothing else. `CLAIM_SCOPE`
+#: says what that predicate is and which properties of it are load-bearing;
+#: this is only where its answer is written down.
 #:
 #: Per document rather than as one total, so a new uncited claim in `sd-ship`
 #: fails even in a change that cleaned two out of `sd-plan`. One number for the
@@ -243,26 +293,64 @@ def names_a_pack_noun() -> re.Pattern[str]:
     return re.compile(rf"(?<![\w-])({alternation})(?![\w-])")
 
 
-def skill_claims() -> list[tuple[str, int, str, list[str]]]:
+def claim_spans(text: str, scope: str) -> list[tuple[int, str]]:
+    """The runs of `text` one claim may occupy, as `(first line, run)`.
+
+    The three readings of `CLAIM_SCOPE`, side by side and executable, so the
+    rejected ones stay reproducible instead of surviving as numbers in a
+    document. `TheClaimPredicate` runs all three over the live corpus.
+    """
+
+    if scope == LINE:
+        return list(enumerate(text.splitlines(), 1))
+    if scope == DOCUMENT:
+        return [(1, text)]
+    if scope != PARAGRAPH:
+        raise ValueError(f"{scope!r} is not one of {CLAIM_SCOPES}")
+    spans, start, block = [], 1, []
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.strip():
+            if not block:
+                start = number
+            block.append(line)
+        elif block:
+            spans.append((start, "\n".join(block)))
+            block = []
+    if block:
+        spans.append((start, "\n".join(block)))
+    return spans
+
+
+def claims_in(text: str, subject: re.Pattern[str], *,
+              scope: str = CLAIM_SCOPE) -> list[tuple[int, str, list[str]]]:
+    """Every tool-behaviour claim in one document, as `(line, run, rule ids)`.
+
+    **This function is the definition.** Nothing else decides what a claim is:
+    `skill_claims` walks the corpus and hands each document here, and the
+    baseline is whatever this returns. See `CLAIM_SCOPE` for why that mattered
+    enough to be said out loud.
+    """
+
+    return [(number, run, sd_rules.RULE_ID.findall(run))
+            for number, run in claim_spans(text, scope)
+            if ENFORCEMENT.search(run) and subject.search(run)]
+
+
+def skill_claims(scope: str = CLAIM_SCOPE) -> list[tuple[str, int, str, list[str]]]:
     """Every tool-behaviour claim in a skill, as `(path, line, text, rule ids)`.
 
-    A claim is a line carrying an enforcement verb *and* naming a pack tool or
-    a test. That predicate is deliberately narrow and will have false
-    negatives, which the design accepted in writing: this is a ratchet on new
-    claims, not an audit of old ones, and a ratchet with false negatives still
-    only moves one way. A predicate wide enough to catch every claim reddens
-    thousands of lines on its first run, and a check that does that is not
-    adopted, it is disabled.
+    The predicate is deliberately narrow and will have false negatives, which
+    the design accepted in writing: this is a ratchet on new claims, not an
+    audit of old ones, and a ratchet with false negatives still only moves one
+    way. A predicate wide enough to catch every claim reddens thousands of
+    lines on its first run, and a check that does that is not adopted, it is
+    disabled.
     """
 
     subject = names_a_pack_noun()
-    found = []
-    for relative, text in read_corpus(f"{SKILLS}*.md", f"{SKILLS}**/*.md"):
-        for number, line in enumerate(text.splitlines(), 1):
-            if ENFORCEMENT.search(line) and subject.search(line):
-                found.append((relative, number, line.strip(),
-                              sd_rules.RULE_ID.findall(line)))
-    return found
+    return [(relative, number, run.strip(), ids)
+            for relative, text in read_corpus(f"{SKILLS}*.md", f"{SKILLS}**/*.md")
+            for number, run, ids in claims_in(text, subject, scope=scope)]
 
 
 def uncited_skill_claims() -> dict[str, int]:
@@ -721,6 +809,127 @@ A registry row teaches from a section that does not exist.
 
 `teaches` is `path#heading`. Both halves are required, and the heading must be
 a real markdown heading in that document.""")
+
+
+# --------------------------------------------------------------------------
+# Leg b's predicate -- one recorded definition, not three readings
+# --------------------------------------------------------------------------
+
+
+class TheClaimPredicate(unittest.TestCase):
+    """sd:622. What counts as a claim, pinned instead of remembered.
+
+    Leg b's baseline was argued three ways before it landed and no reading of
+    it was ever written as code, so the number it produced could not be
+    reproduced from the repository -- which made it a claim about the
+    repository with nothing linking it to the machinery, the exact defect the
+    registry exists to end, committed by the registry.
+
+    These tests do not judge the predicate. They record it, so that widening it
+    is a change somebody signs rather than a baseline that moves.
+    """
+
+    #: A verb and a tool name, split across two lines. The only property that
+    #: matters is that neither line carries both, which is what separates the
+    #: line reading from the two wider ones.
+    SPLIT = "The report from sd-status is the one to read.\nIt refuses a second.\n"
+
+    #: The same two facts on one line.
+    JOINED = "The report from sd-status refuses a second.\n"
+
+    def test_a_claim_is_one_line_and_the_wider_readings_are_not_in_force(self):
+        """The scope in force is the line, and the fixture proves which.
+
+        `CLAIM_SCOPE == LINE` on its own is a constant asserting itself. The
+        fixture is what makes it evidence: the same two sentences are one claim
+        when they share a line and no claim when they do not, and a predicate
+        that had quietly become paragraph-scoped would say one both times.
+        """
+
+        subject = names_a_pack_noun()
+        self.assertEqual(CLAIM_SCOPE, LINE, "the shipped reading is the line")
+        self.assertEqual(claims_in(self.SPLIT, subject), [])
+        self.assertEqual(len(claims_in(self.JOINED, subject)), 1)
+        self.assertEqual(len(claims_in(self.SPLIT, subject, scope=PARAGRAPH)), 1)
+        self.assertEqual(len(claims_in(self.SPLIT, subject, scope=DOCUMENT)), 1)
+
+    def test_the_rejected_readings_stay_reproducible_and_stay_wider(self):
+        """All three readings run over the live corpus, and the shipped one is least.
+
+        The rejected readings are kept executable rather than remembered as
+        numbers. A number in a document is what sd:622 is about: 263, 97, 275,
+        63 and 176 were all offered for this corpus by predicates nobody wrote
+        down, and not one of them can be checked today. These can, on whatever
+        the corpus is at the time.
+
+        The assertion is containment, not a count, because a count here would
+        be a second baseline restating `UNCITED_SKILL_CLAIMS` -- and because
+        counts do not order across these scopes at all: a document read whole
+        is one span, so the widest reading yields the fewest *spans* while
+        reaching the most documents. That asymmetry is itself worth pinning,
+        since it is how two people measuring "the same thing" three ways got
+        three numbers and each believed the others had miscounted.
+        """
+
+        reached = {scope: {path for path, *_ in skill_claims(scope)}
+                   for scope in CLAIM_SCOPES}
+        self.assertLessEqual(reached[LINE], reached[PARAGRAPH], reached)
+        self.assertLessEqual(reached[PARAGRAPH], reached[DOCUMENT], reached)
+        self.assertEqual(reached[CLAIM_SCOPE], reached[LINE], reached)
+        self.assertTrue(reached[LINE], "the corpus carries no claims at all")
+
+    def test_an_enforcement_verb_is_matched_as_written(self):
+        """Lower case only, and the cost of that is named rather than found later.
+
+        `ENFORCEMENT` carries no `IGNORECASE`. A bullet opening *"**Never accept
+        a repo path**"* is therefore not a claim, and that shape is how this
+        pack most often writes a rule. The property is pinned here so that
+        widening it reads as a decision; the measured cost of leaving it is in
+        `CLAIM_SCOPE`.
+        """
+
+        self.assertIsNone(ENFORCEMENT.search("Never accept a repo path"))
+        self.assertIsNotNone(ENFORCEMENT.search("it never accepts a repo path"))
+        self.assertFalse(ENFORCEMENT.flags & re.IGNORECASE)
+
+    def test_the_subject_of_a_claim_is_enumerated_and_not_listed(self):
+        """`pack_nouns` reads the tree, so a new tool needs nobody to remember it.
+
+        A hand-kept roster of tool names is the listed-roster defect one layer
+        down, and it would make leg b quietly stop covering everything written
+        after the day the list was typed.
+
+        **The matcher is exercised, not just the enumeration.** The first form
+        of this test asserted only that `pack_nouns` reads the index, and
+        mutation caught it: hard-coding the roster inside `names_a_pack_noun`
+        -- the function that actually feeds the predicate -- left this test
+        green and reddened only the baseline, which is the wrong test failing
+        and sends the reader to a count instead of to the roster.
+        """
+
+        nouns = pack_nouns()
+        self.assertIn("sd-status", nouns)
+        self.assertIn("test_rule_registry", nouns)
+        self.assertEqual(nouns, frozenset(
+            {path.name for path in tracked_paths("bin")}
+            | {path.stem for path in tracked_paths("tests/test_*.py")}))
+        subject = names_a_pack_noun()
+        missed = sorted(name for name in nouns
+                        if not subject.search(f"the {name} tool"))
+        self.assertEqual(missed, [], f"""
+The claim subject does not match every name enumerated from the tree.
+
+{_lines(missed)}
+
+`names_a_pack_noun` builds its alternation from `pack_nouns`. A name the
+enumeration carries and the matcher misses means the matcher has a roster of
+its own.""")
+
+    def test_an_unknown_scope_is_refused_rather_than_silently_read(self):
+        """A typo must not fall through to whichever branch is last."""
+
+        with self.assertRaises(ValueError):
+            claim_spans("anything", "sentence")
 
 
 # --------------------------------------------------------------------------

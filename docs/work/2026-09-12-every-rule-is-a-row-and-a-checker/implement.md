@@ -25,6 +25,17 @@
       when 263 is raised to 264; adding a correctly cited claim does NOT redden
       it, which is the control that separates a violation count from a census.
 
+      > **Correction, 2026-09-12 (sd:622).** 263 could not be reproduced, and
+      > the three readings offered in its place could not be reproduced either:
+      > an independent reconstruction of the same three shapes gave different
+      > figures again, because each reconstruction had to invent the counting
+      > rule the original never recorded. The shape of the requirement is
+      > unchanged — violations, not population, downward only. The number is
+      > now whatever `claims_in` returns, per document, in
+      > `UNCITED_SKILL_CLAIMS`, and the three properties of that predicate that
+      > were load-bearing and unstated are pinned by `TheClaimPredicate`.
+      > `design.md` carries the correction in full.
+
 - [ ] **3. Meta-check leg c, over the R-id corpus.** Every rule id cited in live
       prose is defined in the registry. On the first run this reports 4
       failures — `R11-D1`, `R11-D30`, `R11-D46`, `R5-D1` — and a baseline of 26
@@ -35,6 +46,40 @@
       whether it is a live rule or a historical decision. This is the expensive
       step. It lands in slices; each slice reduces the leg c baseline and the
       baseline test proves it fell.
+
+      **Slice 1, 2026-09-12. `STRANDED_RULE_IDS` 26 → 24.** `R10-D5` and
+      `R10-D6` are rows. Both were already taught by a skill section that cites
+      the id, and both have a checker that is a plain function in `bin/` —
+      `sd_setup_github.setup_github` and `sd_lib.repo_root`. Registering
+      `R10-D5` turned the second-list check red on the refusal message in
+      `bin/sd_setup_github.py`, which carried the id inside a string; the
+      citation moved to the comment above it, which is the rephrasing that
+      check's own failure text prescribes.
+
+      **Two obstacles decide the rest of the backfill, and neither is the
+      judgement the step was sized for.** Twenty of the twenty-four remaining
+      ids are taught by no skill section at all, so leg a cannot pass for them:
+      registering one means writing the teaching section first, which is step 8
+      and not this step. The other four are taught, and each is held up by
+      something specific:
+
+      | Id | Taught in | Why it is not a row yet |
+      |---|---|---|
+      | `R10-D1` | `skills/sd-status/SKILL.md` | `bin/sd-status` carries the id in two strings, one of them the `CLASSES` row whose text the skill's table mirrors. The second-list check wants it out of the string; leg a reads the skill table it would have to change. The two checks pull opposite ways and that needs a decision, not an edit. |
+      | `R10-D2` | `skills/sd-handoff/SKILL.md` | The section that teaches it says Lane B is *not implemented*. A live row with a checker would assert an enforcement that does not exist, which is the defect this item is about. |
+      | `R10-D3` | `skills/sd-handoff/SKILL.md` | Its enforcement lives in `bin/sd-handoff-restore`, which has no `.py` suffix. `source:bin/sd_lib.py::sibling` is the pack's way to import one, and its own contract says every caller defers it — so importing it to fill a registry row at module load contradicts it. |
+      | `R10-D4` | `skills/sd-review/SKILL.md` | Same obstacle: `codex_preflight` lives in the suffixless `bin/sd-review`. This is the best-taught rule in the corpus — the heading cites the id — and it is the first candidate for slice 2, once a row can name a suffixless tool's function without importing the tool. |
+
+      **A finding about leg c's four dangling ids, measured on `239ff624`.**
+      They are not undefined. Three of them carry a definition in a form
+      `DEFINITION` cannot see, because that pattern requires a bold run
+      *opening* with the id: `R5-D1` is written `**Obsidian vault stays
+      system-of-record** (R5-D1)`, `R11-D1` sits in a table cell with no bold at
+      all, and `R11-D30` is a heading. The fourth, `R11-D46`, is defined in no
+      document in any form — its derivation was recorded as a comment in
+      `tests/test_loc_caps.py`. Widening the grammar would move ids between two
+      baselines at once and is a change to the measurement, so it is left for
+      its own slice rather than folded into this one.
 
 - [ ] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become

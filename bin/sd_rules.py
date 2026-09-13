@@ -21,19 +21,36 @@ exist, and it would fail at run time rather than at import time. This table
 holds the function object itself, so a row naming a checker that does not exist
 raises on the first import, before any test runs.
 
-**The table is empty on purpose.** The meta-check is the deliverable, not the
-rules: legs a, b and c in `tests/test_rule_registry.py` are what keep the
-system from drifting, and a registry with the meta-check and no rules is worth
-more than fifteen rules with no meta-check, because the second one starts
-drifting the day it lands. Zero rows passes every test here, which is what
-makes this module landable before any rule argues about its content.
+**The meta-check is the deliverable, not the rules.** Legs a, b and c in
+`tests/test_rule_registry.py` are what keep the system from drifting, and a
+registry with the meta-check and no rules is worth more than fifteen rules with
+no meta-check, because the second one starts drifting the day it lands. Zero
+rows passed every test here, which is what made this module landable before any
+rule argued about its content.
+
+**The rows arrive by backfill, one judgement at a time.** A rule id cited in
+live prose whose only definition sits in `docs/work/archive` is a citation of a
+page the pack has stopped maintaining, and moving one here is a decision about
+whether it is still a rule or only a record of one. `STRANDED_RULE_IDS` in
+`tests/test_rule_registry.py` is that backfill's meter: it falls by exactly the
+ids a change registers, in the same change, because it is an equality and not a
+ceiling.
 """
 
 from __future__ import annotations
 
+import pathlib
 import re
+import sys
 from collections.abc import Callable
 from typing import NamedTuple
+
+_BIN = str(pathlib.Path(__file__).resolve().parent)
+if _BIN not in sys.path:  # pragma: no cover - import bootstrap, not behaviour
+    sys.path.insert(0, _BIN)
+
+import sd_lib  # noqa: E402 - after the bootstrap that makes `bin/` importable
+import sd_setup_github  # noqa: E402 - same
 
 #: What a rule id looks like, in one place. Every reader of rule ids -- the
 #: meta-check's three legs, and anything that grows later -- compiles nothing
@@ -96,7 +113,43 @@ class Rule(NamedTuple):
 #: `test_no_consumer_carries_a_second_list` holds them to. Adding a rule means
 #: adding a row here and a checker -- never editing a skill's list of rules,
 #: which is how the sentence and the machinery come apart.
-RULES: tuple[Rule, ...] = ()
+#:
+#: `checker` holds a callable that lives in `bin/`, not a test. A test proves a
+#: rule holds; the code is what performs it, and a row pointing at the code
+#: breaks at import the day that code is deleted -- which is the signal worth
+#: having. It also keeps this module out of `tests/`, which nothing under
+#: `bin/` imports.
+#:
+#: The cost of that is an import edge from here to every module a row names, so
+#: a consumer importing this table imports them too, and a module named by a
+#: row must never import this one back. Neither of today's two does. The day a
+#: rule's enforcement lives in a suffixless tool -- `R10-D4`'s
+#: `codex_preflight` in `bin/sd-review` is the first -- that edge is not
+#: payable: `source:bin/sd_lib.py::sibling` is the pack's way to import one and
+#: its contract is that every caller defers it, which a module-level row cannot
+#: do. That is the open question the next backfill slice has to answer, and it
+#: is recorded in this item's `implement.md` rather than discovered again.
+RULES: tuple[Rule, ...] = (
+    Rule(
+        id="R10-D5",
+        subject="only a full-mode repository installs the review routing "
+                "lane; `minimal` and `guest` refuse it, so a shared or "
+                "upstream repository can never grow the framework's workflow",
+        checker=sd_setup_github.setup_github,
+        scope="code",
+        teaches="skills/sd-review/SKILL.md#setup-github",
+    ),
+    Rule(
+        id="R10-D6",
+        subject="an `sd-*` command resolves its repository from the working "
+                "directory and takes no path to another one, because a "
+                "session that can be pointed elsewhere acts on the wrong "
+                "checkout",
+        checker=sd_lib.repo_root,
+        scope="code",
+        teaches="skills/sd-check/SKILL.md#Never",
+    ),
+)
 
 
 #: Keyed lookup over the same tuple, so nothing restates a scope or a checker.

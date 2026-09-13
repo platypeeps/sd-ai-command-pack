@@ -94,6 +94,19 @@ status checks.
    population: it may fall and may not rise, in the shape
    `tests/test_loc_caps.py` already uses, and adding a correctly cited claim
    must not move it.
+
+   > **Correction, 2026-09-12 (sd:622).** The figure 263 in this requirement,
+   > and every other count of claims in this document, came from a predicate
+   > that was never recorded. It cannot be reproduced, and neither can the
+   > replacements proposed for it. The requirement stands as written — a frozen
+   > baseline of violations, not a flag day — but the *number* is now whatever
+   > `source:tests/test_rule_registry.py::claims_in` returns, recorded per
+   > document in `UNCITED_SKILL_CLAIMS`. `design.md` carries the correction and
+   > the three properties of the predicate that are now pinned by tests.
+   >
+   > The 26 archive-only R-ids in this requirement were reproducible and are
+   > not affected by that correction; the backfill has since moved them to 24,
+   > which `STRANDED_RULE_IDS` records and the Log dates.
 7. **The pre-commit tier is scoped by measurement, not by assumption.** A
    checker runs over the whole repository when a whole-repository run is fast,
    and is diff-scoped only where it is not. The backbone item asserts the
@@ -121,9 +134,12 @@ status checks.
       over the uncited shape — and the uncited shape is 263 of the 264 claims in
       `skills/` today, so a leg b that missed it would miss essentially
       everything it exists to catch.
-- [ ] The leg b baseline is 263 — the uncited claims in `skills/`, not the 681
-      live-prose population. A test asserts it may fall and may not rise, and a
-      control asserts that adding a *correctly cited* claim does not redden it.
+- [x] ~~The leg b baseline is 263~~ — **superseded 2026-09-12 by sd:622: 263
+      cannot be reproduced and neither can its proposed replacements.** The
+      baseline is what `claims_in` returns, held per document in
+      `UNCITED_SKILL_CLAIMS`, and a test asserts it may fall and may not rise.
+      The control asserting that a *correctly cited* claim does not redden it
+      stands unchanged and is met.
 - [ ] Meta-check leg c reports the 4 currently dangling R-ids — `R11-D1`,
       `R11-D30`, `R11-D46`, `R5-D1` — as failures on the first run over live
       prose, and reports zero once they are resolved or registered.
@@ -148,3 +164,11 @@ status checks.
 ## Log
 
 - 2026-09-12 created
+- 2026-09-12 steps 1 to 3 delivered (#882); the registry, the three legs, zero
+  rows
+- 2026-09-12 sd:622 closed out against this document: leg b's predicate has one
+  recorded definition, and the counts in this document are marked as
+  unreproducible rather than replaced with a fourth number
+- 2026-09-12 step 4 first slice: `R10-D5` and `R10-D6` registered, the stranded
+  baseline falls 26 → 24, and the twenty-four that did not move each carry a
+  recorded reason in `implement.md`
