@@ -54,11 +54,11 @@ before starting step 2.
       that item's owner holds the file, and editing it here is the cross-lane
       write sd:525 objects to. Record the landing as a note on sd:361 instead.
 
-- [ ] **1. `serve` and `install` are removed; `index` stays.** In
-      `bin/sd-dashboard`: delete `cmd_serve` (`bin/sd-dashboard:37`),
-      `cmd_install` (`bin/sd-dashboard:139`), `launchctl`
-      (`bin/sd-dashboard:126`), `PLIST_BODY` (`bin/sd-dashboard:81`), `LABEL`
-      (`bin/sd-dashboard:52`), `PLIST` (`bin/sd-dashboard:53`) and the two
+- [x] **1. `serve` and `install` are removed; `index` stays.** In
+      `bin/sd-dashboard`: delete `cmd_serve` (line 37 of `bin/sd-dashboard` at `e80153ee`),
+      `cmd_install` (line 139 of `bin/sd-dashboard` at `e80153ee`), `launchctl`
+      (line 126 of `bin/sd-dashboard` at `e80153ee`), `PLIST_BODY` (line 81 of `bin/sd-dashboard` at `e80153ee`), `LABEL`
+      (line 52 of `bin/sd-dashboard` at `e80153ee`), `PLIST` (line 53 of `bin/sd-dashboard` at `e80153ee`) and the two
       `add_parser` registrations for them, and delete the stale comment at
       `bin/sd-dashboard:48-51` with the constant it described rather than fixing
       its wording. **Then drop four imports, not one.** Each was
@@ -73,8 +73,8 @@ before starting step 2.
       | `os` | `bin/sd-dashboard:20` | one use, `os.getuid()` at `:149`, inside `cmd_install`. |
 
       `collect` and `store` **stay** in the import at `bin/sd-dashboard:34`:
-      `cmd_index` (`bin/sd-dashboard:176`) and `issue_lines`
-      (`bin/sd-dashboard:200`) still use them, and steps 4 and 5 still read the
+      `cmd_index` (`bin/sd-dashboard:32`) and `issue_lines`
+      (`bin/sd-dashboard:56`) still use them, and steps 4 and 5 still read the
       cache the `index` verb fills.
 
       **The module docstring is part of this step, because `--help` prints it.**
@@ -85,7 +85,7 @@ before starting step 2.
       a launchd workflow that has been deleted. One verb remains and the docstring
       says so.
 
-      `InstallTests` (`tests/test_sd_dashboard.py:331`) is deleted with the verb it
+      `InstallTests` (line 331 of `tests/test_sd_dashboard.py` at `e80153ee`) is deleted with the verb it
       covers, and the two cases in `tests/test_sd_dashboard.py` that pin the port
       baked into the plist go with it.
 
@@ -111,6 +111,22 @@ before starting step 2.
       Mutation, to prove the negative is load-bearing rather than vacuous: restore
       the `install` parser alone and the `com.sven.sd-dashboard` grep reddens;
       revert and `diff -q` reports the tree identical.
+
+      **Done on `fix/sd-719-step1-pack-dashboard-stops-serving`, branched from
+      `359a2bc9`, and the plan above had drifted by then.** The line numbers in
+      this step were recorded at `e80153ee`; #898 and #901 (sd:705) landed in
+      between, so everything was re-derived by `ast` before deleting. #901 had
+      added `foreign_owner`, `LOGS` and `LAUNCHD_PATH`, all reachable only from
+      `cmd_install`, and a fifth import, `plistlib`, used only by
+      `foreign_owner`. All of them went with the verb, as did the second
+      `sys.path` insert, which existed only so `import sd_ledger` resolved. The
+      mutation claim did not hold as written: the parser registration never
+      named the label, so restoring it alone leaves the label grep silent.
+      `test_index_is_the_only_verb` in `tests/test_sd_dashboard.py` asserts the
+      whole verb set instead, and that test is what goes red. The live service
+      is now PID 76442, not 37095, and it read the same before and after the
+      change. Citations above to deleted symbols now name their line at
+      `e80153ee` rather than a live line.
 
 - [ ] **2. `queues` becomes a native system view.** System repository only;
       nothing in the pack changes. `queues` is the one of the six legacy views
@@ -238,7 +254,7 @@ before starting step 2.
       sd:603 already recorded.
 
       Pack commit: delete `dashboard/store.py`, `dashboard/github.py`,
-      `dashboard/jira.py`, `cmd_index` (`bin/sd-dashboard:176`) and the `index`
+      `dashboard/jira.py`, `cmd_index` (`bin/sd-dashboard:32`) and the `index`
       verb. This is the step that closes the criterion 2 problem outright, because
       `sqlite3.connect` (`dashboard/store.py:89`) and `sqlite3.connect`
       (`dashboard/store.py:94`) are the two connections the port could not carry.
@@ -251,7 +267,7 @@ before starting step 2.
       | Caller | Line | What it needs |
       |---|---|---|
       | `dashboard/server.py` | `:43` | imports `collect` and `store`; survives to step 6, so this commit drops both from the import line and the endpoints behind them. |
-      | `bin/sd-dashboard` | `:34` | `from dashboard import collect, server, store` — `store` goes with `issue_lines` (`bin/sd-dashboard:200`) and the `index` verb this step deletes. |
+      | `bin/sd-dashboard` | `:34` | `from dashboard import collect, server, store` — `store` goes with `issue_lines` (`bin/sd-dashboard:56`) and the `index` verb this step deletes. |
       | `bin/sd` | `:2728` | `from dashboard.collect import discover_checkouts, repo_root`, inside `sd plugin list --fleet`. **This one is not a dashboard file and nothing in this plan would otherwise touch it.** |
       | `bin/sd-trackers` | `:42` | `from dashboard import github, jira`. The whole tool is built on the two modules this step deletes, so it retires in the same commit or it is a broken entry point. |
 
