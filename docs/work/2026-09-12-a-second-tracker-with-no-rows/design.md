@@ -17,7 +17,7 @@ plan below is written against today's state rather than the PRD's:
 
 | | PRD, at `cc93ea85` | Today, at `a593db65` |
 |---|---|---|
-| sd:603 | open, "a hard precondition" | **done**, `platypeeps/system` PR #305, squash `940c045a` |
+| sd:603 | open, "a hard precondition" | **done**, `platypeeps/system#305`, squash `940c045a` |
 | Library pin in `.github/workflows/tests.yml:90` | `3c4c723a`, pre-603 | `758dfb48`, which carries `008_shadow_tracker_key.sql` |
 | Live `sd.db` schema | version 7 | **version 8**, index `shadow_by_tracker_url` (measured below) |
 
@@ -200,7 +200,7 @@ A Jira row is `normalize` (`dashboard/jira.py:229`) as it stands: `tracker`
 *category* via `state_of` (`dashboard/jira.py:217`), `author` the reporter's
 display name. `store` at `sd_db/shadow_sync.py:477` writes it through
 `upsert_shadow` at `sd_db/writes.py:442`, whose conflict target is now
-`(tracker, url)` (`sd_db/writes.py:468`). Before PR #305 it was `url` alone
+`(tracker, url)` (`sd_db/writes.py:468`). Before `platypeeps/system#305` it was `url` alone
 with `SET tracker = excluded.tracker`, which meant the last writer took the
 row. A Jira URL and a GitHub URL never coincide in practice, so the hazard was
 never that Jira would adopt a GitHub row by accident; it was that the store
@@ -274,7 +274,18 @@ its own renderer. `jira_section()` opens its own read-only connection when
 never depends on the checkout's slug. It calls `tracker_items(connection,
 tracker="jira", state=None)` with no `repo`, because the operator's Jira
 involvement is not a property of the checkout, and
-`tracker_freshness(connection, "jira")`. The renderer prints:
+`tracker_freshness(connection, "jira")`. **The producer, not the renderer,
+applies the seven-day rule below**: it drops every closed row whose
+`last_seen` is older than seven days before returning, so the `rows` list
+in the status dict is the list both renderers see and `--json` cannot
+expose a closed row the text hides. The same producer-side contract
+`issues_section` keeps: `_database_issues` (`bin/sd-status:1134`) filters
+before anything renders. `render()` (`bin/sd-status:3305`) gains an
+explicit `_render_jira(result["jira"], write)` immediately after the
+`_render_issues(result["issues"], write)` call at `bin/sd-status:3328`;
+without that call the section would exist in `--json` and be absent from
+the text, which is why the skeleton order test recites the heading. The
+renderer prints:
 
 1. A freshness line, keyed on `last_success_at` rather than on the state
    word: `tracker_freshness` at `sd_db/progress.py:314` answers `never` only
@@ -289,11 +300,20 @@ involvement is not a property of the checkout, and
    decision at `sd_db/shadow_sync.py:630` — and a first run that truncated
    has written rows the verb reported as written. Hiding them behind a
    `never collected` line would contradict the verb. Open rows print first
-   as `KEY  open  title`; closed rows print after them, as
-   `KEY  closed  title`, but only those whose `last_seen` is within seven
-   days, because a Done ticket stops being re-seen once it leaves the JQL
-   window and a permanent list of every ticket ever closed is not a
-   worklist. The key is derived from the URL; nothing formats `number`.
+   as `KEY  open  <title>`; closed rows print after them, as
+   `KEY  closed  <title>`, and the producer has already limited those to
+   rows whose `last_seen` is within seven days, because a Done ticket
+   stops being re-seen once it leaves the JQL window and a permanent list
+   of every ticket ever closed is not a worklist. The key is derived from
+   the URL; nothing formats `number`. `<title>` is
+   `json.dumps(row["title"], ensure_ascii=False)` — the rule
+   `_render_contributions` applies to external text at
+   `bin/sd-status:3365-3368` — because a Jira summary is the `summary`
+   field of an external API response (`dashboard/jira.py:274`) and a
+   newline or an escape sequence in it would otherwise print as a second
+   status line. The quoted form is the shape of the line; no truncation,
+   because a cut inside an escape sequence is the injection the encoding
+   exists to prevent.
 3. `none` when there are no rows at all.
 
 `state=None` rather than `"open"` because the item's fourth "what to build"
@@ -310,13 +330,38 @@ the key `jira`.
 
 **The dashboard.** `sd-dashboard` reads `index.sqlite` through `store.issues`
 (`dashboard/server.py:638`), not `shadow`, and its collector is
-`refresh_issues` with Jira already in `TRACKERS`. It shows `LOG-23818` the
-moment the same three variables are exported and `sd-dashboard index` runs —
-no code change, and the page already renders a row whose `number` is null by
-its key (`dashboard/app.js:116-120`), which is the null-number case
-`sd-status` gets wrong today. That is the PRD's proving step, and it is step 2 of
-`implement.md`. Porting the dashboard onto `shadow` is the retirement of
-`index.sqlite`, which is a separate item and not widened into this one.
+`refresh_issues` with Jira already in `TRACKERS`. A Jira row reaches the
+page the moment the same three variables are exported and `sd-dashboard
+index` runs — that is the PRD's proving step, and it is step 2 of
+`implement.md`. But the page does not show the row "with its key and
+state", which is the item's fifth acceptance line, and an earlier draft of
+this paragraph said it did. Two readers were checked and both say
+otherwise:
+
+- `where` (`dashboard/app.js:115-120`) renders a row whose `number` is null
+  as `issue.repo || issue.tracker`, which for `LOG-23818` is the project
+  key `LOG` — every ticket in the project reads the same. The key is in the
+  link target, not in the text.
+- `dashboard/server.py:638` asks `store.issues` for `state="open"` only, and
+  the table has no state column: the page is an open worklist, and a
+  ticket that has closed is not on it.
+
+So the dashboard half of that line is met in two parts. **The key** is a
+reader change: `where` returns the URL's last path segment when `number`
+is null — `LOG-23818`, the same derivation `sd-status` uses — and falls
+back to `issue.repo || issue.tracker` only when there is no URL. That is
+one expression in one function, guarded by a source-reading test in
+`tests/test_dashboard_now.py` of the kind that file already applies to
+`fillIssues`, and it stays under `DASHBOARD_CODE_CAP`
+(`tests/test_loc_caps.py:231`) without moving it. **The state** is not a
+dashboard fact: the page shows an open ticket while it is open and drops
+it when it closes, because that is what an open worklist is, and the
+recorded state — the item's third acceptance line — is what the
+`sd-status` section prints. The acceptance line is read that way, and
+step 9 of `implement.md` says so on the item rather than leaving "with
+its state" to be argued at the check. Porting the dashboard onto `shadow`
+is the retirement of `index.sqlite`, which is a separate item and not
+widened into this one.
 
 **`sd-trackers ref jira:KEY`** — no change, as the item says.
 
@@ -357,9 +402,14 @@ acceptance line is a grep.
   and closes its connection before rendering; a Jira row has no slug. Reversed
   if items gain a Jira `external_id` and a per-repo join becomes meaningful.
 - **2026-09-12 — closed Jira rows print for seven days after they were last
-  seen, then drop from the section; they stay in `shadow`.** Reversed if the
+  seen, then drop from the section; they stay in `shadow`.** The cutoff is
+  applied by the producer, so `--json` and the text agree. Reversed if the
   operator wants a `--closed` switch, at which point the seven days become
   that switch's default.
+- **2026-09-12 — the dashboard shows the key, and "state" on the dashboard
+  means "open, or gone".** `where` derives the key from the URL tail for a
+  null-number row; the page stays an open worklist. Reversed the day the
+  dashboard reads `shadow`, which is the item that retires `index.sqlite`.
 
 ## Rejected alternatives
 
@@ -386,7 +436,7 @@ forbids it, and the dashboard settled the same question in 2026-08.
 ## Risks
 
 **The PRD's citation `sd_db/schema/001_initial.sql:99` no longer points at
-`shadow_by_url`.** PR #305 added a 25-line comment above the table, so the
+`shadow_by_url`.** `platypeeps/system#305` added a 25-line comment above the table, so the
 index line is `sd_db/schema/001_initial.sql:124` on the pinned library, and
 it now carries the note "Migration 008 replaces this". The PRD was right at
 `754204d`; it is stale at `758dfb48`. Not silently corrected here: the

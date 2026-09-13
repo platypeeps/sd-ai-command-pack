@@ -12,12 +12,13 @@ pin moves: the verb reads `TRACKERS` and `configured` through `getattr` with
 today's behaviour as the default, and that is asserted by running the verb's
 tests with the pinned build, not assumed.
 
-`dashboard/` is not touched. `DASHBOARD_CAP` (`tests/test_loc_caps.py:223`)
-and `DASHBOARD_CODE_CAP` (`tests/test_loc_caps.py:231`) do not move;
-`dashboard/jira.py` stays until the `index.sqlite` retirement deletes it. The
-pack's `bin/` has no ceiling since R11-D48. The pack half is on the order of
-forty lines in `bin/sd_shadow.py`, thirty in `bin/sd-status`, and their
-tests.
+`dashboard/` changes by one expression, step 7b, so the page shows a Jira
+row's key instead of its project. `DASHBOARD_CAP`
+(`tests/test_loc_caps.py:223`) and `DASHBOARD_CODE_CAP`
+(`tests/test_loc_caps.py:231`) do not move; `dashboard/jira.py` stays until
+the `index.sqlite` retirement deletes it. The pack's `bin/` has no ceiling
+since R11-D48. The pack half is on the order of forty lines in
+`bin/sd_shadow.py`, thirty in `bin/sd-status`, and their tests.
 
 ## Step checklist
 
@@ -29,8 +30,11 @@ tests.
       branch puts it first and this checklist does not reorder it.
       Verify: in a fresh login shell, a presence check that prints the
       *missing* names and never a value —
-      `python3 -c 'import os; print([n for n in ("JIRA_BASE_URL","JIRA_EMAIL","JIRA_API_TOKEN") if not os.environ.get(n)])'`
-      — prints `[]`. Today it prints `['JIRA_BASE_URL', 'JIRA_EMAIL']`.
+      `python3 -c 'import os; print([n for n in ("JIRA_BASE_URL","JIRA_EMAIL","JIRA_API_TOKEN") if not os.environ.get(n, "").strip()])'`
+      — prints `[]`. Today it prints `['JIRA_BASE_URL', 'JIRA_EMAIL']`. The
+      `.strip()` matches `settings` (`dashboard/jira.py:89-96`), which strips
+      before `missing` (`dashboard/jira.py:100`) looks; a value of spaces
+      would otherwise pass this check and fail step 2.
 
 - [ ] **2. One proving collect against the loop that exists.** Run
       `bin/sd-dashboard index` from the checkout — the verb at
@@ -43,8 +47,8 @@ tests.
       `sqlite3 "$(python3 -c 'from dashboard import store; print(store.index_path())')" "select tracker, count(*) from issue group by tracker"`
       — the path derived, because `index_path` honours `XDG_CACHE_HOME` —
       returns a `jira` row where today it returns `github|1175` alone. Then
-      `select url, state from issue where tracker='jira' and url like '%/browse/LOG-23818'`
-      returns one row. **If it returns none while the run succeeded**, stop:
+      `sqlite3 "$(python3 -c 'from dashboard import store; print(store.index_path())')" "select url, state from issue where tracker='jira' and url like '%/browse/LOG-23818'"`
+      — its own invocation; the first one has exited — returns one row. **If it returns none while the run succeeded**, stop:
       check the `accountId` `myself` returned against the operator's own
       (design, last risk), because a token minted for another account
       collects that account's involvement and reports success. If the run
@@ -79,7 +83,13 @@ tests.
       gives. Port `JiraTests` (`tests/test_sd_dashboard_index.py:465`) with
       its `jira_issue` and `jira_transport` fixtures to
       `local-sd-db/tests/test_shadow_jira.py`, asserting on `Collected`
-      fields.
+      fields. The suite is not free of the pack:
+      `test_the_window_is_relative_minutes_not_a_timestamp` calls
+      `github.iso(...)` at `tests/test_sd_dashboard_index.py:493` through
+      the module's `dashboard.github` import, so the port replaces that call
+      with the library's `iso` at `sd_db/shadow_sync.py:114` and drops the
+      import; a copy that keeps it fails on collection in `local-sd-db`,
+      where there is no `dashboard` package.
       Verify: the ported suite passes, and each of the three carried-over
       rules is guarded by a test that goes red under the mutation that
       breaks it. The rules, as `dashboard/jira.py:254-258` implements them:
@@ -117,9 +127,15 @@ tests.
       the 2026-09-12 decision on sd:361.
       Verify, each as a test in `local-sd-db/tests/test_shadow_sync.py` or
       beside it: (a) `sync(connection, tracker="jira", ...)` with a
-      transport fixture writes `jira` rows, writes a `watermark` row with
-      `key = 'jira'`, and leaves `read_watermark(connection, "github")`
-      `None` — the per-tracker rule, as a fact about the `state` table; (b)
+      transport fixture, on a database seeded with
+      `write_watermark(connection, "github", <known stamp>)`, writes `jira`
+      rows, writes a `watermark` row with `key = 'jira'`, and leaves
+      `read_watermark(connection, "github")` equal to the seeded stamp —
+      exactly, not merely non-`None`, because an empty database would let a
+      cross-tracker overwrite pass; and the mirror, a GitHub sync on a
+      database seeded with a `jira` watermark leaves the `jira` stamp
+      exactly as seeded — the per-tracker rule, as a fact about the `state`
+      table; (b)
       the same call with `JIRA_BASE_URL` absent from the environment writes
       no row, writes no watermark, makes no request, writes one
       `tracker-sync:jira` heartbeat whose body carries the reason, and
@@ -200,29 +216,44 @@ tests.
       `_database_issues` uses, and the same `available: False, reason`
       shape when it does not — and calls `tracker_items(connection,
       tracker="jira", state=None)` with no `repo`, and
-      `tracker_freshness(connection, "jira")`. It is added to the status
-      dict beside `"issues"` at `bin/sd-status:3061` under the key `jira`,
-      so `--json` carries it. A new `_render_jira` prints the heading
-      `jira (shared database, all repositories)` after the issues section:
+      `tracker_freshness(connection, "jira")`, and drops every closed row
+      whose `last_seen` is more than seven days old before it returns, so
+      the cutoff is a property of the `rows` list and not of one renderer.
+      It is added to the status dict beside `"issues"` at
+      `bin/sd-status:3061` under the key `jira`, so `--json` carries it. A
+      new `_render_jira` prints the heading `jira (shared database, all
+      repositories)` after the issues section, and `render()`
+      (`bin/sd-status:3305`) calls it — `_render_jira(result["jira"],
+      write)` on the line after `_render_issues(result["issues"], write)`
+      at `bin/sd-status:3328` — because a renderer that is defined and not
+      called leaves the section in `--json` only:
       the freshness line, keyed on `last_success_at` and not on the state
       word because `tracker_freshness` says `degraded`, not `never`, once a
       failed heartbeat exists (design, "Readers") — `never collected`, with
       ` (<reason>)` when the latest heartbeat carries one, else the
       `external context` pair; then every open row as
-      `KEY  open  title[:60]` with `KEY` = `row["url"].rpartition("/")[2]`;
-      then every closed row whose `last_seen` is within seven days as
-      `KEY  closed  title[:60]`; then `none` if there were no rows. Nothing
-      formats `number`. `ORDER` (`tests/test_sd_status.py:3555`) gains the
-      heading after `issues (this repo, from the index)`, and the skeleton
-      test's count moves from thirteen to fourteen.
-      `skills/sd-status/SKILL.md:41` is rewritten, not appended to: the
-      issues row keeps saying "for this repository", and a new row for the
-      `jira` section says it is the operator's Jira involvement from the
-      shared database, across every repository, and is not scoped to the
-      checkout.
+      `KEY  open  <title>` with `KEY` = `row["url"].rpartition("/")[2]` and
+      `<title>` = `json.dumps(row["title"], ensure_ascii=False)`, the rule
+      `_render_contributions` applies to external text at
+      `bin/sd-status:3365-3368`; then every closed row the producer kept as
+      `KEY  closed  <title>`; then `none` if there were no rows. Nothing
+      formats `number` and nothing slices a title. `ORDER`
+      (`tests/test_sd_status.py:3555`) gains the heading after
+      `issues (this repo, from the index)`, and the skeleton test's count
+      moves from thirteen to fourteen. Every hand-built result the suite
+      passes to `render()` gains a `jira` entry, starting with
+      `report` (`tests/test_sd_status.py:3522`) on `ReportSectionTests`,
+      which builds `issues` and `contributions` and no `jira` — without
+      that edit the existing skeleton tests fail with `KeyError` before
+      any new case runs. `skills/sd-status/SKILL.md` is rewritten in three
+      places, not appended to: `:23` ("The thirteen sections") and `:29`
+      ("the thirteen below") say fourteen; `:41`'s issues row keeps saying
+      "for this repository", and a new row for the `jira` section says it
+      is the operator's Jira involvement from the shared database, across
+      every repository, and is not scoped to the checkout.
       Verify, in `tests/test_sd_status.py`: (a) a fixture database holding
       one `jira` row with `number NULL` and `url .../browse/LOG-23818`
-      renders `LOG-23818  open  Benchmark harness` under the new heading in
+      renders `LOG-23818  open  "Benchmark harness"` under the new heading in
       a checkout **with no GitHub remote**, and raises nothing — the
       regression for the `:<6` format at `bin/sd-status:3394`, which raises
       `TypeError` on `None` today, and the proof the section does not sit
@@ -232,17 +263,45 @@ tests.
       watermark, and two stored rows — the partial-collect fixture —
       renders `never collected (<reason>)` **and** both rows, because a
       truncated first run stores what it saw; (d) a closed row with
-      `last_seen` eight days old is absent and the same row at six days
-      prints as `closed`;
-      (e) the issues section's existing assertions are unchanged, including
-      `no GitHub remote` in a checkout without one — the control. Mutation:
-      route the Jira row through `_render_issues` and (a) reddens with the
-      `TypeError`; gate `jira_section` on the slug and (a) reddens on the
-      missing heading.
+      `last_seen` eight days old is absent from **both** the text and
+      `jira_section()["rows"]`, and the same row at six days prints as
+      `closed` and is in the list — the cutoff asserted on the producer, so
+      `--json` cannot carry what the text hides; (e) a row whose title is
+      `"a\x1b[2Jb\nprotection"` prints as one line under the `jira`
+      heading, quoted, and the skeleton order test still counts fourteen
+      headings — the control-character fixture, the same shape
+      `_render_contributions` is tested against; (f) `--json` output carries
+      a `jira` object with `available`, `reason`, `freshness` and `rows`,
+      and each row carries `url`, `state`, `title` and `last_seen`, asserted
+      on the parsed JSON and not on the text; (g) the issues section's
+      existing assertions are unchanged, including `no GitHub remote` in a
+      checkout without one — the control. Mutation: route the Jira row
+      through `_render_issues` and (a) reddens with the `TypeError`; gate
+      `jira_section` on the slug and (a) reddens on the missing heading;
+      delete the `_render_jira` call from `render()` and (a) reddens on the
+      missing heading while (f) stays green, which is why both exist; move
+      the seven-day filter into `_render_jira` and (d) reddens on the
+      `rows` assertion.
+
+- [ ] **7b. The dashboard shows the key.** `where` (`dashboard/app.js:115-120`)
+      returns `issue.url.split("/").pop()` when `number` is null and the
+      row has a URL, and `issue.repo || issue.tracker` only when it does
+      not; the comment above it, which says the identity is in the URL
+      tail, is already the rationale. The page stays an open worklist
+      (`dashboard/server.py:638`); nothing else in `dashboard/` changes.
+      Verify: a test in `tests/test_dashboard_now.py`, source-reading like
+      that file's `fillIssues` cases, asserts the null-number branch of
+      `where` derives from `issue.url` and not from `issue.repo` first; and
+      `python -m unittest tests.test_loc_caps` stays green with
+      `DASHBOARD_CODE_CAP` (`tests/test_loc_caps.py:231`) unmoved. Mutation:
+      restore `issue.repo || issue.tracker` as the first branch and the
+      test reddens. Manual check after step 2 has run: the issues tab shows
+      `LOG-23818`, linked, where before this step it showed `LOG`.
 
 - [ ] **8. The first real sync, and the measurement.** With steps 1 to 7
       landed and the venv reinstalled at the new pin, run
-      `sd shadow sync --strict` once by hand, then re-run the measurement
+      `bin/sd shadow sync --strict` once by hand — by path, as every verb
+      here (`AGENTS.md:57-69`) — then re-run the measurement
       block in `design.md` and record the numbers on sd:361 as a note.
       Verify: the run prints `shadow sync[jira]: wrote N shadow row(s)` and
       `shadow sync[jira]: cursor moved to cover from <stamp>`; `select
@@ -258,14 +317,19 @@ tests.
 - [ ] **9. Correct the item.** The PRD's last acceptance line: sd:361's body
       still says it builds an iteration and per-tracker watermarks that
       exist. Add a note to the item, and edit issue #805's "What to build"
-      into the migration this document describes, citing `design.md`.
-      Verify: `sd store item 361` shows the note; the issue body no longer
-      contains the sentence "The caller iterates trackers" as a thing to
-      build.
+      into the migration this document describes, citing `design.md`, and
+      restate its fifth acceptance line the way design.md's "The dashboard"
+      reads it: `sd-status` shows `LOG-23818` with its key and state; the
+      dashboard shows the key and, as an open worklist, shows the ticket
+      while it is open.
+      Verify: `bin/sd store item 361` shows the note; the issue body no
+      longer contains the sentence "The caller iterates trackers" as a thing
+      to build, and its fifth acceptance line names the two readers
+      separately.
 
 Steps 1 and 2 are the operator's and gate everything after them. Steps 3 and
-4 are one pull request in `platypeeps/system`; step 5 is one here; steps 6
-and 7 may share a pull request here; steps 8 and 9 follow the merge.
+4 are one pull request in `platypeeps/system`; step 5 is one here; steps 6,
+7 and 7b may share a pull request here; steps 8 and 9 follow the merge.
 
 ## Verification
 
@@ -282,14 +346,19 @@ and 7 may share a pull request here; steps 8 and 9 follow the merge.
 - The pack half is run twice: once at the pinned library, once at the new
   one. Both green is the claim; one green is not.
 - No value of any `JIRA_*` variable appears in any log, test output, note, or
-  pull request body. Presence only. `grep -rn "JIRA_API_TOKEN=" .` over the
-  pack and the system checkout prints nothing; today it prints nothing, and
+  pull request body. Presence only. `p=JIRA_API_TOKEN; grep -rn "${p}=" .`
+  over the pack and the system checkout prints nothing — the pattern is
+  assembled from a shell variable because a document that spelled it out
+  would match itself; today it prints nothing, and
   the fixture at `tests/test_sd_dashboard_index.py:426` is the shape a test
   value takes — a dict literal with a placeholder, never an assignment.
 - The acceptance lines on the item map to steps: line 1 to step 8, line 2
   to step 6 (b), line 3 to a second sync after a ticket closes — not
   provable on demand; recorded on the item when it first happens — line 4
-  to step 6 (c), line 5 to steps 2 and 7, line 6 to step 4's grep.
+  to step 6 (c), line 5 to steps 2, 7 and 7b — `sd-status` shows key and
+  state; the dashboard shows the key and, being an open worklist, the
+  state only as presence (design, "The dashboard"), which step 9 records
+  on the item — line 6 to step 4's grep.
 
 **What cannot be verified from the repository, stated rather than invented:**
 that the token authenticates the operator's own account (step 2 stops on
