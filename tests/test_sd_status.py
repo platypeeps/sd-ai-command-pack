@@ -1593,7 +1593,7 @@ class ReviewAnsweredByTheMergePathTests(InventoryFixture):
         self.commit("bin/thing.py", "answered\n")
         rows = self.stated("| File | Summary |\n|---|---|\n"
                            "| `bin/thing.py` | Moderate finding (2 votes): wrong. |\n")
-        written = self.ack().record_answers(self.repo, rows, "main")
+        written, _ = self.ack().record_answers(self.repo, rows, "main")
         self.assertEqual([row["path"] for row in written], ["bin/thing.py"])
         self.assertEqual(
             self.by_check(self.rows(pull_requests=self.reviewed([row["id"] for row in rows])),
@@ -1636,7 +1636,7 @@ class ReviewAnsweredByTheMergePathTests(InventoryFixture):
              for row in payload["comments"]],
         )
         self.assertEqual(len(rows), 10)
-        self.assertEqual(self.ack().record_answers(self.repo, rows, "main"), [])
+        self.assertEqual(self.ack().record_answers(self.repo, rows, "main"), ([], ""))
         section = self.reviewed([row["id"] for row in rows])
         section["pull_requests"][0]["number"] = 889
         found = self.by_check(self.rows(pull_requests=section), "pr-review-unacknowledged")

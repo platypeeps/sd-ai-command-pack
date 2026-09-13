@@ -552,19 +552,30 @@ class Ship:
 
         Deliberately advisory. Nothing about a push becomes invalid because
         GitHub would not enumerate its reviews, and a refusal here would stop a
-        merge over bookkeeping. Failures come back as a warning on the receipt.
+        merge over bookkeeping. Failures come back as a warning on the receipt
+        -- the helper failing to load included, which is why the load sits
+        inside the guard: an advisory step that can abort the push is not
+        advisory.
         """
-        ack = sd_lib.sibling("sd_review_ack_ship", "sd-review-ack")
+        unread = f"review findings on #{number} were not read ({{}}); acknowledge them with sd-review-ack"
+        try:
+            ack = sd_lib.sibling("sd_review_ack_ship", "sd-review-ack")
+        except (OSError, SyntaxError, sd_lib.ConfigError) as error:
+            return [unread.format(error)]
         try:
             rows = ack.findings(
                 number,
                 self.api.pages(f"{self.api.prefix}/pulls/{number}/reviews"),
                 self.api.pages(f"{self.api.prefix}/pulls/{number}/comments"),
             )
-            written = ack.record_answers(self.root, rows, head)
+            written, broken = ack.record_answers(self.root, rows, head)
         except (Refusal, OSError, ValueError, ack.UsageError) as error:
-            return [f"review findings on #{number} were not read ({error}); "
-                    "acknowledge them with sd-review-ack"]
+            return [unread.format(error)]
+        if broken:
+            # Read, but nothing could be recorded: the store is unreadable and
+            # was left alone. Silence here would look exactly like a pull
+            # request with nothing to record.
+            return [f"review findings on #{number} were read and none recorded: {broken}"]
         return [f"recorded {len(written)} review finding(s) on #{number} as fixed by "
                 f"commits this push carries"] if written else []
 

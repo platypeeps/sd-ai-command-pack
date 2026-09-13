@@ -317,6 +317,46 @@ roles:
         self.assertEqual(result["phase"], "ready_to_send")
         self.assertIn("review findings on #1 were not read", "\n".join(result["warnings"]))
 
+    def test_a_helper_that_will_not_load_warns_and_never_refuses(self):
+        """The load is part of the advisory step, not a precondition of the push.
+
+        With the load outside the guard a broken `bin/sd-review-ack` aborted
+        `prepare` with a traceback after the push had already happened, which
+        is a refusal over bookkeeping wearing a different exception.
+        """
+        self.prepare()
+        real = ship.sd_lib.sibling
+
+        def broken(module_name, filename):
+            if filename == "sd-review-ack":
+                raise OSError("sd-review-ack cannot be loaded")
+            return real(module_name, filename)
+
+        with patch.object(ship.sd_lib, "sibling", side_effect=broken):
+            result = self.prepare()
+        self.assertEqual(result["phase"], "ready_to_send")
+        self.assertIn("were not read (sd-review-ack cannot be loaded)", "\n".join(result["warnings"]))
+
+    def test_a_store_that_cannot_be_read_is_said_on_the_receipt(self):
+        """Nothing recorded because the store is broken is not nothing to record."""
+        acknowledgements = ship.sd_lib.sibling("sd_review_ack_ship_broken", "sd-review-ack")
+        self.prepare()
+        self.double.review_payload["reviews"] = [{
+            "user": {"login": "copilot-pull-request-reviewer[bot]"},
+            "commit_id": _git(self.root, "rev-parse", "HEAD"),
+            "body": ("| File | Summary |\n|---|---|\n"
+                     "| `src.py` | Moderate finding (2 votes): the value is wrong. |\n"),
+        }]
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "commit", "-am", "answer the finding\n\nAuthored-with: human")
+        acknowledgements.store_path(self.root).write_text("{not json", encoding="utf-8")
+        result = self.prepare()
+        self.assertEqual(result["phase"], "ready_to_send")
+        warned = "\n".join(result["warnings"])
+        self.assertIn("review findings on #1 were read and none recorded", warned)
+        self.assertIn("is not valid JSON", warned)
+        self.assertEqual(acknowledgements.store_path(self.root).read_text(), "{not json")
+
     def test_real_cli_review_prepare_slice_merge_and_repeat_reconcile(self):
         prepared = self.cli("prepare")
         self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)

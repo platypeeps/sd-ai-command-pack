@@ -292,13 +292,20 @@ def review_findings(reviews: Any, number: Any = 0) -> dict[str, Any]:
     # `indeterminate` names the findings that cover an unknown number of
     # findings each, so `sd-status` can hedge its count the same way
     # `sd-review-ack` hedges its own rather than holding a second opinion.
+    # `stated` is the commits each finding was stated against, so the same
+    # caller can tell a fix the reviewer read and overruled from an answer.
     return {"reviews": len(rows), "in_body": len(stated),
             "reviewers": authors, "ids": [row["id"] for row in stated],
-            "indeterminate": [row["id"] for row in stated if row["indeterminate"]]}
+            "indeterminate": [row["id"] for row in stated if row["indeterminate"]],
+            "stated": {row["id"]: list(row["stated_at"]) for row in stated}}
 
 
-def inline_findings(root: pathlib.Path, slug: str, number: Any) -> tuple[list[str], str]:
+def inline_findings(root: pathlib.Path, slug: str, number: Any) -> tuple[list[str], dict[str, list[str]], str]:
     """Finding ids for the inline comments on one pull request, or why not.
+
+    Three values: the ids, the commits each was stated against (as the body
+    half carries them, so the union below keeps both facts for both halves),
+    and the sentence saying why the inline half could not be read.
 
     Not in the `gh pr list` payload, so this is one `gh api` call per pull
     request -- the same per-pull-request price `behind_by` above already pays,
@@ -310,7 +317,7 @@ def inline_findings(root: pathlib.Path, slug: str, number: Any) -> tuple[list[st
     """
     payload, error = gh_json(["api", f"repos/{slug}/pulls/{number}/comments", "--paginate"], root)
     if error:
-        return [], error
+        return [], {}, error
     if not isinstance(payload, list):
         # `gh` exited 0 and returned something that is not a list of comments:
         # an error object, a null, a rate-limit message. Coercing that to `[]`
@@ -318,10 +325,11 @@ def inline_findings(root: pathlib.Path, slug: str, number: Any) -> tuple[list[st
         # through the one door left open -- and it opens on exactly the day
         # GitHub is having trouble. So the reason goes back, and the caller
         # marks the class unchecked rather than counting it clear.
-        return [], (f"the comments endpoint for #{number} returned "
-                    f"{type(payload).__name__}, not a list of comments")
+        return [], {}, (f"the comments endpoint for #{number} returned "
+                        f"{type(payload).__name__}, not a list of comments")
     module = sd_lib.sibling("sd_review_ack", "sd-review-ack")
-    return [row["id"] for row in module.findings(number, [], payload)], ""
+    rows = module.findings(number, [], payload)
+    return [row["id"] for row in rows], {row["id"]: list(row["stated_at"]) for row in rows}, ""
 
 
 def describe(pull: dict[str, Any], root: pathlib.Path, slug: str) -> dict[str, Any]:
@@ -354,7 +362,7 @@ def _findings(pull: dict[str, Any], root: pathlib.Path, slug: str) -> dict[str, 
     count presented as a total is the defect this whole record exists for.
     """
     stated = review_findings(pull.get("reviews"), pull.get("number"))
-    inline, error = inline_findings(root, slug, pull.get("number"))
+    inline, read_at, error = inline_findings(root, slug, pull.get("number"))
     stated["inline"] = len(inline)
     # `dict.fromkeys` rather than `+`, first occurrence winning, which is the
     # order and the rule `findings` itself uses. Today `source` is part of the
@@ -363,6 +371,7 @@ def _findings(pull: dict[str, Any], root: pathlib.Path, slug: str) -> dict[str, 
     # halves do, rather than resting on that detail staying true.
     stated["ids"] = list(dict.fromkeys(stated["ids"] + inline))
     stated["indeterminate"] = [row for row in stated["indeterminate"] if row in stated["ids"]]
+    stated["stated"] = {**read_at, **stated["stated"]}
     stated["unreadable"] = error
     return stated
 

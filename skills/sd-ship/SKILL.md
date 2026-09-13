@@ -240,8 +240,10 @@ invokes the adapter with its own provisioned Python interpreter.
   finding names, reachable from the head being pushed. A finding on a file the
   push never touched is left unanswered, an acknowledgement already on record
   is never moved, and `dismissed <reason>` stays something a person types. The
-  step is advisory — a pull request whose reviews GitHub will not enumerate
-  produces a warning on the receipt, never a refusal.
+  step is advisory — a pull request whose reviews GitHub will not enumerate,
+  a helper that will not load, or a store that cannot be read produces a
+  warning on the receipt, never a refusal, and the last of those says so
+  rather than reading as nothing to record.
 - The optional commit stage requires one `--path FILE` per enumerated file,
   `--message-file FILE`, and `--author ENTRY`. It refuses directories and a
   pre-populated index. It records the actual registry provider/vendor and the

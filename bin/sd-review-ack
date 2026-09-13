@@ -33,6 +33,26 @@ being cited; it is satisfied by that SHA being an ancestor of the branch the
 work is landing on. A commit nobody can find is `fix-missing`, a commit that
 exists but never landed is `fix-not-landed`, and both keep the gate red.
 
+A SQUASH IS A LANDING TOO. This repository merges by squash, so the commit a
+record names is never itself an ancestor of `main`; only the squash commit
+is, and a check that asked for ancestry alone read `fix-not-landed` on every
+merged pull request forever (#889 and #890, fourteen and one records, the
+day this was found). The model does not change -- the commit claiming to
+answer has to be in the history that landed -- but the history that landed
+is read through the pull request: when GitHub says the pull request merged,
+the cited commit is an ancestor of the head it merged, and its merge commit
+is an ancestor of the landing ref, the cited commit landed. Three facts, two
+of them settled by local `git`; "the pull request is merged" alone is a
+claim about the future again and is not accepted. The merge facts ride in
+with the round (`live_round` reads `pulls/N` beside its reviews, a captured
+round carries them as `pull`), so `--check` never makes a second trip.
+
+A RESTATED FINDING IS NOT ANSWERED. A reviewer that reads the fix and states
+the finding again has overruled the record: a `fixed <commit>` whose commit
+is an ancestor of a commit the finding was stated against reads
+`fix-restated`, keeps the gate red, and is left on file for a person to
+move, because a record somebody wrote is not something a verdict deletes.
+
 WHO WRITES THE RECORD. `--ack` writes one, and so does `bin/sd-ship`, from the
 push it has just made. A gate whose store nothing ever fills is a gate that
 only ever says no, and `sd-status` grew a row from this store before anything
@@ -155,8 +175,11 @@ SATISFIED = ("landed", "dismissed")
 
 VERDICT_HELP = {
     "unread": "nobody has recorded reading this finding",
-    "landed": "acknowledged as fixed, and the commit is an ancestor of the landing ref",
+    "landed": ("acknowledged as fixed, and the commit is an ancestor of the landing ref "
+               "or of a head whose merge commit is"),
     "fix-not-landed": "acknowledged as fixed by a commit that never reached the landing ref",
+    "fix-restated": ("acknowledged as fixed by a commit the reviewer had already read when "
+                     "it stated this finding"),
     "fix-missing": "acknowledged as fixed by a commit this repository does not have",
     "dismissed": "read and dismissed, with a reason on the record",
     "unknown-disposition": "the record carries a disposition this version does not define",
@@ -375,7 +398,7 @@ def findings(pull: int, reviews: Iterable[Any], comments: Iterable[Any]) -> list
         voted = _outstanding(pull, body, author) + _table(pull, body, author)
         here = voted + _reconciled(pull, body, author, voted) + _suppressed(pull, body, author)
         for row in here:
-            row["reviewed"] = _reviewed_at(review)
+            _date(row, review)
         rows.extend(here)
     roots, answers = _threads(comments)
     for comment in roots:
@@ -384,18 +407,31 @@ def findings(pull: int, reviews: Iterable[Any], comments: Iterable[Any]) -> list
             comment.get("body") or "", _login(comment),
         )
         row["replies"] = len(answers.get(comment.get("id"), ()))
-        row["reviewed"] = _reviewed_at(comment)
+        _date(row, comment)
         rows.append(row)
     seen: dict[str, dict] = {}
     for row in rows:
         first = seen.setdefault(row["id"], row)
-        if first is not row and first.get("reviewed") != row.get("reviewed"):
+        if first is row:
+            continue
+        for commit in row["stated_at"]:
+            if commit not in first["stated_at"]:
+                first["stated_at"].append(commit)
+        if first.get("reviewed") != row.get("reviewed"):
             # The same finding stated twice against two different commits is
             # the reviewer saying it still stands at the later one. Keeping the
             # earlier date would let a commit made in between read as its
-            # answer, so the finding stops carrying a date at all.
+            # answer, so the finding stops carrying a date at all. Every
+            # commit it was stated against stays in `stated_at`, which is how
+            # a record written before the restatement is found to be stale.
             first["reviewed"] = ""
     return list(seen.values())
+
+
+def _date(row: dict, record: dict) -> None:
+    """Bind a finding to the commit the reviewer read: once to date it, once to remember it."""
+    row["reviewed"] = _reviewed_at(record)
+    row["stated_at"] = [row["reviewed"]] if row["reviewed"] else []
 
 
 def _threads(comments: Iterable[Any]) -> tuple[list[dict], dict[Any, list[dict]]]:
@@ -576,18 +612,29 @@ def answering_commit(root: pathlib.Path, found: dict, head: str) -> str:
     shortfall and reconciliation rows carry -- a finding this reader could not
     place is a finding it may not decide has been answered. Empty too when
     `git` cannot answer, which is the same direction: `unread` stands.
+
+    The path is the reviewer's text and is passed as exactly that. A plain
+    pathspec is a glob, so `bin/*.py` would be answered by any commit touching
+    any file under `bin/`, and `[`, `?` and `*` inside a real file name would
+    match the wrong file or none; `:(literal)` makes the name mean itself.
     """
     reviewed, path = str(found.get("reviewed") or ""), str(found.get("path") or "")
     if not reviewed or not path or path == "?":
         return ""
     found_at = sd_lib.git_output(
-        ["rev-list", "--max-count=1", f"{reviewed}..{head}", "--", path], root
+        ["rev-list", "--max-count=1", f"{reviewed}..{head}", "--", f":(literal){path}"], root
     )
     return (found_at or "").strip()
 
 
-def record_answers(root: pathlib.Path, rows: Iterable[dict], head: str) -> list[dict]:
+def record_answers(root: pathlib.Path, rows: Iterable[dict], head: str) -> tuple[list[dict], str]:
     """Record `fixed <commit>` for every finding the push to `head` answers.
+
+    Returns the records written and the sentence saying the store could not
+    be read, the same pair `read_store` returns. An empty list alone cannot
+    tell "nothing to record" from "the record is broken", and the receipt has
+    to say which, because the second is a store nobody's acknowledgements
+    reach and nothing else on the push path would mention it.
 
     The half the merge path was missing. `sd-status` grew a row for an
     unanswered review finding and nothing on the way to a merge ever wrote an
@@ -611,8 +658,8 @@ def record_answers(root: pathlib.Path, rows: Iterable[dict], head: str) -> list[
     if broken:
         # The store cannot be read, so which findings are already answered is
         # unknown, and writing would replace the whole file with a record built
-        # from that ignorance. `sd-status` already reports the breakage.
-        return []
+        # from that ignorance.
+        return [], broken
     written: list[dict] = []
     for found in rows:
         if found["id"] in store:
@@ -621,7 +668,7 @@ def record_answers(root: pathlib.Path, rows: Iterable[dict], head: str) -> list[
         if not commit:
             continue
         written.append(dict(acknowledge(root, found, "fixed", commit), id=found["id"]))
-    return written
+    return written, ""
 
 
 # --------------------------------------------------------------------------
@@ -642,25 +689,70 @@ def landing_ref(root: pathlib.Path, given: str | None = None) -> str:
     return head or "origin/main"
 
 
-def fix_verdict(root: pathlib.Path, commit: str, ref: str) -> str:
+def landing_evidence(payload: dict) -> dict[str, str]:
+    """The merge facts a round carries about one pull request, or nothing.
+
+    From the `pull` object `live_round` reads and a captured round may hold:
+    the head GitHub merged and the commit it merged it as, and only when
+    GitHub says the pull request *is* merged. A pull request that is open, or
+    closed unmerged, carries a `merge_commit_sha` too -- GitHub's test merge
+    -- and reading that as a landing would pass the gate on a branch nobody
+    has accepted. Empty means `fix_verdict` has ancestry alone to go on.
+    """
+    pull = payload.get("pull")
+    if not isinstance(pull, dict) or pull.get("merged") is not True:
+        return {}
+    head = pull.get("head")
+    landed = str(head.get("sha") or "") if isinstance(head, dict) else ""
+    merged = str(pull.get("merge_commit_sha") or "")
+    return {"head": landed, "merge": merged} if merged and landed else {}
+
+
+def _is_ancestor(root: pathlib.Path, commit: str, ref: str) -> bool:
+    return bool(commit and ref) and sd_lib.git_output(["merge-base", "--is-ancestor", commit, ref], root) is not None
+
+
+def fix_verdict(root: pathlib.Path, commit: str, ref: str, merge: dict[str, str] | None = None) -> str:
     """Whether a cited commit actually reached `ref`.
 
     The whole reason this function exists: "Fixed in <sha>" is a claim about
     the future that nothing ever checked. Three real defects shipped under it.
+
+    Two ways to have reached it. The commit is an ancestor of `ref`, which is
+    what a merge commit or a rebase leaves behind. Or `merge` says the pull
+    request that carried it was merged, the commit is an ancestor of the head
+    GitHub merged, and the commit GitHub merged it *as* is an ancestor of
+    `ref` -- which is what a squash leaves behind, and every merge in this
+    repository is one. Both ancestry facts are local `git`'s to settle, so a
+    branch whose objects this repository never fetched still reads
+    `fix-not-landed`: absent evidence is not evidence of a landing.
     """
     if not commit or sd_lib.git_output(["rev-parse", "--verify", f"{commit}^{{commit}}"], root) is None:
         return "fix-missing"
-    landed = sd_lib.git_output(["merge-base", "--is-ancestor", commit, ref], root)
-    return "landed" if landed is not None else "fix-not-landed"
+    if _is_ancestor(root, commit, ref):
+        return "landed"
+    squashed = merge or {}
+    if _is_ancestor(root, commit, squashed.get("head", "")) and _is_ancestor(root, squashed.get("merge", ""), ref):
+        return "landed"
+    return "fix-not-landed"
 
 
-def id_verdict(root: pathlib.Path, found_id: str, rows: dict[str, dict], ref: str) -> str:
+def id_verdict(root: pathlib.Path, found_id: str, rows: dict[str, dict], ref: str,
+               merge: dict[str, str] | None = None, stated: Iterable[str] = ()) -> str:
     """What the record says about one finding id, and what that is worth.
 
     Separate from `verdict` so a caller holding ids and no finding bodies --
     `sd-status`, counting what stands unacknowledged on each pull request --
     asks the same question through the same answer, rather than reimplementing
     "is this addressed" next to the one place that defines it.
+
+    `stated` is every commit the finding was stated against. A `fixed`
+    record whose commit is an ancestor of one of them names a fix the
+    reviewer had already read when it stated the finding -- a restatement
+    after the fix, or a citation that predates the review -- and that is
+    `fix-restated` whether or not the commit landed. The record is not moved:
+    a person wrote it, or `record_answers` did from evidence that was true at
+    the time, and a verdict reads records rather than editing them.
     """
     record = rows.get(found_id)
     if not record:
@@ -673,24 +765,35 @@ def id_verdict(root: pathlib.Path, found_id: str, rows: dict[str, dict], ref: st
         return "unknown-disposition"
     if disposition == "dismissed":
         return "dismissed" if str(record.get("reason") or "").strip() else "unread"
-    return fix_verdict(root, str(record.get("commit") or ""), ref)
+    commit = str(record.get("commit") or "")
+    state = fix_verdict(root, commit, ref, merge)
+    if state != "fix-missing" and any(_is_ancestor(root, commit, read) for read in stated):
+        return "fix-restated"
+    return state
 
 
-def verdict(root: pathlib.Path, found: dict, rows: dict[str, dict], ref: str) -> dict:
+def verdict(root: pathlib.Path, found: dict, rows: dict[str, dict], ref: str,
+            merge: dict[str, str] | None = None) -> dict:
     """One finding, with what is on record about it and what that is worth."""
-    state = id_verdict(root, found["id"], rows, ref)
+    state = id_verdict(root, found["id"], rows, ref, merge, found.get("stated_at") or ())
     return dict(found, verdict=state, record=rows.get(found["id"]))
 
 
-def unacknowledged(root: pathlib.Path, ids: Iterable[str], ref: str | None = None) -> list[str]:
+def unacknowledged(root: pathlib.Path, ids: Iterable[str], ref: str | None = None,
+                   stated: dict[str, list[str]] | None = None) -> list[str]:
     """Which of these finding ids nobody has answered. The whole public gate.
 
     One call, so a reader that only wants the number -- `sd-status`'s row --
-    needs neither the store's shape nor the verdict vocabulary.
+    needs neither the store's shape nor the verdict vocabulary. `stated` maps
+    a finding id to the commits it was stated against, as `sd-pr-state`
+    carries them; without it a restated finding cannot be told from an
+    answered one, so a caller that has the map passes it.
     """
     rows, _ = read_store(root)
     landing = ref or landing_ref(root)
-    return [found for found in ids if id_verdict(root, found, rows, landing) not in SATISFIED]
+    read = stated or {}
+    return [found for found in ids
+            if id_verdict(root, found, rows, landing, None, read.get(found) or ()) not in SATISFIED]
 
 
 def review_state(root: pathlib.Path, rounds: dict[int, dict], ref: str) -> dict:
@@ -699,8 +802,9 @@ def review_state(root: pathlib.Path, rounds: dict[int, dict], ref: str) -> dict:
     out: list[dict] = []
     for pull in sorted(rounds):
         payload = rounds[pull]
+        merge = landing_evidence(payload)
         for found in findings(pull, payload.get("reviews") or (), payload.get("comments") or ()):
-            out.append(verdict(root, found, rows, ref))
+            out.append(verdict(root, found, rows, ref, merge))
     return {
         "landing_ref": ref,
         "store_error": broken,
@@ -758,7 +862,7 @@ def live_round(root: pathlib.Path, only: int | None, limit: int) -> tuple[dict[i
         numbers = [row["number"] for row in payload if isinstance(row, dict) and "number" in row]
     out: dict[int, dict] = {}
     for number in numbers:
-        record = {}
+        record: dict[str, Any] = {}
         for field in ("reviews", "comments"):
             payload, error = pr_state.gh_json(
                 ["api", f"repos/{slug}/pulls/{number}/{field}", "--paginate"], root
@@ -774,6 +878,17 @@ def live_round(root: pathlib.Path, only: int | None, limit: int) -> tuple[dict[i
                 return {}, (f"the {field} endpoint for #{number} returned "
                             f"{type(payload).__name__}, not a list of {field}")
             record[field] = payload
+        # The pull request itself, for `merged`, `merge_commit_sha` and
+        # `head.sha`: what `fix_verdict` needs to see a squash as a landing.
+        # Read here, with the round, so the verdict makes no trip of its own.
+        # An answer that is not an object is left out rather than refused:
+        # without it a fix can only read *less* landed, never more, which is
+        # the one direction a gate may be wrong in on its own.
+        payload, error = pr_state.gh_json(["api", f"repos/{slug}/pulls/{number}"], root)
+        if error:
+            return {}, error
+        if isinstance(payload, dict):
+            record["pull"] = payload
         out[int(number)] = record
     return out, ""
 

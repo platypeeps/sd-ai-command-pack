@@ -114,8 +114,12 @@ invisible where the operator already looked.
 
 A finding is answered when `bin/sd-review-ack` says so — acknowledged as fixed
 by a commit that actually reached the landing ref, or dismissed with a reason.
-`sd-status` holds no second opinion about either; it counts what that tool
-reports unanswered.
+Reached it directly, or through a squash: the commit is in the head of a pull
+request GitHub merged and the commit it merged as is on the ref, both facts
+local `git` settles. A fix the reviewer had already read when it stated the
+finding again is `fix-restated`, not answered, and the row stays up.
+`sd-status` holds no second opinion about any of this; it counts what that
+tool reports unanswered.
 
 Most of those acknowledgements are written by `bin/sd-ship`, not typed. A row
 whose store nothing ever fills is a row that is always on, and a report that is
