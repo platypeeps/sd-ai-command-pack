@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import plistlib
 import subprocess
 import sys
 from pathlib import Path
@@ -59,15 +60,19 @@ def cmd_serve(args: argparse.Namespace, out) -> int:
 # file's mode is 600 where `write_text` below leaves 644, which is independent
 # of any claim in either repository about who owns it.
 #
-# **Which makes `install` destructive today, and that is the part to read
-# before running it.** It writes `PLIST`, boots this label out and bootstraps
-# its own (:181-183), so it stops a live service, overwrites the system's plist
-# body with the pack's, and repoints the name at this file; `--uninstall`
-# (:170-171) unlinks that plist outright. Nothing in the pack's tests or docs
-# notices, because every one of them asserts against a plist the pack wrote.
-# Whether the pack should take a distinct label, refuse a plist it did not
-# write, or stop shipping `install` at all is the owner's call on sd:705,
-# alongside the port question in `dashboard/server.py`. Unchanged until then.
+# **`install` refuses a plist this checkout did not write, which closes the
+# destructive half.** `foreign_owner()` below is the guard and
+# `ProgramArguments[0]` is what it reads: `cmd_install` renders this file's
+# resolved path there, so a plist naming anything else -- or one that will not
+# parse, or that carries no `ProgramArguments` at all -- is not this
+# checkout's. Both `install` and `--uninstall` then exit 1 having written
+# nothing and having called `launchctl` not once, which is the property
+# `InstallTests` pins; reinstalling over the pack's own plist is untouched.
+# `--force` overwrites anyway, because without it a plist that got corrupted
+# or hand-edited is unfixable by the command that owns it. What the guard does
+# not settle is the name: the label and the port are still the system's, and
+# whether this pack takes a distinct label or stops shipping `install` at all
+# is sd:719's call, alongside the port question in `dashboard/server.py`.
 LABEL = "com.sven.sd-dashboard"
 PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 LOGS = Path.home() / "Library" / "Logs"
@@ -155,6 +160,33 @@ def launchctl(*argv: str) -> tuple[int, str]:
     return done.returncode, (done.stderr or done.stdout).strip()
 
 
+def foreign_owner() -> str | None:
+    """The program holding `PLIST`, when that program is not this checkout.
+
+    `ProgramArguments[0]` is the discriminator, because it is the one field
+    `cmd_install` renders from `__file__`: a plist carrying this file's
+    resolved path is one this checkout wrote, and every other answer belongs
+    to somebody else. On this machine that somebody is the system
+    repository's workflow server, which holds `LABEL` today -- see the comment
+    above `LABEL`.
+
+    Absent is *not* foreign: no file means a first install, which is the
+    normal case and must stay quiet. Unreadable is, though. The question is
+    not "did someone else write this" but "can we show that we did", and a
+    file that will not parse, or that has no `ProgramArguments`, answers no.
+    Reading corruption as ours would make corruption the way past the guard.
+    """
+    if not PLIST.exists():
+        return None
+    try:
+        program = plistlib.loads(PLIST.read_bytes())["ProgramArguments"][0]
+    except Exception as why:  # any malformed plist, not a taxonomy of them
+        return f"an unreadable plist ({type(why).__name__})"
+    if program == str(Path(__file__).resolve()):
+        return None
+    return str(program)
+
+
 def cmd_install(args: argparse.Namespace, out) -> int:
     """Write the LaunchAgent and hand it to launchd, or take it away again.
 
@@ -165,6 +197,18 @@ def cmd_install(args: argparse.Namespace, out) -> int:
     loaded label fails, and a reinstall that quietly kept the old arguments is
     the failure this verb exists to prevent.
     """
+    owner = None if args.force else foreign_owner()
+    if owner is not None:
+        # Ahead of the uninstall branch as well as the write, and ahead of
+        # `launchctl` in both: a refusal that had already booted a service out
+        # would have done the damage it exists to prevent. An exit code, not a
+        # report, unlike the `launchd did not load it` case below -- there the
+        # plist is written and correct, here nothing happened at all.
+        print(f"refusing: {PLIST}", file=out)
+        print(f"  is not this checkout's -- it runs {owner}", file=out)
+        print("  nothing was written and launchd was not called; pass --force "
+              "to overwrite it", file=out)
+        return 1
     domain = f"gui/{os.getuid()}"
     if args.uninstall:
         code, said = launchctl("bootout", f"{domain}/{LABEL}")
@@ -265,6 +309,11 @@ def build_parser() -> argparse.ArgumentParser:
     install_verb.add_argument("--port", type=int, default=server.DEFAULT_PORT)
     install_verb.add_argument(
         "--uninstall", action="store_true", help="unload it and delete the plist")
+    install_verb.add_argument(
+        "--force", action="store_true",
+        help="write over a plist this checkout did not write; without this "
+             "escape hatch a corrupted or hand-edited one is unfixable by the "
+             "command that owns it")
     install_verb.set_defaults(handler=cmd_install)
     index_verb = verbs.add_parser("index", help="collect the fleet once")
     index_verb.add_argument(
