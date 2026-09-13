@@ -108,6 +108,13 @@ STORE_NAME = "sd-review-ack.json"
 #: itself cannot work here: `write_store` replaces that file, so the inode a
 #: waiting writer holds a lock on is not the inode the winner just wrote, and
 #: the two would serialise against nothing.
+#:
+#: It is created once and never removed, which is the point rather than an
+#: oversight: unlinking it would let a writer that already holds the lock be
+#: joined by one that creates a fresh inode and locks that instead. One empty
+#: file per repository is the cost, and it is paid in the git common dir beside
+#: the store it guards -- outside the tree, so it is never staged, never
+#: committed, and never changes the head under review.
 LOCK_NAME = STORE_NAME + ".lock"
 
 DEFAULT_LIMIT = 30

@@ -1595,9 +1595,18 @@ class TwoWritersAtOnce(unittest.TestCase):
         because under a correct lock the other writer never gets far enough to
         set anything -- a handshake would deadlock the fixed code and pass only
         the broken one.
+
+        What the two writers *can* agree on is the moment before either tries
+        the lock, so they rendezvous on a barrier there. An `Event` the push set
+        and did not wait on would leave the hand writer's scheduling inside the
+        measured window: if the kernel did not run it within the pause, the
+        broken code would append after the push had written, both rows would
+        survive, and the test would pass having proved nothing. After the
+        barrier both threads are running and the next thing each does is the
+        lock, so the pause covers the race and not the scheduler.
         """
         real = ack.read_store
-        reached = threading.Event()
+        reached = threading.Barrier(2)
         counted = {"push": 0}
 
         def read_store(root: pathlib.Path) -> tuple[dict[str, dict], str]:
@@ -1609,7 +1618,7 @@ class TwoWritersAtOnce(unittest.TestCase):
                 # happens before the lock is taken, so the fixed and the broken
                 # code both re-read afterwards and both look clean.
                 if counted["push"] == 2:
-                    reached.set()
+                    reached.wait(10)
                     threading.Event().wait(1.5)
             return rows
 
@@ -1620,7 +1629,7 @@ class TwoWritersAtOnce(unittest.TestCase):
                 outcome["push"] = ack.record_answers(self.branch.root, self.rows(), "main")[0]
 
         def hand() -> None:
-            reached.wait(10)
+            reached.wait(10)  # the same barrier: neither runs on before both arrive
             outcome["hand"] = ack.acknowledge(
                 self.branch.root,
                 {"id": "byhand", "pr": 7, "path": "docs/untouched.md", "line": None},
