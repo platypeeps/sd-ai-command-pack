@@ -68,9 +68,14 @@ for its current item revision. A changes file is a UTF-8 JSON object, limited
 to 64 KiB. Unknown fields, invalid dependencies, stale revisions, and invalid
 local evidence refuse the operation. Duplicate JSON keys also refuse.
 
-An unfiled contribution requires the local clone and branch. Supply the tested
+A contribution row carries exactly one identity: a `pull_url`, an `issue_url`,
+a local clone plus branch, or an issue draft. A row carrying both `pull_url`
+and `issue_url` is refused.
+
+Unfiled *branch* work requires the local clone and branch. Supply the tested
 commit and evidence group to record verified test results. Missing evidence
-remains explicitly unverified. A filed contribution can supply only `pull_url`.
+remains explicitly unverified. A filed contribution supplies `pull_url` or
+`issue_url` instead of the clone and branch, and never both of them.
 
 ```json
 {
@@ -97,20 +102,42 @@ never executes them. Nonzero test results remain recorded as failures.
 
 Filing needs a changes file such as
 `{"pull_url":"https://github.com/OWNER/REPO/pull/123"}`.
+
+An upstream issue is the same row with `issue_url` instead:
+`{"issue_url":"https://github.com/OWNER/REPO/issues/123"}`. An issue you have
+written up but not filed anywhere supplies `target_repo` (`owner/repo`),
+`draft_title`, and `draft_path` -- an absolute path to the draft body with its
+SHA-256 digest, re-checked on read the way evidence artifacts are, so the draft
+that was reviewed is the draft that gets filed. All three are required
+together. Filing it later preserves the item ID, its notes and its status,
+exactly as filing a branch does. The word for that state is `draft`: "unfiled"
+already means a contribution with no `pull_url`, which demands a clone and a
+branch an issue draft does not have.
+
 `depends_on` also accepts a merge dependency with `kind` and the exact PR `url`.
 A release dependency uses `kind: "release"`, `repo: "OWNER/REPO"`, `tag`,
 and `contains_pull`. An optional `package` object binds its `name` and `version`.
 Merge alone does not prove release inclusion or package publication.
-An unknown release requirement remains unresolved. All dependencies must resolve
+An unknown release requirement remains unresolved.
+An issue dependency uses `kind: "issue"` and the exact issue `url`; it resolves
+when that issue is closed as completed, or when a referencing pull request
+merges. A close as not planned resolves nothing, because not planned is a
+refusal rather than an answer. All dependencies must resolve
 before the contribution becomes newly unblocked.
 
 The ordered list uses the shared dashboard projection. It keeps unknown and
 stale observations visible. Local task completion remains an explicit task
-operation; an upstream merge does not complete the task.
+operation; an upstream merge does not complete the task, and neither does an
+upstream issue closing. A closed issue takes the terminal `closed` lane, which
+sorts after every open row; a pull request closed without merging is not
+terminal and stays in `awaiting_them`.
 
 Each row's `attention_sources` identifies its checkpoint key, revision, and
 event IDs. PR attention uses `github:https://github.com/OWNER/REPO/pull/123`;
-dependency attention uses `item:42`. These checkpoints have separate revisions.
+issue attention uses `issue:https://github.com/OWNER/REPO/issues/123`;
+dependency attention uses `item:42`. An issue draft has no second key: an
+unfiled row lives under `item:ID` alone until it is filed. These checkpoints
+have separate revisions.
 Inspect the matching key with `show`, then acknowledge its explicit event IDs.
 Repeat `--event` for multiple events from that checkpoint. A stale checkpoint
 revision refuses acknowledgement. Acknowledgement does not erase source history
