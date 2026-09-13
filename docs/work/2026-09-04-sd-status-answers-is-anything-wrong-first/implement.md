@@ -78,7 +78,7 @@ The ceiling is what checks this, not this paragraph.
       reader learns what was looked at and not only what was found.
 
       **The summary is assembled so the word `clear` cannot be printed while
-      any class is unchecked**, which is `prd.md:143`'s substring test written
+      any class is unchecked**, which is `prd.md:145`'s substring test written
       as a construction rather than as a wording convention: with something
       unread the tail reads `n of 11 checks could not run`, and only with
       nothing unread does it read `all 11 checks clear`.
