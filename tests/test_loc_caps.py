@@ -796,5 +796,42 @@ class AnUnmergedIndex(unittest.TestCase):
         self.assertNotIn(self.panel, tracked("dashboard"))
 
 
+class DeletedArchitectureResidue(unittest.TestCase):
+    """sd:601. A generated file nothing reads can only ever be wrong.
+
+    `generated/registry-snapshot.json` listed 20 skills. Fourteen existed in
+    neither `skills/` nor `contrib/`, and it omitted 76 that did -- last
+    written 2026-08-17, before the rename that made it wrong, and read by no
+    code in the tree. The pack was pointing outward at drift in a consumer's
+    CLAUDE.md while shipping the same drift itself.
+
+    It is not refreshed, because a refreshed list is stale again on the next
+    rename; that is how it reached fourteen. sd:10's own prd.md calls it
+    residue from a deleted architecture, and acceptance criterion 17 requires
+    it absent, so this asserts the criterion rather than restating a judgement.
+
+    The criterion's other two paths, `tests/test_selector_contract_drift.py`
+    and `plugins/sd`, are sd:10's to remove and are still present. They are
+    deliberately NOT recited here: a list naming paths this file does not
+    enforce is the same unread recitation sd:601 is about.
+    """
+
+    def test_the_registry_snapshot_does_not_come_back(self) -> None:
+        path = "generated/registry-snapshot.json"
+        self.assertEqual([], tracked(path), f"{path} is tracked again")
+        self.assertFalse((REPO_ROOT / path).exists(), f"{path} is on disk again")
+
+    def test_nothing_in_the_tree_reads_the_registry_snapshot(self) -> None:
+        """Enumerated from the index, not from a list of directories."""
+        readers = [
+            path for path in tracked("bin", "tests", "dashboard", "skills",
+                                     ".github", "Makefile")
+            if path.is_file() and path.name != pathlib.Path(__file__).name
+            and "registry-snapshot" in path.read_text(
+                encoding="utf-8", errors="replace")
+        ]
+        self.assertEqual([], readers)
+
+
 if __name__ == "__main__":
     unittest.main()

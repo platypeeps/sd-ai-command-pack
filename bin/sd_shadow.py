@@ -70,6 +70,59 @@ def _rows():
     return sd_handoff_rows
 
 
+def report_sync(result, *, strict: bool) -> int:
+    """Turn one `Synced` into the operator's lines, and the exit code.
+
+    Split out of `shadow_sync` because the verb crossed the branch ceiling
+    when this grew, and because the reporting is worth driving directly: it
+    is the part that was wrong, and it needs no CLI, no database and no
+    network to exercise.
+    """
+    print(f"wrote {result.written} shadow row(s)")
+    if result.truncated:
+        # Named, because a truncated page means the next run starts from the
+        # same watermark and there is more behind it than this run saw.
+        print("coverage is incomplete; retry a smaller window or increase the request/time limits")
+    # `ok` is the SEARCH's success; `watermark_moved` is the CURSOR's. Reading
+    # the cursor line off `ok` said "cursor held" through two nights in which
+    # the watermark had in fact moved: one incomplete contribution observation
+    # made `ok` false while the search itself had advanced. So the cursor line
+    # is read off the cursor, and the reason off the collect.
+    if result.watermark_moved:
+        print(f"cursor moved to cover from {result.window_start}")
+    elif result.ok:
+        print(f"coverage completed from {result.window_start}; existing cursor retained")
+    else:
+        # The rows above are still written and still true. Only the cursor
+        # held, so the next run re-reads the same window rather than skipping.
+        print(f"cursor held: {result.reason or 'the collect did not succeed'}")
+    if not result.ok and result.watermark_moved:
+        print(f"the collect did not succeed: {result.reason or 'no reason given'}")
+    for line in _library_lines(result):
+        print(line)
+    return 0 if result.ok else (1 if strict else 0)
+
+
+def _library_lines(result) -> list[str]:
+    """The library's report, minus the lines this verb already said.
+
+    Forwarded rather than re-worded, so a line the library learns to emit
+    reaches the log without this verb being edited -- sd:602's lesson. The
+    three lines the verb has put in its own words are dropped by the FIELDS
+    that produced them, never by matching their text.
+
+    The installed library decides how many lines there are. A pin that
+    predates `queued` and `incomplete` simply yields fewer, which is why this
+    reads `report()` rather than naming the fields it hopes to find.
+    """
+    lines = result.report()[1:]
+    if result.truncated and lines and "truncated buckets" in lines[0]:
+        lines = lines[1:]
+    if not result.ok and result.reason and lines and result.reason in lines[0]:
+        lines = lines[1:]
+    return lines
+
+
 def shadow_sync(args) -> int:
     """Run one sync and report what moved. Writes rows; never closes anything."""
     rows = _rows()
@@ -94,18 +147,4 @@ def shadow_sync(args) -> int:
     finally:
         connection.close()
 
-    print(f"wrote {result.written} shadow row(s)")
-    if result.truncated:
-        # Named, because a truncated page means the next run starts from the
-        # same watermark and there is more behind it than this run saw.
-        print("coverage is incomplete; retry a smaller window or increase the request/time limits")
-    if result.ok:
-        if result.watermark_moved:
-            print(f"cursor moved to cover from {result.window_start}")
-        else:
-            print(f"coverage completed from {result.window_start}; existing cursor retained")
-        return 0
-    # The rows above are still written and still true. Only the cursor held,
-    # so the next run re-reads the same window rather than skipping it.
-    print(f"cursor held: {result.reason or 'the collect did not succeed'}")
-    return 1 if args.strict else 0
+    return report_sync(result, strict=bool(getattr(args, "strict", False)))
