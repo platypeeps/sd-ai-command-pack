@@ -597,12 +597,20 @@ def import_sd_db() -> Imported:
         # and pointless anywhere but the front of the list.
         #
         # What is prepended is a whole `site-packages`, so in principle it
-        # shadows more than `sd_db`. In this pack it shadows nothing: the
-        # header above says stdlib only, and every import in `bin/` and
-        # `dashboard/` is stdlib, a sibling module, or `sd_db` itself, so
-        # there is no second name for the provisioned copy to answer to. A
-        # third-party dependency arriving in either tree is what would make
-        # this worth narrowing to the one module it is for.
+        # shadows more than `sd_db`. In this pack it shadows nothing -- but
+        # not for the reason the first version of this comment gave, which
+        # said every import in `bin/` and `dashboard/` is stdlib, a sibling
+        # module, or `sd_db` itself. An AST scan of both trees finds one
+        # exception: `bin/sd_research_render.py:51 import markdown`.
+        #
+        # The safety survives on other grounds. Python-Markdown is not
+        # provisioned into the pack's virtualenv, so the `site-packages` this
+        # prepends has no `markdown` in it to shadow anything with, and that
+        # module's only consumer, `bin/sd-research-kit`, never reaches this
+        # function. So a third-party dependency arriving in either tree is
+        # not by itself the thing to watch for -- one that is also
+        # PROVISIONED is, and that is what would make this worth narrowing to
+        # the one module it is for.
         for path in offered:
             if path in sys.path:
                 sys.path.remove(path)
