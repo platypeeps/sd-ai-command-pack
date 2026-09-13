@@ -79,6 +79,8 @@ with `--from`. Writes exactly one file, and only when asked to acknowledge.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -87,7 +89,7 @@ import re
 import sys
 import tempfile
 from datetime import datetime, timezone
-from typing import Any, Iterable, TextIO
+from typing import Any, Iterable, Iterator, TextIO
 
 #: Read-only means read-only, and importing `sd_lib` would otherwise leave a
 #: `bin/__pycache__` behind. Set before the first sibling import.
@@ -101,6 +103,20 @@ import sd_lib  # noqa: E402
 
 SCHEMA_VERSION = 1
 STORE_NAME = "sd-review-ack.json"
+
+#: The sidecar `flock` is taken on, beside the store. A lock on the store file
+#: itself cannot work here: `write_store` replaces that file, so the inode a
+#: waiting writer holds a lock on is not the inode the winner just wrote, and
+#: the two would serialise against nothing.
+#:
+#: It is created once and never removed, which is the point rather than an
+#: oversight: unlinking it would let a writer that already holds the lock be
+#: joined by one that creates a fresh inode and locks that instead. One empty
+#: file per repository is the cost, and it is paid in the git common dir beside
+#: the store it guards -- outside the tree, so it is never staged, never
+#: committed, and never changes the head under review.
+LOCK_NAME = STORE_NAME + ".lock"
+
 DEFAULT_LIMIT = 30
 
 #: The heading an automated reviewer writes above findings it chose not to
@@ -139,13 +155,44 @@ SECTION_END = re.compile(r"^(?:</details>|- \*\*Files reviewed:|#+\s)", re.MULTI
 #:
 #: So the vote marker, not the shape, is what a finding is counted by.
 #: `_reconciled` compares the markers in a body against the findings located in
-#: it and turns any difference into findings of its own. A fourth shape, next
-#: time the reviewer changes its template, becomes unparsed findings that keep
-#: the gate red -- not silence.
+#: it and turns any difference into findings of its own. A fourth *place* the
+#: reviewer states a finding becomes unparsed findings that keep the gate red --
+#: not silence.
+#:
+#: THE GUARD DOES NOT COVER THE MARKER ITSELF, AND #893 PROVED IT. Every shape
+#: above is reconciled against the markers, so the markers are the one thing
+#: that cannot be reconciled against anything: when the reviewer respells the
+#: marker, `stated` and `located` both fall to zero and the round reads clean.
+#: That is not a hole this pattern can close from the inside, which is why the
+#: alternatives below are widened to whatever the reviewer has been seen to
+#: write and each spelling is pinned to a captured body in `tests/fixtures/`
+#: rather than to a sentence somebody typed here.
+#:
 #: Deliberately loose inside the parentheses: the reviewer writes `(3 votes)`,
-#: `(1 vote each)` and `(2 and 1 votes)`, and a pattern that admits only the
-#: first silently loses the other two.
-VOTE_MARKER = re.compile(r"\([^()]*?\b\d+\s+votes?\b[^()]*?\)")
+#: `(1 vote each)`, `(2 and 1 votes)` and `(2 votes, 1 vote)`, and a pattern
+#: that admits only the first silently loses the other three.
+#:
+#: THE NOUN IS OPTIONAL, WHICH IS THE FIFTH SHAPE. Copilot's review of #893
+#: dropped the word entirely -- `**Critical (1):**`, `**Moderate (2):**` -- and
+#: a pattern that required `votes?` read that round as clean: five stated
+#: findings, `no review findings on 1 pull request(s)`, on the very tool that
+#: exists to stop exactly that. So the second alternative below takes a
+#: parenthetical of bare counts.
+#:
+#: It has to earn it, though. `\(\d+\)` on its own also matches the reviewer's
+#: own `### Suppressed comments (4)` heading, and every count this file prints
+#: goes through `_reconciled`, which turns a marker it cannot place into a
+#: finding -- so a loose second alternative would invent a phantom finding on
+#: every body carrying that section. The trailing colon is what separates the
+#: two: a severity label is written `Critical (1):`, a section heading is not
+#: followed by a colon at all. Measured rather than assumed: across the two
+#: captured rounds in `tests/fixtures/`, the only bare-count parentheticals in
+#: any real review body are those headings, and none of them is followed by one
+#: (see `test_the_suppressed_headings_own_count_is_not_a_finding_marker`).
+VOTE_MARKER = re.compile(
+    r"\([^()]*?\b\d+\s+votes?\b[^()]*?\)"
+    r"|\(\s*\d+(?:\s*,\s*\d+)*\s*\)(?=\s*\**\s*:)"
+)
 
 #: A row of the file-summary table: a file in the first cell, prose in the
 #: second. Only the second cell is searched, and only when it carries a vote
@@ -155,18 +202,36 @@ TABLE_ROW = re.compile(r"^\|\s*`?(?P<path>[^`|\n]+?)`?\s*\|(?P<summary>.*)\|\s*$
 #: A label the reviewer puts in front of a run of findings inside one cell.
 FINDING_LABEL = re.compile(r"\bFindings?\s*:", re.IGNORECASE)
 
+#: Where the text in front of a marker stops belonging to the finding: at the
+#: end of the preceding sentence, or at the cell before it. The `|` is #893's
+#: contribution -- that table has three columns, `File`, `Summary` and
+#: `Findings`, so the first marker of a row has a whole other cell and a cell
+#: separator in front of it. Cutting at the sentence alone read the severity of
+#: its first finding as `| **Critical`, which is a garbled finding that still
+#: looks like a finding somebody read.
+LABEL_START = re.compile(r"[.|]")
+
 #: A marker that covers more than one finding without saying where they split.
-#: `(3 votes each)` and `(2 and 1 votes)` are both the reviewer saying "more
-#: than one" in its own words, which is a fact this reader can place. *How
-#: many*, and which text belongs to which, is not -- splitting on "and" or on
-#: a semicolon would be this file guessing, which is the failure every other
-#: shape here exists to avoid.
+#: `(3 votes each)`, `(2 and 1 votes)` and `(2 votes, 1 vote)` are all the
+#: reviewer saying "more than one" in its own words, which is a fact this
+#: reader can place. *How many*, and which text belongs to which, is not --
+#: splitting on "and" or on a semicolon would be this file guessing, which is
+#: the failure every other shape here exists to avoid.
 #:
 #: So the finding carries its whole text, as it already did, and is marked
 #: indeterminate. Every surface that prints a count then says "at least N".
 #: Silently counting it as one is the worse error of the two: an undercount on
 #: a gate reads as progress.
-PLURAL_MARKER = re.compile(r"\beach\b|\d+\s+and\s+\d+", re.IGNORECASE)
+#:
+#: THE COMMA IS THE SAME FACT AS "AND". `**Nits (2 votes, 1 vote):**` on #889
+#: is one cell, one run of prose, and two counts -- the reviewer's own way of
+#: saying it filed two things here. It read as exactly one finding before this
+#: clause, which is the undercount above, so the comma joins `each` and
+#: `N and M` rather than getting a splitter of its own. Two rows out of one
+#: prose run would need the id to carry an index, and the id is over the
+#: content by design: an acknowledgement has to survive the reviewer
+#: re-rendering the same finding.
+PLURAL_MARKER = re.compile(r"\beach\b|\d+\s*(?:votes?)?\s*(?:,|and)\s*\d+", re.IGNORECASE)
 
 DISPOSITIONS = ("fixed", "dismissed")
 
@@ -335,7 +400,7 @@ def _cell(pull: int, path: str, cell: str, author: str) -> list[dict]:
         tail = cell[marker.end() : (marks[index + 1].start() if index + 1 < len(marks) else len(cell))]
         after = tail.lstrip().lstrip("*").lstrip()
         if after.startswith(":"):
-            severity = head.strip(" *").rsplit(".", 1)[-1]
+            severity = LABEL_START.split(head.strip(" *"))[-1]
             text = after[1:]
             # The next finding's severity label sits at the end of this text.
             if index + 1 < len(marks) and "." in text:
@@ -356,8 +421,7 @@ def _unlabelled(head: str) -> str:
     label = list(FINDING_LABEL.finditer(head))
     if label:
         return head[label[-1].end() :]
-    trimmed = head.strip(" *;,")
-    return trimmed.rsplit(".", 1)[-1] if "." in trimmed else trimmed
+    return LABEL_START.split(head.strip(" *;,"))[-1]
 
 
 def _reconciled(pull: int, body: str, author: str, located: list[dict]) -> list[dict]:
@@ -539,6 +603,12 @@ def write_store(root: pathlib.Path, rows: dict[str, dict]) -> pathlib.Path:
     `os.replace` is atomic within a directory, and the temporary file is made
     in the same directory for that reason. A torn store would read as empty on
     the next run, silently discarding acknowledgements that were made.
+
+    Atomic against a crash is not serialised against a second writer, and this
+    function is not where that is handled: it replaces whatever rows it is
+    given, so a caller that read the rows before another writer added one
+    replaces that writer's row with its own absence. Every caller that mutates
+    the store holds `locked` across its read, its edit and this call.
     """
     path = store_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -554,6 +624,82 @@ def write_store(root: pathlib.Path, rows: dict[str, dict]) -> pathlib.Path:
         pathlib.Path(temporary).unlink(missing_ok=True)
         raise
     return path
+
+
+def lock_path(root: pathlib.Path) -> pathlib.Path:
+    """The sidecar every writer of this store queues on."""
+    return store_path(root).with_name(LOCK_NAME)
+
+
+@contextlib.contextmanager
+def locked(root: pathlib.Path) -> Iterator[bool]:
+    """Hold the store for one read-modify-write, against writers anywhere.
+
+    `write_store` is atomic against a *crash* and that is all it is atomic
+    against. Every write here is read-modify-write -- read the rows, add one,
+    replace the file -- and nothing serialised the three steps, so two lanes
+    that got there in the same second each read the same rows and the second
+    `os.replace` dropped the first lane's record. The store is one file for
+    the whole repository, shared by every linked worktree by construction
+    (`store_path` resolves the *common* git dir), so "two lanes at once" is the
+    ordinary case on this repository rather than a rare one: two agents, two
+    worktrees, two pushes, one file.
+
+    BLOCKING, UNLIKE THE TWO OTHER LOCKS IN THIS TREE. `bin/sd_ledger.py` and
+    `bin/sd-handoff-restore` both take `LOCK_NB` with a short retry and give the
+    write up, because both run inside something a wait would stall -- an HTTP
+    handler and a `SessionStart` hook -- and both would rather lose one
+    measurement than delay a session. Neither trade applies here. This runs on
+    a push that is already talking to GitHub, the row is an acknowledgement
+    somebody will be gated on, and losing it is the defect. A wait is also
+    bounded by the kernel rather than by trust: `flock` is released when the
+    holder's file descriptor closes, which includes the holder dying, so there
+    is no stale lock to wait behind forever.
+
+    Yields whether the lock was actually taken. A lock file that cannot be
+    created or cannot be locked -- a read-only `.git`, a filesystem with no
+    `flock` -- degrades to the unserialised write this replaced, which is what
+    the caller did before and is strictly better than refusing to record. Reads
+    take no lock at all, deliberately: `os.replace` means a reader sees one
+    whole version or another and never a torn one, and `--check` and
+    `sd-status` must stay read-only down to not creating a file.
+    """
+    path = lock_path(root)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = os.open(str(path), os.O_CREAT | os.O_WRONLY, 0o644)
+    except OSError:
+        yield False
+        return
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+        except OSError:
+            yield False
+            return
+        yield True
+    finally:
+        os.close(handle)
+
+
+def _row(found: dict, disposition: str, detail: str, commit: str) -> dict:
+    """One store row, and nothing about where it is going.
+
+    Split out of `acknowledge` so both writers can build a row while the lock
+    is held without either calling the other: two `flock` calls on two
+    descriptors for the same file deadlock a single process against itself, so
+    a writer that loops over `acknowledge` cannot be a writer that locks.
+    """
+    return {
+        "pr": found["pr"],
+        "disposition": disposition,
+        "commit": commit or None,
+        "cited": detail if disposition == "fixed" else "",
+        "reason": detail if disposition == "dismissed" else "",
+        "path": found["path"],
+        "line": found["line"],
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
 
 
 def acknowledge(root: pathlib.Path, found: dict, disposition: str, detail: str) -> dict:
@@ -579,19 +725,12 @@ def acknowledge(root: pathlib.Path, found: dict, disposition: str, detail: str) 
                 "acknowledge a commit that exists"
             )
         commit = resolved
-    rows, _ = read_store(root)
-    rows[found["id"]] = {
-        "pr": found["pr"],
-        "disposition": disposition,
-        "commit": commit or None,
-        "cited": detail.strip() if disposition == "fixed" else "",
-        "reason": detail.strip() if disposition == "dismissed" else "",
-        "path": found["path"],
-        "line": found["line"],
-        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    }
-    write_store(root, rows)
-    return rows[found["id"]]
+    row = _row(found, disposition, detail.strip(), commit)
+    with locked(root):
+        rows, _ = read_store(root)
+        rows[found["id"]] = row
+        write_store(root, rows)
+    return row
 
 
 def answering_commit(root: pathlib.Path, found: dict, head: str) -> str:
@@ -660,14 +799,35 @@ def record_answers(root: pathlib.Path, rows: Iterable[dict], head: str) -> tuple
         # unknown, and writing would replace the whole file with a record built
         # from that ignorance.
         return [], broken
-    written: list[dict] = []
+    # Every `git` question first, outside the lock. `answering_commit` is a
+    # `rev-list` per finding, and a lock held across a dozen subprocesses is a
+    # lock another lane waits behind for no reason; the pre-read above only
+    # decides which findings are worth asking about.
+    answers: list[tuple[dict, str]] = []
     for found in rows:
         if found["id"] in store:
             continue
         commit = answering_commit(root, found, head)
-        if not commit:
-            continue
-        written.append(dict(acknowledge(root, found, "fixed", commit), id=found["id"]))
+        if commit:
+            answers.append((found, commit))
+    if not answers:
+        return [], ""
+    written: list[dict] = []
+    with locked(root):
+        # Read again, under the lock, and this read is the one that decides.
+        # Between the pre-read and here another lane may have recorded some of
+        # these findings, and one write at the end of the loop replaces the file
+        # once from rows nobody else can have moved underneath it.
+        store, broken = read_store(root)
+        if broken:
+            return [], broken
+        for found, commit in answers:
+            if found["id"] in store:
+                continue
+            store[found["id"]] = _row(found, "fixed", commit, commit)
+            written.append(dict(store[found["id"]], id=found["id"]))
+        if written:
+            write_store(root, store)
     return written, ""
 
 

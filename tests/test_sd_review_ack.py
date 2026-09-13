@@ -21,6 +21,8 @@ memory, and the two cases that matter most are named individually:
 
 from __future__ import annotations
 
+import ast
+import fcntl
 import json
 import os
 import pathlib
@@ -28,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import unittest.mock
 
@@ -35,6 +38,8 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 BIN = REPO_ROOT / "bin"
 FIXTURE = REPO_ROOT / "tests" / "fixtures" / "sd-543-review-round.json"
 UNANSWERED = REPO_ROOT / "tests" / "fixtures" / "sd-631-unanswered-round.json"
+COUNT_ONLY = REPO_ROOT / "tests" / "fixtures" / "sd-655-count-only-round.json"
+CAPTURES = sorted((REPO_ROOT / "tests" / "fixtures").glob("*-round.json"))
 
 sys.path.insert(0, str(BIN))
 import sd_lib  # noqa: E402
@@ -1324,6 +1329,395 @@ class TheRoundNobodyHasAnswered(unittest.TestCase):
             [row["id"] for row in rows],
             "ten findings stated and none answered is ten findings standing",
         )
+
+
+class AMarkerWithNoNoun(unittest.TestCase):
+    """#893's round, where the reviewer stopped writing the word `votes`.
+
+    `tests/fixtures/sd-655-count-only-round.json` is pull request 893 read from
+    the API on 2026-09-13, both of its reviews, bodies and all. The first one
+    states five findings in a three-column file-summary table and spells every
+    marker as a bare count -- `**Critical (1):**`, `**Moderate (2):**` -- and a
+    reader that required `votes?` called that pull request clean while it
+    carried five. Hand-counted against the review on GitHub, in the order the
+    table states them:
+
+      `bin/sd-ship`       Critical (1)  the pre-squash SHA is the one recorded
+      `bin/sd-ship`       Moderate (2)  helper loading outside the guarded block
+      `bin/sd-review-ack` Critical (2)  a plain pathspec is a glob
+      `bin/sd-review-ack` Critical (1)  an older acknowledgement satisfies a restatement
+      `bin/sd-review-ack` Moderate (1)  a corrupt store is indistinguishable from empty
+
+    Five, and item sd:655 recorded six. The sixth is not in a marker: the
+    round's *second* review names four more defects in its summary sentence
+    only, with no table and no marker anywhere in the body, and this reader
+    counts markers on purpose. What it cannot count it must not pretend to, so
+    the number pinned below is the five the reviewer marked.
+    """
+
+    ROUND = json.loads(COUNT_ONLY.read_text(encoding="utf-8"))
+
+    def rows(self) -> list[dict]:
+        payload = self.ROUND["pull_requests"]["893"]
+        return ack.findings(893, payload["reviews"], payload["comments"])
+
+    def test_the_round_that_read_clean_reads_as_five_findings(self) -> None:
+        """The defect, measured: a bare count is a marker or the round is silent."""
+        self.assertEqual(len(self.rows()), 5)
+
+    def test_the_captured_round_is_refused_by_the_gate(self) -> None:
+        """End to end, through the CLI, on the real body."""
+        stack = tempfile.TemporaryDirectory()
+        self.addCleanup(stack.cleanup)
+        repo = Repo(stack)
+        done = subprocess.run(
+            [sys.executable, str(BIN / "sd-review-ack"), "--from", str(COUNT_ONLY),
+             "--check", "--landed-in", "main", "--json"],
+            cwd=str(repo.root), capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(done.returncode, 1, done.stdout + done.stderr)
+        result = json.loads(done.stdout)
+        self.assertEqual(len(result["findings"]), 5)
+        self.assertEqual(len(result["unsatisfied"]), 5)
+
+    def test_the_severity_survives_a_table_with_three_columns(self) -> None:
+        """`File | Summary | Findings`, so a cell separator precedes the label.
+
+        The count and the text were both right before this and the severity of
+        the first finding in each row read `| **Critical`, which is a garbled
+        finding that still looks like a finding somebody read -- the failure
+        `_cell` was written for, in a column layout it had not seen.
+        """
+        self.assertEqual(
+            [(row["path"], row["text"]) for row in self.rows()],
+            [("bin/sd-ship",
+              "Critical: Records the pre-squash SHA, preventing normal squash merges "
+              "from reaching `landed`"),
+             ("bin/sd-ship",
+              "Moderate: Helper loading outside the guarded block can abort `prepare` "
+              "instead of producing an advisory warning"),
+             ("bin/sd-review-ack", "Critical: Normal pathspecs can match unrelated files"),
+             ("bin/sd-review-ack",
+              "Critical: Older acknowledgements can satisfy findings restated on newer commits"),
+             ("bin/sd-review-ack",
+              "Moderate: Corrupt stores are indistinguishable from empty results and "
+              "produce no warning")],
+        )
+
+    def test_a_bare_count_is_flat_unless_the_reviewer_says_otherwise(self) -> None:
+        """The control for the hedge: five exact counts stay exact."""
+        rows = self.rows()
+        self.assertFalse(any(row["indeterminate"] for row in rows))
+        self.assertEqual(ack.at_least(rows, len(rows)), "5")
+
+    def test_the_second_review_states_nothing_this_reader_will_invent(self) -> None:
+        """A body with no table and no marker yields nothing, not a guess.
+
+        The honest half of the count above. The reviewer's summary sentence
+        lists four defects in prose; a reader that mined prose for findings
+        would be writing them, and `_reconciled` is what makes the gap loud
+        when the reviewer next moves them into a shape.
+        """
+        second = self.ROUND["pull_requests"]["893"]["reviews"][1]
+        self.assertNotIn("|", second["body"])
+        self.assertEqual(ack.findings(893, [second], []), [])
+
+    def test_the_suppressed_headings_own_count_is_not_a_finding_marker(self) -> None:
+        """Why the bare-count marker needs the colon after it.
+
+        `### Suppressed comments (4)` is a bare count in parentheses in every
+        body that has that section, and it is the reviewer's own heading rather
+        than a severity label. A marker that matched it would count the section
+        twice -- once as the heading's own assertion, which `_suppressed`
+        already checks, and once as a marker `_reconciled` cannot place, which
+        is a phantom finding nothing states and nobody can acknowledge.
+
+        Enumerated from `tests/fixtures/` rather than asserted from the one
+        example: every captured round on disk, every review body in it, every
+        heading against every marker.
+        """
+        self.assertIsNone(ack.VOTE_MARKER.search("### Suppressed comments (4)"))
+        headings = 0
+        for capture in CAPTURES:
+            payload = json.loads(capture.read_text(encoding="utf-8"))
+            for number, record in payload["pull_requests"].items():
+                for review in record.get("reviews") or []:
+                    body = review.get("body") or ""
+                    marks = [mark.span() for mark in ack.VOTE_MARKER.finditer(body)]
+                    for heading in ack.SUPPRESSED_HEADING.finditer(body):
+                        headings += 1
+                        overlap = [body[start:stop] for start, stop in marks
+                                   if start < heading.end() and heading.start() < stop]
+                        self.assertEqual(
+                            overlap, [],
+                            f"{capture.name} #{number}: {heading.group(0)!r} read as a marker",
+                        )
+        self.assertGreater(headings, 0, "no capture carries the heading this guards")
+
+
+class TwoCountsInOneMarker(unittest.TestCase):
+    """`**Nits (2 votes, 1 vote):**`, from #889's captured review.
+
+    One cell, one run of prose, two counts. It read as exactly one finding,
+    which is an undercount, and an undercount on a gate reads as progress. The
+    comma is the reviewer saying "more than one" the same way `each` and
+    `N and M votes` already did, so it is read the same way: the row keeps its
+    whole text and is marked indeterminate, and every count built on it says
+    "at least". Splitting the prose would be this reader guessing which half of
+    a sentence is which finding, and two rows out of one run would need the id
+    to carry an index -- the id is over the content so that an acknowledgement
+    survives the reviewer re-rendering the same words.
+    """
+
+    ROUND = json.loads(UNANSWERED.read_text(encoding="utf-8"))
+
+    def rows(self) -> list[dict]:
+        payload = self.ROUND["pull_requests"]["889"]
+        return ack.findings(889, payload["reviews"], payload["comments"])
+
+    def test_the_captured_marker_is_read_as_more_than_one_finding(self) -> None:
+        grouped = [row for row in self.rows() if row["indeterminate"]]
+        self.assertEqual(len(grouped), 1)
+        self.assertTrue(grouped[0]["text"].startswith("Nits:"))
+        self.assertIn("2 votes, 1 vote", self.ROUND["pull_requests"]["889"]["reviews"][0]["body"])
+
+    def test_the_round_that_carried_it_stops_claiming_an_exact_count(self) -> None:
+        rows = self.rows()
+        self.assertEqual(len(rows), 10)
+        self.assertEqual(ack.at_least(rows, len(rows)), "at least 10")
+
+    def test_the_comma_is_the_evidence_and_not_the_plural_noun(self) -> None:
+        """`Nits` is not read as plural; the reviewer writes it over one finding too."""
+        self.assertTrue(ack.PLURAL_MARKER.search("(2 votes, 1 vote)"))
+        self.assertTrue(ack.PLURAL_MARKER.search("(2, 1)"))
+        self.assertIsNone(ack.PLURAL_MARKER.search("(3 votes)"))
+        self.assertIsNone(ack.PLURAL_MARKER.search("(1)"))
+        rows = ack._table(1, "| `a.py` | Nits (2 votes): one thing. |\n", "bot")
+        self.assertEqual(len(rows), 1)
+        self.assertFalse(rows[0]["indeterminate"])
+
+
+#: A second *process* writing one row into the store of the repository named by
+#: `argv[1]`, under the id in `argv[2]`. A thread would share this process's
+#: `flock`-holding descriptor in ways a real lane never does.
+CHILD_WRITER = (
+    "import pathlib, sys;"
+    "sys.path.insert(0, sys.argv[3]);"
+    "sys.dont_write_bytecode = True;"
+    "import sd_lib;"
+    "writer = sd_lib.sibling('child_writer', 'sd-review-ack');"
+    "writer.acknowledge(pathlib.Path(sys.argv[1]),"
+    " {'id': sys.argv[2], 'pr': 7, 'path': 'bin/thing.py', 'line': None},"
+    " 'dismissed', 'the child wrote this')"
+)
+
+
+class TwoWritersAtOnce(unittest.TestCase):
+    """The store is one file for the whole repository, and two lanes share it.
+
+    `store_path` resolves the *common* git dir on purpose, so every linked
+    worktree of this repository writes the same file -- which is what makes a
+    lost update the ordinary case here rather than a rare one. Both writers did
+    read-modify-write with nothing serialising the three steps: two lanes that
+    got there in the same second each read the same rows, and the second
+    `os.replace` dropped the first lane's record.
+
+    `write_store` was already atomic against a crash and that was never the
+    defect; the defect is the window around it. So the tests below interleave
+    two writers for real -- one across a process boundary, one across the
+    read-modify-write window itself -- rather than asserting that `flock` was
+    called, which would pass on a lock held over nothing.
+    """
+
+    def setUp(self) -> None:
+        self.stack = tempfile.TemporaryDirectory()
+        self.addCleanup(self.stack.cleanup)
+        self.branch = Branch(self.stack)
+        self.open: set[int] = set()
+
+    def rows(self) -> list[dict]:
+        """The three findings of the automatic path, on this repository."""
+        return ack.findings(7, [{
+            "author": "bot",
+            "commit_id": self.branch.reviewed,
+            "body": APushIsEvidenceOrItIsNothing.REVIEW,
+        }], [])
+
+    def held(self) -> int:
+        """This test process, holding the sidecar the way a live writer does."""
+        path = ack.lock_path(self.branch.root)
+        handle = os.open(str(path), os.O_CREAT | os.O_WRONLY, 0o644)
+        self.open.add(handle)
+        self.addCleanup(lambda: os.close(handle) if handle in self.open else None)
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        return handle
+
+    def release(self, handle: int) -> None:
+        os.close(handle)
+        self.open.discard(handle)
+
+    def test_a_second_process_waits_rather_than_overwriting(self) -> None:
+        """The cross-process half, which is the one two worktrees produce.
+
+        The lock is held here and a real second interpreter is asked to write.
+        It must not have written when the lock is still held -- that wait is the
+        whole fix -- and it must write once the lock goes. Without the lock the
+        child returns immediately, which is what this reddens on.
+        """
+        handle = self.held()
+        child = subprocess.Popen(
+            [sys.executable, "-c", CHILD_WRITER, str(self.branch.root), "childrow", str(BIN)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.addCleanup(child.kill)
+        with self.assertRaises(subprocess.TimeoutExpired):
+            child.wait(timeout=2)
+        self.assertEqual(ack.read_store(self.branch.root)[0], {},
+                         "a writer wrote while another writer held the lock")
+        self.release(handle)
+        self.assertEqual(child.wait(timeout=30), 0, child.communicate()[1])
+        self.assertIn("childrow", ack.read_store(self.branch.root)[0])
+
+    def test_a_push_and_a_hand_acknowledgement_keep_both_rows(self) -> None:
+        """The interleaving itself: both writers, both rows, one file.
+
+        `record_answers` is the push's writer and `acknowledge` is the
+        operator's, and the window is between the read and the replace. So the
+        push is held open *inside* that window -- after the read that decides,
+        before the write -- and the hand acknowledgement is let go at exactly
+        that moment. Serialised, the second writer cannot start until the first
+        has finished and both rows survive. Unserialised, the second writer
+        reads the store the first has not written yet and the first then
+        replaces the file without its row: one row, and `assertEqual` below
+        says which one went.
+
+        The pause is a timeout rather than an event the other writer sets,
+        because under a correct lock the other writer never gets far enough to
+        set anything -- a handshake would deadlock the fixed code and pass only
+        the broken one.
+
+        What the two writers *can* agree on is the moment before either tries
+        the lock, so they rendezvous on a barrier there. An `Event` the push set
+        and did not wait on would leave the hand writer's scheduling inside the
+        measured window: if the kernel did not run it within the pause, the
+        broken code would append after the push had written, both rows would
+        survive, and the test would pass having proved nothing. After the
+        barrier both threads are running and the next thing each does is the
+        lock, so the pause covers the race and not the scheduler.
+        """
+        real = ack.read_store
+        reached = threading.Barrier(2)
+        counted = {"push": 0}
+
+        def read_store(root: pathlib.Path) -> tuple[dict[str, dict], str]:
+            rows = real(root)
+            if threading.current_thread().name == "push":
+                counted["push"] += 1
+                # The second read is the one under the lock, the one whose rows
+                # are replaced. Pausing on the first would prove nothing: it
+                # happens before the lock is taken, so the fixed and the broken
+                # code both re-read afterwards and both look clean.
+                if counted["push"] == 2:
+                    reached.wait(10)
+                    threading.Event().wait(1.5)
+            return rows
+
+        outcome: dict = {}
+
+        def push() -> None:
+            with unittest.mock.patch.object(ack, "read_store", read_store):
+                outcome["push"] = ack.record_answers(self.branch.root, self.rows(), "main")[0]
+
+        def hand() -> None:
+            reached.wait(10)  # the same barrier: neither runs on before both arrive
+            outcome["hand"] = ack.acknowledge(
+                self.branch.root,
+                {"id": "byhand", "pr": 7, "path": "docs/untouched.md", "line": None},
+                "dismissed", "the reviewer misread the diff",
+            )
+
+        writers = [threading.Thread(target=push, name="push"),
+                   threading.Thread(target=hand, name="hand")]
+        for writer in writers:
+            writer.start()
+        for writer in writers:
+            writer.join(60)
+        self.assertEqual([row["path"] for row in outcome["push"]], ["bin/thing.py"])
+        store = ack.read_store(self.branch.root)[0]
+        automatic = [found for found, row in store.items() if row["disposition"] == "fixed"]
+        self.assertEqual(len(automatic), 1, f"the push's row is gone: {store}")
+        self.assertIn("byhand", store, f"the hand-written row is gone: {store}")
+        self.assertEqual(len(store), 2)
+
+    def test_a_read_takes_no_lock_and_leaves_no_file(self) -> None:
+        """Read-only means read-only, down to not creating the sidecar.
+
+        The same rule `sys.dont_write_bytecode` is set for at the top of the
+        file. `--check` and the row `sd-status` builds from this store both run
+        on repositories nobody is acknowledging anything in, and a gate that
+        writes a file in `.git/` to report is a gate that cannot be run on a
+        tree somebody else owns.
+        """
+        self.assertEqual(ack.read_store(self.branch.root), ({}, ""))
+        self.assertEqual(ack.unacknowledged(self.branch.root, ["nothing"], "main"), ["nothing"])
+        done = subprocess.run(
+            [sys.executable, str(BIN / "sd-review-ack"), "--from", str(FIXTURE),
+             "--check", "--landed-in", "main"],
+            cwd=str(self.branch.root), capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertFalse(ack.lock_path(self.branch.root).exists(),
+                         "reading the store created a lock file")
+        ack.acknowledge(self.branch.root, self.rows()[0], "dismissed", "not a defect")
+        self.assertTrue(ack.lock_path(self.branch.root).exists(),
+                        "a writer that creates no lock file is locking nothing")
+
+    def test_a_lock_that_cannot_be_taken_still_records(self) -> None:
+        """A sidecar that cannot exist degrades to the write, not to silence.
+
+        A read-only `.git`, a filesystem without `flock`: the row is still the
+        operator's acknowledgement, and refusing to record it would be a worse
+        failure than the race this lock closes.
+        """
+        nowhere = pathlib.Path(os.devnull) / "no" / ack.LOCK_NAME
+        with unittest.mock.patch.object(ack, "lock_path", return_value=nowhere):
+            with ack.locked(self.branch.root) as taken:
+                self.assertFalse(taken)
+            row = ack.acknowledge(self.branch.root, self.rows()[0], "dismissed", "not a defect")
+        self.assertEqual(row["reason"], "not a defect")
+        self.assertEqual(len(ack.read_store(self.branch.root)[0]), 1)
+
+    def test_every_writer_of_the_store_holds_the_lock(self) -> None:
+        """Enumerated from the tree, because two is only today's answer.
+
+        The audit found two writers and a third added later would make this fix
+        partial and say nothing. So the set is derived rather than listed: every
+        `write_store` call in the file has to sit inside a `with locked(...)`,
+        and no other file in `bin/` may reach the store at all.
+        """
+        source = (BIN / "sd-review-ack").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        windows = [(node.lineno, node.end_lineno or node.lineno)
+                   for node in ast.walk(tree) if isinstance(node, ast.With)
+                   and any(isinstance(item.context_expr, ast.Call)
+                           and getattr(item.context_expr.func, "id", "") == "locked"
+                           for item in node.items)]
+        calls = [node.lineno for node in ast.walk(tree) if isinstance(node, ast.Call)
+                 and getattr(node.func, "id", "") == "write_store"]
+        self.assertTrue(calls, "no writer found, so this test measures nothing")
+        self.assertEqual(
+            [line for line in calls
+             if not any(start <= line <= stop for start, stop in windows)],
+            [], "a write_store call outside every `with locked(...)` block",
+        )
+        elsewhere = []
+        for path in sorted(BIN.iterdir()):
+            if not path.is_file() or path.name == "sd-review-ack":
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            if "write_store" in text or ack.STORE_NAME in text:
+                elsewhere.append(path.name)
+        self.assertEqual(elsewhere, [], "another module reaches the store directly")
 
 
 if __name__ == "__main__":
