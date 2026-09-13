@@ -3,6 +3,8 @@
 These verbs do not need a checkout. A new task takes the repository enclosing
 the current directory by default; ``--no-repo`` files one that belongs to no
 checkout, and ``--here`` refuses rather than filing a repo-less task.
+``--kind`` files one of the four item kinds that carry no repository at all,
+for which the repository question is already answered -- see ``ADD_KINDS``.
 """
 
 from __future__ import annotations
@@ -21,6 +23,27 @@ import sd_lib
 
 class WorkRefusal(Exception):
     """A workflow operation was refused without changing its state."""
+
+
+#: The item kinds a person files by hand, which is five of the eleven
+#: `item.kind`'s CHECK carries. The other six are left out because each
+#: already has a producer, and a second way to make the same row is a second
+#: answer: `work` is written by the work lane and carries a repository,
+#: `report` by the scheduled job that ran, `dep` by the `work` item that waits
+#: on it, `skill-review` by the skill catalogue. `proposal` is reserved and
+#: nothing creates one, so a flag that created one would contradict the
+#: reservation rather than fill it. `idea` looks like the generic word and is
+#: not: `sd_db/writing.py` selects `kind = 'idea' AND piece IS NOT NULL`, so an
+#: `idea` row this verb filed would be a draft article in a publishing queue
+#: that the queue's own query cannot see -- which is exactly why `work-idea`
+#: and `personal-idea` are separate kinds and are here instead.
+ADD_KINDS = ("task", "personal", "followup", "work-idea", "personal-idea")
+
+#: The four of those that carry no repository, read as a group by
+#: `reads.backlog_items(connection, repo=reads.NO_REPO)`. Not a coincidence of
+#: how they happen to be filed: it is what the group *is*, so `_task_repo`
+#: settles it from the kind rather than from where the caller stood.
+REPO_LESS_KINDS = frozenset(ADD_KINDS[1:])
 
 
 def _task_repo(args: argparse.Namespace, connection: Any) -> str | None:
@@ -46,7 +69,21 @@ def _task_repo(args: argparse.Namespace, connection: Any) -> str | None:
     every checkout nobody has registered. A default may not break the
     command; only an explicit `--here` gets to refuse, and it says which of
     the two reasons applied.
+
+    A kind in `REPO_LESS_KINDS` settles the question before any of that. Those
+    four carry no repository by definition, and the group is read by asking
+    for exactly that (`reads.backlog_items(repo=reads.NO_REPO)`), so a
+    `personal` row that took the checkout cwd happened to be in would be
+    missing from the one query written to list it. `--no-repo` is therefore
+    implied rather than required: this function's own history is that a flag
+    nobody remembers prevents nothing. `--here` is refused instead of ignored,
+    because it asks for a repository the kind cannot have, and a flag that
+    silently succeeds at the opposite of what it says is worse than absent.
     """
+    if args.kind in REPO_LESS_KINDS:
+        if args.here:
+            raise WorkRefusal(f"--here: a {args.kind} item carries no repository")
+        return None
     if args.no_repo:
         return None
     root = sd_lib.repo_root()
@@ -509,6 +546,37 @@ def _refuse_task_delivery(workflow: Any, connection: Any, args: argparse.Namespa
             f"{args.commit}`, which verifies the same commit")
 
 
+def _capture(sd_db: Any, workflow: Any, args: argparse.Namespace,
+             connection: Any, who: str) -> Any:
+    """The row `add` writes, and the one step `capture_task` will not take.
+
+    `capture_task` is the library's capture entry point and stays the one that
+    makes the row: it validates the user fields, refuses a repository the
+    `repo` table does not carry, and writes the opening status note. It also
+    hard-codes `kind='task'`, and it is not this pack's function to widen --
+    migration 009 added four item kinds and gave none of them a producer,
+    which is the whole defect. So the kind is set immediately afterwards, by
+    the library's own `set_item_fields`, whose allow-list names `kind`.
+
+    Both writes are one unit. `transaction` takes a savepoint when the
+    connection is already inside one, so nothing outside this function
+    observes the row while it still reads `task`, and the returned state is
+    re-read after the update rather than patched -- `revision` is computed
+    from the row, and handing back the pre-update one would arm every
+    `--if-revision` caller with a checkpoint that was already stale.
+    """
+    with workflow.transaction(connection):
+        state = workflow.capture_task(
+            connection, title=args.title, body=args.body, priority=args.priority,
+            due=args.due, repo=_task_repo(args, connection), who=who,
+        )
+        if args.kind == "task":
+            return state
+        item = state["item"]["id"]
+        sd_db.writes.set_item_fields(connection, item, kind=args.kind)
+        return workflow.item_state(connection, item)
+
+
 def run(args: argparse.Namespace) -> int:
     sd_db, workflow = _library()
     write = args.work_action not in {"today", "items", "item"}
@@ -533,10 +601,7 @@ def run(args: argparse.Namespace) -> int:
         elif action == "item":
             result = workflow.item_state(connection, args.item)
         elif action == "add":
-            result = workflow.capture_task(
-                connection, title=args.title, body=args.body, priority=args.priority,
-                due=args.due, repo=_task_repo(args, connection), who=who,
-            )
+            result = _capture(sd_db, workflow, args, connection, who)
         elif action == "edit":
             changes = _edit_changes(args)
             moved = "repo" in changes
@@ -769,11 +834,13 @@ def register(groups: Any, store: Any) -> None:
     task = groups.add_parser("task", help="capture and manage work without files or GitHub")
     verbs = task.add_subparsers(dest="verb", required=True)
     _register_contributions(verbs)
-    add = verbs.add_parser("add", help="capture a standalone task")
+    add = verbs.add_parser("add", help="capture a standalone item, a task unless --kind says")
     add.add_argument("title")
     add.add_argument("--body", default="")
     add.add_argument("--priority", type=int, choices=range(1, 5))
     add.add_argument("--due", help="YYYY-MM-DD")
+    add.add_argument("--kind", choices=ADD_KINDS, default="task",
+                     help="what the item is (default: task); the four others carry no repository")
     where = add.add_mutually_exclusive_group()
     where.add_argument("--here", action="store_true",
                        help="refuse unless this is a checkout (one is used by default)")
