@@ -72,19 +72,22 @@ jobs:
       # this suite's library underneath it. It moves when this pack starts
       # using something the old pin does not carry, and only then: the suite
       # fails on a skip, so a capability the library lacks is a red run here
-      # rather than a quietly unexercised test. It last moved for
-      # `Synced.queued` and `Synced.incomplete`, which `sd shadow sync` now
-      # forwards and which `3c4c723a` predates: a test constructing
-      # `Synced(queued=3)` passes on every local venv and can only fail here,
-      # so sd:614's forwarding tests had to be written against a stub instead.
-      # The new pin is the merge that closed sd:603, chosen over the branch
-      # head so the jump carries the two commits this pack needs and not the
-      # collector work landing beside them.
+      # rather than a quietly unexercised test. It last moved for the issue
+      # collector sd:360 step 6 reads -- #306 reads an issue and its timeline,
+      # #307 lets a contribution row hold one, #308 watches it -- none of which
+      # `940c045a` carries. The move before that was for `Synced.queued` and
+      # `Synced.incomplete`, which `sd shadow sync` forwards and `3c4c723a`
+      # predates: a test constructing `Synced(queued=3)` passes on every local
+      # venv and can only fail here, which is the asymmetry this pin creates
+      # whenever it lags what the pack has started using.
+      #
+      # `758dfb4` carries no migration: `SCHEMA_VERSION` is 8 at both the old
+      # pin and the new one, so this move says nothing about any database.
       - name: Check out the system checkout, for sd_db
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          ref: 940c045a93311aba30607bb1123a54d0b7f14fb9
+          ref: 758dfb480e1b785a7f22644824f2d710a213cafe
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false
