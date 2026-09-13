@@ -227,9 +227,22 @@ not earn budget; it forces the ceiling down.
 How much a removal earns, exactly, and the number does not depend on the size of
 the removal. Remove *N* code lines and the highest cap that still passes is
 `(2,326 - N) + 29`, which leaves headroom of 29 whatever *N* is. Headroom goes
-from 2 to 29. **A removal of any size earns 27 lines of code headroom and
-nothing else.** There is nowhere for a larger budget to go, because the slack
-test caps standing permission at 29 regardless.
+from 2 to 29. **A removal earns 27 lines of code headroom and nothing else,
+whatever its size.** There is nowhere for a larger budget to go, because the
+slack test caps standing permission at 29 regardless.
+
+**But the test only forces the cap down once the removal passes 27 lines, and
+every removal in this item does.** The rule above says what a removal *earns*;
+it does not say when the ceiling *must* move, and the two are different numbers.
+The live gap is 2 and the slack is 29, so removing *N* lines leaves a gap of
+`2 + N` and the unchanged 2,328 stays legal while `2 + N <= 29` — for *N* up to
+27. The threshold is **28**. Below it a removal may lower the cap and earns the
+right to, but is not failed for leaving it alone; at or above it the same commit
+must lower the cap or the suite is red. Nothing this item removes is smaller
+than that: the step-3 commit alone deletes 357 code lines of
+`dashboard/plugins.py` and 121 of `dashboard/markup.py`. The threshold is stated
+because a reader applying the rule to some *other*, smaller removal would
+otherwise be told to move a ceiling no test asks them to move.
 
 And lowering the cap is not a one-line edit either.
 `test_each_ceiling_is_the_last_value_its_history_records`
@@ -243,10 +256,28 @@ asserts that the downward count is zero. It goes red.
 That is by design and its docstring says so: it "fails the day a ceiling finally
 comes down — at which point the paragraph in R11-D41 that reasons from *not one
 downward move* needs rewriting, which is what a failure here is for." So the cap
-step is a decision record with a new R-id, not a patch: it lowers both
-ceilings, appends both values, rewrites the `downward == 0` assertion into one
-that permits a recorded fall and names it, and rewrites the paragraph in the
-module docstring that reasons from there being none.
+step is a decision record with a new R-id, not a patch: it rewrites the
+`downward == 0` assertion into one that permits a recorded fall and names it,
+rewrites the paragraph in the module docstring that reasons from there being
+none, and — the part a reader of that assertion alone misses — repairs the
+*second* assertion in the same test.
+
+**Only one ceiling moves, and only `DASHBOARD_CODE_CAP`.** Each pack commit that
+deletes code lowers that cap and appends one value to its history; `DASHBOARD_CAP`
+is a cap on the whole directory including its prose, stands at 4,600 against a
+directory that is shrinking, and is never crossed on the way down, so it moves
+once — to nothing — when it retires at step 7. Appending to both would make
+`ceiling_moves()` read `(31, 26, 2)` after step 3; appending to the one that
+actually moves makes it `(30, 26, 1)`, which is the figure the implementation
+verification expects.
+
+The second assertion is `tests/test_loc_caps.py:598`, and it reads
+`upward == values - len(CEILING_HISTORY)` — every recorded move is a raise,
+because until now every one has been. One downward move makes it arithmetically
+false: 30 values across 3 ceilings leaves 27 moves, of which 26 are up and 1 is
+down. Both assertions and both messages are the decision record's subject. A
+plan that rewrites only the first one lands red on the second, on a message about
+a ceiling repeating a value, which is not what happened.
 
 One more mechanical detail nobody finds by reading prose.
 `test_the_dashboard_stays_under_its_ceiling` (`tests/test_loc_caps.py:487`) and

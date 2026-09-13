@@ -135,14 +135,22 @@ because three of the loader's four documented properties are real:
    plugin crashing quietly and leaving Now looking calm." The system side raises
    a `ValueError` on the screen instead. **Going native trades a fleet-wide alert
    for a per-screen error, and there is no mechanical check that the trade was
-   made deliberately.** Accepted gap; it belongs in the same item as the Now
-   ranking's port (step 6), because Now is where the row would have shown.
+   made deliberately.**
+
+   **The gap is bounded, not accepted for good, and the boundary is step 6.** It
+   opens when step 3 deletes the loader and closes when step 6 ports the Now
+   ranking: a collector that goes dark raises a visible row in the merged system
+   view, which `implement.md`'s step 6 verifies with a fixture collector that
+   exits non-zero. Between those two steps a dark collector shows as a per-screen
+   `ValueError` and nothing else, and that window is the accepted part. Recording
+   the whole thing as permanently accepted would have left this document and
+   `implement.md` asking one commit for opposite behaviour.
 4. *Bounded reads rather than checked-after reads.* Kept: `reports_screen` reads
    65,537 bytes and no more.
 
 ## Question 3 — the `PAGE` string and `app.js`
 
-**Both are deleted. Neither is ported. Five behaviours are carried out of them by
+**Both are deleted. Neither is ported. Six behaviours are carried out of them by
 name first.**
 
 `PAGE` (`dashboard/server.py:238`) is an HTML literal whose nav declares seven
@@ -161,9 +169,10 @@ have, each named so it cannot be lost quietly:
 | Behaviour | Pack location | Disposition |
 |---|---|---|
 | Severity band from a rank | `band` (`dashboard/app.js:547`) | ports with the Now ranking, step 6. The rank is a server-side number and the band is the rendering choice; the system page needs the second half only. |
-| Per-table filter | `addFilter` (`dashboard/app.js:463`) | compare against the system listing first. `Listing` already renders tables; if it filters, drop. Decide, do not assume. |
-| Per-table sort | `addSort` (`dashboard/app.js:480`) | same. |
-| Panel enhancement and id assignment | `enhance` (`dashboard/app.js:517`), `panelId` (`dashboard/app.js:526`) | **dropped.** They exist to mount plugin panels, and question 2 retires plugin panels. |
+| Per-table filter | `addFilter` (`dashboard/app.js:463`) | **dropped, measured rather than assumed.** The system page already filters its listings: the field is `[data-listing-filter]` (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/static/dashboard.js:385`) and `/` is bound to focus it (`:189`). |
+| Per-table sort | `addSort` (`dashboard/app.js:480`) | **dropped, and it costs nothing, because no shipped table asks for it.** `PAGE` declares `data-sd-search` on exactly one table (`dashboard/server.py:356`) and `data-sd-sort` on none; the only `data-sd-sort` in the repository is a fixture at `tests/test_dashboard_markup.py:80`. The system side refuses a client sort on purpose and says why (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/screens.py:135`): `sd today` and the page must list the same ids in the same order. |
+| Panel enhancement | `enhance` (`dashboard/app.js:517`) | **not dropped, and not step 3's.** It is the dispatcher for the two rows above and it runs for every *static* panel at startup — `for (const [, panel] of STATIC) enhance(...)` (`dashboard/app.js:426`), seven panels, none of them a plugin. Deleting it in step 3 is a `ReferenceError` on page load. It dies with `app.js` at step 6. |
+| Plugin panel id assignment | `panelId` (`dashboard/app.js:526`) | **dropped at step 3.** This one *is* plugin-only: its single caller is `drawPlugins` (`dashboard/app.js:690`), which goes in the same commit. |
 | Tracker key for a null-number row | `where` (`dashboard/app.js:115`) | **specification, not code.** sd:361 step 7b changes this one expression so a Jira row shows `LOG-23818` rather than `LOG`. The system page needs the same rule when it takes the tracker views over. |
 
 **The `where` row is also an ordering decision.** sd:361 step 7b edits a file this
@@ -219,11 +228,22 @@ Three tests interlock, and a change that moves one without the others is red:
    comes down — at which point the paragraph in R11-D41 that reasons from *not
    one downward move* needs rewriting, which is what a failure here is for."
 
-So the cap step is: lower both ceilings; append both values; rewrite the
-`downward == 0` assertion into one that permits a recorded fall and names which
-ceiling fell and why; and rewrite the module docstring paragraph that reasons
-from there being none, at `tests/test_loc_caps.py:33-46`. That is a new R-id, not
-a patch, and it is the first time this repository has argued a ceiling downward.
+So the cap step is: rewrite the `downward == 0` assertion
+(`tests/test_loc_caps.py:590`) into one that permits a recorded fall and names
+which ceiling fell and why; rewrite the *second* assertion in the same test
+(`tests/test_loc_caps.py:598`), which asserts `upward == values -
+len(CEILING_HISTORY)` and is arithmetically false the moment one move is not a
+raise; and rewrite the module docstring paragraph that reasons from there being
+none, at `tests/test_loc_caps.py:33-46`. That is a new R-id, not a patch, and it
+is the first time this repository has argued a ceiling downward.
+
+**One ceiling moves, not both.** `DASHBOARD_CODE_CAP` comes down in each pack
+commit that deletes code, one appended value each time. `DASHBOARD_CAP` covers the
+whole directory including its prose, stands at 4,600 over a directory that only
+shrinks from here, and is therefore never crossed on the way down — it moves once,
+to nothing, when it retires at step 7. That is why the figure the implementation
+verifies is `(30, 26, 1)` and not `(31, 26, 2)`: one value appended to one
+history, not one to each.
 
 ### And the last deletion reddens both dashboard cap tests
 
@@ -272,7 +292,7 @@ PID 37095.**
 | 0 | sd:361 to completion | both | Given. Step 3 has landed as `b05d684a`; steps 4 to 9 have not. The tracker views cannot leave the pack before the shared store can hold both trackers. |
 | 1 | `serve` and `install` are removed from `bin/sd-dashboard`; `index` stays | pack | The only step that makes the machine **safer**. It closes sd:705's destructive half and answers its port and label questions by deletion. Nothing under `dashboard/` is deleted, so no ceiling moves. |
 | 2 | `queues` becomes a native system view | system | The one view with no system-side path. After it, the pack's loader renders nothing that is not also reachable on :8767. |
-| 3 | `dashboard/plugins.py`, `markup.py` and the plugin half of `app.js` go; `sd-plugin.json`'s `tabs` and `tile` keys retire | pack, then system | Two commits, the system side first. |
+| 3 | `sd-plugin.json`'s `tabs` and `tile` keys retire; then `dashboard/plugins.py`, `markup.py` and the plugin half of `app.js` go | system, then pack | Two commits, the system side first, like every other step here. The manifest keys are the system half: they advertise a discovery contract to the registry, so they must stop advertising it *before* the loader that honours them is deleted, not after. |
 | 4 | PRs and Issues are served from `sd_db.shadow`; `index`, `store.py`, `github.py`, `jira.py`, `collect.py` retire | system, then pack | The legacy `index.sqlite` retirement. GitHub rows are already in `sd_db` — 3,668 of them as of sd:361's measurement — so this needs no new store work beyond step 0. |
 | 5 | Repos and Sessions | system, then pack | Cheapest of the ports and deliberately not first: these collectors open no database at all, so criterion 2 is not in play. `collect.py`'s docstring is the authority — "Nothing here is stored as an input to anything." |
 | 6 | The Now ranking | system, then pack | **Last, and it must be last.** Now is the merge of every source above and cannot be correct until each one is in place. It is also where question 2's lost alert row belongs. |
