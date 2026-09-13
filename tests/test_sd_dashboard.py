@@ -649,6 +649,30 @@ class InstallTests(FleetHarness):
                 self.assertEqual(self.said, [])
                 self.assertIn("--force", output)
 
+    def test_force_over_a_symlink_replaces_it_rather_than_writing_through(self):
+        """`--force` means overwrite this plist, not write past it.
+
+        `write_text` follows a link, so forcing over one left `PLIST` a
+        symlink and put the body at the target -- the operator's own override
+        placing the file at a path they did not name, and `launchctl` then
+        handed a link out of `~/Library/LaunchAgents`. The refusal path never
+        reached this, because the guard turns a symlink away; only `--force`
+        gets here, which is exactly why it needed its own test.
+        """
+        self.plist.parent.mkdir(parents=True, exist_ok=True)
+        target = self.root / "elsewhere.plist"
+        self.plist.symlink_to(target)
+
+        code, output = self.run_install("--force")
+
+        self.assertEqual(code, 0)
+        self.assertFalse(self.plist.is_symlink())
+        self.assertFalse(target.exists())
+        args = plistlib.loads(self.plist.read_bytes())["ProgramArguments"]
+        self.assertEqual(args[0], str(REPO_ROOT / "bin" / "sd-dashboard"))
+        self.assertEqual([argv[0] for argv in self.said], ["bootout", "bootstrap"])
+        self.assertIn("wrote", output)
+
     def test_a_symlink_counts_as_foreign_even_when_it_dangles(self):
         """`Path.exists()` follows the link, and that is the hole.
 

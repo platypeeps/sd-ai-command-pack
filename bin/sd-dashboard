@@ -238,6 +238,15 @@ def cmd_install(args: argparse.Namespace, out) -> int:
         bind=server.TAILNET_BIND,
     )
     PLIST.parent.mkdir(parents=True, exist_ok=True)
+    # Unlink first, so the write cannot follow a link somewhere else. Only
+    # `--force` reaches here with anything to unlink -- the guard refuses a
+    # symlink otherwise -- and `--force` means "overwrite this plist", not
+    # "write the body wherever this points and leave the link". Measured
+    # without it: the body landed at the target and `PLIST` stayed a symlink,
+    # so the operator's own override put the file somewhere they did not name.
+    # `unlink` removes the link itself rather than resolving it, which is the
+    # whole reason it is a separate call and not a mode on `write_text`.
+    PLIST.unlink(missing_ok=True)
     PLIST.write_text(body, encoding="utf-8")
     launchctl("bootout", f"{domain}/{LABEL}")
     code, said = launchctl("bootstrap", domain, str(PLIST))
