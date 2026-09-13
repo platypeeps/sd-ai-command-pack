@@ -3271,9 +3271,15 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
         write(f"    remove: {entry['remove']}\n")
 
 
+#: Display order only; `sd_lib.display_fields` takes membership from the row,
+#: so a key named here that the library did not project costs nothing and a key
+#: it projects that is not named here still prints, after these, sorted. The
+#: issue and draft keys are named so an issue row reads as one row rather than
+#: as a pull request with five stray keys in its alphabetical tail.
 CONTRIBUTION_ORDER = (
-    "key", "item_id", "url", "local_status", "external_state", "reasons", "observed_at",
-    "freshness", "blocked_on", "depends_on", "local_clone", "local_branch", "tested_commit",
+    "key", "item_id", "url", "issue_url", "local_status", "external_state", "reasons",
+    "observed_at", "freshness", "blocked_on", "depends_on", "local_clone", "local_branch",
+    "tested_commit", "target_repo", "draft_title", "draft_path", "draft_verified",
     "evidence", "evidence_verified", "notification_state", "attention_sources",
 )
 

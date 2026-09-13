@@ -45,8 +45,11 @@ opens with fourteen top-level lines; the thirteen below are the sections.
 | `legacy residue` | legacy leftovers, each with the exact command that removes it |
 
 The contribution section filters the shared projection by the current checkout path and its GitHub repository name.
-Its order is newly unblocked, awaiting you, awaiting them, then merged.
+Its order is newly unblocked, awaiting you, awaiting them, merged, then closed.
+`closed` is terminal and belongs to an upstream issue; a pull request closed without merging stays in awaiting them.
 The dashboard uses the same projection and order across repositories.
+A row is a pull request, an upstream issue, or local work that is neither filed yet.
+An issue row carries `issue_url`; an issue you have written up but not filed carries `target_repo`, `draft_title`, `draft_path` and `draft_verified` instead, and filing it keeps the item ID.
 Read event IDs and their revision with `sd task contribution show KEY --json`.
 Use `sd task contribution ack KEY --event EVENT --if-revision REVISION` to acknowledge an event explicitly.
 Acknowledgement records attention separately from notification delivery and local task completion.

@@ -522,9 +522,14 @@ def _contribution_changes(path: str) -> dict[str, Any]:
         raise WorkRefusal(f"contribution input refused: {error}") from error
 
 
+#: Display order only; membership comes from the row through
+#: `sd_lib.display_fields`. The issue identity sits beside `url` and the three
+#: draft keys beside the unfiled-branch keys they are the issue analogue of,
+#: so an unfiled issue draft reads next to the unfiled branch work it resembles.
 CONTRIBUTION_ORDER = (
-    "url", "local_clone", "local_branch", "tested_commit", "blocked_on", "depends_on",
-    "evidence", "reasons", "event_ids", "attention_sources",
+    "url", "issue_url", "local_clone", "local_branch", "tested_commit",
+    "target_repo", "draft_title", "draft_path", "draft_verified",
+    "blocked_on", "depends_on", "evidence", "reasons", "event_ids", "attention_sources",
 )
 
 #: Printed by the trailer below for a `show` result, so the loop must not
@@ -608,6 +613,18 @@ def run_contribution(args: argparse.Namespace) -> int:
             connection.close()
 
 
+#: The three key forms, recited because the parser is built before the library
+#: is known to be installed -- `sd --help` answers in guest mode, so this string
+#: cannot be derived from `sd_db.contributions._key`, which is its authority and
+#: which refuses anything else with the same three names. Recited and not
+#: derived is a cost, named here rather than hidden: if the library grows a
+#: fourth form, this string is the place that will not know.
+CONTRIBUTION_KEY_HELP = (
+    "item:ID, github:https://github.com/OWNER/REPO/pull/NUMBER, "
+    "or issue:https://github.com/OWNER/REPO/issues/NUMBER"
+)
+
+
 def _register_contributions(verbs: Any) -> None:
     group = verbs.add_parser("contribution", help="track local work and upstream contribution attention")
     actions = group.add_subparsers(dest="verb", required=True)
@@ -623,7 +640,7 @@ def _register_contributions(verbs: Any) -> None:
                 parser.add_argument("item", type=int)
                 parser.add_argument("--if-revision", help="item revision from sd store item")
         if action in {"show", "ack"}:
-            parser.add_argument("key", help="item:ID or github:https://github.com/OWNER/REPO/pull/NUMBER")
+            parser.add_argument("key", help=CONTRIBUTION_KEY_HELP)
         if action == "ack":
             parser.add_argument("--event", action="append", required=True, help="observed event ID; repeat as needed")
             parser.add_argument("--if-revision", required=True, help="checkpoint revision from contribution show")
