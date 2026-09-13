@@ -25,7 +25,6 @@ from __future__ import annotations
 import argparse
 import json
 import pathlib
-import re
 import shutil
 import subprocess  # nosec B404 - fixed argv gh/git reads, never a shell
 import sys
@@ -64,18 +63,6 @@ PR_FIELDS = (
     # never became an inline comment at all. Same call, no extra round trip.
     "reviews",
 )
-
-#: How an automated reviewer says a finding exists that it did not leave as an
-#: inline comment. `copilot-pull-request-reviewer` writes its real findings
-#: under this heading in the review *body*, so a reader counting inline
-#: comments sees zero and concludes the review was clean.
-#:
-#: Measured over the twelve pack PRs merged on 2026-09-12 (851, 852, 856-865):
-#: 9 inline comments and 12 findings stated only in a review body, with #859
-#: and #861 carrying four of those between them while showing no inline
-#: comment at all. Thirteen comments went unread in that round; the count that
-#: would have shown something was wrong was never printed anywhere.
-SUPPRESSED_RE = re.compile(r"Suppressed comments \((\d+)\)")
 
 #: Check outcomes collapsed into the buckets a human acts on. Anything
 #: unrecognised lands in `other` rather than being silently counted as green.
@@ -283,13 +270,29 @@ def review_findings(reviews: Any) -> dict[str, Any]:
     for review in rows:
         if not isinstance(review, dict):
             continue
-        found = sum(int(count) for count in SUPPRESSED_RE.findall(review.get("body") or ""))
+        found = len(_body_findings(review.get("body") or ""))
         if found:
             stated += found
             login = (review.get("author") or {}).get("login")
             if isinstance(login, str) and login not in authors:
                 authors.append(login)
     return {"reviews": len(rows), "in_body": stated, "reviewers": authors}
+
+
+def _body_findings(body: str) -> list:
+    """Every finding this review body states, from `sd-review-ack`'s reader.
+
+    Counted here and acknowledged there, from one parser. The count used to be
+    `SUPPRESSED_RE` alone, which reads one of the three shapes a reviewer
+    actually uses: #880 stated three real findings in cells of its file-summary
+    table and this line printed nothing at all. A second opinion about what a
+    finding is would drift the first time either side learned a fourth shape.
+
+    Imported at call time rather than at module load, so the cheap path -- a
+    pull request with no review body worth reading -- costs no import.
+    """
+    module = sd_lib.sibling("sd_review_ack", "sd-review-ack")
+    return module.findings(0, [{"body": body}], [])
 
 
 def describe(pull: dict[str, Any], root: pathlib.Path, slug: str) -> dict[str, Any]:
