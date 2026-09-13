@@ -72,22 +72,44 @@ jobs:
       # this suite's library underneath it. It moves when this pack starts
       # using something the old pin does not carry, and only then: the suite
       # fails on a skip, so a capability the library lacks is a red run here
-      # rather than a quietly unexercised test. It last moved for the issue
-      # collector sd:360 step 6 reads -- #306 reads an issue and its timeline,
-      # #307 lets a contribution row hold one, #308 watches it -- none of which
-      # `940c045a` carries. The move before that was for `Synced.queued` and
-      # `Synced.incomplete`, which `sd shadow sync` forwards and `3c4c723a`
-      # predates: a test constructing `Synced(queued=3)` passes on every local
-      # venv and can only fail here, which is the asymmetry this pin creates
-      # whenever it lags what the pack has started using.
+      # rather than a quietly unexercised test. It last moved for the heartbeat
+      # sd:739 (`ac7afd0`) gave a quiet cron tick. A clean tick now records a
+      # `state` heartbeat and files no report item, so `reports ingest` returns
+      # `recorded` and no `item`; `tests/test_sd_controls.py` asserts that
+      # shape (sd:748), and `758dfb48` predates it. That is this asymmetry
+      # running the other way: the old test expected a report item from a
+      # clean tick, so it was green here and red on every local venv, and the
+      # corrected test was red here and green locally. The move before that
+      # was for the issue collector sd:360 step 6 reads -- #306 reads an issue
+      # and its timeline, #307 lets a contribution row hold one, #308 watches
+      # it -- none of which `940c045a` carries. Before that it was
+      # `Synced.queued` and `Synced.incomplete`, which `sd shadow sync`
+      # forwards and `3c4c723a` predates: a test constructing
+      # `Synced(queued=3)` passes on every local venv and can only fail here,
+      # which is the asymmetry this pin creates whenever it lags what the pack
+      # has started using.
       #
-      # `758dfb4` carries no migration: `SCHEMA_VERSION` is 8 at both the old
-      # pin and the new one, so this move says nothing about any database.
+      # `fb57ae56` is not migration-free, unlike the previous move.
+      # `009_personal_and_followup_kinds.sql` (sd:730, `6af3a4b`) moves
+      # `SCHEMA_VERSION` from 8 to 9 and adds `personal`, `followup` and the
+      # two idea kinds to `item.kind` (with matching `reads` and `runner`
+      # changes), so a database this library opens has to be at 9. The pack
+      # already depends on 009: `sd task add --kind personal|followup|work-idea|
+      # personal-idea` (sd:730) fails `758dfb48`'s `item.kind` CHECK, so
+      # `tests/test_sd_work.py`'s two kind tests were red at the old pin as
+      # well. Of the other nine commits in `758dfb48..fb57ae56`, the ones that
+      # could reach a pack test: `reporting.acknowledge` no longer has a default
+      # `who` (sd:747, `fd8281b`; `bin/sd_controls.py` already passes one), a
+      # clean run report
+      # is no longer counted as backlog in `reads` (sd:708, `1263e46`), the
+      # nightly backup checks that rows point at rows that exist (sd:744,
+      # `84cb4ea`), and `sd_db.shadow_jira` is new (`b05d684`). The rest are
+      # dashboard and documentation commits that do not touch `sd_db`.
       - name: Check out the system checkout, for sd_db
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          ref: 758dfb480e1b785a7f22644824f2d710a213cafe
+          ref: fb57ae5620e4bf3f75207e04817837d433f0111a
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false

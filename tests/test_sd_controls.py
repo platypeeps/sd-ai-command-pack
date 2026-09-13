@@ -63,43 +63,90 @@ class Controls(unittest.TestCase):
         self.assertEqual(refused.returncode, 1)
         self.assertNotIn("Traceback", refused.stderr)
 
-    def test_report_ingestion_is_replayable_and_acknowledged(self):
-        log = self.home / "report.log"
-        log.write_text("A completed observation.\n")
-        args = (
+    def ingest(self, run_id, exit_code, text):
+        log = self.home / f"{run_id}.log"
+        log.write_text(text)
+        return (
             "reports",
             "ingest",
             "fixture",
             "--run-id",
-            "one",
+            run_id,
             "--started",
             "2026-09-08T00:00:00Z",
             "--ended",
             "2026-09-08T00:01:00Z",
             "--exit-code",
-            "0",
+            str(exit_code),
             "--log",
             str(log),
             "--json",
         )
-        first = self.cli(*args)
+
+    def reports(self):
+        listed = self.cli("reports", "list", "--json")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        return json.loads(listed.stdout)
+
+    def test_report_ingestion_is_replayable_and_acknowledged(self):
+        # A clean tick is not an event: the library records a heartbeat and
+        # files no report (system sd:739), and replaying the same run records
+        # nothing more.
+        quiet = self.ingest("quiet", 0, "A completed observation.\n")
+        clean = self.cli(*quiet)
+        self.assertEqual(clean.returncode, 0, clean.stderr)
+        beat = json.loads(clean.stdout)
+        self.assertEqual(beat["recorded"], "heartbeat")
+        self.assertNotIn("item", beat)
+        replay = self.cli(*quiet)
+        self.assertEqual(replay.returncode, 0, replay.stderr)
+        replayed = json.loads(replay.stdout)
+        self.assertEqual(replayed["recorded"], "nothing")
+        self.assertNotIn("item", replayed)
+        self.assertEqual(self.reports(), [])
+
+        # A tick with findings is the one that files a report, so it is the one
+        # the acknowledge verb has to be proved against.
+        findings = self.ingest(
+            "findings", 0, "Observed drift.\nSD_REPORT_ATTENTION: two stale rows\n"
+        )
+        first = self.cli(*findings)
         self.assertEqual(first.returncode, 0, first.stderr)
         state = json.loads(first.stdout)
-        again = json.loads(self.cli(*args).stdout)
+        self.assertEqual(state["recorded"], "report")
+        self.assertEqual(state["item"]["kind"], "report")
+        self.assertIs(json.loads(state["item"]["fields"])["attention"], True)
+        replay = self.cli(*findings)
+        self.assertEqual(replay.returncode, 0, replay.stderr)
+        again = json.loads(replay.stdout)
         self.assertEqual(state["item"]["id"], again["item"]["id"])
+        report = str(state["item"]["id"])
+
+        # Its followup is open, so acknowledging it now is refused and changes
+        # nothing.
+        refused = self.cli(
+            "reports", "acknowledge", report, "--if-revision", state["revision"], "--json"
+        )
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("resolve the report's followups", refused.stderr)
+        self.assertNotIn("Traceback", refused.stderr)
+        [followup] = [note for note in state["notes"] if note["kind"] == "followup"]
+        resolved = self.cli(
+            "task", "resolve", str(followup["id"]), "--if-revision", state["revision"], "--json"
+        )
+        self.assertEqual(resolved.returncode, 0, resolved.stderr)
+
         result = self.cli(
             "reports",
             "acknowledge",
-            str(state["item"]["id"]),
+            report,
             "--if-revision",
-            state["revision"],
+            json.loads(resolved.stdout)["revision"],
             "--json",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["item"]["status"], "done")
-        self.assertEqual(
-            len(json.loads(self.cli("reports", "list", "--json").stdout)), 1
-        )
+        self.assertEqual([row["id"] for row in self.reports()], [state["item"]["id"]])
 
 
 if __name__ == "__main__":
