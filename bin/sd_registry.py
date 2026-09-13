@@ -167,6 +167,8 @@ def shipped_path(checkout: Path | str) -> Path:
 def library():
     """`sd_db.registry`, or `None` when the library is not installed here."""
     try:
+        import sd_lib  # noqa: PLC0415 - its helper also tries the provisioned copy (sd:746)
+        sd_lib.import_sd_db()  # a `None` module leaves the import below to fail, as before
         from sd_db import registry as module  # noqa: PLC0415 - optional at runtime
     except ImportError:
         return None
@@ -234,6 +236,8 @@ def read_or_report(
 def read_runtime(target: Path, *, home: Path | str | None = None, database_path: Path | str | None = None) -> Registry:
     """Read provider state without writing; a missing database uses the file."""
     try:
+        import sd_lib  # noqa: PLC0415 - so "unavailable" below means both tries failed (sd:746)
+        sd_lib.import_sd_db()
         from sd_db import database  # noqa: PLC0415 - optional at runtime
         from sd_db.errors import SdDbError  # noqa: PLC0415
     except ImportError:

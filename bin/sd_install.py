@@ -1318,11 +1318,16 @@ def open_library(ctx: Context):
     provisions `sd_db`, so it has to run on a machine where the import fails,
     and a top-level import would make the installer unable to fix the problem
     it exists to fix.
+
+    Through `sd_lib.import_sd_db`, loaded as a sibling like every other
+    `sd_lib` read here, so the render under a PATH `python3` still finds the
+    provisioned copy (sd:746). Its sentence says which of the two faults it
+    was: nothing to import, or a provisioned copy that would not.
     """
-    try:
-        import sd_db  # noqa: PLC0415 - see the docstring
-    except ImportError as problem:
-        return None, f"sd_db not importable ({problem}); trials unavailable"
+    imported = sibling("sd_lib").import_sd_db()
+    if imported.module is None:
+        return None, f"{imported.problem}; trials unavailable"
+    sd_db = imported.module
     path = sd_db.default_path(ctx.home)
     if not path.exists():
         return None, f"no database at {path}; run `sd-db.sh init` for trials"

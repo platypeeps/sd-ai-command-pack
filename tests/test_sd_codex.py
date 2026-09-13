@@ -20,6 +20,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -409,6 +411,32 @@ class TheVerbEndToEnd(CodexCase):
         code, output = self.scan_cli()
         self.assertEqual(code, 0, output)
         self.assertIn("0 row(s) written", output)
+
+
+class TheRefusalNamesTheFault(unittest.TestCase):
+    """sd:746. `_library` asks `sd_lib.import_sd_db`, and picks a sentence per fault.
+
+    The helper is replaced with its two failure answers rather than driven
+    against a real `.venv`: what is under test here is only which sentence
+    `sd_codex` chooses, and the helper's own tries are tested where it lives.
+    """
+
+    def refusal(self, problem: str, provisioned: str) -> str:
+        answer = SimpleNamespace(module=None, problem=problem, provisioned=provisioned)
+        helper = SimpleNamespace(import_sd_db=lambda: answer)
+        with mock.patch.dict(sys.modules, {"sd_lib": helper}):
+            with self.assertRaises(sd_codex.CodexRefusal) as raised:
+                sd_codex._library()
+        return str(raised.exception)
+
+    def test_nothing_to_import_gets_the_installer(self):
+        said = self.refusal("sd_db is not installed here: No module named 'sd_db'", "")
+        self.assertEqual(said, sd_codex.NOT_INSTALLED, "said once, not NOT_INSTALLED plus the helper's echo")
+
+    def test_a_provisioned_copy_that_will_not_import_is_not_called_absent(self):
+        said = self.refusal("sd_db is provisioned at /pack/site but will not import: broken", "/pack/site")
+        self.assertIn("will not import: broken", said)
+        self.assertNotIn("sd-install", said)
 
 
 if __name__ == "__main__":

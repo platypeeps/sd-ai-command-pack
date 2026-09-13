@@ -178,12 +178,18 @@ def library():
 
     The `return None` form and not `bin/sd_restore.py:54-67`'s, which raises a
     refusal carrying remedy prose. A hook has nobody to say it to.
+
+    Through `sd_lib.import_sd_db` (sd:746): the hook runs under the PATH
+    `python3`, which never carries `sd_db`, so a single try recorded nothing
+    on any machine. Anything short of a module -- no sibling, no library, a
+    copy that will not import -- is still `None`, silently.
     """
     try:
-        import sd_db  # noqa: PLC0415 - deferred: absent is a state, not a fault
-    except ImportError:
+        import sd_lib  # noqa: PLC0415 - deferred: absent is a state, not a fault
+
+        return sd_lib.import_sd_db().module
+    except Exception:  # noqa: BLE001 - a hook never breaks a tool call
         return None
-    return sd_db
 
 
 def run(stdin_text: str, environ: dict[str, str]) -> int:
