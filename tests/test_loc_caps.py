@@ -811,8 +811,8 @@ class DeletedArchitectureResidue(unittest.TestCase):
     it absent, so this asserts the criterion rather than restating a judgement.
 
     The criterion's other two paths, `tests/test_selector_contract_drift.py`
-    and `plugins/sd`, are sd:10's to remove and are still present. They are
-    deliberately NOT recited here: a list naming paths this file does not
+    and `plugins/sd`, have since been removed too. They are still
+    deliberately NOT asserted here: a list naming paths this file does not
     enforce is the same unread recitation sd:601 is about.
     """
 

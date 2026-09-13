@@ -293,7 +293,7 @@ Reference files:
 
 - `.github/scripts/generate-plugin.py` [absent: removed with the release train in 0.72.0]
 - `.claude-plugin/marketplace.json`
-- `plugins/sd/.claude-plugin/plugin.json`
+- `plugins/sd/.claude-plugin/plugin.json` [absent: the last file under `plugins/sd/` and read by nothing; removed as sd:10 criterion 17 residue]
 - `tests/test_generate_plugin.py` [absent: removed with the release train in 0.72.0]
 
 ### Script Sibling Resolution
