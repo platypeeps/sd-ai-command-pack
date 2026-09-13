@@ -288,7 +288,7 @@ since R11-D48. The pack half is on the order of forty lines in
       row has a URL, and `issue.repo || issue.tracker` only when it does
       not; the comment above it, which says the identity is in the URL
       tail, is already the rationale. The page stays an open worklist
-      (`dashboard/server.py:638`); nothing else in `dashboard/` changes.
+      (`dashboard/server.py:657`); nothing else in `dashboard/` changes.
       Verify: a test in `tests/test_dashboard_now.py`, source-reading like
       that file's `fillIssues` cases, asserts the null-number branch of
       `where` derives from `issue.url` and not from `issue.repo` first; and

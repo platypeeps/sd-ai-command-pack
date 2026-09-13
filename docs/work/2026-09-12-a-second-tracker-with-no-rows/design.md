@@ -170,7 +170,7 @@ differently, and the difference is deliberate:
 |---|---|---|
 | `sd shadow sync` | `shadow sync[jira]: not collected (JIRA_BASE_URL and JIRA_EMAIL not set)` | 0, even with `--strict` |
 | `sd-status`, `jira` section | `never collected (JIRA_BASE_URL and JIRA_EMAIL not set)`, then the stored rows if any | unchanged |
-| `sd-dashboard index` | `issues[jira]: not collected (JIRA_BASE_URL and JIRA_EMAIL not set)` | 0 — already today, `bin/sd-dashboard:220-221` |
+| `sd-dashboard index` | `issues[jira]: not collected (JIRA_BASE_URL and JIRA_EMAIL not set)` | 0 — already today, `bin/sd-dashboard:239-240` |
 
 The verb's line is the new one. Its wording matches the dashboard's because
 `issue_lines` (`bin/sd-dashboard:219`) settled it: "a tracker that cannot be
