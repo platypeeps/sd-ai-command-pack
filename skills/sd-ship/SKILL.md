@@ -107,7 +107,13 @@ A change with no work item needs no PRD or database row to ship.
    its own head did not move.
 7. **Merge**: `gh pr merge --squash --match-head-commit <the reviewed sha>
    -t "<title> (#N)" -b "<body>"`. The explicit `-t`/`-b` is the wip-eraser:
-   `wip:` subjects must never reach main.
+   `wip:` subjects must never reach main. `-b` is also what keeps the
+   trailers readable: when GitHub composes the squash body itself for a pull
+   request of two or more commits, it puts a `---------` line between the
+   body and the `Co-authored-by:` lines it appends, and that line demotes
+   every trailer above it (measured on #894, 60968d75). A body supplied at
+   merge is taken verbatim (#892, a51bb920), so write the trailer block as
+   its last paragraph.
    GitHub CLI's --match-head-commit option refuses a head that moved after review.
    A merge with only a title and body cannot check that condition.
    Never use GitHub CLI's --delete-branch option: it deletes both local and remote branches.
