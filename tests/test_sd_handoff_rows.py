@@ -18,6 +18,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -205,6 +206,79 @@ class TheRenderedShape(RowCase):
         item = self.item()
         note = self.followup(item, "close me")
         self.assertIn(f"- [{note}] close me", self.read())
+
+
+class TheRefusalNamesTheFault(unittest.TestCase):
+    """Two ways `sd_db` can be unreachable, and two things to tell the reader.
+
+    `bin/sd-note` and `bin/sd` print a `RowsRefusal` verbatim to a human, so
+    the sentence this module chooses is the whole of what that person gets.
+    `NOT_INSTALLED` is right for one of the two faults and misleading for the
+    other: a virtualenv holding an `sd_db` that raises on import is not a
+    machine without the library, and telling its owner to run the installer
+    sends them to provision a package already sitting there while discarding
+    the error that says what is wrong with it.
+
+    Run out of process against a built pack, for the reason
+    `tests/test_status_source.py` gives: the run that reaches this test
+    necessarily has a working `sd_db`, and `-S` with a copied tree is the only
+    honest way to describe a machine that does not. Binding the name to `None`
+    in `sys.modules` cannot express it -- that defeats the retry as well as
+    the first try, and the retry is the thing under test.
+    """
+
+    def refusal(self, provisioned: str | None) -> str:
+        """`library()`'s sentence on a pack whose provisioned copy is `provisioned`.
+
+        `None` builds the virtualenv and leaves it empty, which is the machine
+        before `make setup`. A string is written as the copy's `__init__.py`.
+        """
+        directory = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, directory, True)
+        pack = Path(directory) / "pack"
+        (pack / "bin").mkdir(parents=True)
+        for name in ("sd_lib.py", "sd_handoff_rows.py"):
+            (pack / "bin" / name).write_bytes((REPO_ROOT / "bin" / name).read_bytes())
+        version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+        site = pack / ".venv" / "lib" / version / "site-packages"
+        site.mkdir(parents=True)
+        if provisioned is not None:
+            (site / "sd_db").mkdir()
+            (site / "sd_db" / "__init__.py").write_text(provisioned, encoding="utf-8")
+        script = (
+            "import sd_handoff_rows as rows\n"
+            "try:\n"
+            "    rows.library()\n"
+            "except rows.RowsRefusal as refusal:\n"
+            "    print(refusal)\n"
+            "else:\n"
+            "    print('no refusal at all')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-S", "-c", script], capture_output=True, text=True,
+            env={**os.environ, "PYTHONPATH": str(pack / "bin")},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_a_provisioned_copy_that_will_not_import_is_not_called_absent(self):
+        """The error is the only thing that can be acted on, and it was dropped."""
+        said = self.refusal("raise ImportError('the provisioned copy is broken')")
+        self.assertIn("the provisioned copy is broken", said)
+        self.assertIn("will not import", said)
+        self.assertNotIn("is not installed in this virtualenv", said)
+        self.assertNotIn("sd-install", said)
+
+    def test_a_library_absent_everywhere_still_gets_the_installer(self):
+        """The other half, and the reason the fix is a choice and not a swap.
+
+        Nothing provisioned means nothing to inspect, and the remedy really is
+        to install. Pinned so that naming the second fault does not quietly
+        take the first fault's answer away with it.
+        """
+        said = self.refusal(None)
+        self.assertIn("sd-install", said)
+        self.assertNotIn("will not import", said)
 
 
 class TheHookStaysSilent(unittest.TestCase):

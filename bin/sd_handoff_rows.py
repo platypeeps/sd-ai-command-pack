@@ -42,10 +42,13 @@ module raises and lets each caller decide.
 from __future__ import annotations
 
 import pathlib
-import sys
 
-#: Why the reader cannot run yet, when it cannot. Printed by `bin/sd-note`;
-#: swallowed by the hooks, which exit 0 silently rather than break a session.
+#: Why the reader cannot run yet on a machine that has no library at all.
+#: Printed by `bin/sd-note`; swallowed by the hooks, which exit 0 silently
+#: rather than break a session. Not the only reason the reader cannot run:
+#: `library` below picks this sentence for one of the two faults and
+#: `sd_lib`'s own for the other, which is a provisioned copy that will not
+#: import and wants its error rather than an installer it already ran.
 NOT_INSTALLED = (
     "sd_db is not installed in this virtualenv. Followups are rows; install "
     "the library with the pack's installer (`sd-install`), which provisions "
@@ -69,25 +72,29 @@ class RowsRefusal(Exception):
 
 def library():
     """Import `sd_db`, or refuse with the remedy rather than a traceback."""
-    try:
-        # May or may not be resolvable at type-check time: `sd_db` is built
-        # into this virtualenv by the pack's installer, from the `system`
-        # checkout, and this repository does not vendor it. `pyproject.toml`
-        # carries the override rather than an inline ignore here, which
-        # `warn_unused_ignores` turns into a failure on any machine that has
-        # run `make setup`. The ImportError below is a supported state.
-        import sd_db
-    except ImportError:
-        import sd_lib
+    # May or may not be resolvable at type-check time: `sd_db` is built into
+    # this virtualenv by the pack's installer, from the `system` checkout, and
+    # this repository does not vendor it. `pyproject.toml` carries the
+    # override rather than an inline ignore here, which `warn_unused_ignores`
+    # turns into a failure on any machine that has run `make setup`. An absent
+    # library is a supported state, and the helper's two tries are what makes
+    # the ordinary machine -- the pack's `sd_db`, the PATH `python3` -- the
+    # present one.
+    import sd_lib
 
-        for path in sd_lib._provisioned_library_paths():
-            if path not in sys.path:
-                sys.path.append(path)
-        try:
-            import sd_db
-        except ImportError:
-            raise RowsRefusal(NOT_INSTALLED) from None
-    return sd_db
+    imported = sd_lib.import_sd_db()
+    if imported.module is None:
+        # Two faults, two remedies, and this is the caller that used to hand
+        # both readers the same one. `NOT_INSTALLED` says the library is
+        # absent and to run the installer; over a provisioned copy that
+        # raised on import that is false in its first clause and useless in
+        # its second, and it swallows the only thing that would let anybody
+        # fix it -- what the copy actually raised. The helper's own sentence
+        # names the copy and quotes the error, so for that fault it *is* the
+        # refusal. `bin/sd-note` and `bin/sd` print whichever one arrives
+        # verbatim, which is why the choice has to be made here.
+        raise RowsRefusal(imported.problem if imported.provisioned else NOT_INSTALLED) from None
+    return imported.module
 
 
 def connect(sd_db, *, write: bool = False):

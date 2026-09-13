@@ -17,7 +17,7 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field, replace
-from typing import Any, Callable
+from typing import Any, Callable, NamedTuple
 
 LOCAL_FILE_NAME = "CLAUDE.local.md"
 LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
@@ -536,6 +536,100 @@ def _provisioned_library_paths() -> list[str]:
     return [path for _, path in sorted(found, reverse=True)]
 
 
+class Imported(NamedTuple):
+    """What one entrypoint's attempt to reach `sd_db` came to.
+
+    Three fields because "did it work" is not the whole question. `problem`
+    is the sentence to show; `provisioned` says which of the two faults
+    produced it -- a path when the pack's own copy was there and would not
+    import, empty when there was no copy to try. A caller with a canned
+    remedy of its own needs that distinction, and the alternative is matching
+    on the wording of the sentences below, which is a coupling that breaks
+    the first time somebody rewords one. Both are meaningful only when
+    `module` is `None`.
+    """
+
+    module: Any
+    problem: str
+    provisioned: str
+
+
+def import_sd_db() -> Imported:
+    """`sd_db` for an entrypoint running under whatever `python3` is on PATH.
+
+    The one place the two tries live. `_provisioned_library_paths` above says
+    why there has to be a second try; this says why every caller has to make
+    it. No `python3` on a developer's PATH carries `sd_db` -- the pack
+    provisions it into its own virtualenv and every entrypoint starts
+    `#!/usr/bin/env python3` -- so an entrypoint that tries once and gives up
+    is not degraded on an unusual machine, it is broken on all of them. That
+    is sd:745: `bin/sd-ship` refused every verb with "install matching
+    sd_db" while `bin/sd`, which had this fallback, answered fine, and the
+    only difference between the two was a copy of these six lines.
+
+    Returns the module, or `None` and the problem, so each caller still
+    decides for itself whether an absent library is a refusal, a fall back to
+    the revision history, or a field on a report. The two problem sentences
+    stay apart for the reason the retry below states: a provisioned copy that
+    will not import is not a machine without the library, and one message over
+    both sends half its readers to the wrong remedy.
+    """
+    try:
+        import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
+    except ImportError as error:
+        offered = _provisioned_library_paths()
+        # Prepended, and that is the difference between the provisioned copy
+        # answering and an incompatible one keeping the answer. The retry
+        # only runs because the first try failed, and it can fail two ways:
+        # nothing on `sys.path` held an `sd_db`, or something earlier on it
+        # held one that raised. Appended, the pack's copy sits behind that
+        # second one, the finder walks the path in order and reaches the same
+        # incompatible package again, and the sentence below then names the
+        # provisioned path as the thing that would not import -- about a copy
+        # that was never tried. At the front, the copy `make setup` chose is
+        # the copy this run gets, and any error reported is that copy's own.
+        #
+        # No deliberate `PYTHONPATH` is overridden by this. An `sd_db` a
+        # developer put there that imports has already answered the first try
+        # and never reaches here; the only thing that loses is one that
+        # raised. Ordering among the offered paths is preserved -- newest
+        # interpreter first, which is `_provisioned_library_paths`'s contract
+        # and pointless anywhere but the front of the list.
+        #
+        # What is prepended is a whole `site-packages`, so in principle it
+        # shadows more than `sd_db`. In this pack it shadows nothing -- but
+        # not for the reason the first version of this comment gave, which
+        # said every import in `bin/` and `dashboard/` is stdlib, a sibling
+        # module, or `sd_db` itself. An AST scan of both trees finds one
+        # exception: `bin/sd_research_render.py:51 import markdown`.
+        #
+        # The safety survives on other grounds. Python-Markdown is not
+        # provisioned into the pack's virtualenv, so the `site-packages` this
+        # prepends has no `markdown` in it to shadow anything with, and that
+        # module's only consumer, `bin/sd-research-kit`, never reaches this
+        # function. So a third-party dependency arriving in either tree is
+        # not by itself the thing to watch for -- one that is also
+        # PROVISIONED is, and that is what would make this worth narrowing to
+        # the one module it is for.
+        for path in offered:
+            if path in sys.path:
+                sys.path.remove(path)
+        sys.path[:0] = offered
+        try:
+            import sd_db  # noqa: PLC0415 - the provisioned copy, second and last try
+        except ImportError as retry:
+            # Two faults, two sentences. A provisioned copy that will not
+            # import is not a machine without the library, and saying "not
+            # installed" over the top of one sends the reader to `make
+            # setup` for a package that is already there. Where nothing
+            # was offered, the first error is the only one there is.
+            return Imported(None, (
+                f"sd_db is provisioned at {offered[0]} but will not import: {retry}"
+                if offered else f"sd_db is not installed here: {error}"
+            ), offered[0] if offered else "")
+    return Imported(sd_db, "", "")
+
+
 class Rows:
     """This checkout's item rows, read through `sd_db` and through nothing else.
 
@@ -578,26 +672,11 @@ class Rows:
         self._artifact_read: Any = None
         self._completion_read: Any = None
         self._notes_read: Any = None
-        try:
-            import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
-        except ImportError as error:
-            offered = _provisioned_library_paths()
-            for path in offered:
-                if path not in sys.path:
-                    sys.path.append(path)
-            try:
-                import sd_db  # noqa: PLC0415 - the provisioned copy, second and last try
-            except ImportError as retry:
-                # Two faults, two sentences. A provisioned copy that will not
-                # import is not a machine without the library, and saying "not
-                # installed" over the top of one sends the reader to `make
-                # setup` for a package that is already there. Where nothing
-                # was offered, the first error is the only one there is.
-                self.problem = (
-                    f"sd_db is provisioned at {offered[0]} but will not import: {retry}"
-                    if offered else f"sd_db is not installed here: {error}"
-                )
-                return
+        imported = import_sd_db()
+        self.problem = imported.problem
+        if imported.module is None:
+            return
+        sd_db = imported.module
         self.installed = True
         try:
             self._connection = sd_db.connect(write=False)
