@@ -1133,11 +1133,12 @@ def residue_section(root: pathlib.Path) -> list[dict[str, Any]]:
 
 def _database_issues(slug: str) -> dict[str, Any] | None:
     """Prefer the shared database; only its absence falls back, never a failure to read it."""
+    imported = sd_lib.import_sd_db()  # the provisioned copy's second try, before the first import (sd:746)
     try:
         import sd_db
         from sd_db.progress import tracker_freshness, tracker_items
-    except ImportError:
-        return {"available": False, "reason": "shared tracker library is not installed", "needs_you": [], "other": []}
+    except ImportError:  # a provisioned copy that will not import is named, not called absent
+        return {"available": False, "reason": imported.problem if imported.provisioned else "shared tracker library is not installed", "needs_you": [], "other": []}
     if not sd_db.default_path().exists():
         return None
     try:
@@ -1156,11 +1157,12 @@ def _database_issues(slug: str) -> dict[str, Any] | None:
 
 def contributions_section(root: pathlib.Path) -> dict[str, Any]:
     """Read the shared contribution projection without collecting or opening a writer."""
+    imported = sd_lib.import_sd_db()  # the provisioned copy's second try, before the first import (sd:746)
     try:
         import sd_db
         from sd_db import contributions
-    except ImportError:
-        return {"available": False, "reason": "shared contribution library is not installed", "rows": []}
+    except ImportError:  # a provisioned copy that will not import is named, not called absent
+        return {"available": False, "reason": imported.problem if imported.provisioned else "shared contribution library is not installed", "rows": []}
     if not sd_db.default_path().exists():
         return {"available": False, "reason": "no shared database yet", "rows": []}
     identities = [str(root)]

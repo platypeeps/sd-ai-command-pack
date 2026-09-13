@@ -1326,9 +1326,9 @@ class IssueSectionTests(StatusFixture):
         double = mock.Mock()
         double.issues.return_value = [self.row("acme/widget", 99, ["assigned"])]
         double.needs_you.return_value = True
-        with mock.patch.dict(sys.modules, self.NO_SHARED_LIBRARY), mock.patch.object(
-            status, "store", double
-        ):
+        # Nothing provisioned, pinned: a checkout with a `.venv` would otherwise take the other branch.
+        library_unimportable(self, self.NO_SHARED_LIBRARY, provisioned=[])
+        with mock.patch.object(status, "store", double):
             section = status.issues_section(self.repo)
 
         double.index_path.assert_not_called()
@@ -1351,8 +1351,8 @@ class IssueSectionTests(StatusFixture):
         dropped them would be the only one, and a consumer indexing `needs_you`
         would raise on exactly the machine that is already missing a library.
         """
-        with mock.patch.dict(sys.modules, self.NO_SHARED_LIBRARY):
-            answer = status._database_issues("acme/widget")
+        library_unimportable(self, self.NO_SHARED_LIBRARY, provisioned=[])
+        answer = status._database_issues("acme/widget")
 
         self.assertIsNotNone(answer, "None sends `issues_section` to the index")
         assert answer is not None
@@ -4077,6 +4077,67 @@ class ActionsCliTests(StatusFixture):
         self.assertTrue(completed.stdout.startswith("1 actionable\n"))
         for absent in ("abnormalities", "pending", "work items"):
             self.assertNotIn(f"\n{absent}\n", completed.stdout)
+
+
+def library_unimportable(
+    test: unittest.TestCase, modules: dict[str, None], *, provisioned: list[str]
+) -> None:
+    """For the rest of `test`, `sd_db` will not import and `provisioned` is what `make setup` left.
+
+    `sd-status` asks `sd_lib.import_sd_db`, whose second try reads the
+    checkout's own `.venv`. Pinned either way: on a checkout that has one (CI,
+    the main checkout) an unpinned "nothing provisioned" test is really
+    running the provisioned branch. The retry prepends to `sys.path`, so a
+    copy is patched in and nothing leaks into later tests. Down here, not
+    beside its first users, so the line numbers `docs/work/` cites above do
+    not move.
+    """
+    test.enterContext(mock.patch.dict(sys.modules, modules))
+    test.enterContext(
+        mock.patch.object(status.sd_lib, "_provisioned_library_paths", return_value=provisioned)
+    )
+    test.enterContext(mock.patch.object(sys, "path", list(sys.path)))
+
+
+class ProvisionedButBrokenLibraryTests(StatusFixture):
+    """sd:746 review: a copy `make setup` left that raises is a fault, not a gap.
+
+    Both readers of the shared library used to answer "not installed" for it,
+    which sends the reader to reinstall a library that is installed. They now
+    make the same two-way call as `sd_codex` and `sd_restore`.
+    """
+
+    PROGRESS = {"sd_db": None, "sd_db.progress": None}
+    CONTRIBUTIONS = {"sd_db": None, "sd_db.contributions": None}
+
+    def assert_names_the_provisioned_copy(self, reason: str) -> None:
+        self.assertIn("provisioned at /pack/site", reason)
+        self.assertIn("will not import", reason)
+        self.assertNotIn("not installed", reason, "the remedy for absent, sent to a broken copy")
+
+    def test_the_issues_answer_names_the_broken_copy(self) -> None:
+        library_unimportable(self, self.PROGRESS, provisioned=["/pack/site"])
+        answer = status._database_issues("acme/widget")
+
+        assert answer is not None
+        self.assertFalse(answer["available"])
+        self.assert_names_the_provisioned_copy(answer["reason"])
+        self.assertEqual((answer["needs_you"], answer["other"]), ([], []))
+
+    def test_the_contributions_answer_names_the_broken_copy(self) -> None:
+        library_unimportable(self, self.CONTRIBUTIONS, provisioned=["/pack/site"])
+        answer = status.contributions_section(self.repo)
+
+        self.assertFalse(answer["available"])
+        self.assert_names_the_provisioned_copy(answer["reason"])
+        self.assertEqual(answer["rows"], [])
+
+    def test_nothing_provisioned_still_calls_contributions_not_installed(self) -> None:
+        library_unimportable(self, self.CONTRIBUTIONS, provisioned=[])
+        answer = status.contributions_section(self.repo)
+
+        self.assertEqual(answer["reason"], "shared contribution library is not installed")
+        self.assertEqual(answer["rows"], [])
 
 
 if __name__ == "__main__":
