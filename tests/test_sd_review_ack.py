@@ -300,6 +300,81 @@ class ThePrStateCountUsesTheSameReader(unittest.TestCase):
         self.assertEqual(len(whole["ids"]), 4)
         self.assertIn("inline-id", whole["ids"])
 
+    def test_a_re_review_does_not_double_what_it_restates(self):
+        """Two surfaces, one fact. A restated finding is one finding.
+
+        A reviewer that runs again after a push restates what still stands,
+        and #860 carries four reviews for exactly that reason. `findings`
+        deduplicates by id across every review it is given, in one pass; a
+        caller that instead loops and calls it once per review gets that
+        deduplication per review and none across them, so this surface and
+        `sd-review-ack` report different totals for the same pull request.
+
+        The body here is #859's real review body from the capture. The only
+        construction is that it appears twice, which is what a second pass on
+        an unchanged finding produces. Measured before the fix: 8 against 4.
+        """
+        pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
+        once = ROUND["859"]["reviews"][0]
+        again = [once, dict(once)]
+        truth = ack.findings(859, again, [])
+        stated = pr_state.review_findings(again, 859)
+        self.assertEqual(len(ack.findings(859, [once], [])), 4)
+        self.assertEqual(len(truth), 4)
+        self.assertEqual(stated["in_body"], len(truth))
+        self.assertEqual(stated["ids"], [row["id"] for row in truth])
+        self.assertEqual(stated["reviewers"], ["copilot-pull-request-reviewer[bot]"])
+
+    def test_no_pull_request_in_the_round_is_counted_twice_over(self):
+        """The same question across all twelve, enumerated rather than sampled."""
+        pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
+        for number, record in ROUND.items():
+            with self.subTest(pr=number):
+                reviews, comments = record["reviews"], record["comments"]
+                body = pr_state.review_findings(reviews, int(number))["ids"]
+                inline = [row["id"] for row in ack.findings(int(number), [], comments)]
+                union = list(dict.fromkeys(body + inline))
+                self.assertEqual(len(set(union)), len(union))
+                self.assertEqual(len(union), len(ack.findings(int(number), reviews, comments)))
+
+    def test_a_comment_response_that_is_not_a_list_is_refused(self):
+        """`gh` exits 0 and returns an error object. That is not zero findings.
+
+        The third time this shape has come up in this item, after `gh` missing
+        and after a capture that is not JSON. An error object or a null
+        iterates as nothing, the row prints clean, and the gate passes hardest
+        on the day GitHub is having trouble.
+        """
+        pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
+        original = pr_state.gh_json
+        try:
+            for payload in ({"message": "API rate limit exceeded"}, None, "nope"):
+                with self.subTest(payload=type(payload).__name__):
+                    pr_state.gh_json = lambda *a, _p=payload: (_p, "")
+                    ids, reason = pr_state.inline_findings(REPO_ROOT, "acme/widget", 7)
+                    self.assertEqual(ids, [])
+                    self.assertIn("not a list of comments", reason)
+                    self.assertIn(type(payload).__name__, reason)
+        finally:
+            pr_state.gh_json = original
+
+    def test_a_real_comment_list_is_read_through_the_shared_reader(self):
+        """The success half, so the refusal above is not the only path covered."""
+        pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
+        comments = ROUND["860"]["comments"]
+        original = pr_state.gh_json
+        try:
+            pr_state.gh_json = lambda *a: (comments, "")
+            ids, reason = pr_state.inline_findings(REPO_ROOT, "acme/widget", 860)
+        finally:
+            pr_state.gh_json = original
+        self.assertEqual(reason, "")
+        # Six inline rows on #860: three findings and three replies. The reader
+        # decides which is which, and this asserts it was asked.
+        self.assertEqual(len(comments), 6)
+        self.assertEqual(ids, [row["id"] for row in ack.findings(860, [], comments)])
+        self.assertEqual(len(ids), 3)
+
     def test_a_body_with_nothing_in_it_still_counts_nothing(self):
         """The clean case stays clean: the line prints only on a non-zero count."""
         pr_state = sd_lib.sibling("sd_pr_state_under_test", "sd-pr-state")
@@ -520,6 +595,76 @@ class TheControl(RoundFixture):
         self.assertEqual(gated.returncode, 1)
         self.assertIn("unavailable:", report.stdout)
         self.assertIn("nothing was read, so nothing is acknowledged", report.stdout)
+
+    def test_an_endpoint_that_answers_with_something_other_than_a_list_stops_the_round(self):
+        """The live half of the same refusal, for both endpoints it reads.
+
+        `payload or []` used to stand here and turned an error object into a
+        clean pull request: a rate-limit body is a dict, iterates as nothing,
+        and the pull request prints with no findings on it. `pr list` above
+        already refused a non-list; these two did not.
+
+        Driven through a real `gh` on `PATH` rather than a patched module,
+        because `sd_lib.sibling` loads a fresh module object on every call --
+        an in-process patch here would leave the code under test reading the
+        real GitHub and the test passing for the wrong reason.
+        """
+        for bad in ("reviews", "comments"):
+            with self.subTest(endpoint=bad):
+                rounds, reason = self._round_with_fake_gh(bad)
+                self.assertEqual(rounds, {})
+                self.assertIn(f"not a list of {bad}", reason)
+                self.assertIn("dict", reason)
+
+    def test_a_live_round_that_reads_two_real_lists_is_not_refused(self):
+        """The control for the refusal above: valid lists still produce a round."""
+        rounds, reason = self._round_with_fake_gh(None)
+        self.assertEqual(reason, "")
+        self.assertEqual(sorted(rounds), [7])
+        self.assertEqual(rounds[7], {"reviews": [], "comments": []})
+
+    #: A `gh` that authenticates, lists one pull request, and answers every
+    #: API path with an empty list -- except the one named, which answers with
+    #: the rate-limit object GitHub really returns.
+    FAKE_GH = """#!/bin/sh
+case "$*" in
+  *'auth status'*) exit 0 ;;
+  *'pr list'*) echo '[{"number":7}]' ;;
+%s  *) echo '[]' ;;
+esac
+"""
+
+    def _round_with_fake_gh(self, broken: str | None) -> tuple[dict, str]:
+        """`live_round` against a `gh` that answers one endpoint with an object."""
+        if "origin" not in self.repo._git("remote"):
+            self.repo._git("remote", "add", "origin", "https://github.com/acme/widget.git")
+        bin_dir = pathlib.Path(self.stack.name) / f"fake-{broken or 'ok'}"
+        bin_dir.mkdir()
+        (bin_dir / "git").symlink_to(shutil.which("git") or "/usr/bin/git")
+        arm = f"""  *{broken}*) echo '{{"message":"API rate limit exceeded"}}' ;;\n""" if broken else ""
+        fake = bin_dir / "gh"
+        fake.write_text(self.FAKE_GH % arm, encoding="utf-8")
+        fake.chmod(0o755)
+        return self._live_round_under(bin_dir)
+
+    def _live_round_under(self, bin_dir: pathlib.Path) -> tuple[dict, str]:
+        """`live_round` in a subprocess, so `PATH` is the only thing that changed."""
+        script = (
+            "import json,pathlib,sys;"
+            f"sys.path.insert(0, {str(BIN)!r});"
+            "import sd_lib;"
+            "m = sd_lib.sibling('a', 'sd-review-ack');"
+            f"r, why = m.live_round(pathlib.Path({str(self.repo.root)!r}), None, 10);"
+            "print(json.dumps({'rounds': {str(k): v for k, v in r.items()}, 'why': why}))"
+        )
+        done = subprocess.run(
+            [sys.executable, "-c", script], cwd=str(self.repo.root), text=True,
+            capture_output=True, check=False,
+            env=dict(os.environ, PATH=str(bin_dir), PYTHONDONTWRITEBYTECODE="1"),
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        payload = json.loads(done.stdout)
+        return {int(k): v for k, v in payload["rounds"].items()}, payload["why"]
 
     def test_a_named_pull_request_the_capture_lacks_is_an_error(self):
         """Not "no findings": the file never held it, so the question is wrong."""
