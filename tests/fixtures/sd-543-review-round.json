@@ -1,0 +1,258 @@
+{
+ "captured": "the 2026-09-12 round named by item sd:543",
+ "pull_requests": {
+  "851": {
+   "comments": [],
+   "reviews": [
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udd35 Needs a closer look\n\nAddress the unresolved working-tree identity, compatibility, loader fallback, and documentation issues.\n\n<details>\n<summary>Pull request overview</summary>\n\nUpdates `sd-review` to reuse a matching runner-recorded successful check instead of rerunning `sd-check`.\n\n**Changes:**\n- Adds read-only receipt lookup with fallback behavior.\n- Adds integration tests for receipt acceptance and rejection.\n- Updates import boundaries and review-lane size limits.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Summary |\r\n|---|---|\r\n| `tests/test_sd_review_check_receipt.py` | Tests receipt reuse and fallback cases. |\r\n| `tests/test_sd_review_boundary.py` | Updates import and size boundaries. |\r\n| `bin/sd-review` | Implements runner check receipt reuse. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 2/3 changed files\n- **Comments generated:** 0\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/platypeeps/sd-ai-command-pack/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+     "id": 5186123209,
+     "state": "COMMENTED"
+    }
+   ]
+  },
+  "852": {
+   "comments": [
+    {
+     "author": "Copilot",
+     "body": "This new expectation is not backed by the implementation: `DEFAULT_BLOCK_BODY` still emits live `mode`, `check`, `test`, and `lint` keys (and `consent_body()` only replaces an uncommented `reviewers:` line). If the template is changed to comment the menu as described, that substitution will also stop writing a granted `reviewers` value. Update the installer template and its consent rendering together; otherwise these tests fail and a grant is silently lost.",
+     "id": 3996011033,
+     "in_reply_to_id": null,
+     "line": 565,
+     "path": "tests/test_sd_install.py"
+    },
+    {
+     "author": "Copilot",
+     "body": "The new menu assertion changes the template from active keys to commented keys, but `tests/test_workflow_policy.py:96-98` only recognizes lines matching `    key:` and `:165-173` still requires that live-key set. Once the intended template change is made, that existing check will fail; update it to recognize the commented menu or separate documented keys from active values.",
+     "id": 3996011056,
+     "in_reply_to_id": null,
+     "line": 581,
+     "path": "tests/test_sd_install.py"
+    }
+   ],
+   "reviews": [
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udfe1 Changes recommended\n\nCritical implementation and policy-check issues remain unresolved.\n\n*Get a fresh assessment by requesting another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nThis PR adds action-aware Dependabot guard handling and tests for local installer configuration behavior.\n\n**Changes:**\n- Supports `review-route` and `docs-gate` guard detection, pins, and rendering.\n- Adds coverage for action-specific and multi-action guards.\n- Tests grant-only local defaults and commented configuration menus.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Review summary |\r\n|---|---|\r\n| `tests/test_sd_review_setup_github.py` | Adds coverage for action-aware guard behavior. |\r\n| `tests/test_sd_install.py` | Critical (3 votes): installer template and consent rendering must be updated together. Critical (1 vote): workflow policy checks must recognize the commented menu. |\r\n| `bin/sd_setup_guard.py` | Critical (3 votes): setup must query the default action explicitly. Moderate (1 vote): aggregate verdicts must inspect all matching action blocks. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 2/3 changed files\n- **Comments generated:** 2\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/platypeeps/sd-ai-command-pack/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+     "id": 5186224767,
+     "state": "COMMENTED"
+    }
+   ]
+  },
+  "856": {
+   "comments": [
+    {
+     "author": "Copilot",
+     "body": "This newly added docstring is grammatically incomplete: it is missing the words that make the opening clause read as a sentence.",
+     "id": 3996026476,
+     "in_reply_to_id": null,
+     "line": 167,
+     "path": "tests/test_sd_work.py"
+    }
+   ],
+   "reviews": [
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udfe1 Changes recommended\n\nUnresolved critical inventory-guard and moderate malformed-path handling findings remain.\n\n*Get a fresh assessment by requesting another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nAdds repository reassignment to `sd task edit` via `--repo` and `--clear-repo`, with path normalization, tests, and documentation.\n\n**Changes:**\n- Added repository move and clear handling.\n- Added coverage for moves, refusals, notes, and clearing.\n- Documented the new control.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Summary |\r\n|---|---|\r\n| `tests/test_sd_work.py` | Adds reassignment tests. Nit (3 votes): fix the incomplete docstring sentence. |\r\n| `docs/workflow-controls.md` | Documents repository reassignment. |\r\n| `bin/sd_work.py` | Implements reassignment options. Critical (1 vote): update the command inventory guard for this scoped exception. Moderate (3 votes): handle path-resolution errors as `WorkRefusal` with a regression test. Nit (1 vote): clarify fallback wording. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 2/3 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/platypeeps/sd-ai-command-pack/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+     "id": 5186238794,
+     "state": "COMMENTED"
+    }
+   ]
+  },
+  "857": {
+   "comments": [
+    {
+     "author": "Copilot",
+     "body": "This control case only checks that stderr lacks the guest wording; a different usage/configuration failure (or an otherwise failed `--explain`) would still pass, so it does not prove the allowed full-mode path reached the reviewer as the test name claims. Assert a successful return code so regressions in the allowed path are caught.",
+     "id": 3996032741,
+     "in_reply_to_id": null,
+     "line": 251,
+     "path": "tests/test_guest_artifact_refusal.py"
+    }
+   ],
+   "reviews": [
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udfe1 Changes recommended\n\nUnresolved critical and moderate findings affect citation stability, destination handling, and test coverage.\n\n*Get a fresh assessment by requesting another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nAdds guest-mode refusal for planning artifacts during `sd-review --scope planning`, with shared detection, tests, and documentation updates.\n\n**Changes:**\n- Adds guest artifact path and mode checks.\n- Adds unit and CLI coverage.\n- Updates workflow and planning-skill documentation.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Review summary |\r\n|---|---|\r\n| `WORKFLOW.md` | **Nit (1 vote):** Documentation claims enforcement through `sd-ship`, which uses an independent tuple rather than the shared helper. |\r\n| `tests/test_guest_artifact_refusal.py` | **Moderate (3 votes):** The allowed full-mode control case should assert a successful return code. |\r\n| `skills/sd-plan/SKILL.md` | Documents the planning refusal behavior. |\r\n| `bin/sd-review` | **Moderate (1 vote):** Repository-level mode detection cannot distinguish upstream destinations from allowed fork integration branches. |\r\n| `bin/sd_lib.py` | **Critical (1 vote):** An added blank line shifts cited line numbers. **Moderate (1 vote):** Mode detection conflates access mode with destination. **Nits (2 and 1 votes):** The push gate does not share the refusal list, and the refusal message contains two sentences. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n### Suppressed comments (1)\n\n**WORKFLOW.md:164**\n* `bin/sd-ship` does not read this helper (or `GUEST_REFUSED_DIRS`); its push guard still has an independent literal tuple at `bin/sd-ship:501`. As written, this sentence is false and the new list is not a single source of truth, so a future refused tree can be enforced at review but missed at push. Please either make the push guard consume the shared helper/constant or describe the checks as independent.\n```\n  `sd_lib.guest_artifact_refusal`, which resolves `sd_lib.mode()` and names the\n  paths it refused: `sd-review --scope planning`, the lane `sd-plan` gates\n  `planning \u2192 ready` on, refuses the active item's `prd.md`, `design.md` and\n  `implement.md` before they are promoted; `sd-ship` refuses a guest push whose\n  diff carries any of the three trees. Nothing yet refuses a `docs/spec/` or\n```\n\n- **Files reviewed:** 3/5 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/platypeeps/sd-ai-command-pack/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+     "id": 5186246346,
+     "state": "COMMENTED"
+    }
+   ]
+  },
+  "858": {
+   "comments": [],
+   "reviews": [
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udd35 Needs a closer look\n\nExisting partial manifests can still hide newly added citations, and documentation wording needs clarification.\n\n<details>\n<summary>Pull request overview</summary>\n\nThis PR strengthens Rule 6 by reporting unrecorded citations and showing active-versus-recorded item counts.\n\n**Changes:**\n- Adds failures for active items with missing citation manifests.\n- Expands Rule 6 reporting.\n- Adds regression tests for active, empty, and archived-item cases.\n\nOpen findings include one critical issue (2 votes) involving existing partial manifests and two documentation nits (1 vote each).\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Summary |\r\n|---|---|\r\n| `tests/test_sd_docs_lint.py` | Adds Rule 6 regression and exemption tests. |\r\n| `bin/sd-docs-lint` | Updates citation detection and reporting. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 1/2 changed files\n- **Comments generated:** 0\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/platypeeps/sd-ai-command-pack/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+     "id": 5186308730,
+     "state": "COMMENTED"
+    }
+   ]
+  },
+  "859": {
+   "comments": [],
+   "reviews": [
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udd35 Needs a closer look\n\nTwo moderate findings remain unresolved, including bare-condition comment handling and schema/runtime vocabulary drift.\n\n<details>\n<summary>Pull request overview</summary>\n\nFixes `sd-status` conditional-job detection and validates acknowledgement IDs against emitted gaps.\n\n**Changes:**\n- Recognizes safe `always()` and `!cancelled()` conditions.\n- Rejects unknown acknowledgement IDs.\n- Adds regression tests and updates documentation citations.\n\nOutstanding review findings:\n- `bin/sd-status:425` \u2014 Moderate (3 votes): handle trailing comments in bare YAML conditions.\n- `bin/sd-status:512` \u2014 Moderate (1 vote): align the schema with the closed ID vocabulary.\n- `docs/.../prd.md:1148` \u2014 Nit (1 vote): update stale `BACKENDS` and residue citations.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Summary |\r\n|---|---|\r\n| `tests/test_sd_status.py` | Adds coverage for condition handling and invalid acknowledgement IDs. |\r\n| `docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md` | Updates affected source citations. |\r\n| `bin/sd-status` | Implements condition parsing and acknowledgement validation. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n### Suppressed comments (1)\n\n**docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md:1151**\n* The insertion also moved the adjacent `BACKENDS` and residue declarations, but their citations remain at `903` and `946-1004`; those ranges now point into `protection_section`/`carrier_branches` rather than the tables the prose names. Please update these two stale anchors along with the already-renumbered `carrier_branches` citation.\n```\n  (`bin/sd-status:903`), derived from the registry instead; the residue\n  detectors (`bin/sd-status:946-1004`) after one clean run across the fleet;\n  the history comments in `Makefile`; `--stash-ref` (`bin/sd-handoff:374`) and\n  `carrier_branches` (`bin/sd-status:994-1017`); `sd-status`'s `_git` is taken --\n```\n\n- **Files reviewed:** 2/3 changed files\n- **Comments generated:** 0\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/platypeeps/sd-ai-command-pack/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+     "id": 5186333960,
+     "state": "COMMENTED"
+    }
+   ]
+  },
+  "860": {
+   "comments": [
+    {
+     "author": "Copilot",
+     "body": "These commands do not publish a completed run as one unit, and their failures are not checked. While two completed runs execute this block, one can remove or move files between the other run's operations, leaving a mixed shard set; a signal/SIGKILL in the same window can leave the previous run deleted with only some new shards. A failed `mv` or the following log copy can also be masked by the final `if` when `run_status` is zero. Serialize and make publication crash-safe (or change consumers to swap a completed run atomically), and propagate publication failures instead of reporting success.",
+     "id": 3996311665,
+     "in_reply_to_id": null,
+     "line": 227,
+     "path": ".github/scripts/run-tests.sh"
+    },
+    {
+     "author": "Copilot",
+     "body": "Stopping the watchdog here ends parent-death monitoring before the harness has finished: log concatenation and publication still run afterward. If the launcher exits after `wait` returns, the script can remain orphaned and write the shared root files, so the launcher-lifetime guarantee only covers shard execution. Keep the watcher active through post-processing/publication and stop it only during final cleanup.",
+     "id": 3996311677,
+     "in_reply_to_id": null,
+     "line": 208,
+     "path": ".github/scripts/run-tests.sh"
+    },
+    {
+     "author": "Copilot",
+     "body": "`_alive` does not actually exclude zombies: `_parent_map()` records every row returned by `ps`, including processes whose state is `Z`. Killing the process group can leave those entries briefly (or under a non-reaping PID 1), so this regression test can report an orphan even though no process is still running. Query the process state here and return false for zombie states.",
+     "id": 3996311684,
+     "in_reply_to_id": null,
+     "line": 148,
+     "path": "tests/test_gate_harness_isolation.py"
+    },
+    {
+     "author": "sdelmas",
+     "body": "Right, and it is the same defect this branch is about. Fixed in 371495dc: the stand-down moved to immediately before the publish, so the watchdog now covers the log concatenation as well as the shards. It is not moved past the publish on purpose \u2014 that is the one step where being killed half-way leaves the root holding half of one run and half of another, which is worse than an orphan finishing a publish of data that is already complete and its own. Everything before it is interruptible with no consequence.",
+     "id": 3996362325,
+     "in_reply_to_id": 3996311677,
+     "line": 208,
+     "path": ".github/scripts/run-tests.sh"
+    },
+    {
+     "author": "sdelmas",
+     "body": "Unchecked failures: agreed, and fixed in 371495dc. Each publish step now sets `publish_status`, and a publish that did not land exits non-zero naming the root rather than reporting the tests' own success \u2014 a half-published root under a zero exit is the exact shape of failure this script is being fixed for. Verified against an unwritable repo root: `exit status with an unwritable repo root: 1`, `error: could not publish this run's results to <root>; the files there are not this run's.`\n\nSerialization: deliberately not added, and the PR body now says so. Two runs can only reach this block together if someone started both on purpose \u2014 an orphan no longer gets there, since the watchdog reaps it first \u2014 and a lock would have to survive a SIGKILLed holder to be safe. A stale lock blocking every later gate in the checkout is a worse failure than the race it removes. The house rule is one writer per checkout; the residual is last-writer-wins between two deliberate, completed runs, and each of those publishes a self-consistent set.",
+     "id": 3996362739,
+     "in_reply_to_id": 3996311665,
+     "line": 227,
+     "path": ".github/scripts/run-tests.sh"
+    },
+    {
+     "author": "sdelmas",
+     "body": "Correct \u2014 the docstring claimed something the code did not do, which is the worse half. Fixed in 371495dc: `_process_rows` reads `ps -A -o pid= -o ppid= -o state=` and `_alive` returns false for a row whose state starts with `Z`. That matters most where PID 1 does not reap promptly, since a flaky failure there would look exactly like the defect the test exists to catch. The state field is parsed defensively \u2014 a `ps` that does not print it leaves the state empty rather than dropping the row.",
+     "id": 3996363005,
+     "in_reply_to_id": 3996311684,
+     "line": 148,
+     "path": "tests/test_gate_harness_isolation.py"
+    }
+   ],
+   "reviews": [
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udfe1 Changes recommended\n\nUnresolved findings affect crash-safe publication, cleanup, and regression-test reliability.\n\n*Get a fresh assessment by requesting another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nThis PR hardens the test harness against concurrent runs and orphaned shard processes.\n\n**Changes:**\n- Stages coverage shards and logs privately before publishing.\n- Adds process-group cleanup and launcher watchdog handling.\n- Adds regression tests for orphan cleanup and concurrent-run isolation.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Summary |\r\n|---|---|\r\n| `tests/test_gate_harness_isolation.py` | Tests orphan termination and concurrent-run isolation. |\r\n| `.github/scripts/run-tests.sh` | Implements private staging, publication, watchdog handling, and cleanup. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n### Suppressed comments (2)\n\n**.github/scripts/run-tests.sh:175**\n* When the gate shell is SIGKILLed, its EXIT trap cannot run. This `kill -0` branch only terminates the shard group and returns, so `work_dir` and all its logs/shards remain in the system temp directory; repeated aborted runs can exhaust runner disk. Remove the private directory from this detached-watchdog path too.\n```\n    if ! kill -0 \"$gate_pid\" 2>/dev/null; then\n      reap_shards\n      return 0\n```\n**tests/test_gate_harness_isolation.py:244**\n* This wait does not establish that the slow test is in flight. The harness already has two descendants as soon as `xargs` and the watchdog are forked, before `xargs` launches a coverage worker or `test_slow` writes anything; the fast run can therefore avoid the pre-fix clobber and let this regression test pass falsely. Wait for a fixture-controlled ready marker or shard from `test_slow`, and assert that the barrier succeeded.\n```\n                    _wait_for(lambda: len(_descendants(slow.pid)) >= 2, timeout=60)\n```\n\n- **Files reviewed:** 2/2 changed files\n- **Comments generated:** 3\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/platypeeps/sd-ai-command-pack/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+     "id": 5186523044,
+     "state": "COMMENTED"
+    },
+    {
+     "author": "sdelmas",
+     "body": "",
+     "id": 5186569858,
+     "state": "COMMENTED"
+    },
+    {
+     "author": "sdelmas",
+     "body": "",
+     "id": 5186570257,
+     "state": "COMMENTED"
+    },
+    {
+     "author": "sdelmas",
+     "body": "",
+     "id": 5186570503,
+     "state": "COMMENTED"
+    }
+   ]
+  },
+  "861": {
+   "comments": [],
+   "reviews": [
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udd35 Needs a closer look\n\nThree moderate review findings remain unresolved around process-state checks, marker writes, and cleanup.\n\n<details>\n<summary>Pull request overview</summary>\n\nImproves dashboard plugin hang/stall tests under machine contention without changing production code.\n\n**Changes:**\n- Adds escalating tile budgets and refusal validation.\n- Verifies child-process termination.\n- Replaces fixed timing assumptions with liveness checks.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Summary and findings |\r\n|---|---|\r\n| `tests/test_dashboard_plugins.py` | Adds resilient hang/stall testing. **Moderate findings (1 vote each):** zombie processes may pass `kill(pid, 0)` checks; marker creation should be atomic or validated; early-return failures need process cleanup. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n### Suppressed comments (3)\n\n**tests/test_dashboard_plugins.py:186**\n* `os.kill(pid, 0)` also succeeds for a zombie, so this loop does not prove that the child is still running. `_terminate` waits only for the tile leader; the killed/orphaned child can remain in `Z` state until PID 1 reaps it, causing a 30-second false failure even though it cannot execute or write the marker. The existing process-group tests treat `ps` state `Z` as stopped (`tests/test_sd_ship.py:1428-1432`), so inspect the process state here instead of using kill-0 alone.\n```\n            try:\n                os.kill(pid, 0)\n            except (ProcessLookupError, PermissionError):\n                return True\n```\n**tests/test_dashboard_plugins.py:707**\n* `Path.write_text` creates `child-born` before it writes the PID, so `reached.exists()` can make `refusal_saying` return with an empty or partial marker if the tile is killed during this call. The subsequent `int(born.read_text())` then fails instead of checking the child, and no survivor cleanup is registered. Use an atomic temporary-file write/replace (or validate the PID before treating existence as the barrier).\n```\n            pathlib.Path({str(born)!r}).write_text(str(child.pid))\n```\n**tests/test_dashboard_plugins.py:159**\n* If the loader incorrectly returns `ok` while the tile is still sleeping, this assertion aborts `refusal_saying` before `died()` or any process cleanup is registered. The deliberately injected EOF/early-return defect therefore leaves the tile alive for 30 seconds (and can leave the `gg` child alive for 120 seconds), contaminating the rest of the test run; arrange cleanup for the early-failure path as well as the normal group-kill assertion.\n```\n            self.assertFalse(\n                tab[\"ok\"],\n                f\"the loader accepted a tile still in the state under test, \"\n                f\"at {seconds:g}s of budget\",\n            )\n```\n\n- **Files reviewed:** 1/1 changed files\n- **Comments generated:** 0\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/platypeeps/sd-ai-command-pack/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+     "id": 5186523780,
+     "state": "COMMENTED"
+    }
+   ]
+  },
+  "862": {
+   "comments": [],
+   "reviews": [
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udd35 Needs a closer look\n\nFour moderate review findings remain unresolved around path handling, schema versioning, and database activity validation.\n\n<details>\n<summary>Pull request overview</summary>\n\nUpdates `sd-status` and `sd_sweep` to use current branch state and recent item activity when reporting issues.\n\n**Changes:**\n- Validate branches against current origin heads with offline fallback.\n- Base idle planning on the latest item, Git, or database activity.\n- Update models, tests, documentation, and source references.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Summary |\r\n|---|---|\r\n| `tests/test_sd_sweep.py` | Tests activity-based sweep aging. |\r\n| `tests/test_sd_status.py` | Tests idle and stale-branch behavior. |\r\n| `tests/test_sd_lib.py` | Tests database activity resolution. |\r\n| `skills/sd-status/SKILL.md` | Updates status-check documentation. |\r\n| `README.md` | Corrects `sd-suggest` documentation. |\r\n| `docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md` | Updates shifted source line references. |\r\n| `bin/sd-status` | Adds activity-aware aging and origin branch filtering. |\r\n| `bin/sd_sweep.py` | Tracks latest activity and exposes active dates. |\r\n| `bin/sd_lib.py` | Reads database row and note activity. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 6/9 changed files\n- **Comments generated:** 0\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/platypeeps/sd-ai-command-pack/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+     "id": 5186546699,
+     "state": "COMMENTED"
+    }
+   ]
+  },
+  "863": {
+   "comments": [
+    {
+     "author": "Copilot",
+     "body": "`init-claude-md` writes the repository's `CLAUDE.md` (using the pack template as its source), not `templates/CLAUDE.md`; as written, this directs users to expect a nested template path and contradicts the command help and README. Please name the destination as `CLAUDE.md`.",
+     "id": 3996334763,
+     "in_reply_to_id": null,
+     "line": 60,
+     "path": "skills/sd-research-repo/SKILL.md"
+    }
+   ],
+   "reviews": [
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udfe1 Changes recommended\n\nCritical and moderate correctness, safety, and documentation issues remain unresolved.\n\n*Get a fresh assessment by requesting another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nAdds a documented, one-time `CLAUDE.md` initialization command and explicit local template overrides for drift checks.\n\n**Changes:**\n- Adds `init-claude-md` with refusal-on-existing behavior.\n- Adds override parsing, validation, suppression, and reporting.\n- Updates documentation, template guidance, and focused tests.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Summary |\r\n|---|---|\r\n| `tests/test_sd_research_kit.py` | Tests initialization and override behavior. |\r\n| `skills/sd-research-repo/templates/CLAUDE.md` | Documents template management and overrides. |\r\n| `skills/sd-research-repo/SKILL.md` | Adds setup guidance; destination wording needs correction. |\r\n| `skills/sd-research-repo/references/conventions.md` | Defines repository conventions. |\r\n| `README.md` | Documents the repository write path. |\r\n| `bin/sd-research-kit` | Registers the new command. |\r\n| `bin/sd_research_review.py` | Implements initialization and drift overrides; findings cover override validation/counting, duplicate and fenced entries, dangling symlinks, and non-atomic writes. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 5/7 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/platypeeps/sd-ai-command-pack/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+     "id": 5186544263,
+     "state": "COMMENTED"
+    }
+   ]
+  },
+  "864": {
+   "comments": [],
+   "reviews": [
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udd35 Needs a closer look\n\nUnresolved critical and moderate findings remain around symlink containment and complete refusal-path reporting.\n\n<details>\n<summary>Pull request overview</summary>\n\nUpdates `sd-docs-lint` to report checked and skipped coverage, with regression tests for the new diagnostics.\n\n**Changes:**\n- Adds rule-specific coverage and skip reporting.\n- Names unrecordable citations during linting and manifest updates.\n- Adds focused tests for census and refusal reporting.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Summary |\r\n|---|---|\r\n| `tests/test_sd_docs_lint.py` | Adds regression tests for reporting behavior. |\r\n| `bin/sd-docs-lint` | Implements coverage censuses and skipped-citation diagnostics. |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n- **Files reviewed:** 1/2 changed files\n- **Comments generated:** 0\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/platypeeps/sd-ai-command-pack/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+     "id": 5186542667,
+     "state": "COMMENTED"
+    }
+   ]
+  },
+  "865": {
+   "comments": [
+    {
+     "author": "Copilot",
+     "body": "This scan treats every positional argument as an operand, so a fixed assertion can evade it through its message or keywords: `self.assertTrue(True, dynamic_message)` is unconditionally passing, and `self.assertEqual(first=1, second=1)` has no entries in `node.args`. Extract the assertion's actual operand parameters (excluding `msg`) and include keyword arguments before applying the fixed-verdict checks.",
+     "id": 3996344624,
+     "in_reply_to_id": null,
+     "line": 490,
+     "path": "tests/test_suite_shape.py"
+    }
+   ],
+   "reviews": [
+    {
+     "author": "copilot-pull-request-reviewer[bot]",
+     "body": "### \ud83d\udfe1 Changes recommended\n\nUnresolved moderate findings remain in report robustness and assertion analysis.\n\n*Get a fresh assessment by requesting another Copilot review.*\n\n<details>\n<summary>Pull request overview</summary>\n\nAdds static test-suite assertion checks and a non-gating `bin/` size trend report.\n\n**Changes:**\n- Detects decorative or claimless tests.\n- Adds historical size metrics and CI summary reporting.\n- Documents mutation-testing guidance.\n</details>\n\n<details>\n<summary>File summaries</summary>\n\n| File | Description |\r\n|---|---|\r\n| `tests/test_suite_shape.py` | Assertion-shape and reachability checks |\r\n| `tests/test_sd_size_report.py` | Size-report measurement and history tests |\r\n| `skills/sd-review/SKILL.md` | Test-review and mutation guidance |\r\n| `bin/sd-size-report` | Size and trend report implementation |\r\n| `.github/workflows/tests.yml` | Non-gating CI summary step |\n</details>\n\n<details>\n<summary>Review details</summary>\n\n### Suppressed comments (5)\n\n**tests/test_suite_shape.py:488**\n* `ast.unparse` equality is only syntactic: evaluating the same call/property/subscript twice can produce different values. For example, `assertEqual(build(), build())` can legitimately fail when two builds differ, but this rule classifies it as decorative and would block that useful reproducibility test. Restrict this check to side-effect-free operands, or require repeated results to be captured before comparing them.\n```\n            if len(operands) >= 2 and operands[0] == operands[1]:\n```\n**tests/test_suite_shape.py:484**\n* `decorative_assertions` only analyzes `*.assert*()` calls, so Python's built-in assertion syntax is invisible to this gate. A test containing `assert True`, `assert 1 == 1`, or `assert value == value` would be accepted even though its verdict is fixed; handle `ast.Assert` separately (including its comparison and literal forms).\n```\n    for class_name, function in methods(tree):\n        for node in ast.walk(function):\n            name = _assertion_call(node)\n            if name not in COMPARING_ASSERTIONS or not isinstance(node, ast.Call):\n```\n**tests/test_suite_shape.py:519**\n* `ast.walk(function)` descends into nested function and class bodies. A test can define an uncalled local helper containing `self.assertTrue(...)` or `assert False`, then make only the production call; this adds the outer test to `direct` even though no assertion executes when the test runs. Use an AST visitor that skips nested scopes for the outer method and analyzes helper definitions only when their calls are resolved.\n```\n            if (isinstance(node, ast.Assert)\n                    or _assertion_call(node) is not None\n                    or helper == \"fail\"):\n                direct.add(function.name)\n```\n**tests/test_suite_shape.py:489**\n* The same-expression branch is applied to every non-contextual unittest assertion, but APIs such as `assertIn`, `assertRegex`, and `assertIsInstance` do not compare two interchangeable operands. For example, `self.assertIn(value, value)` can pass or fail based on the runtime value, yet this reports it as decorative and makes the suite reject a legitimate test. Keep the literal-only check broad, but restrict the same-expression check to symmetric comparison APIs.\n```\n            if len(operands) >= 2 and operands[0] == operands[1]:\n                found.append(f\"{where}: {name} compares {operands[0]} with itself\")\n```\n**tests/test_suite_shape.py:556**\n* The description reports 77 test modules, but this glob also includes the newly added `tests/test_sd_size_report.py`, so the post-change sweep covers 78 `test_*.py` modules. Please update the measured module/method totals so the prevalence evidence matches the code that actually runs.\n```\n    return sorted(TESTS.glob(\"test_*.py\"))\n```\n\n- **Files reviewed:** 4/5 changed files\n- **Comments generated:** 1\n- **Review effort level:** Lite\n</details>\n\n---\n\n\ud83d\udca1 <a href=\"/platypeeps/sd-ai-command-pack/new/main?filename=.github/skills/code-review/SKILL.md\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Add a `code-review` agent skill</a> or configure MCP servers for context-aware, tailored reviews. <a href=\"https://docs.github.com/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review?tool=webui#mcp-servers-and-agent-skills\" class=\"Link--inTextBlock\" target=\"_blank\" rel=\"noopener noreferrer\">Learn more in the docs.</a>",
+     "id": 5186552912,
+     "state": "COMMENTED"
+    }
+   ]
+  }
+ },
+ "repo": "platypeeps/sd-ai-command-pack"
+}
