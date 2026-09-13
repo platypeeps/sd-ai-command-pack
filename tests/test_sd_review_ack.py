@@ -339,6 +339,27 @@ class TheControl(RoundFixture):
         self.assertEqual(code, 1)
         self.assertNotIn(865, {row["pr"] for row in whole["unsatisfied"]})
 
+    def test_a_captured_round_with_an_explicit_null_is_read_as_empty(self):
+        """`"reviews": null` is not the same absence as a missing key.
+
+        `.get("reviews", ())` hands back None for a key present with a JSON
+        null, where `or ()` hands back the empty tuple; both call sites use the
+        latter. This test does **not** discriminate the two, and saying so is
+        the point: `findings` guards its own arguments with `or []`, so the
+        run survives either way today. What the test pins is the behaviour --
+        a null round reads as empty and the gate exits 0 -- which stays true if
+        that internal guard is ever removed, and which is the case a fixture
+        can really produce.
+        """
+        odd = pathlib.Path(self.stack.name) / "null.json"
+        odd.write_text(json.dumps({"pull_requests": {"7": {"reviews": None, "comments": None}}}))
+        done = subprocess.run(
+            [sys.executable, str(BIN / "sd-review-ack"), "--from", str(odd), "--check", *self.ref],
+            cwd=str(self.repo.root), capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("no review findings", done.stdout)
+
     def test_an_empty_round_passes_the_gate(self):
         """The gate is not green-by-default and not red-by-default either."""
         empty = pathlib.Path(self.stack.name) / "empty.json"

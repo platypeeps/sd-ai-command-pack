@@ -462,7 +462,7 @@ def review_state(root: pathlib.Path, rounds: dict[int, dict], ref: str) -> dict:
     out: list[dict] = []
     for pull in sorted(rounds):
         payload = rounds[pull]
-        for found in findings(pull, payload.get("reviews"), payload.get("comments")):
+        for found in findings(pull, payload.get("reviews") or (), payload.get("comments") or ()):
             out.append(verdict(root, found, rows, ref))
     return {
         "landing_ref": ref,
@@ -535,7 +535,7 @@ def live_round(root: pathlib.Path, only: int | None, limit: int) -> tuple[dict[i
 # --------------------------------------------------------------------------
 
 
-def render(result: dict, stream: TextIO, indent: str = "  ") -> None:
+def render_findings(result: dict, stream: TextIO, indent: str = "  ") -> None:
     write = stream.write
     if result.get("reason"):
         write(f"{indent}unavailable: {result['reason']}\n")
@@ -563,7 +563,7 @@ def render(result: dict, stream: TextIO, indent: str = "  ") -> None:
         write(f"{indent}acknowledge each: sd-review-ack --ack ID --fixed SHA | --dismiss 'why'\n")
 
 
-def build_parser() -> argparse.ArgumentParser:
+def ack_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sd-review-ack",
         description=(
@@ -588,7 +588,8 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict, int]:
+def _refuse_bad_arguments(args: argparse.Namespace) -> None:
+    """Every way the flags contradict each other, before anything is read."""
     if args.limit <= 0:
         raise UsageError("--limit takes a positive number of pull requests")
     if args.ack and not (args.fixed or args.dismiss):
@@ -598,36 +599,48 @@ def run(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict, int]:
     if (args.fixed or args.dismiss) and not args.ack:
         raise UsageError("--fixed and --dismiss say what to do with --ack ID")
 
-    if args.source:
-        rounds, reason = captured_round(pathlib.Path(args.source)), ""
-        if args.pr is not None:
-            rounds = {args.pr: rounds[args.pr]} if args.pr in rounds else {}
-    else:
-        rounds, reason = live_round(root, args.pr, args.limit)
+
+def _chosen_round(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict[int, dict], str]:
+    """The pull requests to read: a captured file, or GitHub."""
+    if not args.source:
+        return live_round(root, args.pr, args.limit)
+    rounds = captured_round(pathlib.Path(args.source))
+    if args.pr is not None:
+        rounds = {args.pr: rounds[args.pr]} if args.pr in rounds else {}
+    return rounds, ""
+
+
+def _record_one(args: argparse.Namespace, root: pathlib.Path, rounds: dict[int, dict]) -> None:
+    """Acknowledge the finding `--ack` names, or refuse because nothing has that id."""
+    wanted = [row for pull in rounds
+              for row in findings(pull, rounds[pull].get("reviews") or (),
+                                  rounds[pull].get("comments") or ())
+              if row["id"] == args.ack]
+    if not wanted:
+        raise UsageError(f"no finding here has the id {args.ack!r}; run without --ack to list them")
+    acknowledge(root, wanted[0], "fixed" if args.fixed else "dismissed", args.fixed or args.dismiss)
+
+
+def review_report(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict, int]:
+    """The whole run: validate, read a round, record a reading, report, rule."""
+    _refuse_bad_arguments(args)
+    rounds, reason = _chosen_round(args, root)
     if reason:
         return {"reason": reason, "findings": [], "unsatisfied": [], "pull_requests": []}, 0
-
-    ref = landing_ref(root, args.landed_in)
     if args.ack:
-        wanted = [row for pull in rounds
-                  for row in findings(pull, rounds[pull].get("reviews"), rounds[pull].get("comments"))
-                  if row["id"] == args.ack]
-        if not wanted:
-            raise UsageError(f"no finding here has the id {args.ack!r}; run without --ack to list them")
-        acknowledge(root, wanted[0], "fixed" if args.fixed else "dismissed", args.fixed or args.dismiss)
-
-    result = review_state(root, rounds, ref)
+        _record_one(args, root, rounds)
+    result = review_state(root, rounds, landing_ref(root, args.landed_in))
     result.update(tool="sd-review-ack", schema=SCHEMA_VERSION, reason="", root=str(root))
     return result, (1 if args.check and result["unsatisfied"] else 0)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+def ack_main(argv: list[str] | None = None) -> int:
+    args = ack_parser().parse_args(argv)
     try:
         root = sd_lib.repo_root()
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
-        result, code = run(args, root)
+        result, code = review_report(args, root)
     except UsageError as error:
         print(f"sd-review-ack: error: {error}", file=sys.stderr)
         return 2
@@ -635,9 +648,9 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         print(f"sd-review-ack: {len(result['pull_requests'])} pull request(s)")
-        render(result, sys.stdout)
+        render_findings(result, sys.stdout)
     return code
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(ack_main())
