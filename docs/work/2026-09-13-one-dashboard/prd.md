@@ -104,9 +104,9 @@ arise, and the reason is worth stating before the ordering section leans on it.
 `DEFAULT_PORT` (`dashboard/server.py:57`) is 8767. The process listening on 8767
 is PID 37095, which `launchctl` runs under the label `com.sven.sd-dashboard`,
 and whose `ProgramArguments[0]` is the system repository's
-`local-project-dashboard/dashboard.sh`. Measured by sd:705's followup note
-#1331 and independently re-measured on pull request #898 at `d0ad6542`. So the
-pack dashboard cannot bind its own default while the system server holds it:
+`local-project-dashboard/dashboard.sh`. Measured by sd:705's followup note #1331,
+and independently re-measured on pull request #898 at `d0ad6542`. So the pack
+dashboard cannot bind its own default while the system server holds it:
 starting it either fails or wins a race nobody wants it to win. **It is not a
 fallback. There is no window in which the machine depends on it.** The invariant
 the ordering has to protect is therefore not "the pack keeps serving until the
