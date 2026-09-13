@@ -586,12 +586,15 @@ class TheShadowRecoveryWindow(SuggestCase):
     class Reporting:
         """A `Synced`-shaped result whose `report()` this test controls.
 
-        NOT a convenience. `queued` and `incomplete` arrived in the library at
-        #301, and CI pins a commit that predates it -- `Synced(queued=3)`
-        raises `TypeError` there while passing on every local venv. Naming the
-        library's newer fields in a test would make the test assert the
-        library's schema; what is under test is the VERB's forwarding, which
-        must hold whatever `report()` returns.
+        NOT a convenience, and no longer a workaround either. It was written
+        when CI pinned a commit predating `queued` and `incomplete`, so
+        `Synced(queued=3)` raised `TypeError` there while passing on every
+        local venv; the pin has since moved past #301 and that asymmetry is
+        gone. The stub stays for the reason that outlives the pin: naming the
+        library's newer fields would make this test assert the library's
+        schema, and what is under test is the VERB's forwarding, which must
+        hold whatever `report()` returns -- including a line the library
+        learns to emit after this test was written.
         """
 
         def __init__(self, lines, *, ok=True, reason="", truncated=()):
