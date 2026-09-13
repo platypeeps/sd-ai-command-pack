@@ -90,7 +90,7 @@ them." Read literally, and the plan follows it literally:
 - **The library exports the order.** `sd_db.TRACKERS = ("github", "jira")`,
   in report order, the same enumerated-not-discovered shape as
   `TRACKERS` (`dashboard/collect.py:24`) and for the same reason its comment
-  gives. The verb `shadow_sync` (`bin/sd_shadow.py:126`) iterates it and calls
+  gives. The verb `shadow_sync` (`bin/sd_shadow.py:141`) iterates it and calls
   `sync_shadow(connection, tracker=name, **options)` once per name, printing
   one block per tracker, each line prefixed `shadow sync[<tracker>]:`. A pin
   that predates the export yields `("github",)` through `getattr`, so the

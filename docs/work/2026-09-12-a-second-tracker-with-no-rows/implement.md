@@ -159,7 +159,7 @@ since R11-D48. The pack half is on the order of forty lines in
       `python -c "import sd_db; print(sd_db.TRACKERS)"` in the CI venv prints
       `('github', 'jira')`.
 
-- [ ] **6. The verb iterates.** `shadow_sync` (`bin/sd_shadow.py:126`) reads
+- [ ] **6. The verb iterates.** `shadow_sync` (`bin/sd_shadow.py:141`) reads
       `names = getattr(sd_db, "TRACKERS", ("github",))`; when `--since` or
       `--until` is given, `names` is `("github",)` and every other tracker
       prints `shadow sync[<name>]: skipped (recovery window is GitHub's)`.
@@ -238,11 +238,11 @@ since R11-D48. The pack half is on the order of forty lines in
       `bin/sd-status:3365-3368`; then every closed row the producer kept as
       `KEY  closed  <title>`; then `none` if there were no rows. Nothing
       formats `number` and nothing slices a title. `ORDER`
-      (`tests/test_sd_status.py:3555`) gains the heading after
+      (`tests/test_sd_status.py:3675`) gains the heading after
       `issues (this repo, from the index)`, and the skeleton test's count
       moves from thirteen to fourteen. Every hand-built result the suite
       passes to `render()` gains a `jira` entry, starting with
-      `report` (`tests/test_sd_status.py:3522`) on `ReportSectionTests`,
+      `report` (`tests/test_sd_status.py:3641`) on `ReportSectionTests`,
       which builds `issues` and `contributions` and no `jira` — without
       that edit the existing skeleton tests fail with `KeyError` before
       any new case runs. `skills/sd-status/SKILL.md` is rewritten in three
