@@ -79,6 +79,8 @@ with `--from`. Writes exactly one file, and only when asked to acknowledge.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -87,7 +89,7 @@ import re
 import sys
 import tempfile
 from datetime import datetime, timezone
-from typing import Any, Iterable, TextIO
+from typing import Any, Iterable, Iterator, TextIO
 
 #: Read-only means read-only, and importing `sd_lib` would otherwise leave a
 #: `bin/__pycache__` behind. Set before the first sibling import.
@@ -101,6 +103,13 @@ import sd_lib  # noqa: E402
 
 SCHEMA_VERSION = 1
 STORE_NAME = "sd-review-ack.json"
+
+#: The sidecar `flock` is taken on, beside the store. A lock on the store file
+#: itself cannot work here: `write_store` replaces that file, so the inode a
+#: waiting writer holds a lock on is not the inode the winner just wrote, and
+#: the two would serialise against nothing.
+LOCK_NAME = STORE_NAME + ".lock"
+
 DEFAULT_LIMIT = 30
 
 #: The heading an automated reviewer writes above findings it chose not to
@@ -587,6 +596,12 @@ def write_store(root: pathlib.Path, rows: dict[str, dict]) -> pathlib.Path:
     `os.replace` is atomic within a directory, and the temporary file is made
     in the same directory for that reason. A torn store would read as empty on
     the next run, silently discarding acknowledgements that were made.
+
+    Atomic against a crash is not serialised against a second writer, and this
+    function is not where that is handled: it replaces whatever rows it is
+    given, so a caller that read the rows before another writer added one
+    replaces that writer's row with its own absence. Every caller that mutates
+    the store holds `locked` across its read, its edit and this call.
     """
     path = store_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -602,6 +617,82 @@ def write_store(root: pathlib.Path, rows: dict[str, dict]) -> pathlib.Path:
         pathlib.Path(temporary).unlink(missing_ok=True)
         raise
     return path
+
+
+def lock_path(root: pathlib.Path) -> pathlib.Path:
+    """The sidecar every writer of this store queues on."""
+    return store_path(root).with_name(LOCK_NAME)
+
+
+@contextlib.contextmanager
+def locked(root: pathlib.Path) -> Iterator[bool]:
+    """Hold the store for one read-modify-write, against writers anywhere.
+
+    `write_store` is atomic against a *crash* and that is all it is atomic
+    against. Every write here is read-modify-write -- read the rows, add one,
+    replace the file -- and nothing serialised the three steps, so two lanes
+    that got there in the same second each read the same rows and the second
+    `os.replace` dropped the first lane's record. The store is one file for
+    the whole repository, shared by every linked worktree by construction
+    (`store_path` resolves the *common* git dir), so "two lanes at once" is the
+    ordinary case on this repository rather than a rare one: two agents, two
+    worktrees, two pushes, one file.
+
+    BLOCKING, UNLIKE THE TWO OTHER LOCKS IN THIS TREE. `bin/sd_ledger.py` and
+    `bin/sd-handoff-restore` both take `LOCK_NB` with a short retry and give the
+    write up, because both run inside something a wait would stall -- an HTTP
+    handler and a `SessionStart` hook -- and both would rather lose one
+    measurement than delay a session. Neither trade applies here. This runs on
+    a push that is already talking to GitHub, the row is an acknowledgement
+    somebody will be gated on, and losing it is the defect. A wait is also
+    bounded by the kernel rather than by trust: `flock` is released when the
+    holder's file descriptor closes, which includes the holder dying, so there
+    is no stale lock to wait behind forever.
+
+    Yields whether the lock was actually taken. A lock file that cannot be
+    created or cannot be locked -- a read-only `.git`, a filesystem with no
+    `flock` -- degrades to the unserialised write this replaced, which is what
+    the caller did before and is strictly better than refusing to record. Reads
+    take no lock at all, deliberately: `os.replace` means a reader sees one
+    whole version or another and never a torn one, and `--check` and
+    `sd-status` must stay read-only down to not creating a file.
+    """
+    path = lock_path(root)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = os.open(str(path), os.O_CREAT | os.O_WRONLY, 0o644)
+    except OSError:
+        yield False
+        return
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+        except OSError:
+            yield False
+            return
+        yield True
+    finally:
+        os.close(handle)
+
+
+def _row(found: dict, disposition: str, detail: str, commit: str) -> dict:
+    """One store row, and nothing about where it is going.
+
+    Split out of `acknowledge` so both writers can build a row while the lock
+    is held without either calling the other: two `flock` calls on two
+    descriptors for the same file deadlock a single process against itself, so
+    a writer that loops over `acknowledge` cannot be a writer that locks.
+    """
+    return {
+        "pr": found["pr"],
+        "disposition": disposition,
+        "commit": commit or None,
+        "cited": detail if disposition == "fixed" else "",
+        "reason": detail if disposition == "dismissed" else "",
+        "path": found["path"],
+        "line": found["line"],
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
 
 
 def acknowledge(root: pathlib.Path, found: dict, disposition: str, detail: str) -> dict:
@@ -627,19 +718,12 @@ def acknowledge(root: pathlib.Path, found: dict, disposition: str, detail: str) 
                 "acknowledge a commit that exists"
             )
         commit = resolved
-    rows, _ = read_store(root)
-    rows[found["id"]] = {
-        "pr": found["pr"],
-        "disposition": disposition,
-        "commit": commit or None,
-        "cited": detail.strip() if disposition == "fixed" else "",
-        "reason": detail.strip() if disposition == "dismissed" else "",
-        "path": found["path"],
-        "line": found["line"],
-        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-    }
-    write_store(root, rows)
-    return rows[found["id"]]
+    row = _row(found, disposition, detail.strip(), commit)
+    with locked(root):
+        rows, _ = read_store(root)
+        rows[found["id"]] = row
+        write_store(root, rows)
+    return row
 
 
 def answering_commit(root: pathlib.Path, found: dict, head: str) -> str:
@@ -708,14 +792,35 @@ def record_answers(root: pathlib.Path, rows: Iterable[dict], head: str) -> tuple
         # unknown, and writing would replace the whole file with a record built
         # from that ignorance.
         return [], broken
-    written: list[dict] = []
+    # Every `git` question first, outside the lock. `answering_commit` is a
+    # `rev-list` per finding, and a lock held across a dozen subprocesses is a
+    # lock another lane waits behind for no reason; the pre-read above only
+    # decides which findings are worth asking about.
+    answers: list[tuple[dict, str]] = []
     for found in rows:
         if found["id"] in store:
             continue
         commit = answering_commit(root, found, head)
-        if not commit:
-            continue
-        written.append(dict(acknowledge(root, found, "fixed", commit), id=found["id"]))
+        if commit:
+            answers.append((found, commit))
+    if not answers:
+        return [], ""
+    written: list[dict] = []
+    with locked(root):
+        # Read again, under the lock, and this read is the one that decides.
+        # Between the pre-read and here another lane may have recorded some of
+        # these findings, and one write at the end of the loop replaces the file
+        # once from rows nobody else can have moved underneath it.
+        store, broken = read_store(root)
+        if broken:
+            return [], broken
+        for found, commit in answers:
+            if found["id"] in store:
+                continue
+            store[found["id"]] = _row(found, "fixed", commit, commit)
+            written.append(dict(store[found["id"]], id=found["id"]))
+        if written:
+            write_store(root, store)
     return written, ""
 
 
