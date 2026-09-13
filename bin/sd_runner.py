@@ -33,7 +33,7 @@ def service(args):
         historical = getattr(args, "run", None)
         if historical is None:
             result = runner_controls.control(connection, args.assignment, args.runner_action,
-                expected_revision=revision, destination=getattr(args, "destination", None))
+                expected_revision=revision, destination=getattr(args, "destination", None), who=getpass.getuser())
         else:
             selected = runner.attempt(connection, args.assignment, historical)
             database = sd_db.database.default_path()

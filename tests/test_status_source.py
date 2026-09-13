@@ -267,7 +267,7 @@ class TheRowDecides(Fixture):
         note = sd_db.add_note(connection, row["id"], "followup", "Keep the original history")
         moved = self.work / "2026-09-08-renamed"
         self.item.rename(moved)
-        progress.relink_artifact(connection, row["id"], "docs/work/2026-09-08-renamed/prd.md")
+        progress.relink_artifact(connection, row["id"], "docs/work/2026-09-08-renamed/prd.md", who="user")
         self.assertEqual(sd_lib.status_report(moved).status, "in_progress")
         linked = sd_handoff_rows.item_for(connection, sd_db, self.root, moved)
         self.assertEqual(linked["id"], row["id"])
@@ -292,7 +292,7 @@ class TheRowDecides(Fixture):
         connection = self.seed("in_progress")
         sd_db.upsert_repo(connection, str(self.root), status_source="row")
         row = sd_db.writes.item_by_external(connection, sd_lib.ITEM_ROW_SOURCE, self.identity())
-        progress.cancel_work(connection, row["id"], reason="No longer needed")
+        progress.cancel_work(connection, row["id"], reason="No longer needed", who="user")
         with mock.patch.object(sd_lib, "delivered", side_effect=AssertionError("asked Git")):
             item = self.only()
         self.assertEqual(item.status, "done")
