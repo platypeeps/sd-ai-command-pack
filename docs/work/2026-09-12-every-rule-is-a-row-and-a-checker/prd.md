@@ -89,8 +89,9 @@ status checks.
      carries;
    - c. every rule id cited in live prose is defined in the registry.
 6. **Leg b and leg c carry a frozen baseline, not a flag day.** The uncited
-   claims in `skills/` — held per document in `UNCITED_SKILL_CLAIMS`, which is
-   what `claims_in` measures — and the archive-only R-ids cannot be fixed in
+   claims in `skills/` — held per document in `UNCITED_SKILL_CLAIMS`, the
+   count `uncited_skill_claims()` projects from what `claims_in` finds — and
+   the archive-only R-ids cannot be fixed in
    the pull request that introduces the check. A baseline counts *violations*, never a
    population: it may fall and may not rise, in the shape
    `tests/test_loc_caps.py` already uses, and adding a correctly cited claim
@@ -172,6 +173,8 @@ status checks.
 - 2026-09-12 sd:622 closed out against this document: leg b's predicate has one
   recorded definition, and the counts in this document are marked as
   unreproducible rather than replaced with a fourth number
-- 2026-09-12 step 4 first slice: `R10-D5` and `R10-D6` registered, the stranded
-  baseline falls 26 → 24, and the twenty-four that did not move each carry a
-  recorded reason in `implement.md`
+- 2026-09-12 step 4 first slice: `R10-D5` registered, the stranded baseline
+  falls 26 → 25, and the twenty-five that did not move each carry a recorded
+  reason in `implement.md`. `R10-D6` was registered in the first round and
+  unregistered in review: its named checker, `sd_lib.repo_root`, accepts a
+  path and enforces nothing

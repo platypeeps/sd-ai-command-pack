@@ -41,6 +41,7 @@ import re
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
@@ -923,6 +924,13 @@ class TheClaimPredicate(unittest.TestCase):
         -- the function that actually feeds the predicate -- left this test
         green and reddened only the baseline, which is the wrong test failing
         and sends the reader to a count instead of to the roster.
+
+        **And exercised against a name the tree does not have.** Asserting
+        that today's matcher covers today's names is satisfied by a roster
+        typed today: a hard-coded alternation carrying the same names passes
+        the subset assertion and misses every tool written tomorrow. So
+        `pack_nouns` is stubbed to a sentinel and the matcher must recognise
+        it -- which only a matcher that reads the enumeration can do.
         """
 
         nouns = pack_nouns()
@@ -942,6 +950,18 @@ The claim subject does not match every name enumerated from the tree.
 `names_a_pack_noun` builds its alternation from `pack_nouns`. A name the
 enumeration carries and the matcher misses means the matcher has a roster of
 its own.""")
+        sentinel = "zz-tool-that-does-not-exist"
+        with mock.patch(f"{__name__}.pack_nouns",
+                        return_value=frozenset({sentinel})):
+            stubbed = names_a_pack_noun()
+        self.assertIsNotNone(
+            stubbed.search(f"the {sentinel} tool"),
+            "`names_a_pack_noun` does not read `pack_nouns`: a name the stub "
+            "returned is not matched, so the matcher carries its own roster.")
+        self.assertIsNone(
+            stubbed.search("the sd-status tool"),
+            "`names_a_pack_noun` matched a name the stubbed `pack_nouns` did "
+            "not return, so the matcher carries its own roster.")
 
     def test_an_unknown_scope_is_refused_rather_than_silently_read(self):
         """A typo must not fall through to whichever branch is last."""

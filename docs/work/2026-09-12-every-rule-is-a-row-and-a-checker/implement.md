@@ -16,8 +16,10 @@
 - [ ] **2. Meta-check legs a and b, with the baseline.** Leg a: every registry
       row is cited by at least one skill. Leg b: every tool-behaviour claim in
       a skill cites a rule id the registry carries.
-      **The baseline is what `claims_in` returns, held per document in
-      `UNCITED_SKILL_CLAIMS`.** It counts *violations* within leg b's scope —
+      **The baseline is `UNCITED_SKILL_CLAIMS`, a projection of `claims_in`
+      and not its return value.** `claims_in` finds every claim, cited or not;
+      `uncited_skill_claims()` keeps the ones citing no id and counts them per
+      document. It counts *violations* within leg b's scope —
       the claims in `skills/` citing no rule id — and never the *population*.
       A ratchet over the whole live-prose population would be wrong twice: it
       counts claims leg b never examines, and adding a new, correctly cited
@@ -36,8 +38,8 @@
       > figures again, because each reconstruction had to invent the counting
       > rule the original never recorded. The shape of the requirement is
       > unchanged — violations, not population, downward only. The number is
-      > now whatever `claims_in` returns, per document, in
-      > `UNCITED_SKILL_CLAIMS`, and the three properties of that predicate that
+      > now `UNCITED_SKILL_CLAIMS`: the per-document count `uncited_skill_claims()`
+      > projects from `claims_in`, and the three properties of that predicate that
       > were load-bearing and unstated are pinned by `TheClaimPredicate`.
       > `design.md` carries the correction in full.
 
@@ -52,24 +54,38 @@
       step. It lands in slices; each slice reduces the leg c baseline and the
       baseline test proves it fell.
 
-      **Slice 1, 2026-09-12. `STRANDED_RULE_IDS` 26 → 24.** `R10-D5` and
-      `R10-D6` are rows. Both were already taught by a skill section that cites
-      the id, and both have a checker that is a plain function in `bin/` —
-      `sd_setup_github.setup_github` and `sd_lib.repo_root`. Registering
-      `R10-D5` turned the second-list check red on the refusal message in
-      `bin/sd_setup_github.py`, which carried the id inside a string; the
-      citation moved to the comment above it, which is the rephrasing that
-      check's own failure text prescribes.
+      **Slice 1, 2026-09-12. `STRANDED_RULE_IDS` 26 → 25.** `R10-D5` is a
+      row. It was already taught by a skill section that cites the id, and its
+      checker is a plain function in `bin/` — `sd_setup_github.setup_github` —
+      that is runtime code carrying its own refusal. Registering it turned the
+      second-list check red on the refusal message in `bin/sd_setup_github.py`,
+      which carried the id inside a string; the citation moved to the comment
+      above it, which is the rephrasing that check's own failure text
+      prescribes.
+
+      `R10-D6` was a row for one review round and is not one now. The row
+      named `sd_lib.repo_root` as its checker, and `repo_root(start=None)`
+      accepts a path: it is the resolver the rule constrains, not a guard, so
+      the row named the mechanism by which the rule would be broken as its
+      enforcement. The meta-check passed it because leg a's checker test
+      asserts the checker EXISTS and never that it ENFORCES; leg d, "the
+      checker fails when the rule is violated", is recorded on sd:431 as the
+      fix. The rule's real enforcement is
+      `tests/test_verb_inventory.py::test_no_command_accepts_a_repository_path`,
+      a test over the tree that `bin/sd_rules.py` cannot import. Settle what
+      `Rule.checker` names before the row returns; the same obstacle holds
+      `R10-D6` in the table below.
 
       **Two obstacles decide the rest of the backfill, and neither is the
-      judgement the step was sized for.** Twenty of the twenty-four remaining
+      judgement the step was sized for.** Twenty of the twenty-five remaining
       ids are taught by no skill section at all, so leg a cannot pass for them:
       registering one means writing the teaching section first, which is step 8
-      and not this step. The other four are taught, and each is held up by
+      and not this step. The other five are taught, and each is held up by
       something specific:
 
       | Id | Taught in | Why it is not a row yet |
       |---|---|---|
+      | `R10-D6` | `skills/sd-status/SKILL.md` and four others | Its checker is a test, and `Rule.checker` holds a function `bin/sd_rules.py` imports. The registry has no way to name the second kind. See the paragraph above. |
       | `R10-D1` | `skills/sd-status/SKILL.md` | `bin/sd-status` carries the id in two strings, one of them the `CLASSES` row whose text the skill's table mirrors. The second-list check wants it out of the string; leg a reads the skill table it would have to change. The two checks pull opposite ways and that needs a decision, not an edit. |
       | `R10-D2` | `skills/sd-handoff/SKILL.md` | The section that teaches it says Lane B is *not implemented*. A live row with a checker would assert an enforcement that does not exist, which is the defect this item is about. |
       | `R10-D3` | `skills/sd-handoff/SKILL.md` | Its enforcement lives in `bin/sd-handoff-restore`, which has no `.py` suffix. `source:bin/sd_lib.py::sibling` is the pack's way to import one, and its own contract says every caller defers it — so importing it to fill a registry row at module load contradicts it. |
