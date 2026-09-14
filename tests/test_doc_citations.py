@@ -265,12 +265,14 @@ once and refuses otherwise.
 from __future__ import annotations
 
 import collections
+import errno
 import os
 import pathlib
 import re
 import subprocess
 import tempfile
 import typing
+import unicodedata
 import unittest
 from unittest import mock
 
@@ -506,20 +508,33 @@ def numbered_lines(text: str) -> list[str]:
     return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
 
 
-def line_count(target: pathlib.Path) -> int:
-    """How many lines this file has, counted the way `numbered_lines` numbers them.
+def file_lines(target: pathlib.Path) -> list[str]:
+    """This file's lines, numbered the way `numbered_lines` numbers them.
+
+    Every reader of a cited window comes through here (sd:822). sd:794 moved
+    the `source:` window and the use test onto `numbered_lines` and left
+    `names_its_symbol`, `anchor_lines`' fallback and the markdown branches on
+    `splitlines()`, which counted two lines more than the parser past this
+    module's own U+2028 fixture; two counts of the same file are two answers.
 
     A trailing newline *ends* the last line, it does not start another, so the
     empty final element `split("\\n")` leaves behind is dropped. Without that
     an off-by-one lets a citation one line past the end read as in range, which
-    is the commonest spelling of the defect this count exists to find.
+    is the commonest spelling of the defect `line_count` exists to find.
+    Decoded with replacement: these readers compare and discard, and a byte
+    that will not decode should fail a row, not the run.
     """
 
-    text = target.read_text(encoding="utf-8", errors="replace")
-    lines = numbered_lines(text)
+    lines = numbered_lines(target.read_text(encoding="utf-8", errors="replace"))
     if lines and lines[-1] == "":
         lines.pop()
-    return len(lines)
+    return lines
+
+
+def line_count(target: pathlib.Path) -> int:
+    """How many lines this file has, counted the way `file_lines` reads them."""
+
+    return len(file_lines(target))
 
 
 def within_file(target: pathlib.Path, start: int, end: int,
@@ -784,7 +799,7 @@ def quotes(reason: str, token: str, doc: pathlib.Path,
         # rather than one bad row. An unconvertible line number is a line the
         # file does not have, which is already a failed quote.
         return False
-    lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
+    lines = file_lines(source)
     return 1 <= number <= len(lines) and token in lines[number - 1]
 
 
@@ -954,7 +969,7 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
 def names_its_symbol(anchor: str, target: pathlib.Path, start: int, end: int) -> bool:
     """Does the cited window carry the anchor? The one comparison this gate makes."""
 
-    lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
+    lines = file_lines(target)
     window = "\n".join(lines[max(0, start - 1 - WINDOW):end + WINDOW])
     return anchor.rstrip("()") in window
 
@@ -1001,7 +1016,7 @@ class DocCitationTests(unittest.TestCase):
     def test_every_anchored_citation_names_its_symbol_at_the_cited_line(self) -> None:
         stale = []
         for doc, anchor, target, start, end in anchored_citations():
-            lines = target.read_text(encoding="utf-8").splitlines()
+            lines = file_lines(target)
             window = "\n".join(lines[max(0, start - 1 - WINDOW):end + WINDOW])
             if anchor.rstrip("()") not in window:
                 stale.append(
@@ -1189,8 +1204,7 @@ class TheMarkerGrammar(unittest.TestCase):
         """
 
         here = pathlib.Path(__file__)
-        for number, line in enumerate(
-                here.read_text(encoding="utf-8").splitlines(), 1):
+        for number, line in enumerate(file_lines(here), 1):
             if token in line and "QUOTABLE = " not in line:
                 return f"{here.relative_to(REPO_ROOT)}:{number}"
         raise AssertionError(f"no line of {here.name} carries {token}")
@@ -1510,9 +1524,9 @@ class TheMarkerGrammar(unittest.TestCase):
             ("S15 form feeds above a neighbour",
              "\x0c\n\x0c\ndef other():\n" + body + "\ndef f():\n    pass\n", "quoted-not-there"),
             ("S16 form feed in a comment", "# a \x0c comment\ndef f():\n" + body, "quoted"),
-            ("S17 U+2028 in a string", "X = 'a b'\ndef f():\n" + body, "quoted"),
+            ("S17 U+2028 in a string", "X = 'a\u2028b'\ndef f():\n" + body, "quoted"),
             ("vertical tab and \\x1c-\\x1e, \\x85, U+2029",
-             "X = 'a\x0b\x1c\x1d\x1e\x85 b'\ndef f():\n" + body, "quoted"),
+             "X = 'a\x0b\x1c\x1d\x1e\x85\u2029b'\ndef f():\n" + body, "quoted"),
             ("CONTROL: CRLF", ("X = 1\ndef f():\n" + body).replace("\n", "\r\n"), "quoted"),
         )
         for name, source, expected in cases:
@@ -1528,6 +1542,23 @@ class TheMarkerGrammar(unittest.TestCase):
                     with mock.patch.dict(globals(), {"REPO_ROOT": root}):
                         rows = classify([root / "doc.md"])
                 self.assertEqual([row.reason for row in rows], [expected])
+
+    def test_this_module_spells_its_invisible_separators_as_escapes(self) -> None:
+        """sd:822 NB3. A literal U+2028 in a fixture is a fixture an editor deletes.
+
+        S17 and the U+2029 case carried the character itself. An editor that
+        strips "unusual line terminators" leaves both tests green while each
+        tests nothing, and a diff shows no change. Read as bytes, so no newline
+        translation hides one; every terminator `splitlines()` breaks on that
+        `\\n` is not, so a fixture written with any of them is caught the same
+        way.
+        """
+        text = pathlib.Path(__file__).read_bytes().decode("utf-8")
+        found = {f"U+{ord(char):04X}": text.count(char)
+                 for char in ("\r", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e",
+                              "\x85", "\u2028", "\u2029")
+                 if char in text}
+        self.assertEqual(found, {}, "write these as escapes, not as the character")
 
     def test_a_marker_with_no_reason_does_not_exempt(self) -> None:
         self.assertNotEqual(self.reason_for("`f` (`bin/x.py:1`) [quoted:]"), "quoted")
@@ -1721,6 +1752,12 @@ def source_declaration_error(root: pathlib.Path, path: str, symbol: str) -> str 
     Functions, classes and assigned names are declarations; comments, strings
     and call sites cannot keep a deleted definition's citation passing. This
     also handles extensionless Python entrypoints such as bin/sd-docs-lint.
+
+    Each cause is named before the last one is assumed (sd:794, sd:822).
+    `is_file()` answers no for a directory and for a symlink loop as readily
+    as for nothing there, and "target is missing" sent a reader looking for a
+    file that exists. A markdown page is refused before it is parsed: one that
+    happens to parse as Python said "found 0", which reads as a renamed symbol.
     """
     import ast
 
@@ -1728,8 +1765,20 @@ def source_declaration_error(root: pathlib.Path, path: str, symbol: str) -> str 
         target = (root / path).resolve()
         if not target.is_relative_to(root.resolve()):
             return None  # Preserve the line rule's containment exclusion.
-        if not target.is_file():
+        if not points_into_code(path):
+            return f"{path}: a markdown page declares no Python symbol"
+        try:
+            target.stat()
+        except (FileNotFoundError, NotADirectoryError):
             return f"{path}: target is missing"
+        except OSError as error:
+            if error.errno == errno.ELOOP:
+                return f"{path}: target is a symlink loop"
+            raise
+        if target.is_dir():
+            return f"{path}: target is a directory"
+        if not target.is_file():
+            return f"{path}: target is not a regular file"
         tree = ast.parse(target.read_text(encoding="utf-8"), filename=path)
     except (OSError, UnicodeError, SyntaxError) as error:
         return f"{path}: cannot read a Python source declaration: {error}"
@@ -1848,7 +1897,7 @@ def anchor_lines(root: pathlib.Path, path: str, anchor: str) -> list[int]:
         if len(declared) == 1:
             return declared
     try:
-        lines = (root / path).read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = file_lines(root / path)
     except OSError:
         return []
     # The FULL anchor, not the callee. `.replace("\n", " ")` is discriminating
@@ -1874,13 +1923,35 @@ def calls_by_name(target: pathlib.Path, start: int, end: int, name: str) -> bool
     (sd:765). A stale `get` whose old window held `budget` read as a use and
     refused, and an anchor `helper(a, b)` cited at `helper(a,b)` read as no use
     and converted, because the argument spelling differs. The callee alone, on
-    an identifier boundary, answers both. The boundary is `\\w`, which is
-    Unicode-aware, because `geté` is one Python identifier and not a use of
-    `get`.
+    an identifier boundary, answers both.
+
+    The boundary is the parser's, not `\\w`'s (sd:822). Python normalises an
+    identifier with NFKC before it looks the name up, so a fullwidth `get()`
+    (U+FF47 U+FF45 U+FF54) calls `get`; `\\w` never matched it, and the tool
+    converted that use onto the declaration. So the window is normalised
+    first. And `\\w` stops at U+0301 and U+00B7, which continue an identifier,
+    so `get` followed by either read as a use of `get` when it is another
+    name; the neighbour test is `str.isidentifier`, the rule the parser
+    applies. `name` needs no normalising: it comes from the page, and
+    `anchored_repoint` admits only ASCII. What remains is that a mention in a
+    comment or a string counts as a use. That is the safe direction, a
+    refusal, and `tokenize` over a window cut from the middle of a file fails
+    on the indentation it cannot see, which is worse than a refusal.
     """
-    lines = numbered_lines(target.read_text(encoding="utf-8", errors="replace"))
-    window = "\n".join(lines[max(0, start - 1 - WINDOW):end + WINDOW])
-    return re.search(rf"(?<!\w){re.escape(name)}(?!\w)", window) is not None
+    lines = file_lines(target)
+    window = unicodedata.normalize(
+        "NFKC", "\n".join(lines[max(0, start - 1 - WINDOW):end + WINDOW]))
+    for found in re.finditer(re.escape(name), window):
+        before = window[found.start() - 1:found.start()] if found.start() else ""
+        after = window[found.end():found.end() + 1]
+        if not continues_identifier(before) and not continues_identifier(after):
+            return True
+    return False
+
+
+def continues_identifier(char: str) -> bool:
+    """Would `char` continue an identifier it follows? The window's edge does not."""
+    return bool(char) and ("_" + char).isidentifier()
 
 
 def inside(root: pathlib.Path, path: str) -> pathlib.Path | None:
@@ -1994,7 +2065,7 @@ def quoted_repoint(
     source = inside(root, path)
     if source is None or source.resolve() == doc.resolve():
         return f"[quoted: {reason}] names no readable source"
-    lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
+    lines = file_lines(source)
     carrying = [n for n, line in enumerate(lines, 1) if match.group(0) in line]
     if not carrying:
         return f"[quoted: {reason}] -- {match.group(0)} is gone from {path}"
@@ -3187,19 +3258,141 @@ class CitationRepointerTests(unittest.TestCase):
         self.assertIn("is a use, not its declaration at 18", refusals[0].reason)
         self.assertIn("`bin/tool.py:3`", text)
 
-    def test_a_declaration_at_either_edge_of_the_window_converts(self) -> None:
-        """The window's two bounds, which no test pinned (mutations Md and Me).
+    def test_the_use_test_reads_an_identifier_the_way_the_parser_does(self) -> None:
+        """sd:822 NB1. `\\w` was not the identifier rule, and it erred both ways.
 
-        The declaration sits WINDOW lines under the cited line, and inside a
-        cited range but more than WINDOW lines under its start. Each is a
-        citation to the declaration. The use on line 2 is inside the range's
-        first lines, so ignoring the range end refuses it as a use whether the
-        mutation narrows the bound alone or the window as well.
+        Python normalises an identifier with NFKC before it looks it up, so a
+        fullwidth `get()` (U+FF47 U+FF45 U+FF54) calls `get`: a use `\\w` never
+        saw, so the tool converted it onto the declaration -- a wrong
+        conversion, the class of defect this tool must not produce. U+0301 (a
+        combining acute) and U+00B7 (a middle dot) continue an identifier where
+        `\\w` stops, so `get` followed by either is another name and not a use
+        of `get`; those refused. The premise is executed, not asserted: the
+        fixture is run, and the fullwidth call reaches `get` while the other
+        two names reach nothing. Each direction is its own subTest, so a fix
+        for one cannot pass for the other.
+        """
+        source = (
+            "def lookup():\n"                                   # 1
+            "    return \uff47\uff45\uff54()\n"                 # 2
+            "\n\n\n\n"                                          # 3-6
+            "def other():\n"                                    # 7
+            "    return get\u0301() + get\u00b7()\n"            # 8
+            + "# pad\n" * 10 +                                  # 9-18
+            "def get():\n"                                      # 19
+            "    return 42\n")                                  # 20
+        namespace: dict[str, typing.Any] = {}
+        exec(source, namespace)
+        self.assertEqual(namespace["lookup"](), 42, "the premise: fullwidth get() is get()")
+        with self.assertRaises(NameError):
+            namespace["other"]()
+        self.source.write_text(source, encoding="utf-8")
+        with self.subTest("a fullwidth call is a use"):
+            self.page("It reads with `get` (`bin/tool.py:2`).\n")
+            text, moves, refusals = repoint_document(self.doc, self.root)
+            self.assertEqual(moves, [], "NFKC: fullwidth get() calls get, so line 2 is a use")
+            self.assertIn("is a use, not its declaration at 19", refusals[0].reason)
+            self.assertIn("`bin/tool.py:2`", text)
+        with self.subTest("a name that continues past `get` is not a use"):
+            self.page("It reads with `get` (`bin/tool.py:8`).\n")
+            _, moves, refusals = repoint_document(self.doc, self.root)
+            self.assertEqual(refusals, [], "U+0301 and U+00B7 continue an identifier")
+            self.assertEqual([move.now for move in moves], ["source:bin/tool.py::get`"])
+
+    def test_a_separator_above_a_cited_use_does_not_slide_the_use_test(self) -> None:
+        """sd:822 NB2 R2. The use test counts lines the way the parser does.
+
+        sd:794 moved it onto `numbered_lines` and nothing held it there: no
+        fixture put a form feed or a U+2028 above a cited use. Under
+        `splitlines()` the separators on line 1 are WINDOW + 1 lines of their
+        own, the window for line 3 slides up past the use, and the use converts
+        -- a wrong conversion. The declaration is where `ast` puts it either
+        way, which is what makes the two counts disagree.
+        """
+        for name, first in (("U+2028 in a string", "X = '" + "\u2028" * (WINDOW + 1) + "'"),
+                            ("form feeds in a comment", "# " + "\x0c" * (WINDOW + 1))):
+            with self.subTest(name):
+                self.source.write_bytes(
+                    (first + "\n"                          # 1
+                     "def lookup():\n"                     # 2
+                     "    return get()\n"                  # 3
+                     + "# pad\n" * 10 +                    # 4-13
+                     "def get():\n"                        # 14
+                     "    pass\n").encode("utf-8"))        # 15
+                self.page("It reads with `get` (`bin/tool.py:3`).\n")
+                text, moves, refusals = repoint_document(self.doc, self.root)
+                self.assertEqual(moves, [], "the window slid above the use")
+                self.assertIn("is a use, not its declaration at 14", refusals[0].reason)
+                self.assertIn("`bin/tool.py:3`", text)
+
+    def test_a_separator_in_a_page_does_not_slide_the_staleness_window(self) -> None:
+        """sd:822 NB3. One file, one line count: `names_its_symbol` reads it too.
+
+        A page carrying WINDOW + 1 invisible separators on its first line is
+        numbered by every editor, by git and by this module as the file it
+        looks like. `splitlines()` numbers it WINDOW + 1 lines longer, the
+        window for a correct citation slides above the anchor, and the gate
+        calls the citation stale -- so the repointer rewrites a citation that
+        was right, which is the failure mode it exists to avoid. The anchor is
+        at exactly one line, so nothing ambiguity could hide the move.
+        """
+        self.notes.write_bytes(
+            ("head" + "\u2028" * (WINDOW + 1) + "tail\n"       # 1
+             + "pad\n" * 8 +                                   # 2-9
+             "the render call is here\n"                       # 10
+             "pad\n").encode("utf-8"))                         # 11
+        self.page("The renderer is `render` (`notes.md:10`).\n")
+        text, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(moves, [], "the citation is right; the window slid off the anchor")
+        self.assertEqual(refusals, [])
+        self.assertIn("`notes.md:10`", text)
+
+    def test_the_use_test_window_is_WINDOW_lines_each_way(self) -> None:
+        """sd:822 NB2 R1. Nothing pinned the width of the use-test window.
+
+        A use WINDOW lines under the cited line, or above it, is inside the
+        window and refuses; one line further either way is outside it, and the
+        citation is a stale one to the declaration, which converts. A window
+        of the cited lines alone passed every test before this one, and under
+        it the citation two lines above a use converted -- the use test
+        answering a question it had not been asked.
         """
         self.source.write_text(
-            "# a\nx = render\n" + "# a\n" * 5 + "def render():\n    pass\n",
+            "# pad\n" * 6                                       # 1-6
+            + "x = get()\n"                                     # 7
+            + "# pad\n" * 10 +                                  # 8-17
+            "def get():\n"                                      # 18
+            "    pass\n",                                       # 19
             encoding="utf-8")
-        for citation in (f"bin/tool.py:{8 - WINDOW}", "bin/tool.py:1-6"):
+        for line, expected in ((7 - WINDOW, "use"), (7 - WINDOW - 1, "converts"),
+                               (7 + WINDOW, "use"), (7 + WINDOW + 1, "converts")):
+            with self.subTest(line=line, expected=expected):
+                self.page(f"It reads with `get` (`bin/tool.py:{line}`).\n")
+                _, moves, refusals = repoint_document(self.doc, self.root)
+                if expected == "use":
+                    self.assertEqual(moves, [])
+                    self.assertIn("is a use, not its declaration at 18", refusals[0].reason)
+                else:
+                    self.assertEqual(refusals, [])
+                    self.assertEqual([move.now for move in moves],
+                                     ["source:bin/tool.py::get`"])
+
+    def test_a_declaration_at_either_edge_of_the_window_converts(self) -> None:
+        """The window's three bounds, which no test pinned (mutations Md, Me, R8).
+
+        The declaration sits WINDOW lines under the cited line, inside a
+        cited range but more than WINDOW lines under its start, and WINDOW
+        lines above the cited line (sd:822 R8). Each is a citation to the
+        declaration. The use on line 2 is inside the range's first lines, so
+        ignoring the range end refuses it as a use whether the mutation
+        narrows the bound alone or the window as well; dropping the lower
+        bound refuses the third as a use of the name its own window declares.
+        """
+        self.source.write_text(
+            "# a\nx = render\n" + "# a\n" * 5 + "def render():\n    pass\n" + "# a\n" * 3,
+            encoding="utf-8")
+        for citation in (f"bin/tool.py:{8 - WINDOW}", "bin/tool.py:1-6",
+                         f"bin/tool.py:{8 + WINDOW}"):
             with self.subTest(citation=citation):
                 self.page(f"The renderer is `render` (`{citation}`).\n")
                 _, moves, refusals = repoint_document(self.doc, self.root)
@@ -3211,16 +3404,27 @@ class CitationRepointerTests(unittest.TestCase):
 
         A missing file, a file that is not Python, a markdown page, the page
         itself and a path out of the checkout all said the example "is not
-        inside one declaration". Nothing is rewritten in any case.
+        inside one declaration". Then (sd:822 NB4) a directory and a symlink
+        loop said "target is missing", and a markdown page that happens to
+        parse as Python -- `notes.md` here is two bare names -- said "found 0",
+        which reads as a renamed symbol. The page itself is also named through
+        `..` (sd:822 R6): a check that compared the unresolved paths sent that
+        spelling on to be parsed as Python. Nothing is rewritten in any case.
         """
         (self.root / "bin" / "run").write_text("#!/bin/sh\necho {\n", encoding="utf-8")
         (self.root / "docs.md").write_text("# notes\n\n- a (b\n", encoding="utf-8")
+        os.symlink("loop", self.root / "bin" / "loop")
         self.source.write_text("def render():\n    pass\n" * 2, encoding="utf-8")
         for path, symbol, cause in (
                 ("bin/gone.py", "render", "bin/gone.py: target is missing"),
+                ("bin/tool.py/x", "render", "bin/tool.py/x: target is missing"),
+                ("bin", "render", "bin: target is a directory"),
+                ("bin/loop", "render", "bin/loop: target is a symlink loop"),
                 ("bin/run", "render", "bin/run: cannot read a Python source declaration"),
-                ("docs.md", "render", "docs.md: cannot read a Python source declaration"),
+                ("docs.md", "render", "docs.md: a markdown page declares no Python symbol"),
+                ("notes.md", "render", "notes.md: a markdown page declares no Python symbol"),
                 ("page.md", "render", "names the page it sits on"),
+                ("bin/../page.md", "render", "names the page it sits on"),
                 ("../../etc/passwd", "render", "names a file outside the checkout"),
                 ("bin/tool.py", "render", "found 2"),
                 ("bin/tool.py", "gone", "found 0")):
