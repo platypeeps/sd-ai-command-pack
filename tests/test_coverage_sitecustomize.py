@@ -247,6 +247,12 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["bash", "-c", "cd sub && true & wait; python -I ../bin/sd_install.py"],
         # A function body runs where its caller is, and only once it is called.
         ["bash", "-c", "f() { cd sub; }; python -I ../bin/sd_install.py"],
+        # Called, the body's `cd` is the caller's: the launch is under `sub`.
+        ["bash", "-c", "f() { cd sub; }; f; python -I bin/sd_install.py"],
+        ["bash", "-c", "{ f() { cd sub; }; }; f; python -I bin/sd_install.py"],
+        ["bash", "-c", "function f() { cd sub; }; f; python -I bin/sd_install.py"],
+        # A call in a pipeline runs in that pipeline's subshell.
+        ["bash", "-c", "f() { cd sub; }; f | cat; python -I ../bin/sd_install.py"],
         # A quoted word is a program or an argument, never the shell's own.
         ["bash", "-c", '"if" python -I bin/sd_install.py'],
         ["bash", "-c", "echo ';' python -I bin/sd_install.py"],
@@ -254,12 +260,11 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["bash", "-c", "python -I 'bin/sd_inst*.py'"],
         # The last command of a pipeline runs in a subshell of its own.
         ["bash", "-c", "true | cd sub; python -I ../bin/sd_install.py"],
-        # `popd +N` and `popd -n` drop an entry and stay where they are.
-        ["bash", "-c", "pushd sub; pushd deep; popd +1; python -I ../bin/sd_install.py"],
-        ["bash", "-c", "pushd sub; pushd deep; popd -n; python -I ../bin/sd_install.py"],
-        # `pushd -n` adds to the stack without moving; a bare `pushd` swaps.
+        # `pushd -n` adds to the stack without moving; a bare `pushd` swaps,
+        # and a bare `pushd -n` does neither.
         ["bash", "-c", "pushd -n sub; python -I ../bin/sd_install.py"],
         ["bash", "-c", "pushd sub; pushd; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd -n; python -I bin/sd_install.py"],
     )
 
     #: Command lines that run a gate-measured file with site skipped.
@@ -307,12 +312,23 @@ class LazySubprocessCoverage(unittest.TestCase):
         # after it: neither cuts the launch on the next command.
         ["bash", "-c", "echo a#b; python -I bin/sd_install.py"],
         ["bash", "-c", "echo \\'; true # it's\npython -I bin/sd_install.py"],
+        # A backslash escape ends a word's first character too: what follows
+        # the `#` is the word's, not a comment's.
+        ["bash", "-c", "echo \\b#c; python -I bin/sd_install.py"],
         # The `pushd` stack: a bare `pushd` swaps the top two, `+N` rotates,
         # `popd +N` drops an entry without moving, `pushd -n` adds without one.
         ["bash", "-c", "pushd sub; pushd; python -I bin/sd_install.py"],
         ["bash", "-c", "pushd sub; pushd +1; python -I bin/sd_install.py"],
         ["bash", "-c", "pushd sub; pushd ../other; popd +1; popd; python -I bin/sd_install.py"],
         ["bash", "-c", "pushd -n sub; popd; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd -n; python -I ../bin/sd_install.py"],
+        # `popd +N` and `popd -n` drop an entry and stay where they are, two
+        # levels down; the `popd` after one returns to the root, not to `sub`,
+        # because the entry it would have returned to is the one that went.
+        ["bash", "-c", "pushd sub; pushd deep; popd +1; python -I ../../bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd deep; popd -n; python -I ../../bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd deep; popd +1; popd; python -I bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd deep; popd -n; popd; python -I bin/sd_install.py"],
         # `cd -` goes back to where the `cd` before it left.
         ["bash", "-c", "cd sub; cd -; python -I bin/sd_install.py"],
         # A `\\` newline joins the two lines before any word is read.
@@ -325,6 +341,10 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["bash", "-c", "cat <(python -I bin/sd_install.py)"],
         ["bash", "-c", "eval 'python -I bin/sd_install.py'"],
         ["bash", "-c", "function f { python -I bin/sd_install.py; }; f"],
+        # A called function's `cd` moves the launch that follows it, and a
+        # second call to it does not move again: the relative `cd` would fail.
+        ["bash", "-c", "f() { cd sub; }; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; f; f; python -I ../bin/sd_install.py"],
         ["bash", "-c", "time -- python -I bin/sd_install.py"],
         ["env", "-a", "name", "python", "-I", "bin/sd_install.py"],
         # A pattern is expanded where the command runs, as the shell expands it.
