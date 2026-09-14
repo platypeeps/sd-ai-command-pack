@@ -241,7 +241,7 @@ and it covers one citation, not a document, a region or a path.
 
 **Delivered, and demonstrated here rather than described.** This page can now
 show the literal shape it is about.
-`frontmatter` (`bin/sd:1231`) [quoted: tests/test_doc_citations.py:382]
+`frontmatter` (`bin/sd:1231`) [quoted: source:tests/test_doc_citations.py::marker_after]
 is the citation that went stale, quoted here as the example it is and carrying
 a marker that tells the gate not to read it as a claim. The live one is `frontmatter` (`source:bin/sd::frontmatter`),
 and 1231 now sits inside another function's docstring -- which is the whole
