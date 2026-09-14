@@ -5312,10 +5312,12 @@ from a number the operator types.
   map of `main` at `0aeb42a1`. The note names criteria 5, 16 and 22 as
   implemented now. This entry records every decision in that note and
   nothing else. The
-  criteria above carry each one with a dated marker. As the 2026-09-07
-  entry did for criterion 7, a rewritten clause is replaced in the
-  criterion and its original text is quoted here. A cut or deferred clause
-  keeps its original text in the criterion, marked, as a record.
+  criteria above carry each one with a dated marker. A rewritten clause is
+  replaced in the criterion and its original text is quoted here. That is
+  one step more explicit than the 2026-09-07 entry for criterion 7, which
+  left the original standing in the criterion, marked, pointing at the log.
+  A cut or deferred clause keeps its original text in the criterion,
+  marked, as a record, which is that entry's shape.
 
   **Criterion 27 is rewritten to #802's queue design.** The owner accepts
   #802 (`505431b8`): promotion and demotion queue a code review task and
@@ -5363,8 +5365,10 @@ from a number the operator types.
   total. sd:788 also carries an audit of the attribution clauses whose
   names, `SD_AUTHOR` and `slice_base`, have 0 hits in `bin/` and `tests/`.
   The owner accepts that caps on `url` entries stay unenforced until then.
-  `start` entries on capped bills are already refused, per
-  `bin/sd_registry.py:1217-1218`.
+  `start` entries on capped bills are already refused, at
+  `bin/sd_registry.py:622-628`, which raises "is a 'start' entry on the
+  capped bill". Note 1942 cites `:1217-1218` for the same fact; those two
+  lines are the comment that states it, not the refusal.
 
   **Criterion 11's open parts are deferred to followup sd:789:** the
   demotion note and the `merge: auto` clauses, which were never audited.
@@ -5412,9 +5416,9 @@ from a number the operator types.
   check passes, and until then the `.trellis` residue line is exempt.
 
   **What this leaves.** Open after these decisions: 5, 16, 18, 21, 22, 27
-  (the help text and the rewrite), 13 (the refusal test) and 31 (a, b and
-  c). Criteria 5, 16 and 22 are being implemented now. After #932 merges,
-  in series: 27's help text; then 21 with 31(a), once the system sweep job
+  (the help text), 13 (the refusal test) and 31 (a, b and
+  c). Criteria 5, 16 and 22 are being implemented now. After #932, which
+  merged as `107016fc`, in series: 27's help text; then 21 with 31(a), once the system sweep job
   is retired; then 18; then 31(b); then 31(c). The last of those carries
   `Delivers: sd:10`. This ledger pull request is the one the note requires
   to record every cut, rewrite and deferral before it. `implement.md`'s

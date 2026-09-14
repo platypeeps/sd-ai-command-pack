@@ -1482,7 +1482,7 @@ history as evidence. "Tests pass" means the named module ran green with the
 pack's `.venv` Python on this branch, whose code is `ef9d3499`'s.
 
 **Open after the owner's decisions, 2026-09-14: criteria 5, 16, 18, 21, 22,
-27 (the help text and the rewrite), 13 (the refusal test) and 31 (a, b and
+27 (the help text), 13 (the refusal test) and 31 (a, b and
 c).** Decision note 1942 on sd:10, recorded in `prd.md`'s log entry of that
 date, decides the rest of the open list below. Criterion 14 and criterion
 15's ceilings clause are cut. Criterion 6's open parts are deferred to
@@ -1494,7 +1494,7 @@ decisions, on `ef9d3499`, and each open line carries a dated marker for the
 decision that changed it.
 
 **The lane order, from decision note 1942.** Criteria 5, 16 and 22 are being
-implemented now. After #932 merges, in series:
+implemented now. After #932, which merged as `107016fc`, in series:
 
 1. criterion 27's help text;
 2. criterion 21 with 31(a), once the system sweep job and its LaunchAgent
@@ -1526,7 +1526,7 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   cap, which no production caller wires, and an audit of the attribution
   clauses whose names `SD_AUTHOR` and `slice_base` have 0 hits. Caps on
   `url` entries stay unenforced until then, by the owner's acceptance.)
-- **9, open on `main`, closed by this pull request.** The settings clause is
+- **9, open on `main`, closed by #931.** The settings clause is
   removed by the owner's decision note 1921 (2026-09-14): the global
   Copilot-requesting hook stays. On 2026-09-14,
   `grep -c -i copilot ~/.claude/settings.json` counts 1 and
@@ -1537,7 +1537,7 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   none requests a review. The nearest is `skills/sd-handoff/SKILL.md:123`
   "**suppress the Copilot re-request**". The `WORKFLOW.md` clause failed on
   `main`: `:148-149` said "On a repository you pay for personally it is off".
-  This pull request changes it to say Copilot review there comes from the
+  #931 changed it to say Copilot review there comes from the
   operator's own global hook, at the operator's choice and cost, citing note
   1921. (2026-09-14: closed. #931 merged as `0aeb42a1`.)
 - **11, open (the demotion-note clause).** No code writes the demotion note
@@ -1686,7 +1686,7 @@ line, since the row carries status, so no delivery edits it. The item is
 not deliverable: `Delivers: sd:10` waits until every open criterion above is
 closed, cut or deferred by a recorded owner decision: 5, 6, 9, 11, 13, 14,
 15, 16, 18, 21, 22, 27 and 31. (2026-09-14: after decision note 1942 the
-list is 5, 16, 18, 21, 22, 27 (the help text and the rewrite), 13 (the
+list is 5, 16, 18, 21, 22, 27 (the help text), 13 (the
 refusal test) and 31 (a, b and c). `Delivers: sd:10` goes on 31(c), the last
 pull request in the lane order above.)
 
@@ -1802,15 +1802,15 @@ recounted.
 |---|---|
 | 1, 4, 8, 20 — the policy page, the lane, the conditional obligations | PR 1 |
 | 5 — the review table in exactly two places, and no bare vendor token in a skill | PR 1 (the two table clauses), PR 6 (the vendor clause whole: a converted token names a role, and no role resolves before PR 6's registry reader) (2026-09-14: the vendor clause is open, see "The closure state today"; being implemented now, from decision note 1942) |
-| 31 — requirement 13 line by line | PR 2 (2026-09-14: never merged; open, see "The closure state today"). (2026-09-14, decision note 1942: rescoped, with `R10-D` and `sd-rust-reviewer` dropped, `parked` and `archived` scoped to the `sd_lib` item field and its readers, and the cross-repository bug regression tests moved to followup sd:790. Three pull requests close it: 31(a) with criterion 21, then 31(b), then 31(c), which carries `Delivers: sd:10`) |
-| 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) (2026-09-14: PR 2 never merged; the code-path half is open, see "The closure state today"). (2026-09-14, decision note 1942: one pull request with 31(a), after #932 merges and after the system sweep job and its LaunchAgent are retired) |
-| 14, 15, 16, 17, 30 — the checks | PR 3 (2026-09-14: never merged; 14, 15 and 16 are open, 17 closed by #892 and 30 is CI's, see "The closure state today"). (2026-09-14, decision note 1942: 14 is cut and 15's ceilings clause is cut, so 15 is closed on its floor clause; 16 is being implemented now) |
-| 33 — no document names a `docs/work/` path that does not resolve | PR 7, which adds the rule; wired by criterion 14's enumeration in PR 3, which lands first (2026-09-14: PR 3 never merged and criterion 14 is open, so nothing wires the rule into `make check`; see "The closure state today"). (2026-09-14: criterion 14 is cut by decision note 1942, and #820 runs the whole lint, rule 7 with it, in `make check`) |
-| 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4; criterion 19 and criterion 23's first half by the operator edit of 2026-09-07; criterion 23's second half, the writing repository's style override, by `sd-writing-pack` #41 (`be76962e`), read on 2026-09-13 and recorded under "Closing the item" (2026-09-14: PR 4 never merged; 18 and 22 are open, and criterion 9's settings clause is removed by decision note 1921, see "The closure state today"). (2026-09-14: 9 closed when #931 merged as `0aeb42a1`. By decision note 1942, 22 is being implemented now, and 18 lands after 21 with 31(a), with the `AGENTS.md` upstream Trellis guard and the `.trellis` residue line exempt) |
+| 31 — requirement 13 line by line | PR 2 (2026-09-14: never merged; open, see "The closure state today"). (2026-09-14, superseding the sentence before it, decision note 1942: rescoped, with `R10-D` and `sd-rust-reviewer` dropped, `parked` and `archived` scoped to the `sd_lib` item field and its readers, and the cross-repository bug regression tests moved to followup sd:790. Three pull requests close it: 31(a) with criterion 21, then 31(b), then 31(c), which carries `Delivers: sd:10`) |
+| 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) (2026-09-14: PR 2 never merged; the code-path half is open, see "The closure state today"). (2026-09-14, superseding the sentence before it, decision note 1942: one pull request with 31(a), after #932, which merged as `107016fc`, and after the system sweep job and its LaunchAgent are retired) |
+| 14, 15, 16, 17, 30 — the checks | PR 3 (2026-09-14: never merged; 14, 15 and 16 are open, 17 closed by #892 and 30 is CI's, see "The closure state today"). (2026-09-14, superseding the sentence before it, decision note 1942: 14 is cut and 15's ceilings clause is cut, so 15 is closed on its floor clause; 16 is being implemented now) |
+| 33 — no document names a `docs/work/` path that does not resolve | PR 7, which adds the rule; wired by criterion 14's enumeration in PR 3, which lands first (2026-09-14: PR 3 never merged and criterion 14 is open, so nothing wires the rule into `make check`; see "The closure state today"). (2026-09-14, superseding the sentence before it: criterion 14 is cut by decision note 1942, and #820 runs the whole lint, rule 7 with it, in `make check`) |
+| 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4; criterion 19 and criterion 23's first half by the operator edit of 2026-09-07; criterion 23's second half, the writing repository's style override, by `sd-writing-pack` #41 (`be76962e`), read on 2026-09-13 and recorded under "Closing the item" (2026-09-14: PR 4 never merged; 18 and 22 are open, and criterion 9's settings clause is removed by decision note 1921, see "The closure state today"). (2026-09-14, superseding the sentence before it: 9 closed when #931 merged as `0aeb42a1`. By decision note 1942, 22 is being implemented now, and 18 lands after 21 with 31(a), with the `AGENTS.md` upstream Trellis guard and the `.trellis` residue line exempt) |
 | 24, 25 — `paths.json`, the union with active trials, `sd skill try` and its row | PR 5 |
 | 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | (2026-09-14: criterion 6's `minimax` meter clause and criterion 11's demotion-note clause are open, see "The closure state today"; decision note 1942 defers 6's open parts to followup sd:788 and 11's to followup sd:789) PR 6, which also carries criterion 5's vendor clause; with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
 | 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1541-1547`, whose files are in its Touches and in no other pull request's claim) (2026-09-14: the moved-default-branch clause is open, see "The closure state today"; decision note 1942 rewrites it to #802's refusal, and the test for the refusal is still to add) |
-| 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` and writing-manifest clauses checked by reading on 2026-09-13 and recorded under "Closing the item", not tested (2026-09-14: criterion 27 fails its own words on `main`, see "The closure state today"; decision note 1942 rewrites it to #802's queue design, and its help text is the first fix after #932 merges) |
+| 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` and writing-manifest clauses checked by reading on 2026-09-13 and recorded under "Closing the item", not tested (2026-09-14: criterion 27 fails its own words on `main`, see "The closure state today"; decision note 1942 rewrites it to #802's queue design, and its help text is the first fix after #932, which merged as `107016fc`) |
 | 7 — no percentage removes the code review point | the grep, which passes (re-run 2026-09-13); the back-scoring of the seven passes is cut (operator, 2026-09-07); the forward ten-pass experiment, its report and its decision are deferred to followup sd:777 (owner decision, 2026-09-13, decision note 1920) |
 
 Criterion 7 is the one row in this table with no pull request beside it, and
