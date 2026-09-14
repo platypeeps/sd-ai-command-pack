@@ -252,9 +252,10 @@ The quoted citation lands in the `quoted` bucket and is counted, which is this
 design's standard: a silencer that is counted is visible, and a bucket that
 moves is a defect that shows. The marker's reason was free text when this
 shipped, so `[quoted: anything]` exempted a citation. D4a below is where that
-reason becomes a `path:line` the gate opens, and it is delivered as sd:568:
-the reason above is now one, and if the line it names stops carrying this
-citation the row goes red in `quoted-not-there`. That this paragraph survives
+reason becomes evidence the gate opens, delivered as sd:568 with a `path:line`
+and since sd:765 also as `source:<path>::<symbol>`. The reason above is the
+second form, and if `marker_after` stops carrying this citation, or is no
+longer one declaration, the row goes red in `quoted-not-there`. That this paragraph survives
 `make check` is question 3's acceptance test, and no fixture could have been
 it.
 
