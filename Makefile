@@ -17,11 +17,35 @@ setup:
 # at install time, so there is nothing to keep in sync and nothing to check for
 # closure against a generator.
 
+# `make check CHANGED="<paths>"` is the changed-files fast path (sd:10
+# criterion 16): the tests those paths need plus an always-run set, chosen by
+# .github/scripts/select-tests.py. Only a CHANGED given on the command line
+# counts; one inherited from the environment is ignored, so the full suite
+# stays the default. A run the selector narrowed skips `coverage combine` and
+# the installer gate, which only the full suite can meet; a run it widened to
+# the full suite keeps both. CI calls run-tests.sh itself and never passes it.
+#
+# The value is exported rather than written into the recipe as a quoted word:
+# a path holding a quote would otherwise end the quoting and the rest would be
+# read as shell. And with no CHANGED on the command line the runner is given a
+# tree with TEST_CHANGED_FILES removed, so an operator who left one in their
+# environment still gets the full suite from a plain `make check`.
+ifeq ($(origin CHANGED),command line)
+export TEST_CHANGED_FILES := $(CHANGED)
+TEST_RUNNER_ENV =
+else
+TEST_RUNNER_ENV = env -u TEST_CHANGED_FILES
+endif
+
 test:
-	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/run-tests.sh
+	PYTHON_BIN="$(VENV_PYTHON)" $(TEST_RUNNER_ENV) bash .github/scripts/run-tests.sh
 	@if grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log; then printf '%s\n' "Tests skipped locally; install required tools or make the skip explicit."; exit 1; fi
-	"$(VENV_PYTHON)" -m coverage combine
-	PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/check-installer-coverage.sh
+	@if head -n 1 unittest-output.log | grep -q '^test selection: changed files'; then \
+		printf '%s\n' "Changed-files fast path: coverage combine and the installer gate were not run. Run make check without CHANGED before a push."; \
+	else \
+		"$(VENV_PYTHON)" -m coverage combine && \
+		PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/check-installer-coverage.sh; \
+	fi
 
 # The one definition of what the Python linters cover. CI reads these through
 # the lint-ruff-paths / lint-mypy-paths targets rather than restating them:
