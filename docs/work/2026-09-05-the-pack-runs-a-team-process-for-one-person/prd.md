@@ -1297,22 +1297,18 @@ confirmed by the next `sd-ship` run alone.
    is recorded, a Codex session that commits those edits and exits
    clean, and then the first slice's squash recorded, resolves neither
    for the second slice, Claude's entry bound to Codex's commit and
-   that commit in no recorded slice, and the entry is gone once the
-   second slice's squash is recorded, from A's rounds forty-five and
-   forty-six;
-   two
-   clones attributing two different commits of one branch in turn both
-   push without force and the review reads both; `sd attribute <sha>
-   human` on an untagged branch resolves to the
-   first enabled entry; `sd-review --author claude` is refused as not a
-   review flag, and `SD_AUTHOR=codex` in the review's environment changes
-   nothing about an untagged commit. Consent at install: the installer writing the block for
-   a fixture repository with a two-entry registry asks once and writes the
-   answered entries with their recipients as the `reviewers` line, writes
-   no line for an empty
-   answer, and on a rerun keeps the line it finds and asks nothing; a
-   non-interactive run takes `--reviewers` and otherwise writes no line.
-   Authorization: a block
+   that commit in no recorded slice, and the entry is gone once the second
+   slice's squash is recorded, from A's rounds forty-five and forty-six; two
+   clones attributing two different commits of one branch in turn both push
+   without force and the review reads both; `sd attribute <sha> human` on an
+   untagged branch resolves to the first enabled entry; `sd-review --author
+   claude` is refused as not a review flag, and `SD_AUTHOR=codex` in the
+   review's environment changes nothing about an untagged commit. Consent at
+   install: the installer writing the block for a fixture repository with a
+   two-entry registry asks once and writes the answered entries with their
+   recipients as the `reviewers` line, writes no line for an empty answer, and
+   on a rerun keeps the line it finds and asks nothing; a non-interactive run
+   takes `--reviewers` and otherwise writes no line. Authorization: a block
    whose `reviewers` line names `claude@claude` alone, with author
    `claude`, refuses naming the key; `claude@claude, codex@codex` with
    author `claude` resolves to
@@ -1349,6 +1345,10 @@ confirmed by the next `sd-ship` run alone.
    bill, and that `--provider` on it refuses with the month's total. A `url:`
    entry whose response carries a `<think>` block and `reasoning_content`
    yields a clean finding list, asserted against a fixture response.
+   (Deferred 2026-09-14 by owner decision note 1942: the `minimax` meter clause
+   and the spend cap's clauses, the refusal naming the month's total, the two
+   concurrent calls and the cost rows written to `cap_usd_month`, go to
+   followup sd:788, with an audit of the attribution clauses. See the log.)
 7. No percentage removes the code review point. The other vendor reviews
    the next ten code pull requests, accepted against rejected per pass with
    each accepted finding's severity, and cost logged per pass. After the
@@ -1405,7 +1405,11 @@ confirmed by the next `sd-ship` run alone.
     fixture remote whose default branch does not require pull requests
     refuses naming the setting, and no test above pushes to the default
     branch, asserted by the fixture remote seeing none. All three modes
-    appear in `README.md`.
+    appear in `README.md`. (Deferred 2026-09-14 by owner decision note
+    1942: the demotion-note clause, that the item carries a demotion note,
+    and the `merge: auto` clauses, which were never audited, go to followup
+    sd:789. The protective refusal exists and is tested, at
+    `tests/test_guest_artifact_refusal.py:178`. See the log.)
 12. `README.md`'s writes-nothing claim names the installer as its subject and
     lists the skills that write tracked files.
 13. Once B's library exists: `sd_lib.py`, `sd-status` and `sd-docs-lint`
@@ -1511,13 +1515,16 @@ confirmed by the next `sd-ship` run alone.
     request body, and `sd-status` to report five settings; a hand squash
     merge on the fixture with the dialog's prefilled message is asserted
     to carry every trailer the body carried.
-    A test moves the fixture's default branch after the review and
-    asserts one integration update, one branch review over the combined
-    head that spent no pass, CI, and a merge naming that head; moved
-    again during the wait, the run ends `ready_to_send` naming the reason
-    with no second update, and the next run makes one; a seeded conflict
-    in the update ends the item `blocked` naming the file with no merge
-    call. A test ships a guest-mode item whose triad sits on the fork's
+    A default branch that moves after the review is refused, not
+    integrated: `sd-ship` refuses with "pull-request head or default base
+    moved after local review" when the pull request's head or base moved,
+    and with "the reviewed branch is behind the current default branch"
+    when the reviewed branch is behind the default, both in
+    `bin/sd_ship_remote.py:119-127`, and a test asserts each refusal by
+    its message. (Rewritten 2026-09-14 by owner decision note 1942, which
+    accepts #802's refusal instead of an integration update. The test for
+    the refusal is still to add. The original clause is quoted in the
+    log.) A test ships a guest-mode item whose triad sits on the fork's
     integration branch in two slices, merges the first upstream pull
     request by hand on the fixture, and asserts the row is `in_progress`
     with the squash commit on a note and no mark commit, then ships the
@@ -1543,13 +1550,20 @@ confirmed by the next `sd-ship` run alone.
     that checkout. The ref is the checkout's `sd-db-v*` tag, else its commit,
     never the working tree: `system` is a monorepo with no tags. Before B
     exists, this criterion is recorded as waiting, not as met.
-14. `make check` runs the documentation-lint rules that need no database when
+14. **Cut 2026-09-14** by owner decision note 1942. #820 already runs the
+    whole documentation lint in `make check`, and the lint needs no
+    database, so the enumerated no-database set and its skip clauses are
+    dropped. The original text, kept as a record: `make check` runs the
+    documentation-lint rules that need no database when
     `docs/work/` exists, and skips them cleanly when it does not. The set is
     enumerated from the lint itself, not written into the `Makefile` as a
     range, so criterion 33's rule and any rule added later run without a
     second edit. A test asserts the wired set equals the lint's own
     no-database set, and fails if a rule is added to one side alone.
-15. The coverage floor applies to `bin/sd_install.py` and to no other file. The
+15. The coverage floor applies to `bin/sd_install.py` and to no other file.
+    That clause holds. The ceilings clause is **cut 2026-09-14** by owner
+    decision note 1942, as superseded by #813, sd:430 and sd:719. Its
+    original text, kept as a record: The
     four line-count ceilings emit a warning and exit zero when exceeded. A test
     asserts the warning path, not only the passing one.
 16. `make check` accepts a changed-files fast path, and the full suite remains
@@ -1558,7 +1572,12 @@ confirmed by the next `sd-ship` run alone.
     `generated/registry-snapshot.json` and the `plugins/sd` stub are absent, and
     the `security` job's steps run inside `lint`.
 18. A grep of the governed tree, criterion 4, for `Trellis`, `.trellis`
-    and `task.py` returns nothing.
+    and `task.py` returns nothing. (Two exemptions, 2026-09-14, by owner
+    decision note 1942. The upstream Trellis pull-request guard at
+    `AGENTS.md:7-10,31` is exempt while sd:241, sd:242 and sd:244 are open.
+    The residue detectors in `sd-status` are cut only after the gating
+    fleet check passes, and until then the `.trellis` residue line is
+    exempt. See the log.)
 19. The global settings contain no `Read()` deny rule and no `.trellis` allow
     rule, and do contain the four MCP pull-request tools. The global guide
     contains no `cd` prohibition.
@@ -1584,7 +1603,12 @@ confirmed by the next `sd-ship` run alone.
     either state, since `bin/sd_install.py:961` is an error message rather
     than a temporary path, and `bin/sd_sweep.py` is in none of the eight. A test ships a `done` item and runs
     `sd-plan` and `sd-ship` again in that repository, and asserts the
-    directory is untouched.
+    directory is untouched. (The sweep's retirement order, 2026-09-14, by
+    owner decision note 1942. `sd sweep` has a live consumer, the system
+    repository's `local-cron-jobs/jobs/sd-sweep-weekly.job`, whose last log
+    is from 2026-09-07. That job and its LaunchAgent retire first, with the
+    operator running the `launchctl` step. Then the verb and
+    `bin/sd_sweep.py` are cut, under this criterion and criterion 31(a).)
 22. The pull-request template links only to files that exist. A test walks its
     links.
 23. The caveman plugin is absent from the global settings, and the writing
@@ -1601,9 +1625,14 @@ confirmed by the next `sd-ship` run alone.
 26. The `PreToolUse` and `UserPromptSubmit` hooks write `skill_use` rows with
     `surface`, `mode` and `cwd`, and the Codex nightly parse writes the same
     shape. A test feeds one recorded session of each kind and asserts the rows.
-27. Promotion and demotion each produce one pull request that moves the
-    directory and edits `paths.json`, opened by the library and never by the
-    dashboard directly. A test asserts the branch content.
+27. Promotion and demotion each queue one code review task, a `skill-apply`
+    assignment, and open no pull request. The library queues it, never the
+    dashboard directly, and writes nothing to git. A test asserts the queued
+    assignment and that git is unchanged. The `sd` help text for both verbs
+    says so, and does not say they open a pull request. (Rewritten
+    2026-09-14 by owner decision note 1942, which accepts #802's design,
+    `505431b8`. The stale help text at `bin/sd:3031-3046` is still to fix.
+    The original text is quoted in the log.)
 28. `sd-suggest` writes a row in every mode and files nothing, asserted by a
     test per mode against a recording GitHub fixture that saw no call; `sd
     suggest publish` files one issue at the destination `--to` names,
@@ -1631,28 +1660,41 @@ confirmed by the next `sd-ship` run alone.
     the loop stops at pull-request-ready in every repository.
 31. Requirement 13 is closed line by line. One test lists the symbols, flags
     and files the cuts remove and asserts a grep of the governed tree,
-    criterion 4, for each returns nothing: `sd_sweep`, `parked`, `archived`, `record_load`,
+    criterion 4, for each returns nothing: `sd_sweep`; `parked` and
+    `archived` as the `sd_lib` item field and its readers and not the
+    words, since writing pieces park and revive, a review disposition is
+    `parked`, and criterion 21's own test says `archived`, so a bare grep
+    cannot tell them apart; `record_load`,
     `carrier_branches`, `_protection_gaps`, `load_acknowledgements`,
     `--stash-ref`, `--push`, `--park`, the `authors` policy key
     (`bin/sd-review:276`, `:283`, `:1098`, `bin/sd_setup_github.py:230,267`, the
     schema and `.github/sd-review.json`) and not the word, since criterion 6
     introduces `authors` as a row field and a bare grep cannot tell the two
     apart, `argument-vocabulary`,
-    `Standing rule`, `R10-D`, `five gates`, `cron-jobs.sh`, `Active item:`,
-    `sd-rust-reviewer`, `sd-deps`. Each bug has a regression test: planning scope on a
+    `Standing rule`, `five gates`, `cron-jobs.sh`, `Active item:`,
+    `sd-deps`. Each bug has a regression test: planning scope on a
     fixture with two planning items and one `ready` item picks the item
     whose branch is checked out and refuses when none is; `sd-status <path>`
     run from another checkout reports the packet under `<path>`;
     `Work: nonexistent-item` fails as an unresolved path, not as a missing
-    reason; `adversarial-gate run --timeout 1` against a sleeping command
-    exits non-zero within two seconds, and a run whose `--out` is empty
-    exits non-zero and names the file; `sd_research_review` on a directory
+    reason; `sd_research_review` on a directory
     without `research.conf.py` exits 2; `sd-research-kit -C <dir> <verb>`
     runs from another working directory; the verdict set in
     `agents/sd-claim-verifier.md` equals the set in
     `skills/sd-fact-check/SKILL.md`, read from both files. One provider
     list, one git wrapper, one status vocabulary and one ACTIVE set exist,
-    asserted by a grep that finds no second definition of each.
+    asserted by a grep that finds no second definition of each. (Rescoped
+    2026-09-14 by owner decision note 1942. `R10-D` is dropped, because
+    those are now sd:431's rule registry ids. `parked` and `archived` are
+    scoped to the `sd_lib` item field and its readers, as `authors` was
+    scoped to the policy key. `sd-rust-reviewer` is removed, because
+    `agents/sd-rust-reviewer.md` is a live agent. The cross-repository bug
+    regression tests move to followup sd:790: `adversarial-gate` lives in
+    the system repository, so its `--timeout 1` and empty `--out` tests go
+    there. The rest lands in three pull requests: (a) `sd_sweep`, `parked`
+    and `archived`, with criterion 21; (b) the prose symbols and flags; (c)
+    the bug regressions and the one-definition greps. The original text is
+    quoted in the log.)
 33. No document names a path under `docs/work/` that does not resolve.
     `sd-docs-lint` gains a rule that enumerates tracked `*.md` from git,
     excluding `docs/work/archive/` and `CHANGELOG.md`, reads every
@@ -5261,3 +5303,120 @@ from a number the operator types.
   pull request, and no test asserts a branch's content. This item has no
   entry for that change. Whether the criterion changes or the code does is
   the owner's call.
+
+- **2026-09-14** — **Owner decisions on the twelve open criteria: 27 and
+  13's moved-default-branch clause are rewritten to #802's design, 14 and
+  15's ceilings clause are cut, 6 and 11 are deferred, 31 is rescoped, and
+  18 gains two exemptions.** Decision note 1942 on sd:10 records nine
+  decisions on the twelve criteria the entry above left open, taken from a
+  map of `main` at `0aeb42a1`. The note names criteria 5, 16 and 22 as
+  implemented now. This entry records every decision in that note and
+  nothing else. The
+  criteria above carry each one with a dated marker. As the 2026-09-07
+  entry did for criterion 7, a rewritten clause is replaced in the
+  criterion and its original text is quoted here. A cut or deferred clause
+  keeps its original text in the criterion, marked, as a record.
+
+  **Criterion 27 is rewritten to #802's queue design.** The owner accepts
+  #802 (`505431b8`): promotion and demotion queue a code review task and
+  open no pull request. The criterion now says that. The original text:
+
+  > Promotion and demotion each produce one pull request that moves the
+  > directory and edits `paths.json`, opened by the library and never by the
+  > dashboard directly. A test asserts the branch content.
+
+  `tests/test_sd_skill_promotion.py:78` already asserts one queued
+  assignment and no git change. The help text at `bin/sd:3031-3046` still
+  says both verbs open a pull request. The note says it is fixed, and until
+  it is, criterion 27 stays open.
+
+  **Criterion 13's moved-default-branch clause is rewritten to #802's
+  refusal.** The owner accepts the refusal in
+  `bin/sd_ship_remote.py:119-127` instead of an integration update. It
+  refuses "pull-request head or default base moved after local review" and
+  "the reviewed branch is behind the current default branch". No test in
+  `tests/` asserts either message, so the test the note adds is still to
+  add, and criterion 13 stays open for it. The original clause:
+
+  > A test moves the fixture's default branch after the review and
+  > asserts one integration update, one branch review over the combined
+  > head that spent no pass, CI, and a merge naming that head; moved
+  > again during the wait, the run ends `ready_to_send` naming the reason
+  > with no second update, and the next run makes one; a seeded conflict
+  > in the update ends the item `blocked` naming the file with no merge
+  > call.
+
+  **Criterion 14 is cut.** #820 (`9235dcc2`) already runs the whole
+  documentation lint in `make check`, and the lint needs no database. The
+  enumerated no-database set and its skip clauses have nothing left to
+  name, so they are dropped. Criterion 33's rule runs in `make check` as
+  part of that whole lint.
+
+  **Criterion 15's ceilings clause is cut** as superseded by #813, which
+  retired the `bin/` line-count cap, by sd:430, and by sd:719, which uses
+  the dashboard ceilings as a falling ratchet and deletes their subject.
+  The coverage floor clause holds.
+
+  **Criterion 6's open parts are deferred to followup sd:788.** They are the
+  `minimax` meter, which reads `token_plan/remains`, and the spend cap:
+  `capped_bills` has no production caller, and no refusal names the month's
+  total. sd:788 also carries an audit of the attribution clauses whose
+  names, `SD_AUTHOR` and `slice_base`, have 0 hits in `bin/` and `tests/`.
+  The owner accepts that caps on `url` entries stay unenforced until then.
+  `start` entries on capped bills are already refused, per
+  `bin/sd_registry.py:1217-1218`.
+
+  **Criterion 11's open parts are deferred to followup sd:789:** the
+  demotion note and the `merge: auto` clauses, which were never audited.
+  The protective refusal exists and is tested, at
+  `tests/test_guest_artifact_refusal.py:178`.
+
+  **Criterion 31's symbol scope changes.**
+
+  - `R10-D` is dropped. Those ids are now sd:431's rule registry ids.
+  - `parked` and `archived` are scoped to the `sd_lib` item field and its
+    readers, as `authors` was scoped to the policy key.
+  - `sd-rust-reviewer` is removed from the criterion.
+    `agents/sd-rust-reviewer.md` is a live agent.
+  - The cross-repository bug regression tests move to followup sd:790.
+    `adversarial-gate` lives in the system repository.
+  - The rest lands in three pull requests: (a) `sd_sweep`, `parked` and
+    `archived`, with criterion 21; (b) the prose symbols and flags; (c) the
+    bug regressions and the one-definition greps.
+
+  The original symbol list, before `authors`:
+
+  > `sd_sweep`, `parked`, `archived`, `record_load`,
+
+  and after it:
+
+  > `argument-vocabulary`,
+  > `Standing rule`, `R10-D`, `five gates`, `cron-jobs.sh`, `Active item:`,
+  > `sd-rust-reviewer`, `sd-deps`.
+
+  and the original `adversarial-gate` regression tests:
+
+  > `adversarial-gate run --timeout 1` against a sleeping command
+  > exits non-zero within two seconds, and a run whose `--out` is empty
+  > exits non-zero and names the file;
+
+  **`sd sweep` retires in order.** First the system job
+  `local-cron-jobs/jobs/sd-sweep-weekly.job` and its LaunchAgent retire,
+  with the operator running the `launchctl` step. Then the verb and
+  `bin/sd_sweep.py` are cut, under criteria 21 and 31(a). The job's last
+  log is from 2026-09-07.
+
+  **Criterion 18 gains two exemptions.** The upstream Trellis pull-request
+  guard at `AGENTS.md:7-10,31` is exempt while sd:241, sd:242 and sd:244
+  are open. The `RESIDUE` detectors are cut only after the gating fleet
+  check passes, and until then the `.trellis` residue line is exempt.
+
+  **What this leaves.** Open after these decisions: 5, 16, 18, 21, 22, 27
+  (the help text and the rewrite), 13 (the refusal test) and 31 (a, b and
+  c). Criteria 5, 16 and 22 are being implemented now. After #932 merges,
+  in series: 27's help text; then 21 with 31(a), once the system sweep job
+  is retired; then 18; then 31(b); then 31(c). The last of those carries
+  `Delivers: sd:10`. This ledger pull request is the one the note requires
+  to record every cut, rewrite and deferral before it. `implement.md`'s
+  "The closure state today" and its closure table carry the same list and
+  order.
