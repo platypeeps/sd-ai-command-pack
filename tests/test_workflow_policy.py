@@ -76,11 +76,18 @@ BARE_VENDOR = re.compile(
 
 #: The one product name the rule exempts. It is blanked before matching, not
 #: used to skip a line, so a bare token sharing a line with it still counts.
-#: The two words may sit either side of one line break, since the pages
-#: hard-wrap and a reflow must not turn the gate red. The blank keeps that
-#: break, so line numbers do not move. `\b` stops it short of a longer word:
-#: `Claude Codex` is not the product, and blanking its first eleven characters
-#: would hide the `codex` in it.
+#: Every separator it accepts is named here, because each one is a hole in the
+#: gate and an unnamed hole is an unpinned one. They are: a run of spaces or
+#: tabs, or exactly one line break -- LF or CRLF -- with spaces or tabs
+#: allowed either side of it, since the pages hard-wrap and a reflow must not
+#: turn the gate red. Nothing else. A blank line is two breaks, not a wrap,
+#: and stays refused; so does a form feed. `\s` is not the shape, and the
+#: second reason is the one that bites: `str.splitlines()` below treats a form
+#: feed as a line break, while the blank reinstates only `\n`, so a name
+#: spanning one would report every row after it a line early. The blank keeps
+#: the break it spans, so line numbers do not move. `\b` stops it short of a
+#: longer word: `Claude Codex` is not the product, and blanking its first
+#: eleven characters would hide the `codex` in it.
 PRODUCT_NAME = re.compile(r"Claude(?:[ \t]+|[ \t]*\r?\n[ \t]*)Code\b")
 
 #: An indented `key: value` line inside a fenced-free block.
@@ -114,9 +121,20 @@ def bare_vendor_lines(text: str) -> list[int]:
 
 def tracked_files(top: str, root: pathlib.Path = REPO_ROOT) -> list[str]:
     """Every tracked file under `top`, whatever its suffix. Enumerated from the
-    index, so a new skill is covered on arrival."""
+    index, so a new skill is covered on arrival.
+
+    `--deduplicate` because the index holds an unmerged path once per merge
+    stage, and plain `ls-files` prints it once per stage. No verdict moves:
+    the sweep filters this list and compares lists, so three copies of an
+    offender is still an offender and three copies of a clean file is still
+    nothing -- which is why it went unnoticed. What moves is the report, which
+    named one file three times to somebody mid-merge who was already hunting
+    for what they had just broken. `tests/test_no_shipped_shell.py` reads the
+    index this way; this call did not, and one right form beside one wrong one
+    is how the wrong one survives.
+    """
     result = subprocess.run(
-        ["git", "ls-files", "-z", "--", top],
+        ["git", "ls-files", "-z", "--deduplicate", "--", top],
         cwd=root,
         capture_output=True,
         text=True,
@@ -347,6 +365,60 @@ class BareVendorTokens(unittest.TestCase):
                 ],
             )
 
+    def test_a_file_being_merged_is_enumerated_once(self):
+        """An unmerged path must arrive once, not once per merge stage.
+
+        Cosmetic, and stated as such: the sweep filters this list and compares
+        lists, so no verdict moves. What moves is the report. Nothing about a
+        clean checkout separates the two behaviours, so the conflict is built
+        for real and the premises are asserted before the conclusion -- the
+        index is genuinely unmerged, and plain `ls-files` does repeat the path
+        there. Drop either and what follows would pass against any ordinary
+        repository, which is how this survived.
+        """
+
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+
+            def git(*argv, check=True):
+                return subprocess.run(  # nosec B603 B607 - fixed argv, scratch repo
+                    ["git", "-c", "user.email=policy@example.invalid",
+                     "-c", "user.name=workflow policy",
+                     "-c", "commit.gpgsign=false", *argv],
+                    cwd=root, capture_output=True, text=True, check=check)
+
+            page = root / "skills" / "f.md"
+            page.parent.mkdir(parents=True)
+            git("init", "-q", "-b", "main", ".")
+            page.write_text("base\n")
+            git("add", "--", "skills")
+            git("commit", "-qm", "base")
+            git("checkout", "-q", "-b", "other")
+            page.write_text("other\n")
+            git("commit", "-qam", "other")
+            git("checkout", "-q", "main")
+            page.write_text("mine\n")
+            git("commit", "-qam", "mine")
+            git("merge", "other", check=False)
+
+            stages = git("ls-files", "-u", "--", "skills").stdout
+            self.assertEqual(
+                [line.split("\t")[0].split()[-1] for line in stages.splitlines()],
+                ["1", "2", "3"],
+                "the fixture did not leave an unmerged index, so the case "
+                "below proves nothing")
+
+            repeated = git("ls-files", "-z", "--", "skills").stdout
+            self.assertEqual(
+                [name for name in repeated.split("\0") if name],
+                ["skills/f.md", "skills/f.md", "skills/f.md"],
+                "this git no longer repeats an unmerged path; if that is now "
+                "the default, say so here rather than deleting the case")
+
+            self.assertEqual(
+                tracked_files("skills", root), ["skills/f.md"],
+                "a file being merged entered the walk once per merge stage")
+
     def test_the_shape_catches_a_vendor_named_as_who_runs_a_pass(self):
         """The guard against the guard: the three lines that came back, and
         the cases around them, match. A pattern that missed them would leave
@@ -376,6 +448,34 @@ class BareVendorTokens(unittest.TestCase):
             bare_vendor_lines("see the Claude\nCode guide, which hands the\npass to codex"),
             [3],
         )
+
+    def test_every_separator_the_product_name_accepts_is_pinned(self):
+        """One case per separator the comment above names, and one per
+        separator it refuses. Each of the three widenings that reads as
+        harmless -- `\\s+` for the break, `[ \\t]` for the run, dropping the
+        `\\r?` -- is green against the cases before this one, so each is given
+        the case that fails it.
+
+        A run of spaces or tabs is the product, so `[ \\t]` alone is not the
+        shape. CRLF is the product, so the `\\r?` is load-bearing: a page
+        written on Windows, or checked out with git's `core.autocrlf` on,
+        hard-wraps the same way and must not turn the gate red.
+        """
+        for text in ("the Claude  Code guide", "the Claude\tCode guide",
+                     "the Claude \t Code guide", "the Claude\r\nCode entry",
+                     "the Claude  \r\n  Code entry"):
+            with self.subTest(exempt=text):
+                self.assertEqual(bare_vendor_lines(text), [])
+
+        # A blank line is two breaks. A reflow does not produce one inside a
+        # name, so it stays a bare token rather than widening the exemption.
+        self.assertEqual(bare_vendor_lines("Claude\n\nCode"), [1])
+
+        # A form feed is the expensive one. `str.splitlines()` counts it as a
+        # break; the blank reinstates only `\n`. A pattern that spanned it
+        # would merge two rows into one and report `codex` on line 2 of a file
+        # where a reader finds it on line 3.
+        self.assertEqual(bare_vendor_lines("Claude\x0cCode\ncodex"), [1, 3])
 
     def test_the_shape_drops_identifiers_paths_and_the_product_name(self):
         for line in (

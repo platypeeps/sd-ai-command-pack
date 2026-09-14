@@ -58,7 +58,17 @@ def lines(text: str) -> list[str]:
 
 
 def tracked(pattern: str) -> list[str]:
-    return lines(git("ls-files", "--", f":(glob){pattern}"))
+    """The tracked paths matching `pattern`, each named once.
+
+    `--deduplicate` because the index holds an unmerged path once per merge
+    stage, and plain `ls-files` prints it once per stage. Inert here -- the
+    one caller that reads the rows feeds them to `set()`, and the other only
+    asks whether the list is non-empty -- so this is the form, not a fix for a
+    failure. It is written this way because the repository already had the
+    right form in `.github/scripts/`, the `Makefile` and six test modules, and
+    the two calls that did not are how the wrong form survived (sd:823).
+    """
+    return lines(git("ls-files", "--deduplicate", "--", f":(glob){pattern}"))
 
 
 def carrying_status(pattern: str) -> list[str]:
