@@ -4,10 +4,11 @@ Review found the same defect three times in one pull request, each time a rule
 naming something nobody invokes: `python3 scripts/:*` for a directory that does
 not exist; `python3 bin/sd-status:*` alone, when the script is executable and
 carries a `python3` shebang, so the form the documents actually use is
-`bin/sd-status`; and `bin/sd-dashboard:*`, whose `install` verb writes a plist
-into `~/Library/LaunchAgents` for a command no document tells anyone to run by
-hand. Every one came from writing a rule out of an assumption about the
-workflow rather than reading what the workflow runs, and narrowing the list by
+`bin/sd-status`; and `bin/sd-dashboard:*`, whose `install` verb then wrote a
+plist into `~/Library/LaunchAgents` for a command no document told anyone to
+run by hand (sd:719 has since deleted the verb). Every one came from writing a
+rule out of an assumption about the workflow rather than reading what the
+workflow runs, and narrowing the list by
 hand found them one at a time while reintroducing the shape twice.
 
 Hand-narrowing was the wrong instrument. The repository already states what it

@@ -9,9 +9,15 @@ own first line calls it "observability only, rebuildable, never an input"
 the PRD anticipated** -- "where its fix lands is a budget decision, not only a
 design one". `dashboard/` had 110 lines of total headroom and this mechanism
 needs more than that; `bin/` has 1,783. The dependency already runs one way,
-`bin/sd-dashboard` imports `dashboard`, so the writer is passed *down* into
+`bin/sd-dashboard` imports `dashboard`, so the writer was passed *down* into
 `serve` and `make_handler` as a callable. `dashboard/` gains a parameter, not
 an import, and stays a library that knows nothing about where its records go.
+
+**Nothing passes it down any more.** sd:719 step 1 deleted the `serve` verb
+that handed `append` and `acked` to `dashboard.server.serve`, because the page
+on :8767 is the system repository's workflow server and not this pack's. This
+module has no production caller from that commit on, and it retires with
+`dashboard/` in the same item.
 
 `bin/sd-handoff-restore:157` is the same shape. Its retry-and-give-up lock loop
 is not copied -- that exists so a SessionStart hook cannot block, and a POST

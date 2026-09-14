@@ -265,8 +265,9 @@ verified by the maintainer's local run and the other three by nothing.
   `make test` inside a pipeline still prompts. That is the intended trade --
   `make test:*` would also permit `make test -f /somewhere/else/Makefile`, and
   a wildcard over a command with *verbs* grants the verbs nobody was thinking
-  about, which is why `sd-dashboard`, whose `install` writes a plist into
-  `~/Library/LaunchAgents`, is absent rather than verb-scoped.
+  about, which is why `sd-dashboard`, whose `install` verb wrote a plist into
+  `~/Library/LaunchAgents` until sd:719 deleted it, is absent rather than
+  verb-scoped.
 
   Two invariants hold whatever the derivation does, and each is a defect that
   actually shipped. Every path a rule names must exist -- `python3 scripts/:*`

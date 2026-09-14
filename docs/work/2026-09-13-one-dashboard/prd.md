@@ -115,17 +115,18 @@ operator was reading.
 
 ### And the pack's installer would stop the surviving dashboard
 
-`LABEL` (`bin/sd-dashboard:52`) declares `com.sven.sd-dashboard` as the one
-LaunchAgent the pack owns, and `PLIST` (`bin/sd-dashboard:53`) renders to that
-name. `cmd_install` (`bin/sd-dashboard:139`) writes that file and then boots the
-label out and bootstraps its own, at `bin/sd-dashboard:163-164`. Run today it
-stops PID 37095, overwrites the system's plist body with the pack's, and
-repoints the name at the pack. The live file's mode is 600 where the pack's
+`LABEL` (line 52 of `bin/sd-dashboard` at `e80153ee`) declares `com.sven.sd-dashboard` as the one
+LaunchAgent the pack owns, and `PLIST` (line 53 of `bin/sd-dashboard` at `e80153ee`) renders to that
+name. `cmd_install` (line 139 of `bin/sd-dashboard` at `e80153ee`) writes that file and then boots the
+label out and bootstraps its own, at lines 163-164 of that commit. Run then, it
+would have stopped PID 37095, overwritten the system's plist body with the
+pack's, and repointed the name at the pack; sd:719 step 1 has since deleted the
+verb. The live file's mode is 600 where the pack's
 `write_text` would leave 644, which is evidence independent of either
 repository's claims that the pack did not write it.
 
 Nothing in the pack warns about this and no test covers it: `InstallTests`
-(`tests/test_sd_dashboard.py:331`) patches the plist path to a scratch HOME, so
+(line 331 of `tests/test_sd_dashboard.py` at `e80153ee`) patches the plist path to a scratch HOME, so
 every case starts from a path that is absent or pack-written and none of them
 puts a foreign plist there first.
 
@@ -148,8 +149,8 @@ divide.
 2. **`serve` and `install` go first, and they answer sd:705 by deletion.** The
    port number and the LaunchAgent label are this item's to decide, and the
    decision is that neither gets a new value. `cmd_serve`
-   (`bin/sd-dashboard:37`) and `cmd_install` (`bin/sd-dashboard:139`) are
-   removed; `cmd_index` (`bin/sd-dashboard:176`) stays until the tracker views
+   (line 37 of `bin/sd-dashboard` at `e80153ee`) and `cmd_install` (line 139 of `bin/sd-dashboard` at `e80153ee`) are
+   removed; `cmd_index` (`bin/sd-dashboard:32`) stays until the tracker views
    move. This is the only step that makes the machine safer rather than only
    tidier, and it is first for that reason.
 
