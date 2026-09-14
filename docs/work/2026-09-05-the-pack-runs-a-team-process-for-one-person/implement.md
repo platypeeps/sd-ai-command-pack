@@ -1312,7 +1312,8 @@ parked with the operator, triggered by `mezmo-world-simulator` Phase 1 reaching
 *Criterion 28 has two clauses that cannot close from this checkout.* PR 8d
 says so in its own text and the closure table says so in its own row, and this
 section was written before either. It is now the only criterion between the
-item and `done`, but it is **two** pieces of work and not one:
+item and `done` (wrong: criterion 23's second half is open too, corrected
+below), but it is **two** pieces of work and not one:
 
 1. **`commands.yaml`, item B's.** The "no palette entry" assertion enumerates
    a file that does not exist in this repository. B's slice 4 PR 7 writes it,
@@ -1497,7 +1498,7 @@ recounted.
 | 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) |
 | 14, 15, 16, 17, 30 — the checks | PR 3 |
 | 33 — no document names a `docs/work/` path that does not resolve | PR 7, which adds the rule; wired by criterion 14's enumeration in PR 3, which lands first |
-| 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4 |
+| 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4; criterion 23's second half, the writing repository's style override, is that repository's pull request and was still open on 2026-09-13 |
 | 24, 25 — `paths.json`, the union with active trials, `sd skill try` and its row | PR 5 |
 | 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | PR 6, which also carries criterion 5's vendor clause; with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
 | 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1534-1540`, whose files are in its Touches and in no other pull request's claim) |
