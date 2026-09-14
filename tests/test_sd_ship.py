@@ -1793,5 +1793,85 @@ class ReviewWatchdogTests(unittest.TestCase):
                 [], 0, json.dumps(dict(report, requested_reviews=requested)), "")), timing)
 
 
+class CaptureDepthTests(unittest.TestCase):
+    """`capture_too_deep` is read directly, not only through the watchdog.
+
+    Until sd:818 the depth rule was CPython's C recursion guard, which is
+    correct by construction. This scan replaces it with a reader of our own,
+    and a reader can be wrong in two directions: drop a report the operator
+    needed, or admit one the limit exists to refuse. Strings are where that
+    goes wrong -- #941 had just fixed the same class of bug in the launch
+    check's reader of bash quoting -- so each escape case is a row here.
+    """
+
+    def test_a_real_shaped_report_is_nowhere_near_the_limit(self):
+        # The shape `timeout_evidence` requires, which is as deep as a captured
+        # report gets: the report object, `subject`, `findings`, a finding.
+        body = json.dumps({"scope": "branch", "subject": {"head": "a" * 40},
+                           "findings": [{"path": "bin/sd-ship", "summary": "x"}],
+                           "authored_with": ["claude"]}).encode()
+        self.assertFalse(ship.capture_too_deep(body))
+
+    def test_the_limit_is_the_deepest_container_that_is_kept(self):
+        at_limit = b"[" * ship.REVIEW_CAPTURE_DEPTH + b"0" + b"]" * ship.REVIEW_CAPTURE_DEPTH
+        self.assertFalse(ship.capture_too_deep(at_limit))
+        self.assertTrue(ship.capture_too_deep(b"[" + at_limit + b"]"))
+
+    def test_a_closed_container_gives_its_depth_back(self):
+        # Depth is nesting, not a running count of opening brackets. Siblings
+        # must not accumulate, or a long findings list is refused for its
+        # length rather than its shape.
+        self.assertFalse(ship.capture_too_deep(b"[]" * (ship.REVIEW_CAPTURE_DEPTH * 100)))
+
+    def test_brackets_inside_a_string_are_text(self):
+        deep = b"[" * (ship.REVIEW_CAPTURE_DEPTH + 1)
+        self.assertTrue(ship.capture_too_deep(deep))
+        self.assertFalse(ship.capture_too_deep(b'{"quoted":"' + deep + b'"}'))
+
+    def test_an_escaped_quote_does_not_end_a_string(self):
+        # A `\"` in the body is a quote in the text, not the end of the string,
+        # so what follows it is still text. Read as an ending, the brackets
+        # after it become structure and a legitimate report is refused.
+        body = rb'{"quoted":"\"' + b"[" * (ship.REVIEW_CAPTURE_DEPTH + 1) + b'"}'
+        self.assertEqual(json.loads(body)["quoted"][0], '"')
+        self.assertFalse(ship.capture_too_deep(body))
+
+    def test_an_escaped_backslash_leaves_the_closing_quote_closing(self):
+        # The mirror case, and the one that fails the other way. A `\\` is a
+        # backslash in the text and consumes itself, so the quote after it does
+        # end the string and the brackets that follow are structure. A reader
+        # that lets that backslash escape the quote hides them, and admits a
+        # report past the limit.
+        deep = ship.REVIEW_CAPTURE_DEPTH + 1
+        body = rb'{"quoted":"x\\","deep":' + b"[" * deep + b"0" + b"]" * deep + b"}"
+        self.assertEqual(json.loads(body)["quoted"], "x\\")
+        self.assertTrue(ship.capture_too_deep(body))
+
+    def test_an_unterminated_string_swallows_what_follows(self):
+        # Under-counting is the safe direction here: an unterminated string is
+        # not JSON, so `json.loads` refuses the body a moment later and no
+        # report is kept either way. Recorded because it is a real input --
+        # output cut off mid-write by the kill the watchdog just sent.
+        body = b'{"quoted":"' + b"[" * (ship.REVIEW_CAPTURE_DEPTH + 1)
+        self.assertFalse(ship.capture_too_deep(body))
+        with self.assertRaises(ValueError):
+            json.loads(body)
+
+    def test_the_largest_body_the_gate_admits_is_read_in_one_pass(self):
+        # 2_000_000 is the size bound `review_process` applies just before this
+        # scan, so these are the worst cases that can reach it. The five
+        # seconds is about fifty times the measured time; it is here to fail a
+        # reader that became quadratic, not to police speed.
+        deep = b"[" * (ship.REVIEW_CAPTURE_DEPTH + 1)
+        front = deep + b"x" * (2_000_000 - len(deep))
+        for body in (front,                       # too deep at the first bytes
+                     b'"' * 2_000_000,            # nothing but quotes
+                     b'"' + b"x" * 1_999_999):    # one unterminated string
+            started = time.monotonic()
+            ship.capture_too_deep(body)
+            self.assertLess(time.monotonic() - started, 5)
+        self.assertTrue(ship.capture_too_deep(front))
+
+
 if __name__ == "__main__":
     unittest.main()
