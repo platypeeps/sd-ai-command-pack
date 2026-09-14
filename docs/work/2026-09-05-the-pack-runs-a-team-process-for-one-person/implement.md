@@ -1358,7 +1358,10 @@ in front of this item's delivery.
 criterion 28 is closed.** Neither check is a test, and neither can be one in
 this repository: what each reads lives outside this checkout, where pack CI
 cannot reach it. A regression in either place would not turn this repository
-red. They are recorded here with enough to repeat them.
+red. They are recorded here with enough to repeat them. Closing a criterion
+by a dated one-time read instead of a test is the owner's call, not this
+page's: the owner accepted the read as the evidence in decision note 1904 on
+sd:10, recorded 2026-09-14 for the review of pack #926.
 
 1. **`commands.yaml` exists and names no suggest or publish entry.** The file
    is at `~/.local/share/sd/commands.yaml`, the default path `sd_db`'s runner
@@ -1394,7 +1397,8 @@ left, and it is the writing repository's one-line pull request that removes
 that section.
 
 **The closure state as of 2026-09-13, in one place.** Criterion 7's scoring
-clause is cut. Criterion 28 is closed by reading, with the evidence above.
+clause is cut. Criterion 28 is closed by reading, with the evidence above,
+under decision note 1904.
 Criterion 23's second half is open. The delivery commit waits on that one
 clause and on nothing else this section names. Every earlier sentence in this
 section that says otherwise carries a dated marker pointing here.
