@@ -141,11 +141,13 @@ already pays. A pull request whose comments cannot be read marks the class
 count presented as a count is the failure this class is about. That pull
 request gets no row; every other pull request whose findings were read keeps
 its row, so one failed read does not empty `pending` of the rest. The reason
-names every pull request whose comments could not be read, the first five by
-number and the rest as a count. An acknowledgement store that cannot be parsed
-also marks the class `unchecked`, but it hides no row: the store then reads as
-empty, so every finding is unanswered and every pull request with one keeps
-its row.
+names every pull request whose comments could not be read, sorted by number:
+the lowest five named, the rest as a count. An acknowledgement store
+that cannot be read also marks the class `unchecked`, but it hides no row: the
+store then reads as empty, so every finding is unanswered and every pull
+request with one keeps its row. Those rows say to repair or move the store
+first, because `sd-review-ack --ack` refuses to write over a store it cannot
+read rather than replace the acknowledgements still in it.
 
 The count is sometimes a floor. A reviewer that writes `Moderate findings
 (3 votes each)` has stated more than one finding under one marker and has not

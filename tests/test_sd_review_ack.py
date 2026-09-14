@@ -858,6 +858,38 @@ class TheRecord(RoundFixture):
         self.assertEqual(done.returncode, 2)
         self.assertIn("no finding here has the id", done.stderr)
 
+    def test_an_unreadable_record_refuses_an_acknowledgement_and_keeps_its_bytes(self):
+        """review-914 B1: `--ack` on a torn store replaced it, dismissals and all.
+
+        A store cut short still holds acknowledgements somebody wrote. Reading
+        it as empty is the safe direction for the gate; writing that emptiness
+        back is the unsafe one, which `record_answers` already refuses.
+        """
+        result, _ = payload(self.repo.root, "--pr", "863", *self.ref)
+        found = result["findings"][0]["id"]
+        path = ack.store_path(self.repo.root)
+        ack.write_store(self.repo.root, {name: {
+            "pr": 1, "disposition": "dismissed", "commit": None, "reason": f"real reason {name}",
+            "path": "x", "line": 1, "at": "2026-09-12T00:00:00+00:00",
+        } for name in ("aaaa00000001", "aaaa00000002")})
+        path.write_bytes(path.read_bytes()[:-4])
+        torn = path.read_bytes()
+        done = run(self.repo.root, "--pr", "863", "--ack", found, "--dismiss", "new", *self.ref)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("repair or move it first", done.stderr)
+        self.assertEqual(path.read_bytes(), torn)
+
+    def test_an_unreadable_record_does_not_ask_for_an_acknowledgement(self):
+        """The listing points at the repair, not at the write that `--ack` refuses."""
+        ack.store_path(self.repo.root).write_text("{not json")
+        out = run(self.repo.root, "--pr", "863", *self.ref).stdout
+        self.assertIn("record unreadable", out)
+        self.assertIn("repair or move the record first", out)
+        self.assertNotIn("acknowledge each", out)
+        control = tempfile.TemporaryDirectory()
+        self.addCleanup(control.cleanup)
+        self.assertIn("acknowledge each", run(Repo(control).root, "--pr", "863", *self.ref).stdout)
+
 
 class Branch:
     """A repository holding the two commits an automatic record has to tell apart.

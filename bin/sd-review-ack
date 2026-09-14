@@ -727,7 +727,9 @@ def acknowledge(root: pathlib.Path, found: dict, disposition: str, detail: str) 
         commit = resolved
     row = _row(found, disposition, detail.strip(), commit)
     with locked(root):
-        rows, _ = read_store(root)
+        rows, broken = read_store(root)
+        if broken:  # writing would replace what could not be read, as record_answers says
+            raise UsageError(f"not recorded: {broken}; repair or move it first")
         rows[found["id"]] = row
         write_store(root, rows)
     return row
@@ -1110,7 +1112,9 @@ def render_findings(result: dict, stream: TextIO, indent: str = "  ") -> None:
         f"{at_least(rows, len(rows))} finding(s) stand unacknowledged "
         f"against {result['landing_ref']}\n"
     )
-    if result["unsatisfied"]:
+    if result["unsatisfied"] and result.get("store_error"):
+        write(f"{indent}repair or move the record first; --ack refuses while it is unreadable\n")
+    elif result["unsatisfied"]:
         write(f"{indent}acknowledge each: sd-review-ack --ack ID --fixed SHA | --dismiss 'why'\n")
 
 

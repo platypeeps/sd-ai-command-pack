@@ -4186,9 +4186,28 @@ class ReviewUnacknowledgedPartialReadTests(InventoryFixture):
             "repo": "acme/widget", "pull_requests": [blind(7), read, blind(9)]}), self.TODAY)
         rows = self.by_check(found.rows, "pr-review-unacknowledged")
         self.assertEqual([row["key"] for row in rows], ["acme/widget!8"])
+        self.assertIn("acknowledge each", rows[0]["suggest"], "a readable store keeps the ack hint")
         reason = found.unchecked["pr-review-unacknowledged"]
         self.assertIn("#7", reason)
         self.assertIn("#9", reason)
+
+    def test_a_broken_record_and_unreadable_pull_requests_share_one_reason(self) -> None:
+        """Both sentences, joined, in pull request order, with differing causes hedged."""
+        ack = status.sd_lib.sibling("sd_review_ack_joined", "sd-review-ack")
+        ack.store_path(self.repo).write_text("{not json", encoding="utf-8")
+
+        def blind(number: int, why: str) -> dict[str, Any]:
+            return self.pull(failing=[], number=number, title=f"PR {number}", review_findings={
+                "reviews": 1, "in_body": 1, "reviewers": ["bot"], "ids": [f"b{number}"],
+                "inline": 0, "unreadable": why, "indeterminate": []})
+        pulls = [blind(9, "HTTP 502"), blind(7, "gh api exited 1")]
+        found = status.actionable_inventory(self.repo, self.sections(pull_requests={
+            "repo": "acme/widget", "pull_requests": pulls}), self.TODAY)
+        reason = found.unchecked["pr-review-unacknowledged"]
+        self.assertTrue(reason.startswith(f"{ack.store_path(self.repo)} is not valid JSON"), reason)
+        self.assertTrue(reason.endswith(
+            "; every finding reads as unread; the inline comments on #7, #9 could not be read"
+            " (gh api exited 1, among others)"), reason)
 
     def test_many_unreadable_pull_requests_are_counted_past_a_cap(self) -> None:
         """The sentence stays short however many reads fail, and loses no count."""
@@ -4220,6 +4239,10 @@ class ReviewUnacknowledgedPartialReadTests(InventoryFixture):
         rows = self.by_check(found.rows, "pr-review-unacknowledged")
         self.assertEqual([row["key"] for row in rows], ["acme/widget!7"])
         self.assertIn("2 of 2 review finding(s) unanswered", rows[0]["detail"])
+        # `--ack` would replace the store it cannot read (review-914 B1), so
+        # the row must not send anyone there before the store is repaired.
+        self.assertIn("repair or move the acknowledgement store first", rows[0]["suggest"])
+        self.assertNotIn("acknowledge each", rows[0]["suggest"])
         self.assertIn("not valid JSON", found.unchecked["pr-review-unacknowledged"])
         self.assertNotIn("clear", status.banner(found)["summary"])
         self.assertEqual(status.next_action(found.rows)["id"], rows[0]["id"])
