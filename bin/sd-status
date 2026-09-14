@@ -39,6 +39,7 @@ import pathlib
 import re
 import shutil
 import sys
+from collections.abc import Sequence
 from typing import Any, NamedTuple, TextIO
 
 #: Read-only means read-only, and importing a sibling module would otherwise
@@ -1260,6 +1261,12 @@ class Class(NamedTuple):
     needs: tuple[str, ...] = ()
 
 
+#: How many days after its merge a pull request's unanswered review findings
+#: stay a row, inclusive: merged fourteen days ago is in, fifteen is out. The
+#: number is the owner's decision on sd:631. Without a window the class would
+#: grow into a list of every finding this repository never answered.
+MERGED_REVIEW_DAYS = 14
+
 #: The enumeration. This tuple is the *only* answer to "which checks exist":
 #: the renderer iterates it, the ranking reads `rank` off it, the banner reads
 #: `abnormal` off it and `open threads` reads `source` off it. Adding a check
@@ -1291,6 +1298,11 @@ CLASSES = (
           "review findings + local acknowledgements",
           "an open pull request carrying a review finding nobody has answered",
           ("pull_requests",)),
+    Class("merged-pr-review-unacknowledged", "p", False, 36,
+          f"merged PRs ({MERGED_REVIEW_DAYS} days) + local acknowledgements",
+          f"a pull request merged in the last {MERGED_REVIEW_DAYS} days with a review "
+          "finding nobody answered",
+          ("merged_pull_requests",)),
     Class("protection-gap", "g", True, 40, "protection",
           "an enforcement leg missing on the default branch", ("protection",)),
     Class("accepted-gap-standing", "g", False, 45,
@@ -1345,6 +1357,8 @@ EXCLUDED = (
     "second has no disposition field, so nothing in it can ever be marked handled",
     "markers outside bin/, dashboard/, tests/ and .github/scripts/ -- in "
     "skills/ and docs/ the word documents the convention instead of instancing it",
+    f"review findings on pull requests merged more than {MERGED_REVIEW_DAYS} days ago "
+    "-- past that window a finding nobody answered stops being a row (sd:631)",
 )
 
 
@@ -1492,6 +1506,7 @@ def actionable_inventory(
     rows += _step_rows(root, work)
     rows += _pull_rows(root, pulls, protection)
     rows += _review_rows(root, pulls, unchecked)
+    rows += _merged_review_rows(root, sections.get("merged_pull_requests") or {}, day, unchecked)
     rows += _protection_rows(protection)
     rows += _issue_rows(sections.get("issues") or {})
     rows += _branch_rows(root, pulls, protection)
@@ -2697,19 +2712,33 @@ def _review_rows(
     repair the store first, since `--ack` refuses one it cannot read. `setdefault`,
     so this sentence survives `_mark_unasked`'s generic one.
     """
+    listed = [(pull, None, "") for pull in pulls.get("pull_requests") or []]
+    return _unanswered_rows("pr-review-unacknowledged", root, pulls.get("repo"), listed, unchecked)
+
+
+def _unanswered_rows(
+    check: str, root: pathlib.Path, slug: str | None,
+    listed: Sequence[tuple[dict[str, Any], dict[str, str] | None, str]],
+    unchecked: dict[str, str], reasons: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """`_review_rows`'s rule, for any list of `(pull, merge evidence, detail tail)`.
+
+    One body for both review classes, so the open class and the merged class
+    cannot come to disagree about what unreadable, broken or answered means.
+    `reasons` are the caller's own sentences, kept after the store's.
+    """
     ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
-    slug = pulls.get("repo") or "?"
     _, broken = ack.read_store(root)
-    reasons, blind = [broken] if broken else [], []
+    reasons, blind = ([broken] if broken else []) + (reasons or []), []
     ref = ack.landing_ref(root)
     rows: list[dict[str, Any]] = []
-    for pull in pulls.get("pull_requests") or []:
+    for pull, merge, tail in listed:
         stated = pull.get("review_findings") or {}
         if stated.get("unreadable"):
             blind.append((int(pull["number"]), stated["unreadable"]))
             continue
         found = list(stated.get("ids") or [])
-        standing = ack.unacknowledged(root, found, ref, stated.get("stated") or {})
+        standing = ack.unacknowledged(root, found, ref, stated.get("stated") or {}, merge)
         if not standing:
             continue
         # A reviewer that writes `(3 votes each)` has stated more than one
@@ -2719,13 +2748,14 @@ def _review_rows(
         # the tool cannot disagree about the same pull request.
         many = set(stated.get("indeterminate") or ())
         rows.append(_row(
-            "pr-review-unacknowledged", f"{slug}!{pull['number']}",
+            check, f"{slug or '?'}!{pull['number']}",
             f"#{pull['number']} {pull['title']}",
             f"{ack.at_least_ids(standing, many)} of {ack.at_least_ids(found, many)}"
-            " review finding(s) unanswered",
+            f" review finding(s) unanswered{tail}",
             f"read them with `sd-review-ack --pr {pull['number']}`, then " + (
                 "repair or move the acknowledgement store first; --ack refuses while it is"
                 " unreadable" if broken else "acknowledge each with --fixed SHA or --dismiss 'why'"),
+            int(pull.get("age_days") or 0),
         ))
     if blind:
         blind.sort(key=lambda pair: pair[0])
@@ -2734,8 +2764,60 @@ def _review_rows(
         reasons.append(f"the inline comments on {', '.join(f'#{n}' for n, _ in blind[:5])}{more} "
                        f"could not be read ({cause})")
     if reasons:
-        unchecked.setdefault("pr-review-unacknowledged", "; ".join(reasons))
+        unchecked.setdefault(check, "; ".join(reasons))
     return rows
+
+
+def _merged_on(pull: dict[str, Any]) -> datetime.date | None:
+    """The UTC calendar day GitHub says a pull request merged, or None."""
+    try:
+        return datetime.datetime.fromisoformat(
+            str(pull.get("merged_at") or "").replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def _merged_review_rows(
+    root: pathlib.Path, merged: dict[str, Any], day: datetime.date,
+    unchecked: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Merged pull requests, inside the window, carrying a finding nobody answered.
+
+    `pr-review-unacknowledged` reads open pull requests, so its row goes the
+    moment one merges, answered or not. PR #896 merged with seven of seven
+    findings unread and surfaced nowhere (sd:631, note 1355). This class keeps
+    such a pull request in the report for `MERGED_REVIEW_DAYS` after its merge,
+    counted from `day` so a test pins the boundary without the wall clock.
+
+    Not abnormal, and ranked 36 so it sorts right after the open class; both
+    are the owner's decision. The unreadable rule is the open class's, through
+    the same body: a merged pull request whose comments could not be read gets
+    no row and marks this class `unchecked`, and every other pull request
+    keeps its row. A pull request with no readable merge date is skipped the
+    same way, and a list that stopped at its limit marks the class too.
+
+    The merge evidence is the head GitHub merged and the commit it merged as,
+    so a `fixed <branch commit>` that landed through a squash reads answered.
+    """
+    reasons: list[str] = []
+    if merged.get("truncated"):
+        reasons.append(f"the merged list stopped at its limit of {merged.get('limit')}, "
+                       "so some pull requests in the window were not read")
+    listed, undated = [], []
+    for pull in merged.get("pull_requests") or []:
+        when = _merged_on(pull)
+        if when is None:
+            undated.append(f"#{pull.get('number')}")
+            continue
+        age = max((day - when).days, 0)
+        if age > MERGED_REVIEW_DAYS:
+            continue
+        merge = {"head": str(pull.get("head_oid") or ""), "merge": str(pull.get("merge_oid") or "")}
+        listed.append((dict(pull, age_days=age), merge, f", merged {age} day{_s(age)} ago"))
+    if undated:
+        reasons.append(f"GitHub gave no merge date for {', '.join(undated)}")
+    return _unanswered_rows("merged-pr-review-unacknowledged", root, merged.get("repo"),
+                            listed, unchecked, reasons)
 
 
 def _protection_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
@@ -3061,6 +3143,8 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "pack": pack_banner(),
         "work": work_section(root),
         "pull_requests": pulls,
+        "merged_pull_requests": pr_state.collect_merged(root, gh, (
+            datetime.date.today() - datetime.timedelta(days=MERGED_REVIEW_DAYS + 1)).isoformat()),
         "setup": setup_section(root),
         "protection": protection_section(root, gh),
         "handoff": handoff_section(root, environ),

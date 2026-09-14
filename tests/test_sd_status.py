@@ -1478,6 +1478,7 @@ class InventoryFixture(StatusFixture):
         base: dict[str, Any] = {
             "work": status.work_section(self.repo),
             "pull_requests": {"repo": "acme/widget", "pull_requests": []},
+            "merged_pull_requests": {"repo": "acme/widget", "pull_requests": []},
             "protection": {"default_branch": "main", "gaps": [], "detail": {}},
             "issues": {"available": False, "needs_you": [], "other": []},
         }
@@ -1723,7 +1724,7 @@ class ClassTableTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(len(names), len(status.BY_CHECK))
 
-    def test_the_table_carries_the_twenty_two_checks_the_design_enumerates(self) -> None:
+    def test_the_table_carries_the_twenty_three_checks_the_design_enumerates(self) -> None:
         # Pinned as a set, not a count: a count passes when a check is renamed
         # into a duplicate of another, which is the drift this table exists to
         # make impossible.
@@ -1738,6 +1739,7 @@ class ClassTableTests(unittest.TestCase):
                 "parked-concern", "idle-planning", "undated-planning",
                 "issue-open", "source-marker", "unreadable-concern-row",
                 "undisclosed-tool", "pr-review-unacknowledged",
+                "merged-pr-review-unacknowledged",
             },
         )
 
@@ -2855,6 +2857,7 @@ class BannerTests(InventoryFixture):
             "pr-check-failing", "pr-check-missing", "dirty-tree-with-open-pr",
             "pr-review-unacknowledged",
         },
+        "merged_pull_requests": {"merged-pr-review-unacknowledged"},
         "protection": {"pr-check-missing", "protection-gap"},
     }
 
@@ -4251,6 +4254,177 @@ class ReviewUnacknowledgedPartialReadTests(InventoryFixture):
         status._render_pending(found.rows, pending.write)
         self.assertIn(rows[0]["id"], actions.getvalue())
         self.assertIn(rows[0]["id"], pending.getvalue())
+
+
+class MergedReviewUnacknowledgedTests(InventoryFixture):
+    """`merged-pr-review-unacknowledged`: sd:631, note 1845.
+
+    PR #896 merged with seven of seven findings unread, and the open class lost
+    its row the moment it merged. Every date here counts from `TODAY`, never
+    from the wall clock, so the window's edge is a fixed day.
+    """
+
+    CHECK = "merged-pr-review-unacknowledged"
+
+    def merged(self, number: int, days_ago: int, ids: list[str], **extra: Any) -> dict[str, Any]:
+        """One row shaped as `sd-pr-state.collect_merged` returns it."""
+        found = {"reviews": 1, "in_body": len(ids), "reviewers": ["bot"], "ids": ids,
+                 "inline": 0, "unreadable": "", "indeterminate": [], "stated": {}}
+        found.update(extra)
+        when = self.TODAY - datetime.timedelta(days=days_ago)
+        return {"number": number, "title": f"PR {number}",
+                "url": f"https://github.com/acme/widget/pull/{number}",
+                "merged_at": f"{when.isoformat()}T23:59:00Z",
+                "head_oid": "", "merge_oid": "", "review_findings": found}
+
+    def found(self, *pulls: dict[str, Any], **section: Any) -> Any:
+        merged = {"repo": "acme/widget", "pull_requests": list(pulls), **section}
+        return status.actionable_inventory(
+            self.repo, self.sections(merged_pull_requests=merged), self.TODAY)
+
+    def test_the_window_holds_day_thirteen_and_fourteen_and_drops_day_fifteen(self) -> None:
+        inventory = self.found(self.merged(13, 13, ["a13"]), self.merged(14, 14, ["a14"]),
+                               self.merged(15, 15, ["a15"]))
+        rows = self.by_check(inventory.rows, self.CHECK)
+        self.assertEqual(sorted(row["key"] for row in rows),
+                         ["acme/widget!13", "acme/widget!14"])
+        by_key = {row["key"]: row for row in rows}
+        self.assertIn("1 of 1 review finding(s) unanswered, merged 13 days ago",
+                      by_key["acme/widget!13"]["detail"])
+        self.assertEqual(14, by_key["acme/widget!14"]["age_days"])
+        self.assertNotIn(self.CHECK, inventory.unchecked)
+
+    def test_the_row_is_not_abnormal_and_never_reaches_the_banner(self) -> None:
+        inventory = self.found(self.merged(5, 1, ["aa11"]))
+        rows = self.by_check(inventory.rows, self.CHECK)
+        self.assertEqual(1, len(rows))
+        self.assertFalse(rows[0]["abnormal"])
+        result = status.banner(inventory)
+        self.assertNotIn(self.CHECK, [row["check"] for row in result["classes"]])
+        self.assertEqual("no findings; all 13 checks clear", result["summary"])
+
+    def test_the_rank_sorts_after_the_open_class_and_before_protection(self) -> None:
+        """Below 35 in priority: the open pull request's row comes first.
+
+        The merged row is the older of the two, so an order by age alone
+        would put it first; only the rank keeps it second.
+        """
+        self.assertGreater(status.BY_CHECK[self.CHECK].rank,
+                           status.BY_CHECK["pr-review-unacknowledged"].rank)
+        open_pull = {"repo": "acme/widget", "pull_requests": [self.pull(
+            failing=[], review_findings={"reviews": 1, "in_body": 1, "reviewers": ["bot"],
+                                         "ids": ["op11"], "inline": 0, "unreadable": "",
+                                         "indeterminate": []})]}
+        protection = {"default_branch": "main", "detail": {},
+                      "gaps": [{"id": "reviews", "gap": "no review required"}]}
+        rows = status.actionable_inventory(self.repo, self.sections(
+            pull_requests=open_pull, protection=protection,
+            merged_pull_requests={"repo": "acme/widget",
+                                  "pull_requests": [self.merged(5, 9, ["mm11"])]},
+        ), self.TODAY).rows
+        order = [row["check"] for row in rows if row["check"] in (
+            "pr-review-unacknowledged", self.CHECK, "protection-gap")]
+        self.assertEqual(["pr-review-unacknowledged", self.CHECK, "protection-gap"], order)
+
+    def test_one_unreadable_merged_pull_request_is_unchecked_and_hides_no_other(self) -> None:
+        blind = self.merged(7, 2, ["bb11"], unreadable="gh api exited 1")
+        read = self.merged(8, 3, ["cc11", "cc22"])
+        for order in ([blind, read], [read, blind]):
+            with self.subTest(first=order[0]["number"]):
+                inventory = self.found(*order)
+                rows = self.by_check(inventory.rows, self.CHECK)
+                self.assertEqual(["acme/widget!8"], [row["key"] for row in rows])
+                self.assertIn("2 of 2 review finding(s) unanswered", rows[0]["detail"])
+                self.assertIn("#7", inventory.unchecked[self.CHECK])
+                self.assertNotIn("pr-review-unacknowledged", inventory.unchecked)
+
+    def test_no_merge_date_and_a_truncated_list_are_unchecked_too(self) -> None:
+        undated = dict(self.merged(9, 1, ["dd11"]), merged_at=None)
+        inventory = self.found(undated, self.merged(10, 1, ["ee11"]), truncated=True, limit=500)
+        self.assertEqual(["acme/widget!10"],
+                         [row["key"] for row in self.by_check(inventory.rows, self.CHECK)])
+        reason = inventory.unchecked[self.CHECK]
+        self.assertIn("no merge date for #9", reason)
+        self.assertIn("limit of 500", reason)
+
+    def test_a_fix_that_landed_through_a_squash_answers_the_finding(self) -> None:
+        """The merge evidence reaches `sd-review-ack`, or every squash reads unanswered."""
+        self.git("checkout", "-q", "-b", "fix")
+        (self.repo / "fixed.txt").write_text("fixed\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", "fix it")
+        tip = self.git("rev-parse", "HEAD").strip()
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--squash", "fix")
+        self.git("commit", "-q", "-m", "squash fix")
+        squash = self.git("rev-parse", "HEAD").strip()
+        self.git("update-ref", "refs/remotes/origin/main", "main")
+        self.git("branch", "-q", "-D", "fix")
+        ack = status.sd_lib.sibling("sd_review_ack_merged", "sd-review-ack")
+        ack.write_store(self.repo, {"ff11": {
+            "pr": 5, "disposition": "fixed", "commit": tip, "cited": tip, "reason": "",
+            "path": "fixed.txt", "line": 1, "at": "2026-09-06T00:00:00+00:00"}})
+        landed = dict(self.merged(5, 1, ["ff11"]), head_oid=tip, merge_oid=squash)
+        self.assertEqual([], self.by_check(self.found(landed).rows, self.CHECK))
+        # The control: the same record with no merge evidence stays a row.
+        self.assertEqual(1, len(self.by_check(self.found(self.merged(5, 1, ["ff11"])).rows,
+                                              self.CHECK)))
+
+
+class CollectMergedTests(unittest.TestCase):
+    """`sd-pr-state.collect_merged`: two calls for any number of pull requests."""
+
+    FOUND = {"available": True, "reason": "", "slug": "acme/widget"}
+
+    def pulls(self) -> list[dict[str, Any]]:
+        return [
+            {"number": 5, "title": "Five", "url": "u5", "mergedAt": "2026-09-06T10:00:00Z",
+             "createdAt": "2026-09-01T00:00:00Z", "headRefOid": "h5",
+             "mergeCommit": {"oid": "m5"}, "reviews": []},
+            {"number": 6, "title": "Six", "url": "u6", "mergedAt": "2026-09-05T10:00:00Z",
+             "createdAt": "2026-08-20T00:00:00Z", "headRefOid": "h6",
+             "mergeCommit": {"oid": "m6"}, "reviews": []},
+        ]
+
+    def run_with(self, comments: Any, error: str = "") -> tuple[dict[str, Any], list[list[str]]]:
+        seen: list[list[str]] = []
+
+        def answer(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
+            seen.append(args)
+            if args[:2] == ["pr", "list"]:
+                return self.pulls(), ""
+            return (None, error) if error else (comments, "")
+
+        with mock.patch.object(status.pr_state, "gh_json", answer):
+            return status.pr_state.collect_merged(BIN.parent, self.FOUND, "2026-08-23"), seen
+
+    def comment(self, number: int, ident: int, body: str) -> dict[str, Any]:
+        return {"id": ident, "path": "bin/x", "line": 3, "body": body, "user": {"login": "bot"},
+                "commit_id": "c", "original_commit_id": "c",
+                "pull_request_url": f"https://api.github.com/repos/acme/widget/pulls/{number}"}
+
+    def test_one_comments_call_bounded_by_the_oldest_pull_request(self) -> None:
+        result, seen = self.run_with([self.comment(5, 1, "wrong here"),
+                                      self.comment(6, 2, "and here"),
+                                      self.comment(6, 3, "and again")])
+        self.assertEqual(2, len(seen))
+        self.assertIn("merged:>=2026-08-23", seen[0])
+        self.assertIn("since=2026-08-20T00:00:00Z", seen[1][1])
+        by_number = {row["number"]: row for row in result["pull_requests"]}
+        self.assertEqual(1, by_number[5]["review_findings"]["inline"])
+        self.assertEqual(2, by_number[6]["review_findings"]["inline"])
+        self.assertEqual(("h5", "m5"), (by_number[5]["head_oid"], by_number[5]["merge_oid"]))
+        self.assertEqual("", by_number[6]["review_findings"]["unreadable"])
+
+    def test_a_failed_or_unattributable_read_makes_every_pull_request_unreadable(self) -> None:
+        stray = dict(self.comment(5, 1, "whose?"), pull_request_url=None)
+        for label, comments, error in (("error", None, "HTTP 502"), ("object", {}, ""),
+                                       ("stray", [stray], "")):
+            with self.subTest(label):
+                result, _ = self.run_with(comments, error)
+                reasons = [row["review_findings"]["unreadable"] for row in result["pull_requests"]]
+                self.assertEqual(2, len(reasons))
+                self.assertTrue(all(reasons), reasons)
 
 
 if __name__ == "__main__":

@@ -942,20 +942,23 @@ def verdict(root: pathlib.Path, found: dict, rows: dict[str, dict], ref: str,
 
 
 def unacknowledged(root: pathlib.Path, ids: Iterable[str], ref: str | None = None,
-                   stated: dict[str, list[str]] | None = None) -> list[str]:
+                   stated: dict[str, list[str]] | None = None,
+                   merge: dict[str, str] | None = None) -> list[str]:
     """Which of these finding ids nobody has answered. The whole public gate.
 
     One call, so a reader that only wants the number -- `sd-status`'s row --
     needs neither the store's shape nor the verdict vocabulary. `stated` maps
     a finding id to the commits it was stated against, as `sd-pr-state`
     carries them; without it a restated finding cannot be told from an
-    answered one, so a caller that has the map passes it.
+    answered one, so a caller that has the map passes it. `merge` is
+    `landing_evidence`'s shape, for a merged pull request: without it a fix
+    that landed through a squash reads `fix-not-landed`.
     """
     rows, _ = read_store(root)
     landing = ref or landing_ref(root)
     read = stated or {}
     return [found for found in ids
-            if id_verdict(root, found, rows, landing, None, read.get(found) or ()) not in SATISFIED]
+            if id_verdict(root, found, rows, landing, merge, read.get(found) or ()) not in SATISFIED]
 
 
 def review_state(root: pathlib.Path, rounds: dict[int, dict], ref: str) -> dict:

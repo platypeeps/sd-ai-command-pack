@@ -83,6 +83,7 @@ predict `pending` from this table before running the command.
 | 30 | `pr-check-missing` | `p` | yes | `open PRs + protection` | an open pull request reporting no check the branch requires |
 | 30 | `dirty-tree-with-open-pr` | `p` | yes | `git + open PRs` | uncommitted work on a branch that already has a pull request |
 | 35 | `pr-review-unacknowledged` | `p` | yes | `review findings + local acknowledgements` | an open pull request carrying a review finding nobody has answered |
+| 36 | `merged-pr-review-unacknowledged` | `p` | no | `merged PRs (14 days) + local acknowledgements` | a pull request merged in the last 14 days with a review finding nobody answered |
 | 40 | `protection-gap` | `g` | yes | `protection` | an enforcement leg missing on the default branch |
 | 45 | `accepted-gap-standing` | `g` | no | `.github/sd-status.json accepted_gaps[]` | a written acceptance whose until condition nothing re-reads |
 | 50 | `issue-needs-you` | `i` | no | `dashboard index` | an indexed issue the index says is waiting on you |
@@ -108,9 +109,10 @@ The rank is deliberate. Below the three rank-30 `p` classes, because a red
 check is a machine-verified fact and a review finding still needs a human to
 judge it. Above `protection-gap` at 40, because a gap in branch protection is a
 standing configuration question while an unanswered finding is attached to a
-pull request that is about to merge, and stops mattering the moment it does.
-Abnormal, so it reaches the banner: the whole failure was that this was
-invisible where the operator already looked.
+pull request that is about to merge, and the merge is the last point where
+answering it can keep a defect off the default branch. Abnormal, so it reaches
+the banner: the whole failure was that this was invisible where the operator
+already looked.
 
 A finding is answered when `bin/sd-review-ack` says so — acknowledged as fixed
 by a commit that actually reached the landing ref, or dismissed with a reason.
@@ -156,6 +158,38 @@ indeterminate, and the detail then reads `at least 2 of at least 2` rather
 than `2 of 2`. Splitting that text on "and" would be guessing how many, and
 counting it flat as one would understate — an undercount on a gate reads as
 progress. Rows with no such marker keep an exact count.
+
+### `merged-pr-review-unacknowledged`, and why it sits at 36
+
+The open class loses its row when the pull request merges, answered or not.
+PR #896 merged with seven of seven findings unread, its fixes pushed without
+`bin/sd-ship`, and the report showed it nowhere. This class keeps such a pull
+request on the report for 14 days after the merge: merged fourteen days ago is
+in, fifteen is out. Past that it is no longer a row, and `open threads` names
+the exclusion.
+
+A rank below 35 and not abnormal are the owner's decision (sd:631). 36 sorts it
+right after the open class, because an open pull request can still be held
+back and this one has already merged. Not abnormal, so it never reaches the banner and never
+changes its count. Automatic acknowledgement stays with `bin/sd-ship`; a push
+or a merge made another way records nothing, which is the case this row exists
+to show.
+
+It asks the same question through the same code as the open class. A finding
+is answered when `bin/sd-review-ack` says so, and the merged pull request's
+head and merge commit go with the question, so a fix that landed through a
+squash reads answered. The rule for unreadable data is the open class's too. A
+merged pull request whose comments could not be read gets no row and marks
+the class `unchecked`, and every other pull request keeps its row. A pull
+request with no merge date does the same, and so does a merged list that
+stopped at its limit.
+
+The read costs two calls, however many pull requests merged: `gh pr list
+--state merged` for the window, and one `gh api` over the repository's review
+comments. That call's `since` is the oldest merged pull request's creation
+time, since no review comment predates its pull request. The data arrives in
+`--json` as `merged_pull_requests`. The text report has no section for it;
+its rows print in `pending`.
 
 ## Ids: `<letter><4 hex digits, 8 on collision>`, from the data alone
 
@@ -261,7 +295,9 @@ at ten because a report is read whole; `--actions` is the list a caller pipes,
 so capping it would make the cap the interface.
 
 The `--json` schema is version **3**. Beyond the section keys it carries
-`inventory` (`rows` plus the `unchecked` map), `abnormalities`, `actions` — the
+`merged_pull_requests` (the pull requests merged inside the review window, with
+the findings each carries), `inventory` (`rows` plus the `unchecked` map),
+`abnormalities`, `actions` — the
 uncapped inventory, of which `pending` is a view of the first ten — and `next`.
 **`next` is an object with `id`, `check` and `suggest`, not a bare string**,
 because a caller acting on the suggestion needs the id it belongs to in the
