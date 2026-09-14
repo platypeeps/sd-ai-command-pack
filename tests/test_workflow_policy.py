@@ -1,6 +1,6 @@
 """`WORKFLOW.md` is the policy, and the payload agrees with it.
 
-Four things drift silently and each has a test here.
+Five things drift silently and each has a test here.
 
 **The override keys.** The `CLAUDE.local.md` block the installer writes and the
 Overrides section of `WORKFLOW.md` describe the same set of keys. Neither is
@@ -19,6 +19,11 @@ needs it links to that one.
 **The deleted second-model lane.** It is named nowhere in the governed tree.
 `CHANGELOG.md` and `docs/work/` are history and are excluded by name, since the
 archive is kept unchanged and holds every name the cuts removed.
+
+**The bare vendor token.** No file under `skills/` names `codex`, `claude`,
+`openai` or `anthropic` as a bare token: a skill names a role or a registry
+entry, and the registry maps it to a vendor. The grep was once zero and nothing
+pinned it, so three tokens came back in `skills/sd-review/SKILL.md` unnoticed.
 """
 
 from __future__ import annotations
@@ -58,6 +63,19 @@ TABLE_HEADER = "| Flow | Point | What it checks | Cap |"
 
 SELF = "tests/test_workflow_policy.py"
 
+#: A bare vendor token: one of the four names with none of `/`, `.`, `_`, `~`
+#: or `-` against either side. That shape drops paths, filenames, environment
+#: variables, MCP tool identifiers and URLs, and keeps a vendor named as a
+#: choice of who runs a pass. A letter or digit on either side makes a longer
+#: word, not the token, so `\w` sits beside the five characters.
+BARE_VENDOR = re.compile(
+    r"(?<![/._~\w-])(codex|claude|openai|anthropic)(?![/._~\w-])", re.IGNORECASE
+)
+
+#: The one product name the rule exempts. It is blanked before matching, not
+#: used to skip a line, so a bare token sharing a line with it still counts.
+PRODUCT_NAME = "Claude Code"
+
 #: An indented `key: value` line inside a fenced-free block.
 KEY_LINE = re.compile(r"^ {4}([a-z][a-z_]*):")
 
@@ -75,6 +93,38 @@ def governed_grep(pattern: str) -> list[str]:
     if result.returncode not in (0, 1):
         raise AssertionError(result.stderr.strip())
     return [line for line in result.stdout.splitlines() if line]
+
+
+def bare_vendor_lines(text: str) -> list[int]:
+    """The 1-based numbers of the lines carrying a bare vendor token."""
+    return [
+        number
+        for number, line in enumerate(text.splitlines(), start=1)
+        if BARE_VENDOR.search(line.replace(PRODUCT_NAME, " "))
+    ]
+
+
+def bare_vendor_tokens(top: str) -> list[str]:
+    """`path:line:text` for every bare vendor token in the tracked files under
+    `top`. Enumerated from the index, so a new skill is covered on arrival."""
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--", top],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    rows = []
+    for name in filter(None, result.stdout.split("\0")):
+        raw = (REPO_ROOT / name).read_bytes()
+        # A binary file carries no token a reader sees. A tracked text file
+        # that does not decode fails loudly rather than being skipped.
+        if b"\0" in raw:
+            continue
+        text = raw.decode("utf-8")
+        lines = text.splitlines()
+        rows.extend(f"{name}:{n}:{lines[n - 1].strip()}" for n in bare_vendor_lines(text))
+    return rows
 
 
 def expected_keys() -> set[str]:
@@ -244,6 +294,41 @@ class DeletedLane(unittest.TestCase):
     def test_no_governed_file_references_the_deleted_page(self):
         rows = governed_grep(r"planning-adversarial-review-codex")
         self.assertEqual(rows, [])
+
+
+class BareVendorTokens(unittest.TestCase):
+    """A grep of `skills/` for a bare vendor token returns nothing."""
+
+    def test_no_skill_names_a_vendor_as_a_bare_token(self):
+        rows = bare_vendor_tokens("skills")
+        self.assertEqual(rows, [], "bare vendor tokens under skills/:\n" + "\n".join(rows))
+
+    def test_the_shape_catches_a_vendor_named_as_who_runs_a_pass(self):
+        """The guard against the guard: the three lines that came back, and
+        the cases around them, match. A pattern that missed them would leave
+        the test above passing on the regression."""
+        for line in (
+            "an authorized exact-head `--scope branch --provider claude` review",
+            "variables declared in its registry `env` list. Codex also receives",
+            "The `claude-json` reader runs Claude in safe and restricted modes",
+            "OpenAI and Anthropic bill separately",
+            "Claude Code hands the pass to codex",
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(bare_vendor_lines(line), [1])
+
+    def test_the_shape_drops_identifiers_paths_and_the_product_name(self):
+        for line in (
+            "The `claude-json` reader and the `codex-json` entry",
+            "`codex_preflight` scrubs `CODEX_HOME` and `OPENAI_API_KEY`",
+            "settings live in ~/.claude/settings.json and .codex/",
+            "see https://code.claude.com/docs/en/headless",
+            "the `mcp__claude-in-chrome__navigate` tool",
+            "[Claude Code's headless guide](https://code.claude.com/docs)",
+            "codexes and claudeish are longer words",
+        ):
+            with self.subTest(line=line):
+                self.assertEqual(bare_vendor_lines(line), [])
 
 
 class StandingAuthorizationInventory(unittest.TestCase):
