@@ -31,7 +31,7 @@ opens with fourteen top-level lines; the thirteen below are the sections.
 | Section | What it shows |
 |---|---|
 | `abnormalities` | every abnormal class in the ranking table, whether or not it fired: `clear`, `n findings`, or `unchecked: <reason>`. At most three findings print per class, and the elision says how many were held back |
-| `pending` | at most ten actionable rows by rank, with the line above them stating the denominator — `10 of 123, by rank` |
+| `pending` | at most ten actionable rows by rank, with the line above them stating the denominator — `10 of 123, by rank`. A class with a cap shows at most that many rows, and a line under the list says how many it held back |
 | `next` | one row: the top-ranked id and its `suggest`. Not a menu, not three options |
 | `open threads` | a count per `source`, then the exclusions named in full, so the counts are never read as a total of everything that exists |
 | `work items` | derived item status from `docs/work`, counted, with the parked ones counted and not listed |
@@ -68,8 +68,10 @@ means adding a row there and a producer — never editing a renderer, a sort, or
 a list.** That is how those drift apart.
 
 Rows are ordered `(rank, -age_days, id)`: the class first, the oldest of a
-class next, the id last so the order is total and reproducible. A reader can
-predict `pending` from this table before running the command.
+class next, the id last so the order is total and reproducible. One class,
+`merged-pr-review-unacknowledged`, orders its rows newest first instead, and
+`pending` shows at most three of them. A reader can predict `pending` from
+this table before running the command.
 
 | Rank | Check | Id prefix | In the banner | Source | What it means |
 |---|---|---|---|---|---|
@@ -87,6 +89,7 @@ predict `pending` from this table before running the command.
 | 45 | `accepted-gap-standing` | `g` | no | `.github/sd-status.json accepted_gaps[]` | a written acceptance whose until condition nothing re-reads |
 | 50 | `issue-needs-you` | `i` | no | `dashboard index` | an indexed issue the index says is waiting on you |
 | 60 | `pr-needs-action` | `p` | no | `open pull requests` | an open pull request waiting on a review or a merge |
+| 65 | `merged-pr-review-unacknowledged` | `p` | no | `merged PRs (14 days) + local acknowledgements` | a pull request merged in the last 14 days with a review finding nobody answered |
 | 70 | `open-step` | `s` | no | `- [ ] in item docs` | an unchecked box on an item nobody has closed |
 | 80 | `unmerged-branch` | `b` | no | `origin heads` | a branch on origin with no open pull request carrying it |
 | 90 | `parked-concern` | `c` | no | `## Review ledger` | a concern parked behind a trigger nobody is watching |
@@ -108,9 +111,10 @@ The rank is deliberate. Below the three rank-30 `p` classes, because a red
 check is a machine-verified fact and a review finding still needs a human to
 judge it. Above `protection-gap` at 40, because a gap in branch protection is a
 standing configuration question while an unanswered finding is attached to a
-pull request that is about to merge, and stops mattering the moment it does.
-Abnormal, so it reaches the banner: the whole failure was that this was
-invisible where the operator already looked.
+pull request that is about to merge, and the merge is the last point where
+answering it can keep a defect off the default branch. Abnormal, so it reaches
+the banner: the whole failure was that this was invisible where the operator
+already looked.
 
 A finding is answered when `bin/sd-review-ack` says so — acknowledged as fixed
 by a commit that actually reached the landing ref, or dismissed with a reason.
@@ -156,6 +160,65 @@ indeterminate, and the detail then reads `at least 2 of at least 2` rather
 than `2 of 2`. Splitting that text on "and" would be guessing how many, and
 counting it flat as one would understate — an undercount on a gate reads as
 progress. Rows with no such marker keep an exact count.
+
+### `merged-pr-review-unacknowledged`, and why it sits at 65
+
+The open class loses its row when the pull request merges, answered or not.
+PR #896 merged with seven of seven findings unread, its fixes pushed without
+`bin/sd-ship`, and the report showed it nowhere. This class keeps such a pull
+request on the report for 14 days after the merge: merged fourteen days ago is
+in, fifteen is out. Past that it is no longer a row, and `open threads` names
+the exclusion.
+
+The days are counted from the UTC calendar day GitHub records the merge on to
+the local date `sd-status` runs on. So the edge can move by the local offset
+from UTC: in California a pull request merged in the evening falls on the next
+UTC day, so it stays in the window one local day longer. The query to GitHub reaches
+one day further back than the window, so no pull request inside the window
+goes unread because of that difference.
+
+Sorted after the open class at 35, and not abnormal, both by the owner's
+decision (sd:631). Not
+abnormal, so it never reaches the banner and never changes its count.
+Automatic acknowledgement stays with `bin/sd-ship`; a push or a merge made
+another way records nothing, which is the case this row exists to show.
+
+It sat at 36 at first, and review of #925 showed why that cannot hold here.
+Lanes in this repository push with plain `git` instead of `bin/sd-ship`, so
+nothing records their answers, and about 278 pull requests merged in the
+fifteen days to 2026-09-13. Ten of them with one unanswered inline comment
+would fill all ten `pending` slots at 36, and `next` would point at the
+oldest. So three rules apply now:
+
+- **Rank 65**, below `pr-needs-action` at 60 and above `open-step` at 70. An
+  open pull request waiting on a review or a merge can still change; a merged
+  one cannot, so the open one comes first.
+- **Newest merge first** within the class (`newest_first` in `CLASSES`), the
+  reverse of every other class. A finding from yesterday's merge is still
+  fresh in someone's head; one from two weeks ago is the least likely to be
+  acted on.
+- **At most three of its rows in `pending`** (`pending_cap`). The rows it holds
+  back leave their slots to the classes below, and a line under the list says
+  how many were held back. `--actions` and `--json` still carry every row.
+
+It asks the same question through the same code as the open class. A finding
+is answered when `bin/sd-review-ack` says so, and the merged pull request's
+head and merge commit go with the question, so a fix that landed through a
+squash reads answered. The rule for unreadable data is the open class's too. A
+merged pull request whose comments could not be read gets no row and marks
+the class `unchecked`, and every other pull request keeps its row. A pull
+request with no merge date does the same, and so does a merged list that
+stopped at its limit.
+
+The read runs two `gh` commands, however many pull requests merged: `gh pr list
+--state merged` for the window, and one `gh api --paginate` over the
+repository's review comments. That call's `since` is the oldest merged pull
+request's creation time, since no review comment predates its pull request. It
+is still as many HTTP pages as there are comments since then, and one
+long-lived pull request that merges widens it. If it runs past `gh`'s 60-second
+limit, every merged pull request reads unreadable and the class is `unchecked`.
+The data arrives in `--json` as `merged_pull_requests`. The text report has no section for it;
+its rows print in `pending`.
 
 ## Ids: `<letter><4 hex digits, 8 on collision>`, from the data alone
 
@@ -261,7 +324,9 @@ at ten because a report is read whole; `--actions` is the list a caller pipes,
 so capping it would make the cap the interface.
 
 The `--json` schema is version **3**. Beyond the section keys it carries
-`inventory` (`rows` plus the `unchecked` map), `abnormalities`, `actions` — the
+`merged_pull_requests` (the pull requests merged inside the review window, with
+the findings each carries), `inventory` (`rows` plus the `unchecked` map),
+`abnormalities`, `actions` — the
 uncapped inventory, of which `pending` is a view of the first ten — and `next`.
 **`next` is an object with `id`, `check` and `suggest`, not a bare string**,
 because a caller acting on the suggestion needs the id it belongs to in the

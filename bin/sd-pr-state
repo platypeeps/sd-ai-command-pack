@@ -132,7 +132,33 @@ def gh_json(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
     try:
         return json.loads(out or "null"), ""
     except json.JSONDecodeError as error:
+        pages = _pages(out)
+        if pages is not None:
+            return pages, ""
         return None, f"gh {args[0]} did not return JSON: {error}"
+
+
+def _pages(out: str) -> list[Any] | None:
+    """`--paginate` pages printed back to back, `[..][..]`, as one list, or None.
+
+    A `gh` that does not merge the pages of an array endpoint prints each page
+    as its own array. Past the first page that is not one JSON document, and
+    refusing it would mark every pull request unreadable on exactly the busy
+    repository that has more than a page of comments. Only arrays are joined.
+    """
+    decoder, index, joined = json.JSONDecoder(), 0, []
+    text = out.strip()
+    while index < len(text):
+        try:
+            page, index = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(page, list):
+            return None
+        joined.extend(page)
+        while index < len(text) and text[index].isspace():
+            index += 1
+    return joined if text else None
 
 
 def canonical_remote(root: pathlib.Path) -> str | None:
@@ -327,9 +353,14 @@ def inline_findings(root: pathlib.Path, slug: str, number: Any) -> tuple[list[st
         # marks the class unchecked rather than counting it clear.
         return [], {}, (f"the comments endpoint for #{number} returned "
                         f"{type(payload).__name__}, not a list of comments")
+    return (*_inline_rows(number, payload), "")
+
+
+def _inline_rows(number: Any, comments: list[Any]) -> tuple[list[str], dict[str, list[str]]]:
+    """The ids and stated-at commits of the inline findings in `comments`."""
     module = sd_lib.sibling("sd_review_ack", "sd-review-ack")
-    rows = module.findings(number, [], payload)
-    return [row["id"] for row in rows], {row["id"]: list(row["stated_at"]) for row in rows}, ""
+    rows = module.findings(number, [], comments)
+    return [row["id"] for row in rows], {row["id"]: list(row["stated_at"]) for row in rows}
 
 
 def describe(pull: dict[str, Any], root: pathlib.Path, slug: str) -> dict[str, Any]:
@@ -362,7 +393,12 @@ def _findings(pull: dict[str, Any], root: pathlib.Path, slug: str) -> dict[str, 
     count presented as a total is the defect this whole record exists for.
     """
     stated = review_findings(pull.get("reviews"), pull.get("number"))
-    inline, read_at, error = inline_findings(root, slug, pull.get("number"))
+    return _union(stated, *inline_findings(root, slug, pull.get("number")))
+
+
+def _union(stated: dict[str, Any], inline: list[str], read_at: dict[str, list[str]],
+           error: str) -> dict[str, Any]:
+    """The body half and the inline half as one record, `_findings`'s rule."""
     stated["inline"] = len(inline)
     # `dict.fromkeys` rather than `+`, first occurrence winning, which is the
     # order and the rule `findings` itself uses. Today `source` is part of the
@@ -401,6 +437,93 @@ def collect(root: pathlib.Path, limit: int = DEFAULT_LIMIT) -> dict[str, Any]:
         describe(pull, root, slug) for pull in payload if isinstance(pull, dict)
     ]
     return result
+
+
+#: What a merged pull request is read for: its name, when it merged, the two
+#: commits a squash-aware landed read needs, when it opened (the floor under
+#: every review comment on it), and the review bodies.
+MERGED_FIELDS = ("number", "title", "url", "mergedAt", "createdAt", "headRefOid",
+                 "mergeCommit", "reviews")
+
+#: Most merged pull requests one run reads. This repository merges hundreds in
+#: two weeks, so the list says when it stopped here rather than counting clear.
+MERGED_LIMIT = 500
+
+
+def collect_merged(root: pathlib.Path, found: dict[str, Any], since: str,
+                   limit: int = MERGED_LIMIT) -> dict[str, Any]:
+    """Pull requests merged on or after `since`, with the findings each carries.
+
+    `found` is `probe`'s answer, which the caller already holds. The price is
+    one `gh pr list` and one `gh api` over the repository's review comments,
+    not one call per pull request: the comments endpoint takes `since`, and no
+    review comment on a pull request predates the pull request, so the oldest
+    `createdAt` bounds the read without missing one (sd:631).
+    """
+    result: dict[str, Any] = {
+        "available": found["available"], "reason": found["reason"], "repo": found["slug"],
+        "since": since, "limit": limit, "truncated": False, "pull_requests": [],
+    }
+    if not found["available"]:
+        return result
+    payload, error = gh_json(
+        ["pr", "list", "--state", "merged", "--search", f"merged:>={since}",
+         "--limit", str(limit), "--json", ",".join(MERGED_FIELDS)],
+        root,
+    )
+    if error or not isinstance(payload, list):
+        result["available"] = False
+        result["reason"] = error or "gh pr list did not return a list of merged pull requests"
+        return result
+    pulls = [pull for pull in payload if isinstance(pull, dict)]
+    result["truncated"] = len(payload) >= limit
+    comments, error = merged_comments(root, str(found["slug"]), pulls)
+    result["pull_requests"] = [_merged(pull, comments, error) for pull in pulls]
+    return result
+
+
+def merged_comments(root: pathlib.Path, slug: str,
+                    pulls: list[dict[str, Any]]) -> tuple[dict[int, list[Any]], str]:
+    """Every review comment on these pull requests, by number, or why not."""
+    opened = [str(pull["createdAt"]) for pull in pulls if pull.get("createdAt")]
+    if not opened:
+        return {}, "" if not pulls else "no merged pull request carried a createdAt"
+    payload, error = gh_json(
+        ["api", f"repos/{slug}/pulls/comments?since={min(opened)}&per_page=100", "--paginate"],
+        root,
+    )
+    if error:
+        return {}, error
+    if not isinstance(payload, list):
+        return {}, (f"the review comments endpoint returned {type(payload).__name__}, "
+                    "not a list of comments")
+    by_pull: dict[int, list[Any]] = {}
+    for comment in payload:
+        url = comment.get("pull_request_url") if isinstance(comment, dict) else None
+        tail = str(url or "").rsplit("/", 1)[-1]
+        if not tail.isdigit():
+            # A comment nobody can attribute could belong to any of them, so
+            # none of them is read in full.
+            return {}, "a review comment named no pull request"
+        by_pull.setdefault(int(tail), []).append(comment)
+    return by_pull, ""
+
+
+def _merged(pull: dict[str, Any], comments: dict[int, list[Any]], error: str) -> dict[str, Any]:
+    """One merged pull request as `sd-status` reads it."""
+    number = pull.get("number")
+    if not error and not pull.get("createdAt"):
+        error = f"#{number} carried no createdAt, so its comments were not bounded"
+    mine = comments.get(number, []) if isinstance(number, int) else []
+    inline, read_at = ([], {}) if error else _inline_rows(number, mine)
+    merge = pull.get("mergeCommit")
+    return {
+        "number": number, "title": pull.get("title"), "url": pull.get("url"),
+        "merged_at": pull.get("mergedAt"), "head_oid": pull.get("headRefOid") or "",
+        "merge_oid": str(merge.get("oid") or "") if isinstance(merge, dict) else "",
+        "review_findings": _union(review_findings(pull.get("reviews"), number),
+                                  inline, read_at, error),
+    }
 
 
 # --------------------------------------------------------------------------
