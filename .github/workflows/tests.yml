@@ -72,7 +72,23 @@ jobs:
       # this suite's library underneath it. It moves when this pack starts
       # using something the old pin does not carry, and only then: the suite
       # fails on a skip, so a capability the library lacks is a red run here
-      # rather than a quietly unexercised test. It last moved for sd:749
+      # rather than a quietly unexercised test. It last moved for sd:743
+      # (#332, `dc03956e`): `workflow.edit_item` accepts `kind`, guarded to
+      # `workflow.HAND_KINDS`, and `workflow` now names `HAND_KINDS` and
+      # `REPO_LESS_KINDS`. `bin/sd_work.py` reads both from the library in
+      # place of its own `ADD_KINDS` and `REPO_LESS_KINDS`, and `sd task edit
+      # --kind` passes `kind` to `edit_item`; `fd07ea9c` has neither constant
+      # and refuses `kind` as a field, so the pin and that verb move together,
+      # and `tests/test_sd_work.py` binds them. The move is migration-free:
+      # `fd07ea9c..dc03956e` touches nothing under `sd_db/schema` and
+      # `SCHEMA_VERSION` stays 9. Of the other three commits in that range,
+      # none can reach a pack test: the dashboard's resource views (sd:758,
+      # #329, `c943cd4`) and ports (sd:756, #330, `b16f1e1`) change only
+      # `local-project-dashboard`, and #331 (`39bbfcd`) changes only
+      # `local-sd-db/tests/test_contributions.py`, which the built `sd_db`
+      # this job installs does not carry.
+      #
+      # The move before that was for sd:749
       # (#322, `fd07ea9c`): the operator verbs lose their `who` default, and
       # `writing.import_pieces` and `runner_controls.invoke_service` gain a
       # `who` with none. `bin/sd_writing.py` and `bin/sd_runner.py` now pass
@@ -80,7 +96,7 @@ jobs:
       # `who` there, so the pin and those calls move together;
       # `tests/test_sd_writing.py` and `tests/test_sd_runner.py` bind them
       # against the library's own signatures. The move is migration-free:
-      # `fb57ae56..fd07ea9c` touches nothing under `sd_db/migrations` and
+      # `fb57ae56..fd07ea9c` touches nothing under `sd_db/schema` and
       # `SCHEMA_VERSION` stays 9. Of the other eight commits in that range,
       # the ones that could reach a pack test: a report replay answers from
       # the item it filed and an older run cannot rewrite current health
@@ -132,7 +148,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          ref: fd07ea9c9da8b48927c9da23e64071ef0c0c8795
+          ref: dc03956e92e8716c22bf68985eafa3995b9630e5
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false

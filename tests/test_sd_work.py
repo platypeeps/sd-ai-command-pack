@@ -1,5 +1,6 @@
 """The real CLI operates on a scratch database, without repository ceremony."""
 
+import getpass
 import importlib
 import json
 import os
@@ -14,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 
 import sd_db  # noqa: E402
 import sd_db.repos  # noqa: E402
+import sd_db.workflow as workflow  # noqa: E402
 import sd_work  # noqa: E402
 from sd_db.workflow import NOTE_KINDS  # noqa: E402
 
@@ -109,13 +111,13 @@ class TaskCLI(unittest.TestCase):
         `kind = 'idea' AND piece IS NOT NULL`, so filing one here would write
         a row the publishing queue cannot see.
         """
-        self.assertEqual(sd_work.ADD_KINDS,
+        self.assertEqual(workflow.HAND_KINDS,
                          ("task", "personal", "followup", "work-idea", "personal-idea"))
         default = json.loads(self.call("task", "add", "Standalone work", "--json").stdout)
         self.assertEqual(default["item"]["kind"], "task")
 
         filed = {}
-        for kind in sd_work.ADD_KINDS:
+        for kind in workflow.HAND_KINDS:
             with self.subTest(kind=kind):
                 state = json.loads(
                     self.call("task", "add", f"A {kind}", "--kind", kind, "--json").stdout)
@@ -151,7 +153,7 @@ class TaskCLI(unittest.TestCase):
         ordinary = json.loads(self.call("task", "add", "Ordinary", "--json", cwd=root).stdout)
         self.assertEqual(ordinary["item"]["repo"], str(root.resolve()))
 
-        for kind in sorted(sd_work.REPO_LESS_KINDS):
+        for kind in sorted(workflow.REPO_LESS_KINDS):
             with self.subTest(kind=kind):
                 filed = json.loads(
                     self.call("task", "add", f"A {kind}", "--kind", kind, "--json",
@@ -336,6 +338,94 @@ class TaskCLI(unittest.TestCase):
                   "--no-repo", code=2)
         self.assertIn("requires a field",
                       self.call("task", "edit", state["item"]["id"], code=1).stderr)
+
+    def test_the_kind_lists_are_the_library_s_and_the_pack_keeps_no_copy(self):
+        """sd:743. `add` and `edit` offer exactly `workflow.HAND_KINDS`.
+
+        The pack's `ADD_KINDS` was the list the library's `HAND_KINDS` was
+        copied from, and two copies of one list drift. So the pack holds
+        neither `ADD_KINDS` nor `REPO_LESS_KINDS`, and both verbs' `--kind`
+        read the library's tuple, in the library's order.
+        """
+        self.assertFalse(hasattr(sd_work, "ADD_KINDS"))
+        self.assertFalse(hasattr(sd_work, "REPO_LESS_KINDS"))
+        offered = "{" + ",".join(workflow.HAND_KINDS) + "}"
+        for verb in ("add", "edit"):
+            with self.subTest(verb=verb):
+                self.assertIn(offered, self.call("task", verb, "--help").stdout)
+
+    def test_building_the_parser_imports_no_sd_db(self):
+        """The choices are read when argparse asks, not when the parser is built.
+
+        `sd --help` answers in guest mode, and every entrypoint reaches `sd_db`
+        through `sd_lib.import_sd_db`; a parser that imported the library to
+        spell its choices would do both wrong on every invocation.
+        """
+        probe = (
+            "import sys; sys.path.insert(0, sys.argv[1]); "
+            "import importlib.machinery as m, importlib.util as u; "
+            "loader = m.SourceFileLoader('sd', sys.argv[2]); "
+            "spec = u.spec_from_loader('sd', loader); "
+            "sd = u.module_from_spec(spec); loader.exec_module(sd); "
+            "sd.build_parser(); "
+            "print(sorted(name for name in sys.modules if name.split('.')[0] == 'sd_db'))"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", probe, str(ROOT / "bin"), str(ROOT / "bin" / "sd")],
+            env=self.environment, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "[]")
+
+    def test_edit_moves_a_task_with_a_repository_to_a_repo_less_kind_in_one_edit(self):
+        """sd:743. `--kind personal --no-repo` is one edit, attributed and noted."""
+        root = self._checkout("reclassified")
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.repos.add(connection, root, home=self.home)
+        state = json.loads(self.call("task", "add", "Not work at all", "--json", cwd=root).stdout)
+        item = state["item"]["id"]
+        self.assertEqual((state["item"]["kind"], state["item"]["repo"]),
+                         ("task", str(root.resolve())))
+        before = {note["id"] for note in state["notes"]}
+
+        moved = json.loads(self.call(
+            "task", "edit", item, "--kind", "personal", "--no-repo",
+            "--if-revision", state["revision"], "--json").stdout)
+        self.assertEqual((moved["item"]["kind"], moved["item"]["repo"]), ("personal", None))
+        added = [note for note in moved["notes"] if note["id"] not in before]
+        self.assertEqual([note["kind"] for note in added], ["comment"])
+        self.assertEqual(added[0]["body"].splitlines()[0],
+                         f"Changed kind task -> personal by {getpass.getuser()}")
+
+        with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
+            row = connection.execute("SELECT kind, repo FROM item WHERE id = ?", (item,)).fetchone()
+        self.assertEqual((row["kind"], row["repo"]), ("personal", None))
+        self.assertEqual(json.loads(self.call("store", "item", item, "--json").stdout), moved)
+
+    def test_edit_refuses_a_produced_kind_at_the_parser_without_touching_the_row(self):
+        state = json.loads(self.call("task", "add", "Stays a task", "--json").stdout)
+        item = state["item"]["id"]
+        for kind in ("report", "work", "dep", "skill-review", "proposal", "idea", "nonsense"):
+            with self.subTest(kind=kind):
+                refused = self.call("task", "edit", item, "--kind", kind, code=2)
+                self.assertIn("invalid choice", refused.stderr)
+        readback = json.loads(self.call("store", "item", item, "--json").stdout)
+        self.assertEqual(readback, state)
+
+    def test_the_library_s_kind_refusal_reaches_the_caller_without_a_traceback(self):
+        """A contribution task keeps its kind, and `edit_item` is what says so."""
+        state = json.loads(self.call("task", "add", "Upstream pull request", "--json").stdout)
+        item = state["item"]["id"]
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.writes.set_item_fields(
+                connection, item, fields={"contribution": {"url": "https://example.invalid/pr/1"}})
+            connection.commit()
+        before = json.loads(self.call("store", "item", item, "--json").stdout)
+
+        refused = self.call("task", "edit", item, "--kind", "personal", code=1)
+        self.assertIn(f"item {item} carries contribution metadata", refused.stderr)
+        self.assertTrue(refused.stderr.startswith("sd: "), refused.stderr)
+        self.assertNotIn("Traceback", refused.stderr)
+        self.assertEqual(json.loads(self.call("store", "item", item, "--json").stdout), before)
 
     def test_refusals_and_usage_have_distinct_exit_codes(self):
         self.assertIn("no item", self.call("store", "item", 9999, code=1).stderr)

@@ -4,7 +4,8 @@ These verbs do not need a checkout. A new task takes the repository enclosing
 the current directory by default; ``--no-repo`` files one that belongs to no
 checkout, and ``--here`` refuses rather than filing a repo-less task.
 ``--kind`` files one of the four item kinds that carry no repository at all,
-for which the repository question is already answered -- see ``ADD_KINDS``.
+for which the repository question is already answered, and ``edit --kind``
+moves a row between the same five -- see ``LibraryKinds``.
 """
 
 from __future__ import annotations
@@ -25,28 +26,78 @@ class WorkRefusal(Exception):
     """A workflow operation was refused without changing its state."""
 
 
-#: The item kinds a person files by hand, which is five of the eleven
-#: `item.kind`'s CHECK carries. The other six are left out because each
-#: already has a producer, and a second way to make the same row is a second
-#: answer: `work` is written by the work lane and carries a repository,
-#: `report` by the scheduled job that ran, `dep` by the `work` item that waits
-#: on it, `skill-review` by the skill catalogue. `proposal` is reserved and
-#: nothing creates one, so a flag that created one would contradict the
-#: reservation rather than fill it. `idea` looks like the generic word and is
-#: not: `sd_db/writing.py` selects `kind = 'idea' AND piece IS NOT NULL`, so an
-#: `idea` row this verb filed would be a draft article in a publishing queue
-#: that the queue's own query cannot see -- which is exactly why `work-idea`
-#: and `personal-idea` are separate kinds and are here instead.
-ADD_KINDS = ("task", "personal", "followup", "work-idea", "personal-idea")
+class LibraryKinds:
+    """`sd_db.workflow.HAND_KINDS`, read when argparse asks and not before.
 
-#: The four of those that carry no repository, read as a group by
-#: `reads.backlog_items(connection, repo=reads.NO_REPO)`. Not a coincidence of
-#: how they happen to be filed: it is what the group *is*, so `_task_repo`
-#: settles it from the kind rather than from where the caller stood.
-REPO_LESS_KINDS = frozenset(ADD_KINDS[1:])
+    The item kinds a person files or sets by hand, which is five of the eleven
+    `item.kind`'s CHECK carries. The library owns the list and says why each
+    of the other six is left out -- each has a producer of its own, or is
+    reserved, or is `idea`, which `writing.list_pieces` reads as a draft
+    article. This pack kept its own copy as `ADD_KINDS` until sd:743 put the
+    same tuple into `workflow` for `edit_item`, and two copies of one list are
+    two answers the first time either moves. So `add --kind` and `edit --kind`
+    both read the library's.
+
+    Not read when the parser is built. `sd --help` answers in guest mode, and
+    every entrypoint reaches `sd_db` through `sd_lib.import_sd_db`, whose
+    second try is the only reason the library imports at all under the PATH
+    `python3` (sd:745, sd:746) -- so `choices=workflow.HAND_KINDS` at
+    construction would import the library on every invocation of every verb,
+    or fail before the helper had run. argparse touches `choices` only to
+    check a value (`in`) and to spell usage and errors (iteration), so this
+    object answers those two and imports then.
+
+    Absent, or a build that predates `HAND_KINDS`, the object offers nothing
+    and refuses nothing: the verb's own `_library` and `_kinds` then refuse,
+    naming the install to fix, which "invalid choice" about a valid kind
+    would not. `register` assigns it after `add_argument`, because
+    `add_argument` formats the metavar once -- iterating the choices -- to
+    validate it.
+    """
+
+    def _read(self) -> tuple[str, ...]:
+        imported = sd_lib.import_sd_db()
+        if imported.module is None:
+            return ()
+        try:
+            import sd_db.workflow as workflow  # noqa: PLC0415 - after the helper
+        except ImportError:
+            return ()
+        return tuple(getattr(workflow, "HAND_KINDS", ()))
+
+    def __contains__(self, value: object) -> bool:
+        kinds = self._read()
+        return not kinds or value in kinds
+
+    def __iter__(self):
+        return iter(self._read())
 
 
-def _task_repo(args: argparse.Namespace, connection: Any) -> str | None:
+#: What `add --kind` and `edit --kind` read from `sd_db.workflow`, as
+#: attributes. `REPO_LESS_KINDS` is the four of the hand kinds that carry no
+#: repository, read as a group by `reads.backlog_items(repo=reads.NO_REPO)`.
+KIND_NEEDS = ("HAND_KINDS", "REPO_LESS_KINDS")
+
+
+def _kinds(workflow: Any) -> None:
+    """Refuse, naming the install, when the library predates the kind lists.
+
+    `sd_db.workflow` imports on builds older than sd:743, so the import
+    `_library` checks cannot stand in for this; the alternative is an
+    `AttributeError` traceback naming a Python attribute. `REGISTER_NEEDS`
+    is the same check for `register`.
+    """
+    missing = [name for name in KIND_NEEDS if not hasattr(workflow, name)]
+    if missing:
+        raise WorkRefusal(
+            "the installed sd_db cannot file or reclassify item kinds; it is missing "
+            + ", ".join(f"sd_db.workflow.{name}" for name in missing)
+            + ". Install the current system/local-sd-db build with the pack's "
+            "installer (`sd-install`), then run this again."
+        )
+
+
+def _task_repo(args: argparse.Namespace, connection: Any, workflow: Any) -> str | None:
     """Which checkout a new task owns, defaulting to the one enclosing cwd.
 
     Filing from inside a checkout and getting no repository is the mistake
@@ -70,7 +121,7 @@ def _task_repo(args: argparse.Namespace, connection: Any) -> str | None:
     command; only an explicit `--here` gets to refuse, and it says which of
     the two reasons applied.
 
-    A kind in `REPO_LESS_KINDS` settles the question before any of that. Those
+    A kind in `workflow.REPO_LESS_KINDS` settles the question before any of that. Those
     four carry no repository by definition, and the group is read by asking
     for exactly that (`reads.backlog_items(repo=reads.NO_REPO)`), so a
     `personal` row that took the checkout cwd happened to be in would be
@@ -80,7 +131,7 @@ def _task_repo(args: argparse.Namespace, connection: Any) -> str | None:
     because it asks for a repository the kind cannot have, and a flag that
     silently succeeds at the opposite of what it says is worse than absent.
     """
-    if args.kind in REPO_LESS_KINDS:
+    if args.kind in workflow.REPO_LESS_KINDS:
         if args.here:
             raise WorkRefusal(f"--here: a {args.kind} item carries no repository")
         return None
@@ -158,6 +209,13 @@ def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
         changes["repo"] = _belongs_to(args.belongs_to)
     if args.no_repo:
         changes["repo"] = None
+    # A row's kind, which `edit_item` guards and notes: the kinds it may set
+    # and leave, the rows a producer still reads, and a repository-less kind
+    # arriving with its repository cleared -- `--no-repo` in the same command,
+    # because the library refuses a move that leaves one behind rather than
+    # dropping it silently. None of those rules is repeated here.
+    if args.kind is not None:
+        changes["kind"] = args.kind
     if not changes:
         raise WorkRefusal("edit requires a field to change")
     return changes
@@ -568,7 +626,7 @@ def _capture(sd_db: Any, workflow: Any, args: argparse.Namespace,
     with workflow.transaction(connection):
         state = workflow.capture_task(
             connection, title=args.title, body=args.body, priority=args.priority,
-            due=args.due, repo=_task_repo(args, connection), who=who,
+            due=args.due, repo=_task_repo(args, connection, workflow), who=who,
         )
         if args.kind == "task":
             return state
@@ -601,9 +659,12 @@ def run(args: argparse.Namespace) -> int:
         elif action == "item":
             result = workflow.item_state(connection, args.item)
         elif action == "add":
+            _kinds(workflow)
             result = _capture(sd_db, workflow, args, connection, who)
         elif action == "edit":
             changes = _edit_changes(args)
+            if "kind" in changes:
+                _kinds(workflow)
             moved = "repo" in changes
             result = workflow.edit_item(
                 connection, args.item, changes, who=who, expected_revision=revision)
@@ -839,8 +900,10 @@ def register(groups: Any, store: Any) -> None:
     add.add_argument("--body", default="")
     add.add_argument("--priority", type=int, choices=range(1, 5))
     add.add_argument("--due", help="YYYY-MM-DD")
-    add.add_argument("--kind", choices=ADD_KINDS, default="task",
-                     help="what the item is (default: task); the four others carry no repository")
+    kind = add.add_argument(
+        "--kind", default="task",
+        help="what the item is (default: task); the four others carry no repository")
+    kind.choices = LibraryKinds()  # after add_argument: see `LibraryKinds`
     where = add.add_mutually_exclusive_group()
     where.add_argument("--here", action="store_true",
                        help="refuse unless this is a checkout (one is used by default)")
@@ -848,7 +911,7 @@ def register(groups: Any, store: Any) -> None:
                        help="file a task that belongs to no checkout")
     _output(add, "add")
 
-    edit = verbs.add_parser("edit", help="change a task's details")
+    edit = verbs.add_parser("edit", help="change a task's details, or any hand-filed item's kind")
     edit.add_argument("item", type=int)
     edit.add_argument("--title")
     edit.add_argument("--body")
@@ -866,6 +929,10 @@ def register(groups: Any, store: Any) -> None:
                          help="move the task to a registered checkout (`.` is this one)")
     belongs.add_argument("--no-repo", action="store_true",
                          help="leave the task belonging to no checkout")
+    kind = edit.add_argument(
+        "--kind", help="reclassify the item; a move to one of the four repo-less kinds "
+                       "needs --no-repo in the same command")
+    kind.choices = LibraryKinds()  # after add_argument: see `LibraryKinds`
     _output(edit, "edit", revision=True)
 
     status = verbs.add_parser("status", help="change status with an atomic history entry")
