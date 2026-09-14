@@ -46,7 +46,7 @@ opens with fourteen top-level lines; the thirteen below are the sections.
 
 The contribution section filters the shared projection by the current checkout path and its GitHub repository name.
 Its order is newly unblocked, awaiting you, awaiting them, merged, then closed.
-`closed` is terminal and belongs to an upstream issue; a pull request closed without merging stays in awaiting them.
+`closed` is terminal and holds any row whose last observation reads closed: an upstream issue, or a pull request closed without merging; an unacknowledged event keeps either in awaiting you until it is acknowledged.
 The dashboard uses the same projection and order across repositories.
 A row is a pull request, an upstream issue, or local work that is neither filed yet.
 An issue row carries `issue_url`; an issue you have written up but not filed carries `target_repo`, `draft_title`, `draft_path` and `draft_verified` instead, and filing it keeps the item ID.
@@ -138,7 +138,9 @@ the `gh pr list` call this report already makes; the inline comments cost one
 `gh api` call per pull request, the same per-pull-request price `behind_by`
 already pays. A pull request whose comments cannot be read marks the class
 `unchecked` rather than reporting the body findings as the total — a partial
-count presented as a count is the failure this class is about.
+count presented as a count is the failure this class is about. That pull
+request gets no row; every other pull request whose findings were read keeps
+its row, so one failed read does not empty `pending` of the rest.
 
 The count is sometimes a floor. A reviewer that writes `Moderate findings
 (3 votes each)` has stated more than one finding under one marker and has not

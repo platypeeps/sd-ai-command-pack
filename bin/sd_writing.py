@@ -37,7 +37,7 @@ def run(args: argparse.Namespace) -> int:
             if args.status:
                 result = [row for row in result if row["stage"] == args.status]
         elif action == "import":
-            result = (writing.import_pieces(connection, repo) if args.apply
+            result = (writing.import_pieces(connection, repo, who=who) if args.apply
                       else writing.cutover_preview(connection, repo))
         elif action == "verify":
             result = writing.verify_pieces(connection, repo)

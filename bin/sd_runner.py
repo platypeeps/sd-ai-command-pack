@@ -39,7 +39,8 @@ def service(args):
             database = sd_db.database.default_path()
             installation = runner_controls.service_installation(database=database)
             result = runner_controls.invoke_service(installation, args.runner_action, args.assignment,
-                revision=revision, run=selected["id"], destination=args.destination, historical_run=historical)
+                revision=revision, run=selected["id"], destination=args.destination, historical_run=historical,
+                who=getpass.getuser())
         print(json.dumps(result, indent=2))
         return 0
     except (sd_db.SdDbError, OSError, ValueError) as error:

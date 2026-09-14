@@ -72,9 +72,32 @@ jobs:
       # this suite's library underneath it. It moves when this pack starts
       # using something the old pin does not carry, and only then: the suite
       # fails on a skip, so a capability the library lacks is a red run here
-      # rather than a quietly unexercised test. It last moved for the heartbeat
-      # sd:739 (`ac7afd0`) gave a quiet cron tick. A clean tick now records a
-      # `state` heartbeat and files no report item, so `reports ingest` returns
+      # rather than a quietly unexercised test. It last moved for sd:749
+      # (#322, `fd07ea9c`): the operator verbs lose their `who` default, and
+      # `writing.import_pieces` and `runner_controls.invoke_service` gain a
+      # `who` with none. `bin/sd_writing.py` and `bin/sd_runner.py` now pass
+      # one at those two calls, which `fb57ae56` rejects because it has no
+      # `who` there, so the pin and those calls move together;
+      # `tests/test_sd_writing.py` and `tests/test_sd_runner.py` bind them
+      # against the library's own signatures. The move is migration-free:
+      # `fb57ae56..fd07ea9c` touches nothing under `sd_db/migrations` and
+      # `SCHEMA_VERSION` stays 9. Of the other eight commits in that range,
+      # the ones that could reach a pack test: a report replay answers from
+      # the item it filed and an older run cannot rewrite current health
+      # (sd:757, #326, `a75693d`, `reporting`, which `bin/sd_controls.py`
+      # ingests through), a closed-unmerged pull request takes the closed
+      # lane (sd:750, #328, `d99d7aa`, `contributions`, which `sd task
+      # contribution` reads), and a local `main` is a working branch when the
+      # default is `dev` (sd:653, #321, `b065db2`, `jobs.cli`, whose
+      # `_working_branch` `bin/sd_work.py` mirrors). Of the rest, one changes
+      # only a docstring in `sd_db.shadow_sync` (#320), and the runner's
+      # process table (#325), the dashboard's ports (#324, #327) and the
+      # system repository's own test launchers (#323) are not in the `sd_db`
+      # this job installs.
+      #
+      # The move before that was for the heartbeat sd:739 (`ac7afd0`) gave a
+      # quiet cron tick. A clean tick now records a `state` heartbeat and
+      # files no report item, so `reports ingest` returns
       # `recorded` and no `item`; `tests/test_sd_controls.py` asserts that
       # shape (sd:748), and `758dfb48` predates it. That is this asymmetry
       # running the other way: the old test expected a report item from a
@@ -89,7 +112,7 @@ jobs:
       # which is the asymmetry this pin creates whenever it lags what the pack
       # has started using.
       #
-      # `fb57ae56` is not migration-free, unlike the previous move.
+      # `fb57ae56` was not migration-free, unlike the move before it.
       # `009_personal_and_followup_kinds.sql` (sd:730, `6af3a4b`) moves
       # `SCHEMA_VERSION` from 8 to 9 and adds `personal`, `followup` and the
       # two idea kinds to `item.kind` (with matching `reads` and `runner`
@@ -109,7 +132,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          ref: fb57ae5620e4bf3f75207e04817837d433f0111a
+          ref: fd07ea9c9da8b48927c9da23e64071ef0c0c8795
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false

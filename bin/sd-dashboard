@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""The dashboard CLI: serve the view, keep it running, or dump what it serves.
+"""The dashboard CLI, down to one verb: `index`, which collects the fleet once.
 
-Three verbs now, not the five the design lists. `item set-status` (the intents
-lane) and `export --obsidian` land with the tabs they belong to, under the
-3c-to-6b parity checklist -- shipping them as stubs would put two verbs in the
-inventory that answer nothing, and the inventory is supposed to be a promise.
-`install` arrived at 6b-7 with the write path, because a dashboard nobody has
-to start by hand is the one that gets pressed.
+`sd-dashboard index` reports the fleet's repository counts and refreshes the
+issue index, one line per tracker; `--dump` prints the collected state as
+canonical JSON instead, offline and without touching the index.
+
+This CLI no longer serves a page or keeps one running. The dashboard on :8767 is
+the system repository's workflow server, and launchd runs it under a
+LaunchAgent that repository owns, so a pack verb that served the old view or
+wrote a plist for it was a second claim on a port and a label that are not the
+pack's. sd:719 step 1 deleted both. `index` stays because the pack's tracker
+views still read the cache it fills, until sd:719 retires that cache.
 
 No verb takes a path to a repository. The fleet root comes from `SD_REPO_ROOT`
 or defaults to `~/repos`, so R10-D6 holds here the same as everywhere else: the
@@ -17,248 +21,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import plistlib
-import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-# And this script's own directory, for the sibling modules under bin/. Running
-# the file as a program puts it on sys.path already; loading it *as a file* --
-# runpy.run_path, spec_from_file_location, which is how two of its test modules
-# reach it -- does not, so the sibling import fails there and only there.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import sd_ledger  # noqa: E402 - after the path insert
-
-from dashboard import collect, server, store  # noqa: E402 - after the path insert
-
-
-def cmd_serve(args: argparse.Namespace, out) -> int:
-    root = collect.repo_root()
-    print(f"serving {root} on http://{server.DEFAULT_HOST}:{args.port}", file=out)
-    # The ledger is handed *down*. `dashboard/` is a library that knows
-    # nothing about where its records go, which is what lets this mechanism
-    # charge `bin/` instead of a `dashboard/` budget that had no room for it.
-    server.serve(root, port=args.port,
-                 record=sd_ledger.append, acked=sd_ledger.acked)
-    return 0
-
-
-# The LaunchAgent this pack's design claimed (design: "Sole pack-owned
-# LaunchAgent = `sd-dashboard install`"). **The shared name does not prevent a
-# collision with the system dashboard -- it is the collision.** Naming it for
-# the command rather than the machine was meant to keep two services apart
-# until 6b-8 replaced one with the other. 6b-8 happened and then reversed: the
-# system repository rebuilt its workflow server, took :8767 back at its #221,
-# and this label went with the port, so they are not two services and this one
-# is not the pack's. Measured 2026-09-13 -- `launchctl list` shows
-# `com.sven.sd-dashboard` held by PID 37095, and that plist's
-# `ProgramArguments` is `~/repos/system/local-project-dashboard/dashboard.sh
-# serve --config ... --port 8767`: the system's program, under this name. The
-# file's mode is 600 where `write_text` below leaves 644, which is independent
-# of any claim in either repository about who owns it.
-#
-# **`install` refuses a plist this checkout did not write, which closes the
-# destructive half.** `foreign_owner()` below is the guard and
-# `ProgramArguments[0]` is what it reads: `cmd_install` renders this file's
-# resolved path there, so a plist naming anything else -- or one that will not
-# parse, or that carries no `ProgramArguments` at all, or that is a symlink
-# whatever it resolves to -- is not this checkout's. Both `install` and
-# `--uninstall` then exit 1 having written nothing and having called
-# `launchctl` not once, which is the property `InstallTests` pins;
-# reinstalling over the pack's own plist is untouched. `--force` acts anyway,
-# overwriting or, with `--uninstall`, deleting: without that escape hatch a
-# plist that got corrupted or hand-edited is unfixable by the command that
-# owns it. The symlink arm is the one a first version of this guard missed --
-# `Path.exists()` follows the link, so a dangling one read as "no file yet"
-# and `write_text` then created the *target*. What the guard does
-# not settle is the name: the label and the port are still the system's, and
-# whether this pack takes a distinct label or stops shipping `install` at all
-# is sd:719's call, alongside the port question in `dashboard/server.py`.
-LABEL = "com.sven.sd-dashboard"
-PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
-LOGS = Path.home() / "Library" / "Logs"
-
-# Both Homebrew prefixes, ahead of the system pair, and the order is the whole
-# point -- not a preference for newer tools.
-#
-# `ProgramArguments[0]` is this file, and its shebang is `/usr/bin/env
-# python3`, so the PATH written here is what selects the interpreter the
-# service runs under. macOS ships `/usr/bin/python3` at 3.9; this pack declares
-# `requires-python = ">=3.13"`, and `dashboard/collect.py` calls `zip(...,
-# strict=True)`, which 3.9 rejects with `zip() takes no keyword arguments`.
-# Move the system pair to the front and the agent still boots, still binds the
-# port and still answers -- with a traceback on every page that needs the
-# fleet, from a service `launchctl list` reports as healthy. That is the
-# failure this ordering exists to prevent, and it is not the one the old
-# comment here named.
-#
-# `/opt/homebrew/bin` is the Apple Silicon prefix and `/usr/local/bin` the
-# Intel one. Naming both is what makes one plist correct on either mac; the
-# prefix that is absent costs a failed lookup and nothing else, which is why
-# neither is dead weight to be trimmed. `tailscale` and `gh` live under
-# whichever one is real. The system pair carries `git` (macOS ships a current
-# one at `/usr/bin/git`, so this is not where Homebrew earns its place) and
-# `ps`. Every directory named here is one the running service reaches into;
-# `launchctl` is not, because `install` is the only verb that calls it and the
-# service never runs that verb.
-LAUNCHD_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-
-PLIST_BODY = """<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
- "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
- <key>Label</key><string>{label}</string>
- <key>ProgramArguments</key>
- <array><string>{program}</string><string>serve</string>
-  <string>--port</string><string>{port}</string></array>
- <key>RunAtLoad</key><true/>
- <key>KeepAlive</key><true/>
- <!-- KeepAlive with no throttle is a crashloop waiting for a reason to
-      happen: launchd restarts on exit, so a serve that dies immediately (port
-      already bound, a dependency missing after an upgrade) gets restarted as
-      fast as it can exit, burning CPU and filling the log with one traceback
-      repeated. Naming the interval makes it a decision rather than a default.
-      Every other KeepAlive agent on this machine sets both keys, five of five,
-      at 15 or 30 seconds with ProcessType Background; this one set neither.
-      Note for whoever edits this next: a double hyphen is illegal inside an
-      XML comment, and `plutil -lint` accepts the malformed file anyway. The
-      parser that rejects it is the one in the test suite. -->
- <key>ThrottleInterval</key><integer>30</integer>
- <!-- Background tells the scheduler this is not interactive, so it is throttled
-      under load rather than competing with the user's foreground work. -->
- <key>ProcessType</key><string>Background</string>
- <key>StandardOutPath</key><string>{logs}/{label}.log</string>
- <key>StandardErrorPath</key><string>{logs}/{label}.err</string>
- <key>EnvironmentVariables</key>
- <dict><key>SD_REPO_ROOT</key><string>{root}</string>
-  <!-- launchd's own PATH is /usr/bin:/bin:/usr/sbin:/sbin. It does carry `git`
-       and `ps`, and nothing else this service needs: no `tailscale`, so the
-       tailnet bind silently does nothing; no `gh`, so the issues half reports
-       a missing binary; and no python3 above the 3.9 macOS ships, which is
-       four minor versions under this pack's floor. All three read as a quiet
-       dashboard rather than a broken one. See LAUNCHD_PATH for the order. -->
-  <key>PATH</key><string>{path}</string>
-  <!-- Also listen on this node's tailnet addresses, not just loopback: an IP
-       URL keeps working on a device whose resolver ignores MagicDNS. On here
-       and off in a hand-run `serve`, because installing is asking for the
-       service the system dashboard provided, and R11-D10 says carry both
-       paths or knowingly drop one. -->
-  <key>{bind}</key><string>1</string></dict>
-</dict></plist>
-"""
-
-
-def launchctl(*argv: str) -> tuple[int, str]:
-    """`launchctl`, reported rather than raised.
-
-    Every failure mode here is one the operator has to be told about and none
-    is one this command can fix: a domain that is not bootstrapped, a service
-    already loaded, a plist launchd will not read. Printing what launchd said
-    beats a traceback that hides it.
-    """
-    done = subprocess.run(
-        ["launchctl", *argv], capture_output=True, text=True, check=False)
-    return done.returncode, (done.stderr or done.stdout).strip()
-
-
-def foreign_owner() -> str | None:
-    """The program holding `PLIST`, when that program is not this checkout.
-
-    `ProgramArguments[0]` is the discriminator, because it is the one field
-    `cmd_install` renders from `__file__`: a plist carrying this file's
-    resolved path is one this checkout wrote, and every other answer belongs
-    to somebody else. On this machine that somebody is the system
-    repository's workflow server, which holds `LABEL` today -- see the comment
-    above `LABEL`.
-
-    Absent is *not* foreign: no file means a first install, which is the
-    normal case and must stay quiet. Unreadable is, though. The question is
-    not "did someone else write this" but "can we show that we did", and a
-    file that will not parse, or that has no `ProgramArguments`, answers no.
-    Reading corruption as ours would make corruption the way past the guard.
-
-    A symlink is foreign whatever it points at, and it is checked *before*
-    absence because `Path.exists()` follows the link: a dangling one reports
-    `False`, which reads as "no file, first install", and then `write_text`
-    creates the target rather than the link -- so the guard would wave through
-    the one case where the pack's plist body lands at a path nobody chose.
-    Measured: `link.exists()` is `False` while `link.is_symlink()` is `True`,
-    and the write afterwards leaves the body at the target. Even a symlink
-    resolving to a plist this checkout wrote is foreign, because `cmd_install`
-    only ever writes a regular file, so the link is not ours either way.
-    """
-    if PLIST.is_symlink():
-        return f"a symlink to {os.readlink(PLIST)}"
-    if not PLIST.exists():
-        return None
-    try:
-        program = plistlib.loads(PLIST.read_bytes())["ProgramArguments"][0]
-    except Exception as why:  # any malformed plist, not a taxonomy of them
-        return f"an unreadable plist ({type(why).__name__})"
-    if program == str(Path(__file__).resolve()):
-        return None
-    return str(program)
-
-
-def cmd_install(args: argparse.Namespace, out) -> int:
-    """Write the LaunchAgent and hand it to launchd, or take it away again.
-
-    The plist is rendered from this file every time rather than edited in
-    place: it is generated state, and a hand-edit that survived an install
-    would make the running service disagree with the command that installed
-    it. Bootout-then-bootstrap for the same reason -- `bootstrap` over a
-    loaded label fails, and a reinstall that quietly kept the old arguments is
-    the failure this verb exists to prevent.
-    """
-    owner = None if args.force else foreign_owner()
-    if owner is not None:
-        # Ahead of the uninstall branch as well as the write, and ahead of
-        # `launchctl` in both: a refusal that had already booted a service out
-        # would have done the damage it exists to prevent. An exit code, not a
-        # report, unlike the `launchd did not load it` case below -- there the
-        # plist is written and correct, here nothing happened at all.
-        print(f"refusing: {PLIST}", file=out)
-        print(f"  is not this checkout's -- it runs {owner}", file=out)
-        print("  nothing was written and launchd was not called; pass --force "
-              "to overwrite it", file=out)
-        return 1
-    domain = f"gui/{os.getuid()}"
-    if args.uninstall:
-        code, said = launchctl("bootout", f"{domain}/{LABEL}")
-        PLIST.unlink(missing_ok=True)
-        print(f"removed {PLIST}" + (f" (launchd: {said})" if code else ""), file=out)
-        return 0
-    program = str(Path(__file__).resolve())
-    body = PLIST_BODY.format(
-        label=LABEL, program=program, port=args.port,
-        logs=LOGS, root=collect.repo_root(), path=LAUNCHD_PATH,
-        bind=server.TAILNET_BIND,
-    )
-    PLIST.parent.mkdir(parents=True, exist_ok=True)
-    # Unlink first, so the write cannot follow a link somewhere else. Only
-    # `--force` reaches here with anything to unlink -- the guard refuses a
-    # symlink otherwise -- and `--force` means "overwrite this plist", not
-    # "write the body wherever this points and leave the link". Measured
-    # without it: the body landed at the target and `PLIST` stayed a symlink,
-    # so the operator's own override put the file somewhere they did not name.
-    # `unlink` removes the link itself rather than resolving it, which is the
-    # whole reason it is a separate call and not a mode on `write_text`.
-    PLIST.unlink(missing_ok=True)
-    PLIST.write_text(body, encoding="utf-8")
-    launchctl("bootout", f"{domain}/{LABEL}")
-    code, said = launchctl("bootstrap", domain, str(PLIST))
-    print(f"wrote {PLIST}", file=out)
-    if code:
-        # Not an exit code: the plist is written and correct, and `launchctl
-        # kickstart` after a login is a thing the operator can do. Failing the
-        # command would suggest the install did not happen.
-        print(f"launchd did not load it: {said or code}", file=out)
-        return 0
-    print(f"serving on http://{server.DEFAULT_HOST}:{args.port}", file=out)
-    return 0
+from dashboard import collect, store  # noqa: E402 - after the path insert
 
 
 def cmd_index(args: argparse.Namespace, out) -> int:
@@ -326,21 +94,6 @@ def issue_lines() -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sd-dashboard", description=__doc__)
     verbs = parser.add_subparsers(dest="verb", required=True)
-    serve_verb = verbs.add_parser("serve", help="run the view")
-    serve_verb.add_argument("--port", type=int, default=server.DEFAULT_PORT)
-    serve_verb.set_defaults(handler=cmd_serve)
-    install_verb = verbs.add_parser(
-        "install", help="run the view as a LaunchAgent at login")
-    install_verb.add_argument("--port", type=int, default=server.DEFAULT_PORT)
-    install_verb.add_argument(
-        "--uninstall", action="store_true", help="unload it and delete the plist")
-    install_verb.add_argument(
-        "--force", action="store_true",
-        help="act on a plist this checkout did not write -- overwrite it, or "
-             "with --uninstall delete it; without this escape hatch a "
-             "corrupted or hand-edited one is unfixable by the command that "
-             "owns it")
-    install_verb.set_defaults(handler=cmd_install)
     index_verb = verbs.add_parser("index", help="collect the fleet once")
     index_verb.add_argument(
         "--dump",
