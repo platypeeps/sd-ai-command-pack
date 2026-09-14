@@ -23,7 +23,8 @@ What counts as a link, and what resolving means:
 * A URL is not a file. It is counted and not fetched; this test makes no
   network call.
 * A token carrying a metavariable (`<id>`, `YYYY`) is a pattern, not a path,
-  and is skipped by the same rule `bin/sd-docs-lint` rule 7 applies.
+  and is skipped by the same rule `bin/sd-docs-lint` rule 7 applies. `YYYY`,
+  `MM` and `DD` count only as whole tokens: `docs/COMMANDS.md` is a path.
 
 The link and metavariable grammar is `bin/sd-docs-lint`'s own
 (`MARKDOWN_LINK_RE`, `METAVARIABLE_RE`), imported rather than restated. Rule 7
@@ -251,6 +252,7 @@ GUIDE = "docs/guide.md"
 GUIDE_BODY = (
     "# Guide\n\n## Review scope\n\n## Review scope\n\n"
     "```\n# not a heading\n<a id=\"not-an-anchor\"></a>\n```\n\n"
+    '<a id="an-html-id"></a>\n<a name="an-html-name"></a>\n\n'
     "Setext title\n============\n\n- a list item\n---\n"
 )
 
@@ -258,10 +260,13 @@ GUIDE_BODY = (
 class WalkerTests(unittest.TestCase):
     """Each link form, green and red, on a fixture repository."""
 
-    def broken(self, template_body: str, extra: dict[str, str] | None = None) -> tuple[str, ...]:
+    def walked(self, template_body: str, extra: dict[str, str] | None = None) -> Walk:
         holder, repo = fixture_repo({TEMPLATE: template_body, GUIDE: GUIDE_BODY, **(extra or {})})
         self.addCleanup(holder.cleanup)
-        return walk(repo, TEMPLATE, tracked_files(repo)).broken
+        return walk(repo, TEMPLATE, tracked_files(repo))
+
+    def broken(self, template_body: str, extra: dict[str, str] | None = None) -> tuple[str, ...]:
+        return self.walked(template_body, extra).broken
 
     def test_links_that_resolve_pass(self) -> None:
         body = (
@@ -297,6 +302,35 @@ class WalkerTests(unittest.TestCase):
     def test_a_prose_path_without_a_suffix_under_a_tracked_directory_fails(self) -> None:
         self.assertEqual(1, len(self.broken("Run docs/missing-tool first.\n")))
 
+    def test_a_prose_path_claimed_only_by_its_suffix_is_checked(self) -> None:
+        # `notes/` is no top-level entry of the fixture, so only the `.md` the
+        # token carries makes it a path claim. Every other prose fixture starts
+        # with `docs/`, where the first-segment half decides on its own and the
+        # suffix half could be deleted unnoticed (sd:801).
+        self.assertEqual(1, len(self.broken("Read notes/gone.md first.\n")))
+        result = self.walked("Read notes/here.md first.\n", {"notes/here.md": "# Here\n"})
+        self.assertEqual((), result.broken)
+        self.assertIn("notes/here.md", result.files)
+
+    def test_a_tracked_name_carrying_a_date_letter_pair_is_a_path(self) -> None:
+        # `COMMANDS.md` carries `MM`, `ADDING.md` carries `DD`. As substrings
+        # both matched `METAVARIABLE_RE`, so a link to either was a pattern
+        # and never checked: broken or tracked, the walk read nothing (sd:801).
+        for name in ("docs/COMMANDS.md", "docs/ADDING.md", "docs/HAPPYYYYEAR.md"):
+            with self.subTest(name=name):
+                # Once as a link and once in prose; both readers must check it.
+                self.assertEqual(2, len(self.broken(f"[x](../{name}) and {name}.\n")))
+                result = self.walked(f"[x](../{name}) and {name}.\n", {name: "# Named\n"})
+                self.assertEqual((), result.broken)
+                self.assertEqual((name, name), result.files)
+
+    def test_a_bare_date_placeholder_is_still_a_pattern(self) -> None:
+        # The other direction of the boundary: `YYYY`, `MM` and `DD` as whole
+        # tokens, with no `<` to carry the skip, are patterns and not paths.
+        self.assertEqual((), self.broken(
+            "Named docs/work/YYYY-MM-DD-slug/prd.md, docs/archive/YYYY-MM/ "
+            "and [the bucket](/docs/archive/YYYY-MM/DD.md).\n"))
+
     def test_a_reference_definition_to_a_missing_file_fails(self) -> None:
         self.assertEqual(1, len(self.broken("[ref]: ../docs/gone.md\n")))
 
@@ -311,6 +345,13 @@ class WalkerTests(unittest.TestCase):
 
     def test_an_html_id_inside_a_code_fence_is_not_an_anchor(self) -> None:
         self.assertEqual(1, len(self.broken("[x](../docs/guide.md#not-an-anchor)\n")))
+
+    def test_an_html_id_or_name_outside_a_fence_is_an_anchor(self) -> None:
+        # The green half of the fence test above. Without it, dropping the
+        # `HTML_ANCHOR_RE` read from `anchors_of` keeps every test green: the
+        # fenced id is then missing for the wrong reason (sd:801).
+        self.assertEqual((), self.broken(
+            "[x](../docs/guide.md#an-html-id) [y](../docs/guide.md#an-html-name)\n"))
 
     def test_a_rule_under_a_list_item_is_not_a_heading(self) -> None:
         # Read as Setext, "- a list item" would slug to "--a-list-item".

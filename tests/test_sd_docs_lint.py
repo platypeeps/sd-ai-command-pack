@@ -1093,6 +1093,27 @@ class Rule6MisresolutionTests(LintFixture):
         self.assertIn("checked 1 citation(s)", self.notes())
 
 
+class MetavariableTests(unittest.TestCase):
+    """`METAVARIABLE_RE` reads a token, not a substring.
+
+    Two readers share it: rule 7 here and the pull-request template walk in
+    `tests/test_pull_request_template_links.py`. Both skip what it matches, so
+    a match on a real name is a check that silently did not happen (sd:801).
+    """
+
+    def test_a_placeholder_is_a_whole_token(self) -> None:
+        for token in ("<YYYY-MM-DD>-<slug>", "YYYY-MM-DD-slug", "archive/YYYY-MM/",
+                      "YYYY_MM", "DD.md", "<id>", "MM"):
+            with self.subTest(token=token):
+                self.assertIsNotNone(lint.METAVARIABLE_RE.search(token))
+
+    def test_a_name_that_merely_contains_the_letters_is_not_one(self) -> None:
+        for token in ("docs/COMMANDS.md", "ADDING.md", "HAPPYYYYEAR", "2026-08-29-slug",
+                      "SUMMARY.md", "0MM0", "docs/work/2026-09-04-an-item/prd.md"):
+            with self.subTest(token=token):
+                self.assertIsNone(lint.METAVARIABLE_RE.search(token))
+
+
 class Rule7WorkReferenceTests(LintFixture):
     """A `docs/work/` path a document names has to resolve.
 
@@ -1116,6 +1137,31 @@ class Rule7WorkReferenceTests(LintFixture):
     def test_green_a_metavariable_is_a_pattern_and_not_a_path(self) -> None:
         self.name_it("docs/work/<YYYY-MM-DD>-<slug>/prd.md")
         self.assert_clean()
+
+    def test_green_a_bare_date_placeholder_is_a_pattern_without_the_brackets(self) -> None:
+        # `YYYY`, `MM` and `DD` as whole tokens carry the skip on their own;
+        # the case above carries it on `<` as well, so it cannot say so.
+        self.name_it("docs/work/YYYY-MM-DD-slug/prd.md")
+        self.assert_clean()
+        self.assertIn("and 1 template reference(s)", self.notes())
+
+    def test_red_a_name_carrying_a_date_letter_pair_is_a_path_and_not_a_pattern(self) -> None:
+        """`COMMANDS` carries `MM` and `ADDING` carries `DD`.
+
+        Matched as substrings, `METAVARIABLE_RE` made either name a template,
+        and a reference to an item that was never created was passed over
+        instead of failed. No tracked name carried one when this was found,
+        so nothing was hidden yet; the boundary is what keeps it that way
+        (sd:801).
+        """
+        for slug in ("2026-08-29-COMMANDS-that-do-not-exist",
+                     "2026-08-29-ADDING-what-is-not-there",
+                     "2026-08-29-HAPPYYYYEAR"):
+            with self.subTest(slug=slug):
+                self.name_it(f"docs/work/{slug}/prd.md")
+                joined = "\n".join(self.assert_fails("names nothing in the checkout"))
+                self.assertIn(slug, joined)
+                self.assertIn("and 0 template reference(s)", self.notes())
 
     def test_green_a_reference_that_resolves(self) -> None:
         self.name_it("docs/work/2026-08-29-a-workable-item/prd.md")
