@@ -125,14 +125,15 @@ fi
 # Unset, which is every CI run and every plain `make check`, the whole suite
 # runs and nothing below changes a byte of it. select-tests.py says which
 # modules the paths need, or `full`; its docstring has the rules. Any doubt
-# runs the whole suite: a CI runner, a selector that fails or prints nothing,
+# runs the whole suite: a CI runner -- `CI` or `GITHUB_ACTIONS` set to
+# anything, since a runner is free to export `CI=1` -- a selector that fails or prints nothing,
 # or a selection that matches no module here. A run that did narrow writes
 # FAST_PATH_MARK as the first line of the log, and `make test` reads that line
 # to skip `coverage combine` and the installer gate, which a partial run
 # cannot meet.
 FAST_PATH_MARK="test selection: changed files"
 if [ -n "${TEST_CHANGED_FILES+set}" ]; then
-  if [ "${CI:-}" = "true" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
+  if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
     printf '%s\n' "warning: TEST_CHANGED_FILES is ignored under CI; running the full suite" >&2
   else
     set -f

@@ -105,6 +105,22 @@ def test_modules(root: pathlib.Path) -> dict[str, str]:
     }
 
 
+def imports_pattern(stem: str) -> re.Pattern[str]:
+    """Matches the import forms this repository uses, absolute and relative.
+
+    `import x`, `from x import y`, `from .x import y`, and the package form
+    `from . import a, x, z`, which is how `dashboard/` imports its own
+    modules and which an absolute-only pattern misses.
+    """
+
+    name = re.escape(stem)
+    return re.compile(
+        rf"^\s*(?:import\s+{name}(?![\w-])"
+        rf"|from\s+\.*{name}\s+import"
+        rf"|from\s+\.+\s+import\s+[^\n]*(?<![\w-]){name}(?![\w-]))",
+        re.MULTILINE)
+
+
 def importers(root: pathlib.Path, rel: str) -> set[str]:
     """Paths of Python modules in `IMPORTING_TREES` importing `rel`, transitively."""
 
@@ -117,8 +133,7 @@ def importers(root: pathlib.Path, rel: str) -> set[str]:
     pending = [rel]
     while pending:
         stem = pathlib.PurePosixPath(pending.pop()).stem
-        pattern = re.compile(rf"^\s*(?:from\s+{re.escape(stem)}\s+import|import\s+{re.escape(stem)}\b)",
-                             re.MULTILINE)
+        pattern = imports_pattern(stem)
         for path, text in sources.items():
             if path not in found and path != rel and pattern.search(text):
                 found.add(path)

@@ -24,12 +24,21 @@ setup:
 # stays the default. A run the selector narrowed skips `coverage combine` and
 # the installer gate, which only the full suite can meet; a run it widened to
 # the full suite keeps both. CI calls run-tests.sh itself and never passes it.
+#
+# The value is exported rather than written into the recipe as a quoted word:
+# a path holding a quote would otherwise end the quoting and the rest would be
+# read as shell. And with no CHANGED on the command line the runner is given a
+# tree with TEST_CHANGED_FILES removed, so an operator who left one in their
+# environment still gets the full suite from a plain `make check`.
 ifeq ($(origin CHANGED),command line)
-TEST_CHANGED_ENV = TEST_CHANGED_FILES='$(CHANGED)'
+export TEST_CHANGED_FILES := $(CHANGED)
+TEST_RUNNER_ENV =
+else
+TEST_RUNNER_ENV = env -u TEST_CHANGED_FILES
 endif
 
 test:
-	PYTHON_BIN="$(VENV_PYTHON)" $(TEST_CHANGED_ENV) bash .github/scripts/run-tests.sh
+	PYTHON_BIN="$(VENV_PYTHON)" $(TEST_RUNNER_ENV) bash .github/scripts/run-tests.sh
 	@if grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log; then printf '%s\n' "Tests skipped locally; install required tools or make the skip explicit."; exit 1; fi
 	@if head -n 1 unittest-output.log | grep -q '^test selection: changed files'; then \
 		printf '%s\n' "Changed-files fast path: coverage combine and the installer gate were not run. Run make check without CHANGED before a push."; \

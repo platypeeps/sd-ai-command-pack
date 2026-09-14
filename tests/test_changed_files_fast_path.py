@@ -60,6 +60,7 @@ OPTIONAL_TESTS = {
     "test_gamma": 'GUIDE = "docs/guide.md"  # sd_common\n',
     "test_delta": 'NAME = "sd-alphabet"  # a longer name; sd_common\n',
     "test_epsilon": 'SCRIPT = "sd-epsilon"\n',
+    "test_eta": 'SERVER = "dashboard/server.py"\n',
     "test_zeta": 'TOOLING = ("Makefile", ".coveragerc", "sd_install", ".github/workflows/tests.yml", "sitecustomize")\n',
 }
 
@@ -89,9 +90,13 @@ def build_tree(root: pathlib.Path) -> None:
     (root / "bin/sd_beta.py").write_text("VALUE = 1\n")
     (root / "bin/sd-epsilon").write_text("import sd_beta\n")
     (root / "bin/sd_common.py").write_text("VALUE = 2\n")
+    (root / "dashboard").mkdir()
+    (root / "dashboard/collect.py").write_text("VALUE = 3\n")
+    (root / "dashboard/server.py").write_text("from . import collect\n")
     (root / "docs").mkdir()
     (root / "docs/guide.md").write_text("# Guide\n")
     (root / "docs/nowhere.md").write_text("# Named by no test\n")
+    (root / "docs/it's.md").write_text("# A name with a quote in it\n")
     (root / ".coveragerc").write_text(COVERAGERC)
 
 
@@ -159,6 +164,11 @@ class TheSelection(TreeCase):
     def test_a_module_importing_the_change_brings_its_tests(self) -> None:
         self.assertEqual(self.select("bin/sd_beta.py"),
                          sorted(self.always | {"tests.test_beta", "tests.test_epsilon"}))
+
+    def test_a_relative_import_is_an_import(self) -> None:
+        """`dashboard/` imports its own modules as `from . import collect`."""
+
+        self.assertEqual(self.select("dashboard/collect.py"), sorted(self.always | {"tests.test_eta"}))
 
     def test_an_unmapped_file_selects_the_full_run(self) -> None:
         self.assertIsNone(self.select("docs/nowhere.md"))
@@ -237,9 +247,11 @@ class TheRunner(TreeCase):
         self.assertNotIn("test selection", first)
 
     def test_ci_never_takes_the_fast_path(self) -> None:
-        for variable in ("CI", "GITHUB_ACTIONS"):
-            with self.subTest(variable=variable):
-                ran, first, stderr = self.run_harness(TEST_CHANGED_FILES="bin/sd-alpha", **{variable: "true"})
+        """Any value, not only `true`: a runner is free to export `CI=1`."""
+
+        for variable, value in (("CI", "true"), ("CI", "1"), ("GITHUB_ACTIONS", "true")):
+            with self.subTest(variable=variable, value=value):
+                ran, first, stderr = self.run_harness(TEST_CHANGED_FILES="bin/sd-alpha", **{variable: value})
                 self.assertEqual(ran, self.everything)
                 self.assertNotIn("test selection", first)
                 self.assertIn("ignored under CI", stderr)
@@ -295,6 +307,18 @@ class TheMakefile(TreeCase):
     def test_changed_from_the_environment_is_ignored(self) -> None:
         ran, stdout = self.make(CHANGED="bin/sd-alpha")
         self.assertEqual(ran, self.everything)
+        self.assert_coverage_steps(stdout, ran=True)
+
+    def test_an_inherited_runner_variable_is_removed(self) -> None:
+        """`TEST_CHANGED_FILES` left in the environment does not narrow a plain `make test`."""
+
+        ran, stdout = self.make(TEST_CHANGED_FILES="bin/sd-alpha")
+        self.assertEqual(ran, self.everything)
+        self.assert_coverage_steps(stdout, ran=True)
+
+    def test_a_quote_in_a_path_does_not_reach_the_shell(self) -> None:
+        ran, stdout = self.make("CHANGED=bin/sd-alpha docs/it's.md")
+        self.assertEqual(ran, self.everything, "an unmapped path runs everything")
         self.assert_coverage_steps(stdout, ran=True)
 
     def test_a_change_widened_to_the_full_suite_keeps_the_gates(self) -> None:

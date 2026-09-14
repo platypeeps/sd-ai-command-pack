@@ -56,7 +56,9 @@ make check CHANGED="$(git diff --name-only origin/main) $(git ls-files --others 
 Without `CHANGED`, `make check` runs the full suite, and that stays the
 default: run it once, without `CHANGED`, before a push. Only a `CHANGED` given
 on the command line counts, and CI never passes one. `run-tests.sh` ignores
-the fast path when `CI` or `GITHUB_ACTIONS` is set. Any doubt runs the full
+the fast path when `CI` or `GITHUB_ACTIONS` is set to anything. The list is
+split on whitespace, so a path with a blank in it arrives as two paths, which
+neither names anything and so runs the full suite. Any doubt runs the full
 suite instead: a path no test module names, a path more than half of them
 name, the `Makefile`, anything under `.github/`, the Python or dependency
 configuration, `bin/sd_install.py`, and any non-test file under `tests/`.
