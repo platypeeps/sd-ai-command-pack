@@ -17,6 +17,7 @@ progress belongs to the database.
 | Capture work without a PRD | Today, or `sd task add "Title"` — it takes the registered checkout enclosing cwd; `--no-repo` files one that belongs to none |
 | Prioritize, schedule, add details | Item screen, or `sd task edit ID` |
 | Move a task to the right checkout | `sd task edit ID --belongs-to PATH` — `.` names the checkout enclosing cwd; `--no-repo` leaves it belonging to none, as it does on `add`. An unregistered path is refused, and the move is recorded as an item note. The move prints the checkout it landed in; ordinary output names a row's checkout only when it is not the one you are standing in |
+| Reclassify an item filed as the wrong kind | A task's item screen, or `sd task edit ID --kind KIND` — the kinds are `sd_db.workflow.HAND_KINDS`, the same five `sd task add --kind` offers. A move to `personal`, `followup`, `work-idea` or `personal-idea` carries no repository, so a row that has one needs `--no-repo` in the same command. `edit_item` refuses a produced row (a contribution or skill-review task), an `idea` that is a writing piece, and a row with a queued, running or ending assignment, and records every change as a "Changed kind" note naming who made it |
 | Change task status | Item screen, or `sd task status ID STATUS` |
 | Record and resolve a followup | Item notes, or `sd task note ID --kind followup --body TEXT` / `sd task resolve NOTE_ID` |
 | See the same inventory as the dashboard | `sd today --json`, `sd store items --json` |
@@ -47,9 +48,9 @@ item and resolves against it; `sd task add --kind followup` files one that
 belongs to nothing and is worked in its own right, and it needs no Related
 item because there is no parent. The test is whether it survives the parent
 being deleted. `proposal` is the same collision with only one live half: the
-note exists, the item kind is reserved and nothing creates it, so
-`sd task add` does not offer it. The other three -- Comment, Question,
-Decision -- are notes and nothing else. `local-sd-db/README.md` holds the
+note exists, the item kind is reserved and nothing creates it, so neither
+`sd task add --kind` nor `sd task edit --kind` offers it. The other three --
+Comment, Question, Decision -- are notes and nothing else. `local-sd-db/README.md` holds the
 full table of both closed lists.
 
 The `sd` launcher is installed at `~/bin/common/sd` and is also managed by the
