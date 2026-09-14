@@ -48,7 +48,7 @@ item and resolves against it; `sd task add --kind followup` files one that
 has no parent item and is worked in its own right, and it needs no Related
 item because there is no parent. Like a task, it takes the registered checkout
 enclosing cwd (`--no-repo` files it against none), and `sd task edit` changes
-its title, priority, due date and checkout. The test is whether it survives the parent
+its title, body, priority, due date and checkout. The test is whether it survives the parent
 being deleted. `proposal` is the same collision with only one live half: the
 note exists, the item kind is reserved and nothing creates it, so neither
 `sd task add --kind` nor `sd task edit --kind` offers it. The other three --

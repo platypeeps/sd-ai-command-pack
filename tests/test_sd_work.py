@@ -262,10 +262,15 @@ class TaskCLI(unittest.TestCase):
             "task", "edit", item, "--belongs-to", ".", "--json", cwd=second).stdout)
         self.assertEqual(again["item"]["repo"], str(second.resolve()))
 
+        bodied = json.loads(self.call(
+            "task", "edit", item, "--body", "The finding is at line 12", "--json").stdout)
+        self.assertEqual(json.loads(bodied["item"]["body"]), {"text": "The finding is at line 12"})
+        self.assertEqual(bodied["notes"][-1]["body"], f"Updated body by {getpass.getuser()}")
+
         # Leaving for a repository-less kind still needs the repository cleared.
         refused = self.call("task", "edit", item, "--kind", "personal", code=1)
         self.assertIn("a personal item carries no repository", refused.stderr)
-        self.assertEqual(json.loads(self.call("store", "item", item, "--json").stdout), again)
+        self.assertEqual(json.loads(self.call("store", "item", item, "--json").stdout), bodied)
 
         cleared = json.loads(self.call("task", "edit", item, "--no-repo", "--json").stdout)
         self.assertIsNone(cleared["item"]["repo"])
