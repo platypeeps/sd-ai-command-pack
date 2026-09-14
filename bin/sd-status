@@ -1250,6 +1250,13 @@ class Class(NamedTuple):
     the reason the table exists at all: a check's data dependency is a fact
     about the check, and a producer that forgot to declare it would go on
     reporting clear over a question nobody asked.
+
+    `newest_first` orders a class's rows youngest first instead of oldest,
+    and `pending_cap` is the most rows of the class `pending` shows (0 is no
+    cap). Both exist for a class whose rows can outnumber the list: its
+    freshest rows are the ones still worth acting on, and a cap keeps it from
+    pushing every other class out of `pending`. `--actions` and `--json` stay
+    uncapped.
     """
 
     check: str
@@ -1259,6 +1266,8 @@ class Class(NamedTuple):
     source: str
     what: str
     needs: tuple[str, ...] = ()
+    newest_first: bool = False
+    pending_cap: int = 0
 
 
 #: How many days after its merge a pull request's unanswered review findings
@@ -1266,6 +1275,11 @@ class Class(NamedTuple):
 #: number is the owner's decision on sd:631. Without a window the class would
 #: grow into a list of every finding this repository never answered.
 MERGED_REVIEW_DAYS = 14
+
+#: The most merged-pull-request rows `pending` shows. Lanes that push without
+#: `bin/sd-ship` leave hundreds of merges a fortnight with nothing recorded,
+#: and uncapped those rows would fill all ten slots (review-925 N-4).
+MERGED_PENDING_CAP = 3
 
 #: The enumeration. This tuple is the *only* answer to "which checks exist":
 #: the renderer iterates it, the ranking reads `rank` off it, the banner reads
@@ -1298,11 +1312,6 @@ CLASSES = (
           "review findings + local acknowledgements",
           "an open pull request carrying a review finding nobody has answered",
           ("pull_requests",)),
-    Class("merged-pr-review-unacknowledged", "p", False, 36,
-          f"merged PRs ({MERGED_REVIEW_DAYS} days) + local acknowledgements",
-          f"a pull request merged in the last {MERGED_REVIEW_DAYS} days with a review "
-          "finding nobody answered",
-          ("merged_pull_requests",)),
     Class("protection-gap", "g", True, 40, "protection",
           "an enforcement leg missing on the default branch", ("protection",)),
     Class("accepted-gap-standing", "g", False, 45,
@@ -1312,6 +1321,11 @@ CLASSES = (
           "an indexed issue the index says is waiting on you"),
     Class("pr-needs-action", "p", False, 60, "open pull requests",
           "an open pull request waiting on a review or a merge"),
+    Class("merged-pr-review-unacknowledged", "p", False, 65,
+          f"merged PRs ({MERGED_REVIEW_DAYS} days) + local acknowledgements",
+          f"a pull request merged in the last {MERGED_REVIEW_DAYS} days with a review "
+          "finding nobody answered",
+          ("merged_pull_requests",), newest_first=True, pending_cap=MERGED_PENDING_CAP),
     Class("open-step", "s", False, 70, "- [ ] in item docs",
           "an unchecked box on an item nobody has closed"),
     Class("unmerged-branch", "b", False, 80, "origin heads",
@@ -1477,7 +1491,8 @@ def actionable_inventory(
 
     Ranking is `(rank, -age_days, id)`: the class first, the oldest of a class
     next, the id last so the order is total and reproducible. Requirement 4 is
-    that a reader can predict it without running it.
+    that a reader can predict it without running it. A class marked
+    `newest_first` puts its youngest row first instead.
 
     Everything comes from `sections` -- the state `collect` already gathered --
     plus local git and the filesystem, never from a maintained list of known
@@ -1516,7 +1531,10 @@ def actionable_inventory(
     rows += _accepted_rows(protection)
     _mark_unasked(sections, unchecked)
     _widen_collisions(rows)
-    rows.sort(key=lambda row: (row["rank"], -row["age_days"], row["id"]))
+    rows.sort(key=lambda row: (
+        row["rank"],
+        row["age_days"] if BY_CHECK[row["check"]].newest_first else -row["age_days"],
+        row["id"]))
     return Inventory(rows, unchecked)
 
 
@@ -2789,8 +2807,11 @@ def _merged_review_rows(
     such a pull request in the report for `MERGED_REVIEW_DAYS` after its merge,
     counted from `day` so a test pins the boundary without the wall clock.
 
-    Not abnormal, and ranked 36 so it sorts right after the open class; both
-    are the owner's decision. The unreadable rule is the open class's, through
+    Not abnormal and ranked below 35, the owner's decision. Rank 65, newest
+    merge first and at most `MERGED_PENDING_CAP` rows in `pending`, so these
+    rows cannot crowd `pending` or take `next` from an open pull request
+    (review-925 N-4). `day` is local and the merge day is UTC, so the edge
+    can move by the local offset. The unreadable rule is the open class's, through
     the same body: a merged pull request whose comments could not be read gets
     no row and marks this class `unchecked`, and every other pull request
     keeps its row. A pull request with no readable merge date is skipped the
@@ -3353,11 +3374,34 @@ def _render_pending(rows: list[dict[str, Any]], write: Any) -> None:
     if not rows:
         write("  nothing pending\n")
         return
-    shown = rows[:PENDING_LIMIT]
+    shown, held = pending_rows(rows)
     write(f"  {len(shown)} of {len(rows)}, by rank\n")
     for row in shown:
         write(f"  {row['id']}  {row['check']:<{CHECK_WIDTH}} {row['title']}\n")
+    for check, count in held.items():
+        write(f"  {count} more {check} past its cap of {BY_CHECK[check].pending_cap}, "
+              "in --actions\n")
     _widened_note(rows, write)
+
+
+def pending_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """The first `PENDING_LIMIT` rows, no class past its `pending_cap`.
+
+    Also returns how many rows each capped class held back, so the list can
+    say so rather than elide in silence. A held-back row frees its slot for the
+    next class down, which is the point of the cap.
+    """
+    shown: list[dict[str, Any]] = []
+    seen: dict[str, int] = {}
+    held: dict[str, int] = {}
+    for row in rows:
+        cap = BY_CHECK[row["check"]].pending_cap
+        seen[row["check"]] = seen.get(row["check"], 0) + 1
+        if cap and seen[row["check"]] > cap:
+            held[row["check"]] = held.get(row["check"], 0) + 1
+        elif len(shown) < PENDING_LIMIT:
+            shown.append(row)
+    return shown, held
 
 
 def _render_next(rows: list[dict[str, Any]], write: Any) -> None:

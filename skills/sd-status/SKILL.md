@@ -31,7 +31,7 @@ opens with fourteen top-level lines; the thirteen below are the sections.
 | Section | What it shows |
 |---|---|
 | `abnormalities` | every abnormal class in the ranking table, whether or not it fired: `clear`, `n findings`, or `unchecked: <reason>`. At most three findings print per class, and the elision says how many were held back |
-| `pending` | at most ten actionable rows by rank, with the line above them stating the denominator — `10 of 123, by rank` |
+| `pending` | at most ten actionable rows by rank, with the line above them stating the denominator — `10 of 123, by rank`. A class with a cap shows at most that many rows, and a line under the list says how many it held back |
 | `next` | one row: the top-ranked id and its `suggest`. Not a menu, not three options |
 | `open threads` | a count per `source`, then the exclusions named in full, so the counts are never read as a total of everything that exists |
 | `work items` | derived item status from `docs/work`, counted, with the parked ones counted and not listed |
@@ -68,8 +68,10 @@ means adding a row there and a producer — never editing a renderer, a sort, or
 a list.** That is how those drift apart.
 
 Rows are ordered `(rank, -age_days, id)`: the class first, the oldest of a
-class next, the id last so the order is total and reproducible. A reader can
-predict `pending` from this table before running the command.
+class next, the id last so the order is total and reproducible. One class,
+`merged-pr-review-unacknowledged`, orders its rows newest first instead, and
+`pending` shows at most three of them. A reader can predict `pending` from
+this table before running the command.
 
 | Rank | Check | Id prefix | In the banner | Source | What it means |
 |---|---|---|---|---|---|
@@ -83,11 +85,11 @@ predict `pending` from this table before running the command.
 | 30 | `pr-check-missing` | `p` | yes | `open PRs + protection` | an open pull request reporting no check the branch requires |
 | 30 | `dirty-tree-with-open-pr` | `p` | yes | `git + open PRs` | uncommitted work on a branch that already has a pull request |
 | 35 | `pr-review-unacknowledged` | `p` | yes | `review findings + local acknowledgements` | an open pull request carrying a review finding nobody has answered |
-| 36 | `merged-pr-review-unacknowledged` | `p` | no | `merged PRs (14 days) + local acknowledgements` | a pull request merged in the last 14 days with a review finding nobody answered |
 | 40 | `protection-gap` | `g` | yes | `protection` | an enforcement leg missing on the default branch |
 | 45 | `accepted-gap-standing` | `g` | no | `.github/sd-status.json accepted_gaps[]` | a written acceptance whose until condition nothing re-reads |
 | 50 | `issue-needs-you` | `i` | no | `dashboard index` | an indexed issue the index says is waiting on you |
 | 60 | `pr-needs-action` | `p` | no | `open pull requests` | an open pull request waiting on a review or a merge |
+| 65 | `merged-pr-review-unacknowledged` | `p` | no | `merged PRs (14 days) + local acknowledgements` | a pull request merged in the last 14 days with a review finding nobody answered |
 | 70 | `open-step` | `s` | no | `- [ ] in item docs` | an unchecked box on an item nobody has closed |
 | 80 | `unmerged-branch` | `b` | no | `origin heads` | a branch on origin with no open pull request carrying it |
 | 90 | `parked-concern` | `c` | no | `## Review ledger` | a concern parked behind a trigger nobody is watching |
@@ -159,7 +161,7 @@ than `2 of 2`. Splitting that text on "and" would be guessing how many, and
 counting it flat as one would understate — an undercount on a gate reads as
 progress. Rows with no such marker keep an exact count.
 
-### `merged-pr-review-unacknowledged`, and why it sits at 36
+### `merged-pr-review-unacknowledged`, and why it sits at 65
 
 The open class loses its row when the pull request merges, answered or not.
 PR #896 merged with seven of seven findings unread, its fixes pushed without
@@ -168,12 +170,36 @@ request on the report for 14 days after the merge: merged fourteen days ago is
 in, fifteen is out. Past that it is no longer a row, and `open threads` names
 the exclusion.
 
-Ranked after the open class and not abnormal, both by the owner's decision
-(sd:631). Rank 36 sorts it right after 35, because an open pull request can
-still be held back and this one has already merged. Not abnormal, so it never reaches the banner and never
-changes its count. Automatic acknowledgement stays with `bin/sd-ship`; a push
-or a merge made another way records nothing, which is the case this row exists
-to show.
+The days are counted from the UTC calendar day GitHub records the merge on to
+the local date `sd-status` runs on. So the edge can move by the local offset
+from UTC: in California a pull request merged in the evening falls on the next
+UTC day, so it stays in the window one local day longer. The query to GitHub reaches
+one day further back than the window, so no pull request inside the window
+goes unread because of that difference.
+
+Sorted after the open class at 35, and not abnormal, both by the owner's
+decision (sd:631). Not
+abnormal, so it never reaches the banner and never changes its count.
+Automatic acknowledgement stays with `bin/sd-ship`; a push or a merge made
+another way records nothing, which is the case this row exists to show.
+
+It sat at 36 at first, and review of #925 showed why that cannot hold here.
+Lanes in this repository push with plain `git` and never run `bin/sd-ship`,
+so nothing records their answers, and about 278 pull requests merged in the
+fifteen days to 2026-09-13. Ten of them with one unanswered inline comment
+would fill all ten `pending` slots at 36, and `next` would point at the
+oldest. So three rules apply now:
+
+- **Rank 65**, below `pr-needs-action` at 60 and above `open-step` at 70. An
+  open pull request waiting on a review or a merge can still change; a merged
+  one cannot, so the open one comes first.
+- **Newest merge first** within the class (`newest_first` in `CLASSES`), the
+  reverse of every other class. A finding from yesterday's merge is still
+  fresh in someone's head; one from two weeks ago is the least likely to be
+  acted on.
+- **At most three of its rows in `pending`** (`pending_cap`). The rows it holds
+  back leave their slots to the classes below, and a line under the list says
+  how many were held back. `--actions` and `--json` still carry every row.
 
 It asks the same question through the same code as the open class. A finding
 is answered when `bin/sd-review-ack` says so, and the merged pull request's
@@ -184,11 +210,14 @@ the class `unchecked`, and every other pull request keeps its row. A pull
 request with no merge date does the same, and so does a merged list that
 stopped at its limit.
 
-The read costs two calls, however many pull requests merged: `gh pr list
---state merged` for the window, and one `gh api` over the repository's review
-comments. That call's `since` is the oldest merged pull request's creation
-time, since no review comment predates its pull request. The data arrives in
-`--json` as `merged_pull_requests`. The text report has no section for it;
+The read runs two `gh` commands, however many pull requests merged: `gh pr list
+--state merged` for the window, and one `gh api --paginate` over the
+repository's review comments. That call's `since` is the oldest merged pull
+request's creation time, since no review comment predates its pull request. It
+is still as many HTTP pages as there are comments since then, and one
+long-lived pull request that merges widens it. If it runs past `gh`'s 60-second
+limit, every merged pull request reads unreadable and the class is `unchecked`.
+The data arrives in `--json` as `merged_pull_requests`. The text report has no section for it;
 its rows print in `pending`.
 
 ## Ids: `<letter><4 hex digits, 8 on collision>`, from the data alone

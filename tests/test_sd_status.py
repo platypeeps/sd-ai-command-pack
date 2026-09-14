@@ -4303,28 +4303,58 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         self.assertNotIn(self.CHECK, [row["check"] for row in result["classes"]])
         self.assertEqual("no findings; all 13 checks clear", result["summary"])
 
-    def test_the_rank_sorts_after_the_open_class_and_before_protection(self) -> None:
-        """Below 35 in priority: the open pull request's row comes first.
+    def test_the_rank_sorts_after_pr_needs_action_and_before_open_step(self) -> None:
+        """Below 35, and below the open pull request waiting on a merge (N-4).
 
-        The merged row is the older of the two, so an order by age alone
-        would put it first; only the rank keeps it second.
+        The merged row is the oldest of them, so an order by age alone would
+        put it first; only the rank keeps it after `pr-needs-action`.
         """
         self.assertGreater(status.BY_CHECK[self.CHECK].rank,
-                           status.BY_CHECK["pr-review-unacknowledged"].rank)
+                           status.BY_CHECK["pr-needs-action"].rank)
         open_pull = {"repo": "acme/widget", "pull_requests": [self.pull(
             failing=[], review_findings={"reviews": 1, "in_body": 1, "reviewers": ["bot"],
                                          "ids": ["op11"], "inline": 0, "unreadable": "",
                                          "indeterminate": []})]}
-        protection = {"default_branch": "main", "detail": {},
-                      "gaps": [{"id": "reviews", "gap": "no review required"}]}
+        directory = self.item("2026-08-01-alpha", status="in_progress", extra="branch: main\n")
+        (directory / "implement.md").write_text("# Steps\n\n- [ ] do it\n", encoding="utf-8")
         rows = status.actionable_inventory(self.repo, self.sections(
-            pull_requests=open_pull, protection=protection,
+            work=status.work_section(self.repo), pull_requests=open_pull,
             merged_pull_requests={"repo": "acme/widget",
                                   "pull_requests": [self.merged(5, 9, ["mm11"])]},
         ), self.TODAY).rows
         order = [row["check"] for row in rows if row["check"] in (
-            "pr-review-unacknowledged", self.CHECK, "protection-gap")]
-        self.assertEqual(["pr-review-unacknowledged", self.CHECK, "protection-gap"], order)
+            "pr-review-unacknowledged", "pr-needs-action", self.CHECK, "open-step")]
+        self.assertEqual(
+            ["pr-review-unacknowledged", "pr-needs-action", self.CHECK, "open-step"], order)
+
+    def test_merged_rows_cannot_crowd_out_pending_or_take_next(self) -> None:
+        """Twelve merged rows and one open pull request waiting on a merge.
+
+        Uncapped at rank 36 those twelve took all ten `pending` slots and
+        `next` pointed at the oldest of them (review-925 N-4). Now `next` is
+        the open pull request, `pending` holds three merged rows, newest
+        merge first, and says how many it held back. `--actions` keeps all.
+        """
+        merged = [self.merged(100 + age, age, [f"m{age:02d}"]) for age in range(1, 13)]
+        rows = status.actionable_inventory(self.repo, self.sections(
+            pull_requests={"repo": "acme/widget", "pull_requests": [self.pull(failing=[])]},
+            merged_pull_requests={"repo": "acme/widget", "pull_requests": merged},
+        ), self.TODAY).rows
+        self.assertEqual("pr-needs-action", status.next_action(rows)["check"])
+        mine = self.by_check(rows, self.CHECK)
+        self.assertEqual(list(range(1, 13)), [row["age_days"] for row in mine])
+        shown, held = status.pending_rows(rows)
+        self.assertEqual([1, 2, 3], [row["age_days"] for row in shown if row["check"] == self.CHECK])
+        self.assertEqual({self.CHECK: 9}, held)
+        pending, actions = io.StringIO(), io.StringIO()
+        status._render_pending(rows, pending.write)
+        status.render_actions(rows, actions)
+        def listed(text: str) -> int:
+            return sum(1 for line in text.splitlines()
+                       if line.split()[1:2] == [self.CHECK] and re.match(r"^\s*[a-z][0-9a-f]{4,} ", line))
+        self.assertEqual(3, listed(pending.getvalue()))
+        self.assertIn(f"9 more {self.CHECK} past its cap of 3", pending.getvalue())
+        self.assertEqual(12, listed(actions.getvalue()))
 
     def test_one_unreadable_merged_pull_request_is_unchecked_and_hides_no_other(self) -> None:
         blind = self.merged(7, 2, ["bb11"], unreadable="gh api exited 1")
@@ -4369,6 +4399,31 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         # The control: the same record with no merge evidence stays a row.
         self.assertEqual(1, len(self.by_check(self.found(self.merged(5, 1, ["ff11"])).rows,
                                               self.CHECK)))
+
+
+class MergedQueryWindowTests(StatusFixture):
+    """The report asks GitHub for one day more than the window (N-1)."""
+
+    def test_the_merged_query_reaches_fifteen_days_back(self) -> None:
+        """Narrowed, pull requests merged 13-14 days ago would never be fetched.
+
+        The only wall-clock read in this class, and it is the report's own:
+        both days either side of a midnight the run could straddle are accepted.
+        """
+        log = self.base / "gh.log"
+        self.with_github(pulls=[])
+        environ = self.env()
+        environ["FAKE_GH_LOG"] = str(log)
+        before = datetime.date.today()
+        subprocess.run([sys.executable, str(SD_STATUS), "--json"], cwd=str(self.repo),
+                       env=environ, capture_output=True, text=True, check=True)
+        after = datetime.date.today()
+        asked = [line for line in log.read_text(encoding="utf-8").splitlines()
+                 if "--state merged" in line]
+        self.assertEqual(1, len(asked), asked)
+        allowed = {f"merged:>={(day - datetime.timedelta(days=15)).isoformat()}"
+                   for day in (before, after)}
+        self.assertTrue(any(token in asked[0] for token in allowed), (asked, allowed))
 
 
 class CollectMergedTests(unittest.TestCase):
@@ -4425,6 +4480,33 @@ class CollectMergedTests(unittest.TestCase):
                 reasons = [row["review_findings"]["unreadable"] for row in result["pull_requests"]]
                 self.assertEqual(2, len(reasons))
                 self.assertTrue(all(reasons), reasons)
+
+    def test_a_list_as_long_as_its_limit_is_marked_truncated(self) -> None:
+        """The producer side of `truncated`, which the class reads as unchecked (N-1)."""
+        for limit, expected in ((2, True), (3, False)):
+            with self.subTest(limit=limit), mock.patch.object(
+                    status.pr_state, "gh_json",
+                    lambda args, root: (self.pulls(), "") if args[:2] == ["pr", "list"] else ([], "")):
+                result = status.pr_state.collect_merged(BIN.parent, self.FOUND, "2026-08-23", limit)
+                self.assertEqual(expected, result["truncated"])
+                self.assertEqual(limit, result["limit"])
+
+    def test_a_pull_request_with_no_created_at_is_unreadable_alone(self) -> None:
+        """No bound for its comments means its inline count is unknown, not zero (N-1)."""
+        pulls = self.pulls()
+        del pulls[1]["createdAt"]
+
+        def answer(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
+            if args[:2] == ["pr", "list"]:
+                return pulls, ""
+            return [self.comment(5, 1, "wrong here")], ""
+
+        with mock.patch.object(status.pr_state, "gh_json", answer):
+            result = status.pr_state.collect_merged(BIN.parent, self.FOUND, "2026-08-23")
+        by_number = {row["number"]: row["review_findings"] for row in result["pull_requests"]}
+        self.assertEqual("", by_number[5]["unreadable"])
+        self.assertEqual(1, by_number[5]["inline"])
+        self.assertIn("#6 carried no createdAt", by_number[6]["unreadable"])
 
     def test_paginated_pages_printed_back_to_back_are_one_list(self) -> None:
         """A `gh` that prints `[..][..]` past page one must not read unreadable."""
