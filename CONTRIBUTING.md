@@ -42,6 +42,28 @@ script that no longer exists, and the second regenerated committed per-platform
 copies that no longer exist either — the installer renders from `skills/` at
 install time, so there is nothing to keep in sync.
 
+While you work, `make check CHANGED="<paths>"` is the changed-files fast path
+(sd:10, criterion 16). It runs the test modules those paths need plus an
+always-run set of whole-tree checks, and it skips `coverage combine` and the
+installer coverage gate, which only the full suite can meet. `lint`, `audit`
+and `docs-lint` still run whole. To cover everything you changed against
+`main`, committed or not:
+
+```bash
+make check CHANGED="$(git diff --name-only origin/main) $(git ls-files --others --exclude-standard)"
+```
+
+Without `CHANGED`, `make check` runs the full suite, and that stays the
+default: run it once, without `CHANGED`, before a push. Only a `CHANGED` given
+on the command line counts, and CI never passes one. `run-tests.sh` ignores
+the fast path when `CI` or `GITHUB_ACTIONS` is set. Any doubt runs the full
+suite instead: a path no test module names, a path more than half of them
+name, the `Makefile`, anything under `.github/`, the Python or dependency
+configuration, `bin/sd_install.py`, and any non-test file under `tests/`.
+`.github/scripts/select-tests.py` holds the rules. A test that reaches a file
+without naming it is not selected unless it is in the always-run set, which is
+why the full run before a push is not optional.
+
 `make check` runs coverage-gated tests, Ruff and mypy over `bin/`, optional
 ShellCheck, optional Bandit/Zizmor, and `sd-docs-lint` over this checkout's
 own `docs/`. Missing optional tools print warnings

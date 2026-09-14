@@ -119,6 +119,45 @@ if [ "${#modules[@]}" -eq 0 ]; then
   exit 1
 fi
 
+# --- changed-files fast path (sd:10 criterion 16) -------------------------
+#
+# Set, even to nothing, by `make check CHANGED="<paths>"` and by nothing else.
+# Unset, which is every CI run and every plain `make check`, the whole suite
+# runs and nothing below changes a byte of it. select-tests.py says which
+# modules the paths need, or `full`; its docstring has the rules. Any doubt
+# runs the whole suite: a CI runner, a selector that fails or prints nothing,
+# or a selection that matches no module here. A run that did narrow writes
+# FAST_PATH_MARK as the first line of the log, and `make test` reads that line
+# to skip `coverage combine` and the installer gate, which a partial run
+# cannot meet.
+FAST_PATH_MARK="test selection: changed files"
+if [ -n "${TEST_CHANGED_FILES+set}" ]; then
+  if [ "${CI:-}" = "true" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
+    printf '%s\n' "warning: TEST_CHANGED_FILES is ignored under CI; running the full suite" >&2
+  else
+    set -f
+    # shellcheck disable=SC2086 # one path per word, and a path here has no blanks
+    selection="$(env -u SD_COVERAGE_PROCESS_START "$PYTHON_BIN" \
+      "$REPO_ROOT/.github/scripts/select-tests.py" -- $TEST_CHANGED_FILES)" || selection=""
+    set +f
+    selected=()
+    if [ -n "$selection" ] && [ "$selection" != "full" ]; then
+      for name in "${modules[@]}"; do
+        if printf '%s\n' "$selection" | grep -Fqx -- "$name"; then
+          selected+=("$name")
+        fi
+      done
+    fi
+    if [ "${#selected[@]}" -eq 0 ]; then
+      printf '%s\n' "changed-files fast path: running the full suite" >&2
+    else
+      printf '%s\n' "$FAST_PATH_MARK, ${#selected[@]} of ${#modules[@]} modules" > "$run_log"
+      printf '%s\n' "changed-files fast path: ${#selected[@]} of ${#modules[@]} modules; not the full suite" >&2
+      modules=("${selected[@]}")
+    fi
+  fi
+fi
+
 # Modules split below module level, by test id, into up to TEST_WORKERS shards
 # each. Sharding by module lets the slowest module set the wall clock on its
 # own: on CI (#907, three workers) tests.test_sd_ship ran 1155 s of a 1173 s
