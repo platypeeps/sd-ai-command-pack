@@ -57,8 +57,8 @@ happening once already.
       its own: a row can be registered, listed and filed without any collector
       existing.
       *Done by sd:611 in system #307 (squash ad443fd1): the row holds a filed
-      issue or an issue draft, keyed `issue:<url>`, and `LANES` gains
-      `closed` (sd:611 note 1189).*
+      issue, keyed `issue:<url>`, or an unfiled issue draft, which stays
+      keyed `item:<id>`, and `LANES` gains `closed` (sd:611 note 1189).*
 
 - [x] **3 — library: the collector watches it (system).** `observe_issue`
       beside `sd_db/contributions.py:412`; `_issue_attention` beside
