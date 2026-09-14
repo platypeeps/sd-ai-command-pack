@@ -1292,7 +1292,9 @@ goes to `status: done` and drops its `branch:` field in the same edit.
 eight pull requests have merged — PR 7 at `b0873ec1`, PR 8d at `fe0712ae` —
 and the item still cannot go `done`, because two criteria were open and
 neither is a pull request in this list. One has since been cut by the
-operator; one remains.
+operator; one remains. (2026-09-13: that one, criterion 28, is closed by
+reading, and a third this count missed, criterion 23's second half, is what
+is left. See the dated paragraphs at the end of this section.)
 
 *Criterion 7 was unscored, and its scoring clause is now cut.* The seven
 `mezmo-world-simulator` passes had no scores anywhere on this item; `git grep`
@@ -1324,7 +1326,9 @@ below), but it is **two** pieces of work and not one:
    `contrib/sd-propose-skills/` half from here.
 
 Neither is code this repository writes. Both are one assertion each once the
-thing they assert against exists.
+thing they assert against exists. (2026-09-13: wrong. Both things now exist,
+and neither can be an assertion here, because pack CI reaches neither. Both
+were checked by reading instead; see below.)
 
 **So `Delivers:` is deliberately not on `fe0712ae`.** `git log --grep
 '^Delivers:'` on `main` returns nothing, which is the state this paragraph
@@ -1333,13 +1337,17 @@ and `WORKFLOW.md:153` makes that commit the answer a database-free reader
 gets. `WORKFLOW.md:149-152` already provides the remedy for a delivery that
 happened without its trailer — the next `sd-ship` merge here, or one empty
 commit on the branch — so nothing is lost by waiting, and the item stays
-`in_progress` until the two close.
+`in_progress` until the two close. (2026-09-13: they have, and the item is
+still `in_progress`, now held by criterion 23's second half; see below.)
 
 **What is left, in the order it can be done.** Two things, and neither is this
 repository's to write. Item B's slice 4 PR 7 lands `commands.yaml`, and the
 palette clause becomes assertable here. The writing repository drops the
 `skill-proposal` kind from its manifest, and the manifest clause becomes
-assertable here. Then, and not before, the delivery commit.
+assertable here. Then, and not before, the delivery commit. (2026-09-13:
+superseded. Both things have happened, neither clause became assertable
+here, and the delivery commit does not follow from them: it waits on
+criterion 23's second half, as the dated paragraphs below record.)
 Scoring the seven passes is no longer in this order at all: it is evidence
 gathered from `answerbook/mezmo-world-simulator` rather than code written here
 — its git history records at least the fourth and the seventh (`0c39c78`,
@@ -1365,7 +1373,8 @@ red. They are recorded here with enough to repeat them.
    declares three kinds, `tip`, `blog-idea` and `topic`. The string
    `skill-proposal` appears nowhere in it, and `templates/skill-proposal.md`
    is gone. The kind was removed by `e79d75e5` (that repository's #34) on
-   2026-09-08, and the log entry is at line 2278 of
+   2026-09-08. At `3d0be2c3` the log entry is at line 2278 (at `e79d75e5`
+   it is line 2279) of
    `sd-writing-pack/docs/work/2026-09-05-the-writing-pipeline-runs-on-the-row/prd.md`.
    The local checkout at `~/repos/platypeeps/sd-writing-pack` matches. Pack
    CI has no checkout of the writing pack, so this clause is recorded here
@@ -1377,11 +1386,18 @@ red. They are recorded here with enough to repeat them.
 was wrong to say it would.** "It is now the only criterion between the item
 and `done`" overlooked criterion 23's second half, which the subsection below
 still records as open. That is still true on 2026-09-13: `CLAUDE.md` on the
-writing pack's `main` at `3d0be2c3` still has a `## Style` section that
-forbids "caveman mode", and criterion 23 deletes that override. The first half
-of criterion 23 still holds, since `~/.claude/settings.json` does not contain
-`caveman`. So `Delivers:` is still not written. One clause is left, and it is
-the writing repository's one-line pull request that removes that section.
+writing pack's `main` at `3d0be2c3` still has a `## Style` section (lines 20
+to 22) that forbids "caveman mode", and criterion 23 deletes that override.
+The first half of criterion 23 still holds, since `~/.claude/settings.json`
+does not contain `caveman`. So `Delivers:` is still not written. One clause is
+left, and it is the writing repository's one-line pull request that removes
+that section.
+
+**The closure state as of 2026-09-13, in one place.** Criterion 7's scoring
+clause is cut. Criterion 28 is closed by reading, with the evidence above.
+Criterion 23's second half is open. The delivery commit waits on that one
+clause and on nothing else this section names. Every earlier sentence in this
+section that says otherwise carries a dated marker pointing here.
 
 ### The three landings that are no pull request of this repository's
 
