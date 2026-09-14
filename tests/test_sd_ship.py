@@ -1899,12 +1899,9 @@ class CaptureDepthTests(unittest.TestCase):
 
     def test_the_largest_body_the_gate_admits_is_read_in_one_pass(self):
         # `REVIEW_CAPTURE_BYTES` is the size bound the gate applies before this
-        # scan, so these are the worst cases that can reach it. The bound is
-        # here to fail a reader that became quadratic, not to police speed, so
-        # it is set for a loaded machine: one of these took 0.09s idle and
-        # 3.33s at load average 290 (verify-950). A quadratic reader is not
-        # near it either way -- about 2e12 byte steps on 2 MB, hours at the
-        # tens of millions of steps a second this loop manages.
+        # scan, so these are the worst cases that can reach it. The 60s bound
+        # is a guard against a hang and nothing more; a reader that became
+        # quadratic is caught by the ratio below, not by this loop.
         cap = ship.REVIEW_CAPTURE_BYTES
         deep = b"[" * (ship.REVIEW_CAPTURE_DEPTH + 1)
         front = deep + b"x" * (cap - len(deep))
@@ -1915,6 +1912,23 @@ class CaptureDepthTests(unittest.TestCase):
             ship.capture_too_deep(body)
             self.assertLess(time.monotonic() - started, 60)
         self.assertTrue(ship.capture_too_deep(front))
+        # Eight times the bytes should cost about eight times the work; a reader
+        # that copies the rest of the body at every byte (`data[index:][0]`)
+        # costs 62 to 77 times as much. That ratio is measured in this thread's
+        # CPU time, `time.thread_time`, not on the clock: at load average 107
+        # the same scan by wall clock gave the linear reader ratios from 1.6 to
+        # 154.3, because the 1 MB scan spans many scheduler slices and the
+        # 125 KB scan few, while CPU time gave it 6.0 to 12.0 across sixteen
+        # runs on 3.13 and 3.14. The 24 sits between those two ranges.
+        small, large = b'"' * 125_000, b'"' * 1_000_000
+        small_cpu: list[float] = []
+        large_cpu: list[float] = []
+        for _ in range(3):
+            for body, spent in ((small, small_cpu), (large, large_cpu)):
+                started = time.thread_time()
+                ship.capture_too_deep(body)
+                spent.append(time.thread_time() - started)
+        self.assertLess(min(large_cpu) / min(small_cpu), 24)
 
 
 if __name__ == "__main__":

@@ -34,10 +34,14 @@ REVIEW_DIAGNOSTIC_BYTES = 4096
 #: on 2026-09-14, 134 nest 5 levels and 22 nest 7, and the whole ship receipts
 #: that carry them reach 10. That depth is not in what `timeout_evidence` reads
 #: -- the report, `findings`, a finding is 3 levels, with `subject` beside
-#: `findings` rather than under it -- but in fields it passes over: a check's
-#: command list reaches 5 and a provider's sanitized response reaches 7.
-#: Nothing in a report's schema bounds those fields, so 100 is an order of
-#: magnitude over the deepest report seen, not a proof about every report.
+#: `findings` rather than under it -- but in fields it passes over. A
+#: provider's sanitized response reaches 7 and stops there, because
+#: `sd_registry.url_response` builds it from fixed keys and `response_value`
+#: flattens every provider value inside it. A check's command list reaches 5,
+#: but `sd-review` copies `checks` from `sd-check --json` as it arrives and
+#: nothing here bounds it. No single schema bounds a whole report, so 100 is an
+#: order of magnitude over the deepest report seen, not a proof about every
+#: report.
 REVIEW_CAPTURE_DEPTH = 100
 #: How large a captured report may be before it is not read at all. This bound
 #: is older than the depth one and stays outermost: it is what keeps the depth
