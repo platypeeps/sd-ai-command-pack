@@ -128,8 +128,9 @@ fi
 #
 # That is checked, not assumed. Before a module here is split, every test class
 # it loads is checked for a setUpClass or tearDownClass of its own or from a
-# base outside unittest, and every module those classes come from for setUpModule,
-# tearDownModule or load_tests, which a split by id would bypass. A module that
+# base outside unittest, and the module itself and every module those classes
+# come from for setUpModule, tearDownModule or load_tests, which a split by id
+# would bypass. A module that
 # has any of them stops the run with the names; it leaves this list or loses
 # the fixture. The check runs on whatever this list names, so a module added
 # later is held to it too.
@@ -166,10 +167,11 @@ for cls in {type(test) for test in tests}:
         defined = next(klass for klass in cls.__mro__ if name in vars(klass))
         if defined.__module__.split(".")[0] != "unittest":
             fixtures.add(f"{defined.__module__}.{defined.__qualname__}.{name}")
-    module = sys.modules.get(cls.__module__)
+for module_name in {type(test).__module__ for test in tests} | {sys.argv[1]}:
+    module = sys.modules.get(module_name)
     for name in ("setUpModule", "tearDownModule", "load_tests"):
         if hasattr(module, name):
-            fixtures.add(f"{cls.__module__}.{name}")
+            fixtures.add(f"{module_name}.{name}")
 if fixtures:
     print("\n".join(sorted(fixtures)), file=sys.stderr)
     sys.exit(3)

@@ -75,6 +75,8 @@ COVERAGE_UNAVAILABLE_MESSAGE = (
 UNMEASURED_FLAGS = frozenset("IES")
 #: Audit events naming a process about to be launched, and where its argv sits.
 LAUNCH_EVENTS = {"subprocess.Popen": 1, "os.exec": 1, "os.posix_spawn": 1}
+#: Programs whose non-option arguments are read as a command line.
+SHELLS = frozenset(("sh", "bash", "dash", "zsh", "ksh"))
 
 
 def _start(config_file=None):
@@ -244,15 +246,18 @@ def _refuse_unmeasured_launch(event, arguments, measured):
     except TypeError:
         return
     commands = [command]
-    for token in command:
-        if " " in token:
-            # A shell's `-c` line.
-            import shlex
+    if command and os.path.basename(command[0]) in SHELLS:
+        # A shell's `-c` line is a command line of its own. Only a shell's: a
+        # space in another program's argument, `python -c` source included,
+        # is not parsed as one.
+        import shlex
 
-            try:
-                commands.append(shlex.split(token))
-            except ValueError:
-                pass
+        for token in command[1:]:
+            if not token.startswith("-"):
+                try:
+                    commands.append(shlex.split(token))
+                except ValueError:
+                    pass
     for tokens in commands:
         found = _unmeasured_script(tokens, measured, cwd)
         if found is None and tokens and measured(tokens[0], cwd):

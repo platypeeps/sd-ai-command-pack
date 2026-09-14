@@ -208,8 +208,9 @@ class LazySubprocessCoverage(unittest.TestCase):
         result = self.child("-c", "import subprocess, sys; "
                                   "print(subprocess.run([sys.executable, '-I', 'bin/other.py']).returncode, "
                                   "subprocess.run([sys.executable, '-I', '-c', 'pass', 'bin/sd_install.py']).returncode, "
-                                  "subprocess.run([sys.executable, '-I', 'copy/bin/sd_install.py']).returncode)")
-        self.assertEqual(result.stdout.split()[-3:], ["0", "0", "0"])
+                                  "subprocess.run([sys.executable, '-I', 'copy/bin/sd_install.py']).returncode, "
+                                  "subprocess.run([sys.executable, '-c', '# python -I bin/sd_install.py']).returncode)")
+        self.assertEqual(result.stdout.split()[-4:], ["0", "0", "0", "0"])
 
 
 if __name__ == "__main__":

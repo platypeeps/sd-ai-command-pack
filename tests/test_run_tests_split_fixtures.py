@@ -81,7 +81,16 @@ class WithModuleFixture(unittest.TestCase):
         pass
 """
 
-SPLIT_NAMES = ("test_sd_ship", "test_sd_ship_dispositions", "test_sd_ship_disposition_guards")
+LOAD_TESTS_ELSEWHERE = """import unittest
+
+from tests.test_sd_ship import Plain
+
+
+def load_tests(loader, standard_tests, pattern):
+    return loader.loadTestsFromTestCase(Plain)
+"""
+
+SPLIT_NAMES =("test_sd_ship", "test_sd_ship_dispositions", "test_sd_ship_disposition_guards")
 
 
 class SplitModuleFixtures(unittest.TestCase):
@@ -128,6 +137,12 @@ class SplitModuleFixtures(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("error: tests.test_sd_ship_disposition_guards is in SPLIT_MODULES", result.stderr)
         self.assertIn("tests.test_sd_ship_disposition_guards.setUpModule", result.stderr)
+
+    def test_a_load_tests_hook_returning_another_modules_tests_is_refused(self) -> None:
+        """The hook's module owns none of the loaded classes; it is checked by name."""
+        result = self.run_harness(test_sd_ship_dispositions=LOAD_TESTS_ELSEWHERE)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("tests.test_sd_ship_dispositions.load_tests", result.stderr)
 
 
 if __name__ == "__main__":
