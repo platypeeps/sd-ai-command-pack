@@ -40,7 +40,7 @@ so it does not drift when prose is reorganised, and it is what would have
 caught each of these on the day it was introduced rather than one at a time by
 being bitten.
 
-Measured over the corpus at 2026-09-14 -- 5,976 tokens -- and re-measurable by
+Measured over the corpus at 2026-09-14 -- 5,977 tokens -- and re-measurable by
 running the module, which prints the census on every run. A snapshot, and the
 only defensible kind: it is dated by the commit that carries it, and `census()`
 is what a reader should run rather than trust it.
@@ -56,7 +56,7 @@ defect as a silent `continue`; it just takes longer to find.
 reason                       live  archiv   total
 =========================  ======  ======  ======
 `compared`                      0       3       3
-`no-adjacent-anchor`          573   2,378   2,951
+`no-adjacent-anchor`          577   2,378   2,955
 `elided-path`                 214   2,180   2,394
 `archived-stale`                0     325     325
 `anchor-not-a-symbol`          25     130     155
@@ -69,7 +69,7 @@ reason                       live  archiv   total
 `quoted-not-there`              0       0       0
 `anchored-line-into-code`       0       0       0
 `line-past-end`                 0       0       0
-`line-past-end-carried`        12       0      12
+`line-past-end-carried`         9       0       9
 =========================  ======  ======  ======
 
 Each reason, with why it exists:
@@ -123,10 +123,11 @@ Each reason, with why it exists:
   gate for a week because the three "not a claim about a symbol" buckets each
   returned before anything opened the target (sd:811). An insertion cannot
   reach it -- a file only grows -- so it does not revive sd:525's objection.
-* **`line-past-end-carried`** -- one of the twelve live past-end citations
+* **`line-past-end-carried`** -- one of the nine live past-end citations
   `KNOWN_PAST_END` enumerates, on pages this item does not own. Counted and
-  visible rather than exempt: the list is checked in both directions, so it
-  can only shrink, and the census reports the debt instead of hiding it.
+  visible rather than exempt: the list is keyed on the citing line and checked
+  in both directions, so it can only shrink, and the census reports the debt
+  instead of hiding it.
 
 **The nine `path:line` sites in this module's own prose are step 8-iv's
 record, and none of them is a claim about today's tree.** Lines 1231 and 1378
@@ -149,6 +150,34 @@ so saying it is the only thing that can.
 like any other, and `test_the_quoted_example_is_carried_once_and_only_by_
 marker_after` requires that `marker_after` be the one place in this file that
 types the 1231 one.)
+
+**What `line-past-end` does not reach, measured rather than waved at.** Of the
+5,977 tokens, 702 have a path that resolves to a tracked file and are the ones
+this rule opens. The other 5,275 do not resolve, and saying which is the only
+honest way to state the rule's coverage:
+
+* 2,394 carry **no path at all** -- the elided form, `` `:391-414` ``, whose
+  file is named by the prose around it. Resolving one means deciding how far
+  back to read, which is the 90-character rule this module threw out. The
+  largest unchecked class, and it is unchecked on purpose.
+* 2,289 name a path inside the checkout that **matches no tracked file by any
+  suffix** -- a fixture name, a deleted file, a renamed one.
+* 413 name a path whose **basename or suffix matches more than one** tracked
+  file. Picking one is a guess and a gate that guesses teaches people to argue
+  with it.
+* 176 name a path that **resolves to exactly one tracked file by suffix**,
+  where the citation elided the leading directory -- `` `prepare-release.py:338` ``
+  for a file under `bin/`. This one is not a guess, and measuring it found a
+  live past-end citation the rule as written does not catch:
+  `sd-propose-skills/SKILL.md:126` in the 2026-09-05 page, against a
+  `contrib/sd-propose-skills/SKILL.md` of 114 lines. Thirty-five more sit in
+  archives. Whether the rule should follow a unique suffix is a decision, not
+  an oversight, and it is filed with the nine rather than taken here.
+* 2 resolve **outside the checkout** and 1 names a **directory**.
+
+Like the table above, these are a dated snapshot and not an assertion: the
+rule they describe is what the tests pin, and the numbers move when the corpus
+does.
 
 **The corpus is every tracked markdown file, asked of git**, with
 `CHANGELOG.md` excluded by name carrying rule 7's reason: the changelog names
@@ -354,45 +383,53 @@ REASONS = frozenset({
 #: The live past-end citations this gate was built over, enumerated and dated.
 #:
 #: A ratchet, not an exemption. Each entry is
-#: `(document, cited path, start, end)` and is *checked*: a listed row that is
-#: no longer past the end fails `test_the_carried_list_can_only_shrink`, so the
-#: list cannot be padded and cannot outlive its rows. Anything past the end and
-#: not listed is `line-past-end` and red.
+#: `(citing document, the line it is written on, cited path, start, end)` and
+#: it is *checked*: a listed key that is no longer a past-end citation fails
+#: `test_every_carried_entry_is_still_a_live_past_end_row`, so the list cannot
+#: be padded and cannot outlive its rows.
+#:
+#: **The citing line is in the key on purpose.** Keyed on the document alone,
+#: a deleted page or a corrected citation would leave a dead entry behind that
+#: silently licensed the next past-end citation someone wrote into the same
+#: file. With the line in it, every way the citation can stop existing --
+#: the page deleted, the prose rewritten, the number repointed, the citation
+#: moved up or down the page -- takes the entry with it, and the list shrinks.
+#: The cost is that an insertion above a carried citation settles its entry
+#: and the list has to be re-measured. That is the correct direction to fail:
+#: a stale exemption goes red rather than green.
 #:
 #: Why they are carried rather than corrected here. Measured 2026-09-14 over
 #: `origin/main` at `e9d72ea7`: 701 `path:line` tokens resolve to a tracked
-#: file, 49 name a line the file does not have, 37 of those are archived and
-#: report `archived-stale` by the standing ruling, and these 12 are live. None
-#: of the 12 is repointable by arithmetic -- `bin/sd_skill.py` went from three
-#: hundred lines to 89, `dashboard/app.js` to 720, and the cited content is
-#: *gone* rather than moved, so each one needs a wording decision on a page
-#: this item does not own. Correcting them is a separate item; deleting this
-#: list is how that item finishes.
+#: file, 49 name a line the file does not have, and 37 of those are archived
+#: and report `archived-stale` by the standing ruling. Twelve were live. Three
+#: had an exact target and are repointed in the commit that adds this list:
+#: `bin/sd-dashboard:239-240` became `:77`, which is the line that prints
+#: `issues[<tracker>]: not collected (<reason>)`, and `:250` became `:32` with
+#: the parser at `:97-103`. The nine here are not repointable by arithmetic --
+#: `bin/sd_skill.py` went from three hundred lines to 89 and
+#: `dashboard/app.js` to 720, and the cited content is *gone* rather than
+#: moved, so each needs one of three dispositions on a page this item does not
+#: own: drop the number, write an `[absent: ...]`-shaped claim, or archive the
+#: page. That is a separate item; deleting this list is how it finishes.
 KNOWN_PAST_END = frozenset({
     ("docs/work/2026-09-04-the-sweep-trusts-a-branch-field-it-never-resolves"
-     "/design.md", "bin/sd_skill.py", 217, 217),
+     "/design.md", 104, "bin/sd_skill.py", 217, 217),
     ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/implement.md", ".github/sd-review.json", 28, 28),
+     "/implement.md", 229, ".github/sd-review.json", 28, 28),
     ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/implement.md", "bin/sd_skill.py", 117, 117),
+     "/implement.md", 946, "bin/sd_skill.py", 117, 117),
     ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/implement.md", "bin/sd_skill.py", 160, 160),
+     "/implement.md", 1046, "bin/sd_skill.py", 278, 278),
     ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/implement.md", "bin/sd_skill.py", 278, 278),
+     "/implement.md", 1048, "bin/sd_skill.py", 160, 160),
     ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/prd.md", "bin/sd_skill.py", 160, 160),
+     "/prd.md", 5123, "bin/sd_skill.py", 278, 278),
     ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/prd.md", "bin/sd_skill.py", 277, 284),
+     "/prd.md", 5125, "bin/sd_skill.py", 160, 160),
     ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/prd.md", "bin/sd_skill.py", 278, 278),
-    ("docs/work/2026-09-12-a-second-tracker-with-no-rows"
-     "/design.md", "bin/sd-dashboard", 239, 240),
-    ("docs/work/2026-09-12-a-second-tracker-with-no-rows"
-     "/implement.md", "bin/sd-dashboard", 250, 250),
-    ("docs/work/2026-09-12-a-second-tracker-with-no-rows"
-     "/prd.md", "bin/sd-dashboard", 239, 240),
+     "/prd.md", 5141, "bin/sd_skill.py", 277, 284),
     ("docs/work/2026-09-13-one-dashboard"
-     "/implement.md", "dashboard/app.js", 780, 780),
+     "/implement.md", 178, "dashboard/app.js", 780, 780),
 })
 
 
@@ -406,6 +443,11 @@ class Citation(typing.NamedTuple):
     start: int
     end: int
     reason: str
+    #: The line of `doc` the citation is written on, 1-based. Set on every
+    #: row, not only the ones that need it: `KNOWN_PAST_END` is keyed on it,
+    #: and a field populated on one branch of `classify` would be a trap for
+    #: the next reader who reached for it from another.
+    line: int
 
 
 #: `CHANGELOG.md` is excluded by name, carrying rule 7's stated reason: the
@@ -761,6 +803,10 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
         for match in TOKEN.finditer(flat):
             path, start = match.group(1), int(match.group(2))
             end = int(match.group(3) or match.group(2))
+            # The flattening is offset-preserving -- one space per newline --
+            # so an offset in `flat` is the same offset in `raw`, and the
+            # newlines before it are this token's line number.
+            where = raw.count("\n", 0, match.start()) + 1
             marker = marker_after(flat, raw, match.end())
             if marker and marker[0] == "quoted":
                 # D4a. The reason names where the example was copied from, and
@@ -779,10 +825,13 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                     reason = "archived-stale"
                 else:
                     reason = "quoted-not-there"
-                rows.append(Citation(doc, "", path, None, start, end, reason))
+                rows.append(
+                    Citation(doc, "", path, None, start, end, reason, where))
                 continue
             if not path:
-                rows.append(Citation(doc, "", path, None, start, end, "elided-path"))
+                rows.append(
+                    Citation(doc, "", path, None, start, end, "elided-path",
+                             where))
                 continue
             found = anchor_for(flat, match.span())
             anchor = found[0] if found else ""
@@ -805,31 +854,33 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                     # citing a symbol that moved, and that is reported, not
                     # failed. 37 of the 49 live here.
                     reason = "archived-stale"
-                elif (named, path, start, end) in KNOWN_PAST_END:
+                elif (named, where, path, start, end) in KNOWN_PAST_END:
                     reason = "line-past-end-carried"
                 else:
                     reason = "line-past-end"
-                rows.append(Citation(doc, anchor, path, target, start, end, reason))
+                rows.append(
+                    Citation(doc, anchor, path, target, start, end, reason, where))
                 continue
             if found is None:
                 rows.append(
-                    Citation(doc, "", path, None, start, end, "no-adjacent-anchor"))
+                    Citation(doc, "", path, None, start, end,
+                             "no-adjacent-anchor", where))
                 continue
             anchor, adjacent = found
             if not adjacent:
                 rows.append(
                     Citation(doc, anchor, path, None, start, end,
-                             "separator-not-adjacent"))
+                             "separator-not-adjacent", where))
                 continue
             if not is_symbol(anchor):
                 rows.append(
                     Citation(doc, anchor, path, None, start, end,
-                             "anchor-not-a-symbol"))
+                             "anchor-not-a-symbol", where))
                 continue
             if not is_under_repo(target):
                 rows.append(
                     Citation(doc, anchor, path, None, start, end,
-                             "escapes-checkout"))
+                             "escapes-checkout", where))
                 continue
             if not target.is_file():
                 # An archive naming a file that has since been deleted is a
@@ -842,7 +893,8 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                     reason = "declared-absent"
                 else:
                     reason = "target-missing"
-                rows.append(Citation(doc, anchor, path, target, start, end, reason))
+                rows.append(
+                    Citation(doc, anchor, path, target, start, end, reason, where))
                 continue
             reason = "compared"
             if marker and marker[0] == "absent":
@@ -858,7 +910,8 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                 # line into code goes stale at the next insertion above it,
                 # made by a lane that was not editing documentation.
                 reason = "anchored-line-into-code"
-            rows.append(Citation(doc, anchor, path, target, start, end, reason))
+            rows.append(
+                    Citation(doc, anchor, path, target, start, end, reason, where))
     return rows
 
 
@@ -2135,6 +2188,51 @@ class ACitationPastTheEndOfItsFile(unittest.TestCase):
         target.write_text("def render():\n", encoding="utf-8")
         self.assertEqual(self.reason_for("see `bin/tool.py:2`\n"), "line-past-end")
 
+    def test_the_carried_key_is_the_citing_line_and_not_just_the_page(self) -> None:
+        """Keyed on the page alone, a dead entry licenses the next citation.
+
+        The three ways a carried citation stops existing -- the prose
+        rewritten, the number repointed, the page deleted -- all have to take
+        the entry with it. With the line in the key a fourth is covered too:
+        the same citation moved elsewhere on the same page is a different
+        claim in a different paragraph, and it is not the one that was
+        measured. The cost is that an insertion above a carried citation
+        settles its entry and the list must be re-measured, which is the
+        correct direction to fail.
+        """
+
+        doc = self.root / "docs" / "page.md"
+        doc.write_text("The reader is at `bin/tool.py:9`.\n", encoding="utf-8")
+        key = ("docs/page.md", 1, "bin/tool.py", 9, 9)
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root,
+                                         "KNOWN_PAST_END": frozenset({key})}):
+            self.assertEqual([row.reason for row in classify([doc])],
+                             ["line-past-end-carried"])
+            doc.write_text("# a heading arrived\n\nThe reader is at"
+                           " `bin/tool.py:9`.\n", encoding="utf-8")
+            self.assertEqual([row.reason for row in classify([doc])],
+                             ["line-past-end"])
+
+    def test_a_carried_entry_whose_citation_is_gone_is_reported(self) -> None:
+        """A page deleted, or its citation corrected, shrinks the list.
+
+        The direction nothing else checks: the red bucket stays empty either
+        way, so without this a settled entry would sit in `KNOWN_PAST_END`
+        forever, and the next past-end citation written at that line of that
+        page would be carried by it.
+        """
+
+        doc = self.root / "docs" / "page.md"
+        doc.write_text("The reader is at `bin/tool.py:9`.\n", encoding="utf-8")
+        key = ("docs/page.md", 1, "bin/tool.py", 9, 9)
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root,
+                                         "KNOWN_PAST_END": frozenset({key})}):
+            TheCarriedPastEndList().test_every_carried_entry_is_still_a_live_past_end_row()
+            doc.unlink()
+            with self.assertRaisesRegex(AssertionError, "no longer past the end"):
+                TheCarriedPastEndList(
+                ).test_every_carried_entry_is_still_a_live_past_end_row()
+
     def test_a_fixture_document_outside_the_checkout_does_not_crash_the_scan(
             self) -> None:
         """`REPO_ROOT` is not moved here, and the document is not under it.
@@ -2236,7 +2334,8 @@ class TheCarriedPastEndList(unittest.TestCase):
 
     def test_every_carried_entry_is_still_a_live_past_end_row(self) -> None:
         carried = {
-            (str(row.doc.relative_to(REPO_ROOT)), row.path, row.start, row.end)
+            (str(row.doc.relative_to(REPO_ROOT)), row.line,
+             row.path, row.start, row.end)
             for row in classify() if row.reason == "line-past-end-carried"
         }
         settled = sorted(KNOWN_PAST_END - carried)
@@ -2254,7 +2353,7 @@ class TheCarriedPastEndList(unittest.TestCase):
         this module's census came to say `line-into-code 0 0 0`.
         """
 
-        self.assertEqual(len(KNOWN_PAST_END), 12)
+        self.assertEqual(len(KNOWN_PAST_END), 9)
 
 
 class StableSourceCitationTests(unittest.TestCase):

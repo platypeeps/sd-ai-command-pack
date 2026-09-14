@@ -29,7 +29,7 @@ of them carrying live rows, which is fact one. Measured at cc93ea85:
   (`source:dashboard/jira.py::settings`) reads `JIRA_BASE_URL`, `JIRA_EMAIL`,
   `JIRA_API_TOKEN` and optional `JIRA_JQL`, and the module docstring at
   `dashboard/jira.py:26-30` states the no-default-host rule and why.
-- **Graceful degradation.** `bin/sd-dashboard:239-240` already prints
+- **Graceful degradation.** `bin/sd-dashboard:77` already prints
   `issues[<tracker>]: not collected (<reason>)` and continues.
 
 So sd:361 is not a construction task. **The real question is a migration**: the

@@ -41,7 +41,8 @@ since R11-D48. The pack half is on the order of forty lines in
 
 - [x] **2. One proving collect against the loop that exists.** Run
       `bin/sd-dashboard index` from the checkout — the verb at
-      `bin/sd-dashboard:250`; the pack links no executable anywhere
+      `bin/sd-dashboard:32`, declared at `bin/sd-dashboard:97-103`; the
+      pack links no executable anywhere
       (`AGENTS.md:57-69`) — with the three variables exported. This is the PRD's "one successful collect
       against the existing `dashboard/collect.py:168` loop proving a row can
       be produced at all", and it costs no code.
