@@ -69,7 +69,7 @@ class LazySubprocessCoverage(unittest.TestCase):
         self.data.mkdir()
 
     def child(self, *argv: str, cwd: pathlib.Path | None = None, extra_path: str = "",
-              check: bool = True) -> subprocess.CompletedProcess:
+              check: bool = True, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         environment = {key: value for key, value in os.environ.items()
                        if not key.startswith(("COVERAGE_", "SD_COVERAGE_")) and key != "PYTHONPATH"}
         environment.update({
@@ -78,6 +78,7 @@ class LazySubprocessCoverage(unittest.TestCase):
             "COVERAGE_FILE": str(self.data / ".coverage"),
             "PYTHONDONTWRITEBYTECODE": "1",
         })
+        environment.update(extra_env or {})
         result = subprocess.run([sys.executable, *argv], cwd=cwd or self.root, env=environment,
                                 text=True, capture_output=True, timeout=60)
         if check:
@@ -211,6 +212,83 @@ class LazySubprocessCoverage(unittest.TestCase):
                                   "subprocess.run([sys.executable, '-I', 'copy/bin/sd_install.py']).returncode, "
                                   "subprocess.run([sys.executable, '-c', '# python -I bin/sd_install.py']).returncode)")
         self.assertEqual(result.stdout.split()[-4:], ["0", "0", "0", "0"])
+
+    def launch(self, argv: list[str]) -> str:
+        """A child that launches `argv` and survives the program being absent."""
+        return ("import subprocess\ntry:\n"
+                f"    subprocess.run({argv!r}, capture_output=True)\n"
+                "except FileNotFoundError:\n    pass\nprint('launched')\n")
+
+    #: Command lines whose interpreter-looking word is not at command position,
+    #: or sits in a shell's positional arguments rather than its `-c` string.
+    NOT_REFUSED = (
+        ["grep", "-e", "python", "-E", "bin/sd_install.py"],
+        ["rg", "python", "-S", "bin/sd_install.py"],
+        ["bash", "-c", "echo python -I bin/sd_install.py"],
+        ["bash", "-c", "true", "python -I bin/sd_install.py"],
+        ["bash", "-c", "grep -e python -E bin/sd_install.py; true"],
+        ["bash", "-c", "(cd sub && true); python -I ../bin/sd_install.py"],
+        ["bash", "-c", "cd sub | true; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "cd sub & wait; python -I ../bin/sd_install.py"],
+    )
+
+    #: Command lines that run a gate-measured file with site skipped.
+    REFUSED = (
+        ["python3.13", "-E", "bin/sd_install.py"],
+        ["/some/where/python", "-S", "bin/sd_install.py"],
+        ["env", "python", "-I", "bin/sd_install.py"],
+        ["env", "-i", "FOO=1", "python3", "-S", "bin/sd_install.py"],
+        ["env", "-S", "python3 -I", "bin/sd_install.py"],
+        ["bash", "-c", "cd sub && python -I ../bin/sd_install.py"],
+        ["bash", "-ec", "true; FOO=1 python -E bin/sd_install.py", "name", "arg"],
+        ["bash", "-c", "true || python -I bin/sd_install.py"],
+        ["sh", "-c", "echo hi | python -S bin/sd_install.py"],
+        ["sh", "-c", "true\npython -I bin/sd_install.py"],
+        ["bash", "-c", "sh -c 'python -I bin/sd_install.py'"],
+        ["env", "-C", "sub", "python", "-I", "../bin/sd_install.py"],
+        ["env", "--chdir=sub", "python", "-I", "../bin/sd_install.py"],
+        ["bash", "-c", ">log python -I bin/sd_install.py"],
+        ["bash", "-c", "2> /dev/null FOO=1 python -E bin/sd_install.py"],
+        ["bash", "-c", "2>&1 python -S bin/sd_install.py"],
+    )
+
+    def test_an_interpreter_word_off_command_position_is_not_refused(self) -> None:
+        (self.root / "sub").mkdir()
+        for argv in self.NOT_REFUSED:
+            with self.subTest(argv=argv):
+                result = self.child("-c", self.launch(argv), check=False)
+                self.assertNotIn("would run with -I, -E or -S", result.stderr)
+                self.assertEqual((result.returncode, result.stdout.strip()), (0, "launched"), result.stderr)
+
+    def test_an_interpreter_at_command_position_is_refused(self) -> None:
+        (self.root / "sub").mkdir()
+        for argv in self.REFUSED:
+            with self.subTest(argv=argv):
+                self.assert_refused(self.launch(argv))
+
+    def test_a_start_on_the_main_thread_beside_a_live_worker_keeps_its_tracer(self) -> None:
+        """PyTracer warns at exit when its thread's trace function was replaced."""
+        script = ("import sys, threading; released = threading.Event(); "
+                  "worker = threading.Thread(target=released.wait); worker.start(); "
+                  "sys.path.insert(0, 'bin'); import sd_install; sd_install.pick(False); "
+                  "released.set(); worker.join()")
+        arcs = {}
+        for start, variable in (("lazy", "SD_COVERAGE_PROCESS_START"), ("eager", "COVERAGE_PROCESS_START")):
+            with self.subTest(start=start):
+                for stale in self.data_files():
+                    stale.unlink()
+                result = self.child("-c", script, extra_env={
+                    "COVERAGE_CORE": "pytrace", variable: str(self.root / ".coveragerc")})
+                self.assertNotIn("Trace function changed", result.stderr)
+                self.assert_installer_measured()
+                data = coverage.CoverageData(basename=str(self.data_files()[0]))
+                data.read()
+                arcs[start] = {os.path.realpath(name): sorted(data.arcs(name) or [])
+                               for name in data.measured_files()}[os.path.realpath(self.installer)]
+        self.assertEqual(sorted(arcs), ["eager", "lazy"])
+        # `pick(False)` ran on the main thread after the start: its branch is in.
+        self.assertIn((2, 4), arcs["lazy"])
+        self.assertEqual(arcs["lazy"], arcs["eager"])
 
 
 if __name__ == "__main__":
