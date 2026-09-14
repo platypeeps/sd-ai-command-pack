@@ -5198,3 +5198,34 @@ from a number the operator types.
   `accepted` still records the decision, with only the filing behind it gone.
   The kind is retired; the ten notes and the decision they can still carry are
   not, by the standing decision that no directory is deleted.
+
+- **2026-09-13** — **Criterion 7's forward experiment is deferred to followup
+  sd:777 by the owner, criterion 23 closes, and every acceptance criterion is
+  now closed, cut or deferred.** This entry is the record the delivery rests
+  on. `implement.md`'s "Closing the item" holds the evidence for each clause.
+
+  **Criterion 7.** The 2026-09-07 entry above removed only the back-scoring of
+  the seven `mezmo-world-simulator` passes. It kept the forward experiment on
+  purpose: the other vendor reviews the next ten code pull requests, a report
+  goes on this item, and the code review point stays or goes by a recorded
+  decision. No pass log, report or decision was ever recorded here. On
+  2026-09-13 the owner moved that experiment, with its report and decision,
+  to followup sd:777 ("sd:10 criterion 7: ten-pass forward experiment on the
+  code review point, report and decision"), so it no longer holds this item
+  open. The criterion's text above is left as written, and this entry
+  supersedes it for the experiment. The
+  half this item still closes is the grep. Re-run on 2026-09-13, it finds no
+  percentage in `bin/` or `skills/` that disables a review point.
+
+  **Criterion 23.** The second half closed when `platypeeps/sd-writing-pack`
+  #41 merged as `be76962e`, deleting that repository's `CLAUDE.md` `## Style`
+  section and `.caveman/config.json`. The first half, no caveman plugin in
+  the global settings, has held since the operator edit of 2026-09-07.
+
+  **Criterion 28** closed by a dated read of `commands.yaml` and the writing
+  manifest, accepted by the owner in decision note 1904 (pack #926).
+
+  **What this leaves.** Cut: criterion 7's back-scoring (2026-09-07).
+  Deferred: criterion 7's forward experiment (sd:777). Every other criterion
+  is closed, as `implement.md`'s "What closes the criteria" assigns. The
+  delivery pull request carries `Delivers: sd:10`.

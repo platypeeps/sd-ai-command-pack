@@ -1464,6 +1464,7 @@ paragraph.
   repository's Phase 1 and is not a follow-up item. Nothing else is cut.
 - **Deferred:** criterion 7's forward ten-pass experiment, with its report
   and decision, moved to followup sd:777 by owner decision on 2026-09-13.
+  `prd.md`'s log entry of 2026-09-13 records the deferral beside the cut.
 - **Closed by a dated read rather than a test:** criterion 19 and criterion
   23's first half (the operator edit of 2026-09-07, measured in the table
   below), criterion 23's second half (`be76962e`, above), and criterion 28's
