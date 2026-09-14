@@ -289,6 +289,26 @@ class TheRunner(TreeCase):
         self.assertEqual(ran, self.everything)
         self.assertNotIn("test selection", first)
 
+    def test_a_long_selection_is_read_to_its_end_for_every_module(self) -> None:
+        """A selection longer than a pipe buffer still selects each module it names.
+
+        Matched through `printf | grep -q` under `set -o pipefail`, a name near
+        the top of a long selection is found, `grep` exits, `printf` takes
+        SIGPIPE on the rest, and the pipeline's 141 reads as "not selected":
+        the module the change needs is dropped from a narrowed run. A real
+        selection is a few kilobytes and cannot reach it today; the padding
+        here is a megabyte of names this tree does not hold.
+        """
+
+        always = [f"tests.{name}" for name in ALWAYS_RUN_NAMES]
+        padding = [f"tests.not_here_{index:06d}" for index in range(40000)]
+        names = ["tests.test_alpha", *padding, *always]
+        (self.root / ".github/scripts/select-tests.py").write_text(
+            f"print({chr(10).join(names)!r})\n")
+        ran, first, _ = self.run_harness(TEST_CHANGED_FILES="bin/sd-alpha")
+        self.assertEqual(ran, set(ALWAYS_RUN_NAMES) | {"test_alpha"})
+        self.assertTrue(first.startswith("test selection: changed files, 8 of"), first)
+
     def test_a_failing_selector_runs_everything(self) -> None:
         (self.root / ".github/scripts/select-tests.py").write_text("import sys\nsys.exit(2)\n")
         ran, first, _ = self.run_harness(TEST_CHANGED_FILES="bin/sd-alpha")

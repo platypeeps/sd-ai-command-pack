@@ -158,8 +158,10 @@ if [ -n "${TEST_CHANGED_FILES+set}" ]; then
     # substring match would narrow to `tests.test_alpha` instead and skip
     # the coverage gates. In this shell: `set -o pipefail` is in force, so a
     # `grep -q` that exited on its first match while `printf` was still
-    # writing would make the pipeline 141 and read as "not selected",
-    # dropping a module from a run that reports itself complete.
+    # writing a selection longer than a pipe buffer made the pipeline 141,
+    # which read as "not selected". The module was dropped, and the run
+    # reported a count the selector did not give. A real selection is a few
+    # kilobytes and did not reach it; a megabyte did, every time.
     newline=$'\n'
     lines="$newline$selection$newline"
     if [ -n "$selection" ] && [ "$selection" != "full" ]; then
