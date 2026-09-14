@@ -4353,8 +4353,36 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
             return sum(1 for line in text.splitlines()
                        if line.split()[1:2] == [self.CHECK] and re.match(r"^\s*[a-z][0-9a-f]{4,} ", line))
         self.assertEqual(3, listed(pending.getvalue()))
-        self.assertIn(f"9 more {self.CHECK} past its cap of 3", pending.getvalue())
+        self.assertIn(f"  9 {self.CHECK} rows not shown (its cap is 3), in --actions\n",
+                      pending.getvalue())
         self.assertEqual(12, listed(actions.getvalue()))
+
+    def test_the_held_back_count_is_every_row_the_list_does_not_show(self) -> None:
+        """Ten open pull requests fill `pending` above rank 65; five merged rows miss it.
+
+        The count was the rows past the cap, so this printed "2 more ... past
+        its cap of 3" while none of the five showed (review of #925, N-7).
+        The line counts the class's rows minus the ones shown, and a count
+        that stops once the list is full misses all five.
+        """
+        opened = [self.pull(failing=[], number=number, title=f"Open {number}",
+                            url=f"https://github.com/acme/widget/pull/{number}")
+                  for number in range(1, 11)]
+        merged = [self.merged(100 + age, age, [f"m{age:02d}"]) for age in range(1, 6)]
+        rows = status.actionable_inventory(self.repo, self.sections(
+            pull_requests={"repo": "acme/widget", "pull_requests": opened},
+            merged_pull_requests={"repo": "acme/widget", "pull_requests": merged},
+        ), self.TODAY).rows
+        self.assertEqual(10, len(self.by_check(rows, "pr-needs-action")))
+        self.assertEqual(5, len(self.by_check(rows, self.CHECK)))
+        shown, held = status.pending_rows(rows)
+        self.assertEqual(["pr-needs-action"] * 10, [row["check"] for row in shown])
+        self.assertEqual({self.CHECK: 5}, held)
+        pending = io.StringIO()
+        status._render_pending(rows, pending.write)
+        self.assertIn("  10 of 15, by rank\n", pending.getvalue())
+        self.assertIn(f"  5 {self.CHECK} rows not shown (its cap is 3), in --actions\n",
+                      pending.getvalue())
 
     def test_one_unreadable_merged_pull_request_is_unchecked_and_hides_no_other(self) -> None:
         blind = self.merged(7, 2, ["bb11"], unreadable="gh api exited 1")
