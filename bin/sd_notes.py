@@ -116,6 +116,6 @@ def add_verbs(verbs: Any) -> None:
     listing.set_defaults(handler=cmd_list)
 
 
-def register(groups: Any) -> None:
+def register_note_group(groups: Any) -> None:
     group = groups.add_parser("note", help="list an item's notes and resolve one")
     add_verbs(group.add_subparsers(dest="verb", required=True))

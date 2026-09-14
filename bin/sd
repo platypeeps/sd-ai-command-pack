@@ -3096,7 +3096,7 @@ def build_parser() -> argparse.ArgumentParser:
     sd_operations.register(groups)
     sd_controls.register(groups)
     sd_runner.register(groups)
-    sd_notes.register(groups)
+    sd_notes.register_note_group(groups)
     return parser
 
 
