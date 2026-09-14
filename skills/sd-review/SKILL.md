@@ -120,7 +120,7 @@ These projections cannot reconstruct a discarded raw response. Historical bodies
 
 MiniMax/Kimi recovery requires both named providers to pass preflight, followed by one complete multi-provider review.
 Local fixtures do not satisfy that live acceptance. No provider call is permitted when the authorized allowance is spent.
-Until live acceptance passes, an authorized exact-head `--scope branch --provider claude` review is the temporary mitigation.
+Until live acceptance passes, an authorized exact-head `--scope branch --provider <name>` review, naming the registry entry whose `reader` is `claude-json`, is the temporary mitigation.
 That single-provider result does not waive the shipping workflow's required depth or review gates.
 
 ## The `codex-json` entry is subscription-only (R10-D4)
@@ -134,12 +134,12 @@ past it. Automatic fallback uses only the separately consented registry entries;
 it never changes that entry's authentication or bypasses its refusal.
 
 Each provider receives only `PATH`, `HOME`, `LANG`, `TERM`, `TMPDIR` and the
-variables declared in its registry `env` list. Codex also receives the exact
+variables declared in its registry `env` list. A `codex-json` entry also receives the exact
 `CODEX_HOME` whose authentication passed preflight. Unrelated credentials are
 not inherited. This reduces accidental exposure; providers still run as the
 operator and can read files accessible to that account.
 
-The `claude-json` reader runs Claude in safe and restricted modes with only
+The `claude-json` reader runs its entry's `start` program in safe and restricted modes with only
 Read, Grep and Glob tools, no custom MCP servers, and no saved session. The
 exact diff and untracked or planning-file contents are supplied in a temporary
 review file; URL providers receive the same material in their request. Its

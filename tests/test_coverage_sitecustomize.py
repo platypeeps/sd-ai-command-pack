@@ -230,6 +230,13 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["bash", "-c", "(cd sub && true); python -I ../bin/sd_install.py"],
         ["bash", "-c", "cd sub | true; python -I ../bin/sd_install.py"],
         ["bash", "-c", "cd sub & wait; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "true # x; python -I bin/sd_install.py"],
+        ["bash", "-c", "a=(python -I bin/sd_install.py)"],
+        ["bash", "-c", "a=(\npython -I bin/sd_install.py\n)"],
+        # Passes before sd:776 too: `popd` returns to where `pushd` left from.
+        ["bash", "-c", "pushd sub; popd; python -I ../bin/sd_install.py"],
+        # A subshell's `pushd` leaves the outer stack alone.
+        ["bash", "-c", "pushd sub; (pushd other); popd; python -I ../bin/sd_install.py"],
     )
 
     #: Command lines that run a gate-measured file with site skipped.
@@ -250,6 +257,29 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["bash", "-c", ">log python -I bin/sd_install.py"],
         ["bash", "-c", "2> /dev/null FOO=1 python -E bin/sd_install.py"],
         ["bash", "-c", "2>&1 python -S bin/sd_install.py"],
+        ["sh", "-c", "! python -I bin/sd_install.py"],
+        ["sh", "-c", "if python -I bin/sd_install.py; then true; fi"],
+        ["sh", "-c", "if true; then python -E bin/sd_install.py; fi"],
+        ["sh", "-c", "if false; then true; elif python -S bin/sd_install.py; then true; fi"],
+        ["sh", "-c", "if false; then true; else python -I bin/sd_install.py; fi"],
+        ["sh", "-c", "while python -I bin/sd_install.py; do break; done"],
+        ["sh", "-c", "until python -I bin/sd_install.py; do break; done"],
+        ["sh", "-c", "for f in x; do python -I bin/sd_install.py; done"],
+        ["sh", "-c", "{ python -S bin/sd_install.py; }"],
+        ["bash", "-c", "time -p python -E bin/sd_install.py"],
+        ["bash", "-c", "if cd sub; then python -I ../bin/sd_install.py; fi"],
+        ["bash", "-c", "cd sub 2>/dev/null && python -I ../bin/sd_install.py"],
+        ["bash", "-c", "cd sub >/dev/null && python -I ../bin/sd_install.py"],
+        ["bash", "-c", "cd sub &>/dev/null && python -I ../bin/sd_install.py"],
+        ["bash", "-c", "cd sub > /dev/null 2>&1; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "x=`python -I bin/sd_install.py`"],
+        ["bash", "-c", "# it's here\npython -I bin/sd_install.py"],
+        ["env", "-Csub", "python", "-I", "../bin/sd_install.py"],
+        ["env", "-iC", "sub", "python", "-I", "../bin/sd_install.py"],
+        ["env", "-Spython3 -I", "bin/sd_install.py"],
+        ["env", "--split-string=python3 -I", "bin/sd_install.py"],
+        ["python", "--check-hash-based-pycs", "never", "-I", "bin/sd_install.py"],
+        ["bash", "-c", "pushd sub && python -I ../bin/sd_install.py"],
     )
 
     def test_an_interpreter_word_off_command_position_is_not_refused(self) -> None:
@@ -289,6 +319,36 @@ class LazySubprocessCoverage(unittest.TestCase):
         # `pick(False)` ran on the main thread after the start: its branch is in.
         self.assertIn((2, 4), arcs["lazy"])
         self.assertEqual(arcs["lazy"], arcs["eager"])
+
+    @unittest.skipUnless(hasattr(sys, "_settraceallthreads"), "no sys._settraceallthreads before Python 3.12")
+    def test_a_start_on_a_thread_without_a_tracer_keeps_the_installer(self) -> None:
+        """The calling thread gets back only a tracer it had: with none, the installer stays."""
+        script = (
+            "import importlib.util, sys, threading, types\n"
+            f"spec = importlib.util.spec_from_file_location('probe', {str(SITECUSTOMIZE / 'sitecustomize.py')!r})\n"
+            "module = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(module)\n"
+            "def install(frame, event, arg):\n"
+            "    return None\n"
+            "collector = types.SimpleNamespace(core=types.SimpleNamespace(systrace=True), _installation_trace=install)\n"
+            "current = types.SimpleNamespace(_collector=collector)\n"
+            "fake = types.SimpleNamespace(Coverage=types.SimpleNamespace(current=lambda: current))\n"
+            "released = threading.Event()\n"
+            "worker = threading.Thread(target=released.wait)\n"
+            "worker.start()\n"
+            "sys.settrace(None)\n"
+            "module._trace_existing_threads(fake)\n"
+            "print(sys.gettrace() is install)\n"
+            "sys.settrace(None)\n"
+            "released.set()\n"
+            "worker.join()\n"
+        )
+        # No coverage variable and no PYTHONPATH: loading the module starts nothing.
+        environment = {key: value for key, value in os.environ.items()
+                       if not key.startswith(("COVERAGE_", "SD_COVERAGE_")) and key != "PYTHONPATH"}
+        result = subprocess.run([sys.executable, "-c", script], cwd=self.root, env=environment,
+                                text=True, capture_output=True, timeout=60)
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, "True"), result.stderr)
 
 
 if __name__ == "__main__":

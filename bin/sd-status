@@ -3179,8 +3179,9 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
     inventory = actionable_inventory(root, result)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
     result["abnormalities"] = banner(inventory)
-    # `actions` is the uncapped list and `pending` is a view of its first ten,
-    # so a consumer that wants row eleven has it without re-deriving anything.
+    # `actions` is the uncapped list and `pending` is the first ten of it after
+    # each class's `pending_cap` (`pending_rows`), so a consumer that wants a
+    # row `pending` leaves out has it without re-deriving anything.
     # `next` is an object rather than a string because a caller that acts on
     # the suggestion needs the id it belongs to in the same breath.
     result["actions"] = inventory.rows
@@ -3378,30 +3379,60 @@ def _render_pending(rows: list[dict[str, Any]], write: Any) -> None:
     write(f"  {len(shown)} of {len(rows)}, by rank\n")
     for row in shown:
         write(f"  {row['id']}  {row['check']:<{CHECK_WIDTH}} {row['title']}\n")
+    totals: dict[str, int] = {}
+    for row in rows:
+        totals[row["check"]] = totals.get(row["check"], 0) + 1
     for check, count in held.items():
-        write(f"  {count} more {check} past its cap of {BY_CHECK[check].pending_cap}, "
-              "in --actions\n")
+        write(_held_back_line(check, count, totals[check]))
     _widened_note(rows, write)
+
+
+def _held_back_line(check: str, held: int, total: int) -> str:
+    """Why `held` of the class's `total` rows are not in `pending`.
+
+    The count is every row of the class the list does not show, the reading
+    `pending_rows` settled, and the line used to name the cap for all of them.
+    That misread the ordinary case: one row of a class capped at three, crowded
+    out by ten higher-ranked rows, read as "(its cap is 3)" when the cap had no
+    part in it, while a displaced row of an uncapped class got no line at all.
+    `past` is what the cap alone removes -- those rows stay out however short
+    the list above them is -- and the rest lost their slot to higher rank,
+    which a quieter day gives back.
+    """
+
+    cap = BY_CHECK[check].pending_cap
+    past = max(0, total - cap)
+    ranked = held - past
+    crowded = f"ranked below the first {PENDING_LIMIT}"
+    if not ranked:
+        cause = f", past its cap of {cap}"
+    elif not past:
+        cause = f", {crowded}"
+    else:
+        cause = f": {past} past its cap of {cap}, {ranked} {crowded}"
+    return (f"  {held} {check} row{'' if held == 1 else 's'} not shown"
+            f"{cause}, in --actions\n")
 
 
 def pending_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """The first `PENDING_LIMIT` rows, no class past its `pending_cap`.
 
-    Also returns how many rows each capped class held back, so the list can
-    say so rather than elide in silence. A held-back row frees its slot for the
-    next class down, which is the point of the cap.
+    Also returns how many rows of each capped class the list does not show, so
+    it can say so rather than elide in silence. That is the class's rows minus
+    the ones shown, not the rows past the cap: when higher classes fill the
+    list, none of the class shows and every row of it is missing. A row past
+    the cap frees its slot for the next class down, which is the point of the cap.
     """
     shown: list[dict[str, Any]] = []
     seen: dict[str, int] = {}
-    held: dict[str, int] = {}
     for row in rows:
         cap = BY_CHECK[row["check"]].pending_cap
         seen[row["check"]] = seen.get(row["check"], 0) + 1
-        if cap and seen[row["check"]] > cap:
-            held[row["check"]] = held.get(row["check"], 0) + 1
-        elif len(shown) < PENDING_LIMIT:
+        if len(shown) < PENDING_LIMIT and not (cap and seen[row["check"]] > cap):
             shown.append(row)
-    return shown, held
+    held = {check: count - sum(1 for row in shown if row["check"] == check)
+            for check, count in seen.items() if BY_CHECK[check].pending_cap}
+    return shown, {check: count for check, count in held.items() if count}
 
 
 def _render_next(rows: list[dict[str, Any]], write: Any) -> None:
