@@ -200,7 +200,10 @@ oldest. So three rules apply now:
 - **At most three of its rows in `pending`** (`pending_cap`). The rows it holds
   back leave their slots to the classes below, and a line under the list says
   how many of its rows the list does not show. When higher classes fill all ten
-  slots, that is every row of the class, not just the rows past the cap.
+  slots, that is every row of the class, not just the rows past the cap — so
+  the line splits the count by cause (`_held_back_line`): rows "past its cap of
+  3", rows "ranked below the first 10", or both with a number each. A class
+  crowded out while under its cap names rank alone, never the cap.
   `--actions` and `--json` still carry every row.
 
 It asks the same question through the same code as the open class. A finding
@@ -335,8 +338,11 @@ The `--json` schema is version **3**. Beyond the section keys it carries
 the findings each carries), `inventory` (`rows` plus the `unchecked` map),
 `abnormalities`, `actions` — the uncapped inventory, of which `pending` is the
 first ten after each class's `pending_cap` (`pending_rows`) — and `next`. It
-has no top-level `pending` key; `handoff.packet.pending` is a boolean
-about the handoff packet, not this list.
+has no top-level `pending` key, and the two nested ones are something else
+again: `handoff.packet.pending` is a boolean about the handoff packet, and
+`pull_requests.pull_requests[].checks.pending` an integer count of that pull
+request's queued or running checks (`rollup_buckets` in `bin/sd-pr-state`).
+Neither is this list.
 **`next` is an object with `id`, `check` and `suggest`, not a bare string**,
 because a caller acting on the suggestion needs the id it belongs to in the
 same breath.
