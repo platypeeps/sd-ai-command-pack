@@ -1597,11 +1597,13 @@ def calls_by_name(target: pathlib.Path, start: int, end: int, name: str) -> bool
     (sd:765). A stale `get` whose old window held `budget` read as a use and
     refused, and an anchor `helper(a, b)` cited at `helper(a,b)` read as no use
     and converted, because the argument spelling differs. The callee alone, on
-    an identifier boundary, answers both.
+    an identifier boundary, answers both. The boundary is `\\w`, which is
+    Unicode-aware, because `geté` is one Python identifier and not a use of
+    `get`.
     """
     lines = numbered_lines(target.read_text(encoding="utf-8", errors="replace"))
     window = "\n".join(lines[max(0, start - 1 - WINDOW):end + WINDOW])
-    return re.search(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])", window) is not None
+    return re.search(rf"(?<!\w){re.escape(name)}(?!\w)", window) is not None
 
 
 def inside(root: pathlib.Path, path: str) -> pathlib.Path | None:
@@ -2508,7 +2510,7 @@ class CitationRepointerTests(unittest.TestCase):
         """
         self.source.write_text(
             "def lookup():\n"                      # 1
-            "    budget = 1\n"                     # 2
+            "    budget = geté() + éget()\n"       # 2
             "    return helper(a,b)\n"             # 3
             + "# pad\n" * 10 +                     # 4-13
             "def get():\n"                         # 14
@@ -2519,7 +2521,7 @@ class CitationRepointerTests(unittest.TestCase):
             encoding="utf-8")
         self.page("It reads with `get` (`bin/tool.py:1`).\n")
         _, moves, refusals = repoint_document(self.doc, self.root)
-        self.assertEqual(refusals, [], "R1: `budget` is not a use of `get`")
+        self.assertEqual(refusals, [], "R1: `budget`, `geté` and `éget` are not uses of `get`")
         self.assertEqual([move.now for move in moves], ["source:bin/tool.py::get`"])
         self.page("It calls `helper(a, b)` (`bin/tool.py:3`).\n")
         text, moves, refusals = repoint_document(self.doc, self.root)
