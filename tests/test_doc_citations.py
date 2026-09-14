@@ -40,28 +40,37 @@ so it does not drift when prose is reorganised, and it is what would have
 caught each of these on the day it was introduced rather than one at a time by
 being bitten.
 
-Measured over the corpus at the time of writing -- 5,699 tokens -- and
-re-measurable by running the module, which prints the census on every run.
-A snapshot, and the only defensible kind: it is dated by the commit that
-carries it, and `census()` is what a reader should run rather than trust it.
+Measured over the corpus at 2026-09-14 -- 5,976 tokens -- and re-measurable by
+running the module, which prints the census on every run. A snapshot, and the
+only defensible kind: it is dated by the commit that carries it, and `census()`
+is what a reader should run rather than trust it.
 
-===========================  ======  ======  ======
-reason                         live  archiv   total
-===========================  ======  ======  ======
-`compared`                       38      15      53
-`no-adjacent-anchor`            321   2,410   2,731
-`elided-path`                   178   2,180   2,358
-`archived-stale`                  0     277     277
-`anchor-not-a-symbol`            13     131     144
-`separator-not-adjacent`         20     114     134
-`declared-absent`                 1       0       1
-`absent-but-present`              0       0       0
-`target-missing`                  0       0       0
-`escapes-checkout`                0       0       0
-`quoted`                          1       0       1
-`quoted-not-there`                0       0       0
-`line-into-code`                  0       0       0
-===========================  ======  ======  ======
+**Every reason here says what it did, not what it declined to do.** The bucket
+that used to read `line-into-code` is `anchored-line-into-code`, because at
+`0 0 0` the old name read as "no citations into code" and meant "no
+*symbol-anchored* ones" -- and an unanchored one was the thing nobody was
+resolving (sd:811). A census line that overstates its coverage is the same
+defect as a silent `continue`; it just takes longer to find.
+
+=========================  ======  ======  ======
+reason                       live  archiv   total
+=========================  ======  ======  ======
+`compared`                      0       3       3
+`no-adjacent-anchor`          573   2,378   2,951
+`elided-path`                 214   2,180   2,394
+`archived-stale`                0     325     325
+`anchor-not-a-symbol`          25     130     155
+`separator-not-adjacent`       23     111     134
+`declared-absent`               1       0       1
+`absent-but-present`            0       0       0
+`target-missing`                0       0       0
+`escapes-checkout`              0       0       0
+`quoted`                        1       0       1
+`quoted-not-there`              0       0       0
+`anchored-line-into-code`       0       0       0
+`line-past-end`                 0       0       0
+`line-past-end-carried`        12       0      12
+=========================  ======  ======  ======
 
 Each reason, with why it exists:
 
@@ -104,8 +113,42 @@ Each reason, with why it exists:
 * **`quoted-not-there`** -- it carries one whose line does not. Red: a reason
   that parses but does not hold is worse than free text, because it looks
   checked.
-* **`line-into-code`** -- a live anchored citation whose target is not
-  markdown. Red since sd:525: cite `source:<path>::<symbol>` or write prose.
+* **`anchored-line-into-code`** -- a live *anchored* citation whose target is
+  not markdown. Red since sd:525: cite `source:<path>::<symbol>` or write
+  prose. Named for what it covers since sd:811, because the unanchored case is
+  not in it and its `0` was being read as though it were.
+* **`line-past-end`** -- the line, or the end of the range, is past the last
+  line of the file. Asked of every citation whose path is a file, anchored or
+  not, and **red**: `bin/sd_skill.py:217` into an 89-line file passed every
+  gate for a week because the three "not a claim about a symbol" buckets each
+  returned before anything opened the target (sd:811). An insertion cannot
+  reach it -- a file only grows -- so it does not revive sd:525's objection.
+* **`line-past-end-carried`** -- one of the twelve live past-end citations
+  `KNOWN_PAST_END` enumerates, on pages this item does not own. Counted and
+  visible rather than exempt: the list is checked in both directions, so it
+  can only shrink, and the census reports the debt instead of hiding it.
+
+**The nine `path:line` sites in this module's own prose are step 8-iv's
+record, and none of them is a claim about today's tree.** Lines 1231 and 1378
+of `bin/sd` are the two numbers the first paragraph quotes -- `frontmatter()`
+and `status_filter` *on the branch that moved them* -- and lines 501-506 of
+`bin/sd-status` are where an earlier draft's 90-character rule mis-attributed
+a docstring. All three have moved again since: `frontmatter` is at 1259 today
+and `status_filter` at 1421. Repointing them would rewrite the record rather
+than repair it, which is the ruling this module already makes for
+`CHANGELOG.md` -- "the one place a reference that no longer resolves is still
+correct". The six fixture literals reusing 1378 quote the same record, and the
+regexes they exercise never open a file.
+`test_the_historical_numbers_are_not_repointed` pins all nine, so a later lane
+cannot tidy them into today's lines and lose what they are evidence of; sd:799
+filed them as stale and this is the answer to that filing. Nothing gates a
+`path:line` inside a `.py` file, here or anywhere -- the corpus is markdown --
+so saying it is the only thing that can.
+
+(Spelled without backticks above on purpose. The whole token is a citation
+like any other, and `test_the_quoted_example_is_carried_once_and_only_by_
+marker_after` requires that `marker_after` be the one place in this file that
+types the 1231 one.)
 
 **The corpus is every tracked markdown file, asked of git**, with
 `CHANGELOG.md` excluded by name carrying rule 7's reason: the changelog names
@@ -145,10 +188,14 @@ the legacy marker's quoted citation on exactly one line, inside
 the day one of them types it whole; otherwise deleting the example would
 leave the marker green.
 
-Three shapes are named and counted rather than resolved, and saying so is more
-honest than a number that implies they were handled: the bare comma and
-semicolon (134), the elided path (2,358), and the token with no anchoring
-shape at all (2,731).
+Three shapes have no symbol to compare a line against, and saying so is more
+honest than a number that implies one was found: the bare comma and semicolon
+(134), the elided path (2,394), and the token with no anchoring shape at all
+(2,951). Since sd:811 they are not *unresolved*, which is what this paragraph
+used to imply and what the census was read as saying -- each one whose path is
+a file still has its line looked up, and a line the file does not have is
+`line-past-end` whatever shape the prose around it takes. What is not checked
+is the claim: no symbol stands beside them to check one against.
 
 **sd:525: the symbol is authoritative and a line into code is not.** Every
 insertion above a cited line used to turn this gate red for a lane that was
@@ -158,9 +205,9 @@ saying why, and a docstring was held to one line to keep a count fixed. The
 owner's ruling was to remove the incentive rather than tolerate it.
 
 So a live `path:line` citation anchored to a symbol and pointing into anything
-other than markdown is `line-into-code`, and red, whether or not the line is
-right today: it will not be right after the next insertion, and the lane that
-inserts is not the lane that wrote it. The stable spelling is
+other than markdown is `anchored-line-into-code`, and red, whether or not the
+line is right today: it will not be right after the next insertion, and the
+lane that inserts is not the lane that wrote it. The stable spelling is
 `source:<path>::<symbol>`, which `source_declaration_error` resolves by
 declaration and which no insertion can break. A claim about a line that is not
 a declaration is written as prose naming the enclosing declaration; losing
@@ -299,7 +346,53 @@ REASONS = frozenset({
     "no-adjacent-anchor",
     "quoted",
     "quoted-not-there",
-    "line-into-code",
+    "anchored-line-into-code",
+    "line-past-end",
+    "line-past-end-carried",
+})
+
+#: The live past-end citations this gate was built over, enumerated and dated.
+#:
+#: A ratchet, not an exemption. Each entry is
+#: `(document, cited path, start, end)` and is *checked*: a listed row that is
+#: no longer past the end fails `test_the_carried_list_can_only_shrink`, so the
+#: list cannot be padded and cannot outlive its rows. Anything past the end and
+#: not listed is `line-past-end` and red.
+#:
+#: Why they are carried rather than corrected here. Measured 2026-09-14 over
+#: `origin/main` at `e9d72ea7`: 701 `path:line` tokens resolve to a tracked
+#: file, 49 name a line the file does not have, 37 of those are archived and
+#: report `archived-stale` by the standing ruling, and these 12 are live. None
+#: of the 12 is repointable by arithmetic -- `bin/sd_skill.py` went from three
+#: hundred lines to 89, `dashboard/app.js` to 720, and the cited content is
+#: *gone* rather than moved, so each one needs a wording decision on a page
+#: this item does not own. Correcting them is a separate item; deleting this
+#: list is how that item finishes.
+KNOWN_PAST_END = frozenset({
+    ("docs/work/2026-09-04-the-sweep-trusts-a-branch-field-it-never-resolves"
+     "/design.md", "bin/sd_skill.py", 217, 217),
+    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
+     "/implement.md", ".github/sd-review.json", 28, 28),
+    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
+     "/implement.md", "bin/sd_skill.py", 117, 117),
+    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
+     "/implement.md", "bin/sd_skill.py", 160, 160),
+    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
+     "/implement.md", "bin/sd_skill.py", 278, 278),
+    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
+     "/prd.md", "bin/sd_skill.py", 160, 160),
+    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
+     "/prd.md", "bin/sd_skill.py", 277, 284),
+    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
+     "/prd.md", "bin/sd_skill.py", 278, 278),
+    ("docs/work/2026-09-12-a-second-tracker-with-no-rows"
+     "/design.md", "bin/sd-dashboard", 239, 240),
+    ("docs/work/2026-09-12-a-second-tracker-with-no-rows"
+     "/implement.md", "bin/sd-dashboard", 250, 250),
+    ("docs/work/2026-09-12-a-second-tracker-with-no-rows"
+     "/prd.md", "bin/sd-dashboard", 239, 240),
+    ("docs/work/2026-09-13-one-dashboard"
+     "/implement.md", "dashboard/app.js", 780, 780),
 })
 
 
@@ -354,6 +447,52 @@ def numbered_lines(text: str) -> list[str]:
     """
 
     return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
+def line_count(target: pathlib.Path) -> int:
+    """How many lines this file has, counted the way `numbered_lines` numbers them.
+
+    A trailing newline *ends* the last line, it does not start another, so the
+    empty final element `split("\\n")` leaves behind is dropped. Without that
+    an off-by-one lets a citation one line past the end read as in range, which
+    is the commonest spelling of the defect this count exists to find.
+    """
+
+    text = target.read_text(encoding="utf-8", errors="replace")
+    lines = numbered_lines(text)
+    if lines and lines[-1] == "":
+        lines.pop()
+    return len(lines)
+
+
+def within_file(target: pathlib.Path, start: int, end: int,
+                counted: dict[str, int] | None = None) -> bool:
+    """Does this file have the lines `start`-`end` a citation claims it has?
+
+    The one question no gate asked of an unanchored citation, which is why
+    `bin/sd_skill.py:217` into an 89-line file passed every gate (sd:811).
+    It is asked of the *range end*, so `a-b` is caught when `b` is past the
+    end even though `a` is not.
+
+    Only a deletion can make this false for a citation that was true: an
+    insertion lengthens a file. So it does not revive sd:525's objection --
+    a lane that is not editing documentation does not turn this red by
+    growing a file.
+    """
+
+    # `counted` is one `classify()` call's memo and nothing wider. Seven
+    # hundred citations resolve to a tracked file and a handful of files carry
+    # most of them, so without it the corpus scan reads `bin/sd` a hundred
+    # times over and the module's runtime doubles. A cache that outlived the
+    # call would have to answer "has this file changed", which is a question
+    # a gate should not be guessing at -- the fixtures rewrite their targets
+    # mid-test on purpose.
+    if counted is None:
+        return 1 <= start and end <= line_count(target)
+    key = str(target)
+    if key not in counted:
+        counted[key] = line_count(target)
+    return 1 <= start and end <= counted[key]
 
 
 def is_under_repo(target: pathlib.Path) -> bool:
@@ -595,6 +734,7 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
     """
 
     rows: list[Citation] = []
+    counted: dict[str, int] = {}
     for doc in (corpus() if docs is None else docs):
         raw = doc.read_text(encoding="utf-8", errors="replace")
         # Newlines flattened: a citation routinely wraps away from its symbol.
@@ -628,6 +768,33 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                 rows.append(Citation(doc, "", path, None, start, end, "elided-path"))
                 continue
             found = anchor_for(flat, match.span())
+            anchor = found[0] if found else ""
+            # sd:811. Asked of *every* citation whose path is a file, before
+            # the anchoring buckets get to claim it. The three buckets below
+            # -- no-adjacent-anchor, separator-not-adjacent,
+            # anchor-not-a-symbol -- never opened their target, so a citation
+            # in prose could name any line at all and land in one of them
+            # counted as "not a claim about a symbol" rather than as wrong.
+            # `bin/sd_skill.py:217` into an 89-line file spent a week there.
+            # The question is asked of the file, not of the anchor, so the
+            # answer does not depend on how the prose around it is shaped.
+            target = REPO_ROOT / path
+            if (not (marker and marker[0] == "absent")
+                    and is_under_repo(target) and target.is_file()
+                    and not within_file(target, start, end, counted)):
+                if archived:
+                    # The archive ruling, unchanged: a record citing a line
+                    # its file no longer has is the same event as a record
+                    # citing a symbol that moved, and that is reported, not
+                    # failed. 37 of the 49 live here.
+                    reason = "archived-stale"
+                elif (str(doc.relative_to(REPO_ROOT)), path, start, end) \
+                        in KNOWN_PAST_END:
+                    reason = "line-past-end-carried"
+                else:
+                    reason = "line-past-end"
+                rows.append(Citation(doc, anchor, path, target, start, end, reason))
+                continue
             if found is None:
                 rows.append(
                     Citation(doc, "", path, None, start, end, "no-adjacent-anchor"))
@@ -643,7 +810,6 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                     Citation(doc, anchor, path, None, start, end,
                              "anchor-not-a-symbol"))
                 continue
-            target = REPO_ROOT / path
             if not is_under_repo(target):
                 rows.append(
                     Citation(doc, anchor, path, None, start, end,
@@ -675,7 +841,7 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                 # sd:525. The symbol is authoritative and the number is not: a
                 # line into code goes stale at the next insertion above it,
                 # made by a lane that was not editing documentation.
-                reason = "line-into-code"
+                reason = "anchored-line-into-code"
             rows.append(Citation(doc, anchor, path, target, start, end, reason))
     return rows
 
@@ -812,12 +978,12 @@ class DocCitationTests(unittest.TestCase):
         """
 
         rows = classify()
-        fixes = {"line-into-code": (
+        fixes = {"anchored-line-into-code": (
             " cite `source:<path>::<symbol>` instead (`python3"
             " tests/test_doc_citations.py --repoint --apply` rewrites each one"
             " whose symbol is declared once) or say it in prose; sd:525")}
         for reason in ("target-missing", "absent-but-present", "quoted-not-there",
-                       "line-into-code"):
+                       "anchored-line-into-code", "line-past-end"):
             offenders = [
                 f"{row.doc.relative_to(REPO_ROOT)}: `{row.path}:{row.start}`"
                 for row in rows if row.reason == reason
@@ -1425,9 +1591,9 @@ def stable_source_citations(root: pathlib.Path) -> list[tuple[pathlib.Path, str,
     # from `contained`. `classify` deliberately *does* read archives -- it
     # reports a stale archived citation instead of failing it -- so a shared
     # filter would have made one rule's corpus an accident of the other's.
-    # The same living pages `line-into-code` fails and the repointer rewrites,
-    # since sd:525: a locator the repointer writes into `AGENTS.md` or a skill
-    # would otherwise be checked by nothing.
+    # The same living pages `anchored-line-into-code` fails and the repointer
+    # rewrites, since sd:525: a locator the repointer writes into `AGENTS.md`
+    # or a skill would otherwise be checked by nothing.
     documents = [d for d in corpus(root) if "archive" not in d.parts]
     documents += [root / name for name in ROOT_DOCUMENTS if (root / name).is_file()]
     documents = list(dict.fromkeys(documents))
@@ -1812,6 +1978,239 @@ def repoint_main(argv: list[str]) -> int:
     verb = "repointed" if apply else "would repoint"
     print(f"{verb} {moved} citation(s); refused {refused}")
     return 1 if refused else 0
+
+
+class ACitationPastTheEndOfItsFile(unittest.TestCase):
+    """sd:811. The line is resolved whether or not a symbol stands beside it.
+
+    Three buckets used to swallow this. `no-adjacent-anchor`,
+    `separator-not-adjacent` and `anchor-not-a-symbol` all mean "not a claim
+    about a symbol", and each of them returned before anything opened the
+    cited file -- so a citation in prose could name any line at all, including
+    one the file does not have, and be counted as classified.
+    `bin/sd_skill.py:217` into an 89-line file passed `make check` green.
+
+    The census said so and nobody could read it: `line-into-code 0 0 0` looks
+    like "no citations into code" and means "no *symbol-anchored* ones". The
+    bucket is `anchored-line-into-code` now, and this one carries what its
+    silence used to cover.
+    """
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = pathlib.Path(temporary.name)
+        (self.root / "bin").mkdir()
+        (self.root / "bin" / "tool.py").write_text(
+            "def render():\n    return 1\n", encoding="utf-8")
+        (self.root / "notes.md").write_text("one\ntwo\n", encoding="utf-8")
+        (self.root / "docs").mkdir()
+
+    def reason_for(self, text: str, name: str = "page.md") -> str:
+        doc = self.root / "docs" / name
+        doc.parent.mkdir(parents=True, exist_ok=True)
+        doc.write_text(text, encoding="utf-8")
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root}):
+            rows = classify([doc])
+        self.assertEqual(len(rows), 1, f"{len(rows)} tokens in {text!r}")
+        return rows[0].reason
+
+    def test_an_unanchored_citation_past_the_end_is_red(self) -> None:
+        """The filed instance's shape: prose, no symbol beside it, line 9 of 2."""
+
+        self.assertEqual(
+            self.reason_for("The reader is over at `bin/tool.py:9` today.\n"),
+            "line-past-end")
+
+    def test_the_same_citation_in_range_is_left_where_it_was(self) -> None:
+        """CONTROL. Only the line number differs, and the bucket must not move."""
+
+        self.assertEqual(
+            self.reason_for("The reader is over at `bin/tool.py:2` today.\n"),
+            "no-adjacent-anchor")
+
+    def test_a_range_is_judged_by_its_end(self) -> None:
+        """`1-9` starts inside the file. The claim still reaches past the end."""
+
+        self.assertEqual(
+            self.reason_for("Read `bin/tool.py:1-9` for the whole of it.\n"),
+            "line-past-end")
+
+    def test_an_anchored_citation_past_the_end_is_this_bucket_and_not_the_code_rule(
+            self) -> None:
+        """Precedence, stated rather than left to branch order.
+
+        `anchored-line-into-code` says "the number will go stale". This says
+        "the number is already impossible". Reporting the weaker one would
+        send the reader to the repointer, which cannot rewrite a line that
+        does not exist.
+        """
+
+        self.assertEqual(
+            self.reason_for("`render` (`bin/tool.py:9`)\n"), "line-past-end")
+
+    def test_a_bare_separator_does_not_hide_it_either(self) -> None:
+        self.assertEqual(
+            self.reason_for("`render`, `bin/tool.py:9`\n"), "line-past-end")
+
+    def test_an_anchor_that_is_not_a_symbol_does_not_hide_it_either(self) -> None:
+        self.assertEqual(
+            self.reason_for("`bin/tool.py` (`bin/tool.py:9`)\n"), "line-past-end")
+
+    def test_a_markdown_target_is_read_the_same_way(self) -> None:
+        """Not a code-only rule. A page has a last line too."""
+
+        self.assertEqual(self.reason_for("see `notes.md:9`\n"), "line-past-end")
+        self.assertEqual(self.reason_for("see `notes.md:2`\n"), "no-adjacent-anchor")
+
+    def test_a_trailing_newline_does_not_add_a_line(self) -> None:
+        """The off-by-one that would let the commonest spelling through.
+
+        `"one\\ntwo\\n".split("\\n")` is three elements and the file has two
+        lines. Count the empty tail and `notes.md:3` reads as in range.
+        """
+
+        self.assertEqual(line_count(self.root / "notes.md"), 2)
+        self.assertEqual(self.reason_for("see `notes.md:3`\n"), "line-past-end")
+
+    def test_an_archived_page_reports_and_does_not_fail(self) -> None:
+        """The standing archive ruling, unchanged. 37 of the 49 live here."""
+
+        self.assertEqual(
+            self.reason_for("The reader is at `bin/tool.py:9`.\n", "archive/old.md"),
+            "archived-stale")
+
+    def test_a_quoted_example_is_still_an_example(self) -> None:
+        """A page explaining this gate must be able to print a past-end citation."""
+
+        (self.root / "other.md").write_text(
+            "# other\n\nthe example writes `bin/tool.py:9` here\n", encoding="utf-8")
+        self.assertEqual(
+            self.reason_for("`render` (`bin/tool.py:9`) [quoted: other.md:3]\n"),
+            "quoted")
+
+    def test_a_token_whose_path_is_not_a_file_is_untouched(self) -> None:
+        """`sd:811` is an item reference and `TOKEN` matches it.
+
+        Nearly three thousand rows in the live corpus have this shape. The
+        check is gated on there being a file to open, so none of them moves;
+        without that gate every item reference in the repository turns red.
+        """
+
+        self.assertEqual(self.reason_for("filed as `sd:811` today\n"),
+                         "no-adjacent-anchor")
+
+    def test_an_insertion_cannot_turn_this_red(self) -> None:
+        """sd:525's objection, answered rather than assumed away.
+
+        The rule removed in sd:525 went red when a lane that was not editing
+        documentation inserted a line above a cited one. This one cannot: an
+        insertion only lengthens a file, so a citation that was in range stays
+        in range. Only a deletion reaches it, and then the line really is gone.
+        """
+
+        self.assertEqual(self.reason_for("see `bin/tool.py:2`\n"),
+                         "no-adjacent-anchor")
+        target = self.root / "bin" / "tool.py"
+        target.write_text("# inserted\n" * 20 + target.read_text(encoding="utf-8"),
+                          encoding="utf-8")
+        self.assertEqual(self.reason_for("see `bin/tool.py:2`\n"),
+                         "no-adjacent-anchor")
+        target.write_text("def render():\n", encoding="utf-8")
+        self.assertEqual(self.reason_for("see `bin/tool.py:2`\n"), "line-past-end")
+
+    def test_the_bucket_fails_the_gate(self) -> None:
+        """Counting a defect is not catching it: the bucket has to be red."""
+
+        (self.root / "docs" / "page.md").write_text(
+            "The reader is at `bin/tool.py:9`.\n", encoding="utf-8")
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root}):
+            with self.assertRaisesRegex(AssertionError, "line-past-end"):
+                DocCitationTests().test_the_red_buckets_are_empty()
+
+
+class TheHistoricalNumbersInThisModule(unittest.TestCase):
+    """sd:799's nine stale sites, answered by pinning them instead of moving them.
+
+    Lines 1231 and 1378 of `bin/sd`, and 501-506 of `bin/sd-status`, are step
+    8-iv's record and an earlier draft's mis-attribution. `frontmatter` is at
+    1259 today and `status_filter` at 1421, so all three read as stale to
+    anyone who checks them against the tree -- and repointing them would
+    delete the evidence the module's first paragraph is built on.
+
+    Nothing gates a `path:line` inside a `.py` file, so without this the next
+    reader to notice the mismatch either repoints them, losing the record, or
+    files them stale again. This is the assertion that makes the ruling
+    checkable: the counts are exact, so a repoint fails here and an extra
+    historical number cannot be smuggled in beside them.
+    """
+
+    def occurrences(self) -> collections.Counter:
+        """Every whole `path:line` token typed in this file, counted.
+
+        Not flattened. A citation token cannot span a line terminator, and
+        `TOKEN` scanned across a file joined into one 130KB line costs
+        twenty-five seconds of backtracking for an answer identical to this
+        one.
+        """
+
+        return collections.Counter(
+            f"{path}:{start}" + (f"-{end}" if end else "")
+            for path, start, end
+            in TOKEN.findall(pathlib.Path(__file__).read_text(encoding="utf-8")))
+
+    def test_the_historical_numbers_are_not_repointed(self) -> None:
+        counts = self.occurrences()
+        self.assertEqual(counts["bin/sd:1378"], 7, "step 8-iv's status_filter line")
+        self.assertEqual(counts["bin/sd:1231"], 1, "step 8-iv's frontmatter line")
+        self.assertEqual(counts["bin/sd-status:501-506"], 1,
+                         "the 90-character rule's mis-attribution")
+
+    def test_they_are_stale_against_the_tree_which_is_the_whole_point(self) -> None:
+        """The control. Green here would mean the ruling is about nothing."""
+
+        self.assertNotIn(
+            "status_filter",
+            numbered_lines((REPO_ROOT / "bin" / "sd").read_text(
+                encoding="utf-8", errors="replace"))[1377])
+        self.assertNotIn(
+            "def frontmatter",
+            numbered_lines((REPO_ROOT / "bin" / "sd").read_text(
+                encoding="utf-8", errors="replace"))[1230])
+
+
+class TheCarriedPastEndList(unittest.TestCase):
+    """`KNOWN_PAST_END` is a ratchet over an existing debt, and it is checked.
+
+    An allow-list nobody rechecks is the silencer this module exists to
+    remove, so this one is made to fail in the direction that matters: an
+    entry whose citation has been corrected, or whose page has moved or been
+    archived, is no longer a `line-past-end-carried` row and this test says
+    so. The list can therefore only shrink, and it cannot be padded with rows
+    that were never past the end.
+    """
+
+    def test_every_carried_entry_is_still_a_live_past_end_row(self) -> None:
+        carried = {
+            (str(row.doc.relative_to(REPO_ROOT)), row.path, row.start, row.end)
+            for row in classify() if row.reason == "line-past-end-carried"
+        }
+        settled = sorted(KNOWN_PAST_END - carried)
+        self.assertEqual(
+            settled, [],
+            "these entries are no longer past the end; delete them from"
+            " KNOWN_PAST_END:\n" + "\n".join(map(str, settled)))
+
+    def test_the_list_holds_what_it_was_measured_to_hold(self) -> None:
+        """Twelve, enumerated 2026-09-14 over `origin/main` at `e9d72ea7`.
+
+        A count, not a threshold: it is the size of a closed literal beside
+        it, so it cannot drift with the corpus. It is here because the
+        docstring states the number and a stated number nothing checks is how
+        this module's census came to say `line-into-code 0 0 0`.
+        """
+
+        self.assertEqual(len(KNOWN_PAST_END), 12)
 
 
 class StableSourceCitationTests(unittest.TestCase):
@@ -2730,10 +3129,10 @@ class InsertionIsHarmlessToASymbolTests(unittest.TestCase):
     def test_a_bare_line_into_code_fails_the_gate_before_and_after(self) -> None:
         (self.root / "docs" / "line.md").write_text(
             "`render` (`bin/tool.py:1`)\n", encoding="utf-8")
-        with self.assertRaisesRegex(AssertionError, "line-into-code"):
+        with self.assertRaisesRegex(AssertionError, "anchored-line-into-code"):
             self.gate()
         self.insert_above_the_symbol()
-        with self.assertRaisesRegex(AssertionError, "line-into-code"):
+        with self.assertRaisesRegex(AssertionError, "anchored-line-into-code"):
             self.gate()
 
     def test_the_bucket_is_code_only_and_live_only(self) -> None:
