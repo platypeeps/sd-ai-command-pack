@@ -1,4 +1,4 @@
-"""Open followups for a checkout, read from the row and rendered for a hook.
+"""Open followups for a checkout, read from the row through the library's brief.
 
 Continuity used to come from one file. `bin/sd-handoff` wrote a packet, and
 `bin/sd-handoff-restore` injected it -- but only if somebody had run the write
@@ -25,11 +25,13 @@ directory all deserve the same open followups, and a followup stops appearing
 when the work is done and somebody resolves it -- not when a session happened
 to read it. Nothing here writes.
 
-**Scope is the checkout, not one item.** The hook knows a directory and no
-item name; it cannot ask for "this item's followups" because it has no item.
-So the query is every open followup on an active item of this repository,
-oldest first. `done` items are excluded: their followups are finished work,
-and a session restarting has no use for them.
+**What is open is `sd_db.note_brief`'s answer, not a query here.** The hook
+knows a directory and no item name. The library turns that into the
+checked-out branch's item, or every live item of the repository when no
+branch matches, and returns their open `followup` and `question` notes newest
+first within eight kilobytes. This module carried its own query and renderer
+for the same rows until sd:234's PR 10; `brief_for` below says why the second
+reader went.
 
 `sd_db` is imported inside the functions, not at module import, for
 `bin/sd_restore.py`'s reason -- the library reaches this virtualenv through the
@@ -55,15 +57,10 @@ NOT_INSTALLED = (
     "it from the `system` checkout at its tag, then run this again."
 )
 
-#: The one note kind this module reads. `add_note` accepts six more and
-#: `transition` owns the seventh; a session resuming wants only what is left
-#: to do.
+#: The kind `sd-note add` writes by default. `add_note` accepts six more and
+#: `transition` owns the seventh; which kinds a resuming session is handed is
+#: `sd_db.note_brief`'s decision (`followup` and `question`), not this one's.
 FOLLOWUP = "followup"
-
-#: Statuses whose followups a restarting session still owes work on. `done`
-#: is the omission: a finished item's open followup is a bookkeeping slip,
-#: not a thing to hand the next session.
-ACTIVE = ("planning", "ready", "in_progress", "ready_to_send", "blocked")
 
 
 class RowsRefusal(Exception):
@@ -104,41 +101,6 @@ def connect(sd_db, *, write: bool = False):
         raise RowsRefusal(str(error)) from None
 
 
-def open_followups(connection, repo: str) -> list[dict]:
-    """Every unresolved followup on an active item of `repo`, oldest first.
-
-    Ordered by `(timestamp, id)` and not by timestamp alone: two notes written
-    in the same second are ordered by the sequence they were written in, so a
-    session gets its own list back in the order it named things.
-    """
-    # Older stores have no parking column. Paused work must stay out of the
-    # resumed session's action list just as it stays out of Today.
-    columns = {row[1] for row in connection.execute("PRAGMA table_info(item)")}
-    if "parked_at" in columns:
-        query = (
-            "SELECT note.id AS id, note.body AS body, note.timestamp AS timestamp, "
-            "item.title AS title, item.status AS status "
-            "FROM note JOIN item ON item.id = note.item "
-            "WHERE note.kind = ? AND note.resolved_at IS NULL AND item.repo = ? "
-            "AND item.parked_at IS NULL ORDER BY note.timestamp, note.id"
-        )
-    else:
-        query = (
-            "SELECT note.id AS id, note.body AS body, note.timestamp AS timestamp, "
-            "item.title AS title, item.status AS status "
-            "FROM note JOIN item ON item.id = note.item "
-            "WHERE note.kind = ? AND note.resolved_at IS NULL AND item.repo = ? "
-            "ORDER BY note.timestamp, note.id"
-        )
-    rows = connection.execute(query, (FOLLOWUP, repo))
-    # `status` is filtered here and not in an `IN (...)` clause, which would
-    # need the placeholders interpolated into the statement. Every value would
-    # still be a bound parameter, but a query built by string formatting is a
-    # shape a reader has to check rather than one they can see is safe -- and
-    # the row count this walks is one checkout's open followups.
-    return [dict(row) for row in rows if row["status"] in ACTIVE]
-
-
 def item_for(connection, sd_db, root, item_dir):
     """The row one work-item directory names, or None when there is none.
 
@@ -162,46 +124,39 @@ def item_for(connection, sd_db, root, item_dir):
     return None if row is None else dict(row)
 
 
-def render(rows: list[dict]) -> list[str]:
-    """Open followups as context lines, or an empty list when there are none.
+def brief_for(root) -> list[str]:
+    """The whole read for a hook: open, `sd_db.note_brief`, close. Never writes.
 
-    Grouped under the item that owns them, because a checkout with two active
-    items hands back two lists and an ungrouped run of bullets says nothing
-    about which work each belongs to.
-    """
-    if not rows:
-        return []
-    lines = [
-        f"Open followups on this checkout ({len(rows)}), read from the "
-        "database rather than from a handoff packet. These are work you named "
-        "and have not resolved; a finished one is closed with `sd-note "
-        "--resolve <id>`.",
-    ]
-    seen = ""
-    for row in rows:
-        title = str(row.get("title") or "(untitled item)")
-        if title != seen:
-            lines.extend(["", f"{title}:"])
-            seen = title
-        lines.append(f"- [{row['id']}] {row['body']}")
-    return lines
+    The brief is the library's and not this module's. Requirement 7 of
+    system's one-database item puts the order (newest first), the filter (open
+    `followup` and `question` notes of the checked-out branch's item, or of
+    every live item in the repository when no branch matches) and the
+    eight-kilobyte bound in `sd_db.brief`, because a pack that renders the
+    same rows from its own query is a second reader that drifts. This module
+    used to be that second reader; what is left is the plumbing a hook needs
+    around the call.
 
-
-def followups_for(root) -> list[str]:
-    """The whole read for a hook: open, query, render, close. Never writes.
-
-    `root` is resolved to the main worktree here rather than by the caller.
-    Rows are keyed by the registered checkout, and a linked worktree was never
-    added to the `repo` table -- so a session started inside one asks about a
-    path that holds no rows and silently gets nothing back, which is the exact
-    shape of the loss this criterion exists to stop.
+    Two paths, on purpose. `item.repo` is the *main* worktree root, since a
+    linked worktree was never added to the `repo` table, so the rows are read
+    against that. The branch is the session's own checkout, which in a linked
+    worktree is not the main one's: `note_brief` left to read the branch
+    itself would read it at the main root and brief the wrong item. A
+    detached HEAD is passed as `""` rather than None, because None tells
+    `note_brief` to go and read the branch at `repo` -- the main root again --
+    and `""` is its repository-wide case.
     """
     import sd_lib
 
     sd_db = library()
     connection = connect(sd_db)
     try:
-        base = str(sd_lib.main_worktree_root(pathlib.Path(root).resolve()))
-        return render(open_followups(connection, base))
+        here = pathlib.Path(root).resolve()
+        base = str(sd_lib.main_worktree_root(here))
+        branch = sd_db.brief.checked_out_branch(here) or ""
+        text = sd_db.note_brief(connection, base, branch=branch).text.rstrip("\n")
     finally:
         connection.close()
+    # `split("\n")` and not `splitlines()`: the brief's lines end in `\n`
+    # alone, and `splitlines` also breaks a note body at `\r`, a form feed or
+    # U+2028, which the hook's `"\n".join` then hands over changed.
+    return text.split("\n") if text else []

@@ -53,11 +53,11 @@ underneath the hook -- says so rather than passing for "no packet here".
 
 **There are two sources, and only one of them is claimed.** The packet exists
 only if somebody ran `sd-handoff` by hand, and a session killed mid-task ran
-nothing -- so open followup rows are read as well, through
-`bin/sd_handoff_rows.py`, and injected whether or not a packet is here. Rows
-are not claimed: three sessions restarting in one directory all deserve the
-same open work, and a followup closes when it is resolved rather than when
-somebody read it. The packet keeps its exactly-once rename, because it
+nothing -- so the open followup and question rows are read as well, as
+`sd_db.note_brief` renders them, and injected whether or not a packet is here.
+Rows are not claimed: three sessions restarting in one directory all deserve
+the same open work, and a note closes when it is resolved, not when somebody
+read it. The packet keeps its exactly-once rename, because it
 describes one moment and consuming it twice would restore a stale one.
 """
 
@@ -482,6 +482,10 @@ def context_for(packet: dict, warnings: list[str]) -> str:
 def followup_lines(root: str) -> list[str]:
     """Open followups for this checkout, or nothing at all if anything fails.
 
+    The lines are `sd_db.note_brief`'s text and nothing else: the library owns
+    the order, the filter and the eight-kilobyte bound, and this hook used to
+    render the same rows from a query of its own (sd:234, PR 10).
+
     Every failure is silent by design. `sd_db` absent is the supported
     pre-install state, a database this cannot open is the operator's problem
     and not the starting session's, and a hook that printed either would break
@@ -492,7 +496,7 @@ def followup_lines(root: str) -> list[str]:
     except ImportError:
         return []
     try:
-        return sd_handoff_rows.followups_for(root)
+        return sd_handoff_rows.brief_for(root)
     except BaseException:  # noqa: BLE001 - a hook never breaks session startup
         return []
 
