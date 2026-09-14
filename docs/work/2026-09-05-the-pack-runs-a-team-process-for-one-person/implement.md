@@ -1292,7 +1292,9 @@ goes to `status: done` and drops its `branch:` field in the same edit.
 eight pull requests have merged — PR 7 at `b0873ec1`, PR 8d at `fe0712ae` —
 and the item still cannot go `done`, because two criteria were open and
 neither is a pull request in this list. One has since been cut by the
-operator; one remains.
+operator; one remains. (2026-09-13: that one, criterion 28, is closed by
+reading, and a third this count missed, criterion 23's second half, is what
+is left. See the dated paragraphs at the end of this section.)
 
 *Criterion 7 was unscored, and its scoring clause is now cut.* The seven
 `mezmo-world-simulator` passes had no scores anywhere on this item; `git grep`
@@ -1312,7 +1314,8 @@ parked with the operator, triggered by `mezmo-world-simulator` Phase 1 reaching
 *Criterion 28 has two clauses that cannot close from this checkout.* PR 8d
 says so in its own text and the closure table says so in its own row, and this
 section was written before either. It is now the only criterion between the
-item and `done`, but it is **two** pieces of work and not one:
+item and `done` (wrong: criterion 23's second half is open too, corrected
+below), but it is **two** pieces of work and not one:
 
 1. **`commands.yaml`, item B's.** The "no palette entry" assertion enumerates
    a file that does not exist in this repository. B's slice 4 PR 7 writes it,
@@ -1323,7 +1326,9 @@ item and `done`, but it is **two** pieces of work and not one:
    `contrib/sd-propose-skills/` half from here.
 
 Neither is code this repository writes. Both are one assertion each once the
-thing they assert against exists.
+thing they assert against exists. (2026-09-13: wrong. Both things now exist,
+and neither can be an assertion here, because pack CI reaches neither. Both
+were checked by reading instead; see below.)
 
 **So `Delivers:` is deliberately not on `fe0712ae`.** `git log --grep
 '^Delivers:'` on `main` returns nothing, which is the state this paragraph
@@ -1332,18 +1337,71 @@ and `WORKFLOW.md:153` makes that commit the answer a database-free reader
 gets. `WORKFLOW.md:149-152` already provides the remedy for a delivery that
 happened without its trailer — the next `sd-ship` merge here, or one empty
 commit on the branch — so nothing is lost by waiting, and the item stays
-`in_progress` until the two close.
+`in_progress` until the two close. (2026-09-13: they have, and the item is
+still `in_progress`, now held by criterion 23's second half; see below.)
 
 **What is left, in the order it can be done.** Two things, and neither is this
 repository's to write. Item B's slice 4 PR 7 lands `commands.yaml`, and the
 palette clause becomes assertable here. The writing repository drops the
 `skill-proposal` kind from its manifest, and the manifest clause becomes
-assertable here. Then, and not before, the delivery commit.
+assertable here. Then, and not before, the delivery commit. (2026-09-13:
+superseded. Both things have happened, neither clause became assertable
+here, and the delivery commit does not follow from them: it waits on
+criterion 23's second half, as the dated paragraphs below record.)
 Scoring the seven passes is no longer in this order at all: it is evidence
 gathered from `answerbook/mezmo-world-simulator` rather than code written here
 — its git history records at least the fourth and the seventh (`0c39c78`,
 `426a405`) — and it now sits behind that repository's own Phase 1 rather than
 in front of this item's delivery.
+
+**2026-09-13: both of criterion 28's open clauses were checked by reading, and
+criterion 28 is closed.** Neither check is a test, and neither can be one in
+this repository: what each reads lives outside this checkout, where pack CI
+cannot reach it. A regression in either place would not turn this repository
+red. They are recorded here with enough to repeat them. Closing a criterion
+by a dated one-time read instead of a test is the owner's call, not this
+page's: the owner accepted the read as the evidence in decision note 1904 on
+sd:10, recorded 2026-09-14 for the review of pack #926.
+
+1. **`commands.yaml` exists and names no suggest or publish entry.** The file
+   is at `~/.local/share/sd/commands.yaml`, the default path `sd_db`'s runner
+   reads its command catalog from. Read on 2026-09-13 (sha256 `de63f1bf…`,
+   last modified 2026-09-11), it holds three entries: `git-status`,
+   `runner-provisioning-probe` and `plan-item`. The strings `suggest` and
+   `publish` appear nowhere in the file, so `sd suggest publish` is not a
+   palette entry. It is per-machine state outside git, which is why
+   `tests/test_sd_suggest.py` still leaves this clause out on purpose.
+2. **The writing manifest no longer declares `skill-proposal`.** On
+   `platypeeps/sd-writing-pack` `main` at `3d0be2c3`, `sd-plugin.json`
+   declares three kinds, `tip`, `blog-idea` and `topic`. The string
+   `skill-proposal` appears nowhere in it, and `templates/skill-proposal.md`
+   is gone. The kind was removed by `e79d75e5` (that repository's #34) on
+   2026-09-08. At `3d0be2c3` the log entry is at line 2278 (at `e79d75e5`
+   it is line 2279) of
+   `sd-writing-pack/docs/work/2026-09-05-the-writing-pipeline-runs-on-the-row/prd.md`.
+   The local checkout at `~/repos/platypeeps/sd-writing-pack` matches. Pack
+   CI has no checkout of the writing pack, so this clause is recorded here
+   and not tested. The clause's other half, that `sd-propose-skills` writes
+   no vault note, was already covered by PR 8d's test across
+   `contrib/sd-propose-skills/`.
+
+**Closing criterion 28 does not make the item deliverable, and this section
+was wrong to say it would.** "It is now the only criterion between the item
+and `done`" overlooked criterion 23's second half, which the subsection below
+still records as open. That is still true on 2026-09-13: `CLAUDE.md` on the
+writing pack's `main` at `3d0be2c3` still has a `## Style` section (lines 20
+to 22) that forbids "caveman mode", and criterion 23 deletes that override.
+The first half of criterion 23 still holds, since `~/.claude/settings.json`
+does not contain `caveman`. So `Delivers:` is still not written. One clause is
+left, and it is the writing repository's one-line pull request that removes
+that section.
+
+**The closure state as of 2026-09-13, in one place.** Criterion 7's scoring
+clause is cut. Criterion 28 is closed by reading, with the evidence above,
+under decision note 1904.
+Criterion 23's second half is open. The delivery commit waits on that one
+clause and on nothing else this section names. Every earlier sentence in this
+section that says otherwise carries a dated marker pointing here.
 
 ### The three landings that are no pull request of this repository's
 
@@ -1385,7 +1443,8 @@ removing neither.
 
 **Criterion 23's second half is open.** The writing repository's style
 override is that repository's one-line pull request and is not this
-repository's or `system`'s.
+repository's or `system`'s. It was still present on 2026-09-13; see "Closing
+the item".
 
 **The system repository's guide landed as its own pull request there.**
 `CLAUDE.md` 341 lines to 278, five narrative sections rewritten as
@@ -1459,11 +1518,11 @@ recounted.
 | 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) |
 | 14, 15, 16, 17, 30 — the checks | PR 3 |
 | 33 — no document names a `docs/work/` path that does not resolve | PR 7, which adds the rule; wired by criterion 14's enumeration in PR 3, which lands first |
-| 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4 |
+| 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4; criterion 23's second half, the writing repository's style override, is that repository's pull request and was still open on 2026-09-13 |
 | 24, 25 — `paths.json`, the union with active trials, `sd skill try` and its row | PR 5 |
 | 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | PR 6, which also carries criterion 5's vendor clause; with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
 | 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1534-1540`, whose files are in its Touches and in no other pull request's claim) |
-| 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` clause behind B's slice 4 |
+| 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` and writing-manifest clauses checked by reading on 2026-09-13 and recorded under "Closing the item", not tested |
 | 7 — no percentage removes the code review point | the grep, which passes today; the forward ten-pass report is the operator's, not a pull request's |
 
 Criterion 7 is the one row in this table with no pull request beside it, and
