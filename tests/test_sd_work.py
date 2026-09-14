@@ -138,7 +138,7 @@ class TaskCLI(unittest.TestCase):
                          sorted([default["item"]["id"], *filed.values()]))
 
     def test_a_repo_less_kind_is_filed_off_the_checkout_it_was_typed_in(self):
-        """The four kinds after `proposal` carry no repository, by definition.
+        """`personal`, `work-idea` and `personal-idea` carry no repository.
 
         The group is read by asking for exactly that -- `backlog_items(repo=
         NO_REPO)` -- so a `personal` row that took the checkout cwd happened
@@ -171,12 +171,123 @@ class TaskCLI(unittest.TestCase):
         with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
             grouped = sorted(row["kind"] for row in
                              sd_db.reads.backlog_items(connection, repo=sd_db.reads.NO_REPO))
-        self.assertEqual(grouped, ["followup", "personal", "personal", "personal-idea",
-                                   "work-idea"])
+        # sd:809: `followup` left the set, so the loop above files none.
+        self.assertEqual(sorted(workflow.REPO_LESS_KINDS),
+                         ["personal", "personal-idea", "work-idea"])
+        self.assertEqual(grouped, ["personal", "personal", "personal-idea", "work-idea"])
         self.assertEqual(
             [row["kind"] for row in
              json.loads(self.call("store", "items", "--kind", "task", "--json").stdout)],
             ["task"])
+
+    def test_a_followup_takes_the_repository_it_was_filed_from(self):
+        """sd:809. A followup is filed by the rule a task is filed by.
+
+        A followup from a code review is about the checkout it was typed in,
+        and with no repository a checkout's brief never lists it. So the
+        registered checkout enclosing cwd is the default, a linked worktree
+        resolves to its main checkout, an unregistered checkout falls back to
+        none, `--no-repo` opts out and `--here` refuses only where a task's
+        would.
+        """
+        root = self._checkout("reviewed")
+        unregistered = json.loads(self.call(
+            "task", "add", "Before registering", "--kind", "followup", "--json",
+            cwd=root).stdout)
+        self.assertIsNone(unregistered["item"]["repo"])
+        self.assertIn("not a registered repository", self.call(
+            "task", "add", "Insisting", "--kind", "followup", "--here", cwd=root,
+            code=1).stderr)
+
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.repos.add(connection, root, home=self.home)
+
+        filed = json.loads(self.call(
+            "task", "add", "Review finding", "--kind", "followup", "--json", cwd=root).stdout)
+        self.assertEqual((filed["item"]["kind"], filed["item"]["repo"]),
+                         ("followup", str(root.resolve())))
+        here = json.loads(self.call(
+            "task", "add", "Said here", "--kind", "followup", "--here", "--json",
+            cwd=root).stdout)
+        self.assertEqual(here["item"]["repo"], str(root.resolve()))
+
+        linked = self.home / "reviewed-linked"
+        subprocess.run(["git", "worktree", "add", "-q", "-b", "side", str(linked)],
+                       cwd=str(root), check=True, capture_output=True, text=True)
+        from_worktree = json.loads(self.call(
+            "task", "add", "From a worktree", "--kind", "followup", "--json",
+            cwd=linked).stdout)
+        self.assertEqual(from_worktree["item"]["repo"], str(root.resolve()))
+
+        opted_out = json.loads(self.call(
+            "task", "add", "Nowhere", "--kind", "followup", "--no-repo", "--json",
+            cwd=root).stdout)
+        self.assertIsNone(opted_out["item"]["repo"])
+        outside = json.loads(self.call(
+            "task", "add", "Outside", "--kind", "followup", "--json").stdout)
+        self.assertIsNone(outside["item"]["repo"])
+
+        with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
+            in_repo = sorted(row["id"] for row in
+                             sd_db.reads.backlog_items(connection, repo=str(root.resolve())))
+            unscoped = sorted(row["id"] for row in
+                              sd_db.reads.backlog_items(connection, repo=sd_db.reads.NO_REPO))
+        self.assertEqual(in_repo, sorted([filed["item"]["id"], here["item"]["id"],
+                                          from_worktree["item"]["id"]]))
+        self.assertEqual(unscoped, sorted([unregistered["item"]["id"],
+                                           opted_out["item"]["id"], outside["item"]["id"]]))
+
+    def test_edit_moves_a_followup_and_changes_its_details(self):
+        """sd:809. `edit_item` refused a followup's every field but `kind`."""
+        first, second = self._checkout("first"), self._checkout("second")
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.repos.add(connection, first, home=self.home)
+            sd_db.repos.add(connection, second, home=self.home)
+        state = json.loads(self.call(
+            "task", "add", "Filed off its checkout", "--kind", "followup", "--json").stdout)
+        item = state["item"]["id"]
+        self.assertIsNone(state["item"]["repo"])
+
+        moved = json.loads(self.call(
+            "task", "edit", item, "--belongs-to", first, "--title", "Fix the finding",
+            "--priority", 2, "--due", "2026-09-20", "--if-revision", state["revision"],
+            "--json").stdout)
+        row = moved["item"]
+        self.assertEqual((row["kind"], row["repo"], row["title"], row["priority"], row["due"]),
+                         ("followup", str(first.resolve()), "Fix the finding", 2, "2026-09-20"))
+        self.assertEqual(moved["notes"][-1]["body"],
+                         f"Updated due, priority, repo, title by {getpass.getuser()}")
+
+        again = json.loads(self.call(
+            "task", "edit", item, "--belongs-to", ".", "--json", cwd=second).stdout)
+        self.assertEqual(again["item"]["repo"], str(second.resolve()))
+
+        # Leaving for a repository-less kind still needs the repository cleared.
+        refused = self.call("task", "edit", item, "--kind", "personal", code=1)
+        self.assertIn("a personal item carries no repository", refused.stderr)
+        self.assertEqual(json.loads(self.call("store", "item", item, "--json").stdout), again)
+
+        cleared = json.loads(self.call("task", "edit", item, "--no-repo", "--json").stdout)
+        self.assertIsNone(cleared["item"]["repo"])
+        self.assertEqual(cleared["item"]["kind"], "followup")
+
+    def test_help_names_the_repository_less_kinds_the_library_holds(self):
+        """sd:809. The help said "the four others"; it names the three.
+
+        The names are spelled in the help because the parser may not import
+        the library to read them, so this reads them from the library and
+        fails the day the two disagree.
+        """
+        for verb in ("add", "edit"):
+            with self.subTest(verb=verb):
+                text = " ".join(self.call("task", verb, "--help").stdout.split())
+                text = text.replace("- ", "-")
+                for kind in sorted(workflow.REPO_LESS_KINDS):
+                    self.assertIn(kind, text)
+                self.assertNotIn("four", text)
+        add = " ".join(self.call("task", "add", "--help").stdout.split()).replace("- ", "-")
+        self.assertIn("a followup takes a checkout as a task does", add)
+        self.assertIn("personal, work-idea and personal-idea carry no repository", add)
 
     def _checkout(self, name):
         """A real checkout, because the repository is resolved by asking git."""

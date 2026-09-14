@@ -495,6 +495,26 @@ class TaskDeliveryCLITests(unittest.TestCase):
                                                   "--json").stdout)
                     self.assertEqual("done", closed["item"]["status"])
 
+    def test_a_followup_with_a_checkout_still_takes_no_delivery_evidence(self) -> None:
+        """sd:809. A followup filed in a checkout now carries it, so it no longer
+        reads "belongs to no checkout". It still is not a task, and only a
+        task's move to done records a delivering commit, so the refusal is that
+        one and the row does not move."""
+        case = self.host()
+        root = self.repository(case)
+        state = json.loads(case.call("task", "add", "A review finding", "--kind", "followup",
+                                     "--json", cwd=root).stdout)
+        item = state["item"]["id"]
+        self.assertEqual(state["item"]["repo"], str(root))
+
+        refused = case.call("task", "status", item, "done", "--delivered-by", "0" * 40,
+                            code=1, cwd=root)
+        self.assertIn(f"followup item {item} takes no --delivered-by; only a task's "
+                      "move to done records one", refused.stderr)
+        self.assertNotIn("belongs to no checkout", refused.stderr)
+        readback = json.loads(case.call("store", "item", item, "--json", cwd=root).stdout)
+        self.assertEqual(readback, state)
+
     def test_the_close_hint_follows_the_library_that_would_close_it(self) -> None:
         """Both library shapes, on whichever build is installed. A stand-in
         `workflow` is enough: `_status_reason` reads `item_state` and the
