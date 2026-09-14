@@ -3028,12 +3028,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="what each path names, what is in contrib/, and what is on trial")
     skill_lister.set_defaults(handler=sd_skill.skill_list)
 
-    # Promotion and demotion queue one code review task each and open nothing
+    # Promotion and demotion queue one task each and open nothing
     # themselves: no branch, no request against `main`, and no move in this
     # checkout. Criterion 27: the library queues the task, never the dashboard.
     promoter = trying.add_parser(
         "promote",
-        help="queue a code review task to move a contrib/ skill onto a path")
+        help="queue one task to move a contrib/ skill onto a path")
     promoter.add_argument("name", help="a directory under contrib/")
     promoter.add_argument(
         "--path", required=True,
@@ -3042,7 +3042,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     demoter = trying.add_parser(
         "demote",
-        help="queue a code review task to move a skill back to contrib/")
+        help="queue one task to move a skill back to contrib/")
     demoter.add_argument("name", help="a directory under skills/")
     demoter.set_defaults(handler=sd_skill.skill_demote)
     for skill_parser in (trier, skill_lister, promoter, demoter):
