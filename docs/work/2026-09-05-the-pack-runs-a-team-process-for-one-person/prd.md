@@ -1743,7 +1743,7 @@ from a number the operator types.
   *(That last sentence is what the interview decided on 2026-09-05 and is kept
   as the record. It no longer holds: the operator cut the back-scoring gate on
   2026-09-07, and the scoring is parked behind Phase 1 rather than in front of
-  any review. See the log's last entry.)*
+  any review. See the 2026-09-07 log entry "Criterion 7's `mezmo-world-simulator` scoring is cut by the operator".)*
 
   One decision from the interview is corrected here. The 104 Codex sessions
   that run from the Obsidian vault are not scheduled jobs: no launchd job or
@@ -5198,3 +5198,66 @@ from a number the operator types.
   `accepted` still records the decision, with only the filing behind it gone.
   The kind is retired; the ten notes and the decision they can still carry are
   not, by the standing decision that no directory is deleted.
+
+- **2026-09-13** — **Criterion 7's forward experiment is deferred to followup
+  sd:777 by the owner, and criterion 23 closes.** `implement.md`'s "Closing
+  the item" holds the evidence for each clause. (Corrected 2026-09-14: this
+  entry first also said every acceptance criterion was closed, cut or
+  deferred. That was wrong; see the next entry.)
+
+  **Criterion 7.** The 2026-09-07 entry above removed only the back-scoring of
+  the seven `mezmo-world-simulator` passes. It kept the forward experiment on
+  purpose: the other vendor reviews the next ten code pull requests, a report
+  goes on this item, and the code review point stays or goes by a recorded
+  decision. No pass log, report or decision was ever recorded here. On
+  2026-09-13 the owner moved that experiment, with its report and decision,
+  to followup sd:777, in decision note 1920 ("sd:10 criterion 7: ten-pass forward experiment on the
+  code review point, report and decision"), so it no longer holds this item
+  open. The criterion's text above is left as written, and this entry
+  supersedes it for the experiment. The
+  half this item still closes is the grep. Re-run on 2026-09-13, it finds no
+  percentage in `bin/` or `skills/` that disables a review point.
+
+  **Criterion 23.** The second half closed when `platypeeps/sd-writing-pack`
+  #41 merged as `be76962e`, deleting that repository's `CLAUDE.md` `## Style`
+  section and `.caveman/config.json`. The first half, no caveman plugin in
+  the global settings, has held since the operator edit of 2026-09-07.
+
+  **Criterion 28** closed by a dated read of `commands.yaml` and the writing
+  manifest, accepted by the owner in decision note 1904 (pack #926).
+
+  **What this leaves.** Cut: criterion 7's back-scoring (2026-09-07).
+  Deferred: criterion 7's forward experiment (sd:777, note 1920). (Corrected
+  2026-09-14: this paragraph went on to say every other criterion was closed
+  and the delivery pull request carried `Delivers: sd:10`. Neither holds.
+  The pull request, #931, carries no `Delivers:`.)
+
+- **2026-09-14** — **PRs 2, 3 and 4 never merged, criteria are still open,
+  and criterion 9 changes by owner decision.** The review of #931 found that
+  "The closure state at delivery" trusted the closure table and the claim
+  that all eight pull requests had merged. PRs 1 and 5 to 8 merged. PRs 2, 3
+  and 4 did not, and nothing on this item cuts or defers them.
+  `implement.md`'s "The closure state today" replaces it. That section runs
+  each criterion's own check on `main` at `ef9d3499` and quotes the line
+  that decides it. Open: 5 (the vendor clause), 6 (the `minimax` meter
+  clause), 11 (the demotion-note clause), 13 (the moved-default-branch clause), 14, 15, 16, 18, 21 (the code-path half), 22, 27 and 31. Criterion
+  9 is also open until #931 merges. #931 is a correction pull request and
+  does not carry `Delivers:`.
+
+  **Criterion 9.** The owner decided in note 1921 on sd:10 to keep the
+  global Copilot-requesting hook and change the criterion. The clause "The
+  global settings contain no Copilot-requesting hook" is removed. On
+  2026-09-14, `grep -c -i copilot ~/.claude/settings.json` counts 1, and the
+  decision allows that. The pack-surface clause stands, and its grep finds
+  no pack surface that requests a review. The `WORKFLOW.md` clause changes:
+  `WORKFLOW.md` must not say Copilot review is off on a repository the
+  operator pays for personally. It now says Copilot review there comes from
+  the operator's own global hook, at the operator's choice and cost. #931
+  makes that edit. The criterion's text above is left as written, and this
+  entry supersedes it.
+
+  **Criterion 27** fails its own words. Since #802 (`505431b8`,
+  2026-09-10), promotion and demotion queue a review assignment and open no
+  pull request, and no test asserts a branch's content. This item has no
+  entry for that change. Whether the criterion changes or the code does is
+  the owner's call.

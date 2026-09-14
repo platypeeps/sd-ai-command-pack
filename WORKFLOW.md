@@ -145,8 +145,8 @@ decide whether the point stays; no ratio decides for you.
 
 - Copilot review. In an organisation or shared repository GitHub requests it on
   its own when the pull request opens. Its findings are read and dispositioned.
-  They never block a merge and the pack never requests a second round. On a
-  repository you pay for personally it is off.
+  They never block a merge, and no pack surface requests a round. On a repository you
+  pay for personally it comes from your own global hook, at your choice and cost (sd:10 note 1921).
 
 ## Never in a shared repository
 

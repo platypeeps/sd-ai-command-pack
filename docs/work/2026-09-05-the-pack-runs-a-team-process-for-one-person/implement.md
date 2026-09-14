@@ -394,7 +394,14 @@ repository spent a whole pull request re-deriving one.
 one.** Criterion 19's subject is `~/.claude/settings.json`, which is under
 the operator's home and in no git repository; criterion 23 deletes the
 writing repository's `.claude/settings.local.json`; and the system
-repository's guide is `system`'s. The page's framing — each numbered unit is
+repository's guide is `system`'s. (2026-09-14: the override criterion 23's
+second half closed on is not `.claude/settings.local.json`. It is the `## Style`
+section of that repository's tracked `CLAUDE.md` and its tracked
+`.caveman/config.json`, both deleted by `sd-writing-pack` #41 at `be76962e` and
+read through GitHub. On that `main`, `.claude/settings.json` has no `caveman`
+and no `settings.local.json` is tracked. An untracked local
+`.claude/settings.local.json` was not read; the operator can run `grep -c
+caveman` on it if it exists.) The page's framing — each numbered unit is
 one pull request whose merge carries `Item:` — does not hold for those three,
 and an earlier draft added them to this list without reconciling it. So: the
 governed-tree files, `CONTRIBUTING.md` and `WORKFLOW.md` are **this
@@ -1294,7 +1301,14 @@ and the item still cannot go `done`, because two criteria were open and
 neither is a pull request in this list. One has since been cut by the
 operator; one remains. (2026-09-13: that one, criterion 28, is closed by
 reading, and a third this count missed, criterion 23's second half, is what
-is left. See the dated paragraphs at the end of this section.)
+is left. See the dated paragraphs at the end of this section.) (2026-09-13,
+later: criterion 23's second half has closed as well, and this count also
+missed criterion 7's forward experiment, which the owner has moved to
+followup sd:777. See "The closure state today" at the end of this
+section.) (2026-09-14: the first claim is wrong. PRs 2, 3 and 4 never
+merged. Only PRs 1 and 5 to 8 did. The criteria PRs 2, 3 and 4 were to close
+still fail their own checks on `main` at `ef9d3499`, so "two criteria were
+open" undercounted by far more than one. See "The closure state today".)
 
 *Criterion 7 was unscored, and its scoring clause is now cut.* The seven
 `mezmo-world-simulator` passes had no scores anywhere on this item; `git grep`
@@ -1309,13 +1323,21 @@ worked in parallel right now. Criterion 7 keeps the half that was load-bearing
 — no percentage removes the code review point, and the point stays or goes by
 a recorded decision — which is where C-39 and C-42 resolve. The scoring is
 parked with the operator, triggered by `mezmo-world-simulator` Phase 1 reaching
-`done`; `prd.md`'s log carries the reasoning.
+`done`; `prd.md`'s log carries the reasoning. (2026-09-13: this paragraph
+is incomplete. It names the scoring and the grep and leaves out the third
+part of criterion 7: the other vendor reviews the next ten code pull
+requests, a report goes on this item, and the review point stays or goes by
+a decision. The 2026-09-07 cut kept that forward experiment on purpose. It
+was never closed. The owner deferred it to followup sd:777 on 2026-09-13, in decision
+note 1920;
+see "The closure state today".)
 
 *Criterion 28 has two clauses that cannot close from this checkout.* PR 8d
 says so in its own text and the closure table says so in its own row, and this
 section was written before either. It is now the only criterion between the
 item and `done` (wrong: criterion 23's second half is open too, corrected
-below), but it is **two** pieces of work and not one:
+below; and, 2026-09-13, so is criterion 7's forward experiment, now deferred
+to sd:777), but it is **two** pieces of work and not one:
 
 1. **`commands.yaml`, item B's.** The "no palette entry" assertion enumerates
    a file that does not exist in this repository. B's slice 4 PR 7 writes it,
@@ -1339,6 +1361,11 @@ happened without its trailer — the next `sd-ship` merge here, or one empty
 commit on the branch — so nothing is lost by waiting, and the item stays
 `in_progress` until the two close. (2026-09-13: they have, and the item is
 still `in_progress`, now held by criterion 23's second half; see below.)
+(2026-09-13, later: that half has closed too, and the pull request that
+adds "The closure state at delivery" carries `Delivers:`.) (2026-09-14: it
+does not. That pull request, #931, became a correction of the closure state
+and carries no `Delivers:`, because criteria are still open; see "The
+closure state today".)
 
 **What is left, in the order it can be done.** Two things, and neither is this
 repository's to write. Item B's slice 4 PR 7 lands `commands.yaml`, and the
@@ -1348,6 +1375,9 @@ assertable here. Then, and not before, the delivery commit. (2026-09-13:
 superseded. Both things have happened, neither clause became assertable
 here, and the delivery commit does not follow from them: it waits on
 criterion 23's second half, as the dated paragraphs below record.)
+(2026-09-13, later: that half is closed; see "The closure state
+today".) (2026-09-14: and the delivery commit still does not follow, because
+PRs 2, 3 and 4 never merged.)
 Scoring the seven passes is no longer in this order at all: it is evidence
 gathered from `answerbook/mezmo-world-simulator` rather than code written here
 — its git history records at least the fourth and the seventh (`0c39c78`,
@@ -1394,20 +1424,218 @@ to 22) that forbids "caveman mode", and criterion 23 deletes that override.
 The first half of criterion 23 still holds, since `~/.claude/settings.json`
 does not contain `caveman`. So `Delivers:` is still not written. One clause is
 left, and it is the writing repository's one-line pull request that removes
-that section.
+that section. (2026-09-13, later: superseded. That pull request has merged;
+see below. "One clause is left" was also wrong, because it missed criterion
+7's forward experiment.)
 
 **The closure state as of 2026-09-13, in one place.** Criterion 7's scoring
 clause is cut. Criterion 28 is closed by reading, with the evidence above,
 under decision note 1904.
 Criterion 23's second half is open. The delivery commit waits on that one
 clause and on nothing else this section names. Every earlier sentence in this
-section that says otherwise carries a dated marker pointing here.
+section that says otherwise carries a dated marker pointing here. (2026-09-13,
+later: superseded by "The closure state today" below. Criterion 23's
+second half has since closed. This paragraph also left out criterion 7's
+forward experiment, which was open when it was written.)
+
+**2026-09-13: criterion 23's second half is closed.** `platypeeps/sd-writing-pack`
+#41 merged as `be76962e` ("docs(sd:10): remove the repository's caveman style
+override", 2026-09-14T04:40Z, which is the evening of 2026-09-13 local time).
+It deletes the `## Style` section of `CLAUDE.md`, which forbade caveman mode,
+and `.caveman/config.json`, the same override in config form. Read through
+GitHub on that repository's `main` at `be76962e`: `CLAUDE.md` contains neither
+`## Style` nor `caveman`, and `.caveman/config.json` does not exist. The first
+half still holds: `grep -c caveman ~/.claude/settings.json` prints `0`. Like
+criterion 28, this is a dated read of another repository and of per-machine
+state. It is not a test, because pack CI reaches neither.
+
+**2026-09-13: the closure state above missed criterion 7.** Criterion 7 has
+three parts. The first is the grep: no percentage in `bin/` or `skills/`
+disables a review point. The second is back-scoring the seven old passes. The
+third is the forward experiment: the other vendor reviews the next ten code
+pull requests, a report goes on this item, and the code review point stays or
+goes by a recorded decision. The 2026-09-07 cut removed only the second part,
+and `prd.md`'s log entry for that date says it kept the forward experiment "so
+the report the operator decides from still has to exist". No pass log, report
+or decision was ever recorded on this item, and `WORKFLOW.md` still describes
+the experiment. #926's closure state named only the cut, so it missed the
+third part. On 2026-09-13 the owner decided to move the forward experiment,
+with its report and decision, to followup sd:777 ("sd:10 criterion 7:
+ten-pass forward experiment on the code review point, report and decision"),
+in decision note 1920 on sd:10.
+The delivery does not wait on it. The grep was re-run over `bin/` and
+`skills/` for percentages, `percent` and `threshold` on 2026-09-13. None of
+its 33 hits disables a review point: they are age and line thresholds, size
+reports, and `sd-review`'s severity floor, which classifies findings and
+turns no review off.
+
+**The closure state today, 2026-09-14.** This replaces "The closure state at
+delivery, 2026-09-13", which said every criterion was closed, cut or deferred
+and put `Delivers: sd:10` on #931. That was wrong. It trusted the table under
+"What closes the criteria" and the claim that all eight pull requests had
+merged, and PRs 2, 3 and 4 never did. #931 now corrects the closure state and
+does not deliver the item.
+
+Each line below is that criterion's own check, run on `origin/main` at
+`ef9d3499` on 2026-09-14, with the line that decides it. No line uses merge
+history as evidence. "Tests pass" means the named module ran green with the
+pack's `.venv` Python on this branch, whose code is `ef9d3499`'s.
+
+**Open: criteria 5, 6, 11, 13, 14, 15, 16, 18, 21, 22, 27 and 31, and
+criterion 9 until this pull request merges.** The review of #931 named 9, 14,
+15, 16, 18, 21 (the code-path half), 22 and 31. These checks confirm those and
+add 5, 6 and 27. The verification of #931 adds 11 and 13.
+
+- **5, open (vendor clause).** The table clauses hold:
+  `ReviewTable.test_the_two_copies_are_identical` passes. A grep of
+  `skills/` for a bare `codex`, `claude`, `openai` or `anthropic`, not
+  `Claude Code`, finds 3 lines, all in `skills/sd-review/SKILL.md`: `:123`
+  "`--scope branch --provider claude` review", `:137` "Codex also receives
+  the exact" and `:142` "runs Claude in safe and restricted modes".
+- **6, open (the `minimax` meter clause).** `git grep -l token_plan -- bin
+  tests` finds 0 files, so nothing reads `token_plan/remains` and no test
+  asserts the two windows. Other clauses have passing tests, among them
+  `tests/test_sd_registry.py:1261`
+  `test_the_shipped_registry_still_resolves_exo_over_http`, `:1173`
+  `test_a_think_block_and_reasoning_content_still_read_clean` and `:795`
+  `test_a_bill_at_its_cap_is_passed_over`. No test was found for the two
+  concurrent calls against room for one.
+- **9, open on `main`, closed by this pull request.** The settings clause is
+  removed by the owner's decision note 1921 (2026-09-14): the global
+  Copilot-requesting hook stays. On 2026-09-14,
+  `grep -c -i copilot ~/.claude/settings.json` counts 1 and
+  `grep -c requested_reviewers` counts 1. The pack-surface clause holds: a
+  case-insensitive grep of `bin/`, `skills/`, `agents/`, `dashboard/`,
+  `.claude/`, `.github/`, `CLAUDE.md`, `AGENTS.md` and `README.md` for
+  `copilot`, `requested_reviewers` and `request_copilot` finds 9 lines, and
+  none requests a review. The nearest is `skills/sd-handoff/SKILL.md:123`
+  "**suppress the Copilot re-request**". The `WORKFLOW.md` clause failed on
+  `main`: `:148-149` said "On a repository you pay for personally it is off".
+  This pull request changes it to say Copilot review there comes from the
+  operator's own global hook, at the operator's choice and cost, citing note
+  1921.
+- **11, open (the demotion-note clause).** No code writes the demotion note
+  the criterion asks for when a collaborator joins a `mode: full`
+  repository. `source:bin/sd_lib.py::remote_permits_full` has two callers,
+  the mode resolver in `bin/sd_lib.py` and the ownership check in
+  `bin/sd_ship_remote.py`, and neither writes a note. No test names demotion outside `tests/test_sd_skill_promotion.py`.
+  The six detection cases pass, `test_case_1_…` to `test_case_6_…` in
+  `tests/test_mode_detection.py:144-180`.
+- **13, open (the moved-default-branch clause).** The criterion asks for one
+  integration update when the default branch moves after the review, and for
+  a seeded conflict in it to end the item `blocked`. `grep -c -i integrat
+  bin/sd-ship` counts 0, and no `tests/test_sd_ship*.py` test covers an
+  integration update or its conflict. `tests.test_delivered` (15) and
+  `tests.test_status_source` (43) pass.
+- **14, open.** `Makefile:125-126` `docs-lint:` runs `bin/sd-docs-lint`
+  whole. It wires no no-database rule set enumerated from the lint, and no
+  test compares a wired set to the lint's set.
+- **15, open (the ceilings).** The floor half holds: `.coveragerc` includes
+  only `bin/sd_install.py`. The ceilings fail rather than warn:
+  `tests/test_loc_caps.py:505`, `:554` and `:584` use `assertLessEqual`. There
+  is no warning-path test.
+- **16, open.** `Makefile:20` `test:` and `:134` `check: test lint audit
+  docs-lint` take no changed-files argument.
+- **18, open.** A grep of the governed tree finds `Trellis` in 14 files,
+  `.trellis` in 11 and `task.py` in 2.
+- **21, open (the code-path half).** `bin/sd_sweep.py` is tracked, and
+  `bin/sd:2969` still defines `"sweep", help="report the planning items the
+  45-day rule would park"`. No test asserts a frozen set for `git rm`,
+  `rmtree` and `rmdir`. The archive half holds: `tests.test_archive_untouched`
+  passes (5 tests). No test was found that puts a `planning` item under the
+  archive and runs `sd-status`, `sd-plan` and `sd-review --scope planning`.
+- **22, open (the test).** The template's one link,
+  `.github/copilot-instructions.md`, exists. No test walks the links:
+  `tests/test_delivery_evidence.py:148` reads the template for its trailer
+  block only.
+- **27, open as written.** `tests/test_sd_skill_promotion.py:78`
+  `test_promotion_and_demotion_queue_code_review_without_git_writes` asserts
+  that promotion queues a review assignment and writes nothing to git.
+  `:112` asserts `bin/sd_skill.py` contains no `pr create`. No pull request
+  moves the directory, and no test asserts a branch's content. #802
+  (`505431b8`, 2026-09-10) made that change, and no entry on this item
+  records it.
+- **31, open.** Governed-tree file counts: `sd_sweep` 6, `parked` 13,
+  `archived` 19, `record_load` 2, `carrier_branches` 2, `_protection_gaps` 2,
+  `load_acknowledgements` 2, `--stash-ref` 4, `--push` 2, `--park` 4,
+  `argument-vocabulary` 21, `Standing rule` 4, `R10-D` 45, `five gates` 1,
+  `Active item:` 8, `sd-rust-reviewer` 3, `sd-deps` 4. Only `cron-jobs.sh`
+  finds 0. The `authors` policy key is still in `.github/sd-review.json:22`.
+
+**Closed, by the criterion's own check:**
+
+- **1.** `tests.test_workflow_policy` passes (19 tests), including
+  `test_the_installer_block_names_the_page` and
+  `test_a_sixth_key_on_one_side_alone_fails`.
+- **2.** `tests.test_sd_ship_skill` passes (66 tests), including
+  `test_no_step_runs_sd_spec`, `test_no_step_carries_a_branch_deletion_command`
+  and `test_the_settle_step_issues_no_polling_loop`.
+- **3.** `test_a_missing_trailer_warns`, `test_the_warning_does_not_hold_the_ship`
+  and `test_the_carried_trailer_passes_quietly` pass. `bin/sd-ship:491` says
+  "has no Needed-by trailer; delivery continues".
+- **4.** `DeletedLane.test_no_governed_file_names_the_lane` passes.
+- **7.** The grep of `bin/` and `skills/` for percentages, `percent` and
+  `threshold` finds 33 lines. None disables a review point; the nearest is
+  `bin/sd-review:1086` `threshold = BLOCKING_ORDER[floor]`, a severity floor.
+  The back-scoring is cut (2026-09-07). The forward experiment is deferred to
+  followup sd:777 by the owner's decision note 1920.
+- **8.** `ConditionalObligations.test_every_site_naming_the_ledger_names_the_gate`
+  passes.
+- **10.** `none - ` finds 0 files in `bin/` and `skills/`.
+  `test_green_no_work_line_claims_no_item` and
+  `test_red_a_bare_none_is_a_path_that_does_not_resolve` pass.
+- **12.** The root README, line 50: "**What it writes in a repository:** nothing at
+  machine-scope install." and line 72: "Two skills add paths of their own, both
+  tracked".
+- **17.** `tests/test_selector_contract_drift.py`,
+  `generated/registry-snapshot.json` and `plugins/sd` are untracked (0 files),
+  and `bash32` appears in no workflow.
+- **19.** A dated read on 2026-09-14, counts only: `Read(` 0, `trellis` 0,
+  and 1 each for `create_pull_request`, `pull_request_read`,
+  `merge_pull_request`, `list_pull_requests` and `update_pull_request`. The
+  global guide's `cd`-prohibition pattern counts 0.
+- **20.** `test_exactly_one_file_states_the_planning_review_rule` passes.
+- **23.** `grep -c caveman ~/.claude/settings.json` counts 0 on 2026-09-14,
+  and `sd-writing-pack` `be76962e` deleted the override (above).
+- **24.** `skills/paths.json` names `research`, `development` and `act`.
+  `test_an_unlisted_skill_directory_refuses_the_install` and
+  `test_contrib_is_not_rendered_without_a_trial_row` pass.
+- **25.** `test_a_trial_writes_one_row_and_prints_its_expiry` and
+  `test_an_expired_trial_with_no_use_is_removed_and_named` pass.
+- **26.** `tests.test_sd_skill_use` (13 tests) reads `skill, surface, mode,
+  cwd` rows from `PreToolUse` and `UserPromptSubmit` events and passes.
+  `tests/test_sd_codex.py:117`
+  `test_a_skill_opened_by_path_is_one_row_on_the_codex_surface` passes.
+- **28.** `test_the_row_is_written_in_every_mode_and_reaches_no_tracker`,
+  `test_publish_refuses_without_a_destination` and
+  `test_shadow_sync_writes_the_open_issues_and_closes_nothing` pass. The two
+  clauses closed by reading are under decision note 1904.
+- **29.** `test_three_followups_survive_a_session_that_wrote_no_packet` passes.
+- **32.** `test_the_push_refuses_a_head_the_local_review_has_not_cleared`,
+  `test_a_moved_head_is_refused_by_the_merge_the_skill_prescribes` and
+  `tests/test_sd_registry.py:156` `test_the_same_file_gives_the_same_reviewer_order`
+  pass.
+- **33.** `test_red_a_page_naming_an_item_directory_that_is_not_there` and
+  `test_green_a_metavariable_is_a_pattern_and_not_a_path` pass, and
+  `bin/sd-docs-lint` reports `clean`.
+
+**Not settled by these checks:**
+
+- **30.** `make check` is what CI runs, so it is the state of CI on the pull
+  request that last changed `main`. It was not run locally.
+
+The first instruction in this section, that `prd.md` goes to `status: done`
+and drops `branch:`, predates criterion 13. `prd.md` now has no `status:`
+line, since the row carries status, so no delivery edits it. The item is
+not deliverable: `Delivers: sd:10` waits until every open criterion above is
+closed, cut or deferred by a recorded owner decision: 5, 6, 9, 11, 13, 14,
+15, 16, 18, 21, 22, 27 and 31.
 
 ### The three landings that are no pull request of this repository's
 
 PR 4 said criteria 19 and 23 are recorded against their landings rather than
 against this repository's diff, and left no place to record them. This is that
-place, and two of the three have now happened.
+place, and two of the three have now happened. (2026-09-13: all three have.)
 
 **Criterion 19 and criterion 23's first half — the global settings and the
 global guide — landed on 2026-09-07 as an operator edit.** They are under
@@ -1444,7 +1672,8 @@ removing neither.
 **Criterion 23's second half is open.** The writing repository's style
 override is that repository's one-line pull request and is not this
 repository's or `system`'s. It was still present on 2026-09-13; see "Closing
-the item".
+the item". (2026-09-13, later: closed. `sd-writing-pack` #41 merged as
+`be76962e` and deleted the override; see "Closing the item".)
 
 **The system repository's guide landed as its own pull request there.**
 `CLAUDE.md` 341 lines to 278, five narrative sections rewritten as
@@ -1513,22 +1742,23 @@ recounted.
 | Criterion | Closed by |
 |---|---|
 | 1, 4, 8, 20 — the policy page, the lane, the conditional obligations | PR 1 |
-| 5 — the review table in exactly two places, and no bare vendor token in a skill | PR 1 (the two table clauses), PR 6 (the vendor clause whole: a converted token names a role, and no role resolves before PR 6's registry reader) |
-| 31 — requirement 13 line by line | PR 2 |
-| 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) |
-| 14, 15, 16, 17, 30 — the checks | PR 3 |
-| 33 — no document names a `docs/work/` path that does not resolve | PR 7, which adds the rule; wired by criterion 14's enumeration in PR 3, which lands first |
-| 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4; criterion 23's second half, the writing repository's style override, is that repository's pull request and was still open on 2026-09-13 |
+| 5 — the review table in exactly two places, and no bare vendor token in a skill | PR 1 (the two table clauses), PR 6 (the vendor clause whole: a converted token names a role, and no role resolves before PR 6's registry reader) (2026-09-14: the vendor clause is open, see "The closure state today") |
+| 31 — requirement 13 line by line | PR 2 (2026-09-14: never merged; open, see "The closure state today") |
+| 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) (2026-09-14: PR 2 never merged; the code-path half is open, see "The closure state today") |
+| 14, 15, 16, 17, 30 — the checks | PR 3 (2026-09-14: never merged; 14, 15 and 16 are open, 17 closed by #892 and 30 is CI's, see "The closure state today") |
+| 33 — no document names a `docs/work/` path that does not resolve | PR 7, which adds the rule; wired by criterion 14's enumeration in PR 3, which lands first (2026-09-14: PR 3 never merged and criterion 14 is open, so nothing wires the rule into `make check`; see "The closure state today") |
+| 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4; criterion 19 and criterion 23's first half by the operator edit of 2026-09-07; criterion 23's second half, the writing repository's style override, by `sd-writing-pack` #41 (`be76962e`), read on 2026-09-13 and recorded under "Closing the item" (2026-09-14: PR 4 never merged; 18 and 22 are open, and criterion 9's settings clause is removed by decision note 1921, see "The closure state today") |
 | 24, 25 — `paths.json`, the union with active trials, `sd skill try` and its row | PR 5 |
-| 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | PR 6, which also carries criterion 5's vendor clause; with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
-| 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1534-1540`, whose files are in its Touches and in no other pull request's claim) |
-| 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` and writing-manifest clauses checked by reading on 2026-09-13 and recorded under "Closing the item", not tested |
-| 7 — no percentage removes the code review point | the grep, which passes today; the forward ten-pass report is the operator's, not a pull request's |
+| 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | (2026-09-14: criterion 6's `minimax` meter clause and criterion 11's demotion-note clause are open, see "The closure state today") PR 6, which also carries criterion 5's vendor clause; with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
+| 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1534-1540`, whose files are in its Touches and in no other pull request's claim) (2026-09-14: the moved-default-branch clause is open, see "The closure state today") |
+| 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` and writing-manifest clauses checked by reading on 2026-09-13 and recorded under "Closing the item", not tested (2026-09-14: criterion 27 fails its own words on `main`, see "The closure state today") |
+| 7 — no percentage removes the code review point | the grep, which passes (re-run 2026-09-13); the back-scoring of the seven passes is cut (operator, 2026-09-07); the forward ten-pass experiment, its report and its decision are deferred to followup sd:777 (owner decision, 2026-09-13, decision note 1920) |
 
 Criterion 7 is the one row in this table with no pull request beside it, and
 it stays that way after the 2026-09-07 cut. Its assertable half is a grep of
 `bin/` and `skills/` for a percentage that disables a review point, which
 returns nothing and is checked from any checkout. Its remaining half is a
 report the operator writes after ten forward passes and a decision recorded
-here. Neither is code this item ships, so naming a PR for it would be a false
+here. (2026-09-13: that half is now followup sd:777's, by owner decision in
+decision note 1920, and this item no longer carries it.) Neither is code this item ships, so naming a PR for it would be a false
 entry in a table whose whole value is that its entries are checkable.
