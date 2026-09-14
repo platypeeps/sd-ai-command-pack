@@ -257,6 +257,13 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["bash", "-c", "f() { cd sub; }; g() { f; }; f; python -I bin/sd_install.py"],
         # The call in the subshell moved nothing here, so this one is the first.
         ["bash", "-c", "f() { cd sub; }; (f); f; python -I bin/sd_install.py"],
+        # Assignments and redirections before a function's name leave it a call.
+        ["bash", "-c", "f() { cd sub; }; x=1 f; python -I bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; 2>/dev/null f; python -I bin/sd_install.py"],
+        # A new body under a called name has not been called.
+        ["bash", "-c", "f() { cd sub; }; f; f() { cd deep; }; f; python -I ../bin/sd_install.py"],
+        # The replay budget is a depth: eight calls before this one spend none of it.
+        ["bash", "-c", "n() { :; }; " + "n; " * 8 + "f() { cd sub; }; f; python -I bin/sd_install.py"],
         # A quoted word is a program or an argument, never the shell's own.
         ["bash", "-c", '"if" python -I bin/sd_install.py'],
         ["bash", "-c", "echo ';' python -I bin/sd_install.py"],
@@ -367,6 +374,29 @@ class LazySubprocessCoverage(unittest.TestCase):
         # A call reached through another function in a pipeline moves only the
         # pipeline, so the launch runs where the line stands.
         ["bash", "-c", "f() { cd sub; }; g() { f; }; g | cat; python -I bin/sd_install.py"],
+        # A call after an assignment or a redirection moves; a word a `>` takes
+        # is the redirection's file, not a call.
+        ["bash", "-c", "f() { cd sub; }; x=1 f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; >/dev/null f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; > f; python -I bin/sd_install.py"],
+        # The called mark is the body's: a new body under the name moves, the
+        # same body under another name does not move again.
+        ["bash", "-c", "f() { cd sub; }; f; f() { cd deep; }; f; python -I ../../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; g() { cd sub; }; f; g; python -I ../bin/sd_install.py"],
+        # Replays are counted by depth: eight calls before a call leave it read,
+        # and a call eight deep is read. Only a call's own block is a level:
+        # a call inside eight plain blocks is read too.
+        ["bash", "-c", "n() { :; }; " + "n; " * 8 + "f() { cd sub; }; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f1() { cd sub; }; " + "".join(f"f{k}() {{ f{k - 1}; }}; " for k in range(2, 9))
+         + "f8; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; " + "{ " * 8 + "f; " + "}; " * 8 + "python -I ../bin/sd_install.py"],
+        # A call in a `&` list or at the end of a pipeline leaves the next call
+        # the first; a call inside a block inside a body is part of that body,
+        # and is not a call while that body is being defined.
+        ["bash", "-c", "f() { cd sub; }; f & wait; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; true | f; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; g() { { f; }; }; g; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; g() { { f; }; }; g | cat; python -I bin/sd_install.py"],
         ["bash", "-c", "time -- python -I bin/sd_install.py"],
         ["env", "-a", "name", "python", "-I", "bin/sd_install.py"],
         # A pattern is expanded where the command runs, as the shell expands it.

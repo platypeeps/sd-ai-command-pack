@@ -71,16 +71,17 @@ and a ``<(...)`` put the directory back where they found it, and so does a
 pipeline, while a ``&`` puts back the whole list it backgrounded: the shell
 runs each of those in a child of its own. A function definition puts it back
 as well, its body not having run yet, and a call to a function defined on the
-same line reads that body again, where the caller stands. Which functions are
-defined, and which have been called, is part of that state, so a definition or
-a call inside a subshell, a pipeline or a ``&`` goes back with it, as it does
-in the shell. A second call to the same function keeps the directory, which is
-a choice rather than the shell's rule: the relative ``cd`` that moved once
-usually fails the next time, but ``f() { cd ..; }`` called twice really moves
-twice, and so does ``f() { cd sub; }`` where ``sub/sub`` exists. After
-``f; f`` there the check stands one directory short, so it misses a launch
-that runs and refuses a line that launches nothing. A compound command
-(``{ }``, ``if``, ``while``, ``until``, ``for``, ``select``, ``case``)
+same line reads that body again, where the caller stands, assignments and
+redirections before its name included. Which functions are defined, and which
+have been called, is part of that state, so a definition or a call inside a
+subshell, a pipeline or a ``&`` goes back with it, as it does in the shell. A
+second call to the same body, under its own name or another, keeps the
+directory, which is a choice rather than the shell's rule: the relative ``cd``
+that moved once usually fails the next time, but ``f() { cd ..; }`` called
+twice really moves twice, and so does ``f() { cd sub; }`` where ``sub/sub``
+exists. After ``f; f`` there the check stands one directory short, so it
+misses a launch that runs and refuses a line that launches nothing. A compound
+command (``{ }``, ``if``, ``while``, ``until``, ``for``, ``select``, ``case``)
 is one command to the pipeline around it, and a ``)`` that closes a ``case``
 pattern closes no subshell. A ``python`` word elsewhere is another program's argument,
 a bash array's ``a=(...)`` words are values, a ``for``'s are names, and a
@@ -90,15 +91,15 @@ those is refused.
 It does not see:
 
 - a launch from a non-Python parent, or ``-m`` naming a measured module;
-- a wrapper other than ``env`` (``exec``, ``command``, ``nice``, ``nohup``,
-  ``xargs``, ``/usr/bin/time``): its options differ per wrapper;
+- a wrapper other than ``env`` (``exec``, ``command``, ``builtin``, ``nice``,
+  ``nohup``, ``xargs``, ``/usr/bin/time``): its options differ per wrapper;
 - the commands a shell reads from anywhere but its ``-c`` string: a script
   file, and a here-document, a here-string or a pipe on its standard input,
   which the launch does not carry; nor the commands ``.`` or ``source`` reads
   from a file, which may not exist yet when the launch is read;
 - a here-document's body, which it reads as commands rather than as the data
-  it is: that is a refusal rather than a miss, and text there that looks like
-  a launch fails the test that wrote it;
+  it is: text there that looks like a launch fails the test that wrote it, and
+  a quote there left open ends the line, hiding a launch after the body;
 - a script the shell gets from ``"$@"`` or ``$1``, a program or a ``cd``
   directory a variable or a ``$(...)`` names: positional arguments, variables
   and substitutions are not expanded, by design;
@@ -106,8 +107,15 @@ It does not see:
   ANSI-C ``$'...'`` string: quoted text is one word;
 - a command after ``coproc``: only the words above are skipped;
 - a ``cd`` in an ``eval``: the line it is read as ends with it;
-- a call to a function defined anywhere but the same line, or named by a
-  variable or a substitution, or more than ``SHELL_REPLAYS`` calls deep;
+- a call to a function defined anywhere but the same line, named by a
+  variable or a substitution, or made through ``eval`` or another shell;
+- a call more than ``SHELL_REPLAYS`` calls deep, which is where a function
+  that calls itself stops being read, and every call after the first
+  ``SHELL_CALLS`` in one line, a bound on the work one line can cost;
+- a quoted word that reads as an assignment (``'x=1' f``): it is taken for
+  one, so the word after it is read as the command's name;
+- a ``return``, an ``unset -f`` or ``FUNCNEST`` cutting a function short: a
+  call reads the whole body, and a definition stands until another replaces it;
 - a launch written in a function body, which is read where the body is
   defined: that is a refusal rather than a miss, even when nothing calls the
   function;
@@ -116,6 +124,12 @@ It does not see:
   launch in one is refused;
 - a pattern in a word part of which is quoted (``bin/sd_inst*".py"``): one
   quote stops the whole word expanding;
+- whether a program named like an interpreter is one: any program whose name
+  starts with ``python`` is taken for one, ``python-config`` and a path nothing
+  is at included, which is a refusal rather than a miss;
+- a carriage return, which the shell keeps in its word and this reads as a
+  space: a launch at the end of a CRLF line is refused, though the shell looks
+  for a script whose name ends in one;
 - a ``cd`` or ``pushd`` that fails, and a ``cd -`` before any ``cd`` in the
   line: whether a directory exists is settled when the shell runs, which is
   after this reads the launch -- an earlier command may make it -- and the
@@ -167,8 +181,9 @@ ELSEWHERE = object()
 #: Marks a word a quote or a backslash covered: a quoted `if` is a program, and
 #: a quoted `;` is that program's argument rather than the shell's separator.
 QUOTED = "\0"
-#: How many function calls one shell line is read through.
+#: How deep calls inside function bodies are read through, and how many calls one line is.
 SHELL_REPLAYS = 8
+SHELL_CALLS = 256
 #: Short `env` options that take a value, attached or in the next word.
 ENV_VALUE_LETTERS = "aCSuPLU"
 #: Long `env` options that take a value, after `=` or in the next word.
@@ -524,7 +539,8 @@ def _frame(kind, state):
     so a call can read them again.
     """
     return {"kind": kind, "saved": state, "pipe": None, "list": None, "piped": False,
-            "case": "", "header": False, "scoped": False, "defines": "", "start": 0}
+            "case": "", "header": False, "scoped": False, "defines": "", "start": 0,
+            "replay": False}
 
 
 def _begin(frame, state):
@@ -573,6 +589,19 @@ def _defines_function(current, tokens, index):
             and tokens[index:index + 1] == [(")", True, False)])
 
 
+def _prefixed(current):
+    """Whether a command so far is only assignments and redirections, so its next word is its name."""
+    words = [text for text, _ in current]
+    while words:
+        name, equals, _ = words[0].partition("=")
+        taken = _redirection(words) or (1 if equals and name.isidentifier() else 0)
+        if not taken or taken > len(words):
+            # A word the next one completes, as `>` does its file, is no prefix.
+            return False
+        words = words[taken:]
+    return True
+
+
 def _defined(state, name, body):
     """The state a definition leaves: the shell that ran it knows one more function.
 
@@ -582,9 +611,13 @@ def _defined(state, name, body):
     return (*state[:3], {**state[3], name: body}, state[4])
 
 
-def _calls(state, name):
-    """The state a call leaves: this function has moved the directory here once."""
-    return (*state[:4], state[4] | {name})
+def _calls(state, body):
+    """The state a call leaves: this body has moved the directory here once.
+
+    The mark is the body's, not the name's: a new body under an old name has
+    not run, and the same body under another name has.
+    """
+    return (*state[:4], state[4] | {tuple(body)})
 
 
 def _shell_commands(line, cwd):
@@ -593,10 +626,10 @@ def _shell_commands(line, cwd):
     tokens.append((";", True, False))
     # The state is the directory, the one `cd -` goes back to, the `pushd`
     # stack, the functions defined here as the tokens of their bodies, and the
-    # ones already called. `frames` holds it as each subshell, block and array
+    # bodies already called. `frames` holds it as each subshell, block and array
     # was opened, so what a child defines or calls goes back with it.
     state = (cwd, ELSEWHERE, (), {}, frozenset())
-    previous, pending, named, replays, index = ("", True), "", "", 0, 0
+    previous, pending, named, calls, index, deeper = ("", True), "", "", 0, 0, False
     commands, current, frames = [], [], [_frame("", state)]
     while index < len(tokens):
         text, operator, quoted = tokens[index]
@@ -611,26 +644,30 @@ def _shell_commands(line, cwd):
             elif frame["case"] == "pattern":
                 if text == "esac" and not quoted:
                     state = _closed(frames, state)
-            elif (not current and text in state[3] and replays < SHELL_REPLAYS
+            elif (text in state[3] and _prefixed(current) and calls < SHELL_CALLS
+                  and sum(entry["replay"] for entry in frames) < SHELL_REPLAYS
                   and tokens[index:index + 1] != [("(", True, False)]
                   and not any(entry["defines"] for entry in frames)):
                 # A call reads the body again, where the caller stands, as one
                 # command to the pipeline around it -- which is what a call is.
+                # Assignments and redirections before the name leave it a call.
                 # A body being defined is not running, so a name in one is not
                 # a call, and a name a `()` follows is a definition of its own.
-                # A second call to the same function keeps the directory, as a
+                # A second call to the same body keeps the directory, as a
                 # definition does: a modelling choice the docstring names, not
                 # the shell's rule. The `:` that ends the replay takes the
                 # call's own words, which are the body's arguments.
-                replays += 1
-                named, pending = "", "body" if text in state[4] else ""
+                calls += 1
                 body = state[3][text]
+                named, pending, current = "", "body" if tuple(body) in state[4] else "", []
                 # The pipeline and the list this call is in began before it,
                 # so what they put back is the state without the call in it.
                 _begin(frame, state)
-                state = _calls(state, text)
+                state = _calls(state, body)
                 tokens[index:index] = [("{", False, False), *body, (";", True, False),
                                        ("}", False, False), (":", False, False)]
+                # The `{` opened next is this call's, one call deeper.
+                deeper = True
             elif current or quoted:
                 _begin(frame, state)
                 current.append((text, quoted))
@@ -655,7 +692,8 @@ def _shell_commands(line, cwd):
                 frames[-1]["scoped"] = pending == "body"
                 frames[-1]["defines"] = named if pending == "body" else ""
                 frames[-1]["start"] = index
-                pending = ""
+                frames[-1]["replay"] = deeper
+                pending, deeper = "", False
             elif not (text in SHELL_RESERVED or (text in ("-p", "--") and previous[0] in ("time", "-p"))):
                 pending = ""
                 _begin(frame, state)
