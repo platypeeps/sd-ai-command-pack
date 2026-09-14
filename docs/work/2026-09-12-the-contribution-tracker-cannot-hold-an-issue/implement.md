@@ -16,7 +16,7 @@ happening once already.
 
 ## Step checklist
 
-- [ ] **1 — sd:602 first (pack).** Replace the two recited field tuples at
+- [x] **1 — sd:602 first (pack).** Replace the two recited field tuples at
       `bin/sd-status:3248-3250` and `bin/sd_work.py:417-418` — both in the
       **text** renderers — with a field-agnostic projection, and add a test
       asserting the *set* of keys the default report renders. Do not touch the
@@ -26,6 +26,9 @@ happening once already.
       changes no library code and no pinned behaviour. If sd:602 is not taken
       first, step 6 grows the field-set assertion instead, and its pull request
       says it paid the tax rather than removed it.
+      *Done by sd:602: both text renderers take membership from the row
+      through `source:bin/sd_lib.py::display_fields`, and each renderer's test
+      module asserts a key neither tuple names is printed (item note 1219).*
 
 - [ ] **2 — library: the row can hold an issue (system).** `ISSUE`, its own
       validator beside the one at `sd_db/contributions.py:42`, `issue_url` and
@@ -68,21 +71,30 @@ happening once already.
       the widened comment trigger on the issue path per `design.md` D3. This is the natural second seam D7 names — if step 2 has shipped,
       sd:244 already has a durable home even if this step slips.
 
-- [ ] **4 — move the pin (pack).** Bump
+- [x] **4 — move the pin (pack).** Bump
       `.github/workflows/tests.yml:84` to the system commit that carries steps
       2 and 3. Its own step because it is the one that can be forgotten, and
       forgetting it makes step 6 fail in CI only.
+      *Done by PR #886 (item note 1220), which moved the pin to the system
+      commit carrying #307 and #308; later pin moves have only gone forward.*
 
-- [ ] **5 — register the rows (system).** Migrate sd:244 to an issue row
+- [x] **5 — register the rows (system).** Migrate sd:244 to an issue row
       keeping item ID 244, and register
       `mProjectsCode/obsidian-meta-bind-plugin#644`. Last, so the rows are
       created under the finished shape rather than migrated twice.
+      *Done in the live store, verified read-only (item note 1852): item 244
+      keeps its ID and carries the Trellis#531 `issue_url`; item 628 is
+      meta-bind#644. No lane wrote the store for this tick.*
 
-- [ ] **6 — the pack shows it (pack).** Whatever remains after step 1 —
+- [x] **6 — the pack shows it (pack).** Whatever remains after step 1 —
       documentation in `skills/sd-status/SKILL.md`, and the `key` help string
       at `bin/sd_work.py:483`, which hard-codes both existing key forms in its
       text and will otherwise tell the operator that an issue key does not
       exist.
+      *Done by PR #888 (item note 1236). The `draft_verified: false` case
+      that PR's fixture could not see is closed by the sd:360 predicate
+      change: both text reports skip only `None`, `[]` and `""`, through
+      `source:bin/sd_lib.py::display_value` (owner decision, item note 1842).*
 
 ## Verification
 
