@@ -126,15 +126,33 @@
       and `test_a_non_chatgpt_auth_mode_refuses` in
       `tests/test_sd_review_codex.py` goes red on that edit. It fails an
       assertion, `Refusal not raised`, and does not raise an error. A sentinel edit to
-      the same function's docstring leaves that test green.
+      the same function's docstring leaves that test green. That was measured
+      once, through leg d's `exercise()` from a scratch script on this branch
+      before `ed83a19c`, and reproduced in review on the tree merged with
+      `360b3ba0`. The suite does not hold it: leg d's own sentinel control is
+      `R10-D6`'s, in `bin/sd_work.py`.
+
+      **Leg d proves one clause of `R10-D4`, not the whole rule.** Its mutation
+      defeats the `auth_mode` guard only. Three other ways to break the rule are
+      held by `tests.test_sd_review_codex` and not by leg d. The first is the
+      stored-key check in `codex_preflight`. The second is the
+      `CODEX_METERED_ENV` scrub, which is in `child_environment` and not in the
+      named checker. The third is the `codex_preflight` call in `review()`. In
+      review, each of those three edits left the named test green and turned
+      the whole module red. The row's subject keeps the whole rule, because
+      that is what the rule is. The gap belongs to leg d's design of one
+      mutation per row, and a row whose rule has several clauses inherits it.
 
       The table above was right that no import obstacle remained. It was wrong
       that nothing but a proof was needed. Leg a reads the *body* of the section
       a row names, and `section_body` drops the heading, so a heading that cites
       the id does not count as the section citing it. The row reddened leg a
-      until the section's body cited `R10-D4` too. That added one sentence to
-      `skills/sd-review/SKILL.md`. Counting the heading would have changed
-      leg a's measurement, so this slice did not make that change.
+      until the section's body cited `R10-D4` too. The id now sits in the
+      section's teaching sentence, beside `codex_preflight`, and that sentence
+      no longer credits `codex_preflight` with the environment scrub, which
+      `child_environment` performs. Counting the heading would have changed
+      leg a's measurement, so this slice did not make that change. `design.md`
+      records it as a decision.
 
       **A finding about leg c's four dangling ids, measured on `239ff624`.**
       They are not undefined. Three of them carry a definition in a form
