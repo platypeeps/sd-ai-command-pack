@@ -125,9 +125,11 @@ fi
 # Unset, which is every CI run and every plain `make check`, the whole suite
 # runs and nothing below changes a byte of it. select-tests.py says which
 # modules the paths need, or `full`; its docstring has the rules. Any doubt
-# runs the whole suite: a CI runner -- `CI` or `GITHUB_ACTIONS` set to
-# anything, since a runner is free to export `CI=1` -- a selector that fails or prints nothing,
-# or a selection that matches no module here. A run that did narrow writes
+# runs the whole suite: a CI runner -- `CI` or `GITHUB_ACTIONS` set to a
+# non-empty value, since a runner is free to export `CI=1`, while an empty
+# `CI=` is not a runner and does not stop the fast path -- a list that holds
+# no path, a selector that fails or prints nothing, or a selection that
+# matches no module here. A run that did narrow writes
 # FAST_PATH_MARK as the first line of the log, and `make test` reads that line
 # to skip `coverage combine` and the installer gate, which a partial run
 # cannot meet.
