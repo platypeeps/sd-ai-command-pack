@@ -1,17 +1,26 @@
 """The pack forwards the finite command CLI and preserves its durable evidence."""
 
+import argparse
+import importlib
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import Mock, patch
 
-from sd_db import connect, initialise
+import sd_db
+import sd_db.database
+from sd_db import connect, initialise, runner, runner_controls
 from sd_db.writes import create_item, upsert_repo
 
 ROOT = Path(__file__).resolve().parents[1]
+with patch.object(sys, "path", [str(ROOT / "bin"), *sys.path]):
+    cli = importlib.import_module("sd_runner")
 
 
 class RunnerCommands(unittest.TestCase):
@@ -159,6 +168,71 @@ class RunnerCommands(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {"queued": [], "active": []})
+
+
+class RunnerServiceControls(unittest.TestCase):
+    """`sd runner cancel` and `sd worktree` name the operator to the library.
+
+    `runner_controls.control` and `invoke_service` take `who` with no default
+    (sd:749). The two library calls are replaced by autospec mocks, so a call
+    that leaves `who` out is the library's own TypeError rather than a mock
+    that accepts anything.
+    """
+
+    def setUp(self):
+        self.assertEqual(Path(cli.__file__).resolve(), ROOT / "bin/sd_runner.py")
+        self.parser = argparse.ArgumentParser()
+        cli.register(self.parser.add_subparsers(required=True))
+        self.connection = Mock()
+        self.state = {"id": 8, "status": "running", "revision": "rev-8"}
+        installation = {"launcher": "/runner.sh", "database": "/sd.db"}
+        for patcher in (
+            patch.object(cli.sd_handoff_rows, "library", return_value=sd_db),
+            patch.object(cli.sd_handoff_rows, "connect", return_value=self.connection),
+            patch.object(cli.getpass, "getuser", return_value="operator"),
+            patch.object(runner, "queue_state", side_effect=lambda *_: self.state),
+            patch.object(runner, "attempt", return_value={"id": 21}),
+            patch.object(sd_db.database, "default_path", return_value="/sd.db"),
+            patch.object(runner_controls, "service_installation", return_value=installation),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.control = self.autospec("control")
+        self.invoke = self.autospec("invoke_service")
+
+    def autospec(self, name):
+        patcher = patch.object(runner_controls, name, autospec=True, return_value={"ok": True})
+        self.addCleanup(patcher.stop)
+        return patcher.start()
+
+    def call(self, *argv):
+        arguments = self.parser.parse_args(argv)
+        with redirect_stdout(io.StringIO()) as output:
+            code = arguments.handler(arguments)
+        self.assertEqual((code, json.loads(output.getvalue())), (0, {"ok": True}))
+
+    def test_cancelling_a_running_assignment_names_the_operator(self):
+        self.call("runner", "cancel", "8")
+        self.control.assert_called_once_with(
+            self.connection, 8, "cancel", expected_revision="rev-8",
+            destination=None, who="operator")
+        self.invoke.assert_not_called()
+
+    def test_resuming_a_kept_checkout_names_the_operator(self):
+        self.state = {**self.state, "status": "ending"}
+        self.call("worktree", "resume", "8", "--if-revision", "seen")
+        self.control.assert_called_once_with(
+            self.connection, 8, "resume", expected_revision="seen",
+            destination=None, who="operator")
+
+    def test_restoring_a_historical_run_names_the_operator_to_the_service(self):
+        self.call("worktree", "restore", "8", "--run", "3", "--destination", "/restored")
+        self.invoke.assert_called_once_with(
+            {"launcher": "/runner.sh", "database": "/sd.db"}, "restore", 8,
+            revision="rev-8", run=21, destination="/restored", historical_run=3,
+            who="operator")
+        runner.attempt.assert_called_once_with(self.connection, 8, 3)
+        self.control.assert_not_called()
 
 
 class RunnerPreparation(unittest.TestCase):
