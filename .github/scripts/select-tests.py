@@ -18,10 +18,14 @@ Every doubt resolves to running more, never less:
   outside the always-run set: that file is shared, and a fast path that runs
   most of the suite without its coverage gate is a slower full run that
   proves less.
-* The always-run set runs on every fast path, an empty change included. It is
-  the modules that walk the whole tree rather than naming a file: shape, line
-  caps, code health, citations, shell placement, verbs and workflow policy. If
-  one of them is missing, the set has drifted and the answer is `full`.
+* An empty list of paths selects `full`. `CHANGED=` and `CHANGED="   "` are
+  what an operator produces by accident, from a diff that came back empty or
+  failed, and a narrowed run that skips the coverage gates is the wrong answer
+  to "I changed nothing I can name".
+* The always-run set runs on every fast path. It is the modules that walk the
+  whole tree rather than naming a file: shape, line caps, code health,
+  citations, shell placement, verbs and workflow policy. If one of them is
+  missing, the set has drifted and the answer is `full`.
 
 A test module is selected when its source names the changed path, its file
 name, or its module stem, as a whole token. A change under `bin/` or
@@ -171,6 +175,8 @@ def modules_for(root: pathlib.Path, rel: str, modules: dict[str, str]) -> set[st
 def select(root: pathlib.Path, changed: list[str]) -> tuple[list[str] | None, str]:
     """The modules to run and why, or None and why the full suite must run."""
 
+    if not changed:
+        return None, "no path was given, so there is nothing to narrow to"
     modules = test_modules(root)
     missing = [name for name in ALWAYS_RUN if name not in modules]
     if missing:

@@ -185,12 +185,13 @@ class TheSelection(TreeCase):
                 self.assertIsNone(self.select(path))
                 self.assertIsNone(self.select("bin/sd-alpha", path))
 
-    def test_an_empty_change_runs_the_always_run_set(self) -> None:
-        self.assertEqual(self.select(), sorted(self.always))
+    def test_an_empty_change_selects_the_full_run(self) -> None:
+        """No path is what a failed or empty `git diff` produces; it must not narrow."""
+
+        self.assertIsNone(self.select())
 
     def test_a_missing_always_run_module_selects_the_full_run(self) -> None:
         (self.root / "tests/test_loc_caps.py").unlink()
-        self.assertIsNone(self.select())
         self.assertIsNone(self.select("bin/sd-alpha"))
 
 
@@ -236,10 +237,14 @@ class TheRunner(TreeCase):
         self.assertEqual(ran, set(ALWAYS_RUN_NAMES) | {"test_alpha"})
         self.assertTrue(first.startswith("test selection: changed files"), first)
 
-    def test_an_empty_change_runs_the_always_run_set(self) -> None:
-        ran, first, _ = self.run_harness(TEST_CHANGED_FILES="")
-        self.assertEqual(ran, set(ALWAYS_RUN_NAMES))
-        self.assertTrue(first.startswith("test selection: changed files"), first)
+    def test_an_empty_or_blank_change_runs_everything(self) -> None:
+        """A set-but-empty variable is what an empty diff gives; it runs the full suite."""
+
+        for value in ("", "   ", "\n \n"):
+            with self.subTest(value=repr(value)):
+                ran, first, _ = self.run_harness(TEST_CHANGED_FILES=value)
+                self.assertEqual(ran, self.everything)
+                self.assertNotIn("test selection", first)
 
     def test_an_unmapped_change_runs_everything(self) -> None:
         ran, first, _ = self.run_harness(TEST_CHANGED_FILES="bin/sd-alpha\ndocs/nowhere.md")
@@ -263,8 +268,8 @@ class TheRunner(TreeCase):
         self.assertNotIn("test selection", first)
 
 
-class TheMakefile(TreeCase):
-    """`CHANGED` counts only from the command line; the coverage steps skip only for a narrowed run."""
+class MakefileTree(TreeCase):
+    """The repository's own `Makefile`, over a throwaway tree and a venv that only reports."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -292,6 +297,10 @@ class TheMakefile(TreeCase):
         check = self.assertIn if ran else self.assertNotIn
         check("coverage combine ran", stdout)
         check("installer gate ran", stdout)
+
+
+class TheMakefile(MakefileTree):
+    """`CHANGED` counts only from the command line; the coverage steps skip only for a narrowed run."""
 
     def test_without_changed_the_full_suite_and_its_gates_run(self) -> None:
         ran, stdout = self.make()
@@ -324,6 +333,53 @@ class TheMakefile(TreeCase):
     def test_a_change_widened_to_the_full_suite_keeps_the_gates(self) -> None:
         ran, stdout = self.make("CHANGED=Makefile")
         self.assertEqual(ran, self.everything)
+        self.assert_coverage_steps(stdout, ran=True)
+
+    def test_an_empty_changed_runs_everything_with_its_gates(self) -> None:
+        """`CHANGED=` is what the documented `$(git diff ...)` recipe gives on an empty diff."""
+
+        ran, stdout = self.make("CHANGED=")
+        self.assertEqual(ran, self.everything)
+        self.assert_coverage_steps(stdout, ran=True)
+
+    def test_a_blank_changed_runs_everything_with_its_gates(self) -> None:
+        """The same for a `CHANGED` holding only whitespace."""
+
+        ran, stdout = self.make("CHANGED=   ")
+        self.assertEqual(ran, self.everything)
+        self.assert_coverage_steps(stdout, ran=True)
+
+
+class TheGateMark(MakefileTree):
+    """The mark that skips the coverage steps counts on the first line, at its start.
+
+    `test selection: changed files` is written by `run-tests.sh` and by this
+    module. The realistic way a *full* run's log carries it is a failing
+    assertion in this module printing its expected value -- exactly when the
+    coverage steps must not be skipped. `head -n 1` and the `^` anchor are
+    what hold that, so each is pinned here with a log this test writes.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.root / ".github/scripts/run-tests.sh").write_text(
+            'printf "%s" "$LOG_FIXTURE" > unittest-output.log\n')
+
+    def with_log(self, log: str) -> str:
+        return self.make(LOG_FIXTURE=log)[1]
+
+    def test_the_mark_on_the_first_line_skips_the_coverage_steps(self) -> None:
+        stdout = self.with_log("test selection: changed files, 7 of 85 modules\n...\nOK\n")
+        self.assert_coverage_steps(stdout, ran=False)
+
+    def test_the_mark_below_the_first_line_keeps_the_coverage_steps(self) -> None:
+        """A failed `assertTrue(first.startswith(...), first)` prints the mark at column 1."""
+
+        stdout = self.with_log("...\ntest selection: changed files, 7 of 85 modules\nOK\n")
+        self.assert_coverage_steps(stdout, ran=True)
+
+    def test_the_mark_inside_the_first_line_keeps_the_coverage_steps(self) -> None:
+        stdout = self.with_log("AssertionError: test selection: changed files, 7 of 85 modules\nOK\n")
         self.assert_coverage_steps(stdout, ran=True)
 
 

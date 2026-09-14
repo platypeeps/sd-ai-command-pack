@@ -53,12 +53,19 @@ and `docs-lint` still run whole. To cover everything you changed against
 make check CHANGED="$(git diff --name-only origin/main) $(git ls-files --others --exclude-standard)"
 ```
 
+If that diff comes back empty, or fails, `CHANGED` ends up empty or holding
+only blanks, and an empty list runs the full suite with both coverage steps,
+the same as a path nothing names.
+
 Without `CHANGED`, `make check` runs the full suite, and that stays the
 default: run it once, without `CHANGED`, before a push. Only a `CHANGED` given
 on the command line counts, and CI never passes one. `run-tests.sh` ignores
-the fast path when `CI` or `GITHUB_ACTIONS` is set to anything. The list is
-split on whitespace, so a path with a blank in it arrives as two paths, which
-neither names anything and so runs the full suite. Any doubt runs the full
+the fast path when `CI` or `GITHUB_ACTIONS` is set to a non-empty value; an
+empty `CI=` is not a CI runner and does not trip that guard. The list is split
+on whitespace, so do not pass a path with a blank in it: it arrives as two
+paths, and each half is matched by name, so `docs/sd-status notes.md` selects
+whatever names `sd-status` and runs a narrowed suite that covers neither half.
+A blank in a path can narrow the run, not widen it. Any doubt does run the full
 suite instead: a path no test module names, a path more than half of them
 name, the `Makefile`, anything under `.github/`, the Python or dependency
 configuration, `bin/sd_install.py`, and any non-test file under `tests/`.
