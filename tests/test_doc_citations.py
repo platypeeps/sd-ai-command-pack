@@ -746,6 +746,18 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
         # One character for one, so offsets carry over to `raw` unchanged.
         flat = raw.replace("\n", " ")
         archived = "archive" in doc.parts
+        # The name `KNOWN_PAST_END` spells its documents with, or "" for a
+        # document outside the checkout. `classify` takes its corpus as a
+        # parameter and fixtures routinely pass a page under a temporary
+        # directory without moving `REPO_ROOT` with it, so `relative_to` here
+        # raised `ValueError` out of the whole scan rather than returning a
+        # row: a gate that crashes on a document reports nothing at all
+        # instead of one bad row, which is the failure this module opens by
+        # naming. A document the list cannot name is on no list.
+        try:
+            named = str(doc.relative_to(REPO_ROOT))
+        except ValueError:
+            named = ""
         for match in TOKEN.finditer(flat):
             path, start = match.group(1), int(match.group(2))
             end = int(match.group(3) or match.group(2))
@@ -793,8 +805,7 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                     # citing a symbol that moved, and that is reported, not
                     # failed. 37 of the 49 live here.
                     reason = "archived-stale"
-                elif (str(doc.relative_to(REPO_ROOT)), path, start, end) \
-                        in KNOWN_PAST_END:
+                elif (named, path, start, end) in KNOWN_PAST_END:
                     reason = "line-past-end-carried"
                 else:
                     reason = "line-past-end"
@@ -2124,6 +2135,26 @@ class ACitationPastTheEndOfItsFile(unittest.TestCase):
         target.write_text("def render():\n", encoding="utf-8")
         self.assertEqual(self.reason_for("see `bin/tool.py:2`\n"), "line-past-end")
 
+    def test_a_fixture_document_outside_the_checkout_does_not_crash_the_scan(
+            self) -> None:
+        """`REPO_ROOT` is not moved here, and the document is not under it.
+
+        The shape every other fixture class in this module uses: a page under
+        a temporary directory, classified against the real checkout, citing a
+        real file. `KNOWN_PAST_END` names its documents relative to
+        `REPO_ROOT`, and taking that name of a document outside it raised
+        `ValueError` out of the whole scan. A gate that crashes on a document
+        reports nothing at all rather than one bad row, which is the failure
+        this module's own docstring opens by naming.
+        """
+
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = pathlib.Path(tmp) / "doc.md"
+            doc.write_text("`frontmatter` (`bin/sd_skill.py:217`)\n",
+                           encoding="utf-8")
+            self.assertEqual([row.reason for row in classify([doc])],
+                             ["line-past-end"])
+
     def test_the_bucket_fails_the_gate(self) -> None:
         """Counting a defect is not catching it: the bucket has to be red."""
 
@@ -2182,6 +2213,14 @@ class TheHistoricalNumbersInThisModule(unittest.TestCase):
             "def frontmatter",
             numbered_lines((REPO_ROOT / "bin" / "sd").read_text(
                 encoding="utf-8", errors="replace"))[1230])
+        # The third record, which the two above do not reach. The claim it
+        # carries is that those lines are "a docstring that does not happen to
+        # repeat the key name"; they are a `#:` comment block today, so the
+        # window holds no docstring quote at all. Without this the count above
+        # would keep pinning a range that had quietly become accurate again.
+        window = numbered_lines((REPO_ROOT / "bin" / "sd-status").read_text(
+            encoding="utf-8", errors="replace"))[500:506]
+        self.assertNotIn('"""', "\n".join(window))
 
 
 class TheCarriedPastEndList(unittest.TestCase):
