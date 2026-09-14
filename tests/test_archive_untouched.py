@@ -64,9 +64,13 @@ def tracked(pattern: str) -> list[str]:
     stage, and plain `ls-files` prints it once per stage. Inert here -- the
     one caller that reads the rows feeds them to `set()`, and the other only
     asks whether the list is non-empty -- so this is the form, not a fix for a
-    failure. It is written this way because the repository already had the
-    right form in `.github/scripts/`, the `Makefile` and six test modules, and
-    the two calls that did not are how the wrong form survived (sd:823).
+    failure. It is written this way because the right form was already the
+    rule everywhere the rows are read as a list -- `.github/scripts/`, the
+    `Makefile`, `bin/` and the test modules -- and the two calls that did not
+    carry it are how the wrong form survived (sd:823). No count is given here
+    on purpose: a number in a comment is the thing that drifts. To read the
+    inventory, enumerate it -- `git grep -nI -- ls-files -- tests bin scripts
+    .github Makefile .githooks`.
     """
     return lines(git("ls-files", "--deduplicate", "--", f":(glob){pattern}"))
 
