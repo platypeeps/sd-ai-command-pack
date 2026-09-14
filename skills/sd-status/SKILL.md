@@ -184,8 +184,8 @@ Automatic acknowledgement stays with `bin/sd-ship`; a push or a merge made
 another way records nothing, which is the case this row exists to show.
 
 It sat at 36 at first, and review of #925 showed why that cannot hold here.
-Lanes in this repository push with plain `git` and never run `bin/sd-ship`,
-so nothing records their answers, and about 278 pull requests merged in the
+Lanes in this repository push with plain `git` instead of `bin/sd-ship`, so
+nothing records their answers, and about 278 pull requests merged in the
 fifteen days to 2026-09-13. Ten of them with one unanswered inline comment
 would fill all ten `pending` slots at 36, and `next` would point at the
 oldest. So three rules apply now:
