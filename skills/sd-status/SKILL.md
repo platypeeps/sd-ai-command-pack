@@ -146,8 +146,8 @@ the lowest five named, the rest as a count. An acknowledgement store
 that cannot be read also marks the class `unchecked`, but it hides no row: the
 store then reads as empty, so every finding is unanswered and every pull
 request with one keeps its row. Those rows say to repair or move the store
-first, because `sd-review-ack --ack` refuses to write over a store it cannot
-read rather than replace the acknowledgements still in it.
+first, because `sd-review-ack --ack` stops with an error on a store it could
+not read rather than replace the acknowledgements still in it.
 
 The count is sometimes a floor. A reviewer that writes `Moderate findings
 (3 votes each)` has stated more than one finding under one marker and has not
