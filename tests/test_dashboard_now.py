@@ -189,16 +189,15 @@ class SessionRows(unittest.TestCase):
 
 
 class Merge(unittest.TestCase):
-    def test_a_plugin_rank_zero_outranks_every_backbone_row(self) -> None:
-        """The rank-0 and rank-1 rows all come from plugin-bound sources.
+    def test_the_loudest_row_comes_first_whichever_collector_raised_it(self) -> None:
+        """Rank orders across sources, not within them.
 
-        This is the whole reason plugin rows reach Now at all: a merge that
-        put the backbone first would bury a dark plugin under a dirty tree.
+        A merge that kept the collectors' own order would bury a stale pull
+        request under a dirty tree because the fleet was collected first.
         """
-        backbone = now.backbone_rows([repo("a", ahead=1)])
-        plugin = [{"rank": 0, "id": "z", "source": "sys/toolbox",
-                   "what": "cron exited 1", "detail": ""}]
-        self.assertEqual(now.merge(backbone, plugin)[0]["source"], "sys/toolbox")
+        rows = now.backbone_rows([repo("a", dirty=1)]) + [
+            {"rank": now.STALE, "id": "pr:x#1:2", "source": "prs"}]
+        self.assertEqual([row["source"] for row in now.merge(rows)], ["prs", "repos"])
 
     def test_the_order_does_not_move_between_polls(self) -> None:
         """Rank ties are the common case, not the exception.
@@ -210,16 +209,16 @@ class Merge(unittest.TestCase):
         """
         rows = now.backbone_rows(
             [repo(name, dirty=1) for name in "abcdefghijkl"])
-        first = [row["id"] for row in now.merge(rows, [])]
+        first = [row["id"] for row in now.merge(rows)]
         for _ in range(5):
             shuffled = rows[:]
             random.shuffle(shuffled)
-            self.assertEqual([row["id"] for row in now.merge(shuffled, [])], first)
+            self.assertEqual([row["id"] for row in now.merge(shuffled)], first)
 
     def test_a_row_with_no_rank_sinks_rather_than_raising(self) -> None:
-        """Plugin rows are validated by the loader, and Now is not the place
-        to discover that something got past it."""
-        got = now.merge([], [{"id": "x", "source": "p"}, {"rank": 2, "id": "y"}])
+        """A collector's row without a rank is a bug in the collector, and
+        Now is not the place to discover it by raising."""
+        got = now.merge([{"id": "x", "source": "p"}, {"rank": 2, "id": "y"}])
         self.assertEqual([row["id"] for row in got], ["y", "x"])
 
 
@@ -236,10 +235,8 @@ class PageAndClientAgree(unittest.TestCase):
     is why nothing else would have said so.
 
     Ids the page mints at run time are excluded by construction: this reads
-    the literal `id="..."` attributes `PAGE` ships with, so a plugin table
-    built in JavaScript is out of scope, as it should be -- those are exactly
-    the ids `sanitise` strips (`test_an_id_is_dropped_so_a_plugin_cannot_
-    claim_a_backbone_element`).
+    the literal `id="..."` attributes `PAGE` ships with, so an element built in
+    JavaScript is out of scope.
     """
 
     def handles(self) -> set[str]:

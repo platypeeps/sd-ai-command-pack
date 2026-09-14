@@ -120,8 +120,8 @@ status checks.
    > the three properties of the predicate that are now pinned by tests.
    >
    > The 26 archive-only R-ids in this requirement were reproducible and are
-   > not affected by that correction; the backfill has since moved them to 23,
-   > which `STRANDED_RULE_IDS` records and the Log dates.
+   > not affected by that correction; the backfill and one deletion have since
+   > moved them to 20, which `STRANDED_RULE_IDS` records and the Log dates.
 7. **The pre-commit tier is scoped by measurement, not by assumption.** A
    checker runs over the whole repository when a whole-repository run is fast,
    and is diff-scoped only where it is not. The backbone item asserts the
@@ -205,3 +205,7 @@ status checks.
 - 2026-09-13 step 4 third slice: `R10-D4` registered, with the checker
   `bin/sd-review::codex_preflight`, the first in a file with no `.py` suffix.
   Leg d proves its `auth_mode` clause; the stranded baseline falls 24 → 23
+- 2026-09-13 sd:719 step 3, not this item's work: the plugin loader's files were
+  the only live citations of three stranded ids, and deleting them takes the
+  stranded baseline 23 → 20 with nothing registered. The ids are in that
+  commit's message; naming them here would cite them again

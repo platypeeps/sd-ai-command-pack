@@ -20,7 +20,9 @@ import socket
 import subprocess
 import sys
 import tempfile
+import textwrap
 import threading
+import time
 import unittest
 import unittest.mock
 from http.server import ThreadingHTTPServer
@@ -31,28 +33,16 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from dashboard import (  # noqa: E402 - after the path insert
     actions,
-    plugins,
     server,
     skills,
     work,
 )
 
 
-def plugin_entry(**overrides) -> dict:
-    """A registry entry as `sd plugin list --json` prints one."""
-    return {
-        "root": "/tmp/plug",
-        "prefix": "sys",
-        "readable": True,
-        "actions": [{"id": "queue-set", "label": "sort the queue", "run": "sd-sys queue"}],
-        **overrides,
-    }
-
-
 class Catalog(unittest.TestCase):
     def test_the_backbone_action_is_offered_by_id_and_label(self) -> None:
         self.assertEqual(
-            actions.catalog([]),
+            actions.catalog(),
             [{"id": "index", "label": "collect issues and pull requests"}],
         )
 
@@ -68,61 +58,36 @@ class Catalog(unittest.TestCase):
 
     def test_the_argv_never_reaches_the_page(self) -> None:
         """A page that has never seen a command cannot be talked into echoing one."""
-        offered = actions.catalog([plugin_entry()])
         self.assertEqual(
-            {key for entry in offered for key in entry}, {"id", "label"})
+            {key for entry in actions.catalog() for key in entry}, {"id", "label"})
 
-    def test_a_declared_action_is_namespaced_by_its_plugin(self) -> None:
-        self.assertIn(
-            "sys/queue-set", {entry["id"] for entry in actions.catalog([plugin_entry()])})
+    def test_the_catalog_is_the_allow_list_and_nothing_else(self) -> None:
+        """sd:719 step 3: no manifest is read, so nothing is added to the list.
 
-    def test_a_plugin_cannot_claim_a_backbone_id(self) -> None:
-        """The namespace is the whole defence, so it is tested by trying.
-
-        A plugin declaring `index` gets `sys/index`; the backbone's own
-        `index` still resolves to the backbone's argv.
+        The catalog used to be the backbone's actions followed by every
+        registered plugin's. With the loader gone, an id the page can offer is
+        an id `RUN_ALLOWLIST` names, in its order.
         """
-        entry = plugin_entry(
-            actions=[{"id": "index", "label": "mine", "run": "curl evil.example"}])
-        resolved = actions.declared([entry])
-        self.assertIn("sys/index", resolved)
-        self.assertNotIn("index", resolved)
         self.assertEqual(
-            actions.RUN_ALLOWLIST["index"]["argv"],
-            [str(actions.SD_DASHBOARD), "index"])
+            [entry["id"] for entry in actions.catalog()], list(actions.RUN_ALLOWLIST))
 
-    def test_the_order_is_declaration_order_and_not_sorted(self) -> None:
-        """R11-D23 chose a list over an object keyed by id to keep this.
+    def test_the_dashboard_reads_no_plugin_registry(self) -> None:
+        """The loader went at sd:719 step 3, and nothing here may call it back.
 
-        Sorting reads as tidier and throws away the thing the shape was chosen
-        for: the buttons would reorder themselves when an id was renamed. The
-        backbone's own action comes first, then each manifest in its order.
+        Enumerated from the files under `dashboard/`, so a module added later
+        is covered the day it is written. The registry command and the endpoint
+        the page polled are both named: either one coming back is the loader
+        coming back under another name.
         """
-        entry = plugin_entry(actions=[
-            {"id": "zebra", "label": "z", "run": "sd-sys z"},
-            {"id": "alpha", "label": "a", "run": "sd-sys a"},
-        ])
-        self.assertEqual(
-            [action["id"] for action in actions.catalog([entry])],
-            ["index", "sys/zebra", "sys/alpha"],
-        )
-
-    def test_a_plugin_cannot_shadow_another_plugins_action(self) -> None:
-        first = plugin_entry(prefix="sys")
-        second = plugin_entry(prefix="ops", root="/tmp/other")
-        resolved = actions.declared([first, second])
-        self.assertEqual(set(resolved), {"sys/queue-set", "ops/queue-set"})
-
-    def test_a_declaration_that_will_not_parse_is_dropped_not_fatal(self) -> None:
-        """An unrunnable button is a smaller failure than a loader that stops."""
-        entry = plugin_entry(
-            actions=[{"id": "bad", "label": "x", "run": 'sd-sys "unclosed'},
-                     {"id": "good", "label": "y", "run": "sd-sys ok"}])
-        self.assertEqual(set(actions.declared([entry])), {"sys/good"})
-
-    def test_an_entry_without_a_root_declares_nothing(self) -> None:
-        """The root is the working directory; an empty one is the dashboard's own."""
-        self.assertEqual(actions.declared([plugin_entry(root="")]), {})
+        found = [
+            f"{path.relative_to(REPO_ROOT)}: {needle}"
+            for path in sorted((REPO_ROOT / "dashboard").iterdir())
+            if path.suffix in {".py", ".js"}
+            for needle in ('"plugin", "list"', "/api/plugins", "from .plugins",
+                           "plugins.catalog", "plugins.cached_load", "plugins.load")
+            if needle in path.read_text(encoding="utf-8")
+        ]
+        self.assertEqual(found, [])
 
 
 class Resolution(unittest.TestCase):
@@ -131,15 +96,24 @@ class Resolution(unittest.TestCase):
         with unittest.mock.patch.object(
             actions, "bounded_run", lambda argv, **kw: ran.append(argv) or b""
         ):
-            body, status = actions.run("rm -rf /", [])
+            body, status = actions.run("rm -rf /")
         self.assertEqual(status, 404)
         self.assertEqual(ran, [], "an unresolved id reached a subprocess")
 
-    def test_a_non_string_id_is_refused_before_the_map_is_read(self) -> None:
-        self.assertEqual(actions.run({"argv": ["sh"]}, [])[1], 400)
-        self.assertEqual(actions.run(None, [])[1], 400)
+    def test_an_id_a_plugin_used_to_declare_is_now_a_404(self) -> None:
+        """`sys/queue-blog` was a button until sd:719 step 3; now it is unknown."""
+        ran: list[list[str]] = []
+        with unittest.mock.patch.object(
+            actions, "bounded_run", lambda argv, *a, **kw: ran.append(argv) or b""
+        ):
+            self.assertEqual(actions.run("sys/queue-blog")[1], 404)
+        self.assertEqual(ran, [])
 
-    def test_a_declared_action_runs_its_own_argv_in_its_own_root(self) -> None:
+    def test_a_non_string_id_is_refused_before_the_map_is_read(self) -> None:
+        self.assertEqual(actions.run({"argv": ["sh"]})[1], 400)
+        self.assertEqual(actions.run(None)[1], 400)
+
+    def test_the_backbone_action_runs_its_own_argv(self) -> None:
         seen: dict = {}
 
         def fake(argv, cwd, **kw):
@@ -147,22 +121,194 @@ class Resolution(unittest.TestCase):
             return b"done\n"
 
         with unittest.mock.patch.object(actions, "bounded_run", fake):
-            body, status = actions.run("sys/queue-set", [plugin_entry()])
+            body, status = actions.run("index")
         self.assertEqual(status, 200)
-        self.assertEqual(seen["argv"], ["sd-sys", "queue"])
-        self.assertEqual(str(seen["cwd"]), "/tmp/plug")
+        self.assertEqual(seen["argv"], actions.RUN_ALLOWLIST["index"]["argv"])
         self.assertEqual(body["output"], "done")
 
     def test_a_refused_command_says_why_rather_than_going_quiet(self) -> None:
         """The operator pressed a button. Silence is the failure mode."""
 
         def fake(argv, cwd, **kw):
-            raise plugins.Bounded("exited 1: no such queue")
+            raise actions.Bounded("exited 1: no such queue")
 
         with unittest.mock.patch.object(actions, "bounded_run", fake):
-            body, status = actions.run("index", [])
+            body, status = actions.run("index")
         self.assertEqual(status, 502)
         self.assertIn("no such queue", body["error"])
+
+
+# How much of a budget a child gets to reach the state it is being tested in.
+# Carried from the loader's tests with `bounded_run` (sd:526): a fixed 0.4s
+# measured the machine's load, not this function, so a refusal that is still
+# the one a machine too slow to start an interpreter would give is retried
+# with twice the budget, up to the last.
+BUDGETS = (0.4, 0.8, 1.6, 3.2, 6.4, 12.8)
+
+
+def child(body: str) -> list[str]:
+    """This interpreter running an inline program."""
+    return [sys.executable, "-c", textwrap.dedent(body)]
+
+
+class BoundedRun(unittest.TestCase):
+    """The bounded call, against a real subprocess.
+
+    It moved here from `dashboard/plugins.py` at sd:719 step 3, and its tests
+    moved with it rather than going with the loader: an action is the same kind
+    of child under the same two bounds, and both bounds are about what a child
+    can do to this process -- outlast its deadline, outgrow its buffer -- which
+    neither survives being mocked.
+    """
+
+    def refusal(self, body: str, *, limit: int = 1024) -> str:
+        """The message `bounded_run` refuses `body` with, under a budget it can meet."""
+        try:
+            actions.bounded_run(child(body), None, seconds=60.0, limit=limit)
+        except actions.Bounded as refused:
+            return str(refused)
+        self.fail("the child was accepted")
+
+    def refusal_saying(self, body: str, expected: str, *,
+                       reached: pathlib.Path | None = None) -> str:
+        """The refusal under the smallest of `BUDGETS` that lets the child get there.
+
+        Every child passed here holds its state for 30 seconds, far past the
+        largest budget, so a longer budget changes only whether the call got
+        to see the state. Accepting such a child fails at once, under any
+        budget.
+        """
+        said = "never run"
+        for seconds in BUDGETS:
+            if reached is not None:
+                reached.unlink(missing_ok=True)
+            try:
+                actions.bounded_run(child(body), None, seconds=seconds, limit=1024)
+            except actions.Bounded as refused:
+                said = str(refused)
+            else:
+                self.fail(f"accepted a child still in the state under test at {seconds:g}s")
+            if expected in said and (reached is None or reached.exists()):
+                return said
+        self.fail(f"no refusal said {expected!r}; the last said {said!r}")
+
+    def test_the_byte_ceiling_is_applied_before_the_read_not_after(self) -> None:
+        """A small limit is not quietly rounded up to a full chunk first."""
+        with self.assertRaises(actions.Bounded):
+            actions.bounded_run(
+                child("import sys; sys.stdout.write('x' * 100000)"),
+                None, seconds=60.0, limit=32)
+        out = actions.bounded_run(
+            child("import sys; sys.stdout.write('x' * 32)"), None, seconds=60.0, limit=32)
+        self.assertEqual(len(out), 32)
+
+    def test_output_past_the_limit_is_refused_by_name(self) -> None:
+        self.assertIn("more than 1024 bytes",
+                      self.refusal("import sys; sys.stdout.write('x' * 200000)"))
+
+    def test_a_failing_child_gets_to_say_why(self) -> None:
+        said = self.refusal("""
+            import sys
+            print("no such queue", file=sys.stderr)
+            sys.exit(1)
+            """)
+        self.assertIn("exited 1", said)
+        self.assertIn("no such queue", said)
+
+    def test_the_child_does_not_get_to_choose_how_long_the_message_is(self) -> None:
+        said = self.refusal("""
+            import sys
+            sys.stderr.write("x" * 20000)
+            sys.stderr.write("THE ACTUAL ERROR")
+            sys.exit(1)
+            """)
+        self.assertLess(len(said), actions.STDERR_TAIL + 200)
+        self.assertIn("THE ACTUAL ERROR", said)
+
+    def test_output_and_then_a_failure_is_a_failure(self) -> None:
+        """Closing stdout is not exiting, and the exit status still counts."""
+        said = self.refusal("""
+            import os, sys
+            print("fine")
+            sys.stdout.flush()
+            os.close(1)
+            os._exit(3)
+            """)
+        self.assertIn("exited 3", said)
+
+    def test_a_command_that_does_not_exist_is_refused(self) -> None:
+        with self.assertRaises(actions.Bounded) as caught:
+            actions.bounded_run(["/nonexistent/action"], None, seconds=60.0, limit=32)
+        self.assertIn("cannot run /nonexistent/action", str(caught.exception))
+
+    def test_a_stderr_flood_is_read_rather_than_deadlocked(self) -> None:
+        out = actions.bounded_run(child("""
+            import sys
+            sys.stderr.write("y" * 400000)
+            sys.stderr.flush()
+            print("survived")
+            """), None, seconds=60.0, limit=1024)
+        self.assertEqual(out, b"survived\n")
+
+    def test_a_stderr_flood_after_stdout_closes_is_still_served(self) -> None:
+        """The same deadlock past the break: a plain `wait` hangs on it."""
+        out = actions.bounded_run(child("""
+            import os, sys, time
+            print("late")
+            sys.stdout.flush()
+            os.close(1)
+            time.sleep(0.3)
+            sys.stderr.write("y" * 400000)
+            sys.stderr.flush()
+            """), None, seconds=60.0, limit=1024)
+        self.assertEqual(out, b"late\n")
+
+    def test_a_child_that_never_speaks_is_killed_at_the_deadline(self) -> None:
+        said = self.refusal_saying("import time; time.sleep(30)", "no stdout within")
+        self.assertIn("no stdout within", said)
+
+    def test_a_child_that_writes_then_hangs_is_refused(self) -> None:
+        said = self.refusal_saying("""
+            import os, sys, time
+            print("t")
+            sys.stdout.flush()
+            os.close(1)
+            time.sleep(30)
+            """, "did not exit")
+        self.assertIn("did not exit", said)
+
+    def test_a_child_that_stalls_mid_write_says_so(self) -> None:
+        said = self.refusal_saying("""
+            import sys, time
+            sys.stdout.write("partial")
+            sys.stdout.flush()
+            time.sleep(30)
+            """, "stopped writing stdout")
+        self.assertNotIn("no stdout", said)
+
+    def test_the_deadline_kills_the_process_group_and_not_only_the_child(self) -> None:
+        """A backgrounded grandchild must not outlive the refusal."""
+        with tempfile.TemporaryDirectory() as scratch:
+            born = Path(scratch) / "born"
+            self.refusal_saying(f"""
+                import pathlib, subprocess, sys, time
+                grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
+                pathlib.Path({str(born)!r}).write_text(str(grandchild.pid))
+                time.sleep(30)
+                """, "within", reached=born)
+            pid = int(born.read_text())
+        stop = time.monotonic() + 30.0
+        while time.monotonic() < stop:
+            try:
+                os.kill(pid, 0)
+            except (ProcessLookupError, PermissionError):
+                return
+            time.sleep(0.05)
+        try:
+            os.kill(pid, 9)
+        except OSError:
+            pass
+        self.fail("the grandchild survived the group kill")
 
 
 class Hosts(unittest.TestCase):
@@ -559,8 +705,6 @@ class Live:
         self.installed_patch = unittest.mock.patch.object(
             skills, "installed_root", lambda: self.installed)
         self.installed_patch.start()
-        self.patch = unittest.mock.patch.object(plugins, "catalog", lambda: ([], ""))
-        self.patch.start()
         handler = server.make_handler(server.Cache(REPO_ROOT / "missing"), "// none")
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
@@ -572,7 +716,6 @@ class Live:
         self.httpd.shutdown()
         self.httpd.server_close()
         self.thread.join(timeout=5)
-        self.patch.stop()
         self.installed_patch.stop()
         self.cache_patch.stop()
         self.scratch.cleanup()
@@ -618,7 +761,7 @@ class Guards(unittest.TestCase):
     def test_a_token_holder_reaches_the_allow_list_and_not_a_shell(self) -> None:
         ran: list[str] = []
         with Live(self) as live, unittest.mock.patch.object(
-            actions, "run", lambda name, entries: (ran.append(name) or ({"ok": True}, 200))
+            actions, "run", lambda name: (ran.append(name) or ({"ok": True}, 200))
         ):
             status, body = live.request(
                 "POST", "/api/run", json.dumps({"action": "index"}).encode(),
@@ -672,34 +815,6 @@ class Guards(unittest.TestCase):
             status, _ = live.request(
                 "POST", "/api/run", b"action=index", {server.TOKEN_HEADER: server.TOKEN})
         self.assertEqual(status, 400)
-
-
-class RegistryFailure(unittest.TestCase):
-    def test_a_registry_that_will_not_read_is_said_and_not_shown_as_none(self) -> None:
-        """`plugins.catalog` returns a complaint; dropping it is the quiet it refuses.
-
-        A broken loader and a machine with no plugins are different answers,
-        and the run strip would otherwise render both as an empty row of
-        buttons.
-        """
-        broken = unittest.mock.patch.object(
-            plugins, "catalog", lambda: ([], "plugin registry is not JSON"))
-        broken.start()
-        self.addCleanup(broken.stop)
-        handler = server.make_handler(server.Cache(REPO_ROOT / "missing"), "// none")
-        httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
-        try:
-            conn = http.client.HTTPConnection(*httpd.server_address, timeout=10)
-            conn.request("GET", "/api/actions")
-            payload = json.loads(conn.getresponse().read())
-            conn.close()
-        finally:
-            httpd.shutdown()
-            httpd.server_close()
-            thread.join(timeout=5)
-        self.assertEqual(payload["reason"], "plugin registry is not JSON")
 
 
 class TokenDelivery(unittest.TestCase):

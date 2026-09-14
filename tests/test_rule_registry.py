@@ -197,8 +197,13 @@ DANGLING_RULE_IDS = frozenset({"R11-D1", "R11-D30", "R11-D46", "R5-D1"})
 #: one was newly stranded in the same change -- two baselines in one file
 #: keeping two different standards, which review caught.
 #:
-#: **23 on this branch, down from the 26 measured on `cddd3b98`.** `R10-D5`,
-#: `R10-D6` and `R10-D4` are rows in `bin/sd_rules.py` now.
+#: **20 on this branch, down from the 26 measured on `cddd3b98`.** `R10-D5`,
+#: `R10-D6` and `R10-D4` are rows in `bin/sd_rules.py` now. Three more went the
+#: other way out: sd:719 step 3 deleted the only live files that cited them --
+#: `dashboard/plugins.py`, `dashboard/markup.py` and
+#: `tests/test_dashboard_plugins.py` -- and nothing was registered for them. They
+#: are named in that commit's message and not here, because a live comment
+#: naming them is a live citation, and this set would measure them back in.
 #:
 #: `R10-D6` took two slices to land, and what held it is worth keeping. Its
 #: enforcement was never in doubt --
@@ -213,13 +218,13 @@ DANGLING_RULE_IDS = frozenset({"R11-D1", "R11-D30", "R11-D46", "R5-D1"})
 #: the meta-check passed it. `checker` is a `path::symbol` location now, so a
 #: test is nameable, and leg d is what makes naming one mean something.
 #:
-#: The other twenty-three were each looked at and each has a recorded reason it
+#: The other twenty were each looked at and each has a recorded reason it
 #: is not a row yet, in the backfill section of this item's `implement.md`,
 #: rather than left for the next reader to rediscover.
 STRANDED_RULE_IDS = frozenset({
     "R10-D1", "R10-D2", "R10-D3", "R10-D7",
-    "R11-D10", "R11-D12", "R11-D13", "R11-D14", "R11-D15", "R11-D16",
-    "R11-D17", "R11-D18", "R11-D19", "R11-D20", "R11-D21", "R11-D23",
+    "R11-D10", "R11-D13", "R11-D14", "R11-D15",
+    "R11-D17", "R11-D18", "R11-D20", "R11-D21", "R11-D23",
     "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D4", "R11-D5", "R11-D6",
 })
 
