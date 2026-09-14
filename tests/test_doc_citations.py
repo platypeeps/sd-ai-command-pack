@@ -1313,6 +1313,16 @@ def anchored_repoint(root: pathlib.Path, flat: str, match: re.Match) -> tuple | 
         if len(declared) != 1:
             return (f"`{anchor}` is declared {len(declared)} times in {path}, so"
                     " no source: locator names it; say it in prose")
+        # One declaration is not yet the claim. A cited line that carries the
+        # name while the declaration is elsewhere is a USE -- `d.get('x')`,
+        # `'a'.replace(...)`, `helper()` -- and the prose is about that call,
+        # not about a same-named definition. A window without the name is a
+        # stale citation to the declaration, which is what converts.
+        start, end = int(match.group(2)), int(match.group(3) or match.group(2))
+        if (not start - WINDOW <= declared[0] <= end + WINDOW
+                and names_its_symbol(anchor, target, start, end)):
+            return (f"`{anchor}` at {path}:{start} is a use, not its declaration at"
+                    f" {declared[0]}; say it in prose")
         return (match.start(1), match.end()), f"source:{path}::{name}`"
     start = int(match.group(2))
     end = int(match.group(3) or match.group(2))
@@ -1540,6 +1550,22 @@ class StableSourceCitationTests(unittest.TestCase):
             "found 0",
             source_declaration_error(self.root, "bin/tool", "deleted") or "",
         )
+
+    def test_a_skill_page_is_scanned_and_its_missing_symbol_is_red(self) -> None:
+        """The repointer writes into every living page, so every living page is read.
+
+        A corpus scoped back to `docs/**` would pass a locator in a skill whose
+        symbol was renamed away, and nothing else checks that page.
+        """
+
+        skill = self.root / "skills" / "sd-tool" / "SKILL.md"
+        skill.parent.mkdir(parents=True)
+        skill.write_text("run `render` (`source:bin/tool::deleted`)\n", encoding="utf-8")
+        self.assertIn((skill, "bin/tool", "deleted"), stable_source_citations(self.root))
+        failures = [problem for _, path, symbol in stable_source_citations(self.root)
+                    if (problem := source_declaration_error(self.root, path, symbol))]
+        self.assertEqual(len(failures), 1)
+        self.assertIn("found 0", failures[0])
 
     def test_a_symlinked_document_is_never_read(self) -> None:
         """The document is an input too, not only the file its citation names.
@@ -2080,6 +2106,48 @@ class CitationRepointerTests(unittest.TestCase):
         self.assertEqual(moves, [])
         self.assertIn("say it in prose", refusals[0].reason)
         self.assertNotIn("source:bin/tool.py::replace", text)
+
+    def test_a_bare_name_at_a_use_site_is_not_converted_onto_its_declaration(self) -> None:
+        """A use is a claim about the call, not about the definition it resolves to.
+
+        `get` cited where `d.get('x')` runs means `dict.get`; a `Store.get`
+        declared once, further down, is something else. Counting declarations
+        cannot tell the two apart, so the cited line is asked: the anchor is
+        there and the declaration is not, and that refuses to prose.
+        """
+        self.source.write_text(
+            "def lookup(d):\n"                     # 1
+            "    return d.get('x')\n"              # 2
+            "\n\n"                                 # 3-4
+            "def run_all():\n"                     # 5
+            "    text = 'a'.replace('a', 'b')\n"   # 6
+            "    return helper()\n"                # 7
+            + "# pad\n" * 10 +                     # 8-17
+            "class Store:\n"                       # 18
+            "    def get(self):\n"                 # 19
+            "        return 1\n"                   # 20
+            "\n\n"                                 # 21-22
+            "def replace():\n"                     # 23
+            "    pass\n"                           # 24
+            "\n\n"                                 # 25-26
+            "def helper():\n"                      # 27
+            "    pass\n",                          # 28
+            encoding="utf-8")
+        for anchor, line in (("get", 2), ("replace", 6), ("helper()", 7),
+                             (".get", 2), ("Store.get", 19)):
+            with self.subTest(anchor=anchor):
+                self.page(f"It reads with `{anchor}` (`bin/tool.py:{line}`).\n")
+                text, moves, refusals = repoint_document(self.doc, self.root)
+                self.assertEqual(moves, [])
+                self.assertIn("say it in prose", refusals[0].reason)
+                self.assertIn(f"`bin/tool.py:{line}`", text)
+        for anchor, line, name in (("get", 19, "get"), ("helper()", 27, "helper")):
+            with self.subTest(control=anchor):
+                self.page(f"It reads with `{anchor}` (`bin/tool.py:{line}`).\n")
+                _, moves, refusals = repoint_document(self.doc, self.root)
+                self.assertEqual(refusals, [])
+                self.assertEqual([move.now for move in moves],
+                                 [f"source:bin/tool.py::{name}`"])
 
     def test_a_quoted_reason_moves_and_the_citation_it_covers_does_not(self) -> None:
         """sd:568's marker is a citation too, and its anchored text is the citation.
