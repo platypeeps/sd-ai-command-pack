@@ -78,7 +78,7 @@ since R11-D48. The pack half is on the order of forty lines in
       If the run prints `Jira rejected the credentials`, stop: the port does
       not start on credentials that do not reach Jira.
 
-- [ ] **3. The library module: `sd_db/shadow_jira.py`.** In
+- [x] **3. The library module: `sd_db/shadow_jira.py`.** In
       `platypeeps/system`, lift `dashboard/jira.py` whole — module docstring
       with both lists, `settings`, `missing`, `window_start`,
       `window_minutes`, `_request`, `account_id`, `search`, `state_of`,
@@ -127,8 +127,12 @@ since R11-D48. The pack half is on the order of forty lines in
       reddens. Control: a transport returning one `To Do` issue yields
       exactly one `Collected.issues` row with `tracker == "jira"`,
       `number is None`, `state == "open"`.
+      Done 2026-09-13: system #312 (squash b05d684a) added the module and its
+      ported suite, with all four mutations reddening their tests; system
+      #320 (squash 05b03680) then rewrote the stale "retires with no
+      successor" docstring to name the new module.
 
-- [ ] **4. The library dispatch, the export, and the docstring.** In
+- [x] **4. The library dispatch, the export, and the docstring.** In
       `sd_db/shadow_sync.py`: `sync` keeps its signature; `tracker="github"`
       runs the path at `sd_db/shadow_sync.py:595-661` unchanged;
       `tracker="jira"` runs a new `_sync_jira` — `read_watermark`, `collect`,
@@ -174,6 +178,9 @@ since R11-D48. The pack half is on the order of forty lines in
       nothing — the item's last acceptance line, as a grep. Suites under
       the CI-shaped venv as sd:603 recorded them: `local-sd-db`, dashboard,
       runner, all OK.
+      Done 2026-09-13: system #338 (squash ee68c3e8) landed the dispatch,
+      `configured`, and the `TRACKERS` export, with tests (a) to (d) and the
+      mutations its body records; the library suite ran 996 tests OK.
 
 - [ ] **5. The pin.** `.github/workflows/tests.yml:90` moves from `758dfb48`
       to the squash SHA of step 4's merge. Its own pull request, because the
