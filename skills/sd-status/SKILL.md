@@ -168,9 +168,9 @@ request on the report for 14 days after the merge: merged fourteen days ago is
 in, fifteen is out. Past that it is no longer a row, and `open threads` names
 the exclusion.
 
-A rank below 35 and not abnormal are the owner's decision (sd:631). 36 sorts it
-right after the open class, because an open pull request can still be held
-back and this one has already merged. Not abnormal, so it never reaches the banner and never
+Ranked after the open class and not abnormal, both by the owner's decision
+(sd:631). Rank 36 sorts it right after 35, because an open pull request can
+still be held back and this one has already merged. Not abnormal, so it never reaches the banner and never
 changes its count. Automatic acknowledgement stays with `bin/sd-ship`; a push
 or a merge made another way records nothing, which is the case this row exists
 to show.

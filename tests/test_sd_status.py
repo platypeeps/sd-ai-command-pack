@@ -4426,6 +4426,19 @@ class CollectMergedTests(unittest.TestCase):
                 self.assertEqual(2, len(reasons))
                 self.assertTrue(all(reasons), reasons)
 
+    def test_paginated_pages_printed_back_to_back_are_one_list(self) -> None:
+        """A `gh` that prints `[..][..]` past page one must not read unreadable."""
+        for label, out, expected in (
+            ("pages", '[{"id": 1}]\n[{"id": 2}, {"id": 3}]\n', [{"id": 1}, {"id": 2}, {"id": 3}]),
+            ("objects", '{"id": 1}{"id": 2}', None),
+            ("garbage", "[1] nope", None),
+        ):
+            with self.subTest(label), mock.patch.object(
+                    status.pr_state, "_run", return_value=(0, out, "")):
+                payload, error = status.pr_state.gh_json(["api", "x", "--paginate"], BIN.parent)
+                self.assertEqual(expected, payload)
+                self.assertEqual(expected is None, bool(error))
+
 
 if __name__ == "__main__":
     unittest.main()

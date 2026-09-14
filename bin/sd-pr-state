@@ -132,7 +132,33 @@ def gh_json(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
     try:
         return json.loads(out or "null"), ""
     except json.JSONDecodeError as error:
+        pages = _pages(out)
+        if pages is not None:
+            return pages, ""
         return None, f"gh {args[0]} did not return JSON: {error}"
+
+
+def _pages(out: str) -> list[Any] | None:
+    """`--paginate` pages printed back to back, `[..][..]`, as one list, or None.
+
+    A `gh` that does not merge the pages of an array endpoint prints each page
+    as its own array. Past the first page that is not one JSON document, and
+    refusing it would mark every pull request unreadable on exactly the busy
+    repository that has more than a page of comments. Only arrays are joined.
+    """
+    decoder, index, joined = json.JSONDecoder(), 0, []
+    text = out.strip()
+    while index < len(text):
+        try:
+            page, index = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(page, list):
+            return None
+        joined.extend(page)
+        while index < len(text) and text[index].isspace():
+            index += 1
+    return joined if text else None
 
 
 def canonical_remote(root: pathlib.Path) -> str | None:

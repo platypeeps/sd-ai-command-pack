@@ -3143,6 +3143,8 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "pack": pack_banner(),
         "work": work_section(root),
         "pull_requests": pulls,
+        # One day wider than the window: GitHub's `merged:` dates are UTC and
+        # `today` is local, so the producer cuts the exact edge, not the query.
         "merged_pull_requests": pr_state.collect_merged(root, gh, (
             datetime.date.today() - datetime.timedelta(days=MERGED_REVIEW_DAYS + 1)).isoformat()),
         "setup": setup_section(root),
