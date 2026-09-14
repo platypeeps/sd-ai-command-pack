@@ -84,7 +84,8 @@ Each reason, with why it exists:
   are 89% of the corpus. Counted rather than dropped so that a regex tightened
   by accident shows up as a bucket moving.
 * **`archived-stale`** -- an archived document citing a line that has moved,
-  or a file since deleted. Reported, never failed: the ruling was to take the
+  a line its file no longer has, or a file since deleted. Reported, never
+  failed: the ruling was to take the
   coverage and not buy it by editing the historical record. Archives are *in*
   the corpus now; the predecessor never opened them and said nothing about it.
 * **`anchor-not-a-symbol`** -- the token before the citation is a path or a
@@ -122,12 +123,20 @@ Each reason, with why it exists:
   not, and **red**: `bin/sd_skill.py:217` into an 89-line file passed every
   gate for a week because the three "not a claim about a symbol" buckets each
   returned before anything opened the target (sd:811). An insertion cannot
-  reach it -- a file only grows -- so it does not revive sd:525's objection.
+  reach it, since a file only grows. A deletion can: shortening a cited code
+  file turns this red for a lane that touched no page, and that is the
+  decision taken (review-951, B2) -- the cited line is then gone, not moved,
+  so the red is a true positive, and the failure line names the citing page
+  and line, the whole range, the file's length today and the two fixes.
+  sd:525's objection was to reds on lines that had merely moved; this rule
+  cannot fire on one.
 * **`line-past-end-carried`** -- one of the nine live past-end citations
   `KNOWN_PAST_END` enumerates, on pages this item does not own. Counted and
-  visible rather than exempt: the list is keyed on the citing line and checked
-  in both directions, so it can only shrink, and the census reports the debt
-  instead of hiding it.
+  visible rather than exempt: the list is keyed on the citing line, a dead or
+  fabricated entry fails `test_every_carried_entry_is_still_a_live_past_end_row`,
+  and `test_the_list_holds_no_more_than_it_was_measured_to_hold` holds it at
+  or under nine, so shrinking it costs nothing and growing it means raising
+  that ceiling in review. The census reports the debt instead of hiding it.
 
 **The nine `path:line` sites in this module's own prose are step 8-iv's
 record, and none of them is a claim about today's tree.** Lines 1231 and 1378
@@ -160,8 +169,11 @@ honest way to state the rule's coverage:
   file is named by the prose around it. Resolving one means deciding how far
   back to read, which is the 90-character rule this module threw out. The
   largest unchecked class, and it is unchecked on purpose.
-* 2,289 name a path inside the checkout that **matches no tracked file by any
-  suffix** -- a fixture name, a deleted file, a renamed one.
+* 2,289 name a path inside the checkout that **matches no tracked file by
+  suffix, nor, failing that, by basename** -- a fixture name, a deleted file,
+  a renamed one. (Every class below was matched the same way: the path as a
+  suffix of a tracked path first, and its basename alone only when no suffix
+  matched.)
 * 413 name a path whose **basename or suffix matches more than one** tracked
   file. Picking one is a guess and a gate that guesses teaches people to argue
   with it.
@@ -386,7 +398,10 @@ REASONS = frozenset({
 #: `(citing document, the line it is written on, cited path, start, end)` and
 #: it is *checked*: a listed key that is no longer a past-end citation fails
 #: `test_every_carried_entry_is_still_a_live_past_end_row`, so the list cannot
-#: be padded and cannot outlive its rows.
+#: be padded and cannot outlive its rows. That test cannot stop it growing,
+#: because a new past-end citation keyed in the same commit is a live row;
+#: `test_the_list_holds_no_more_than_it_was_measured_to_hold` is the ceiling,
+#: and growth has to raise it in a diff a reviewer reads.
 #:
 #: **The citing line is in the key on purpose.** Keyed on the document alone,
 #: a deleted page or a corrected citation would leave a dead entry behind that
@@ -513,13 +528,16 @@ def within_file(target: pathlib.Path, start: int, end: int,
 
     The one question no gate asked of an unanchored citation, which is why
     `bin/sd_skill.py:217` into an 89-line file passed every gate (sd:811).
-    It is asked of the *range end*, so `a-b` is caught when `b` is past the
-    end even though `a` is not.
+    It is asked of the *larger* of the two lines, so `a-b` is caught when
+    `b` is past the end even though `a` is not, and so is `b-a` written
+    backwards. Files start at line 1, so `:0` is past the end as well.
 
     Only a deletion can make this false for a citation that was true: an
-    insertion lengthens a file. So it does not revive sd:525's objection --
-    a lane that is not editing documentation does not turn this red by
-    growing a file.
+    insertion lengthens a file, so growing one never turns this red. Deleting
+    or shortening a cited code file does, for a lane that touched no page,
+    and that is intended: the cited line is then gone, not moved, and the
+    red is a true positive. sd:525's objection was to a red on a line that
+    had merely moved; this rule cannot fire on one.
     """
 
     # `counted` is one `classify()` call's memo and nothing wider. Seven
@@ -539,7 +557,25 @@ def within_file(target: pathlib.Path, start: int, end: int,
     key = str(target)
     if key not in counted:
         counted[key] = line_count(target)
-    return 1 <= start and end <= counted[key]
+    return 1 <= min(start, end) and max(start, end) <= counted[key]
+
+
+def describe(row: "Citation") -> str:
+    """One failure line: where the citation is, what it says, and what is there.
+
+    The whole range, not `row.start`: a range is judged by its larger line, so
+    printing the smaller one named a line the file has and sent the reader to
+    look at it (review-951). The citing line is printed so the page can be
+    opened at the claim, and a file target carries its length today, which is
+    the number the claim is being measured against.
+    """
+
+    lines = (f"{row.start}" if row.start == row.end
+             else f"{row.start}-{row.end}")
+    where = f"{row.doc.relative_to(REPO_ROOT)}:{row.line}: `{row.path}:{lines}`"
+    if row.target is not None and row.target.is_file():
+        where += f" -- {row.path} has {line_count(row.target)} lines"
+    return where
 
 
 def is_under_repo(target: pathlib.Path) -> bool:
@@ -1047,15 +1083,21 @@ class DocCitationTests(unittest.TestCase):
         """
 
         rows = classify()
-        fixes = {"anchored-line-into-code": (
-            " cite `source:<path>::<symbol>` instead (`python3"
-            " tests/test_doc_citations.py --repoint --apply` rewrites each one"
-            " whose symbol is declared once) or say it in prose; sd:525")}
+        fixes = {
+            "anchored-line-into-code": (
+                " cite `source:<path>::<symbol>` instead (`python3"
+                " tests/test_doc_citations.py --repoint --apply` rewrites each"
+                " one whose symbol is declared once) or say it in prose; sd:525"),
+            "line-past-end": (
+                " the file no longer has that line: repoint the citation to"
+                " where the content moved, or, if the content is gone, add the"
+                " citation's key (citing document, citing line, cited path,"
+                " start, end) to KNOWN_PAST_END and raise its ceiling; sd:811"),
+        }
         for reason in ("target-missing", "absent-but-present", "quoted-not-there",
                        "anchored-line-into-code", "line-past-end"):
             offenders = [
-                f"{row.doc.relative_to(REPO_ROOT)}: `{row.path}:{row.start}`"
-                for row in rows if row.reason == reason
+                describe(row) for row in rows if row.reason == reason
             ]
             self.assertEqual(offenders, [], f"{reason}:{fixes.get(reason, '')}\n"
                              + "\n".join(offenders))
@@ -2173,9 +2215,10 @@ class ACitationPastTheEndOfItsFile(unittest.TestCase):
         """sd:525's objection, answered rather than assumed away.
 
         The rule removed in sd:525 went red when a lane that was not editing
-        documentation inserted a line above a cited one. This one cannot: an
-        insertion only lengthens a file, so a citation that was in range stays
-        in range. Only a deletion reaches it, and then the line really is gone.
+        documentation inserted a line above a cited one. This one cannot go
+        red on an insertion: it only lengthens a file, so a citation that was
+        in range stays in range. Only a deletion reaches it, and then the line
+        really is gone -- a red a code-only lane can raise, and is meant to.
         """
 
         self.assertEqual(self.reason_for("see `bin/tool.py:2`\n"),
@@ -2262,6 +2305,70 @@ class ACitationPastTheEndOfItsFile(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, "line-past-end"):
                 DocCitationTests().test_the_red_buckets_are_empty()
 
+    def test_the_failure_names_the_whole_range_the_citing_line_and_the_fix(
+            self) -> None:
+        """A range judged by its end has to be reported by its whole range.
+
+        The first message printed `row.start` alone, so `bin/tool.py:1-9`
+        failed as "`bin/tool.py:1`" -- a line the file has -- and the lane
+        reading it was sent to look at a line that is fine (review-951, B2).
+        A red that a code-only deletion can raise on a page the lane does not
+        own is only acceptable if the message says what to do: which page and
+        line cites it, how long the file is today, and the two fixes.
+        """
+
+        (self.root / "docs" / "page.md").write_text(
+            "intro\n\nRead `bin/tool.py:1-9` for the whole of it.\n",
+            encoding="utf-8")
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root}):
+            with self.assertRaises(AssertionError) as caught:
+                DocCitationTests().test_the_red_buckets_are_empty()
+        message = str(caught.exception)
+        self.assertIn("docs/page.md:3: `bin/tool.py:1-9`", message)
+        self.assertIn("bin/tool.py has 2 lines", message)
+        self.assertIn("repoint", message)
+        self.assertIn("KNOWN_PAST_END", message)
+
+    def test_line_zero_is_past_the_end_too(self) -> None:
+        """Files start at line 1. `:0` names nothing, and only the lower bound says so.
+
+        Every other case here is caught by the upper bound alone, so without
+        this the `1 <=` half of `within_file` is an untested clause.
+        """
+
+        self.assertEqual(self.reason_for("see `bin/tool.py:0`\n"), "line-past-end")
+
+    def test_a_reversed_range_is_judged_by_its_larger_line(self) -> None:
+        """`9-2` into a 2-line file. The end is in range; the claim is not.
+
+        Judged by `end` alone this was `no-adjacent-anchor` (review-951, B3):
+        a range written backwards still reaches line 9, whichever way round it
+        is spelled, so the predicate reads the larger of the two.
+        """
+
+        self.assertEqual(self.reason_for("see `bin/tool.py:9-2`\n"), "line-past-end")
+
+    def test_a_carried_key_that_differs_only_in_its_range_end_does_not_carry(
+            self) -> None:
+        """The key is the whole citation, its range end included.
+
+        A carried entry matched on everything but `end` would carry
+        `bin/tool.py:1-9` on the strength of a measured `bin/tool.py:1-8`,
+        which is a different claim about the file.
+        """
+
+        doc = self.root / "docs" / "page.md"
+        doc.write_text("The reader is at `bin/tool.py:1-9`.\n", encoding="utf-8")
+        measured = ("docs/page.md", 1, "bin/tool.py", 1, 8)
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root,
+                                         "KNOWN_PAST_END": frozenset({measured})}):
+            self.assertEqual([row.reason for row in classify([doc])],
+                             ["line-past-end"])
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root,
+                                         "KNOWN_PAST_END": frozenset({measured[:4] + (9,)})}):
+            self.assertEqual([row.reason for row in classify([doc])],
+                             ["line-past-end-carried"])
+
 
 class TheHistoricalNumbersInThisModule(unittest.TestCase):
     """sd:799's nine stale sites, answered by pinning them instead of moving them.
@@ -2327,9 +2434,13 @@ class TheCarriedPastEndList(unittest.TestCase):
     An allow-list nobody rechecks is the silencer this module exists to
     remove, so this one is made to fail in the direction that matters: an
     entry whose citation has been corrected, or whose page has moved or been
-    archived, is no longer a `line-past-end-carried` row and this test says
-    so. The list can therefore only shrink, and it cannot be padded with rows
-    that were never past the end.
+    archived, is no longer a `line-past-end-carried` row and
+    `test_every_carried_entry_is_still_a_live_past_end_row` says so. It
+    cannot be padded with rows that were never past the end, for the same
+    reason. Nothing in that test stops it *growing* -- a new past-end
+    citation and its key arrive together and every entry is live -- so the
+    ceiling in `test_the_list_holds_no_more_than_it_was_measured_to_hold`
+    is what does: growth has to raise the number, in a diff a reviewer reads.
     """
 
     def test_every_carried_entry_is_still_a_live_past_end_row(self) -> None:
@@ -2344,16 +2455,21 @@ class TheCarriedPastEndList(unittest.TestCase):
             "these entries are no longer past the end; delete them from"
             " KNOWN_PAST_END:\n" + "\n".join(map(str, settled)))
 
-    def test_the_list_holds_what_it_was_measured_to_hold(self) -> None:
-        """Twelve, enumerated 2026-09-14 over `origin/main` at `e9d72ea7`.
+    def test_the_list_holds_no_more_than_it_was_measured_to_hold(self) -> None:
+        """Nine, enumerated 2026-09-14 over `origin/main` at `e9d72ea7`.
 
-        A count, not a threshold: it is the size of a closed literal beside
-        it, so it cannot drift with the corpus. It is here because the
-        docstring states the number and a stated number nothing checks is how
-        this module's census came to say `line-into-code 0 0 0`.
+        A ceiling, not a count. The first draft asserted equality, and
+        equality does not tell growth from shrinkage: a lane could write a new
+        past-end citation, key it, and move `9` to `10` in the same commit,
+        and the suite was green (review-951, B1). A genuine shrink also had to
+        edit this test, which is a test that fails in the wrong direction.
+        With `<=`, deleting an entry needs no edit here, and adding one has to
+        raise a labelled ceiling in a diff a reviewer reads. It is here
+        because the docstring states the number, and a stated number nothing
+        checks is how this module's census came to say `line-into-code 0 0 0`.
         """
 
-        self.assertEqual(len(KNOWN_PAST_END), 9)
+        self.assertLessEqual(len(KNOWN_PAST_END), 9)
 
 
 class StableSourceCitationTests(unittest.TestCase):
