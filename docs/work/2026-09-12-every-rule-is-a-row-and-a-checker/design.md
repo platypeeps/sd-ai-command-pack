@@ -266,6 +266,11 @@ apply to the checkers the item aims it at.
   the named test to go green-then-red. Reversed if the copy-and-run cost stops
   being affordable, at which point the leg is scoped rather than dropped — a
   registry whose checkers are unproven is the state this item exists to end.
+- **2026-09-13 — leg a counts a citation in a section's body, never in its
+  heading.** `section_body` drops the heading line, so a row's id has to appear
+  in the body text of the section its `teaches` names. `R10-D1` to `R10-D3`
+  meet this next. Reversed only as a deliberate change to leg a's measurement,
+  made in its own slice.
 - **2026-09-12 — prose rule 3 is narrowed to tool-behaviour claims and carries
   a frozen baseline**, the uncited claims in `skills/`, held per document. Reversed if the
   corpus is deliberately swept and the baseline reaches a number small enough

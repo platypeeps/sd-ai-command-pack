@@ -27,13 +27,6 @@ const nowRows = document.getElementById("now-rows");
 const nowSub = document.getElementById("now-sub");
 const nowBadge = document.getElementById("now-badge");
 
-// Where a plugin row goes when clicked, keyed on the source the loader
-// stamped. Written by the plugin renderer as it assigns panel ids and read by
-// Now. Declared up here because the renderer runs long before Now's section
-// is reached, and a `const` further down would still be in its temporal dead
-// zone by then.
-const PANELS = { bySource: new Map() };
-
 const cell = (text, cls) => {
   const td = document.createElement("td");
   td.textContent = text;
@@ -387,10 +380,8 @@ async function drawSessions() {
 }
 
 // --- tabs ---------------------------------------------------------------
-// The backbone's own tabs are fixed; plugin tabs arrive from the registry and
-// are rebuilt on every poll, so the list is rebuilt with them rather than
-// appended to. A plugin removed from the registry has to lose its tab, and a
-// list that only grows would keep serving a tab nothing feeds.
+// The tabs are fixed. Plugin tabs, which arrived from the registry and were
+// rebuilt on every poll, went with the plugin loader at sd:719 step 3.
 
 const STATIC = [
   ["tab-now", "panel-now"],
@@ -401,10 +392,7 @@ const STATIC = [
   ["tab-skills", "panel-skills"],
   ["tab-sessions", "panel-sessions"],
 ];
-let tabs = STATIC.slice();
-
-const pluginNav = document.getElementById("plugin-tabs");
-const pluginPanels = document.getElementById("plugin-panels");
+const tabs = STATIC;
 
 function select(chosen) {
   for (const [button, panel] of tabs) {
@@ -419,19 +407,18 @@ function wire(button) {
 }
 
 for (const [button] of STATIC) wire(button);
-// The generic table behaviour is not a plugin privilege. Skills is 138 rows
-// and asks for the filter by the same attribute a tile would use, so the
-// backbone's own panels go through `enhance` once at startup -- plugin panels
-// go through it on every rebuild because they are rebuilt.
+// Skills is 138 rows and asks for the filter by attribute, so the panels go
+// through `enhance` once at startup. Step 6 of sd:719 retires it with this
+// file.
 for (const [, panel] of STATIC) enhance(document.getElementById(panel));
 select("tab-now");
 
 // --- generic table behaviour --------------------------------------------
-// A plugin declares what its table can do and the backbone provides the doing:
+// A table declares what it can do and the page provides the doing:
 // `data-sd-search` asks for a filter box, `data-sd-sort` for click-to-sort
-// headers, and a `<th data-sort="num">` says how that column compares. This is
-// the whole reason no plugin ships script — the sanitiser would drop it, and
-// this is what it is dropped in favour of.
+// headers, and a `<th data-sort="num">` says how that column compares. It was
+// built so plugin tabs needed no script of their own; those went at sd:719
+// step 3, and this goes with the file at step 6.
 
 const bodyRows = (table) =>
   table.tBodies[0] ? Array.from(table.tBodies[0].rows) : [];
@@ -521,18 +508,6 @@ function enhance(panel) {
   }
 }
 
-// --- plugin tabs ---------------------------------------------------------
-
-function panelId(tab, used) {
-  // Identity is the plugin's own, not the position in the list: a registry
-  // that reorders must not move which tab the operator is looking at.
-  const base = `${tab.prefix}/${tab.name}`.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-  let id = base;
-  for (let n = 2; used.has(id); n += 1) id = `${base}-${n}`;
-  used.add(id);
-  return id;
-}
-
 // --- now -----------------------------------------------------------------
 // The one view that outranks its own tabs. The rows come merged and ranked
 // from /api/now; what is left here is the two things that cannot be decided
@@ -540,25 +515,19 @@ function panelId(tab, used) {
 // belongs to.
 
 // Severity is derived from `rank` and never from `kind` (R11-D20). `kind` is
-// the category of thing that happened and a plugin names its own, so styling
-// from it paints `plugin-dark` -- a rank-0 row -- with whatever the ternary's
-// catch-all branch happens to be. The bands are chosen here because choosing
-// them is a rendering decision; the ruling is that nothing else may choose.
+// the category of thing that happened, and styling from it paints a rank-0
+// row with whatever the ternary's catch-all branch happens to be. The bands are
+// chosen here because choosing them is a rendering decision; the ruling is that
+// nothing else may choose.
 function band(rank) {
   if (rank <= 1) return "broken";
   if (rank <= 3) return "look";
   return "queued";
 }
 
-// A plugin row's destination is looked up, never recomputed (R11-D20). The
-// renderer records the id it assigned; `panelId` normalises with a many-to-one
-// regex, so deriving it again here could send a row to a sibling tab's panel,
-// which is worse than not linking it. Three sources name no served panel, and
-// they are exactly the failures: `dashboard` for a registry that did not load,
-// a bare prefix for a plugin that is dark, and `prefix/name` for a tab that was
-// refused and filtered out at the moment its alert was created. Those render
-// unlinked by design -- sending a reader to a tab that is not on screen is the
-// same disappearance one layer along.
+// A row links to the backbone panel its source names, and to nothing else. A
+// source with no panel here renders unlinked: sending a reader to a tab that is
+// not on screen is a disappearance one layer along.
 const BACKBONE_PANELS = {
   repos: "panel-repos",
   prs: "panel-prs",
@@ -566,8 +535,7 @@ const BACKBONE_PANELS = {
 };
 
 function destination(row) {
-  if (BACKBONE_PANELS[row.source]) return BACKBONE_PANELS[row.source];
-  return PANELS.bySource.get(row.source) || "";
+  return BACKBONE_PANELS[row.source] || "";
 }
 
 function whereCell(row) {
@@ -575,7 +543,7 @@ function whereCell(row) {
   const panel = destination(row);
   if (!panel) return td;
   // In-page, and only ever in-page: the destination is a tab this page is
-  // already showing, chosen by the backbone rather than supplied by a plugin.
+  // already showing, chosen by the backbone rather than supplied by a row.
   // A button rather than an anchor because selecting a tab is what it does,
   // and an href would need the panel to be a scroll target.
   const link = document.createElement("button");
@@ -643,13 +611,6 @@ function dismissCell(id, tr) {
   return td;
 }
 
-// null until the first fetch answers, and the distinction is the point: the
-// plugin poll repaints this view whenever the panel map moves, and it can win
-// the race on page load. Painting an empty list then would flash "nothing is
-// asking for anything" across the one view whose whole job is not to say that
-// when it does not know.
-let nowRowsSeen = null;
-
 async function drawNow() {
   let payload;
   try {
@@ -664,95 +625,9 @@ async function drawNow() {
       what: `cannot reach the server (${err})`,
       detail: "",
     }]);
-    // What was last seen is no longer what is true, and the plugin poll
-    // repaints from it. Left in place, a tab rebuild ten seconds from now
-    // would quietly replace the error with the rows from before the server
-    // went away -- the failure erased by the thing that reports failures.
-    nowRowsSeen = null;
     return;
   }
-  nowRowsSeen = payload.rows;
-  paintNow(nowRowsSeen);
-}
-
-// Called by the plugin poll too, which is why this repaints from what was last
-// fetched rather than fetching again: the panel map changed, the rows did not.
-function repaintNow() {
-  // Against the sentinel, not for truthiness. Both read the same here -- an
-  // empty array is truthy in JS, so no fetched-but-empty list was ever being
-  // skipped -- but the guard is about whether Now has an answer yet, and
-  // saying so is the only way that stays true if the shape changes.
-  if (nowRowsSeen !== null) paintNow(nowRowsSeen);
-}
-
-let pluginSignature = "";
-
-async function drawPlugins() {
-  let payload;
-  try {
-    payload = await (await fetch("/api/plugins")).json();
-  } catch (err) {
-    // A loader that cannot be reached is itself a rank-0 event: every plugin
-    // has gone quiet at once, and an empty strip would say the opposite.
-    return;
-  }
-  // Rebuilt only when what the tiles returned actually changed. The poll is
-  // every ten seconds and a rebuild throws away the panel's DOM, which is
-  // where a typed filter and a chosen sort order live -- redrawing identical
-  // markup would clear both, four times a minute, while the operator was
-  // reading it. When the data does change the state goes with it, which is
-  // the honest trade: the rows under a filter are no longer the rows it was
-  // applied to.
-  // Only the fields the panel is built from. A tab also carries `rows` and
-  // `complaints`, which go to the alert strip and change whenever a job's age
-  // or exit code does -- signing those would rebuild the panels every poll on
-  // exactly the machines that have something to report, which is the opposite
-  // of what this guard is for.
-  const signature = JSON.stringify(
-    payload.tabs.map((tab) => [tab.prefix, tab.name, tab.title, tab.html]),
-  );
-  if (signature === pluginSignature) {
-    return;
-  }
-  pluginSignature = signature;
-  const previous = (tabs.find(([button]) =>
-    document.getElementById(button).getAttribute("aria-selected") === "true",
-  ) || STATIC[0])[0];
-  pluginNav.replaceChildren();
-  pluginPanels.replaceChildren();
-  tabs = STATIC.slice();
-  PANELS.bySource = new Map();
-  const used = new Set();
-  for (const tab of payload.tabs) {
-    const id = panelId(tab, used);
-    PANELS.bySource.set(`${tab.prefix}/${tab.name}`, `panel-plugin-${id}`);
-    const button = document.createElement("button");
-    button.id = `tab-plugin-${id}`;
-    button.setAttribute("role", "tab");
-    button.setAttribute("aria-selected", "false");
-    button.setAttribute("aria-controls", `panel-plugin-${id}`);
-    button.textContent = tab.title;
-    const panel = document.createElement("section");
-    panel.id = `panel-plugin-${id}`;
-    panel.setAttribute("role", "tabpanel");
-    panel.setAttribute("aria-labelledby", button.id);
-    panel.hidden = true;
-    // Markup, not text: a tile draws its own tab. What makes that safe is the
-    // filter this payload already passed through server-side -- see
-    // dashboard/markup.py, which is where the allow-list lives and where the
-    // reasoning about inline handlers belongs.
-    panel.innerHTML = tab.html;
-    enhance(panel);
-    pluginNav.append(button);
-    pluginPanels.append(panel);
-    tabs.push([button.id, panel.id]);
-    wire(button.id);
-  }
-  // A plugin tab that vanished takes the selection back to a tab that exists,
-  // rather than leaving every panel hidden and the page apparently blank.
-  select(document.getElementById(previous) ? previous : STATIC[0][0]);
-  // The panel map just changed, so every plugin row's destination did too.
-  repaintNow();
+  paintNow(payload.rows);
 }
 
 drawIssues();
@@ -773,21 +648,14 @@ drawSessions();
 setInterval(drawSessions, 30000);
 
 drawNow();
-// The same ten seconds as the plugin poll: this is the view where a cron job
-// going red is the thing being watched, and half its rows come from there.
+// Faster than the tables: Now is the view that is watched.
 setInterval(drawNow, 10000);
-
-drawPlugins();
-// Deliberately not the 30s of the other two: the plugin loader has its own
-// five-second cache, and this is the view where a cron job going red is the
-// thing being watched.
-setInterval(drawPlugins, 10000);
 
 // --- run ----------------------------------------------------------------
 // The one place this page writes, below the tabs rather than inside one: an
 // action belongs to the dashboard, not to whichever view is open when somebody
 // wants to press it. A button sends an **id** -- the argv lives in
-// `RUN_ALLOWLIST` or a manifest and has never been sent here.
+// `RUN_ALLOWLIST` and has never been sent here.
 
 const runButtons = document.getElementById("run-buttons");
 const runSub = document.getElementById("run-sub");
@@ -825,7 +693,7 @@ async function press(button, id) {
   }
   button.disabled = false;
   // Whatever it did, every view that reads what it wrote is now behind.
-  for (const redraw of [drawIssues, drawPrs, drawNow, drawPlugins]) redraw();
+  for (const redraw of [drawIssues, drawPrs, drawNow]) redraw();
 }
 
 async function drawRun() {
@@ -843,13 +711,10 @@ async function drawRun() {
     button.addEventListener("click", () => press(button, action.id));
     runButtons.append(button);
   }
-  // "none declared" would report a broken loader as a machine with no plugins.
-  runSub.textContent = payload.reason
-    ? `every button here is one allow-listed command — ${payload.reason}`
-    : payload.actions.length
-      ? "every button here is one allow-listed command"
-      : "no actions declared";
+  runSub.textContent = payload.actions.length
+    ? "every button here is one allow-listed command"
+    : "no actions declared";
 }
 
-// Once. The set changes when a plugin is registered, which is a restart.
+// Once. The set is `RUN_ALLOWLIST`, which changes only with the code.
 drawRun();

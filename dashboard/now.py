@@ -1,12 +1,14 @@
 """Now: the one view that outranks its own tabs.
 
 Everything the operator has to see is here, ranked, whatever produced it.
-Six sources fed the view this replaces; after the plugin split three of them
--- cron, vault, ports -- are plugin rows and arrive through the loader, and
-what is left on the backbone side is the fleet itself.
+Six sources fed the view this replaces. Three of them -- cron, vault, ports --
+arrived as plugin rows through the pack's plugin loader until sd:719 step 3
+deleted it. Nothing here raises them in its place: sd:719 records that gap and
+rebuilds the row on the system dashboard at its step 6. What is left here is
+the fleet itself.
 
-**The merge is here rather than in the page.** The rows arrive on two clocks
-and from two routes, and the page could join them; doing it server-side means
+**The merge is here rather than in the page.** The rows arrive from several
+collectors, and the page could join them; doing it server-side means
 the ranking, the ids and the row text are one function with one test suite
 instead of behaviour that only exists once a browser is running. What stays in
 the page is what cannot leave it: the severity band, which is a rendering
@@ -173,7 +175,7 @@ def session_rows(trees: list[dict]) -> list[dict]:
     }]
 
 
-def merge(backbone: list[dict], plugin: list[dict]) -> list[dict]:
+def merge(backbone: list[dict]) -> list[dict]:
     """Every row there is, loudest first.
 
     Sorted on `(rank, id)` rather than on rank alone. Rank ties are the common
@@ -181,6 +183,4 @@ def merge(backbone: list[dict], plugin: list[dict]) -> list[dict]:
     sort that leaves them in collection order reshuffles the list under the
     operator every time a thread pool returns in a different order.
     """
-    rows = [*plugin, *backbone]
-    rows.sort(key=lambda row: (row.get("rank", 9), row.get("id", "")))
-    return rows
+    return sorted(backbone, key=lambda row: (row.get("rank", 9), row.get("id", "")))

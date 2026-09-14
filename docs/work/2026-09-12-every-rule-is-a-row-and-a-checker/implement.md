@@ -105,8 +105,8 @@
       spelling, which that test's `iterdir()` scan of `bin/` finds.
 
       **Two obstacles decide the rest of the backfill, and neither is the
-      judgement the step was sized for.** Twenty of the twenty-four remaining
-      ids are taught by no skill section at all, so leg a cannot pass for them:
+      judgement the step was sized for.** Twenty of the twenty-four ids left after
+      slice 2 are taught by no skill section at all, so leg a cannot pass for them:
       registering one means writing the teaching section first, which is step 8
       and not this step. The other four are taught, and each is held up by
       something specific:
@@ -116,7 +116,43 @@
       | `R10-D1` | `skills/sd-status/SKILL.md` | `bin/sd-status` carries the id in two strings, one of them the `CLASSES` row whose text the skill's table mirrors. The second-list check wants it out of the string; leg a reads the skill table it would have to change. The two checks pull opposite ways and that needs a decision, not an edit. |
       | `R10-D2` | `skills/sd-handoff/SKILL.md` | The section that teaches it says Lane B is *not implemented*. A live row with a checker would assert an enforcement that does not exist, which is the defect this item is about. |
       | `R10-D3` | `skills/sd-handoff/SKILL.md` | Its enforcement lives in `bin/sd-handoff-restore`, which has no `.py` suffix. **The import obstacle recorded here is gone** — a `path::symbol` location needs no import and the path needs no suffix. What is left is leg d: the row needs a mutation that reddens a named test, and finding one for a restore path is the work. |
-      | `R10-D4` | `skills/sd-review/SKILL.md` | `codex_preflight` lives in the suffixless `bin/sd-review`, and that obstacle is gone with `R10-D3`'s. This is the best-taught rule in the corpus — the heading cites the id — and it is the first candidate for slice 3, needing only a proof that reddens a named test. |
+      | `R10-D4` | `skills/sd-review/SKILL.md` | A row since slice 3, below. `codex_preflight` lives in the suffixless `bin/sd-review`, and that obstacle went with `R10-D3`'s. |
+
+      **Slice 3, 2026-09-13. `STRANDED_RULE_IDS` 24 → 23.** `R10-D4` is a
+      row. Its checker is `bin/sd-review::codex_preflight`, the first checker
+      the registry names in a file with no `.py` suffix, and the string form
+      resolved it with no change to the resolver. Its proof replaces the
+      `auth_mode` guard in `bin/sd-review` with a condition that is never true,
+      and `test_a_non_chatgpt_auth_mode_refuses` in
+      `tests/test_sd_review_codex.py` goes red on that edit. It fails an
+      assertion, `Refusal not raised`, and does not raise an error. A sentinel edit to
+      the same function's docstring leaves that test green. That was measured
+      once, through leg d's `exercise()` from a scratch script on this branch
+      before `ed83a19c`, and reproduced in review on the tree merged with
+      `360b3ba0`. The suite does not hold it: leg d's own sentinel control is
+      `R10-D6`'s, in `bin/sd_work.py`.
+
+      **Leg d proves one clause of `R10-D4`, not the whole rule.** Its mutation
+      defeats the `auth_mode` guard only. Three other ways to break the rule are
+      held by `tests.test_sd_review_codex` and not by leg d. The first is the
+      stored-key check in `codex_preflight`. The second is the
+      `CODEX_METERED_ENV` scrub, which is in `child_environment` and not in the
+      named checker. The third is the `codex_preflight` call in `review()`. In
+      review, each of those three edits left the named test green and turned
+      the whole module red. The row's subject keeps the whole rule, because
+      that is what the rule is. The gap belongs to leg d's design of one
+      mutation per row, and a row whose rule has several clauses inherits it.
+
+      The table above was right that no import obstacle remained. It was wrong
+      that nothing but a proof was needed. Leg a reads the *body* of the section
+      a row names, and `section_body` drops the heading, so a heading that cites
+      the id does not count as the section citing it. The row reddened leg a
+      until the section's body cited `R10-D4` too. The id now sits in the
+      section's teaching sentence, beside `codex_preflight`, and that sentence
+      no longer credits `codex_preflight` with the environment scrub, which
+      `child_environment` performs. Counting the heading would have changed
+      leg a's measurement, so this slice did not make that change. `design.md`
+      records it as a decision.
 
       **A finding about leg c's four dangling ids, measured on `239ff624`.**
       They are not undefined. Three of them carry a definition in a form

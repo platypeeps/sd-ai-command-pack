@@ -51,8 +51,8 @@ sources, so the names overstate the overlap rather than evidencing it.
 
 **Only in the pack:** Repos, PRs, Issues, Sessions and the Now ranking — about
 1,500 lines of collectors and 250 of UI — plus the plugin loader, 719 lines of
-it, whose `load` (`source:dashboard/plugins.py::load`) renders the six legacy collector
-tabs.
+it, whose `load` in `dashboard/plugins.py` rendered the six legacy collector tabs
+until step 3 deleted the loader.
 
 **Only in the system:** its sections, which a reader should enumerate from
 `SECTIONS` at

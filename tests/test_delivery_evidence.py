@@ -433,6 +433,113 @@ class TaskDeliveryCLITests(unittest.TestCase):
         self.assertIn(f"--delivered-by {sha}", refused.stderr)
         self.assertIn("ordinary task", refused.stderr)
 
+    def test_a_work_item_is_sent_to_work_deliver(self) -> None:
+        """sd:772's control. A work item has a checkout and its own delivery
+        verb, so the refusal keeps naming that verb and leaves the row open."""
+        import sd_db
+        import sd_db.writes
+
+        case = self.host()
+        root = self.repository(case)
+        state = json.loads(case.call("task", "add", "Ship the feature", "--json",
+                                     cwd=root).stdout)
+        item = state["item"]["id"]
+        with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
+            sd_db.writes.set_item_fields(connection, item, kind="work")
+            connection.commit()
+        sha = self.commit(root, f"feat: the feature\n\nDelivers: sd:{item}\n", "one\n")
+
+        refused = case.call("task", "status", item, "done", "--delivered-by", sha,
+                            code=1, cwd=root)
+        self.assertIn(f"item {item} is a work item; `sd work deliver {item} {sha}` "
+                      "records its delivery", refused.stderr)
+        readback = json.loads(case.call("store", "item", item, "--json", cwd=root).stdout)
+        self.assertEqual("planning", readback["item"]["status"])
+
+    def test_a_repository_less_item_says_there_is_nothing_to_verify(self) -> None:
+        """sd:772. A followup or personal item takes task statuses since sd:768
+        and belongs to no checkout, so no commit can be verified for it. The
+        refusal stands; it names the kind and the reason, not `sd work deliver`,
+        which refuses the same row one call later.
+
+        The close hint follows the installed library. CI pins a `sd_db` build
+        from before `TASK_STATUS_KINDS`, which refuses `done` for these kinds,
+        and a hint telling the caller to do what that build refuses would be
+        the same wrong direction in a new place. So where the build closes
+        them the hint is asserted and the close is carried out; where it does
+        not, the hint is asserted absent."""
+        import sd_db.workflow as workflow
+
+        closes = hasattr(workflow, "TASK_STATUS_KINDS")
+        for kind in ("followup", "personal"):
+            with self.subTest(kind=kind, closes=closes):
+                case = self.host()
+                state = json.loads(case.call("task", "add", f"A {kind}", "--kind", kind,
+                                             "--json").stdout)
+                item = state["item"]["id"]
+                self.assertIsNone(state["item"]["repo"])
+                sha = "0" * 40
+
+                refused = case.call("task", "status", item, "done", "--delivered-by",
+                                    sha, code=1)
+                reason = (f"{kind} item {item} belongs to no checkout, so --delivered-by "
+                          "has nothing to verify")
+                hint = "; close it without --delivered-by"
+                self.assertIn(reason + (hint if closes else "\n"), refused.stderr)
+                self.assertNotIn("work item", refused.stderr)
+                self.assertNotIn("sd work deliver", refused.stderr)
+                readback = json.loads(case.call("store", "item", item, "--json").stdout)
+                self.assertEqual("planning", readback["item"]["status"])
+                if closes:
+                    closed = json.loads(case.call("task", "status", item, "done",
+                                                  "--json").stdout)
+                    self.assertEqual("done", closed["item"]["status"])
+
+    def test_the_close_hint_follows_the_library_that_would_close_it(self) -> None:
+        """Both library shapes, on whichever build is installed. A stand-in
+        `workflow` is enough: `_status_reason` reads `item_state` and the
+        kind list and nothing else before it refuses."""
+        import argparse
+        import types
+
+        row = {"id": 5, "kind": "followup", "repo": None}
+        args = argparse.Namespace(item=5, status="done", delivered_by="0" * 40, reason=None)
+        for kinds, hinted in (((), False), (("task", "personal", "followup"), True)):
+            with self.subTest(task_status_kinds=kinds):
+                workflow = types.SimpleNamespace(item_state=lambda _c, _i: {"item": row})
+                if kinds:
+                    workflow.TASK_STATUS_KINDS = kinds
+                with self.assertRaises(sd_work.WorkRefusal) as refused:
+                    sd_work._status_reason(workflow, None, args)
+                self.assertEqual(hinted, str(refused.exception).endswith(
+                    "; close it without --delivered-by"))
+
+    def test_the_other_kinds_are_not_called_work_items_either(self) -> None:
+        """The two branches sd:772 adds beside the followup one. A repo-less
+        kind with no task statuses is not told to close without the flag, and
+        a kind with a checkout but no task closure is told only tasks take it."""
+        import sd_db
+        import sd_db.writes
+
+        case = self.host()
+        idea = json.loads(case.call("task", "add", "An idea", "--kind", "work-idea",
+                                    "--json").stdout)["item"]["id"]
+        refused = case.call("task", "status", idea, "done", "--delivered-by", "0" * 40,
+                            code=1)
+        self.assertIn(f"work-idea item {idea} belongs to no checkout, so --delivered-by "
+                      "has nothing to verify\n", refused.stderr)
+
+        root = self.repository(case)
+        report = json.loads(case.call("task", "add", "A report", "--json",
+                                      cwd=root).stdout)["item"]["id"]
+        with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
+            sd_db.writes.set_item_fields(connection, report, kind="report")
+            connection.commit()
+        refused = case.call("task", "status", report, "done", "--delivered-by", "0" * 40,
+                            code=1, cwd=root)
+        self.assertIn(f"report item {report} takes no --delivered-by; only a task's "
+                      "move to done records one", refused.stderr)
+
 
 class ShipMergeGuardTests(unittest.TestCase):
     """`sd-ship merge` refuses to dispatch a squash that demotes its own trailer.
