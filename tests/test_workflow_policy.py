@@ -32,6 +32,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -75,7 +76,12 @@ BARE_VENDOR = re.compile(
 
 #: The one product name the rule exempts. It is blanked before matching, not
 #: used to skip a line, so a bare token sharing a line with it still counts.
-PRODUCT_NAME = "Claude Code"
+#: The two words may sit either side of one line break, since the pages
+#: hard-wrap and a reflow must not turn the gate red. The blank keeps that
+#: break, so line numbers do not move. `\b` stops it short of a longer word:
+#: `Claude Codex` is not the product, and blanking its first eleven characters
+#: would hide the `codex` in it.
+PRODUCT_NAME = re.compile(r"Claude(?:[ \t]+|[ \t]*\r?\n[ \t]*)Code\b")
 
 #: An indented `key: value` line inside a fenced-free block.
 KEY_LINE = re.compile(r"^ {4}([a-z][a-z_]*):")
@@ -98,26 +104,33 @@ def governed_grep(pattern: str) -> list[str]:
 
 def bare_vendor_lines(text: str) -> list[int]:
     """The 1-based numbers of the lines carrying a bare vendor token."""
+    blanked = PRODUCT_NAME.sub(lambda match: re.sub(r"[^\n]", " ", match[0]), text)
     return [
         number
-        for number, line in enumerate(text.splitlines(), start=1)
-        if BARE_VENDOR.search(line.replace(PRODUCT_NAME, " "))
+        for number, line in enumerate(blanked.splitlines(), start=1)
+        if BARE_VENDOR.search(line)
     ]
 
 
-def bare_vendor_tokens(top: str) -> list[str]:
-    """`path:line:text` for every bare vendor token in the tracked files under
-    `top`. Enumerated from the index, so a new skill is covered on arrival."""
+def tracked_files(top: str, root: pathlib.Path = REPO_ROOT) -> list[str]:
+    """Every tracked file under `top`, whatever its suffix. Enumerated from the
+    index, so a new skill is covered on arrival."""
     result = subprocess.run(
         ["git", "ls-files", "-z", "--", top],
-        cwd=REPO_ROOT,
+        cwd=root,
         capture_output=True,
         text=True,
         check=True,
     )
+    return list(filter(None, result.stdout.split("\0")))
+
+
+def bare_vendor_tokens(names: list[str], root: pathlib.Path = REPO_ROOT) -> list[str]:
+    """`path:line:text` for every bare vendor token in the files `names`,
+    relative to `root`."""
     rows = []
-    for name in filter(None, result.stdout.split("\0")):
-        raw = (REPO_ROOT / name).read_bytes()
+    for name in names:
+        raw = (root / name).read_bytes()
         # A binary file carries no token a reader sees. A tracked text file
         # that does not decode fails loudly rather than being skipped.
         if b"\0" in raw:
@@ -301,8 +314,38 @@ class BareVendorTokens(unittest.TestCase):
     """A grep of `skills/` for a bare vendor token returns nothing."""
 
     def test_no_skill_names_a_vendor_as_a_bare_token(self):
-        rows = bare_vendor_tokens("skills")
+        names = tracked_files("skills")
+        # An empty walk finds no token and would pass on any tree.
+        self.assertTrue(names, "the walk enumerated no file under skills/")
+        rows = bare_vendor_tokens(names)
         self.assertEqual(rows, [], "bare vendor tokens under skills/:\n" + "\n".join(rows))
+
+    def test_the_walk_reads_every_tracked_file_whatever_its_suffix(self):
+        """The criterion names the tree, not a suffix: a token in a script or a
+        JSON file under `skills/` counts as much as one in a page."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            subprocess.run(  # nosec B603 B607 - fixed argv, a scratch repository
+                ["git", "init", "-q"], cwd=root, check=True)
+            files = {
+                "skills/a/SKILL.md": "Run the review.\n",
+                "skills/a/run.sh": "#!/bin/sh\nexec codex review\n",
+                "skills/a/paths.json": '{"reviewer": "anthropic"}\n',
+            }
+            for name, text in files.items():
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text(text)
+            subprocess.run(  # nosec B603 B607 - fixed argv, a scratch repository
+                ["git", "add", "--", "skills"], cwd=root, check=True)
+            names = tracked_files("skills", root)
+            self.assertEqual(sorted(names), sorted(files))
+            self.assertEqual(
+                sorted(bare_vendor_tokens(names, root)),
+                [
+                    'skills/a/paths.json:1:{"reviewer": "anthropic"}',
+                    "skills/a/run.sh:2:exec codex review",
+                ],
+            )
 
     def test_the_shape_catches_a_vendor_named_as_who_runs_a_pass(self):
         """The guard against the guard: the three lines that came back, and
@@ -312,12 +355,27 @@ class BareVendorTokens(unittest.TestCase):
             "an authorized exact-head `--scope branch --provider claude` review",
             "variables declared in its registry `env` list. Codex also receives",
             "The `claude-json` reader runs Claude in safe and restricted modes",
-            "OpenAI and Anthropic bill separately",
+            # One name to a line: a line naming two would still match with
+            # either dropped from the pattern.
+            "OpenAI bills separately",
+            "Anthropic bills separately",
             "Claude Code hands the pass to codex",
             "two Codexes and a claudeish reviewer",
+            "the Claude Codex entry",
         ):
             with self.subTest(line=line):
                 self.assertEqual(bare_vendor_lines(line), [1])
+
+    def test_a_hard_wrap_inside_the_product_name_is_still_the_product(self):
+        """A reflow that breaks `Claude Code` across two lines adds no vendor.
+        A token split the same way still counts, and on its own line."""
+        self.assertEqual(bare_vendor_lines("the Claude\nCode headless guide"), [])
+        self.assertEqual(bare_vendor_lines("- the Claude\n  Code headless guide"), [])
+        self.assertEqual(bare_vendor_lines("the Claude\nCodex entry"), [1, 2])
+        self.assertEqual(
+            bare_vendor_lines("see the Claude\nCode guide, which hands the\npass to codex"),
+            [3],
+        )
 
     def test_the_shape_drops_identifiers_paths_and_the_product_name(self):
         for line in (
