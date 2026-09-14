@@ -48,16 +48,29 @@ raises, which fails the test that did it. "Gate-measured" is anchored where the
 gate combines, at the directory holding the coverage config, so a copy of the
 installer in a temporary tree is not refused. The watch reads a program only
 at command position: an argument list's first word, past assignments,
-redirections and ``env`` with its options (``-C`` followed), and the first
-word of each command in a shell's ``-c`` string -- split at ``;``, ``&``,
-``|``, parentheses and newlines, following a ``cd`` that is not in a pipeline,
-the background or a subshell, and nested shells -- plus a measured file's own
-``#!`` line. A ``python`` word
-elsewhere is another program's argument, and a shell's words after its ``-c``
-string are positional arguments, so neither is refused. It does not see a
-launch from a non-Python parent, ``-m`` naming a measured module, a wrapper
-other than ``env`` (``exec``, ``nohup``, ``xargs``), or a ``cd`` whose
-directory a variable names.
+redirections and ``env`` with its options (``-C`` followed, ``-S`` split, a
+value attached or in the next word), and the first word of each command in a
+shell's ``-c`` string -- ``#`` comments cut, split at ``;``, ``&``, ``|``,
+parentheses, backticks and newlines, past a reserved word (``!``, ``{``,
+``if``, ``then``, ``elif``, ``else``, ``while``, ``until``, ``do``, ``time``),
+following a ``cd``, ``pushd`` or ``popd`` that is not in a pipeline, the
+background or a subshell, past its redirections, and nested shells -- plus a
+measured file's own ``#!`` line. A ``python`` word elsewhere is another
+program's argument, a bash array's ``a=(...)`` words are values, and a shell's
+words after its ``-c`` string are positional arguments, so none is refused.
+
+It does not see:
+
+- a launch from a non-Python parent, or ``-m`` naming a measured module;
+- a wrapper other than ``env`` (``exec``, ``command``, ``nice``, ``nohup``,
+  ``xargs``, ``/usr/bin/time``): its options differ per wrapper;
+- a script the shell gets from ``"$@"`` or ``$1``, a program or a ``cd``
+  directory a variable names: positional arguments and variables are not
+  expanded, by design;
+- a command inside double quotes (``"$(python -I ...)"``, ``"`...`"``) or in a
+  process substitution (``<(...)``, ``>(...)``): quoted text is one word;
+- a command after ``function f {`` or ``coproc``: only the reserved words
+  above are skipped.
 
 A process that is already measured -- the ``coverage run`` shard itself -- is
 left alone, as ``coverage.process_startup`` would leave it. A configuration
@@ -86,8 +99,15 @@ UNMEASURED_FLAGS = frozenset("IES")
 LAUNCH_EVENTS = {"subprocess.Popen": 1, "os.exec": 1, "os.posix_spawn": 1}
 #: Programs whose non-option arguments are read as a command line.
 SHELLS = frozenset(("sh", "bash", "dash", "zsh", "ksh"))
-#: What ends one shell command and starts the next, `(` and `)` included.
-SHELL_SEPARATORS = ";&|()\n"
+#: What ends one shell command and starts the next, `(`, `)` and backticks included.
+SHELL_SEPARATORS = ";&|()`\n"
+#: Shell reserved words a command can follow. Not `for`, `case` or `select`,
+#: whose next word is a name or a value rather than a program.
+SHELL_RESERVED = frozenset(("!", "{", "if", "then", "elif", "else", "while", "until", "do", "time"))
+#: Short `env` options that take a value, attached or in the next word.
+ENV_VALUE_LETTERS = "CSuPLU"
+#: Long `env` options that take a value, after `=` or in the next word.
+ENV_VALUE_OPTIONS = frozenset(("--chdir", "--split-string", "--unset"))
 
 
 def _start(config_file=None):
@@ -139,10 +159,12 @@ def _trace_existing_threads(coverage):
     # `_settraceallthreads` sets this thread too, over the tracer the start just
     # gave it: that tracer would be orphaned, a second one built at the next
     # call, and PyTracer warns at exit that its trace function changed. So
-    # this thread gets its own tracer back.
+    # this thread gets its own tracer back. A thread that had none keeps the
+    # installer, which builds its tracer at the next call.
     here = sys.gettrace()
     set_all(install)
-    sys.settrace(here)
+    if here is not None:
+        sys.settrace(here)
 
 
 def _include_patterns(config_file):
@@ -214,7 +236,7 @@ def _unmeasured_script(tokens, measured, cwd):
             position += 1
             break
         if option.startswith("--"):
-            position += 1
+            position += 1 + (option == "--check-hash-based-pycs")
             continue
         if option == "-" or not option.startswith("-"):
             break
@@ -233,45 +255,67 @@ def _unmeasured_script(tokens, measured, cwd):
     return None
 
 
+def _redirection(words):
+    """How many leading words a redirection takes: `>log` one, `> log` two, `2>&1` as `2>`, `&`, `1` three."""
+    redirect = words[0].lstrip("0123456789") if words else ""
+    if redirect[:1] not in ("<", ">"):
+        return 0
+    bare = not redirect.strip("<>&")
+    return 1 + bare + (bare and words[1:2] == ["&"])
+
+
 def _unwrapped(words, cwd):
     """The program a command runs and where: past assignments, redirections, and `env` with its options."""
     while words:
         name, equals, _ = words[0].partition("=")
-        redirect = words[0].lstrip("0123456789")
+        redirection = _redirection(words)
         if equals and name.isidentifier():
             words = words[1:]
-        elif redirect[:1] in ("<", ">"):
-            # `>log`, or `>` and `2>&` with the target in the next word.
-            bare = not redirect.strip("<>&")
-            words = words[1 + bare + (bare and words[1:2] == ["&"]):]
+        elif redirection:
+            words = words[redirection:]
         elif os.path.basename(words[0]) == "env":
-            words = words[1:]
-            while words:
-                word = words[0]
-                if word == "--":
-                    words = words[1:]
-                    break
-                if word in ("-S", "--split-string") and len(words) > 1:
-                    import shlex
-
-                    try:
-                        words = shlex.split(words[1]) + words[2:]
-                    except ValueError:
-                        return [], cwd
-                elif word in ("-C", "--chdir") and len(words) > 1:
-                    cwd = os.path.join(cwd or "", words[1])
-                    words = words[2:]
-                elif word.startswith("--chdir="):
-                    cwd = os.path.join(cwd or "", word.partition("=")[2])
-                    words = words[1:]
-                elif word in ("-u", "--unset", "-P") and len(words) > 1:
-                    words = words[2:]
-                elif word.startswith("-") or "=" in word:
-                    words = words[1:]
-                else:
-                    break
+            words, cwd = _past_env_options(words[1:], cwd)
         else:
             break
+    return words, cwd
+
+
+def _past_env_options(words, cwd):
+    """The words after `env`'s options, `-S` strings split in, and the directory `-C` names."""
+    while words:
+        word, letter, value = words[0], "", ""
+        if word == "--":
+            return words[1:], cwd
+        if word.startswith("--"):
+            name, equals, value = word.partition("=")
+            words = words[1:]
+            if name in ENV_VALUE_OPTIONS:
+                letter = {"--chdir": "C", "--split-string": "S"}.get(name, "u")
+                if not equals and words:
+                    value, words = words[0], words[1:]
+        elif word.startswith("-"):
+            # A cluster such as `-iC sub` or `-Csub`: the first letter that
+            # takes a value takes the rest of the word, or the next word.
+            words = words[1:]
+            letters = word[1:]
+            offset = next((index for index, flag in enumerate(letters) if flag in ENV_VALUE_LETTERS), None)
+            if offset is not None:
+                letter, value = letters[offset], letters[offset + 1:]
+                if not value and words:
+                    value, words = words[0], words[1:]
+        elif "=" in word:
+            words = words[1:]
+        else:
+            break
+        if letter == "C":
+            cwd = os.path.join(cwd or "", value)
+        elif letter == "S":
+            import shlex
+
+            try:
+                words = shlex.split(value) + words
+            except ValueError:
+                return [], cwd
     return words, cwd
 
 
@@ -297,48 +341,107 @@ def _shell_line(words):
     return None
 
 
+def _prepared(line):
+    """A shell line with each `#` comment cut to its newline, and `&>` written ` >`.
+
+    A quote or `;` in a comment is not the line's. `&>file` redirects, where a
+    lone `&` would end the command and put it in the background.
+    """
+    kept, quote, boundary, position = [], "", True, 0
+    while position < len(line):
+        char = line[position]
+        if char == "\\" and quote != "'":
+            kept.append(line[position:position + 2])
+            position += 2
+            boundary = False
+            continue
+        if char == "#" and boundary and not quote:
+            end = line.find("\n", position)
+            position = len(line) if end < 0 else end
+            continue
+        if char in "'\"" and quote in ("", char):
+            quote = "" if quote else char
+        elif (char == "&" and not quote and line[position + 1:position + 2] == ">"
+              and not "".join(kept[-1:]).endswith(("&", "|", "<", ">"))):
+            char = " "
+        kept.append(char)
+        position += 1
+        boundary = not quote and char in " \t\r" + SHELL_SEPARATORS
+    return "".join(kept)
+
+
+def _opens_array(word):
+    # `a=(` or `a+=(`: the words up to the matching `)` are values.
+    name, equals, value = word.partition("=")
+    return bool(equals) and not value and name.removesuffix("+").isidentifier()
+
+
 def _shell_commands(line, cwd):
     """Each simple command of a shell line, with the directory a `cd` before it left."""
     import shlex
 
-    lexer = shlex.shlex(line, posix=True, punctuation_chars=SHELL_SEPARATORS)
+    lexer = shlex.shlex(_prepared(line), posix=True, punctuation_chars=SHELL_SEPARATORS)
     lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     lexer.commenters = ""
     try:
-        words = list(lexer)
+        words = list(lexer) + [";"]
     except ValueError:
         return []
-    commands, current, subshells, previous, before = [], [], [], "", ";"
-    for word in words + [";"]:
+    # `nested` holds, for each open `(`, backtick or array, the directory
+    # before it and which of the three it is.
+    commands, current, nested, pushed, before = [], [], [], [], ";"
+    for index, word in enumerate(words):
+        previous = words[index - 1] if index else ""
         # The `&` of a `2>&1` redirect is not a separator.
-        if word and not word.strip(SHELL_SEPARATORS) and not previous.endswith(("<", ">")):
-            if current:
-                commands.append((current, cwd))
-                # A `cd` in a pipeline or in the background runs in a subshell.
-                if not any(mark in (before, word) for mark in ("|", "|&", "&")):
-                    cwd = _after_cd(current, cwd)
-                current = []
-            before = word
-            for mark in word:
-                if mark == "(":
-                    subshells.append(cwd)
-                elif mark == ")" and subshells:
-                    cwd = subshells.pop()
-        else:
-            current.append(word)
-        previous = word
+        if not word or word.strip(SHELL_SEPARATORS) or previous.endswith(("<", ">")):
+            if nested and nested[-1][1] == "=":
+                continue
+            # A reserved word at command position is not the program.
+            if current or not (word in SHELL_RESERVED or (word == "-p" and previous == "time")):
+                current.append(word)
+            continue
+        flushed = False
+        for mark in word:
+            in_array = bool(nested) and nested[-1][1] == "="
+            if mark == "(" and not in_array and current and _opens_array(current[-1]):
+                nested.append((cwd, "="))
+                continue
+            if not in_array and not flushed:
+                flushed = True
+                if current:
+                    commands.append((current, cwd))
+                    # A `cd` in a pipeline or in the background runs in a subshell.
+                    if not any(sign in (before, word) for sign in ("|", "|&", "&")):
+                        cwd = _after_cd(current, cwd, pushed)
+                    current = []
+                before = word
+            if mark in "(`" and not (mark == "`" and nested and nested[-1][1] == "`"):
+                nested.append((cwd, mark))
+            elif mark in ")`" and nested:
+                cwd = nested.pop()[0]
     return commands
 
 
-def _after_cd(words, cwd):
-    if words[0] != "cd":
+def _after_cd(words, cwd, pushed):
+    """The directory after a `cd`, `pushd` or `popd`; `pushed` is the `pushd` stack so far."""
+    kept = []
+    while words:
+        taken = _redirection(words)
+        if not taken:
+            kept.append(words[0])
+        words = words[taken or 1:]
+    if not kept or kept[0] not in ("cd", "pushd", "popd"):
         return cwd
-    targets = [word for word in words[1:] if word not in ("-L", "-P", "--")]
+    targets = [word for word in kept[1:] if word not in ("-L", "-P", "--")]
+    if kept[0] == "popd":
+        return pushed.pop() if pushed and not targets else cwd
     if not targets:
-        return os.path.expanduser("~")
-    if len(targets) > 1 or targets[0] == "-":
+        return os.path.expanduser("~") if kept[0] == "cd" else cwd
+    if len(targets) > 1 or targets[0] == "-" or (kept[0] == "pushd" and targets[0][:1] in "+-"):
         return cwd
+    if kept[0] == "pushd":
+        pushed.append(cwd)
     return os.path.join(cwd or "", targets[0])
 
 
