@@ -125,10 +125,10 @@ That single-provider result does not waive the shipping workflow's required dept
 
 ## The `codex-json` entry is subscription-only (R10-D4)
 
-Every entry whose `reader` is `codex-json` is preceded by `codex_preflight`,
-which scrubs `CODEX_API_KEY` and `CODEX_ACCESS_TOKEN` from the subprocess
-environment and refuses unless `auth.json` reports `auth_mode == chatgpt` with
-no stored `OPENAI_API_KEY` field. **Never work around a preflight refusal** —
+Every entry whose `reader` is `codex-json` is preceded by `codex_preflight`
+(R10-D4), which refuses unless `auth.json` reports `auth_mode == chatgpt` with
+no stored `OPENAI_API_KEY` field, and `child_environment` scrubs
+`CODEX_API_KEY` and `CODEX_ACCESS_TOKEN` from the subprocess environment. **Never work around a preflight refusal** —
 never export a key, never invoke the entry's `start` program by hand to get
 past it. Automatic fallback uses only the separately consented registry entries;
 it never changes that entry's authentication or bypasses its refusal.

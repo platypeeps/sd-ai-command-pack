@@ -120,7 +120,7 @@ status checks.
    > the three properties of the predicate that are now pinned by tests.
    >
    > The 26 archive-only R-ids in this requirement were reproducible and are
-   > not affected by that correction; the backfill has since moved them to 24,
+   > not affected by that correction; the backfill has since moved them to 23,
    > which `STRANDED_RULE_IDS` records and the Log dates.
 7. **The pre-commit tier is scoped by measurement, not by assumption.** A
    checker runs over the whole repository when a whole-repository run is fast,
@@ -202,3 +202,6 @@ status checks.
   again — this time with a mutation that reddens
   `test_no_command_accepts_a_repository_path` — and the stranded baseline falls
   25 → 24
+- 2026-09-13 step 4 third slice: `R10-D4` registered, with the checker
+  `bin/sd-review::codex_preflight`, the first in a file with no `.py` suffix.
+  Leg d proves its `auth_mode` clause; the stranded baseline falls 24 → 23

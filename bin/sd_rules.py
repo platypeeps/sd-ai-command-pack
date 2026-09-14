@@ -179,6 +179,21 @@ RULES: tuple[Rule, ...] = (
         scope="code",
         teaches="skills/sd-check/SKILL.md#Never",
     ),
+    Rule(
+        id="R10-D4",
+        subject="a codex review runs on the ChatGPT subscription or it "
+                "does not run: `auth.json` must select `chatgpt` with no "
+                "stored API key, so a run can never fall over to metered "
+                "API billing",
+        checker="bin/sd-review::codex_preflight",
+        proof="replace the `auth_mode` guard in `bin/sd-review` with a "
+              "condition that is never true; the preflight then accepts an "
+              "`apikey` login and `test_a_non_chatgpt_auth_mode_refuses` "
+              "goes red",
+        scope="code",
+        teaches="skills/sd-review/SKILL.md#"
+                "The `codex-json` entry is subscription-only (R10-D4)",
+    ),
 )
 
 
