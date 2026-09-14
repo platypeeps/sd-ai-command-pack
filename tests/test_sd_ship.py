@@ -1721,16 +1721,44 @@ class ReviewWatchdogTests(unittest.TestCase):
         self.assertEqual(diagnostic["captured_report"], json.loads(body))
         self.assertFalse(diagnostic["cleanup"]["drained"])
 
-    def test_deep_captured_json_stays_a_typed_timeout(self):
-        body = ('{"deep":' + '[' * 10000 + '0' + ']' * 10000 + '}').encode()
+    @staticmethod
+    def nested(depth: int) -> bytes:
+        """A report whose deepest container sits `depth` levels down."""
+        return ('{"deep":' + '[' * (depth - 1) + '0' + ']' * (depth - 1) + '}').encode()
+
+    def expired(self, body: bytes) -> dict:
         process = unittest.mock.Mock(pid=123)
         process.communicate.side_effect = [subprocess.TimeoutExpired([], 1), (body, b""), (body, b"")]
         process.poll.return_value = 0
         with patch.object(ship.subprocess, "Popen", return_value=process), patch.object(ship.os, "killpg"):
             with self.assertRaises(ship.ReviewTimeout) as raised:
                 ship.review_process(self.root, ["fixture"], timeout=1)
-        self.assertNotIn("captured_report", raised.exception.diagnostic)
-        self.assertEqual(raised.exception.diagnostic["stdout"]["bytes"], len(body))
+        return raised.exception.diagnostic
+
+    def test_deep_captured_json_stays_a_typed_timeout(self):
+        # One level past the limit this file states, not past whatever the
+        # running interpreter's C recursion guard happens to allow. At 10000
+        # -- what this fixture used until sd:818 -- the refusal came from
+        # `json.loads` on 3.13 and did not come at all on 3.14, so the test
+        # read the interpreter rather than the rule.
+        body = self.nested(ship.REVIEW_CAPTURE_DEPTH + 1)
+        diagnostic = self.expired(body)
+        self.assertNotIn("captured_report", diagnostic)
+        self.assertEqual(diagnostic["stdout"]["bytes"], len(body))
+
+    def test_captured_json_at_the_depth_limit_is_still_evidence(self):
+        body = self.nested(ship.REVIEW_CAPTURE_DEPTH)
+        self.assertEqual(self.expired(body)["captured_report"], json.loads(body))
+
+    def test_brackets_inside_a_string_are_text_and_not_depth(self):
+        # A shallow report that quotes some JSON is still evidence. Counting
+        # every bracket would refuse it, and the tail it quotes is often the
+        # only thing that says what the review was doing when it expired. The
+        # leading quote is escaped in the encoded body, so a scan that does not
+        # honour escapes ends the string there and counts the rest as depth.
+        body = json.dumps({"deep": '"' + "[" * (ship.REVIEW_CAPTURE_DEPTH * 10)}).encode()
+        self.assertIn(rb'\"[[[', body)
+        self.assertEqual(self.expired(body)["captured_report"], json.loads(body))
 
     def test_interrupt_also_cleans_the_owned_group(self):
         process = unittest.mock.Mock(pid=123)
