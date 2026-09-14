@@ -78,9 +78,9 @@ promotions in this repository and they point in opposite directions.
 
 - `skills/sd-plan/SKILL.md` step 4: "**Promote.** `planning → ready` only when
   acceptance criteria are present." A status transition on the item's row.
-- `sd skill promote <name> --path <path>` in `bin/sd_skill.py`: move a
-  directory from `contrib/` to `skills/` and name it on a path, in a pull
-  request.
+- `sd skill promote <name> --path <path>` in `bin/sd_skill.py`: queue one
+  task to move a directory from `contrib/` to `skills/` and name it on a
+  path. The command itself writes nothing in this checkout.
 
 The `## Review` sentence is the first. It sits at the end of a section about
 the planning adversarial review, whose whole subject is whether the item may
@@ -234,12 +234,15 @@ this section first said. A **hand-rolled** `git mv` of `sd-grill` into
 which asserts `sd_install.unnamed_directories(REPO_ROOT) == []` against this
 repository rather than a fixture. But that is not the approach D1 rejects.
 D1 rejects `sd skill promote sd-grill --path development`, and that command
-edits the paths file in the same commit: `bin/sd_skill.py:224-243` runs
-`git mv`, then `paths_edit(root, name, path_name, add=promoting)`, then
-`git add -- skills/paths.json`, then one `git commit`. `development` is a real
-path — `skills/paths.json` names `research`, `development`, `act`. So the
-rejected approach leaves `unnamed_directories(REPO_ROOT) == []` and breaks no
-test.
+writes nothing here: `bin/sd_skill.py:54-56` hands the intent to
+`skills_catalog.request`, which queues one task and moves no directory. The
+move and the `skills/paths.json` edit happen together later, in the isolated
+checkout the queued brief names. (This design first described the command as
+a `git mv`, a `git add -- skills/paths.json` and one `git commit` made here;
+sd:802 removed that body, and correcting it leaves the conclusion below
+standing.) `development` is a real path — `skills/paths.json` names
+`research`, `development`, `act`. So the rejected approach leaves
+`unnamed_directories(REPO_ROOT) == []` and breaks no test.
 
 The sentence that stood here claimed the opposite as "the sharpest evidence
 available here that the direction is right", and its own concession — "unless
@@ -403,8 +406,9 @@ thousand line document; that would need a reader, and the reader is the review.
 wrong again in the other direction.** This is real and is accepted rather than
 engineered around, per D2. The cost is one token in six lines, and the benefit
 is that the move is visible. What makes it acceptable is that the trial is a
-deliberate act with a pull request behind it — `sd skill promote` opens one —
-so there is a change for the correction to ride on.
+deliberate act with a pull request behind it — the task `sd skill promote`
+queues ends in one, prepared in an isolated checkout for the operator to
+merge — so there is a change for the correction to ride on.
 
 **No line-count ceiling constrains this item, and that is a smaller comfort
 than it sounds.** `bin/` measures 17,216 against `BIN_CAP` 18,000 and
@@ -688,10 +692,10 @@ paragraph whose subject is how much review actually happened.
 **C-35 — the design claimed a test distinguishes the two approaches, and none
 does.** "The rejected one breaks a named test" named a hand-rolled `git mv`
 without the paths edit. D1's rejected approach is
-`sd skill promote sd-grill --path development`, which edits the paths file in
-the same commit: `bin/sd_skill.py:224-243` is `git mv`, `paths_edit(...)`,
-`git add -- skills/paths.json`, one `git commit`; `development` is one of the
-three real paths. So the rejected approach leaves
+`sd skill promote sd-grill --path development`, which writes nothing in this
+checkout: `bin/sd_skill.py:54-56` queues one task, and the move and the
+`skills/paths.json` edit happen together later in an isolated checkout;
+`development` is one of the three real paths. So the rejected approach leaves
 `unnamed_directories(REPO_ROOT) == []` and breaks nothing. The paragraph's own
 "unless a second file moves with it" conceded it while the conclusion ignored
 it. The direction rests on the operator's ruling and nothing mechanical, and
