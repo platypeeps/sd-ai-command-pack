@@ -51,23 +51,39 @@ _NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
                  "seven": 7, "eight": 8, "nine": 9, "ten": 10}
 
 
-def _skill_unit(pattern: str) -> re.Match[str]:
-    """The one paragraph or list item of SKILL.md that matches `pattern`.
+def _skill_prose() -> str:
+    """SKILL.md as one line, so a line break cannot split a claim from its number."""
+    return " ".join(SKILL_MD.read_text(encoding="utf-8").split())
 
-    Each is flattened to one line first, so a line break cannot split a claim
-    from its number. Exactly one must match: a claim the page no longer makes,
-    or makes twice, is a question for whoever changed the page.
+
+def _skill_says(*sentences: str) -> str:
+    """The page's prose, once each of `sentences` is in it verbatim and once.
+
+    A rule stated in prose has no slot to extract. "every row of the class,
+    not just the rows past the cap" and "only the rows past the cap, never
+    the rest of the class" share every word the earlier regexes read, and
+    #946's review swapped one for the other with every gate green (sd:821
+    N-1). So a sentence that states a rule is pinned whole, and the test that
+    pins it measures the thing the sentence says against a run: the pin
+    proves the page says it, the run proves it is so. Rewording the page is
+    not free, then. A change that keeps the meaning updates the copy here
+    after re-reading the assertions under it; a change that does not keeps
+    failing, which is the point.
     """
-    units = [" ".join(unit.split())
-             for block in re.split(r"\n\s*\n", SKILL_MD.read_text(encoding="utf-8"))
-             for unit in re.split(r"\n(?=- )", block)]
-    found = [match for unit in units if (match := re.search(pattern, unit))]
-    assert len(found) == 1, f"{len(found)} units of {SKILL_MD.name} match {pattern!r}"
-    return found[0]
+    prose = _skill_prose()
+    for sentence in sentences:
+        count = prose.count(" ".join(sentence.split()))
+        assert count == 1, f"{SKILL_MD.name} says this {count} times, not once: {sentence!r}"
+    return prose
 
 
 def _number(word: str) -> int | None:
     return int(word) if word.isdigit() else _NUMBER_WORDS.get(word.lower())
+
+
+def _word(number: int) -> str:
+    """The number word the page spells `number` with, so a pin reads the constant."""
+    return {value: word for word, value in _NUMBER_WORDS.items()}[number]
 
 
 def _load(name: str, module_name: str) -> Any:
@@ -667,6 +683,28 @@ class StatusFixture(ToolFixture):
     def report(self, *args: str) -> dict[str, Any]:
         return self.run_json(SD_STATUS, *args)
 
+    def write_packet(self) -> pathlib.Path:
+        """One handoff packet for the fixture repo, written by the real tool.
+
+        On the fixture and not on `HandoffTests`, because the skill-page
+        census below needs a packet too and called the other class's method
+        unbound, which held only while both classes kept the same state
+        (sd:821 N-6).
+        """
+        completed = subprocess.run(
+            [sys.executable, str(SD_HANDOFF), "--summary", "mid-refactor"],
+            cwd=str(self.repo),
+            env=self.env(),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        found = sorted(
+            (self.state / "sd-ai-command-pack" / "handoff").glob("*.json")
+        )
+        self.assertEqual(len(found), 1, completed.stdout)
+        return found[0]
+
     @staticmethod
     def headings(text: str) -> list[str]:
         """Section headings, which are the only lines starting at column 0.
@@ -1016,21 +1054,6 @@ class WorkItemTests(StatusFixture):
 
 class HandoffTests(StatusFixture):
     """The packet is read. It is never consumed -- that is `--show`'s job."""
-
-    def write_packet(self) -> pathlib.Path:
-        completed = subprocess.run(
-            [sys.executable, str(SD_HANDOFF), "--summary", "mid-refactor"],
-            cwd=str(self.repo),
-            env=self.env(),
-            capture_output=True,
-            text=True,
-        )
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        found = sorted(
-            (self.state / "sd-ai-command-pack" / "handoff").glob("*.json")
-        )
-        self.assertEqual(len(found), 1, completed.stdout)
-        return found[0]
 
     def test_the_packet_is_reported_as_pending(self) -> None:
         self.write_packet()
@@ -4488,35 +4511,111 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
 
         The page restates the cap and the limit in prose and quotes the line,
         and #940's review changed each of those and inverted the crowd-out
-        rule with every gate still green. Each claim is measured here against
-        a run rather than against a phrase: the quoted fragments must be ones
-        the line prints, the numbers must be the constants, and the cause the
-        page says a crowded class under its cap names must be the one printed.
+        rule with every gate still green. #946's review then inverted the
+        rule's first half, sent the held rows' slots nowhere, and had
+        `--actions` drop them, still green: the test held one slot per
+        sentence and not the sentence (sd:821 N-1). So the four rule
+        sentences are pinned whole, their numbers read from the constants,
+        and each is measured against a run: the quoted fragments must be
+        ones the line prints, the cause a class under its cap names must be
+        the one printed, the held count must be the class's whole count, the
+        freed slots must go to a lower class, and `--actions` and `--json`
+        must still list the rows `pending` does not.
         """
-        bullet = _skill_unit(r"^- \*\*At most (\w+) of its rows in `pending`\*\*")
-        text = bullet.string
-        self.assertEqual(status.MERGED_PENDING_CAP, _number(bullet.group(1)))
+        cap, limit = status.MERGED_PENDING_CAP, status.PENDING_LIMIT
+        rules = (
+            "The rows it holds back leave their slots to the classes below, and a line "
+            "under the list says how many of its rows the list does not show.",
+            f"When higher classes fill all {_word(limit)} slots, that is every row of the "
+            "class, not just the rows past the cap — so the line splits the count by "
+            f'cause (`_held_back_line`): rows "past its cap of {cap}", rows "ranked '
+            f'below the first {limit}", or both with a number each.',
+            "A class crowded out while under its cap names rank alone, never the cap.",
+            "`--actions` and `--json` still carry every row.",
+        )
+        prose = _skill_says(*rules)
+        head = re.search(r"- \*\*At most (\w+) of its rows in `pending`\*\*", prose)
+        assert head is not None
+        self.assertEqual(cap, _number(head.group(1)))
+        bullet = prose[head.start():prose.index(rules[-1]) + len(rules[-1])]
+        for rule in rules:
+            self.assertIn(rule, bullet, "the rule is stated in the bullet on the cap")
 
-        _, crowded = self.merged_pending(10, 1)
-        _, capped = self.merged_pending(0, 5)
-        _, both = self.merged_pending(10, 5)
+        _, crowded = self.merged_pending(limit, 1)
+        rows, capped = self.merged_pending(0, cap + 2)
+        both_rows, both = self.merged_pending(limit, cap + 2)
         printed = crowded + capped + both
-        quoted = re.findall(r'"([^"]+)"', text)
+        quoted = re.findall(r'"([^"]+)"', bullet)
         self.assertTrue(quoted, "the bullet quotes no part of the line")
         for fragment in quoted:
             self.assertIn(fragment, printed)
 
-        filled = re.findall(r"fill all (\w+) slots", text)
-        self.assertTrue(filled)
-        self.assertEqual({status.PENDING_LIMIT}, {_number(word) for word in filled})
+        # "names rank alone, never the cap": one row under a cap of three,
+        # crowded out by `limit` higher-ranked rows.
+        self.assertIn(f"ranked below the first {limit}", crowded)
+        self.assertNotIn("cap", crowded)
 
-        under = [sentence for sentence in re.split(r"(?<=\.) ", text) if "under its cap" in sentence]
-        self.assertEqual(1, len(under), "one sentence says what a class under its cap names")
-        rule = re.search(r"names (?:the )?(rank|cap) alone, never (?:the )?(rank|cap)\b", under[0])
-        assert rule is not None, under[0]
-        cause = {"rank": "ranked below the first", "cap": "cap"}
-        self.assertIn(cause[rule.group(1)], crowded)
-        self.assertNotIn(cause[rule.group(2)], crowded)
+        # "every row of the class, not just the rows past the cap": with the
+        # list full above it, the held count is the class's whole count, and
+        # the line splits it into the two causes with a number each.
+        held = status.pending_rows(both_rows)[1][self.CHECK]
+        self.assertEqual(cap + 2, held)
+        self.assertGreater(held, 2, "held more than the rows past the cap")
+        self.assertIn(f"  {held} {self.CHECK} rows not shown: 2 past its cap of {cap}, "
+                      f"{cap} ranked below the first {limit}, in --actions\n", both)
+
+        # "a line under the list says how many of its rows the list does not show"
+        self.assertEqual({self.CHECK: 2}, status.pending_rows(rows)[1])
+        self.assertIn(f"  2 {self.CHECK} rows not shown", capped)
+
+        # "leave their slots to the classes below": a lower-ranked class's row
+        # takes the slot a row past the cap gave up.
+        below = "open-step"
+        self.assertGreater(status.BY_CHECK[below].rank, status.BY_CHECK[self.CHECK].rank)
+        shown, _ = status.pending_rows([{"check": self.CHECK}] * (cap + 2) + [{"check": below}])
+        self.assertEqual([self.CHECK] * cap + [below], [row["check"] for row in shown])
+
+        # The `--json` paragraph names the function that applies that rule,
+        # and #946's review renamed it to `rollup_buckets` unnoticed (E-W2).
+        _skill_says(f"`actions` — the uncapped inventory, of which `pending` is the first "
+                    f"{_word(limit)} after each class's `pending_cap` (`pending_rows`) "
+                    "— and `next`.")
+        self.assertEqual(limit, len(status.pending_rows([{"check": below}] * (limit + 3))[0]))
+
+        # "`--actions` and `--json` still carry every row": the text list
+        # names the held rows too, and the `actions` key through `collect()`
+        # is the whole inventory when that is longer than the list.
+        stream = io.StringIO()
+        status.render_actions(both_rows, stream)
+        for row in both_rows:
+            self.assertIn(f"{row['id']} {row['check']}", stream.getvalue())
+        for index in range(limit + 4):
+            self.item(f"2026-08-{index + 1:02d}-item", status="in_progress")
+        payload = self.report()
+        self.assertGreater(len(payload["inventory"]["rows"]), limit)
+        self.assertEqual(payload["inventory"]["rows"], payload["actions"])
+
+    def test_the_skill_page_s_other_two_rules_are_the_class_s_table_row(self) -> None:
+        """The rank and the order the page gives the class are the ones `CLASSES` holds.
+
+        The bullet on the cap is measured above; these two were not measured
+        at all, and #946's review moved `newest_first` into `PENDING_LIMIT`
+        with every gate green (sd:821, E-W1). Each is pinned with its numbers
+        read from the table and measured against the table.
+        """
+        row = status.BY_CHECK[self.CHECK]
+        above, under = status.BY_CHECK["pr-needs-action"], status.BY_CHECK["open-step"]
+        _skill_says(
+            f"- **Rank {row.rank}**, below `pr-needs-action` at {above.rank} and above "
+            f"`open-step` at {under.rank}.",
+            "- **Newest merge first** within the class (`newest_first` in `CLASSES`), the "
+            "reverse of every other class.",
+        )
+        self.assertLess(above.rank, row.rank)
+        self.assertLess(row.rank, under.rank)
+        self.assertIn("newest_first", status.Class._fields)
+        self.assertEqual([self.CHECK],
+                         [entry.check for entry in status.CLASSES if entry.newest_first])
 
     def test_one_unreadable_merged_pull_request_is_unchecked_and_hides_no_other(self) -> None:
         blind = self.merged(7, 2, ["bb11"], unreadable="gh api exited 1")
@@ -4710,12 +4809,21 @@ class SkillPageClaimTests(StatusFixture):
                 found.extend(SkillPageClaimTests.pending_keys(value, f"{path}[]"))
         return found
 
-    def test_the_pending_keys_the_page_names_are_the_ones_json_carries(self) -> None:
-        """The census walks a payload with a handoff packet and a check still running.
+    #: The `--json` paragraph's sentences on `pending`, pinned whole (sd:821
+    #: N-1): #946's review made the packet boolean "say whether a check still
+    #: runs", made the key absent "with a running check", and made both nested
+    #: keys "this list", and each regex that read a slot out of these stayed
+    #: green. The two tests below measure what each sentence says.
+    KEYS = ("It has no top-level `pending` key, and the two nested ones are something "
+            "else again: `handoff.packet.pending` is a boolean about the handoff packet, "
+            "and `pull_requests.pull_requests[].checks.pending` an integer count of that "
+            "pull request's checks that have not finished.")
+    ABSENT = ("`rollup_buckets` writes only the buckets it saw, so with no such check "
+              "the key is absent, not 0.")
+    NOT_A_LIST = "Neither is this list."
 
-        A second pull request has no such check, which is the shape the page
-        says leaves the key out rather than writing 0.
-        """
+    def running_and_done(self) -> None:
+        """Two pull requests: one with a check still running, one with none."""
         pull = {"baseRefName": "main", "isDraft": False, "mergeable": "MERGEABLE",
                 "mergeStateStatus": "BLOCKED", "reviewDecision": "",
                 "headRepositoryOwner": {"login": "acme"}}
@@ -4726,77 +4834,143 @@ class SkillPageClaimTests(StatusFixture):
             dict(pull, number=13, title="Done", headRefName="task/done",
                  statusCheckRollup=[{"name": "lint", "conclusion": "SUCCESS"}]),
         ])
-        HandoffTests.write_packet(self)
+
+    def test_the_pending_keys_the_page_names_are_the_ones_json_carries(self) -> None:
+        """The census walks a payload with a handoff packet and a check still running.
+
+        A second pull request has no such check, which is the shape the page
+        says leaves the key out rather than writing 0. The report runs twice,
+        without the packet and with it: the packet boolean is what moves, and
+        the check count is what does not, which is what "about the handoff
+        packet" means and what a boolean "saying whether a check still runs"
+        would fail.
+        """
+        self.running_and_done()
+        without = self.report()
+        self.write_packet()
         payload = self.report()
         found = self.pending_keys(payload)
         nested = {path for path, _ in found if "." in path}
         self.assertEqual({"handoff.packet.pending",
                           "pull_requests.pull_requests[].checks.pending"}, nested,
                          "the census itself: a new pending key needs the page to name it")
+        self.assertEqual(nested, {path for path, _ in self.pending_keys(without)})
 
-        claim = _skill_unit(r"^The `--json` schema is version").string
-        top = re.search(r"has (no|a) top-level `pending` key", claim)
-        assert top is not None, claim
-        self.assertEqual(top.group(1) == "no", "pending" not in payload)
-
-        named = set(re.findall(r"`((?:[\w\[\]]+\.)+pending)`", claim))
-        self.assertEqual(nested, named)
-        count = re.search(r"the (\w+) nested ones", claim)
-        assert count is not None, claim
+        prose = _skill_says(self.KEYS, self.ABSENT, self.NOT_A_LIST)
+        self.assertNotIn("pending", payload)
+        self.assertEqual(nested, set(re.findall(r"`((?:[\w\[\]]+\.)+pending)`", self.KEYS)))
+        count = re.search(r"the (\w+) nested ones", self.KEYS)
+        assert count is not None
         self.assertEqual(len(nested), _number(count.group(1)))
+        self.assertLess(prose.index("The `--json` schema is version"), prose.index(self.KEYS),
+                        "the sentence is in the paragraph on the schema")
 
         kinds = {"boolean": bool, "integer": int}
         for path, value in found:
-            said = re.search(rf"`{re.escape(path)}` (?:is )?an? (\w+)", claim)
+            said = re.search(rf"`{re.escape(path)}`(?: \w+)?? an? (\w+)", self.KEYS)
             assert said is not None, f"the page gives no type for {path}"
             self.assertIs(kinds.get(said.group(1)), type(value), path)
+            self.assertNotIsInstance(value, list, path)
 
-        checks = {pr["number"]: pr["checks"] for pr in payload["pull_requests"]["pull_requests"]}
-        absent = re.search(r"`rollup_buckets` [^.]*\bthe key is (absent|0)\b", claim)
-        assert absent is not None, claim
-        self.assertEqual({"success": 1, "pending": 1}, checks[12])
-        self.assertEqual(absent.group(1) == "absent", "pending" not in checks[13])
+        def checks(report: dict[str, Any]) -> dict[int, dict[str, int]]:
+            return {pr["number"]: pr["checks"] for pr in report["pull_requests"]["pull_requests"]}
+
+        self.assertFalse(without["handoff"]["packet"]["pending"])
+        self.assertTrue(payload["handoff"]["packet"]["pending"])
+        self.assertEqual(checks(without), checks(payload))
+        self.assertEqual({"success": 1, "pending": 1}, checks(payload)[12])
+        self.assertNotIn("pending", checks(payload)[13])
+        self.assertEqual({"success": 1}, checks(payload)[13])
 
     def test_the_states_the_page_says_count_as_pending_are_the_buckets(self) -> None:
-        """`_BUCKETS` folds six GitHub states into `pending`, not only queued and running."""
-        claim = _skill_unit(r"^The `--json` schema is version").string
-        folds = re.search(r"folds (\w+) states into it: (.*?)\. ", claim)
-        assert folds is not None, claim
-        named = re.findall(r"`([A-Z_]+)`", folds.group(2))
+        """`_BUCKETS` folds six GitHub states into `pending`, and the page says which is what.
+
+        The page used to gloss the last three as "a check GitHub expects and
+        has not heard from", which fits `EXPECTED` alone: a `WAITING` run
+        exists and waits (sd:821 N-5). What is true is what `_outcome` reads.
+        A check run's `conclusion` comes first, so its `status` counts only
+        while there is none; a status context has only a `state`. Which enum
+        each name belongs to is GitHub's schema, not this code: on 2026-09-14
+        `CheckRun.status: CheckStatusState!` holds `QUEUED`, `IN_PROGRESS`,
+        `WAITING`, `REQUESTED`, `PENDING` and `COMPLETED`, `CheckRun.conclusion`
+        is nullable, and `StatusContext.state: StatusState!` holds `EXPECTED`
+        and `PENDING` among the finished ones. That part is read here from the
+        page's sentence and from the code, not from GitHub.
+        """
+        six = ("`_BUCKETS` in `bin/sd-pr-state` folds six states into it: `PENDING`, "
+               "`QUEUED`, `IN_PROGRESS`, `WAITING`, `REQUESTED` and `EXPECTED`.")
+        which = ("`QUEUED`, `IN_PROGRESS`, `WAITING` and `REQUESTED` are a check run's "
+                 "`status`, which `_outcome` reads only while the run has no `conclusion`; "
+                 "`EXPECTED` is a commit status GitHub expects and has not received; "
+                 "`PENDING` is either.")
+        prose = _skill_says(six, which)
+        self.assertEqual(prose.index(six) + len(six) + 1, prose.index(which),
+                         "the gloss follows the list it glosses")
+        named = re.findall(r"`([A-Z_]+)`", six.partition(": ")[2])
         buckets = status.pr_state._BUCKETS
         self.assertEqual({state for state, bucket in buckets.items() if bucket == "pending"},
                          set(named))
+        folds = re.search(r"folds (\w+) states", six)
+        assert folds is not None
         self.assertEqual(len(named), _number(folds.group(1)))
+
+        outcome = status.pr_state._outcome
+        runs = re.findall(r"`([A-Z_]+)`", which.partition(" are a check run's")[0])
+        self.assertEqual(4, len(runs))
+        for state in runs:
+            with self.subTest(state):
+                self.assertEqual("pending", outcome({"name": "build", "status": state}))
+                self.assertEqual("failure", outcome({"name": "build", "status": state,
+                                                     "conclusion": "FAILURE"}),
+                                 "a run with a conclusion is read by it, whatever its status")
+        self.assertEqual("pending", outcome({"context": "ci/required", "state": "EXPECTED"}))
+        self.assertEqual("pending", outcome({"context": "ci/required", "state": "PENDING"}))
+        self.assertEqual("pending", outcome({"name": "build", "status": "PENDING"}))
+        self.assertEqual(set(named), {*runs, "EXPECTED", "PENDING"})
         rollup = [{"name": state, "status": state} for state in named]
         self.assertEqual({"pending": len(named)}, status.pr_state.rollup_buckets(rollup))
 
     def test_every_ten_the_page_gives_pending_is_pending_limit(self) -> None:
-        """The page spells the list's length in five places; the code reads one constant."""
-        prose = " ".join(SKILL_MD.read_text(encoding="utf-8").split())
-        said = [word for pattern in (r"at most (\w+) actionable rows",
-                                     r"`pending` is the first (\w+)",
-                                     r"`pending` caps at (\w+)",
-                                     r"capped at (\w+)",
-                                     r"ranked below the first (\w+)")
-                for word in re.findall(pattern, prose)]
-        self.assertGreaterEqual(len(said), 5)
-        self.assertEqual({status.PENDING_LIMIT}, {_number(word) for word in said})
+        """Every ten on the page is the list's length; the code reads one constant.
+
+        The sites are enumerated, not chosen. #946 chose five phrases and
+        missed three sites, and its threshold of five let one of them say
+        "twelve" (sd:821 N-3). Here every `ten` or `10` on the page counts
+        once a table cell that is only a number is dropped (the class table
+        ranks four checks at 10), the number word being the constant's, so a
+        limit of twelve looks for twelve. That is thirteen sites on
+        2026-09-14, which
+        `sed -E 's/\\|[[:space:]]*[0-9]+[[:space:]]*\\|/|/g' skills/sd-status/SKILL.md | grep -oiw -e ten -e 10 | wc -l`
+        gives; a site reworded to another number drops one, which no list of
+        phrases could see, and a site added or removed fails here until the
+        count is brought up to date.
+        """
+        limit = status.PENDING_LIMIT
+        lines = [re.sub(r"\|\s*\d+\s*(?=\|)", "|", line)
+                 for line in SKILL_MD.read_text(encoding="utf-8").splitlines()]
+        sites = [line.strip() for line in lines
+                 for _ in re.findall(rf"(?<![\w#-])(?:{_word(limit)}|{limit})(?![\w-])",
+                                     line, re.IGNORECASE)]
+        self.assertEqual(13, len(sites), "\n".join(sites))
 
     def test_every_symbol_the_page_cites_is_in_the_tools_it_describes(self) -> None:
         """A renamed function leaves the page citing nothing, and nothing said so.
 
         A backticked name with an underscore or in capitals must appear in
-        `bin/sd-status` or `bin/sd-pr-state`. A private name, or one the page
-        places "in `bin/...`", must be defined there, not just mentioned.
+        `bin/sd-status`, `bin/sd-pr-state` or a tool the page names as
+        `bin/...`; #946's version read two sources and failed a true citation
+        of `bin/sd-review-ack`'s (sd:821 N-2). A private name, or one the
+        page places "in `bin/...`", must be defined there, not just mentioned.
         """
-        sources = {name: (BIN / name).read_text(encoding="utf-8")
-                   for name in ("sd-status", "sd-pr-state")}
+        prose = _skill_prose()
+        tools = {"sd-status", "sd-pr-state", *re.findall(r"`bin/([\w-]+)`", prose)}
+        self.assertGreater(len(tools), 2, "the page names a tool beyond the two")
+        sources = {name: (BIN / name).read_text(encoding="utf-8") for name in sorted(tools)}
 
         def defines(source: str, name: str) -> bool:
             return bool(re.search(rf"^\s*(?:(?:def|class)\s+{name}\b|{name}\s*[:=])",
                                   source, re.MULTILINE))
 
-        prose = " ".join(SKILL_MD.read_text(encoding="utf-8").split())
         cited = {name for name in re.findall(r"`([A-Za-z_]\w*)`", prose)
                  if "_" in name or name.isupper()}
         self.assertTrue(any(name.startswith("_") for name in cited), "not vacuous")
@@ -4806,7 +4980,7 @@ class SkillPageClaimTests(StatusFixture):
                                     for source in sources.values()))
                 if name.startswith("_"):
                     self.assertTrue(any(defines(source, name) for source in sources.values()))
-        placed = re.findall(r"`([A-Za-z_]\w*)` in `bin/(sd-status|sd-pr-state)`", prose)
+        placed = re.findall(r"`([A-Za-z_]\w*)` in `bin/([\w-]+)`", prose)
         self.assertTrue(placed)
         for name, tool in placed:
             with self.subTest(f"{name} in bin/{tool}"):

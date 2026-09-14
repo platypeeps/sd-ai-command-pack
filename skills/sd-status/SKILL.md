@@ -343,9 +343,11 @@ again: `handoff.packet.pending` is a boolean about the handoff packet, and
 `pull_requests.pull_requests[].checks.pending` an integer count of that pull
 request's checks that have not finished. `_BUCKETS` in `bin/sd-pr-state` folds
 six states into it: `PENDING`, `QUEUED`, `IN_PROGRESS`, `WAITING`, `REQUESTED`
-and `EXPECTED`, the last three a check GitHub expects and has not heard from.
-`rollup_buckets` writes only the buckets it saw, so with no such check the key
-is absent, not 0. Neither is this list.
+and `EXPECTED`. `QUEUED`, `IN_PROGRESS`, `WAITING` and `REQUESTED` are a check
+run's `status`, which `_outcome` reads only while the run has no `conclusion`;
+`EXPECTED` is a commit status GitHub expects and has not received; `PENDING`
+is either. `rollup_buckets` writes only the buckets it saw, so with no such
+check the key is absent, not 0. Neither is this list.
 **`next` is an object with `id`, `check` and `suggest`, not a bare string**,
 because a caller acting on the suggestion needs the id it belongs to in the
 same breath.
