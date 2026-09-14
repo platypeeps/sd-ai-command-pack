@@ -87,6 +87,13 @@ class RowCase(unittest.TestCase):
                            capture_output=True)
         self.root = self.root.resolve()
         sd_db.writes.upsert_repo(self.connection, str(self.root))
+        # `sd_db.default_path` reads `$HOME` from the process at call time, and
+        # the reader opens its own connection rather than taking this one.
+        # Both have to point at the scratch home or the read opens the
+        # operator's real database.
+        was = os.environ.get("HOME")
+        os.environ["HOME"] = str(self.home)
+        self.addCleanup(os.environ.__setitem__, "HOME", was or "")
 
     def item(self, name: str = "an-item", status: str = "in_progress") -> int:
         """One work item, keyed the way `sd_lib` keys it."""
@@ -106,8 +113,8 @@ class RowCase(unittest.TestCase):
         return sd_db.add_note(self.connection, item, "followup", body)
 
     def read(self) -> list[str]:
-        return sd_handoff_rows.render(
-            sd_handoff_rows.open_followups(self.connection, str(self.root)))
+        """What the restore hook injects for this checkout: `note_brief`'s lines."""
+        return sd_handoff_rows.brief_for(self.root)
 
 
 class TheCriterion(RowCase):
@@ -129,13 +136,19 @@ class TheCriterion(RowCase):
             self.assertTrue(any(body in line for line in lines),
                             f"{body!r} is not in {lines}")
 
-    def test_the_order_is_the_order_they_were_named_in(self):
+    def test_the_last_one_named_comes_first(self):
+        """Newest first, `sd_db.brief_notes`'s order and requirement 7's.
+
+        The pack's own reader handed them back oldest first. The brief is read
+        from the top by a session with eight kilobytes, so what was named last,
+        nearest to where the dead session stopped, leads.
+        """
         item = self.item()
         for body in ("first", "second", "third"):
             self.followup(item, body)
         bullets = [line for line in self.read() if line.startswith("- [")]
         self.assertEqual([line.split("] ", 1)[1] for line in bullets],
-                         ["first", "second", "third"])
+                         ["third", "second", "first"])
 
 
 class WhatIsNotHandedOver(RowCase):
@@ -193,19 +206,91 @@ class WhatIsNotHandedOver(RowCase):
 
 
 class TheRenderedShape(RowCase):
-    def test_two_items_are_grouped_under_their_titles(self):
+    def test_two_items_each_name_their_item_on_the_line(self):
         first = self.item(name="alpha")
         second = self.item(name="beta")
         self.followup(first, "a thing")
         self.followup(second, "another thing")
-        lines = self.read()
-        self.assertIn("alpha:", lines)
-        self.assertIn("beta:", lines)
+        joined = "\n".join(self.read())
+        self.assertIn(f"(alpha, sd:{first}) a thing", joined)
+        self.assertIn(f"(beta, sd:{second}) another thing", joined)
 
     def test_every_bullet_carries_the_id_that_resolves_it(self):
         item = self.item()
         note = self.followup(item, "close me")
-        self.assertIn(f"- [{note}] close me", self.read())
+        bullets = [line for line in self.read() if line.startswith("- [")]
+        self.assertEqual(len(bullets), 1, bullets)
+        self.assertTrue(bullets[0].startswith(f"- [followup #{note} "), bullets)
+        self.assertTrue(bullets[0].endswith("] close me"), bullets)
+
+
+class TheBriefIsTheLibrarys(RowCase):
+    """sd:234 PR 10: the hook injects `sd_db.note_brief`'s text and nothing else.
+
+    `bin/sd_handoff_rows.py` used to query and render the same rows itself,
+    which is the second reader the brief was written to retire. Each test here
+    fails against a hook that renders its own.
+    """
+
+    def injected(self, cwd: Path | None = None) -> str:
+        out = io.StringIO()
+        payload = json.dumps({"cwd": str(cwd or self.root)})
+        self.assertEqual(restore.run(payload, {"HOME": str(self.home)}, out), 0)
+        if not out.getvalue():
+            return ""
+        return json.loads(out.getvalue())["hookSpecificOutput"]["additionalContext"]
+
+    def test_the_hook_injects_the_brief_verbatim(self):
+        item = self.item()
+        self.followup(item, "rebase onto main")
+        sd_db.add_note(self.connection, item, "question", "which tag?\nthe pin or HEAD")
+        sd_db.add_note(self.connection, item, "decision", "we chose sqlite")
+        self.followup(item, "answer the review")
+        brief = sd_db.note_brief(self.connection, str(self.root), branch="")
+        self.assertEqual(brief.shown, 3)
+        self.assertEqual(self.injected(), brief.text.rstrip("\n"))
+
+    def test_a_question_is_handed_over_as_well(self):
+        """The one difference in what is handed over, and the library's call.
+
+        The pack's reader read `followup` alone; requirement 7's brief is open
+        `followup` and `question` notes, so an open question now reaches the
+        next session too.
+        """
+        item = self.item()
+        note = sd_db.add_note(self.connection, item, "question", "which tag?")
+        self.assertIn(f"#{note} ", self.injected())
+
+    def test_the_cut_names_the_list_verb(self):
+        """Past the bound the trailer names `sd note list <item>`, which is
+        why `bin/sd-note` grew `list` in the same change."""
+        item = self.item()
+        for index in range(12):
+            self.followup(item, f"{index:02d} " + "x" * 900)
+        context = self.injected()
+        self.assertLessEqual(len((context + "\n").encode("utf-8")), 8 * 1024)
+        self.assertIn(f"`sd note list {item}`", context)
+
+    def test_a_linked_worktree_is_briefed_on_its_own_branch(self):
+        """Rows are keyed by the main checkout; the branch is the session's.
+
+        Left to read the branch itself, `note_brief` would read it at the
+        main root -- whatever is checked out there -- and brief the wrong item.
+        """
+        mine = sd_db.writes.create_item(
+            self.connection, kind="work", title="on-the-branch", status="in_progress",
+            repo=str(self.root), branch="feature-x", source=sd_lib.ITEM_ROW_SOURCE,
+            external_id=f"{self.root}::feature-x/prd.md")
+        other = self.item(name="elsewhere-on-main")
+        self.followup(mine, "the branch's own work")
+        self.followup(other, "not this worktree's")
+        linked = self.home / "linked"
+        subprocess.run(["git", "-C", str(self.root), "worktree", "add", "-q", "-b",
+                        "feature-x", str(linked)], check=True, capture_output=True)
+        context = self.injected(linked.resolve())
+        self.assertIn("the branch's own work", context)
+        self.assertIn("branch feature-x", context)
+        self.assertNotIn("not this worktree's", context)
 
 
 class TheRefusalNamesTheFault(unittest.TestCase):
@@ -295,13 +380,13 @@ class TheHookStaysSilent(unittest.TestCase):
         self.assertEqual(restore.followup_lines("/nowhere"), [])
 
     def test_an_unopenable_database_returns_no_lines(self):
-        original = sd_handoff_rows.followups_for
+        original = sd_handoff_rows.brief_for
 
         def explode(root):
             raise OSError("disk is gone")
 
-        sd_handoff_rows.followups_for = explode
-        self.addCleanup(setattr, sd_handoff_rows, "followups_for", original)
+        sd_handoff_rows.brief_for = explode
+        self.addCleanup(setattr, sd_handoff_rows, "brief_for", original)
         self.assertEqual(restore.followup_lines("/nowhere"), [])
 
     def test_the_reader_never_writes(self):
@@ -327,16 +412,6 @@ class TheHookStaysSilent(unittest.TestCase):
 
 class TheDeltaToTheRestoreHook(RowCase):
     """The hook's own path, not the reader's."""
-
-    def setUp(self):
-        super().setUp()
-        # `sd_db.default_path` reads `$HOME` from the process at call time, and
-        # the reader is called by the hook rather than handed the environment
-        # dict `run` gets. Both have to point at the scratch home or the hook
-        # opens the operator's real database.
-        was = os.environ.get("HOME")
-        os.environ["HOME"] = str(self.home)
-        self.addCleanup(os.environ.__setitem__, "HOME", was or "")
 
     def env(self) -> dict:
         return {"HOME": str(self.home), "PWD": str(self.root)}
@@ -423,6 +498,48 @@ class TheWriter(RowCase):
         code, _, err = self.note(["resolve", str(note)])
         self.assertEqual(code, 0, err)
         self.assertEqual(self.read(), [])
+
+
+class TheLister(RowCase):
+    """`sd-note list <item>`: one item's whole history, through `sd_db.item_notes`."""
+
+    def note(self, argv: list[str]) -> tuple[int, str, str]:
+        out, err = io.StringIO(), io.StringIO()
+        module = load("sd_note", "sd-note")
+        code = module.main(argv, out, err, cwd=str(self.root))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_every_note_is_listed_oldest_first_with_kind_id_and_resolution(self):
+        item = self.item()
+        first = self.followup(item, "wire the hook")
+        question = sd_db.add_note(self.connection, item, "question", "which tag?\nthe pin or HEAD")
+        decision = sd_db.add_note(self.connection, item, "decision", "we chose sqlite")
+        sd_db.resolve_note(self.connection, first)
+        code, out, err = self.note(["list", str(item)])
+        self.assertEqual((code, err), (0, ""))
+        lines = out.splitlines()
+        self.assertEqual(lines[0], f"sd:{item} an-item (in_progress): 4 notes, oldest first")
+        # The opening `status_change` `create_item` writes is history too.
+        self.assertTrue(lines[1].startswith("- [status_change #"), lines)
+        self.assertRegex(lines[2], rf"^- \[followup #{first} \d{{4}}-\d\d-\d\d, "
+                                   rf"resolved \d{{4}}-\d\d-\d\d\] wire the hook$")
+        self.assertRegex(lines[3], rf"^- \[question #{question} [0-9-]+\] which tag\?$")
+        self.assertEqual(lines[4], "  the pin or HEAD")
+        self.assertRegex(lines[5], rf"^- \[decision #{decision} [0-9-]+\] we chose sqlite$")
+        self.assertEqual(len(lines), 6, lines)
+
+    def test_an_item_with_no_notes_says_so(self):
+        item = self.item()
+        self.connection.execute("DELETE FROM note WHERE item = ?", (item,))
+        self.connection.commit()
+        code, out, err = self.note(["list", f"sd:{item}"])
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(out, f"sd:{item} an-item (in_progress): no notes\n")
+
+    def test_an_unknown_item_refuses_and_prints_nothing_on_stdout(self):
+        code, out, err = self.note(["list", "4242"])
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("no item sd:4242 in the database", err)
 
 
 class TheModuleLoader(unittest.TestCase):

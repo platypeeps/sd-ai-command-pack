@@ -88,16 +88,16 @@ packet exists. Otherwise it emits the
 packet as `additionalContext` stamped with its age, and marks it consumed by
 atomic rename, so two sessions racing in one directory cannot both claim it.
 
-**The packet is no longer the only source.** The same hook also injects every
-open `followup` note on an active item of this checkout, read through
-`bin/sd_handoff_rows.py`. Rows go in whether or not a packet is here, which is
-the point: a session killed mid-task ran no `sd-handoff`, so the packet does not
-exist and the followups are all there is. Rows are **not** claimed — three
-sessions restarting in one directory all deserve the same open work, and a
-followup stops being handed over when somebody resolves it with `sd-note
-resolve <id>`, not when a session read it. Write one with `sd-note add "..."
---item <dir>`, which is an explicit act and so is not what the rule below
-forbids.
+**The packet is no longer the only source.** The same hook also injects the open
+`followup` and `question` notes of this checkout as `sd_db.note_brief` renders
+them: the checked-out branch's item, else every live item, newest first, cut at
+8 KB. Rows go in whether or not a packet is here: a session killed mid-task ran
+no `sd-handoff`, so the rows are all there is. Rows are **not** claimed — every
+session restarting here deserves the same open work, and a note stops being
+handed over when `sd-note resolve <id>` closes it, not when a session read it.
+Write one with `sd-note add "..." --item <dir>`, an explicit act and so not what
+the rule below forbids. `sd-note list <item>` (the id, `234` or `sd:234`) prints
+one item's whole note history, which is what the brief's cut trailer points to.
 
 ## Never
 
