@@ -313,7 +313,8 @@ class WalkerTests(unittest.TestCase):
         self.assertEqual(1, len(self.broken("[x](../docs/guide.md#not-an-anchor)\n")))
 
     def test_a_rule_under_a_list_item_is_not_a_heading(self) -> None:
-        self.assertEqual(1, len(self.broken("[x](../docs/guide.md#a-list-item)\n")))
+        # Read as Setext, "- a list item" would slug to "--a-list-item".
+        self.assertEqual(1, len(self.broken("[x](../docs/guide.md#--a-list-item)\n")))
 
     def test_a_prose_path_with_a_missing_anchor_fails(self) -> None:
         self.assertEqual(1, len(self.broken("As docs/guide.md#missing says.\n")))
