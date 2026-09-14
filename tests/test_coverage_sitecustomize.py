@@ -237,6 +237,29 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["bash", "-c", "pushd sub; popd; python -I ../bin/sd_install.py"],
         # A subshell's `pushd` leaves the outer stack alone.
         ["bash", "-c", "pushd sub; (pushd other); popd; python -I ../bin/sd_install.py"],
+        # A block, and an and-or list, that a `|` or a `&` put in a subshell:
+        # the `cd` in it is that subshell's, not the launch's.
+        ["bash", "-c", "{ cd sub; } | cat; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "{ cd sub; } & wait; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "if cd sub; then :; fi | cat; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "while cd sub; do break; done & wait; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "case x in x) cd sub;; esac | cat; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "cd sub && true & wait; python -I ../bin/sd_install.py"],
+        # A function body runs where its caller is, and only once it is called.
+        ["bash", "-c", "f() { cd sub; }; python -I ../bin/sd_install.py"],
+        # A quoted word is a program or an argument, never the shell's own.
+        ["bash", "-c", '"if" python -I bin/sd_install.py'],
+        ["bash", "-c", "echo ';' python -I bin/sd_install.py"],
+        ["bash", "-c", "find . -maxdepth 0 -exec true {} \\; python -I bin/sd_install.py"],
+        ["bash", "-c", "python -I 'bin/sd_inst*.py'"],
+        # The last command of a pipeline runs in a subshell of its own.
+        ["bash", "-c", "true | cd sub; python -I ../bin/sd_install.py"],
+        # `popd +N` and `popd -n` drop an entry and stay where they are.
+        ["bash", "-c", "pushd sub; pushd deep; popd +1; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd deep; popd -n; python -I ../bin/sd_install.py"],
+        # `pushd -n` adds to the stack without moving; a bare `pushd` swaps.
+        ["bash", "-c", "pushd -n sub; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd; python -I ../bin/sd_install.py"],
     )
 
     #: Command lines that run a gate-measured file with site skipped.
@@ -280,10 +303,42 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["env", "--split-string=python3 -I", "bin/sd_install.py"],
         ["python", "--check-hash-based-pycs", "never", "-I", "bin/sd_install.py"],
         ["bash", "-c", "pushd sub && python -I ../bin/sd_install.py"],
+        # A `#` mid-word is not a comment, and a backslash escapes the quote
+        # after it: neither cuts the launch on the next command.
+        ["bash", "-c", "echo a#b; python -I bin/sd_install.py"],
+        ["bash", "-c", "echo \\'; true # it's\npython -I bin/sd_install.py"],
+        # The `pushd` stack: a bare `pushd` swaps the top two, `+N` rotates,
+        # `popd +N` drops an entry without moving, `pushd -n` adds without one.
+        ["bash", "-c", "pushd sub; pushd; python -I bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd +1; python -I bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd ../other; popd +1; popd; python -I bin/sd_install.py"],
+        ["bash", "-c", "pushd -n sub; popd; python -I ../bin/sd_install.py"],
+        # `cd -` goes back to where the `cd` before it left.
+        ["bash", "-c", "cd sub; cd -; python -I bin/sd_install.py"],
+        # A `\\` newline joins the two lines before any word is read.
+        ["bash", "-c", "cd sub && \\\npython -I ../bin/sd_install.py"],
+        # A quote closes what it opened: the `)` and the `;` in one are text.
+        ["bash", "-c", "(cd sub; echo ')'; python -I ../bin/sd_install.py)"],
+        # A `)` that closes a `case` pattern leaves the subshell open.
+        ["bash", "-c", "(cd sub; case x in x) python -I ../bin/sd_install.py;; esac)"],
+        # A process substitution runs a command line of its own.
+        ["bash", "-c", "cat <(python -I bin/sd_install.py)"],
+        ["bash", "-c", "eval 'python -I bin/sd_install.py'"],
+        ["bash", "-c", "function f { python -I bin/sd_install.py; }; f"],
+        ["bash", "-c", "time -- python -I bin/sd_install.py"],
+        ["env", "-a", "name", "python", "-I", "bin/sd_install.py"],
+        # A pattern is expanded where the command runs, as the shell expands it.
+        ["bash", "-c", "python -I bin/sd_inst*.py"],
+        # A quote left open ends its line; the lines before it have run.
+        ["bash", "-c", "python -I bin/sd_install.py\necho 'unclosed"],
+        # A block's own `cd`, with nothing putting the block in a subshell.
+        ["bash", "-c", "{ cd sub; python -I ../bin/sd_install.py; }"],
     )
 
     def test_an_interpreter_word_off_command_position_is_not_refused(self) -> None:
         (self.root / "sub").mkdir()
+        (self.root / "other").mkdir()
+        (self.root / "sub/deep").mkdir()
         for argv in self.NOT_REFUSED:
             with self.subTest(argv=argv):
                 result = self.child("-c", self.launch(argv), check=False)
@@ -292,6 +347,8 @@ class LazySubprocessCoverage(unittest.TestCase):
 
     def test_an_interpreter_at_command_position_is_refused(self) -> None:
         (self.root / "sub").mkdir()
+        (self.root / "other").mkdir()
+        (self.root / "sub/deep").mkdir()
         for argv in self.REFUSED:
             with self.subTest(argv=argv):
                 self.assert_refused(self.launch(argv))
