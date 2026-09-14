@@ -457,15 +457,22 @@ class TaskDeliveryCLITests(unittest.TestCase):
         self.assertEqual("planning", readback["item"]["status"])
 
     def test_a_repository_less_item_says_there_is_nothing_to_verify(self) -> None:
-        """sd:772. A followup or personal item takes task statuses since sd:768
-        and belongs to no checkout, so no commit can be verified for it. The
-        refusal stands; it names the kind and the reason, not `sd work deliver`,
-        which refuses the same row one call later.
+        """sd:772. A followup or personal item takes task statuses since sd:768.
+        Both rows here are filed off every checkout, so neither belongs to one
+        and no commit can be verified for either. A followup that does carry a
+        checkout (sd:809) is refused for the other reason, which
+        `test_a_followup_with_a_checkout_still_takes_no_delivery_evidence`
+        pins. The refusal stands; it names the kind and the reason, not
+        `sd work deliver`, which refuses the same row one call later.
 
-        The close hint follows the installed library. CI pins a `sd_db` build
-        from before `TASK_STATUS_KINDS`, which refuses `done` for these kinds,
+        The close hint follows the installed library, whichever build that is.
+        A build from before `TASK_STATUS_KINDS` refuses `done` for these kinds,
         and a hint telling the caller to do what that build refuses would be
-        the same wrong direction in a new place. So where the build closes
+        the same wrong direction in a new place. CI carried such a build until
+        sd:809 moved the pin: the symbol is absent at `dc03956e` and present at
+        `workflow.py:83` in today's `09260ad4`, so CI now takes the closing
+        branch that a developer venv already took. The test reads `hasattr`
+        rather than the pin, so both branches stay live: where the build closes
         them the hint is asserted and the close is carried out; where it does
         not, the hint is asserted absent."""
         import sd_db.workflow as workflow
@@ -494,6 +501,72 @@ class TaskDeliveryCLITests(unittest.TestCase):
                     closed = json.loads(case.call("task", "status", item, "done",
                                                   "--json").stdout)
                     self.assertEqual("done", closed["item"]["status"])
+
+    def test_a_followup_with_a_checkout_still_takes_no_delivery_evidence(self) -> None:
+        """sd:809. A followup filed in a checkout now carries it, so it no longer
+        reads "belongs to no checkout". It still is not a task, and only a
+        task's move to done records a delivering commit, so the refusal is that
+        one and the row does not move."""
+        case = self.host()
+        root = self.repository(case)
+        state = json.loads(case.call("task", "add", "A review finding", "--kind", "followup",
+                                     "--json", cwd=root).stdout)
+        item = state["item"]["id"]
+        self.assertEqual(state["item"]["repo"], str(root))
+
+        refused = case.call("task", "status", item, "done", "--delivered-by", "0" * 40,
+                            code=1, cwd=root)
+        self.assertIn(f"followup item {item} takes no --delivered-by; only a task's "
+                      "move to done records one", refused.stderr)
+        self.assertNotIn("belongs to no checkout", refused.stderr)
+        readback = json.loads(case.call("store", "item", item, "--json", cwd=root).stdout)
+        self.assertEqual(readback, state)
+
+    def test_the_readme_states_the_reason_each_kind_is_actually_refused(self) -> None:
+        """sd:809. The README's delivery paragraph answers "why was my
+        `--delivered-by` refused", and it named one reason for both kinds:
+        a followup, like a personal item, belongs to no checkout. A followup
+        filed in a registered checkout carries one, and is refused for the
+        other reason instead, so the paragraph owed the reader two.
+
+        This reads the reasons off the CLI rather than off the README, and
+        asks the README to carry both. The clauses come out of the two
+        refusals `_delivery_row` raises, sliced at the punctuation the
+        messages already use, so a reworded refusal makes the documentation
+        follow the code rather than making this test a transcription of
+        either. What it pins is that both reasons are stated and that each is
+        attached to the row that gets it; what it cannot pin is a false
+        sentence added elsewhere in the same paragraph."""
+        case = self.host()
+        root = self.repository(case)
+
+        unscoped = json.loads(case.call("task", "add", "A personal note", "--kind", "personal",
+                                        "--json").stdout)["item"]["id"]
+        scoped = json.loads(case.call("task", "add", "A review finding", "--kind", "followup",
+                                      "--json", cwd=root).stdout)["item"]["id"]
+        sha = "0" * 40
+        no_checkout = case.call("task", "status", unscoped, "done", "--delivered-by", sha,
+                                code=1).stderr
+        not_a_task = case.call("task", "status", scoped, "done", "--delivered-by", sha,
+                               code=1, cwd=root).stderr
+
+        # "sd: personal item 1 belongs to no checkout, so --delivered-by has
+        # nothing to verify; ..." -> "belongs to no checkout"
+        first = no_checkout.split(f"item {unscoped} ", 1)[1].split(", so ", 1)[0]
+        # "sd: followup item 2 takes no --delivered-by; only a task's move to
+        # done records one" -> "only a task's move to done records"
+        second = not_a_task.split("; ", 1)[1].rsplit(" one", 1)[0]
+        self.assertEqual("belongs to no checkout", first)
+
+        readme = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
+        paragraph = readme.split("A task a commit delivered closes with that commit named", 1)[1]
+        paragraph = paragraph.split("`sd store items --open`", 1)[0]
+        for clause, item in ((first, unscoped), (second, scoped)):
+            with self.subTest(clause=clause):
+                self.assertIn(clause, paragraph,
+                              f"the README does not state why item {item} was refused")
+        self.assertIn("followup", paragraph)
+        self.assertIn("personal", paragraph)
 
     def test_the_close_hint_follows_the_library_that_would_close_it(self) -> None:
         """Both library shapes, on whichever build is installed. A stand-in
