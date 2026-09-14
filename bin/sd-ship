@@ -127,7 +127,15 @@ def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> su
                 diagnostic[name] = {"bytes": len(data), "truncated": len(data) > REVIEW_DIAGNOSTIC_BYTES,
                                     "tail": data[-REVIEW_DIAGNOSTIC_BYTES:].decode("utf-8", "replace")}
             # Captured JSON is evidence only; expiry cannot establish completion.
-            if len(output) <= 2_000_000 and not capture_too_deep(output):
+            # The size bound stays outermost: it is what keeps the depth scan
+            # off a body of unbounded length.
+            if len(output) <= 2_000_000 and capture_too_deep(output):
+                # `cleanup` names why each of its steps failed, and a dropped
+                # capture deserves the same: without this the receipt cannot
+                # tell a report refused for depth from output that was never
+                # JSON, and both look like a review that emitted nothing.
+                diagnostic["captured_report_refused"] = f"nesting deeper than {REVIEW_CAPTURE_DEPTH}"
+            elif len(output) <= 2_000_000:
                 try:
                     captured = json.loads(output)
                     if isinstance(captured, dict):

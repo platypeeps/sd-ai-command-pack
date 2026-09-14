@@ -1744,10 +1744,34 @@ class ReviewWatchdogTests(unittest.TestCase):
         body = self.nested(ship.REVIEW_CAPTURE_DEPTH + 1)
         diagnostic = self.expired(body)
         self.assertNotIn("captured_report", diagnostic)
+        # `cleanup` names why each of its own steps failed; a dropped capture
+        # is named the same way, or the receipt cannot tell a report refused
+        # for depth from output that was never JSON at all.
+        self.assertEqual(diagnostic["captured_report_refused"],
+                         f"nesting deeper than {ship.REVIEW_CAPTURE_DEPTH}")
         self.assertEqual(diagnostic["stdout"]["bytes"], len(body))
+
+    def test_output_that_is_not_json_is_not_reported_as_too_deep(self):
+        # The other half of the sentence above. Naming depth is only useful if
+        # depth is the only thing it names: output the review never meant as a
+        # report must leave the receipt silent rather than accuse it of nesting.
+        diagnostic = self.expired(b"review aborted: provider unreachable\n")
+        self.assertNotIn("captured_report", diagnostic)
+        self.assertNotIn("captured_report_refused", diagnostic)
 
     def test_captured_json_at_the_depth_limit_is_still_evidence(self):
         body = self.nested(ship.REVIEW_CAPTURE_DEPTH)
+        self.assertEqual(self.expired(body)["captured_report"], json.loads(body))
+
+    def test_a_report_with_more_findings_than_the_limit_is_still_evidence(self):
+        # The shape the limit must never refuse, end to end. `sd-review` emits
+        # at most MAX_FINDINGS per provider across three of them, so 150 flat
+        # findings is the widest real report -- and it is four levels deep, not
+        # 150. A reader that counted containers instead of nesting would drop
+        # exactly this, and drop it silently.
+        body = json.dumps({"scope": "branch", "subject": {"head": "a" * 40},
+                           "findings": [{"path": "bin/sd-ship", "line": n} for n in range(150)],
+                           "authored_with": ["claude"]}).encode()
         self.assertEqual(self.expired(body)["captured_report"], json.loads(body))
 
     def test_brackets_inside_a_string_are_text_and_not_depth(self):
@@ -1817,11 +1841,19 @@ class CaptureDepthTests(unittest.TestCase):
         self.assertFalse(ship.capture_too_deep(at_limit))
         self.assertTrue(ship.capture_too_deep(b"[" + at_limit + b"]"))
 
-    def test_a_closed_container_gives_its_depth_back(self):
+    def test_every_kind_of_closed_container_gives_its_depth_back(self):
         # Depth is nesting, not a running count of opening brackets. Siblings
         # must not accumulate, or a long findings list is refused for its
         # length rather than its shape.
-        self.assertFalse(ship.capture_too_deep(b"[]" * (ship.REVIEW_CAPTURE_DEPTH * 100)))
+        #
+        # Both kinds, and interleaved. Asserting on `[]` alone left a reader
+        # that decrements for `]` and not for `}` passing: braces are what a
+        # findings list is actually made of, so that reader refused every real
+        # report while this row stayed green (review-950, M6).
+        many = ship.REVIEW_CAPTURE_DEPTH * 100
+        for body in (b"[]" * many, b"{}" * many, b"[]{}" * many, b"[{}]" * many):
+            with self.subTest(body=body[:8]):
+                self.assertFalse(ship.capture_too_deep(body))
 
     def test_brackets_inside_a_string_are_text(self):
         deep = b"[" * (ship.REVIEW_CAPTURE_DEPTH + 1)
