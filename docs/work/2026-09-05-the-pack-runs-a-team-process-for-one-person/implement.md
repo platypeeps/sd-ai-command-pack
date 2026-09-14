@@ -1294,7 +1294,11 @@ and the item still cannot go `done`, because two criteria were open and
 neither is a pull request in this list. One has since been cut by the
 operator; one remains. (2026-09-13: that one, criterion 28, is closed by
 reading, and a third this count missed, criterion 23's second half, is what
-is left. See the dated paragraphs at the end of this section.)
+is left. See the dated paragraphs at the end of this section.) (2026-09-13,
+later: criterion 23's second half has closed as well, and this count also
+missed criterion 7's forward experiment, which the owner has moved to
+followup sd:777. See "The closure state at delivery" at the end of this
+section.)
 
 *Criterion 7 was unscored, and its scoring clause is now cut.* The seven
 `mezmo-world-simulator` passes had no scores anywhere on this item; `git grep`
@@ -1309,13 +1313,20 @@ worked in parallel right now. Criterion 7 keeps the half that was load-bearing
 — no percentage removes the code review point, and the point stays or goes by
 a recorded decision — which is where C-39 and C-42 resolve. The scoring is
 parked with the operator, triggered by `mezmo-world-simulator` Phase 1 reaching
-`done`; `prd.md`'s log carries the reasoning.
+`done`; `prd.md`'s log carries the reasoning. (2026-09-13: this paragraph
+is incomplete. It names the scoring and the grep and leaves out the third
+part of criterion 7: the other vendor reviews the next ten code pull
+requests, a report goes on this item, and the review point stays or goes by
+a decision. The 2026-09-07 cut kept that forward experiment on purpose. It
+was never closed. The owner deferred it to followup sd:777 on 2026-09-13;
+see "The closure state at delivery".)
 
 *Criterion 28 has two clauses that cannot close from this checkout.* PR 8d
 says so in its own text and the closure table says so in its own row, and this
 section was written before either. It is now the only criterion between the
 item and `done` (wrong: criterion 23's second half is open too, corrected
-below), but it is **two** pieces of work and not one:
+below; and, 2026-09-13, so is criterion 7's forward experiment, now deferred
+to sd:777), but it is **two** pieces of work and not one:
 
 1. **`commands.yaml`, item B's.** The "no palette entry" assertion enumerates
    a file that does not exist in this repository. B's slice 4 PR 7 writes it,
@@ -1339,6 +1350,8 @@ happened without its trailer — the next `sd-ship` merge here, or one empty
 commit on the branch — so nothing is lost by waiting, and the item stays
 `in_progress` until the two close. (2026-09-13: they have, and the item is
 still `in_progress`, now held by criterion 23's second half; see below.)
+(2026-09-13, later: that half has closed too, and the pull request that
+adds "The closure state at delivery" carries `Delivers:`.)
 
 **What is left, in the order it can be done.** Two things, and neither is this
 repository's to write. Item B's slice 4 PR 7 lands `commands.yaml`, and the
@@ -1348,6 +1361,8 @@ assertable here. Then, and not before, the delivery commit. (2026-09-13:
 superseded. Both things have happened, neither clause became assertable
 here, and the delivery commit does not follow from them: it waits on
 criterion 23's second half, as the dated paragraphs below record.)
+(2026-09-13, later: that half is closed; see "The closure state at
+delivery".)
 Scoring the seven passes is no longer in this order at all: it is evidence
 gathered from `answerbook/mezmo-world-simulator` rather than code written here
 — its git history records at least the fourth and the seventh (`0c39c78`,
@@ -1394,20 +1409,79 @@ to 22) that forbids "caveman mode", and criterion 23 deletes that override.
 The first half of criterion 23 still holds, since `~/.claude/settings.json`
 does not contain `caveman`. So `Delivers:` is still not written. One clause is
 left, and it is the writing repository's one-line pull request that removes
-that section.
+that section. (2026-09-13, later: superseded. That pull request has merged;
+see below. "One clause is left" was also wrong, because it missed criterion
+7's forward experiment.)
 
 **The closure state as of 2026-09-13, in one place.** Criterion 7's scoring
 clause is cut. Criterion 28 is closed by reading, with the evidence above,
 under decision note 1904.
 Criterion 23's second half is open. The delivery commit waits on that one
 clause and on nothing else this section names. Every earlier sentence in this
-section that says otherwise carries a dated marker pointing here.
+section that says otherwise carries a dated marker pointing here. (2026-09-13,
+later: superseded by "The closure state at delivery" below. Criterion 23's
+second half has since closed. This paragraph also left out criterion 7's
+forward experiment, which was open when it was written.)
+
+**2026-09-13: criterion 23's second half is closed.** `platypeeps/sd-writing-pack`
+#41 merged as `be76962e` ("docs(sd:10): remove the repository's caveman style
+override", 2026-09-14T04:40Z, which is the evening of 2026-09-13 local time).
+It deletes the `## Style` section of `CLAUDE.md`, which forbade caveman mode,
+and `.caveman/config.json`, the same override in config form. Read through
+GitHub on that repository's `main` at `be76962e`: `CLAUDE.md` contains neither
+`## Style` nor `caveman`, and `.caveman/config.json` does not exist. The first
+half still holds: `grep -c caveman ~/.claude/settings.json` prints `0`. Like
+criterion 28, this is a dated read of another repository and of per-machine
+state. It is not a test, because pack CI reaches neither.
+
+**2026-09-13: the closure state above missed criterion 7.** Criterion 7 has
+three parts. The first is the grep: no percentage in `bin/` or `skills/`
+disables a review point. The second is back-scoring the seven old passes. The
+third is the forward experiment: the other vendor reviews the next ten code
+pull requests, a report goes on this item, and the code review point stays or
+goes by a recorded decision. The 2026-09-07 cut removed only the second part,
+and `prd.md`'s log entry for that date says it kept the forward experiment "so
+the report the operator decides from still has to exist". No pass log, report
+or decision was ever recorded on this item, and `WORKFLOW.md` still describes
+the experiment. #926's closure state named only the cut, so it missed the
+third part. On 2026-09-13 the owner decided to move the forward experiment,
+with its report and decision, to followup sd:777 ("sd:10 criterion 7:
+ten-pass forward experiment on the code review point, report and decision").
+The delivery does not wait on it. The grep was re-run over `bin/` and
+`skills/` for percentages, `percent` and `threshold` on 2026-09-13. None of
+its 33 hits disables a review point: they are age and line thresholds, size
+reports, and `sd-review`'s severity floor, which classifies findings and
+turns no review off.
+
+**The closure state at delivery, 2026-09-13.** Every one of `prd.md`'s 33
+acceptance criteria is now closed, cut or deferred to a named follow-up
+item, so `Delivers: sd:10` goes on the pull request that adds this
+paragraph.
+
+- **Cut:** criterion 7's back-scoring of the seven
+  `mezmo-world-simulator` passes, cut by the operator on 2026-09-07
+  (`prd.md`'s log entry of that date). It is parked behind that
+  repository's Phase 1 and is not a follow-up item. Nothing else is cut.
+- **Deferred:** criterion 7's forward ten-pass experiment, with its report
+  and decision, moved to followup sd:777 by owner decision on 2026-09-13.
+- **Closed by a dated read rather than a test:** criterion 19 and criterion
+  23's first half (the operator edit of 2026-09-07, measured in the table
+  below), criterion 23's second half (`be76962e`, above), and criterion 28's
+  `commands.yaml` and writing-manifest clauses (decision note 1904).
+- **Closed by this repository's pull requests:** every other criterion and
+  clause, as the table under "What closes the criteria" assigns them. Of
+  criterion 7, that is the grep.
+
+The first instruction in this section, that `prd.md` goes to `status: done`
+and drops `branch:`, predates criterion 13. `prd.md` now has no `status:`
+line, since the row carries status, so this delivery does not edit it. The row
+moves when the owner runs `sd work deliver` on the merge commit.
 
 ### The three landings that are no pull request of this repository's
 
 PR 4 said criteria 19 and 23 are recorded against their landings rather than
 against this repository's diff, and left no place to record them. This is that
-place, and two of the three have now happened.
+place, and two of the three have now happened. (2026-09-13: all three have.)
 
 **Criterion 19 and criterion 23's first half — the global settings and the
 global guide — landed on 2026-09-07 as an operator edit.** They are under
@@ -1444,7 +1518,8 @@ removing neither.
 **Criterion 23's second half is open.** The writing repository's style
 override is that repository's one-line pull request and is not this
 repository's or `system`'s. It was still present on 2026-09-13; see "Closing
-the item".
+the item". (2026-09-13, later: closed. `sd-writing-pack` #41 merged as
+`be76962e` and deleted the override; see "Closing the item".)
 
 **The system repository's guide landed as its own pull request there.**
 `CLAUDE.md` 341 lines to 278, five narrative sections rewritten as
@@ -1518,17 +1593,18 @@ recounted.
 | 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) |
 | 14, 15, 16, 17, 30 — the checks | PR 3 |
 | 33 — no document names a `docs/work/` path that does not resolve | PR 7, which adds the rule; wired by criterion 14's enumeration in PR 3, which lands first |
-| 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4; criterion 23's second half, the writing repository's style override, is that repository's pull request and was still open on 2026-09-13 |
+| 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4; criterion 19 and criterion 23's first half by the operator edit of 2026-09-07; criterion 23's second half, the writing repository's style override, by `sd-writing-pack` #41 (`be76962e`), read on 2026-09-13 and recorded under "Closing the item" |
 | 24, 25 — `paths.json`, the union with active trials, `sd skill try` and its row | PR 5 |
 | 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | PR 6, which also carries criterion 5's vendor clause; with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
 | 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1534-1540`, whose files are in its Touches and in no other pull request's claim) |
 | 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` and writing-manifest clauses checked by reading on 2026-09-13 and recorded under "Closing the item", not tested |
-| 7 — no percentage removes the code review point | the grep, which passes today; the forward ten-pass report is the operator's, not a pull request's |
+| 7 — no percentage removes the code review point | the grep, which passes (re-run 2026-09-13); the back-scoring of the seven passes is cut (operator, 2026-09-07); the forward ten-pass experiment, its report and its decision are deferred to followup sd:777 (owner decision, 2026-09-13) |
 
 Criterion 7 is the one row in this table with no pull request beside it, and
 it stays that way after the 2026-09-07 cut. Its assertable half is a grep of
 `bin/` and `skills/` for a percentage that disables a review point, which
 returns nothing and is checked from any checkout. Its remaining half is a
 report the operator writes after ten forward passes and a decision recorded
-here. Neither is code this item ships, so naming a PR for it would be a false
+here. (2026-09-13: that half is now followup sd:777's, by owner decision, and
+this item no longer carries it.) Neither is code this item ships, so naming a PR for it would be a false
 entry in a table whose whole value is that its entries are checkable.
