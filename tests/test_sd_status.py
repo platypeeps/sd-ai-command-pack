@@ -4168,6 +4168,90 @@ class ReviewUnacknowledgedPartialReadTests(InventoryFixture):
                 self.assertIn("#7", found.unchecked["pr-review-unacknowledged"])
                 self.assertNotIn("clear", status.banner(found)["summary"])
 
+    def test_every_unreadable_pull_request_is_named(self) -> None:
+        """sd:761 N2: #9 failing after #7 must not vanish behind #7's reason.
+
+        Now that the loop runs past a failed read, keeping only the first
+        reason leaves every later unreadable pull request in no row and no
+        sentence. Both are named; #8, read in full, keeps its row.
+        """
+        def blind(number: int) -> dict[str, Any]:
+            return self.pull(failing=[], number=number, title=f"PR {number}", review_findings={
+                "reviews": 1, "in_body": 1, "reviewers": ["bot"], "ids": [f"b{number}"],
+                "inline": 0, "unreadable": "gh api exited 1", "indeterminate": []})
+        read = self.pull(failing=[], number=8, title="Two", review_findings={
+            "reviews": 1, "in_body": 1, "reviewers": ["bot"], "ids": ["cc33"],
+            "inline": 0, "unreadable": "", "indeterminate": []})
+        found = status.actionable_inventory(self.repo, self.sections(pull_requests={
+            "repo": "acme/widget", "pull_requests": [blind(7), read, blind(9)]}), self.TODAY)
+        rows = self.by_check(found.rows, "pr-review-unacknowledged")
+        self.assertEqual([row["key"] for row in rows], ["acme/widget!8"])
+        self.assertIn("acknowledge each", rows[0]["suggest"], "a readable store keeps the ack hint")
+        reason = found.unchecked["pr-review-unacknowledged"]
+        self.assertIn("#7", reason)
+        self.assertIn("#9", reason)
+
+    def test_a_broken_record_and_unreadable_pull_requests_share_one_reason(self) -> None:
+        """Both sentences, joined, in pull request order, with differing causes hedged."""
+        ack = status.sd_lib.sibling("sd_review_ack_joined", "sd-review-ack")
+        ack.store_path(self.repo).write_text("{not json", encoding="utf-8")
+
+        def blind(number: int, why: str) -> dict[str, Any]:
+            return self.pull(failing=[], number=number, title=f"PR {number}", review_findings={
+                "reviews": 1, "in_body": 1, "reviewers": ["bot"], "ids": [f"b{number}"],
+                "inline": 0, "unreadable": why, "indeterminate": []})
+        pulls = [blind(9, "HTTP 502"), blind(7, "gh api exited 1")]
+        found = status.actionable_inventory(self.repo, self.sections(pull_requests={
+            "repo": "acme/widget", "pull_requests": pulls}), self.TODAY)
+        reason = found.unchecked["pr-review-unacknowledged"]
+        self.assertTrue(reason.startswith(f"{ack.store_path(self.repo)} is not valid JSON"), reason)
+        self.assertTrue(reason.endswith(
+            "; every finding reads as unread; the inline comments on #7, #9 could not be read"
+            " (gh api exited 1, among others)"), reason)
+
+    def test_many_unreadable_pull_requests_are_counted_past_a_cap(self) -> None:
+        """The sentence stays short however many reads fail, and loses no count."""
+        pulls = [self.pull(failing=[], number=number, title=f"PR {number}", review_findings={
+            "reviews": 1, "in_body": 1, "reviewers": ["bot"], "ids": [f"b{number}"],
+            "inline": 0, "unreadable": "gh api exited 1", "indeterminate": []})
+            for number in range(10, 22)]
+        found = status.actionable_inventory(self.repo, self.sections(pull_requests={
+            "repo": "acme/widget", "pull_requests": pulls}), self.TODAY)
+        reason = found.unchecked["pr-review-unacknowledged"]
+        self.assertIn("#10", reason)
+        self.assertNotIn("#21", reason)
+        self.assertIn("and 7 more", reason)
+
+    def test_a_broken_record_still_leaves_every_finding_a_row(self) -> None:
+        """sd:761 N1: a store nothing can parse reads every finding as unread.
+
+        The reason says so, and the rows must agree with it: returning none
+        would leave `pending`, `next` and `--actions` empty while the sentence
+        claims every finding is unanswered. The class stays unchecked.
+        """
+        ack = status.sd_lib.sibling("sd_review_ack_broken", "sd-review-ack")
+        ack.store_path(self.repo).write_text("{not json", encoding="utf-8")
+        read = self.pull(failing=[], review_findings={
+            "reviews": 1, "in_body": 2, "reviewers": ["bot"], "ids": ["aa11", "bb22"],
+            "inline": 0, "unreadable": "", "indeterminate": []})
+        found = status.actionable_inventory(self.repo, self.sections(
+            pull_requests={"repo": "acme/widget", "pull_requests": [read]}), self.TODAY)
+        rows = self.by_check(found.rows, "pr-review-unacknowledged")
+        self.assertEqual([row["key"] for row in rows], ["acme/widget!7"])
+        self.assertIn("2 of 2 review finding(s) unanswered", rows[0]["detail"])
+        # `--ack` would replace the store it cannot read (review-914 B1), so
+        # the row must not send anyone there before the store is repaired.
+        self.assertIn("repair or move the acknowledgement store first", rows[0]["suggest"])
+        self.assertNotIn("acknowledge each", rows[0]["suggest"])
+        self.assertIn("not valid JSON", found.unchecked["pr-review-unacknowledged"])
+        self.assertNotIn("clear", status.banner(found)["summary"])
+        self.assertEqual(status.next_action(found.rows)["id"], rows[0]["id"])
+        actions, pending = io.StringIO(), io.StringIO()
+        status.render_actions(found.rows, actions)
+        status._render_pending(found.rows, pending.write)
+        self.assertIn(rows[0]["id"], actions.getvalue())
+        self.assertIn(rows[0]["id"], pending.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

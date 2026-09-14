@@ -2691,25 +2691,22 @@ def _review_rows(
     A pull request whose inline comments could not be read gets no row and
     marks the class `unchecked`: a partial count presented as a count is the
     failure this class is about. The others keep their rows, since `pending`
-    and `next` read rows alone (sd:631). `setdefault`, so this sentence
-    survives `_mark_unasked`'s generic one.
+    and `next` read rows alone (sd:631), and the reason names every such pull
+    request, not the first (sd:761). A broken acknowledgement store is also
+    `unchecked`, yet every finding still gets its row, and the row says to
+    repair the store first, since `--ack` refuses one it cannot read. `setdefault`,
+    so this sentence survives `_mark_unasked`'s generic one.
     """
     ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
     slug = pulls.get("repo") or "?"
     _, broken = ack.read_store(root)
-    if broken:
-        unchecked.setdefault("pr-review-unacknowledged", broken)
-        return []
+    reasons, blind = [broken] if broken else [], []
     ref = ack.landing_ref(root)
     rows: list[dict[str, Any]] = []
     for pull in pulls.get("pull_requests") or []:
         stated = pull.get("review_findings") or {}
         if stated.get("unreadable"):
-            unchecked.setdefault(
-                "pr-review-unacknowledged",
-                f"the inline comments on #{pull['number']} could not be read "
-                f"({stated['unreadable']})",
-            )
+            blind.append((int(pull["number"]), stated["unreadable"]))
             continue
         found = list(stated.get("ids") or [])
         standing = ack.unacknowledged(root, found, ref, stated.get("stated") or {})
@@ -2726,9 +2723,18 @@ def _review_rows(
             f"#{pull['number']} {pull['title']}",
             f"{ack.at_least_ids(standing, many)} of {ack.at_least_ids(found, many)}"
             " review finding(s) unanswered",
-            f"read them with `sd-review-ack --pr {pull['number']}`, then "
-            "acknowledge each with --fixed SHA or --dismiss 'why'",
+            f"read them with `sd-review-ack --pr {pull['number']}`, then " + (
+                "repair or move the acknowledgement store first; --ack refuses while it is"
+                " unreadable" if broken else "acknowledge each with --fixed SHA or --dismiss 'why'"),
         ))
+    if blind:
+        blind.sort(key=lambda pair: pair[0])
+        more = f" and {len(blind) - 5} more" if len(blind) > 5 else ""
+        cause = blind[0][1] + ("" if len({c for _, c in blind}) == 1 else ", among others")
+        reasons.append(f"the inline comments on {', '.join(f'#{n}' for n, _ in blind[:5])}{more} "
+                       f"could not be read ({cause})")
+    if reasons:
+        unchecked.setdefault("pr-review-unacknowledged", "; ".join(reasons))
     return rows
 
 
