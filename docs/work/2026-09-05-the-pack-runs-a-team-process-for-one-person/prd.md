@@ -1743,7 +1743,7 @@ from a number the operator types.
   *(That last sentence is what the interview decided on 2026-09-05 and is kept
   as the record. It no longer holds: the operator cut the back-scoring gate on
   2026-09-07, and the scoring is parked behind Phase 1 rather than in front of
-  any review. See the log's 2026-09-07 entry.)*
+  any review. See the 2026-09-07 log entry "Criterion 7's `mezmo-world-simulator` scoring is cut by the operator".)*
 
   One decision from the interview is corrected here. The 104 Codex sessions
   that run from the Obsidian vault are not scheduled jobs: no launchd job or
@@ -5240,7 +5240,7 @@ from a number the operator types.
   `implement.md`'s "The closure state today" replaces it. That section runs
   each criterion's own check on `main` at `ef9d3499` and quotes the line
   that decides it. Open: 5 (the vendor clause), 6 (the `minimax` meter
-  clause), 14, 15, 16, 18, 21 (the code-path half), 22, 27 and 31. Criterion
+  clause), 11 (the demotion-note clause), 13 (the moved-default-branch clause), 14, 15, 16, 18, 21 (the code-path half), 22, 27 and 31. Criterion
   9 is also open until #931 merges. #931 is a correction pull request and
   does not carry `Delivers:`.
 

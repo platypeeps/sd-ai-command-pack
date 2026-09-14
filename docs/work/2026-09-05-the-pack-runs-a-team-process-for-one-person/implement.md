@@ -1481,10 +1481,10 @@ Each line below is that criterion's own check, run on `origin/main` at
 history as evidence. "Tests pass" means the named module ran green with the
 pack's `.venv` Python on this branch, whose code is `ef9d3499`'s.
 
-**Open: criteria 5, 6, 14, 15, 16, 18, 21, 22, 27 and 31, and criterion 9
-until this pull request merges.** The review of #931 named 9, 14, 15, 16, 18,
-21 (the code-path half), 22 and 31. These checks confirm those and add 5, 6
-and 27.
+**Open: criteria 5, 6, 11, 13, 14, 15, 16, 18, 21, 22, 27 and 31, and
+criterion 9 until this pull request merges.** The review of #931 named 9, 14,
+15, 16, 18, 21 (the code-path half), 22 and 31. These checks confirm those and
+add 5, 6 and 27. The verification of #931 adds 11 and 13.
 
 - **5, open (vendor clause).** The table clauses hold:
   `ReviewTable.test_the_two_copies_are_identical` passes. A grep of
@@ -1514,6 +1514,19 @@ and 27.
   This pull request changes it to say Copilot review there comes from the
   operator's own global hook, at the operator's choice and cost, citing note
   1921.
+- **11, open (the demotion-note clause).** No code writes the demotion note
+  the criterion asks for when a collaborator joins a `mode: full`
+  repository. `source:bin/sd_lib.py::remote_permits_full` has two callers,
+  the mode resolver in `bin/sd_lib.py` and the ownership check in
+  `bin/sd_ship_remote.py`, and neither writes a note. No test names demotion outside `tests/test_sd_skill_promotion.py`.
+  The six detection cases pass, `test_case_1_…` to `test_case_6_…` in
+  `tests/test_mode_detection.py:144-180`.
+- **13, open (the moved-default-branch clause).** The criterion asks for one
+  integration update when the default branch moves after the review, and for
+  a seeded conflict in it to end the item `blocked`. `grep -c -i integrat
+  bin/sd-ship` counts 0, and no `tests/test_sd_ship*.py` test covers an
+  integration update or its conflict. `tests.test_delivered` (15) and
+  `tests.test_status_source` (43) pass.
 - **14, open.** `Makefile:125-126` `docs-lint:` runs `bin/sd-docs-lint`
   whole. It wires no no-database rule set enumerated from the lint, and no
   test compares a wired set to the lint's set.
@@ -1608,20 +1621,15 @@ and 27.
 
 **Not settled by these checks:**
 
-- **11.** The six detection cases pass, `test_case_1_…` to `test_case_6_…`
-  in `tests/test_mode_detection.py:144-180`. The demotion and `merge: auto`
-  clauses were not checked one by one.
-- **13.** `tests.test_delivered` (15) and `tests.test_status_source` (43)
-  pass, and `test_red_row_root_with_a_status_line_in_an_active_prd` passes.
-  The criterion's many fixture clauses were not checked one by one.
 - **30.** `make check` is what CI runs, so it is the state of CI on the pull
   request that last changed `main`. It was not run locally.
 
 The first instruction in this section, that `prd.md` goes to `status: done`
 and drops `branch:`, predates criterion 13. `prd.md` now has no `status:`
 line, since the row carries status, so no delivery edits it. The item is
-not deliverable: `Delivers: sd:10` waits until each open criterion above is
-closed, cut or deferred by a recorded owner decision.
+not deliverable: `Delivers: sd:10` waits until every open criterion above is
+closed, cut or deferred by a recorded owner decision: 5, 6, 9, 11, 13, 14,
+15, 16, 18, 21, 22, 27 and 31.
 
 ### The three landings that are no pull request of this repository's
 
@@ -1738,11 +1746,11 @@ recounted.
 | 31 — requirement 13 line by line | PR 2 (2026-09-14: never merged; open, see "The closure state today") |
 | 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) (2026-09-14: PR 2 never merged; the code-path half is open, see "The closure state today") |
 | 14, 15, 16, 17, 30 — the checks | PR 3 (2026-09-14: never merged; 14, 15 and 16 are open, 17 closed by #892 and 30 is CI's, see "The closure state today") |
-| 33 — no document names a `docs/work/` path that does not resolve | PR 7, which adds the rule; wired by criterion 14's enumeration in PR 3, which lands first |
+| 33 — no document names a `docs/work/` path that does not resolve | PR 7, which adds the rule; wired by criterion 14's enumeration in PR 3, which lands first (2026-09-14: PR 3 never merged and criterion 14 is open, so nothing wires the rule into `make check`; see "The closure state today") |
 | 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4; criterion 19 and criterion 23's first half by the operator edit of 2026-09-07; criterion 23's second half, the writing repository's style override, by `sd-writing-pack` #41 (`be76962e`), read on 2026-09-13 and recorded under "Closing the item" (2026-09-14: PR 4 never merged; 18 and 22 are open, and criterion 9's settings clause is removed by decision note 1921, see "The closure state today") |
 | 24, 25 — `paths.json`, the union with active trials, `sd skill try` and its row | PR 5 |
-| 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | (2026-09-14: criterion 6's `minimax` meter clause is open, see "The closure state today") PR 6, which also carries criterion 5's vendor clause; with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
-| 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1534-1540`, whose files are in its Touches and in no other pull request's claim) |
+| 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | (2026-09-14: criterion 6's `minimax` meter clause and criterion 11's demotion-note clause are open, see "The closure state today") PR 6, which also carries criterion 5's vendor clause; with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
+| 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1534-1540`, whose files are in its Touches and in no other pull request's claim) (2026-09-14: the moved-default-branch clause is open, see "The closure state today") |
 | 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` and writing-manifest clauses checked by reading on 2026-09-13 and recorded under "Closing the item", not tested (2026-09-14: criterion 27 fails its own words on `main`, see "The closure state today") |
 | 7 — no percentage removes the code review point | the grep, which passes (re-run 2026-09-13); the back-scoring of the seven passes is cut (operator, 2026-09-07); the forward ten-pass experiment, its report and its decision are deferred to followup sd:777 (owner decision, 2026-09-13, decision note 1920) |
 
