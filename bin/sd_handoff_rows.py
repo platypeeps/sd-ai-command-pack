@@ -153,6 +153,10 @@ def brief_for(root) -> list[str]:
         here = pathlib.Path(root).resolve()
         base = str(sd_lib.main_worktree_root(here))
         branch = sd_db.brief.checked_out_branch(here) or ""
-        return sd_db.note_brief(connection, base, branch=branch).text.splitlines()
+        text = sd_db.note_brief(connection, base, branch=branch).text.rstrip("\n")
     finally:
         connection.close()
+    # `split("\n")` and not `splitlines()`: the brief's lines end in `\n`
+    # alone, and `splitlines` also breaks a note body at `\r`, a form feed or
+    # U+2028, which the hook's `"\n".join` then hands over changed.
+    return text.split("\n") if text else []

@@ -29,6 +29,10 @@ Two things this deliberately does not do:
     every item a note was cut from, so `list` prints one item's whole
     history, every kind, resolved or not, in `sd_db.item_notes`'s order.
     It filters nothing, which is what keeps it from being a second brief.
+
+`list` and `resolve` are `bin/sd_notes.py`'s handlers, the same ones `bin/sd`
+registers as `sd note list` and `sd note resolve`, which are the spellings the
+brief's trailer and the dashboard print. This file adds `add` around them.
 """
 
 from __future__ import annotations
@@ -41,6 +45,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import sd_handoff_rows  # noqa: E402 - after the path insert that finds it
 import sd_lib  # noqa: E402 - same
+import sd_notes  # noqa: E402 - same
 
 
 def cmd_write(args, out, err) -> int:
@@ -71,65 +76,6 @@ def cmd_write(args, out, err) -> int:
     return 0
 
 
-def cmd_resolve(args, out, err) -> int:
-    sd_db = sd_handoff_rows.library()
-    connection = sd_handoff_rows.connect(sd_db, write=True)
-    try:
-        sd_db.resolve_note(connection, args.note)
-    finally:
-        connection.close()
-    # `resolve_note` is a no-op on an id that is absent or already closed, and
-    # says which. Reporting "resolved" either way would be a lie only in the
-    # case nobody can act on, so the line names the id and not an outcome.
-    print(f"resolved note {args.note}", file=out)
-    return 0
-
-
-def item_id(text: str) -> int:
-    """An item id as the brief prints it, `sd:234`, or bare, `234`."""
-    digits = text[3:] if text.startswith("sd:") else text
-    if not digits.isdigit():
-        raise argparse.ArgumentTypeError(f"not an item id: {text!r} (expected 234 or sd:234)")
-    return int(digits)
-
-
-def note_lines(note) -> list[str]:
-    """One note as the brief draws one, plus when it was resolved.
-
-    `sd_db.brief` keeps its line renderer private, so this is the same shape
-    and not the same function: kind, id and date in the brackets, the body's
-    first line after them and its other lines indented under it.
-    """
-    head = f"- [{note['kind']} #{note['id']} {str(note['timestamp'])[:10]}"
-    if note["resolved_at"]:
-        head += f", resolved {str(note['resolved_at'])[:10]}"
-    first, _, rest = str(note["body"]).strip().partition("\n")
-    return [f"{head}] {first}", *(f"  {line}" for line in rest.splitlines())]
-
-
-def cmd_list(args, out, err) -> int:
-    sd_db = sd_handoff_rows.library()
-    connection = sd_handoff_rows.connect(sd_db)
-    try:
-        item = sd_db.item_by_id(connection, args.item)
-        if item is None:
-            print(f"no item sd:{args.item} in the database", file=err)
-            return 1
-        notes = sd_db.item_notes(connection, args.item)
-    finally:
-        connection.close()
-    title = f"sd:{item['id']} {item['title']} ({item['status']})"
-    if not notes:
-        print(f"{title}: no notes", file=out)
-        return 0
-    noun = "note" if len(notes) == 1 else "notes"
-    print(f"{title}: {len(notes)} {noun}, oldest first", file=out)
-    for note in notes:
-        for line in note_lines(note):
-            print(line, file=out)
-    return 0
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sd-note", description=__doc__)
     verbs = parser.add_subparsers(dest="verb", required=True)
@@ -139,12 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--kind", default=sd_handoff_rows.FOLLOWUP,
                      help="note kind (default: followup)")
     add.set_defaults(handler=cmd_write)
-    close = verbs.add_parser("resolve", help="close a followup by its id")
-    close.add_argument("note", type=int, help="the id the write printed")
-    close.set_defaults(handler=cmd_resolve)
-    listing = verbs.add_parser("list", help="print every note on one item, oldest first")
-    listing.add_argument("item", type=item_id, help="the item id, as 234 or sd:234")
-    listing.set_defaults(handler=cmd_list)
+    sd_notes.add_verbs(verbs)
     return parser
 
 

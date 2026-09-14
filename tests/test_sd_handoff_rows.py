@@ -13,6 +13,7 @@ missing library would break every session start on a machine that has not run
 """
 
 import ast
+import contextlib
 import importlib.machinery
 import importlib.util
 import io
@@ -270,6 +271,56 @@ class TheBriefIsTheLibrarys(RowCase):
         context = self.injected()
         self.assertLessEqual(len((context + "\n").encode("utf-8")), 8 * 1024)
         self.assertIn(f"`sd note list {item}`", context)
+
+    def test_the_command_the_trailer_names_runs(self):
+        """The trailer is an instruction, so it has to be one `bin/sd` obeys.
+
+        Asserting the string alone passed while `sd note list` was an
+        argparse "invalid choice": every session past the bound was told to
+        run a command that did not exist.
+        """
+        item = self.item()
+        for index in range(12):
+            self.followup(item, f"{index:02d} " + "x" * 900)
+        command = self.injected().rsplit("`sd note list ", 1)[1].split("`", 1)[0]
+        code, out, err = run_sd(["note", "list", command])
+        self.assertEqual((code, err), (0, ""))
+        self.assertTrue(out.startswith(f"sd:{item} an-item (in_progress): 13 notes"), out)
+
+    def test_a_body_with_other_line_breaks_is_injected_verbatim(self):
+        """`\\r`, form feed and U+2028 are not line ends to the brief.
+
+        `str.splitlines` splits on all of them and the hook joins on `\\n`,
+        so a body carrying one reached the session changed.
+        """
+        item = self.item()
+        self.followup(item, "a \r b \x0c c   d \x85 e")
+        brief = sd_db.note_brief(self.connection, str(self.root), branch="")
+        self.assertEqual(self.injected(), brief.text.rstrip("\n"))
+
+    def test_a_detached_linked_worktree_is_briefed_repository_wide(self):
+        """A detached HEAD reaches `note_brief` as `""`, never as None.
+
+        None tells the library to read the branch itself, at the main root,
+        and the main root here is on a branch that has an item -- so the
+        detached session would be briefed on another checkout's work alone.
+        """
+        branch = subprocess.run(["git", "-C", str(self.root), "branch", "--show-current"],
+                                check=True, capture_output=True, text=True).stdout.strip()
+        on_main = sd_db.writes.create_item(
+            self.connection, kind="work", title="main-roots-branch", status="in_progress",
+            repo=str(self.root), branch=branch, source=sd_lib.ITEM_ROW_SOURCE,
+            external_id=f"{self.root}::{branch}/prd.md")
+        other = self.item(name="unbranched")
+        self.followup(on_main, "the main root's work")
+        self.followup(other, "the repository's other work")
+        linked = self.home / "detached"
+        subprocess.run(["git", "-C", str(self.root), "worktree", "add", "-q", "--detach",
+                        str(linked)], check=True, capture_output=True)
+        context = self.injected(linked.resolve())
+        self.assertIn("the main root's work", context)
+        self.assertIn("the repository's other work", context)
+        self.assertNotIn(f"branch {branch}", context)
 
     def test_a_linked_worktree_is_briefed_on_its_own_branch(self):
         """Rows are keyed by the main checkout; the branch is the session's.
@@ -540,6 +591,57 @@ class TheLister(RowCase):
         code, out, err = self.note(["list", "4242"])
         self.assertEqual((code, out), (1, ""))
         self.assertIn("no item sd:4242 in the database", err)
+
+    def test_an_id_past_sqlites_integers_is_a_usage_error_not_a_traceback(self):
+        """SQLite raised OverflowError on the bind, which reached the operator raw."""
+        for argv in (["list", "99999999999999999999"], ["resolve", "99999999999999999999"]):
+            with self.subTest(argv=argv):
+                err = io.StringIO()
+                with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as exited:
+                    self.note(argv)
+                self.assertEqual(exited.exception.code, 2)
+                self.assertIn("99999999999999999999", err.getvalue())
+                self.assertNotIn("Traceback", err.getvalue())
+
+
+def run_sd(argv: list[str]) -> tuple[int, str, str]:
+    """`bin/sd`'s own `main`, with what it printed."""
+    module = load("sd_cli", "sd")
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = module.main(argv)
+    return code, out.getvalue(), err.getvalue()
+
+
+class TheNoteGroup(RowCase):
+    """`sd note list <item>` and `sd note resolve <id>`, the verbs the brief and
+    the dashboard name, through `bin/sd` rather than `bin/sd-note`."""
+
+    def test_sd_note_list_prints_the_items_history(self):
+        item = self.item()
+        self.followup(item, "wire the hook")
+        code, out, err = run_sd(["note", "list", f"sd:{item}"])
+        self.assertEqual((code, err), (0, ""))
+        lines = out.splitlines()
+        self.assertEqual(lines[0], f"sd:{item} an-item (in_progress): 2 notes, oldest first")
+        self.assertTrue(lines[2].endswith("] wire the hook"), lines)
+
+    def test_sd_note_resolve_closes_the_note(self):
+        item = self.item()
+        note = self.followup(item, "close me")
+        code, out, err = run_sd(["note", "resolve", str(note)])
+        self.assertEqual((code, out, err), (0, f"resolved note {note}\n", ""))
+        self.assertEqual(self.read(), [])
+
+    def test_an_unknown_item_refuses_through_sd(self):
+        code, out, err = run_sd(["note", "list", "4242"])
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("no item sd:4242 in the database", err)
+
+    def test_an_overflowing_id_is_a_usage_error_through_sd(self):
+        code, _, err = run_sd(["note", "list", "99999999999999999999"])
+        self.assertEqual(code, 2)
+        self.assertNotIn("Traceback", err)
 
 
 class TheModuleLoader(unittest.TestCase):

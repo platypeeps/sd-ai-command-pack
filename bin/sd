@@ -79,6 +79,7 @@ import sd_codex  # noqa: E402
 import sd_controls  # noqa: E402
 import sd_handoff_rows  # noqa: E402
 import sd_lib  # noqa: E402
+import sd_notes  # noqa: E402
 import sd_operations  # noqa: E402
 import sd_registry  # noqa: E402
 import sd_research_pins  # noqa: E402
@@ -3095,6 +3096,7 @@ def build_parser() -> argparse.ArgumentParser:
     sd_operations.register(groups)
     sd_controls.register(groups)
     sd_runner.register(groups)
+    sd_notes.register(groups)
     return parser
 
 
