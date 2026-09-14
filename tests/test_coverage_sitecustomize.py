@@ -237,6 +237,51 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["bash", "-c", "pushd sub; popd; python -I ../bin/sd_install.py"],
         # A subshell's `pushd` leaves the outer stack alone.
         ["bash", "-c", "pushd sub; (pushd other); popd; python -I ../bin/sd_install.py"],
+        # A block, and an and-or list, that a `|` or a `&` put in a subshell:
+        # the `cd` in it is that subshell's, not the launch's.
+        ["bash", "-c", "{ cd sub; } | cat; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "{ cd sub; } & wait; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "if cd sub; then :; fi | cat; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "while cd sub; do break; done & wait; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "case x in x) cd sub;; esac | cat; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "cd sub && true & wait; python -I ../bin/sd_install.py"],
+        # A function body runs where its caller is, and only once it is called.
+        ["bash", "-c", "f() { cd sub; }; python -I ../bin/sd_install.py"],
+        # Called, the body's `cd` is the caller's: the launch is under `sub`.
+        ["bash", "-c", "f() { cd sub; }; f; python -I bin/sd_install.py"],
+        ["bash", "-c", "{ f() { cd sub; }; }; f; python -I bin/sd_install.py"],
+        ["bash", "-c", "function f() { cd sub; }; f; python -I bin/sd_install.py"],
+        # A call in a pipeline runs in that pipeline's subshell.
+        ["bash", "-c", "f() { cd sub; }; f | cat; python -I ../bin/sd_install.py"],
+        # A name in a body being defined is not a call: nothing there has run.
+        ["bash", "-c", "f() { cd sub; }; g() { f; }; f; python -I bin/sd_install.py"],
+        # The call in the subshell moved nothing here, so this one is the first.
+        ["bash", "-c", "f() { cd sub; }; (f); f; python -I bin/sd_install.py"],
+        # Assignments and redirections before a function's name leave it a call.
+        ["bash", "-c", "f() { cd sub; }; x=1 f; python -I bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; 2>/dev/null f; python -I bin/sd_install.py"],
+        # A new body under a called name has not been called.
+        ["bash", "-c", "f() { cd sub; }; f; f() { cd deep; }; f; python -I ../bin/sd_install.py"],
+        # The replay budget is a depth: eight calls before this one spend none of it.
+        ["bash", "-c", "n() { :; }; " + "n; " * 8 + "f() { cd sub; }; f; python -I bin/sd_install.py"],
+        # An ANSI-C string holds the launch written in it, and one left open
+        # ends its line.
+        ["bash", "-c", "echo $'x\\'\npython -I bin/sd_install.py'"],
+        ["bash", "-c", "echo $'unterminated\\'; python -I bin/sd_install.py"],
+        ["bash", "-c", "python -I bin/sd_install.py; echo $'unterminated"],
+        ["bash", "-c", "python -I $'bin/sd_inst*.py'"],
+        # A quoted word is a program or an argument, never the shell's own.
+        ["bash", "-c", '"if" python -I bin/sd_install.py'],
+        ["bash", "-c", "echo ';' python -I bin/sd_install.py"],
+        ["bash", "-c", "find . -maxdepth 0 -exec true {} \\; python -I bin/sd_install.py"],
+        ["bash", "-c", "python -I 'bin/sd_inst*.py'"],
+        # The last command of a pipeline runs in a subshell of its own.
+        ["bash", "-c", "true | cd sub; python -I ../bin/sd_install.py"],
+        # `pushd -n` adds to the stack without moving; a bare `pushd` swaps,
+        # and a bare `pushd -n` does neither.
+        ["bash", "-c", "pushd -n sub; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd -n; python -I bin/sd_install.py"],
     )
 
     #: Command lines that run a gate-measured file with site skipped.
@@ -280,10 +325,110 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["env", "--split-string=python3 -I", "bin/sd_install.py"],
         ["python", "--check-hash-based-pycs", "never", "-I", "bin/sd_install.py"],
         ["bash", "-c", "pushd sub && python -I ../bin/sd_install.py"],
+        # A `#` mid-word is not a comment, and a backslash escapes the quote
+        # after it: neither cuts the launch on the next command.
+        ["bash", "-c", "echo a#b; python -I bin/sd_install.py"],
+        ["bash", "-c", "echo \\'; python -I bin/sd_install.py # it's"],
+        # A backslash escape ends a word's first character too: what follows
+        # the `#` is the word's, not a comment's.
+        ["bash", "-c", "echo \\b#c; python -I bin/sd_install.py"],
+        # In an ANSI-C `$'...'` string a backslash escapes the character after
+        # it, so neither `\\'` nor `\\\\` ends the string where it is written,
+        # and the string ends at the first quote none escapes -- newlines and
+        # all. The string is a word: it can be the program, or hold a shell's
+        # `-c` line.
+        ["bash", "-c", "echo $'a\\'b' > /dev/null; python -I bin/sd_install.py"],
+        ["bash", "-c", "echo $'a\\\\'; python -I bin/sd_install.py"],
+        ["bash", "-c", "echo $'\\\\\\''; python -I bin/sd_install.py"],
+        ["bash", "-c", "echo $'a\\'\nb'; python -I bin/sd_install.py"],
+        ["bash", "-c", "echo \"$'\"; python -I bin/sd_install.py"],
+        ["bash", "-c", "$'python' -I bin/sd_install.py"],
+        ["bash", "-c", "bash -c $'python -I bin/sd_install.py'"],
+        # The `pushd` stack: a bare `pushd` swaps the top two, `+N` rotates,
+        # `popd +N` drops an entry without moving, `pushd -n` adds without one.
+        ["bash", "-c", "pushd sub; pushd; python -I bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd +1; python -I bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd ../other; popd +1; popd; python -I bin/sd_install.py"],
+        ["bash", "-c", "pushd -n sub; popd; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd -n; python -I ../bin/sd_install.py"],
+        # `popd +N` and `popd -n` drop an entry and stay where they are, two
+        # levels down; the `popd` after one returns to the root, not to `sub`,
+        # because the entry it would have returned to is the one that went.
+        ["bash", "-c", "pushd sub; pushd deep; popd +1; python -I ../../bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd deep; popd -n; python -I ../../bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd deep; popd +1; popd; python -I bin/sd_install.py"],
+        ["bash", "-c", "pushd sub; pushd deep; popd -n; popd; python -I bin/sd_install.py"],
+        # `cd -` goes back to where the `cd` before it left.
+        ["bash", "-c", "cd sub; cd -; python -I bin/sd_install.py"],
+        # A `\\` newline joins the two lines before any word is read.
+        ["bash", "-c", "cd sub && \\\npython -I ../bin/sd_install.py"],
+        # A quote closes what it opened: the `)` and the `;` in one are text.
+        ["bash", "-c", "(cd sub; echo ')'; python -I ../bin/sd_install.py)"],
+        # A `)` that closes a `case` pattern leaves the subshell open.
+        ["bash", "-c", "(cd sub; case x in x) python -I ../bin/sd_install.py;; esac)"],
+        # A process substitution runs a command line of its own.
+        ["bash", "-c", "cat <(python -I bin/sd_install.py)"],
+        ["bash", "-c", "eval 'python -I bin/sd_install.py'"],
+        ["bash", "-c", "function f { python -I bin/sd_install.py; }; f"],
+        # A called function's `cd` moves the launch that follows it, and a
+        # second call to it does not move again: the relative `cd` would fail.
+        ["bash", "-c", "f() { cd sub; }; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; f; f; python -I ../bin/sd_install.py"],
+        # A quoted name calls the function, and a body defined inside another
+        # body is defined when that one is called.
+        ["bash", "-c", 'f() { cd sub; }; "f"; python -I ../bin/sd_install.py'],
+        ["bash", "-c", "g() { f() { cd sub; }; }; g; f; python -I ../bin/sd_install.py"],
+        # A name in a body being defined is not a call, so this `f` is the
+        # first one, and a call in a pipeline leaves the next call the first.
+        ["bash", "-c", "f() { cd sub; }; g() { f; }; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; f | cat; f; python -I ../bin/sd_install.py"],
+        # A definition in a subshell is the subshell's: `f` here is a command
+        # that does not exist, and the launch runs where it stands.
+        ["bash", "-c", "( f() { cd sub; } ); f; python -I bin/sd_install.py"],
+        # A name a `()` follows is a new definition, not a call of the old one;
+        # a body that calls a function twice moves once, as a line does.
+        ["bash", "-c", "f() { cd sub; }; f() { cd other; }; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; g() { f; f; }; g; python -I ../bin/sd_install.py"],
+        # A call reached through another function in a pipeline moves only the
+        # pipeline, so the launch runs where the line stands.
+        ["bash", "-c", "f() { cd sub; }; g() { f; }; g | cat; python -I bin/sd_install.py"],
+        # A call after an assignment or a redirection moves; a word a `>` takes
+        # is the redirection's file, not a call.
+        ["bash", "-c", "f() { cd sub; }; x=1 f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; >/dev/null f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; > f; python -I bin/sd_install.py"],
+        # The called mark is the body's: a new body under the name moves, the
+        # same body under another name does not move again.
+        ["bash", "-c", "f() { cd sub; }; f; f() { cd deep; }; f; python -I ../../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; g() { cd sub; }; f; g; python -I ../bin/sd_install.py"],
+        # Replays are counted by depth: eight calls before a call leave it read,
+        # and a call eight deep is read. Only a call's own block is a level:
+        # a call inside eight plain blocks is read too.
+        ["bash", "-c", "n() { :; }; " + "n; " * 8 + "f() { cd sub; }; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f1() { cd sub; }; " + "".join(f"f{k}() {{ f{k - 1}; }}; " for k in range(2, 9))
+         + "f8; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; " + "{ " * 8 + "f; " + "}; " * 8 + "python -I ../bin/sd_install.py"],
+        # A call in a `&` list or at the end of a pipeline leaves the next call
+        # the first; a call inside a block inside a body is part of that body,
+        # and is not a call while that body is being defined.
+        ["bash", "-c", "f() { cd sub; }; f & wait; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; true | f; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; g() { { f; }; }; g; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; g() { { f; }; }; g | cat; python -I bin/sd_install.py"],
+        ["bash", "-c", "time -- python -I bin/sd_install.py"],
+        ["env", "-a", "name", "python", "-I", "bin/sd_install.py"],
+        # A pattern is expanded where the command runs, as the shell expands it.
+        ["bash", "-c", "python -I bin/sd_inst*.py"],
+        # A quote left open ends its line; the lines before it have run.
+        ["bash", "-c", "python -I bin/sd_install.py\necho 'unclosed"],
+        # A block's own `cd`, with nothing putting the block in a subshell.
+        ["bash", "-c", "{ cd sub; python -I ../bin/sd_install.py; }"],
     )
 
     def test_an_interpreter_word_off_command_position_is_not_refused(self) -> None:
         (self.root / "sub").mkdir()
+        (self.root / "other").mkdir()
+        (self.root / "sub/deep").mkdir()
         for argv in self.NOT_REFUSED:
             with self.subTest(argv=argv):
                 result = self.child("-c", self.launch(argv), check=False)
@@ -292,6 +437,8 @@ class LazySubprocessCoverage(unittest.TestCase):
 
     def test_an_interpreter_at_command_position_is_refused(self) -> None:
         (self.root / "sub").mkdir()
+        (self.root / "other").mkdir()
+        (self.root / "sub/deep").mkdir()
         for argv in self.REFUSED:
             with self.subTest(argv=argv):
                 self.assert_refused(self.launch(argv))
