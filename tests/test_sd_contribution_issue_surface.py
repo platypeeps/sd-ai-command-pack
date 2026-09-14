@@ -6,18 +6,23 @@ three draft fields, the `closed` lane -- lives in `platypeeps/system` and landed
 there at `f18295d` (#308). What this file tests is the other half: this pack's
 two renderers, which take plain dictionaries and never call the library. A stub
 row hands them exactly what a projection hands them, so a failure here is a
-renderer's and nothing else's, and the module needs no library at all -- which
-is also why it is the one test module a developer can run without one.
+renderer's and nothing else's, and the module needs no library to run. Most of
+this suite does not either: 54 of its 86 test modules never name `sd_db`, and
+this one names it in prose alone.
 
 This paragraph used to justify the stubs differently, and wrongly: it said the
 CI pin was behind `f18295d` and carried `940c045a`, "where `contributions.FIELDS`
-has no `issue_url` and `contributions.LANES` has no `closed`". That is true of
-`940c045a` itself and of nothing else here. `f18295d` is an ancestor of every
-commit `.github/workflows/tests.yml` has ever pinned in this module's lifetime
--- `758dfb48`, the pin on the day this file was written, and `ac7afd0`,
-`fb57ae56`, `fd07ea9c`, `dc03956e` and today's `09260ad4` -- and each of them
-has `issue_url` in `FIELDS` and `closed` in `LANES`. The reason was wrong when
-written; the design it defends is not (sd:809).
+has no `issue_url` and `contributions.LANES` has no `closed`". Both halves are
+true of `940c045a`, which really was the pin -- until #886 moved it to
+`758dfb48` on 2026-09-12, the move made so that CI would carry this very
+work's library half. This file arrived after that move, in #888, so the reason
+was already one move out of date the day it was written.
+`.github/workflows/tests.yml` has pinned nine commits in its life:
+`89dcd866`, `4c9ebff4`, `3c4c723a` and `940c045a` have neither symbol;
+`758dfb48`, `fb57ae56`, `fd07ea9c`, `dc03956e` and today's `09260ad4` have
+both, `f18295d` (#308) being an ancestor of each. So no pin this file has ever
+run against lacked them. The reason was wrong; the design it defends is not
+(sd:809).
 
 What the stubs still cannot prove is that the library projects these keys. That
 is the system item's evidence, in the system repository's own tests, and no pin
