@@ -167,12 +167,13 @@ def _fixture_env(**overrides):
     """The ambient environment minus everything the outer gate run exports.
 
     Inheriting `COVERAGE_FILE` or `PYTHONPATH` from the run measuring *this*
-    file would let the fixture's shards land in the outer run's collection.
+    file would let the fixture's shards land in the outer run's collection, and
+    `SD_COVERAGE_PROCESS_START` would point the fixture at the outer config.
     """
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith("COVERAGE_") and key != "PYTHONPATH"
+        if not key.startswith(("COVERAGE_", "SD_COVERAGE_")) and key != "PYTHONPATH"
     }
     env["PYTHON_BIN"] = sys.executable
     env["TEST_WORKERS"] = "2"
