@@ -96,7 +96,10 @@ def _include_patterns(config_file):
     if not patterns:
         return None
     # A relative pattern matches any path that ends in it; see the docstring.
-    return [pattern if pattern.startswith(("*", "?", "/")) else "*/" + pattern for pattern in patterns]
+    # A pattern is kept as written too, so one that already starts with a
+    # wildcard matches at least what coverage matches.
+    return [form for pattern in patterns
+            for form in ((pattern,) if pattern.startswith("/") else (pattern, "*/" + pattern))]
 
 
 def _install():
