@@ -487,8 +487,13 @@ def within_file(target: pathlib.Path, start: int, end: int,
     # call would have to answer "has this file changed", which is a question
     # a gate should not be guessing at -- the fixtures rewrite their targets
     # mid-test on purpose.
+    # One return, not a memoised branch beside an unmemoised one. The two
+    # spellings were written first and a mutation that made the predicate read
+    # `start` in place of `end` survived, because every caller took the other
+    # branch: duplicated logic where only one copy is reached is an untested
+    # copy, which is this module's own subject.
     if counted is None:
-        return 1 <= start and end <= line_count(target)
+        counted = {}
     key = str(target)
     if key not in counted:
         counted[key] = line_count(target)
