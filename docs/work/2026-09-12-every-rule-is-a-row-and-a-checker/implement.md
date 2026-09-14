@@ -2,7 +2,7 @@
 
 ## Step checklist
 
-- [ ] **1. The empty registry and its own tests.** Add the registry table with
+- [x] **1. The empty registry and its own tests.** Add the registry table with
       zero rows, and the test asserting every row's checker resolves to a
       declaration that exists. Zero rows passes. This step is independently
       landable and independently green, and it fixes the shape before any rule
@@ -17,8 +17,11 @@
       first mutation failed at *import*. Since 2026-09-13 it is a
       `path::symbol` string, so the same mutation fails in the test named
       above — the check moved, the mutation did not.)
+      **Delivered `bb379027` (#882), 2026-09-12.** `bin/sd_rules.py` carries
+      `RULES` and `BY_RULE_ID`; `tests/test_rule_registry.py::Registry` carries
+      the checker-resolution test and the second-list test.
 
-- [ ] **2. Meta-check legs a and b, with the baseline.** Leg a: every registry
+- [x] **2. Meta-check legs a and b, with the baseline.** Leg a: every registry
       row is cited by at least one skill. Leg b: every tool-behaviour claim in
       a skill cites a rule id the registry carries.
       **The baseline is `UNCITED_SKILL_CLAIMS`, a projection of `claims_in`
@@ -48,10 +51,21 @@
       > were load-bearing and unstated are pinned by `TheClaimPredicate`.
       > `design.md` carries the correction in full.
 
-- [ ] **3. Meta-check leg c, over the R-id corpus.** Every rule id cited in live
+      **Delivered `bb379027` (#882) and corrected in `d745474b` (#889),
+      2026-09-12.** `LegA` and `LegB` run the two legs, `TheClaimPredicate`
+      pins the three load-bearing properties, and the baseline is
+      `UNCITED_SKILL_CLAIMS` in `tests/test_rule_registry.py`.
+
+- [x] **3. Meta-check leg c, over the R-id corpus.** Every rule id cited in live
       prose is defined in the registry. On the first run this reports 4
       failures — `R11-D1`, `R11-D30`, `R11-D46`, `R5-D1` — and a baseline of 26
       archive-only definitions. Verify: the run names exactly those 4 ids.
+      **Delivered `bb379027` (#882), 2026-09-12.** `LegC` runs it, and the two
+      baselines it carries — `DANGLING_RULE_IDS` and `STRANDED_RULE_IDS` — are
+      sets rather than counts, so a resolved id cannot hide a newly stranded
+      one. Measured on `075eecf2`, 2026-09-14: the dangling set is still the
+      same 4 ids, and the stranded set is 20, down from the 26 this step first
+      reported.
 
 - [ ] **4. The R-id backfill.** Move live rule definitions out of archived
       planning documents into registry rows, one at a time, deciding for each
@@ -98,6 +112,15 @@
          same file, run through the same machinery, must leave the same test
          green. Without it, any failure to start a child would read as every
          checker enforcing.
+         **The copy is per row, and its cost is budgeted nowhere.** Leg d
+         dominates the module's runtime for three rows, and steps 5 and 6 would
+         add roughly eight more; the cost is linear in rows, because each row
+         copies every tracked file afresh.
+         **Decided 2026-09-14 (owner, note 1989):** leg d takes one
+         tracked-file copy per run rather than one per row, and then states the
+         budget. Sharing the copy removes most of the cost without weakening
+         the leg — each row still runs clean, mutates, reddens and restores —
+         and step 7 needs a stated budget in any case.
 
       `R10-D6` is a row on that basis. Its checker is
       `tests/test_verb_inventory.py::test_no_command_accepts_a_repository_path`,
@@ -105,18 +128,59 @@
       spelling, which that test's `iterdir()` scan of `bin/` finds.
 
       **Two obstacles decide the rest of the backfill, and neither is the
-      judgement the step was sized for.** Twenty of the twenty-four ids left after
-      slice 2 are taught by no skill section at all, so leg a cannot pass for them:
-      registering one means writing the teaching section first, which is step 8
-      and not this step. The other four are taught, and each is held up by
-      something specific:
+      judgement the step was sized for.** The sentence that stood here counted
+      "twenty of the twenty-four ids left after slice 2" and listed four taught
+      ids, one of which — `R10-D4` — had become a row in the slice below it.
+      Both figures are retired. Re-measured against `075eecf2` on 2026-09-14 by
+      running the module's own enumerators —
+      `source:tests/test_rule_registry.py::cited_rule_ids`,
+      `source:tests/test_rule_registry.py::defined_rule_ids` and
+      `source:tests/test_rule_registry.py::registered_rule_ids` — over the
+      corpus, rather than by arithmetic on the old numbers:
+
+      | Fact, on `075eecf2` | Count |
+      |---|---|
+      | Distinct rule ids cited in live prose | 45 |
+      | Distinct rule ids defined by the bold-run form anywhere | 51 |
+      | Registry rows | 3 |
+      | Stranded — live citation, archive-only definition, no row | 20 |
+      | Of the stranded, taught by no file under `skills/` | 17 |
+      | Of the stranded, taught by some file under `skills/` | 3 |
+      | Dangling — live citation resolving to no definition at all | 4 |
+
+      The last two rows are the weakest measurement here and are written down
+      as such. "Taught" is a substring scan of every markdown file under
+      `skills/`, which is not what leg a reads: leg a requires the id in the
+      *body* of the one section a row names. An id appearing in a skill outside
+      any section a row could name counts as taught in this table and would not
+      pass leg a. So 3 is an upper bound on the taught set and 17 a lower bound
+      on the untaught one, and a slice registering one of the three confirms it
+      against leg a rather than against this row.
+
+      Seventeen of the twenty are taught by no skill section, so leg a cannot
+      pass for them: registering one means writing the teaching section first,
+      which is step 8 and not this step. That is why step 8 moves ahead of the
+      rest of this step — see the owner decision recorded on it below. The other
+      three are taught, and each is held up by something specific:
 
       | Id | Taught in | Why it is not a row yet |
       |---|---|---|
-      | `R10-D1` | `skills/sd-status/SKILL.md` | `bin/sd-status` carries the id in two strings, one of them the `CLASSES` row whose text the skill's table mirrors. The second-list check wants it out of the string; leg a reads the skill table it would have to change. The two checks pull opposite ways and that needs a decision, not an edit. |
-      | `R10-D2` | `skills/sd-handoff/SKILL.md` | The section that teaches it says Lane B is *not implemented*. A live row with a checker would assert an enforcement that does not exist, which is the defect this item is about. |
+      | `R10-D1` | `skills/sd-status/SKILL.md` | `bin/sd-status` carries the id in two strings, one of them the `CLASSES` row whose text the skill's table mirrors. The second-list check wants it out of the string; leg a reads the skill table it would have to change. **Decided 2026-09-14 (owner, note 1989):** rewrite the `CLASSES` row and the reason string to drop the literal id and keep the citation in the adjacent comment — the rephrasing the check's own failure text prescribes, and what `R10-D5` did — and only after sd:10 retires the planning-age sweep, because `bin/sd_sweep.py` is where the threshold this rule constrains lives today. |
+      | `R10-D2` | `skills/sd-handoff/SKILL.md` | The section that teaches it says Lane B is *not implemented*. A live row with a checker would assert an enforcement that does not exist, which is the defect this item is about. **Decided 2026-09-14 (owner, note 1989):** it is repealed in the registry — `state=REPEALED`, no checker. Leg c still resolves the citation; leg a skips a repealed row; and a live false enforcement claim becomes an answered citation. This is the first use of the tombstone state the design says must exist before the first repeal, not after. |
       | `R10-D3` | `skills/sd-handoff/SKILL.md` | Its enforcement lives in `bin/sd-handoff-restore`, which has no `.py` suffix. **The import obstacle recorded here is gone** — a `path::symbol` location needs no import and the path needs no suffix. What is left is leg d: the row needs a mutation that reddens a named test, and finding one for a restore path is the work. |
-      | `R10-D4` | `skills/sd-review/SKILL.md` | A row since slice 3, below. `codex_preflight` lives in the suffixless `bin/sd-review`, and that obstacle went with `R10-D3`'s. |
+
+      **A stranded id no earlier revision of this document names: `R10-D7`.**
+      It is in `STRANDED_RULE_IDS` and was not in the table above, so the claim
+      that "each of the others carries a recorded reason here" was false for
+      one id. The reason, measured on `075eecf2`: `bin/sd-review` cites it in
+      the docstring of `local_conventions`, and its only definition is an
+      archived design document. No file under `skills/` mentions it, so it is
+      one of the seventeen untaught ids and it is blocked behind step 8 like
+      the rest of them — not behind anything specific to itself. One thing is
+      already settled for it: the citation is in a docstring, which
+      `source:tests/test_rule_registry.py::second_list_entries` reads as a
+      citation rather than as data, so registering it would not redden the
+      second-list check the way `R10-D5` and `R10-D1` do.
 
       **Slice 3, 2026-09-13. `STRANDED_RULE_IDS` 24 → 23.** `R10-D4` is a
       row. Its checker is `bin/sd-review::codex_preflight`, the first checker
@@ -164,34 +228,74 @@
       `tests/test_loc_caps.py`. Widening the grammar would move ids between two
       baselines at once and is a change to the measurement, so it is left for
       its own slice rather than folded into this one.
+      **Decided 2026-09-14 (owner, note 1989):** that slice is the answer —
+      one change widens `DEFINITION` and re-measures both leg c baselines
+      together, rather than the four ids being repointed one at a time. It
+      converts three false "dangling" entries into honest stranded ones.
+      `R11-D46`, which is defined nowhere in any form, still needs its own
+      answer and does not get one from the widening.
+      Re-measured on `075eecf2`, 2026-09-14: the dangling set is unchanged at
+      those same four ids.
 
 - [ ] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become
       registry rows pointing at the existing checkers — no new enforcement, only
       registration. Verify: the ceilings in `tests/test_code_health.py` are
       unchanged by this step; `git diff` touches no ceiling constant.
+      Read the ceilings off that file and not off the backbone item, which
+      records a length ceiling of 80 where the file has
+      `source:tests/test_code_health.py::LENGTH_CEILING` at 50; complexity and
+      depth agree. A row written from the item body would register the wrong
+      number.
+      **Decided 2026-09-14 (owner, note 1989), for the two questions this step
+      could not answer:** the ids come from a new round, `R12-D*`, allocated
+      for registry-native rules, and `RULE_ID`'s grammar does not change — the
+      registry stays the one place the grammar is written down. The teaching
+      section is a new "code health" section in `skills/sd-check`, where
+      `R10-D6` already teaches from, rather than a new skill or a widening of
+      leg a to reach `CONTRIBUTING.md`. Widening leg a would have been a change
+      to its measurement, which is not what this step is.
 
 - [ ] **6. Prose rules, in their narrowed forms.** Rule 2 as filed. Rules 1 and
       3 as narrowed in `design.md`, each with its baseline. Verify: each rule
       reddens under mutation; no rule's first run reddens the existing corpus.
 
-- [ ] **7. The pre-commit tier.** The code checkers run whole — measured at
-      1.71 s over the tree, so there is no second scope to drift from the CI
-      scope. Only `bin/sd-docs-lint`, at 19.87 s, is diff-scoped, and its cost
-      is attributed to a stage first. **No threshold is set here on purpose.**
-      The two whole-tree passes are already 1.71 s + 0.84 s = 2.55 s before the
-      diff-scoped docs lint and any hook overhead, so the "under two seconds"
-      this step first demanded was unreachable from its own measurements. Verify:
-      time the assembled hook on a one-file diff, record the number, and set the
-      budget from that result in the same pull request. Re-run the whole-tree
-      timings there too, because the decision to skip diff-scoping rests on
-      numbers that will age.
+- [ ] **7. The pre-commit tier.** **Every timing this step used to state has
+      expired, and the shape of the step is now open rather than settled.** It
+      read that the code checkers run whole at 1.71 s, that only
+      `bin/sd-docs-lint` at 19.87 s is diff-scoped, and that the two whole-tree
+      passes come to 2.55 s before any hook overhead. Those three numbers were
+      measured against `e6c2cb20` and none of them reproduces: `design.md`
+      carries what re-measurement found and why it is a signal rather than a
+      new record. What survives is the argument, not the arithmetic — a hook
+      slow enough to be bypassed is an advisory rule in the costume of an
+      enforced one, and no threshold is set here on purpose.
+      **Decided 2026-09-14 (owner, note 1989):** this step re-runs the timings
+      inside its own pull request and re-makes the diff-scoping decision there,
+      as `design.md`'s own reversal clause instructs, rather than inheriting
+      either the expired numbers or the spot checks that retired them. The
+      pre-commit tier is not dropped for CI alone.
+      Verify, unchanged in shape: time the assembled hook on a one-file diff,
+      record the number, and set the budget from that result in the same pull
+      request; re-run the three whole-tree timings there too, on a machine
+      whose load is stated, and write them down beside their commit.
 
 - [ ] **8. The authoring tier.** Skills consult the registry and name the rule
-      ids in scope. Last, because it depends on the registry carrying rules.
+      ids in scope. Filed last, because it depends on the registry carrying
+      rules.
+      **Decided 2026-09-14 (owner, note 1989): it runs next, ahead of the rest
+      of step 4.** The ordering above assumed the backfill could proceed
+      without it. It cannot: 17 of the 20 stranded ids are taught by no skill
+      section, so leg a blocks every one of them until a section exists to
+      teach it, and the alternative — backfilling only the 3 taught ids —
+      exhausts in a single slice. Step 8 is the constraint on step 4, not its
+      consequence.
 
-Steps 1 to 3 are the deliverable. Steps 4 to 8 are payload and may be batched
-into fewer pull requests to reduce CI churn.
+Steps 1 to 3 are the deliverable, and all three are done: `bb379027` (#882)
+landed them and `d745474b` (#889) corrected leg b's baseline. Steps 4 to 8 are
+payload and may be batched into fewer pull requests to reduce CI churn; step 4
+is partially delivered, in three slices recorded above, and step 8 now precedes
+the rest of it.
 
 ## Verification
 
