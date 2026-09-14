@@ -4384,6 +4384,41 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         self.assertIn(f"  5 {self.CHECK} rows not shown (its cap is 3), in --actions\n",
                       pending.getvalue())
 
+    def merged_pending(self, opened: int, merged: int) -> tuple[list[dict[str, Any]], str]:
+        """`opened` open pull requests waiting on a merge and `merged` merged rows, rendered."""
+        pulls = [self.pull(failing=[], number=number, title=f"Open {number}",
+                           url=f"https://github.com/acme/widget/pull/{number}")
+                 for number in range(1, opened + 1)]
+        rows = status.actionable_inventory(self.repo, self.sections(
+            pull_requests={"repo": "acme/widget", "pull_requests": pulls},
+            merged_pull_requests={"repo": "acme/widget", "pull_requests": [
+                self.merged(100 + age, age, [f"m{age:02d}"]) for age in range(1, merged + 1)]},
+        ), self.TODAY).rows
+        pending = io.StringIO()
+        status._render_pending(rows, pending.write)
+        return rows, pending.getvalue()
+
+    def test_a_class_whose_rows_all_show_prints_no_line_and_one_missing_row_is_singular(
+        self,
+    ) -> None:
+        """No "0 rows not shown" line, and "1 row", not "1 rows" (review-932 N-1, N-2)."""
+        for merged in (1, 2, 3):
+            with self.subTest(merged=merged):
+                rows, text = self.merged_pending(0, merged)
+                self.assertEqual({}, status.pending_rows(rows)[1])
+                self.assertNotIn("not shown", text)
+        rows, text = self.merged_pending(9, 2)
+        self.assertEqual({self.CHECK: 1}, status.pending_rows(rows)[1])
+        self.assertIn(f"  1 {self.CHECK} row not shown (its cap is 3), in --actions\n", text)
+
+    def test_the_line_prints_the_class_s_own_cap(self) -> None:
+        """The cap comes from `CLASSES`; one class at 3 cannot tell that from a literal (N-3)."""
+        capped = status.BY_CHECK[self.CHECK]._replace(pending_cap=2)
+        with mock.patch.dict(status.BY_CHECK, {self.CHECK: capped}):
+            rows, text = self.merged_pending(0, 5)
+            self.assertEqual({self.CHECK: 3}, status.pending_rows(rows)[1])
+        self.assertIn(f"  3 {self.CHECK} rows not shown (its cap is 2), in --actions\n", text)
+
     def test_one_unreadable_merged_pull_request_is_unchecked_and_hides_no_other(self) -> None:
         blind = self.merged(7, 2, ["bb11"], unreadable="gh api exited 1")
         read = self.merged(8, 3, ["cc11", "cc22"])

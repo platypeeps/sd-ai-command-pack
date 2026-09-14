@@ -259,8 +259,8 @@ addressable by typing the id, which the component's own free-text answer
 already supports, and `--actions` lists every row, the ones `pending` leaves
 out included. Take the options from the text report's `pending`, not from
 `actions` in `--json`: `pending` is the first ten after each class's
-`pending_cap` (`pending_rows`), so a class past its cap makes rows 1 to 10 of
-`actions` differ from it.
+`pending_cap` (`pending_rows`), so a class past its cap can make rows 1 to 10
+of `actions` differ from it.
 
 Three rules on that question:
 
@@ -335,7 +335,8 @@ The `--json` schema is version **3**. Beyond the section keys it carries
 the findings each carries), `inventory` (`rows` plus the `unchecked` map),
 `abnormalities`, `actions` — the uncapped inventory, of which `pending` is the
 first ten after each class's `pending_cap` (`pending_rows`) — and `next`. It
-has no `pending` key.
+has no top-level `pending` key; `handoff.packet.pending` is a boolean
+about the handoff packet, not this list.
 **`next` is an object with `id`, `check` and `suggest`, not a bare string**,
 because a caller acting on the suggestion needs the id it belongs to in the
 same breath.
