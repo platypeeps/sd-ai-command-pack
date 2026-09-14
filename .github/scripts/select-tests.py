@@ -29,12 +29,18 @@ Every doubt resolves to running more, never less:
 
 A test module is selected when its source names the changed path, its file
 name, or its module stem, as a whole token. A change under `bin/` or
-`dashboard/` also selects the tests that name any Python module importing it,
-followed to a fixed point. A test that reaches a file without naming it -- a
-walk of a whole directory, a script reached through another script -- is not
-selected unless it is in the always-run set. That is the price of a fast path,
-and it is why the full suite still runs before a push, and why CI never runs
-this.
+`dashboard/` also selects the tests that name any file there whose text
+carries an `import` statement for it, followed to a fixed point. The closure
+reads import statements and matches the changed file's stem, so it is empty
+for a stem that is not a Python identifier: `import sd-pr-state` is not
+something Python can say, so no hyphenated `bin/` tool is reachable through
+the closure. No import scan could reach one -- such a tool is loaded by a
+`SourceFileLoader` from a name held in a string -- so a hyphenated tool is
+selected by the tests that write its name and by nothing else. A test that
+reaches a file without naming it -- a walk of a whole directory, a script
+reached through another script -- is not selected unless it is in the
+always-run set. That is the price of a fast path, and it is why the full
+suite still runs before a push, and why CI never runs this.
 """
 
 from __future__ import annotations

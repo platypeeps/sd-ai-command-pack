@@ -26,6 +26,24 @@ import unittest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 HARNESS = REPO_ROOT / ".github/scripts/run-tests.sh"
 
+# Dropped from the fixture run. `PYTHONPATH` would point the copy below at the
+# outer run's path; `TEST_CHANGED_FILES` is the changed-files fast path
+# (sd:10 criterion 16), which `make check CHANGED=...` exports to this process
+# and which that copy reads. It is inert only while this harness copies
+# `run-tests.sh` alone and not `select-tests.py`, so an outer narrowed run
+# would start narrowing its own nested runs the day a fixture copies
+# `.github/scripts` whole. Drop it, and `CHANGED` with it.
+DROPPED_FROM_FIXTURES = ("PYTHONPATH", "TEST_CHANGED_FILES", "CHANGED")
+
+
+def fixture_env(**overrides: str) -> dict[str, str]:
+    """The ambient environment minus everything the outer gate run exports."""
+    environment = {key: value for key, value in os.environ.items()
+                   if not key.startswith(("COVERAGE_", "SD_COVERAGE_"))
+                   and key not in DROPPED_FROM_FIXTURES}
+    environment.update(overrides)
+    return environment
+
 COVERAGERC = """[run]
 include =
     bin/nothing.py
@@ -108,14 +126,12 @@ class SplitModuleFixtures(unittest.TestCase):
     def run_harness(self, **modules: str) -> subprocess.CompletedProcess:
         for name in SPLIT_NAMES:
             (self.root / "tests" / f"{name}.py").write_text(modules.get(name, PLAIN))
-        environment = {key: value for key, value in os.environ.items()
-                       if not key.startswith(("COVERAGE_", "SD_COVERAGE_")) and key != "PYTHONPATH"}
-        environment.update({
-            "PYTHON_BIN": sys.executable,
-            "TEST_WORKERS": "2",
-            "FIXTURE_COUNTER": str(self.counter),
-            "PYTHONDONTWRITEBYTECODE": "1",
-        })
+        environment = fixture_env(
+            PYTHON_BIN=sys.executable,
+            TEST_WORKERS="2",
+            FIXTURE_COUNTER=str(self.counter),
+            PYTHONDONTWRITEBYTECODE="1",
+        )
         return subprocess.run(["bash", str(self.root / ".github/scripts/run-tests.sh")], cwd=self.root,
                               env=environment, text=True, capture_output=True, timeout=300)
 

@@ -144,11 +144,31 @@ if [ -n "${TEST_CHANGED_FILES+set}" ]; then
       "$REPO_ROOT/.github/scripts/select-tests.py" -- $TEST_CHANGED_FILES)" || selection=""
     set +f
     selected=()
+    # The `full` comparison is defence in depth, and nothing rests on it
+    # today: every name below is `tests.` and a file's stem, so the word
+    # `full` is a whole line no name can equal, the selection stays empty,
+    # and the fallback below runs the whole suite anyway. It is here so that
+    # a selector sentinel that did one day collide with a module name would
+    # narrow nothing.
+    #
+    # A name matches a whole line of the selection, never a substring, and
+    # the match is made in this shell rather than through `printf | grep`.
+    # Whole line: a selection naming `tests.test_alphabet`, which this tree
+    # does not hold, must match nothing and fall to the full run below; a
+    # substring match would narrow to `tests.test_alpha` instead and skip
+    # the coverage gates. In this shell: `set -o pipefail` is in force, so a
+    # `grep -q` that exited on its first match while `printf` was still
+    # writing a selection longer than a pipe buffer made the pipeline 141,
+    # which read as "not selected". The module was dropped, and the run
+    # reported a count the selector did not give. A real selection is a few
+    # kilobytes and did not reach it; a megabyte did, every time.
+    newline=$'\n'
+    lines="$newline$selection$newline"
     if [ -n "$selection" ] && [ "$selection" != "full" ]; then
       for name in "${modules[@]}"; do
-        if printf '%s\n' "$selection" | grep -Fqx -- "$name"; then
-          selected+=("$name")
-        fi
+        case "$lines" in
+          *"$newline$name$newline"*) selected+=("$name") ;;
+        esac
       done
     fi
     if [ "${#selected[@]}" -eq 0 ]; then
