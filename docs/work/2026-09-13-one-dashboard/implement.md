@@ -195,8 +195,8 @@ before starting step 2.
 
       **`dashboard/markup.py` goes in this step and not a later one, and
       `server.py` has to be edited in it.** Both facts come from the import graph
-      rather than from the file names: `markup` is imported at
-      `dashboard/plugins.py:58` and **nowhere else** under `dashboard/`, so it is
+      rather than from the file names: `markup` is imported by
+      `dashboard/plugins.py` and **nowhere else** under `dashboard/`, so it is
       the loader's and dies with it. And `server.py` imports `plugins` at
       `dashboard/server.py:43` while surviving until step 6, so this step must
       drop `plugins` from that import line and the endpoint behind it, or step 3
@@ -204,9 +204,9 @@ before starting step 2.
       with `markup.py`. This is the step's real hazard and it is invisible in a
       plan that groups files by what they are for.
 
-      **Two things this step gives up, and both are recorded rather than
-      silently spent** (design, "Pricing the two options"): a third party
-      declaring a dashboard tab, which has no instance — the registry holds two
+      **Three things this step gives up, all recorded rather than silently
+      spent.** The first two were priced before it landed (design, "Pricing the
+      two options"): a third party declaring a dashboard tab, which has no instance — the registry holds two
       plugins and only `sys` declares tabs — and the rank-0 alert row a dark
       collector used to raise, which step 6 rebuilds on the system side. That
       second one is a gap **between step 3 and step 6, and not after it**: in the
@@ -218,13 +218,14 @@ before starting step 2.
       **A third, recorded on 2026-09-13 after the step landed** (review-928 N1,
       owner decision). The four `sys/queue-*` actions — `queue-blog`,
       `queue-tip`, `queue-topic` and `queue-watch` — were buttons in the pack
-      dashboard's run strip, and this step leaves them reachable from no
-      dashboard. The pack commit reduced `catalog`
-      (`source:dashboard/actions.py::catalog`) to `RUN_ALLOWLIST`, so
+      dashboard's run strip. Step 1 had already stopped serving that page, so
+      they were unseen from then; this step removed them from its catalog too,
+      which leaves them reachable from no dashboard. The pack commit reduced
+      `catalog` (`source:dashboard/actions.py::catalog`) to `RUN_ALLOWLIST`, so
       `/api/actions` offers `index` alone and a POST naming `sys/queue-blog` is
       a 404. Nothing replaced them, for two reasons: the pack dashboard is not
-      served, because step 1 removed `serve`, and the system dashboard renders
-      from `VIEWS`, which reads no manifest. They remain reachable as
+      served, because step 1 removed `serve`, and no module of the system
+      dashboard reads the manifest. They remain reachable as
       `dashboard.sh queue-open <q>` in the system repository and in
       `sd plugin list`. The plan said to reduce the catalog and did not list
       what that cost; this paragraph is the listing, and `design.md` carries the
@@ -275,8 +276,10 @@ before starting step 2.
       (R11-D49, pull request #922). `AMBIGUOUS_CEILING` fell from 154 to 145 and
       `STRANDED_RULE_IDS` from 23 to 20. CI was green on head `45752934`, and
       review-928 found nothing blocking. Its N1 is the third give-up above. Its
-      N5, three line citations into files this step deleted, is left for the
-      step 8 sweep and listed in `prd.md`'s Log.
+      N5, three line citations into files this step deleted, was fixed in the
+      tick's fix round by dropping the line numbers, because step 8's sweep
+      filters on `compared` citations under `dashboard/` and would not have
+      found them; `prd.md`'s Log lists the three.
 
 - [ ] **4. PRs and Issues are served from `sd_db.shadow`; the legacy index
       retires.** System commit: the tracker views read `tracker_items` and

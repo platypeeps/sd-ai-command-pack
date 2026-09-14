@@ -128,8 +128,8 @@ because three of the loader's four documented properties are real:
    call — so the property survives; only the number changes, from 5s to 18s.
    That is a widening and it should be argued in the system repository, not
    inherited silently. Recorded as a decision that item owes.
-3. *A plugin that goes dark says so.* This is the one genuinely lost thing. The
-   loader turns every failure mode — absent, non-zero, timed out, oversized,
+3. *A plugin that goes dark says so.* Of the properties the loader's docstring
+   names, this is the one genuinely lost. The loader turns every failure mode — absent, non-zero, timed out, oversized,
    unparseable, contract-violating — into a rank-0 row in the Now view, on the
    reasoning that "the failure that matters is not a plugin crashing, it is a
    plugin crashing quietly and leaving Now looking calm." The system side raises
@@ -153,9 +153,9 @@ owner decision): *a plugin's declared actions as dashboard buttons.* The four
 `sys/queue-*` actions — `queue-blog`, `queue-tip`, `queue-topic` and
 `queue-watch` — were buttons in the pack dashboard's run strip. Step 3 reduced
 the catalog to the backbone's own actions, and no dashboard renders them now.
-The pack dashboard is not served, and the system dashboard renders from `VIEWS`,
-which reads no manifest. They stay reachable as `dashboard.sh queue-open <q>`
-and in `sd plugin list`. The loader's docstring did not list this among its
+The pack dashboard is not served, and no module of the system dashboard reads
+the manifest. They stay reachable as `dashboard.sh queue-open <q>` and in
+`sd plugin list`. The loader's docstring did not list this among its
 properties, which is why the list above missed it.
 
 ## Question 3 — the `PAGE` string and `app.js`
@@ -180,7 +180,7 @@ have, each named so it cannot be lost quietly:
 |---|---|---|
 | Severity band from a rank | `band` (in `dashboard/app.js`) | ports with the Now ranking, step 6. The rank is a server-side number and the band is the rendering choice; the system page needs the second half only. |
 | Per-table filter | `addFilter` (in `dashboard/app.js`) | **dropped, measured rather than assumed.** The system page already filters its listings: the field is `[data-listing-filter]` (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/static/dashboard.js:385`) and `/` is bound to focus it (`:189`). |
-| Per-table sort | `addSort` (in `dashboard/app.js`) | **dropped, and it costs nothing, because no shipped table asks for it.** `PAGE` declares `data-sd-search` on exactly one table (`dashboard/server.py:356`) and `data-sd-sort` on none; the only `data-sd-sort` in the repository is a fixture at `tests/test_dashboard_markup.py:80`. The system side refuses a client sort on purpose and says why (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/screens.py:135`): `sd today` and the page must list the same ids in the same order. |
+| Per-table sort | `addSort` (in `dashboard/app.js`) | **dropped, and it costs nothing, because no shipped table asks for it.** `PAGE` declares `data-sd-search` on exactly one table (`dashboard/server.py:356`) and `data-sd-sort` on none; the only `data-sd-sort` in the repository was a fixture in `tests/test_dashboard_markup.py`, which step 3 deleted. The system side refuses a client sort on purpose and says why (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/screens.py:135`): `sd today` and the page must list the same ids in the same order. |
 | Panel enhancement | `enhance` (in `dashboard/app.js`) | **not dropped, and not step 3's.** It is the dispatcher for the two rows above and it runs for every *static* panel at startup — `for (const [, panel] of STATIC) enhance(...)` (`dashboard/app.js:426`), seven panels, none of them a plugin. Deleting it in step 3 is a `ReferenceError` on page load. It dies with `app.js` at step 6. |
 | Plugin panel id assignment | `panelId` (in `dashboard/app.js`) | **dropped at step 3.** This one *is* plugin-only: its single caller is `drawPlugins` (in `dashboard/app.js`), which goes in the same commit. |
 | Tracker key for a null-number row | `where` (in `dashboard/app.js`) | **specification, not code.** sd:361 step 7b changes this one expression so a Jira row shows `LOG-23818` rather than `LOG`. The system page needs the same rule when it takes the tracker views over. |
@@ -376,7 +376,7 @@ not been planned.
    `dashboard/plugins.py` while `server.py` still imports it at
    `dashboard/server.py:43` and survives to step 6, which would land a module
    that cannot import. Both steps were rewritten. The same pass confirmed
-   `markup` is the loader's alone — imported at `dashboard/plugins.py:58` and
+   `markup` is the loader's alone — imported by `dashboard/plugins.py` and
    nowhere else — so its grouping was right.
 5. **The pin is not only CI's.** The running dashboard's `/health` reports its
    `sd_db` as the **pack's** virtualenv copy, so a system-side view needing a

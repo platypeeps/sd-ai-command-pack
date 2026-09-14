@@ -353,11 +353,13 @@ decision whose evidence has been deleted cannot be reviewed later.
   pull request #928 (`68fa908c`). Review-928's N1, the four `sys/queue-*`
   actions leaving every dashboard, is recorded as a give-up in `design.md` and
   in `implement.md` step 3, by owner decision.
-- 2026-09-13 review-928's N5, left for the step 8 sweep rather than fixed here.
-  Three line citations name files step 3 deleted. In `design.md`, the per-table
-  sort row cites a line of `tests/test_dashboard_markup.py` for its
-  `data-sd-sort` fixture, and review pass 4 cites a line of
+- 2026-09-13 review-928's N5, fixed in the step 3 tick's fix round (review-930
+  B-1) rather than left for step 8, whose sweep keeps only `compared` citations
+  under `dashboard/` or `bin/sd-dashboard` and would not have found them.
+  Three line citations named files step 3 deleted. In `design.md`, the per-table
+  sort row cited a line of `tests/test_dashboard_markup.py` for its
+  `data-sd-sort` fixture, and review pass 4 cited a line of
   `dashboard/plugins.py` for the `markup` import. In `implement.md` step 3, the
-  `markup` paragraph cites that same `plugins.py` import line. The citation gate
-  classifies all three as `no-adjacent-anchor`, not `target-missing`, so none
-  is red.
+  `markup` paragraph cited that same `plugins.py` import line. The citation gate
+  classified all three as `no-adjacent-anchor`, not `target-missing`, so none
+  was red. Each now names the file without a line number.
