@@ -73,9 +73,13 @@ REFERENCE_DEFINITION_RE = re.compile(r"^[ ]{0,3}\[[^\]]+\]:[ \t]*<?([^\s>]+)>?",
 HREF_RE = re.compile(r"""\bhref=["']([^"']+)["']""", re.IGNORECASE)
 HTML_ANCHOR_RE = re.compile(r"""\b(?:id|name)=["']([^"']+)["']""", re.IGNORECASE)
 URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://[^\s<>()\[\]]+|\bmailto:\S+", re.IGNORECASE)
-SCHEME_RE = re.compile(r"^[a-z][a-z0-9+.-]*:", re.IGNORECASE)
-PATH_TOKEN_RE = re.compile(r"(?<![\w:/.<>-])[\w./<>-]*[\w<>/-]")
+#: A scheme (`https:`, `mailto:`) or a protocol-relative `//host`: not a file.
+SCHEME_RE = re.compile(r"^(?:[a-z][a-z0-9+.-]*:|//)", re.IGNORECASE)
+#: A prose token, with the `#fragment` it carries so the anchor is checked too.
+PATH_TOKEN_RE = re.compile(r"(?<![\w:/.<>#-])[\w./<>-]*[\w<>/-](?:#[\w-]+)?")
 ATX_HEADING_RE = re.compile(r"^[ ]{0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
+SETEXT_UNDERLINE_RE = re.compile(r"^[ ]{0,3}(?:=+|-+)[ \t]*$")
+LIST_ITEM_RE = re.compile(r"^[ ]{0,3}(?:[-*+]|\d+[.)])(?:[ \t]|$)")
 FENCE_RE = re.compile(r"^[ ]{0,3}(```|~~~)")
 
 
@@ -108,27 +112,42 @@ def github_slug(heading: str) -> str:
 
 
 def anchors_of(text: str) -> frozenset[str]:
-    """Every anchor a markdown document offers: its ATX headings outside fenced
-    code, numbered the way GitHub numbers repeats, and any HTML id or name."""
+    """Every anchor a markdown document offers outside fenced code: its ATX and
+    Setext headings, numbered the way GitHub numbers repeats, and any HTML id
+    or name. A heading or an `id=` inside a fence renders as code, not as an
+    anchor, so neither counts there."""
     found: set[str] = set()
     seen: dict[str, int] = {}
     fenced = False
+    paragraph = ""
     for line in text.splitlines():
         if FENCE_RE.match(line):
             fenced = not fenced
+            paragraph = ""
             continue
-        heading = None if fenced else ATX_HEADING_RE.match(line)
-        if heading is None:
+        if fenced:
             continue
-        slug = github_slug(heading.group(1))
+        found.update(HTML_ANCHOR_RE.findall(line))
+        atx = ATX_HEADING_RE.match(line)
+        if atx is not None:
+            heading = atx.group(1)
+        elif paragraph and SETEXT_UNDERLINE_RE.match(line):
+            heading = paragraph
+        else:
+            plain = line.strip() and not LIST_ITEM_RE.match(line)
+            paragraph = line.strip() if plain else ""
+            continue
+        paragraph = ""
+        slug = github_slug(heading)
         count = seen.get(slug, 0)
         seen[slug] = count + 1
         found.add(slug if count == 0 else f"{slug}-{count}")
-    found.update(HTML_ANCHOR_RE.findall(text))
     return frozenset(found)
 
 
 def is_tracked_path(relative: str, tracked: frozenset[str]) -> bool:
+    if relative == ".":
+        return bool(tracked)
     prefix = relative.rstrip("/") + "/"
     return relative in tracked or any(name.startswith(prefix) for name in tracked)
 
@@ -193,8 +212,9 @@ def walk(repo: pathlib.Path, template: str, tracked: frozenset[str]) -> Walk:
         token = token.rstrip(".")
         if "/" not in token and "." not in token:
             continue
-        first = token.lstrip("/").split("/", 1)[0]
-        if pathlib.PurePosixPath(token).suffix in suffixes or first in top_level:
+        path = token.partition("#")[0]
+        first = path.lstrip("/").split("/", 1)[0]
+        if pathlib.PurePosixPath(path).suffix in suffixes or first in top_level:
             resolve("/" + token.lstrip("/"), root, "path")
     return Walk(tuple(files), tuple(anchors), tuple(urls), tuple(broken))
 
@@ -228,7 +248,11 @@ def fixture_repo(files: dict[str, str]) -> tuple[tempfile.TemporaryDirectory, pa
 
 TEMPLATE = ".github/PULL_REQUEST_TEMPLATE.md"
 GUIDE = "docs/guide.md"
-GUIDE_BODY = "# Guide\n\n## Review scope\n\n## Review scope\n\n```\n# not a heading\n```\n"
+GUIDE_BODY = (
+    "# Guide\n\n## Review scope\n\n## Review scope\n\n"
+    "```\n# not a heading\n<a id=\"not-an-anchor\"></a>\n```\n\n"
+    "Setext title\n============\n\n- a list item\n---\n"
+)
 
 
 class WalkerTests(unittest.TestCase):
@@ -246,6 +270,9 @@ class WalkerTests(unittest.TestCase):
             "Jump to [the top](#summary).\n\n## Summary\n\n"
             "[ref]: ../docs/guide.md#guide\n"
             '<a href="/docs/guide.md#review-scope">x</a>\n'
+            "Protocol-relative [host](//example.com/org/repo), the [root](/) "
+            "and [up](../).\n"
+            "A prose anchor docs/guide.md#setext-title resolves.\n"
             "Words like pack/Trellis, CI/review and e.g. are not paths.\n"
             "[Claude Code](https://claude.com/claude-code) https://claude.ai/code/session_<id>\n"
             "Pattern docs/work/<YYYY-MM-DD>-<slug>/prd.md is a pattern.\n"
@@ -281,6 +308,15 @@ class WalkerTests(unittest.TestCase):
 
     def test_an_anchor_inside_a_code_fence_is_not_a_heading(self) -> None:
         self.assertEqual(1, len(self.broken("[x](../docs/guide.md#not-a-heading)\n")))
+
+    def test_an_html_id_inside_a_code_fence_is_not_an_anchor(self) -> None:
+        self.assertEqual(1, len(self.broken("[x](../docs/guide.md#not-an-anchor)\n")))
+
+    def test_a_rule_under_a_list_item_is_not_a_heading(self) -> None:
+        self.assertEqual(1, len(self.broken("[x](../docs/guide.md#a-list-item)\n")))
+
+    def test_a_prose_path_with_a_missing_anchor_fails(self) -> None:
+        self.assertEqual(1, len(self.broken("As docs/guide.md#missing says.\n")))
 
     def test_an_anchor_to_a_missing_heading_in_the_template_fails(self) -> None:
         self.assertEqual(1, len(self.broken("[x](#nowhere)\n\n## Summary\n")))
