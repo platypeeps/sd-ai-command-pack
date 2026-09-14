@@ -123,9 +123,16 @@ fi
 # each. Sharding by module lets the slowest module set the wall clock on its
 # own: on CI (#907, three workers) tests.test_sd_ship ran 1155 s of a 1173 s
 # step while the other workers sat idle. Every test in these modules builds its
-# own fixtures in setUp -- none has setUpClass or setUpModule -- which is what
-# makes a split by id safe; a module that grows class or module fixtures must
-# leave this list or be split by class instead.
+# own fixtures in setUp, which is what makes a split by id safe: a split runs
+# a class fixture once per shard holding one of its tests, not once.
+#
+# That is checked, not assumed. Before a module here is split, every test class
+# it loads is checked for a setUpClass or tearDownClass of its own or from a
+# base outside unittest, and every module those classes come from for setUpModule,
+# tearDownModule or load_tests, which a split by id would bypass. A module that
+# has any of them stops the run with the names; it leaves this list or loses
+# the fixture. The check runs on whatever this list names, so a module added
+# later is held to it too.
 #
 # A name here that matches no file is skipped rather than refused, so a rename
 # costs time and never a test: the renamed module still runs, whole.
@@ -134,7 +141,8 @@ SPLIT_MODULES="tests.test_sd_ship tests.test_sd_ship_dispositions tests.test_sd_
 # The ids a module holds, one per line, loaded the way `python -m unittest
 # <module>` loads them. Fails, printing nothing, if the module does not import
 # or holds no tests; the caller then runs it whole, and the whole-module run
-# reports whatever went wrong.
+# reports whatever went wrong. Exits 3, naming them on stderr, if the module
+# has a fixture that must run once.
 module_test_ids() {
   env -u SD_COVERAGE_PROCESS_START "$PYTHON_BIN" -c '
 import sys
@@ -152,6 +160,19 @@ def walk(suite):
 tests = list(walk(unittest.defaultTestLoader.loadTestsFromName(sys.argv[1])))
 if not tests or any(type(test).__module__.startswith("unittest.") for test in tests):
     sys.exit(1)
+fixtures = set()
+for cls in {type(test) for test in tests}:
+    for name in ("setUpClass", "tearDownClass"):
+        defined = next(klass for klass in cls.__mro__ if name in vars(klass))
+        if defined.__module__.split(".")[0] != "unittest":
+            fixtures.add(f"{defined.__module__}.{defined.__qualname__}.{name}")
+    module = sys.modules.get(cls.__module__)
+    for name in ("setUpModule", "tearDownModule", "load_tests"):
+        if hasattr(module, name):
+            fixtures.add(f"{cls.__module__}.{name}")
+if fixtures:
+    print("\n".join(sorted(fixtures)), file=sys.stderr)
+    sys.exit(3)
 print("\n".join(test.id() for test in tests))
 ' "$1"
 }
@@ -165,9 +186,22 @@ for name in "${modules[@]}"; do
   split=0
   case " $SPLIT_MODULES " in
     *" $name "*)
-      if ids="$(module_test_ids "$name")" && [ -n "$ids" ]; then
+      fixtures_file="$work_dir/$name.fixtures"
+      ids="$(module_test_ids "$name" 2>"$fixtures_file")"
+      list_status=$?
+      if [ "$list_status" -eq 3 ]; then
+        printf '%s\n' \
+          "error: $name is in SPLIT_MODULES, but a split by test id would run these once per shard:" >&2
+        sed 's/^/  /' "$fixtures_file" >&2
+        printf '%s\n' \
+          "Take $name out of SPLIT_MODULES in .github/scripts/run-tests.sh, or move the fixture into setUp." >&2
+        rm -rf "$work_dir"
+        exit 1
+      fi
+      if [ "$list_status" -eq 0 ] && [ -n "$ids" ]; then
         split=1
       else
+        cat "$fixtures_file" >&2
         printf '%s\n' "warning: could not list the tests in $name; running it as one shard" >&2
       fi
       ;;
