@@ -110,7 +110,7 @@ def _widen_publish_window(harness):
     harness.write_text("".join(lines))
 
 
-CONCAT_ANCHOR = 'for module in "${modules[@]}"; do'
+CONCAT_ANCHOR = 'for shard in "${shards[@]}"; do'
 CONCAT_SENTINEL = ".harness-assembling"
 
 
