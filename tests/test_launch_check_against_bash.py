@@ -70,14 +70,16 @@ CALLED_ELSEWHERE = "a call to a function defined anywhere but the same line"
 TOO_DEEP = "a call more than ``SHELL_REPLAYS`` calls deep"
 TOO_MANY_CALLS = "every call after the first ``SHELL_CALLS`` in one line"
 QUOTED_ASSIGNMENT = "a quoted word that reads as an assignment"
-CUT_SHORT = "a ``return``, an ``unset -f`` or ``FUNCNEST`` cutting a function short"
+CUT_SHORT = "a ``return`` or an ``unset -f`` cutting a function short"
+FUNCTION_NESTING = "``FUNCNEST``, which under ``bash -c`` ends the whole line"
 LAUNCH_IN_BODY = "a launch written in a function body"
 BRANCH = "which branch the shell takes"
 PARTLY_QUOTED = "a pattern in a word part of which is quoted"
 NAMED_LIKE_PYTHON = "whether a program named like an interpreter is one"
 CARRIAGE_RETURN = "a carriage return, which the shell keeps in its word"
 FAILED_CD = "a ``cd`` or ``pushd`` that fails"
-SECOND_CALL = "A second call to the same body, under its own name or another, keeps the directory"
+SECOND_CALL = "a second call to the same body, which keeps the directory"
+CD_IN_EVAL = "a ``cd`` in an ``eval``"
 
 #: Each shape the check decides otherwise than bash, under the passage of the
 #: sitecustomize docstring that says why.
@@ -98,7 +100,6 @@ LIMITS = {
     "sh -c 'python -I \"$@\"' sh bin/sd_install.py": POSITIONAL,
     "p=python; $p -I bin/sd_install.py": POSITIONAL,
     "x=\"$(python -I bin/sd_install.py)\"": DOUBLE_QUOTED,
-    "echo $'it\\'s'; python -I bin/sd_install.py": DOUBLE_QUOTED,
     "coproc python -I bin/sd_install.py; wait": COPROC,
     "f() { cd sub; }; x=f; $x; python -I ../bin/sd_install.py": CALLED_ELSEWHERE,
     "f() { cd sub; }; eval f; python -I ../bin/sd_install.py": CALLED_ELSEWHERE,
@@ -108,7 +109,7 @@ LIMITS = {
     "n() { :; }; " + "n; " * 256 + "f() { cd sub; }; f; python -I ../bin/sd_install.py": TOO_MANY_CALLS,
     "n() { :; }; " + "n; " * 256 + "f() { cd sub; }; f; python -I bin/sd_install.py": TOO_MANY_CALLS,
     "f() { cd sub; }; 'x=1' f; python -I bin/sd_install.py": QUOTED_ASSIGNMENT,
-    "FUNCNEST=2; f() { cd sub; f; }; f; python -I ../bin/sd_install.py": CUT_SHORT,
+    "FUNCNEST=2; f() { cd sub; f; }; f; python -I ../bin/sd_install.py": FUNCTION_NESTING,
     "f() { cd sub; }; unset -f f; f; python -I bin/sd_install.py": CUT_SHORT,
     "f() { return; cd sub; }; f; python -I bin/sd_install.py": CUT_SHORT,
     "f() { python -I bin/sd_install.py; }; true": LAUNCH_IN_BODY,
@@ -123,6 +124,8 @@ LIMITS = {
     "cd nonexist; python -I bin/sd_install.py": FAILED_CD,
     "pushd nonexist; python -I bin/sd_install.py": FAILED_CD,
     "cd sub; cd sub; python -I ../../bin/sd_install.py": FAILED_CD,
+    "eval cd sub; python -I ../bin/sd_install.py": CD_IN_EVAL,
+    "eval 'cd sub'; python -I bin/sd_install.py": CD_IN_EVAL,
     ("sub/deep", "f() { cd ..; }; f; f; python -I bin/sd_install.py"): SECOND_CALL,
     ("sub/deep", "f() { cd ..; }; f; f; python -I ../bin/sd_install.py"): SECOND_CALL,
     "f() { cd ww; }; f; f; python -I ../../bin/sd_install.py": SECOND_CALL,
@@ -130,6 +133,15 @@ LIMITS = {
     "f() { cd sub; }; g() { f; cd ..; }; g; f; python -I bin/sd_install.py": SECOND_CALL,
     "f() { cd sub; }; f; cd ..; f; python -I bin/sd_install.py": SECOND_CALL,
 }
+
+#: The limits of that docstring list no shape here can show, each named by a
+#: passage of its own. The test fails on one that grows a LIMITS row.
+PROSE_ONLY = (
+    # Every launch here comes from a shell this check reads, and the shims log
+    # a `-m` module as one more argument, not as the file it would run: no
+    # shape can show either half of this limit.
+    "a launch from a non-Python parent",
+)
 
 #: Every shape, as its line or as (the directory it runs in, its line).
 SHAPES = (
@@ -255,6 +267,22 @@ SHAPES = (
     "cat >/dev/null <<EOF\nit's\nEOF\npython -I bin/sd_install.py",
     "cat >/dev/null <<EOF\n# x\nEOF\npython -I bin/sd_install.py",
     "echo $'it\\'s'; python -I bin/sd_install.py",
+    # ANSI-C strings, and the login shell that must still find the shims.
+    "echo $'a\\'b' > /dev/null; python -I bin/sd_install.py",
+    "echo $'a\\\\'; python -I bin/sd_install.py",
+    "echo $'\\\\\\''; python -I bin/sd_install.py",
+    "echo $'a\\'\nb'; python -I bin/sd_install.py",
+    "echo \"$'\"; python -I bin/sd_install.py",
+    "echo $'x\\'\npython -I bin/sd_install.py'",
+    "echo $'unterminated\\'; python -I bin/sd_install.py",
+    "python -I bin/sd_install.py; echo $'unterminated",
+    "python -I $'bin/sd_inst*.py'",
+    "echo $'python -I bin/sd_install.py'",
+    "$'python' -I bin/sd_install.py",
+    "bash -c $'python -I bin/sd_install.py'",
+    "bash -lc 'python3 -I bin/sd_install.py'",
+    "eval cd sub; python -I ../bin/sd_install.py",
+    "eval 'cd sub'; python -I bin/sd_install.py",
     "cd sub && true & wait; python -I ../bin/sd_install.py",
     "if cd sub; then :; fi | cat; python -I ../bin/sd_install.py",
     "while cd sub; do break; done & wait; python -I ../bin/sd_install.py",
@@ -653,8 +681,9 @@ def _skipped_script(words: list[str]) -> str | None:
 def _bash_refuses(bash: str, root: pathlib.Path, shape: tuple[str, str], log: pathlib.Path) -> bool:
     """Whether bash, running the shape, launches the root's installer with site skipped."""
     shims = root.parent.parent / "shims"
+    home = root.parent / "home"
     environment = {"PATH": f"{shims}{os.pathsep}{os.environ.get('PATH', '')}",
-                   "HOME": os.environ.get("HOME", str(root)), "LC_ALL": "C", "SD_LAUNCH_LOG": str(log)}
+                   "HOME": str(home), "LC_ALL": "C", "SD_LAUNCH_LOG": str(log)}
     subprocess.run([bash, "-c", shape[1]], cwd=root / shape[0], env=environment,
                    stdin=subprocess.DEVNULL, capture_output=True, timeout=30, check=False)
     installer = os.path.realpath(root / "bin/sd_install.py")
@@ -687,6 +716,13 @@ def _decided(bash: str, checks: list, scratch: pathlib.Path, index: int,
     root = scratch / str(index) / "root"
     for path in LAYOUT:
         (root / path).mkdir(parents=True)
+    # A home of its own, so no profile of the user's runs and `cd ~` leads
+    # nowhere in the layout; its profile keeps the shims first in a login
+    # shell, which `/etc/profile` reorders on macOS.
+    home = root.parent / "home"
+    home.mkdir()
+    for name in (".bash_profile", ".profile"):
+        (home / name).write_text(f'PATH="{scratch / "shims"}:$PATH"\n')
     (root / "bin/sd_install.py").touch()
     (root / "bin/other.py").touch()
     # The checks read the directory first: a shape may write files into it.
@@ -713,6 +749,13 @@ def _baseline_report(shapes: list[tuple[str, str]], results: list[tuple[bool, li
     return "\n".join([f"against the baseline: {counts}", *regressions])
 
 
+def _bullets() -> list[str]:
+    """Each limit of the sitecustomize docstring's "It does not see" list, on one line."""
+    text = (_load(CHECK).__doc__ or "").partition("It does not see:")[2]
+    text = text.partition("\n\nA process that is already measured")[0]
+    return [" ".join(bullet.split()) for bullet in text.split("\n- ")[1:]]
+
+
 def _entry(shape: tuple[str, str]) -> str | tuple[str, str]:
     """A shape as the table writes it."""
     return shape if shape[0] else shape[1]
@@ -724,9 +767,23 @@ class LaunchCheckAgainstBash(unittest.TestCase):
         self.assertEqual(len(shapes), len(set(shapes)), "a shape is in SHAPES twice")
         self.assertEqual(sorted(map(str, set(map(_shape, LIMITS)) - set(shapes))), [],
                          "LIMITS names a shape SHAPES does not hold")
-        documented = " ".join((_load(CHECK).__doc__ or "").split())
-        self.assertEqual(sorted({reason for reason in LIMITS.values() if reason not in documented}), [],
-                         "a reason in LIMITS is not a passage of the sitecustomize docstring")
+        bullets = _bullets()
+        self.assertTrue(bullets, "the sitecustomize docstring has no \"It does not see\" list")
+        self.assertEqual(sorted({reason for reason in LIMITS.values()
+                                 if not any(reason in bullet for bullet in bullets)}), [],
+                         "a reason in LIMITS is not a passage of a docstring limit")
+        self.assertEqual(sorted(passage for passage in PROSE_ONLY
+                                if not any(passage in bullet for bullet in bullets)), [],
+                         "PROSE_ONLY names a passage no docstring limit holds")
+        listed = [bullet for bullet in bullets
+                  if not any(reason in bullet for reason in LIMITS.values())
+                  and not any(passage in bullet for passage in PROSE_ONLY)]
+        self.assertEqual([bullet[:70] for bullet in listed], [],
+                         "a docstring limit has neither a LIMITS row nor a PROSE_ONLY reason")
+        covered = [bullet[:70] for bullet in bullets
+                   if any(reason in bullet for reason in LIMITS.values())
+                   and any(passage in bullet for passage in PROSE_ONLY)]
+        self.assertEqual(covered, [], "a PROSE_ONLY limit now has a LIMITS row")
 
     def test_the_check_decides_each_shape_as_bash_runs_it_or_names_the_limit(self) -> None:
         bash, version = _bash()

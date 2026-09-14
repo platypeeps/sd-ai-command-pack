@@ -264,6 +264,12 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["bash", "-c", "f() { cd sub; }; f; f() { cd deep; }; f; python -I ../bin/sd_install.py"],
         # The replay budget is a depth: eight calls before this one spend none of it.
         ["bash", "-c", "n() { :; }; " + "n; " * 8 + "f() { cd sub; }; f; python -I bin/sd_install.py"],
+        # An ANSI-C string holds the launch written in it, and one left open
+        # ends its line.
+        ["bash", "-c", "echo $'x\\'\npython -I bin/sd_install.py'"],
+        ["bash", "-c", "echo $'unterminated\\'; python -I bin/sd_install.py"],
+        ["bash", "-c", "python -I bin/sd_install.py; echo $'unterminated"],
+        ["bash", "-c", "python -I $'bin/sd_inst*.py'"],
         # A quoted word is a program or an argument, never the shell's own.
         ["bash", "-c", '"if" python -I bin/sd_install.py'],
         ["bash", "-c", "echo ';' python -I bin/sd_install.py"],
@@ -326,6 +332,18 @@ class LazySubprocessCoverage(unittest.TestCase):
         # A backslash escape ends a word's first character too: what follows
         # the `#` is the word's, not a comment's.
         ["bash", "-c", "echo \\b#c; python -I bin/sd_install.py"],
+        # In an ANSI-C `$'...'` string a backslash escapes the character after
+        # it, so neither `\\'` nor `\\\\` ends the string where it is written,
+        # and the string ends at the first quote none escapes -- newlines and
+        # all. The string is a word: it can be the program, or hold a shell's
+        # `-c` line.
+        ["bash", "-c", "echo $'a\\'b' > /dev/null; python -I bin/sd_install.py"],
+        ["bash", "-c", "echo $'a\\\\'; python -I bin/sd_install.py"],
+        ["bash", "-c", "echo $'\\\\\\''; python -I bin/sd_install.py"],
+        ["bash", "-c", "echo $'a\\'\nb'; python -I bin/sd_install.py"],
+        ["bash", "-c", "echo \"$'\"; python -I bin/sd_install.py"],
+        ["bash", "-c", "$'python' -I bin/sd_install.py"],
+        ["bash", "-c", "bash -c $'python -I bin/sd_install.py'"],
         # The `pushd` stack: a bare `pushd` swaps the top two, `+N` rotates,
         # `popd +N` drops an entry without moving, `pushd -n` adds without one.
         ["bash", "-c", "pushd sub; pushd; python -I bin/sd_install.py"],

@@ -55,10 +55,13 @@ a measured file's own ``#!`` line.
 
 A shell line is read like this. Each ``#`` comment is cut, a backslash before
 a newline joins the two lines, and what a quote or a backslash covers is marked
-as text: a quoted ``if`` is a program and a quoted ``;`` is an argument. A
-quote left open ends its line, which is what the shell does with it. The line
-splits at ``;``, ``&``, ``&&``, ``|``, ``||``, parentheses, backticks and
-newlines, and each command is read past a reserved word (``!``, ``if``,
+as text: a quoted ``if`` is a program and a quoted ``;`` is an argument. An
+ANSI-C ``$'...'`` string is one quoted word holding what bash reads out of it,
+where a backslash escapes the character after it (``\'`` and ``\\`` included),
+so the string ends at the first quote none escapes, a newline in between or
+not. A quote left open ends its line, which is what the shell does with it.
+The line splits at ``;``, ``&``, ``&&``, ``|``, ``||``, parentheses, backticks
+and newlines, and each command is read past a reserved word (``!``, ``if``,
 ``then``, ``elif``, ``else``, ``while``, ``until``, ``do``, and ``time`` with
 its ``-p`` and ``--``) and past its redirections, with its patterns expanded
 where it runs.
@@ -90,7 +93,10 @@ those is refused.
 
 It does not see:
 
-- a launch from a non-Python parent, or ``-m`` naming a measured module;
+- a launch from a non-Python parent, or ``-m`` naming a measured module,
+  which is a module path rather than the file name the gate anchors;
+- a second call to the same body, which keeps the directory: the paragraph
+  above names that choice and what it costs;
 - a wrapper other than ``env`` (``exec``, ``command``, ``builtin``, ``nice``,
   ``nohup``, ``xargs``, ``/usr/bin/time``): its options differ per wrapper;
 - the commands a shell reads from anywhere but its ``-c`` string: a script
@@ -103,8 +109,8 @@ It does not see:
 - a script the shell gets from ``"$@"`` or ``$1``, a program or a ``cd``
   directory a variable or a ``$(...)`` names: positional arguments, variables
   and substitutions are not expanded, by design;
-- a command inside double quotes (``"$(python -I ...)"``, ``"`...`"``) or an
-  ANSI-C ``$'...'`` string: quoted text is one word;
+- a command inside double quotes (``"$(python -I ...)"``, ``"`...`"``):
+  quoted text is one word;
 - a command after ``coproc``: only the words above are skipped;
 - a ``cd`` in an ``eval``: the line it is read as ends with it;
 - a call to a function defined anywhere but the same line, named by a
@@ -114,8 +120,10 @@ It does not see:
   ``SHELL_CALLS`` in one line, a bound on the work one line can cost;
 - a quoted word that reads as an assignment (``'x=1' f``): it is taken for
   one, so the word after it is read as the command's name;
-- a ``return``, an ``unset -f`` or ``FUNCNEST`` cutting a function short: a
-  call reads the whole body, and a definition stands until another replaces it;
+- a ``return`` or an ``unset -f`` cutting a function short, and ``FUNCNEST``,
+  which under ``bash -c`` ends the whole line where a call goes past it: a call
+  reads the whole body, a definition stands until another replaces it, and the
+  commands after go on being read;
 - a launch written in a function body, which is read where the body is
   defined: that is a refusal rather than a miss, even when nothing calls the
   function;
@@ -181,6 +189,9 @@ ELSEWHERE = object()
 #: Marks a word a quote or a backslash covered: a quoted `if` is a program, and
 #: a quoted `;` is that program's argument rather than the shell's separator.
 QUOTED = "\0"
+#: The escapes of an ANSI-C `$'...'` string that can change where a word ends;
+#: any other backslash pair is kept as written.
+ANSI_C_ESCAPES = {"\\'": "'", "\\\\": "\\", '\\"': '"', "\\n": "\n", "\\t": "\t"}
 #: How deep calls inside function bodies are read through, and how many calls one line is.
 SHELL_REPLAYS = 8
 SHELL_CALLS = 256
@@ -449,6 +460,21 @@ def _prepared(line):
         if char == "#" and boundary and not quote:
             end = line.find("\n", position)
             position = len(line) if end < 0 else end
+            continue
+        if char == "$" and following == "'" and not quote:
+            # An ANSI-C `$'...'` string, where a backslash escapes the character
+            # after it, `\'` and `\\` included. It is written as a plain quoted
+            # word holding the text bash reads out of it.
+            end, text = position + 2, []
+            while end < len(line) and line[end] != "'":
+                pair = line[end:end + 2] if line[end] == "\\" else line[end]
+                text.append(ANSI_C_ESCAPES.get(pair, pair))
+                end += len(pair)
+            if end >= len(line):
+                opened, quote, position = len(kept), "'", len(line)
+                continue
+            kept.append(QUOTED + "'" + "".join(text).replace("'", "'\\''") + "'")
+            position, boundary = end + 1, False
             continue
         if char in "'\"" and quote in ("", char):
             if not quote:
