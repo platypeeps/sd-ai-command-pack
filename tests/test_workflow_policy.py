@@ -66,10 +66,11 @@ SELF = "tests/test_workflow_policy.py"
 #: A bare vendor token: one of the four names with none of `/`, `.`, `_`, `~`
 #: or `-` against either side. That shape drops paths, filenames, environment
 #: variables, MCP tool identifiers and URLs, and keeps a vendor named as a
-#: choice of who runs a pass. A letter or digit on either side makes a longer
-#: word, not the token, so `\w` sits beside the five characters.
+#: choice of who runs a pass. Only those five characters exempt a neighbour, as
+#: the criterion states it: a letter beside the name does not, so `Codexes`
+#: counts too.
 BARE_VENDOR = re.compile(
-    r"(?<![/._~\w-])(codex|claude|openai|anthropic)(?![/._~\w-])", re.IGNORECASE
+    r"(?<![/._~-])(codex|claude|openai|anthropic)(?![/._~-])", re.IGNORECASE
 )
 
 #: The one product name the rule exempts. It is blanked before matching, not
@@ -313,6 +314,7 @@ class BareVendorTokens(unittest.TestCase):
             "The `claude-json` reader runs Claude in safe and restricted modes",
             "OpenAI and Anthropic bill separately",
             "Claude Code hands the pass to codex",
+            "two Codexes and a claudeish reviewer",
         ):
             with self.subTest(line=line):
                 self.assertEqual(bare_vendor_lines(line), [1])
@@ -325,7 +327,6 @@ class BareVendorTokens(unittest.TestCase):
             "see https://code.claude.com/docs/en/headless",
             "the `mcp__claude-in-chrome__navigate` tool",
             "[Claude Code's headless guide](https://code.claude.com/docs)",
-            "codexes and claudeish are longer words",
         ):
             with self.subTest(line=line):
                 self.assertEqual(bare_vendor_lines(line), [])
