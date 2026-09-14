@@ -212,20 +212,25 @@ verified by the maintainer's local run and the other three by nothing.
 
 ## Repository Conventions
 
-- For a Python function, class or module-level assignment in living
-  documentation, prefer a stable source reference such as
-  `source:bin/sd-docs-lint::check_pr_link`. The citation check resolves the declaration
-  in that file, so inserting unrelated lines does not require a documentation
-  edit. Use `path:line` when the claim concerns a particular line; those
-  references are still checked strictly. Keep historical references tied to
-  the version they describe.
-- When an edit moves a cited line, repoint from the anchored text rather than
-  by hand: `python3 tests/test_doc_citations.py --repoint` names every move it
+- Cite code in living documentation by symbol, never by line: a Python
+  function, class, method or module-level assignment is
+  `source:bin/sd-docs-lint::check_pr_link`. The citation check resolves the
+  declaration in that file, so inserting unrelated lines does not require a
+  documentation edit, and a symbol-anchored `path:line` into any file that is
+  not markdown fails the check (sd:525). A claim about a line that is not a
+  declaration, or about a file with no locator such as `dashboard/app.js`, is
+  written as prose naming the enclosing declaration or the file. Place code
+  where it belongs; no citation constrains where a line goes. `path:line`
+  remains the form for a line of a markdown page. Keep historical references
+  tied to the version they describe.
+- `python3 tests/test_doc_citations.py --repoint` names every rewrite it
   would make and every citation it refuses to guess at, and `--repoint
-  --apply` takes them. It finds the symbol's declaration, not the citation
-  string, and moves nothing when two lines or none could be the new home. A
-  blunt search-and-replace over the numbers in a page has already moved two
-  markers that were about other things.
+  --apply` takes them. A line into code becomes its `source:` locator when the
+  anchored symbol is declared exactly once; a line into a page moves to where
+  the anchored text now is. It reads the anchored text, not the citation
+  string, and changes nothing when two candidates or none exist. A blunt
+  search-and-replace over the numbers in a page has already moved two markers
+  that were about other things.
 - Claude permissions split by what they describe. A rule about *this machine* —
   a path only you have, a tool only you installed — goes in the ignored
   `.claude/settings.local.json`. A rule about *this repository's workflow* —

@@ -153,7 +153,7 @@ caps; the path for a change at each size; and the modes and how they resolve.
 `sd-help` names it. The `CLAUDE.local.md` block the installer writes links to it.
 
 The block carries the keys the pack reads and no others: `mode:` (`MODES`,
-`bin/sd_lib.py:38`), `check:`, `test:` and `lint:` (`CHECK_NAMES`, `:42`, read
+`source:bin/sd_lib.py::MODES`), `check:`, `test:` and `lint:` (`CHECK_NAMES`, `:42`, read
 at `:1004`), and `reviewers:`, the consent key requirement 6 adds. Every
 opt-in lane is asked for by name in the moment. A key that turns a lane on
 permanently is a default in disguise: it converts a decision about one change
@@ -1137,7 +1137,7 @@ log, not here.
   `:271-282`, `:302-303`, `:350`) and every reader (`bin/sd-status:183,190,
   1122-1129,1234-1242,1254-1287`), so
   `work_item_dirs` is one `iterdir` that skips `archive` by name; `bin/sd_ledger.py` moves to B with the
-  database; `record_load` (`bin/sd-handoff-restore:157-288`); the six helpers
+  database; `record_load` (`source:bin/sd-handoff-restore::record_load`); the six helpers
   copied from `bin/sd-handoff` (`bin/sd-handoff-restore:72-140,356-370`) are
   imported the way `bin/sd-status:96` does; the `authors` policy key
   (`bin/sd-review:276`, `:283`, `:1098`, `bin/sd_setup_github.py:230,267`, the schema,
@@ -1148,7 +1148,7 @@ log, not here.
   (`bin/sd-status:903`), derived from the registry instead; the residue
   detectors (`bin/sd-status:946-1004`) after one clean run across the fleet;
   the history comments in `Makefile`; `--stash-ref` (`bin/sd-handoff:374`) and
-  `carrier_branches` (`bin/sd-status:994-1017`); `sd-status`'s `_git` is taken --
+  `carrier_branches` (`source:bin/sd-status::carrier_branches`); `sd-status`'s `_git` is taken --
   it now calls `sd_lib.git_output`, which already carried the timeout.
   `bin/sd-pr-state` remains; `bin/sd-handoff` and `bin/sd-handoff-restore` are
   not cuts, both pinned self-contained by their own suites; `bin/sd-docs-lint:52,72-82,148` imports the vocabulary, the
@@ -3784,7 +3784,7 @@ from a number the operator types.
   contained. The installer had been writing a `CLAUDE.local.md` block with
   markers `bin/sd_lib.py` could not read, so every key it wrote was silently
   unread; the `url` client found the scheme consent and the `Allowance`
-  (`bin/sd_registry.py:770-783`) round trip that nobody had assigned; and a
+  (`source:bin/sd_registry.py::Allowance`) round trip that nobody had assigned; and a
   loopback exemption spelled as a string prefix admitted
   `http://127.evil.com/v1`, a name RFC 1123 permits anyone to register.
 
@@ -3822,15 +3822,15 @@ from a number the operator types.
   - **106, reserved.** Criterion 11's mode predicate at R11-D32's analogue,
     re-measured with `ast` rather than carried forward. It still measures what
     R11-D32 said it did, at the same lines: `setup_github`
-    (`bin/sd_setup_github.py:188-260`, 73) with `resolve_pin`
-    (`bin/sd_setup_github.py:77-95`, 19) and `action_reference`
-    (`bin/sd_setup_github.py:98-111`, 14). So does the `url` client's
-    now-spent analogue: `codex_argv` (`bin/sd-review:660-693`, 34),
-    `subprocess_runner` (`bin/sd-review:536-562`, 23), `_finding`
-    (`bin/sd-review:754-788`, 37) and `parse_findings`
-    (`bin/sd-review:827-873`, 20) still total 114. Its transport line was if
+    (`source:bin/sd_setup_github.py::setup_github`, 73) with `resolve_pin`
+    (`source:bin/sd_setup_github.py::resolve_pin`, 19) and `action_reference`
+    (`source:bin/sd_setup_github.py::action_reference`, 14). So does the `url` client's
+    now-spent analogue: `codex_argv` (`source:bin/sd-review::codex_argv`, 34),
+    `subprocess_runner` (`source:bin/sd-review::subprocess_runner`, 23), `_finding`
+    (`source:bin/sd-review::_finding`, 37) and `parse_findings`
+    (`source:bin/sd-review::parse_findings`, 20) still total 114. Its transport line was if
     anything generous — the one built stdlib-HTTP transport in `bin/`,
-    `read_source` (`bin/sd-skill-adopt:347-365`), is 19.
+    `read_source` (`source:bin/sd-skill-adopt::read_source`), is 19.
   - **119, reserved, in-flight discovery.** The predicate crosses one seam:
     `mode` out of the `CLAUDE.local.md` block, whose value was unread and
     indistinguishable from its own `full` fallback until the marker fix
@@ -3850,9 +3850,9 @@ from a number the operator types.
 
   **A second ceiling binds at the same time, and R11-D32 never says so.**
   `test_the_review_lane_stays_under_its_sub_cap`
-  (`tests/test_sd_review_boundary.py:306-316`) caps the review lane at 1700,
+  (`source:tests/test_sd_review_boundary.py::test_the_review_lane_stays_under_its_sub_cap`) caps the review lane at 1700,
   where the lane is `bin/sd-review` plus every `bin/` module it imports except
-  `SHARED_CORE` (`tests/test_sd_review_boundary.py:46`). Today that is
+  `SHARED_CORE` (`source:tests/test_sd_review_boundary.py::SHARED_CORE`). Today that is
   `bin/sd-review` (1,364) plus `bin/sd_setup_github.py` (326) = **1,690**, and
   the `url` client takes it to **1,699**. One line. Two consequences this
   entry has to state rather than leave to be discovered:
@@ -3909,13 +3909,13 @@ from a number the operator types.
   the guard that was written.
 
   **The failure is specific to this predicate rather than a general robustness
-  point.** `remote_permits_full` (`bin/sd_lib.py:333`) returns `full` from three
+  point.** `remote_permits_full` (`source:bin/sd_lib.py::remote_permits_full`) returns `full` from three
   places, and one of them is an empty `others` — nobody else may push. Parsing
   an entry and filtering it in the same pass makes an unreadable entry
   indistinguishable from an absent one, so dropping every entry empties `others`
   and "nobody I could parse" arrives as "nobody else may push". A repository
   with a dozen unparseable pushers resolved to the most permissive mode, which
-  is the one direction `mode` (`bin/sd_lib.py:392`) is forbidden to move in.
+  is the one direction `mode` (`source:bin/sd_lib.py::mode`) is forbidden to move in.
   Fixed in code at `bin/sd_lib.py:332-344`, where every entry is read first and
   the first one that cannot be read returns `answered` false rather than a
   permission; the comment there carries the reasoning.
@@ -3943,12 +3943,12 @@ from a number the operator types.
   forbidden to do. `minimal` is also set by hand and detection's six cases never
   produce it, so no run reaches the question by accident. Together those make
   the answer forced rather than chosen, which is why `mode`
-  (`bin/sd_lib.py:392`) returns a written `minimal` unchanged and never asks the
+  (`source:bin/sd_lib.py::mode`) returns a written `minimal` unchanged and never asks the
   remote at all.
 
   **The general fact the criterion is missing is that "downward" is an ordering
   on exposure, not on permissiveness**, and `minimal` is the one mode where the
-  two come apart. `MODES` (`bin/sd_lib.py:38`) is a validation set and its order
+  two come apart. `MODES` (`source:bin/sd_lib.py::MODES`) is a validation set and its order
   carries no such meaning. The reasoning currently lives in the docstring of
   `mode` and nowhere in the criterion, which means the acceptance test for
   criterion 11 could be satisfied in full by an implementation that demotes
@@ -3968,7 +3968,7 @@ from a number the operator types.
   administer and collaborators it has never heard of — the same inversion
   R11-D35 records one layer down, an unanswerable question arriving as a granted
   permission, and reached here without any answer being misread because none was
-  obtained. `remote_permits_full` (`bin/sd_lib.py:333`) already separates them
+  obtained. `remote_permits_full` (`source:bin/sd_lib.py::remote_permits_full`) already separates them
   at `bin/sd_lib.py:303-310`: the `.git` test first and decided on its own, then
   the `rev-parse` test returning `guest` with `answered` false, then the remote
   lookup.
@@ -4088,15 +4088,15 @@ from a number the operator types.
     `implement.md` pins no body for any of it.
 
     - the file-or-row resolver in `bin/sd_lib.py` — **37**. `library`
-      (`bin/sd_registry.py:167-173`, 7) and `read`
-      (`bin/sd_registry.py:176-209`, 30) are this exact decision one level
+      (`source:bin/sd_registry.py::library`, 7) and `read`
+      (`source:bin/sd_registry.py::read`, 30) are this exact decision one level
       down: an optional `sd_db`, a file target, and a refusal when a caller
       holds a connection the library cannot serve. `status_source` asks the
       same question of `docs/work/.status-source` and a row.
     - the row-to-`StatusReport` adapter — **38**. `_adapt`
-      (`bin/sd_registry.py:256-295`, 38) is the one built instance of turning
+      (`source:bin/sd_registry.py::_adapt`, 38) is the one built instance of turning
       `sd_db` rows into this pack's frozen dataclasses. The file side it must
-      parallel is `_status_report` (`bin/sd_lib.py:834-862`, 26) with
+      parallel is `_status_report` (`source:bin/sd_lib.py::_status_report`, 26) with
       `status_report` (`source:bin/sd_lib.py::status_report`, 17), and the row side has to answer one
       question more than either — whether a line found beside the row is
       stale — so the larger analogue is the honest one.
@@ -4104,12 +4104,12 @@ from a number the operator types.
       in a database-free checkout every reader that picks an item asks
       `sd_lib.delivered` and nothing else, and that it answers from a merge
       commit's `Item:` and `Delivers:` trailers. The built trailer scan is
-      `attribution` (`bin/sd_lib.py:1236-1269`, 34) with `_in_range`
+      `attribution` (`source:bin/sd_lib.py::attribution`, 34) with `_in_range`
       (`source:bin/sd_lib.py::_in_range`, 16). `author_vendors` (32) is *not*
       re-reserved: it maps authors onto vendors and `delivered` has no
       equivalent of that.
     - `bin/sd-status`'s row read and its stale line — **38**.
-      `residue_section` (`bin/sd-status:1109-1127`, 19) is a section that
+      `residue_section` (`source:bin/sd-status::residue_section`, 19) is a section that
       enumerates a condition and names it, which is what "report the line by
       name as stale" is, and `_render_work` (`bin/sd-status`, 24) is
       the rendering half that has to say which source answered.
@@ -4144,14 +4144,14 @@ from a number the operator types.
       Left as a reported measurement rather than a re-derivation, because the
       reservation is this item's to move and not that one's.
     - `bin/sd-docs-lint` rules 1 and 2 — **44**. `item_directories`
-      (`bin/sd-docs-lint:77-87`, 11) has to carry the archived distinction,
+      (`source:bin/sd-docs-lint::item_directories`, 11) has to carry the archived distinction,
       and it is a reshape of every line of it rather than an added argument;
       `check_shape`'s two-sign block costs a `local_block`-sized read and
       decision (`bin/sd_lib.py:213-224`, 12), because the sign inverts outside
       the archive and holds inside it, and the paragraph explaining that is
       load-bearing — 487 archived `prd.md` files keep their `status:` line and
       a naive inversion fails on every one; and `check_ready`
-      (`bin/sd-docs-lint:135-155`, 21) is re-reserved whole, because the early
+      (`source:bin/sd-docs-lint::check_ready`, 21) is re-reserved whole, because the early
       return that switches three checks off is its spine
       (`bin/sd-docs-lint:146`) and replacing it is not an edit at the edge.
     - rule 7, criterion 33's dangling-reference scan — **73**.
@@ -4161,14 +4161,14 @@ from a number the operator types.
       not — plus 3 for the call in `run` (`source:bin/sd-docs-lint::run`).
     - the `sd_db` installer step — **19**, and not the 38 it looks like.
       `prd.md:1538-1544` reads as unbuilt scope and is not: `system_checkout`
-      (`bin/sd_install.py:1217-1226`, 10), `library_source` (`:1229-1230`, 2),
+      (`source:bin/sd_install.py::system_checkout`, 10), `library_source` (`:1229-1230`, 2),
       `provision_library` (`:1262-1307`, 46) and `open_library`
       (`:1314-1332`, 19) all landed with PR 6's consent work, and B's library
       is present at `~/repos/system/local-sd-db`, so the criterion's "Once B's
       library exists" is satisfied and it is the built branch that gets
       priced. What is left of the clause is the tag — the copy is installed
       from a path today and the criterion wants it at the system checkout's
-      tag — which is `resolve_pin` (`bin/sd_setup_github.py:77-95`, 19), the
+      tag — which is `resolve_pin` (`source:bin/sd_setup_github.py::resolve_pin`, 19), the
       built resolve-a-ref-then-use-it span. Its assertion is a test and tests
       are outside this cap.
 
@@ -4215,15 +4215,15 @@ from a number the operator types.
     than reaching an argv, and `deliver` is the same shape — an item id, a row
     write, no interpolation site.
   - the row write behind it — **21**, at `set_watermark`
-    (`dashboard/store.py:198-218`), the built guarded single-row write.
-  - the control itself — **31**, at `dismissCell` (`dashboard/app.js:599-624`,
+    (`source:dashboard/store.py::set_watermark`), the built guarded single-row write.
+  - the control itself — **31**, at `dismissCell` (in `dashboard/app.js`,
     26) with the five-line comment head above it (`:594-598`). The comment is
     counted in rather than trimmed off: it is there because a control that
     mutates and can fail has to say what its failure looks like, and `deliver`
     has exactly that problem in a sharper form.
   - the hand-merge reconciliation display — **28**, at `whereCell`
-    (`dashboard/app.js:573-590`, 18), the built cell that renders a derived
-    state with its reason, and `split_status` (`dashboard/work.py:102-109`,
+    (in `dashboard/app.js`, 18), the built cell that renders a derived
+    state with its reason, and `split_status` (`source:dashboard/work.py::split_status`,
     10), where the two new states have to be spelled: a row `in_progress` with
     the squash commit on a note, and a row `done` but unmarked.
 
@@ -4252,7 +4252,7 @@ from a number the operator types.
 
   **The review lane is not in the way this time, and that is worth recording
   because last time it was.** `test_the_review_lane_stays_under_its_sub_cap`
-  (`tests/test_sd_review_boundary.py:306-316`) caps `bin/sd-review` plus every
+  (`source:tests/test_sd_review_boundary.py::test_the_review_lane_stays_under_its_sub_cap`) caps `bin/sd-review` plus every
   `bin/` module it imports outside `SHARED_CORE` at 1700; that lane is
   `bin/sd-review` (1,373) plus `bin/sd_setup_github.py` (326) = **1,699**, one
   line of headroom, unchanged since the `url` client landed. R11-D34 had to

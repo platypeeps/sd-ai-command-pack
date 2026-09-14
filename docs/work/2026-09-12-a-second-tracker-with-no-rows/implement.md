@@ -14,8 +14,8 @@ tests with the pinned build, not assumed.
 
 `dashboard/` changes by one expression, step 7b, so the page shows a Jira
 row's key instead of its project. `DASHBOARD_CAP`
-(`tests/test_loc_caps.py:223`) and `DASHBOARD_CODE_CAP`
-(`tests/test_loc_caps.py:231`) do not move; `dashboard/jira.py` stays until
+(`source:tests/test_loc_caps.py::DASHBOARD_CAP`) and `DASHBOARD_CODE_CAP`
+(`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`) do not move; `dashboard/jira.py` stays until
 the `index.sqlite` retirement deletes it. The pack's `bin/` has no ceiling
 since R11-D48. The pack half is on the order of forty lines in
 `bin/sd_shadow.py`, thirty in `bin/sd-status`, and their tests.
@@ -32,8 +32,8 @@ since R11-D48. The pack half is on the order of forty lines in
       *missing* names and never a value —
       `python3 -c 'import os; print([n for n in ("JIRA_BASE_URL","JIRA_EMAIL","JIRA_API_TOKEN") if not os.environ.get(n, "").strip()])'`
       — prints `[]`. The
-      `.strip()` matches `settings` (`dashboard/jira.py:89-96`), which strips
-      before `missing` (`dashboard/jira.py:100`) looks; a value of spaces
+      `.strip()` matches `settings` (`source:dashboard/jira.py::settings`), which strips
+      before `missing` (`source:dashboard/jira.py::missing`) looks; a value of spaces
       would otherwise pass this check and fail step 2.
       Done 2026-09-13: the operator exported both names beside the token, and
       the check prints `[]` where before this step it printed
@@ -64,11 +64,11 @@ since R11-D48. The pack half is on the order of forty lines in
       `5e9a44b37bc0680c2ccd38af`, the account that both files and is assigned
       `LOG-23818`, so the token is the operator's own.
       (d) A specific issue key is named only after asserting that its
-      `updated` date falls inside `FIRST_RUN_WINDOW` (`dashboard/jira.py:64`);
+      `updated` date falls inside `FIRST_RUN_WINDOW` (`source:dashboard/jira.py::FIRST_RUN_WINDOW`);
       otherwise take the newest key the query itself returned. `LOG-23818`,
       the key the item seeds, does not qualify: it was last updated
       2026-05-05, 131 days before the run, and `DEFAULT_JQL`
-      (`dashboard/jira.py:78-82`) filters `updated >= -{minutes}m`, so the
+      (`source:dashboard/jira.py::DEFAULT_JQL`) filters `updated >= -{minutes}m`, so the
       collector is never asked for it. The run returned `LOG-21895`,
       `LOG-23702`, `LOG-23929`, `RS-8`, `RS-9`, `RS-45`, `RS-47`, `RS-48`,
       `RS-49`, `RS-50` and `RS-51` open, and `RS-54` closed — eleven open and
@@ -86,7 +86,7 @@ since R11-D48. The pack half is on the order of forty lines in
       returns `Collected` rather than the pack's dict. (ii) Every use of the
       pack's `github` module goes: `window_start` calls the library's
       `parse_iso` at `sd_db/shadow_sync.py:119`, and the three `github.iso`
-      calls in `collect` (`dashboard/jira.py:285`, on its missing-variable,
+      calls in `collect` (`source:dashboard/jira.py::collect`, on its missing-variable,
       failed-`myself` and normal returns) call the library's `iso` at
       `sd_db/shadow_sync.py:114`; `from . import github` appears nowhere in
       the new module, and an import of it is the first thing the ported test
@@ -98,12 +98,12 @@ since R11-D48. The pack half is on the order of forty lines in
       library's `Collected` is `ok=not errors and not truncated`
       (`sd_db/shadow_sync.py:466`), and the port returns
       `ok=not error and not cut`, so the watermark guard on `ok` in step 4
-      is sound. (iv) `fetch_issue` (`dashboard/jira.py:330`) does not move,
+      is sound. (iv) `fetch_issue` (`source:dashboard/jira.py::fetch_issue`) does not move,
       because it belongs to `sd-trackers ref`, which the item says needs no
       change. `TRACKER =
       "jira"`, `OVERLAP` and `FIRST_RUN_WINDOW` are declared in the module,
-      not shared, for the reason `window_start` (`dashboard/jira.py:114`)
-      gives. Port `JiraTests` (`tests/test_sd_dashboard_index.py:465`) with
+      not shared, for the reason `window_start` (`source:dashboard/jira.py::window_start`)
+      gives. Port `JiraTests` (`source:tests/test_sd_dashboard_index.py::JiraTests`) with
       its `jira_issue` and `jira_transport` fixtures to
       `local-sd-db/tests/test_shadow_jira.py`, asserting on `Collected`
       fields. The suite is not free of the pack:
@@ -182,14 +182,14 @@ since R11-D48. The pack half is on the order of forty lines in
       `python -c "import sd_db; print(sd_db.TRACKERS)"` in the CI venv prints
       `('github', 'jira')`.
 
-- [ ] **6. The verb iterates.** `shadow_sync` (`bin/sd_shadow.py:141`) reads
+- [ ] **6. The verb iterates.** `shadow_sync` (`source:bin/sd_shadow.py::shadow_sync`) reads
       `names = getattr(sd_db, "TRACKERS", ("github",))`; when `--since` or
       `--until` is given, `names` is `("github",)` and every other tracker
       prints `shadow sync[<name>]: skipped (recovery window is GitHub's)`.
       For each name it calls `sd_db.sync_shadow(connection, tracker=name,
-      **options)` and `report_sync` (`bin/sd_shadow.py:73`), which gains the
+      **options)` and `report_sync` (`source:bin/sd_shadow.py::report_sync`), which gains the
       name and prefixes every line it prints with `shadow sync[<name>]:`.
-      The lines `_library_lines` (`bin/sd_shadow.py:106`) forwards already
+      The lines `_library_lines` (`source:bin/sd_shadow.py::_library_lines`) forwards already
       begin `shadow sync: ` — `Synced.report` at `sd_db/shadow_sync.py:547`
       writes that head on each, and the test double at
       `tests/test_sd_suggest.py:606-607` reproduces it — so the verb strips
@@ -208,7 +208,7 @@ since R11-D48. The pack half is on the order of forty lines in
       GitHub only. Left as it stands, the paragraph would tell the operator
       that an unconfigured Jira fails the nightly.
       Verify: in `tests/test_sd_suggest.py`, beside `TheShadowSync`
-      (`tests/test_sd_suggest.py:412`): (a) with the pinned library, the
+      (`source:tests/test_sd_suggest.py::TheShadowSync`): (a) with the pinned library, the
       four existing tests pass unchanged — the substring assertions such as
       `wrote 2 shadow row(s)` still hold under the prefix, which is the
       control that the pin can lag; (b) with a fake `sd_db` whose `TRACKERS`
@@ -229,10 +229,10 @@ since R11-D48. The pack half is on the order of forty lines in
       and (b) reddens on the exit code.
 
 - [ ] **7. `sd-status` shows the row, in its own section.** The issues
-      section cannot carry it: `issues_section` (`bin/sd-status:1181`)
+      section cannot carry it: `issues_section` (`source:bin/sd-status::issues_section`)
       returns `no GitHub remote` at `bin/sd-status:1197-1199` before any
-      database is opened, `_database_issues` (`bin/sd-status:1134`) closes
-      its connection before `_render_issues` (`bin/sd-status:3378`) runs,
+      database is opened, `_database_issues` (`source:bin/sd-status::_database_issues`) closes
+      its connection before `_render_issues` (`source:bin/sd-status::_render_issues`) runs,
       and the heading says `this repo, from the index`. Neither function is
       touched. A new producer `jira_section()` opens its own read-only
       connection when `sd_db.default_path()` exists — the same gate
@@ -246,7 +246,7 @@ since R11-D48. The pack half is on the order of forty lines in
       `bin/sd-status:3061` under the key `jira`, so `--json` carries it. A
       new `_render_jira` prints the heading `jira (shared database, all
       repositories)` after the issues section, and `render()`
-      (`bin/sd-status:3305`) calls it — `_render_jira(result["jira"],
+      (`source:bin/sd-status::render`) calls it — `_render_jira(result["jira"],
       write)` on the line after `_render_issues(result["issues"], write)`
       at `bin/sd-status:3328` — because a renderer that is defined and not
       called leaves the section in `--json` only:
@@ -261,11 +261,11 @@ since R11-D48. The pack half is on the order of forty lines in
       `bin/sd-status:3365-3368`; then every closed row the producer kept as
       `KEY  closed  <title>`; then `none` if there were no rows. Nothing
       formats `number` and nothing slices a title. `ORDER`
-      (`tests/test_sd_status.py:3675`) gains the heading after
+      (`source:tests/test_sd_status.py::ORDER`) gains the heading after
       `issues (this repo, from the index)`, and the skeleton test's count
       moves from thirteen to fourteen. Every hand-built result the suite
       passes to `render()` gains a `jira` entry, starting with
-      `report` (`tests/test_sd_status.py:3641`) on `ReportSectionTests`,
+      `report` on `ReportSectionTests` (`source:tests/test_sd_status.py::ReportSectionTests`),
       which builds `issues` and `contributions` and no `jira` — without
       that edit the existing skeleton tests fail with `KeyError` before
       any new case runs. `skills/sd-status/SKILL.md` is rewritten in three
@@ -306,7 +306,7 @@ since R11-D48. The pack half is on the order of forty lines in
       the seven-day filter into `_render_jira` and (d) reddens on the
       `rows` assertion.
 
-- [ ] **7b. The dashboard shows the key.** `where` (`dashboard/app.js:115-120`)
+- [ ] **7b. The dashboard shows the key.** `where` (in `dashboard/app.js`)
       returns `issue.url.split("/").pop()` when `number` is null and the
       row has a URL, and `issue.repo || issue.tracker` only when it does
       not; the comment above it, which says the identity is in the URL
@@ -316,7 +316,7 @@ since R11-D48. The pack half is on the order of forty lines in
       that file's `fillIssues` cases, asserts the null-number branch of
       `where` derives from `issue.url` and not from `issue.repo` first; and
       `python -m unittest tests.test_loc_caps` stays green with
-      `DASHBOARD_CODE_CAP` (`tests/test_loc_caps.py:231`) unmoved. Mutation:
+      `DASHBOARD_CODE_CAP` (`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`) unmoved. Mutation:
       restore `issue.repo || issue.tracker` as the first branch and the
       test reddens. Manual check after step 2 has run: the issues tab shows
       `LOG-23929`, linked, where before this step it showed `LOG`. The key is

@@ -16,7 +16,7 @@ not-collected line rather than a failure.
 is cited to the line below; what no measurement here shows is the Jira branch
 of them carrying live rows, which is fact one. Measured at cc93ea85:
 
-- **The iteration.** `TRACKERS` (`dashboard/collect.py:24`) is
+- **The iteration.** `TRACKERS` (`source:dashboard/collect.py::TRACKERS`) is
   `(github, jira)`. The loop over it begins at `dashboard/collect.py:168`.
 - **Per-tracker watermarks.** Inside that loop, `dashboard/collect.py:170`
   reads `store.watermark(connection, name)` for that tracker, and
@@ -26,7 +26,7 @@ of them carrying live rows, which is fact one. Measured at cc93ea85:
   unconfigured neither blocks GitHub from collecting nor lets GitHub's success
   step Jira's window forward over a gap it never read."
 - **Env-only configuration with no default host.** `settings`
-  (`dashboard/jira.py:89`) reads `JIRA_BASE_URL`, `JIRA_EMAIL`,
+  (`source:dashboard/jira.py::settings`) reads `JIRA_BASE_URL`, `JIRA_EMAIL`,
   `JIRA_API_TOKEN` and optional `JIRA_JQL`, and the module docstring at
   `dashboard/jira.py:26-30` states the no-default-host rule and why.
 - **Graceful degradation.** `bin/sd-dashboard:239-240` already prints
@@ -98,7 +98,7 @@ This is the part neither sd:361 nor the retirement commit noticed, and it runs
 the wrong way.
 
 - The pack's store keys a row on **tracker plus URL**. `row_id`
-  (`dashboard/store.py:108`) returns `f"{tracker}:{url}"`, and its docstring at
+  (`source:dashboard/store.py::row_id`) returns `f"{tracker}:{url}"`, and its docstring at
   `dashboard/store.py:111-114` says the prefix exists precisely so that "a
   future tracker cannot silently adopt another's rows."
 - The library's store keys on **URL alone**. The schema declares
@@ -182,7 +182,7 @@ header discusses at length; `dashboard/jira.py` is 363 lines of it.
       such that a shadow row would be acted on? **Not answerable from the
       repository** — recorded here as the gate, not as a task.
 - [ ] If **no**: sd:361 is closed as not-to-be-built, `dashboard/jira.py` and
-      its entry in `TRACKERS` (`dashboard/collect.py:24`) retire with the
+      its entry in `TRACKERS` (`source:dashboard/collect.py::TRACKERS`) retire with the
       legacy collector, and `bin/sd-trackers ref jira:KEY` is decided
       separately — it is a different feature that resolves a reference without
       collecting anything, and it costs nothing to keep.

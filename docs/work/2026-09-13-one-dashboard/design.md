@@ -34,9 +34,9 @@ current program, it is a different one. `dashboard/server.py`'s docstring makes
 the write path a decision rather than an accident: "6b-7 gave the handler a POST,
 because the queue tabs exist to be decided in and a read-only port of them is a
 list of questions nobody can answer." So the read-only variant deletes
-`RUN_ALLOWLIST` (`dashboard/actions.py:52`), `run`
-(`dashboard/actions.py:114`), the ack store, and `deliver`
-(`dashboard/work.py:232`) — which is one of only two facts the two dashboards
+`RUN_ALLOWLIST` (`source:dashboard/actions.py::RUN_ALLOWLIST`), `run`
+(`source:dashboard/actions.py::run`), the ack store, and `deliver`
+(`source:dashboard/work.py::deliver`) — which is one of only two facts the two dashboards
 share on disk. What is left is 4,510 lines under a ceiling with two lines of code
 headroom, needing a second port and a second LaunchAgent, showing views the
 surviving dashboard also shows. The recurring cost is the more interesting half:
@@ -51,7 +51,7 @@ three things that are *not* in `dashboard/` and have to be dealt with: the
 citation in live prose that points into `dashboard/`.
 
 **Why deletion wins.** Not the line count — the front door. The pack's dashboard
-cannot bind `DEFAULT_PORT` (`dashboard/server.py:57`) while PID 37095 holds 8767,
+cannot bind `DEFAULT_PORT` (`source:dashboard/server.py::DEFAULT_PORT`) while PID 37095 holds 8767,
 neither README tells anyone to start it, and the pack's own README says at lines
 198 to 200 that the current dashboard lives in `system/local-project-dashboard`. A
 program that is documented as historical, cannot start on its default, and costs
@@ -153,7 +153,7 @@ because three of the loader's four documented properties are real:
 **Both are deleted. Neither is ported. Six behaviours are carried out of them by
 name first.**
 
-`PAGE` (`dashboard/server.py:238`) is an HTML literal whose nav declares seven
+`PAGE` (`source:dashboard/server.py::PAGE`) is an HTML literal whose nav declares seven
 tabs at `dashboard/server.py:290-306` and whose plugin mount point is the div at
 `dashboard/server.py:371`. The system package already has one page shell and a
 `static/` of one stylesheet and one script, and its package docstring refuses an
@@ -168,12 +168,12 @@ have, each named so it cannot be lost quietly:
 
 | Behaviour | Pack location | Disposition |
 |---|---|---|
-| Severity band from a rank | `band` (`dashboard/app.js:547`) | ports with the Now ranking, step 6. The rank is a server-side number and the band is the rendering choice; the system page needs the second half only. |
-| Per-table filter | `addFilter` (`dashboard/app.js:463`) | **dropped, measured rather than assumed.** The system page already filters its listings: the field is `[data-listing-filter]` (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/static/dashboard.js:385`) and `/` is bound to focus it (`:189`). |
-| Per-table sort | `addSort` (`dashboard/app.js:480`) | **dropped, and it costs nothing, because no shipped table asks for it.** `PAGE` declares `data-sd-search` on exactly one table (`dashboard/server.py:356`) and `data-sd-sort` on none; the only `data-sd-sort` in the repository is a fixture at `tests/test_dashboard_markup.py:80`. The system side refuses a client sort on purpose and says why (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/screens.py:135`): `sd today` and the page must list the same ids in the same order. |
-| Panel enhancement | `enhance` (`dashboard/app.js:517`) | **not dropped, and not step 3's.** It is the dispatcher for the two rows above and it runs for every *static* panel at startup — `for (const [, panel] of STATIC) enhance(...)` (`dashboard/app.js:426`), seven panels, none of them a plugin. Deleting it in step 3 is a `ReferenceError` on page load. It dies with `app.js` at step 6. |
-| Plugin panel id assignment | `panelId` (`dashboard/app.js:526`) | **dropped at step 3.** This one *is* plugin-only: its single caller is `drawPlugins` (`dashboard/app.js:690`), which goes in the same commit. |
-| Tracker key for a null-number row | `where` (`dashboard/app.js:115`) | **specification, not code.** sd:361 step 7b changes this one expression so a Jira row shows `LOG-23818` rather than `LOG`. The system page needs the same rule when it takes the tracker views over. |
+| Severity band from a rank | `band` (in `dashboard/app.js`) | ports with the Now ranking, step 6. The rank is a server-side number and the band is the rendering choice; the system page needs the second half only. |
+| Per-table filter | `addFilter` (in `dashboard/app.js`) | **dropped, measured rather than assumed.** The system page already filters its listings: the field is `[data-listing-filter]` (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/static/dashboard.js:385`) and `/` is bound to focus it (`:189`). |
+| Per-table sort | `addSort` (in `dashboard/app.js`) | **dropped, and it costs nothing, because no shipped table asks for it.** `PAGE` declares `data-sd-search` on exactly one table (`dashboard/server.py:356`) and `data-sd-sort` on none; the only `data-sd-sort` in the repository is a fixture at `tests/test_dashboard_markup.py:80`. The system side refuses a client sort on purpose and says why (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/screens.py:135`): `sd today` and the page must list the same ids in the same order. |
+| Panel enhancement | `enhance` (in `dashboard/app.js`) | **not dropped, and not step 3's.** It is the dispatcher for the two rows above and it runs for every *static* panel at startup — `for (const [, panel] of STATIC) enhance(...)` (`dashboard/app.js:426`), seven panels, none of them a plugin. Deleting it in step 3 is a `ReferenceError` on page load. It dies with `app.js` at step 6. |
+| Plugin panel id assignment | `panelId` (in `dashboard/app.js`) | **dropped at step 3.** This one *is* plugin-only: its single caller is `drawPlugins` (in `dashboard/app.js`), which goes in the same commit. |
+| Tracker key for a null-number row | `where` (in `dashboard/app.js`) | **specification, not code.** sd:361 step 7b changes this one expression so a Jira row shows `LOG-23818` rather than `LOG`. The system page needs the same rule when it takes the tracker views over. |
 
 **The `where` row is also an ordering decision.** sd:361 step 7b edits a file this
 item deletes. The temptation is to block 7b as wasted work. **Do not.** It is one
@@ -188,7 +188,7 @@ and the numbers.
 
 ### A removal earns 27 code lines, and its size does not change that
 
-`test_the_code_ceiling_is_paid_for_in_kind` (`tests/test_loc_caps.py:522`)
+`test_the_code_ceiling_is_paid_for_in_kind` (`source:tests/test_loc_caps.py::test_the_code_ceiling_is_paid_for_in_kind`)
 computes `DASHBOARD_CODE_CAP - code_line_count(tracked("dashboard"))` and asserts
 it is at most `DASHBOARD_CODE_SLACK`, 29. Remove *N* code lines and the highest
 cap that still passes is `(2,326 − N) + 29`; headroom after the change is 29 for
@@ -217,11 +217,11 @@ forces the ceiling down, and forcing the ceiling down is the expensive part.
 Three tests interlock, and a change that moves one without the others is red:
 
 1. `test_each_ceiling_is_the_last_value_its_history_records`
-   (`tests/test_loc_caps.py:552`) requires the new value appended to
-   `CEILING_HISTORY` (`tests/test_loc_caps.py:287`) in the same commit.
+   (`source:tests/test_loc_caps.py::test_each_ceiling_is_the_last_value_its_history_records`) requires the new value appended to
+   `CEILING_HISTORY` (`source:tests/test_loc_caps.py::CEILING_HISTORY`) in the same commit.
 2. `test_the_recorded_history_is_raises_only`
-   (`tests/test_loc_caps.py:577`) asserts the downward count across every
-   recorded ceiling is zero. `ceiling_moves` (`tests/test_loc_caps.py:331`)
+   (`source:tests/test_loc_caps.py::test_the_recorded_history_is_raises_only`) asserts the downward count across every
+   recorded ceiling is zero. `ceiling_moves` (`source:tests/test_loc_caps.py::ceiling_moves`)
    returns `(29, 26, 0)` today. The append in (1) makes it `(30, 26, 1)` and this
    test goes red.
 3. Its docstring says that is the point: it "fails the day a ceiling finally
@@ -247,9 +247,9 @@ history, not one to each.
 
 ### And the last deletion reddens both dashboard cap tests
 
-`test_the_dashboard_stays_under_its_ceiling` (`tests/test_loc_caps.py:487`) and
+`test_the_dashboard_stays_under_its_ceiling` (`source:tests/test_loc_caps.py::test_the_dashboard_stays_under_its_ceiling`) and
 `test_the_dashboard_code_stays_under_its_own_ceiling`
-(`tests/test_loc_caps.py:500`) each open with
+(`source:tests/test_loc_caps.py::test_the_dashboard_code_stays_under_its_own_ceiling`) each open with
 `self.assertTrue(paths, "dashboard/ enumeration matched no tracked files")`.
 **The commit that removes the last tracked file under `dashboard/` fails both on
 the empty enumeration**, whatever the caps say. Nobody finds that by reading the
@@ -262,7 +262,7 @@ retirement was argued from, and a decision whose evidence has been deleted canno
 be reviewed later."
 
 `test_the_migration_tools_stay_under_their_own_ceiling`
-(`tests/test_loc_caps.py:473`) is the precedent for the other shape — it asserts
+(`source:tests/test_loc_caps.py::test_the_migration_tools_stay_under_their_own_ceiling`) is the precedent for the other shape — it asserts
 the empty case rather than skipping it, "so the transition is visible in the test
 output" — and it is available if the dashboard ceilings are wanted as tombstones
 instead. **Recommendation: retire rather than tombstone.** `MIGRATE_CAP`'s
@@ -307,7 +307,7 @@ this document does not dress it up as a gate.
 
 **sd:705 keeps the two stale comments and nothing else.**
 
-- `DEFAULT_PORT` (`dashboard/server.py:57`) carries a comment above it, at
+- `DEFAULT_PORT` (`source:dashboard/server.py::DEFAULT_PORT`) carries a comment above it, at
   `dashboard/server.py:54-56`, saying the system dashboard "landed on 8768 at P3
   so the two could run side by side" and that taking the port "is what makes the
   swap a swap". The swap reversed.
