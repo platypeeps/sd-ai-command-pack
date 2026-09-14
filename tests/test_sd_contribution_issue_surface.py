@@ -3,18 +3,30 @@
 This module imports no `sd_db` on purpose, and that is the point of it rather
 than a convenience. The library half of this work -- the `issue_url` field, the
 three draft fields, the `closed` lane -- lives in `platypeeps/system` and landed
-there at `f18295d`. CI installs the library from a pinned commit
-(`.github/workflows/tests.yml`), and that pin is behind: it carries `940c045a`,
-where `contributions.FIELDS` has no `issue_url` and `contributions.LANES` has no
-`closed`. Every developer venv on this machine already has the newer library,
-so a test that named a new library symbol would pass on every machine a person
-runs it on and fail only in CI. That asymmetry cost an earlier item a CI round.
+there at `f18295d` (#308). What this file tests is the other half: this pack's
+two renderers, which take plain dictionaries and never call the library. A stub
+row hands them exactly what a projection hands them, so a failure here is a
+renderer's and nothing else's, and the module needs no library to run. Most of
+this suite does not either: 54 of its 86 test modules never name `sd_db`, and
+this one names it in prose alone.
 
-So the rows below are stubs shaped like the library's projection, and the checks
-are about this pack's renderers, which take plain dictionaries. They give the
-same answer at either pin. What they cannot prove is that the library projects
-these keys; that is the system item's evidence, and the pin bump is its own
-change.
+This paragraph used to justify the stubs differently, and wrongly: it said the
+CI pin was behind `f18295d` and carried `940c045a`, "where `contributions.FIELDS`
+has no `issue_url` and `contributions.LANES` has no `closed`". Both halves are
+true of `940c045a`, which really was the pin -- until #886 moved it to
+`758dfb48` on 2026-09-12, the move made so that CI would carry this very
+work's library half. This file arrived after that move, in #888, so the reason
+was already one move out of date the day it was written.
+`.github/workflows/tests.yml` has pinned nine commits in its life:
+`89dcd866`, `4c9ebff4`, `3c4c723a` and `940c045a` have neither symbol;
+`758dfb48`, `fb57ae56`, `fd07ea9c`, `dc03956e` and today's `09260ad4` have
+both, `f18295d` (#308) being an ancestor of each. So no pin this file has ever
+run against lacked them. The reason was wrong; the design it defends is not
+(sd:809).
+
+What the stubs still cannot prove is that the library projects these keys. That
+is the system item's evidence, in the system repository's own tests, and no pin
+move makes it this file's.
 """
 
 from __future__ import annotations
