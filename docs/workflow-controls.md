@@ -140,9 +140,13 @@ before the contribution becomes newly unblocked.
 The ordered list uses the shared dashboard projection. It keeps unknown and
 stale observations visible. Local task completion remains an explicit task
 operation; an upstream merge does not complete the task, and neither does an
-upstream issue closing. A closed issue takes the terminal `closed` lane, which
-sorts after every open row; a pull request closed without merging is not
-terminal and stays in `awaiting_them`.
+upstream issue closing. Any row whose last observation reads closed takes the
+terminal `closed` lane, which sorts after every open row: a closed issue, and a
+pull request closed without merging, which awaits no one. A later observation
+that reads open returns that pull request to `awaiting_them`; a merged pull
+request stays in `merged`. Active attention still wins: a row with an
+unacknowledged event, such as `Closed without merge`, stays in `awaiting_you`
+until that event is acknowledged.
 
 Each row's `attention_sources` identifies its checkpoint key, revision, and
 event IDs. PR attention uses `github:https://github.com/OWNER/REPO/pull/123`;
