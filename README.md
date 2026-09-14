@@ -162,7 +162,9 @@ branch and carrying a `Delivers: sd:42` trailer in the block
 `git interpret-trailers` reads — and is recorded on the transition, so the
 history answers "what delivered this" for a task and for a work item alike.
 A commit that states the trailer outside that block is refused by name rather
-than reported as carrying none.
+than reported as carrying none. A `followup` or `personal` item belongs to no
+checkout, so no commit can be verified for it: the flag is refused and the
+item closes without it.
 
 `sd store items --open` lists the backlog; `sd store item 42 --json` includes
 history and a revision that edits can require with `--if-revision`. Notes,
