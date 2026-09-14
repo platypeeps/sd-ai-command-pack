@@ -590,8 +590,10 @@ def _status_reason(workflow: Any, connection: Any, args: argparse.Namespace) -> 
         # sd:772. `followup` and `personal` take task statuses since sd:768,
         # and every kind but `task` that carries no repository is one no
         # checkout can verify a commit for. Pointing at `sd work deliver`
-        # sent the caller to a verb that refuses the same row.
-        closes = kind in getattr(workflow, "TASK_STATUS_KINDS", ("task", "personal", "followup"))
+        # sent the caller to a verb that refuses the same row. The close hint
+        # is given only where the installed library says the kind can close:
+        # a build older than `TASK_STATUS_KINDS` refuses `done` for these.
+        closes = kind in getattr(workflow, "TASK_STATUS_KINDS", ("task",))
         raise WorkRefusal(
             f"{kind} item {args.item} belongs to no checkout, so --delivered-by has "
             "nothing to verify" + ("; close it without --delivered-by" if closes else ""))
