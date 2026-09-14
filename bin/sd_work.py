@@ -581,10 +581,24 @@ def _status_reason(workflow: Any, connection: Any, args: argparse.Namespace) -> 
     if args.status != "done":
         raise WorkRefusal("--delivered-by belongs on the move to done")
     row = workflow.item_state(connection, args.item)["item"]
-    if row["kind"] != "task":
+    kind = row["kind"]
+    if kind == "work":
         raise WorkRefusal(
             f"item {args.item} is a work item; `sd work deliver {args.item} "
             f"{args.delivered_by}` records its delivery")
+    if kind != "task" and not row["repo"]:
+        # sd:772. `followup` and `personal` take task statuses since sd:768,
+        # and every kind but `task` that carries no repository is one no
+        # checkout can verify a commit for. Pointing at `sd work deliver`
+        # sent the caller to a verb that refuses the same row.
+        closes = kind in getattr(workflow, "TASK_STATUS_KINDS", ("task", "personal", "followup"))
+        raise WorkRefusal(
+            f"{kind} item {args.item} belongs to no checkout, so --delivered-by has "
+            "nothing to verify" + ("; close it without --delivered-by" if closes else ""))
+    if kind != "task":
+        raise WorkRefusal(
+            f"{kind} item {args.item} takes no --delivered-by; only a task's "
+            "move to done records one")
     return _delivery_reason(row, args.delivered_by)
 
 
