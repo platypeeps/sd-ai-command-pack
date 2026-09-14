@@ -715,7 +715,9 @@ class Ship:
             from sd_db.progress import deliver_work
             self.assert_scope()
             try:
-                deliver_work(self.connection, self.args.item, commit, verification_root=self.root)
+                # The tool that verified the merge is the actor, as sd_db's own
+                # ship transition names it; a `--run` merge has no operator.
+                deliver_work(self.connection, self.args.item, commit, who="sd-ship", verification_root=self.root)
             except (SdDbError, sqlite3.Error, ValueError) as error:
                 return {**evidence, "delivery_pending": True, "delivery_error": str(error)}
         git(self.root, "fetch", "--prune", "origin")

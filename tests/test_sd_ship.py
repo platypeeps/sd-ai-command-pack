@@ -711,7 +711,7 @@ roles:
         create_assignment(self.connection, item=self.item, role="author", status="ending")
         self.assertFalse(work_controls(self.connection, self.item)["cancel"])
         with self.assertRaisesRegex(WorkflowError, "ending assignment"):
-            cancel_work(self.connection, self.item, reason="stop")
+            cancel_work(self.connection, self.item, reason="stop", who="user")
         with self.assertRaisesRegex(WorkflowError, "manual merge authority"):
             receipts.manual_merge_guard(self.connection, str(self.operator))
 
@@ -790,7 +790,7 @@ roles:
         result = self.merge()
         _git(self.root, "remote", "set-url", "origin", "https://github.com/other/repo.git")
         with self.assertRaisesRegex(WorkflowError, "origin does not match"):
-            deliver_work(self.connection, self.item, result["merge_commit"], verification_root=self.root)
+            deliver_work(self.connection, self.item, result["merge_commit"], who="sd-ship", verification_root=self.root)
 
     def test_forged_delivery_trailer_cannot_turn_a_slice_into_completion(self):
         body = self.directory / "body.txt"
@@ -839,7 +839,7 @@ roles:
         acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [
             {"criterion": "scope", "passed": True, "evidence": "real fixture check"}]}))
         self.prepare("--deliver", "--acceptance-file", str(acceptance))
-        assignment = runner.enqueue(self.connection, [self.item], role="merge")[0]
+        assignment = runner.enqueue(self.connection, [self.item], role="merge", who="user")[0]
         claimed = runner.claim(self.connection, assignment["id"], owner="fixture", work_root=self.directory / "work",
                                retention_root=self.directory / "retained")
         run = claimed["run"]

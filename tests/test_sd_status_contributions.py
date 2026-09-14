@@ -141,7 +141,7 @@ class ContributionStatusTests(unittest.TestCase):
         connection = sd_db.connect(self.database)
         try:
             url = "https://github.com/example/project/pull/14"
-            item = contributions.capture(connection, title="Local patch", changes={"pull_url": url})["item"]["id"]
+            item = contributions.capture(connection, title="Local patch", changes={"pull_url": url}, who="user")["item"]["id"]
             observation = {"complete": True, "observed_at": "2026-09-09T12:00:00Z",
                 "operator": {"id": "1", "login": "author"}, "author": {"id": "1", "login": "author"},
                 "repo": "example/project", "title": "Closed patch", "state": "closed", "head": "a" * 40,
