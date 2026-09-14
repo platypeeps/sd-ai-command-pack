@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Parallel test runner. Shards the unittest suite by module across workers so
-# coverage's --parallel-mode writes one data file per shard, which a later
-# `coverage combine` merges. Writes unittest-output.log (for the skipped-test
+# Parallel test runner. Shards the unittest suite across workers -- one shard
+# per module, except the few modules named in SPLIT_MODULES, which are split by
+# test id -- so coverage's --parallel-mode writes one data file per shard, which
+# a later `coverage combine` merges. Writes unittest-output.log (for the skipped-test
 # gate) and exits non-zero if any shard's tests fail.
 #
 # Both of those live at the repo root, where `make test` and the CI job read
@@ -81,7 +82,15 @@ run_log="$work_dir/unittest-output.log"
 
 # Absolute paths so installer subprocesses spawned from temp cwds still load the
 # coverage config and write their shards where this run collects them.
-export COVERAGE_PROCESS_START="$REPO_ROOT/.coveragerc"
+#
+# SD_COVERAGE_PROCESS_START, not coverage's own COVERAGE_PROCESS_START: the
+# latter makes coverage's `.pth` file start measuring in every Python process
+# that inherits it, and nearly all of the suite's Python children (the `git` and
+# `gh` shims tests put on PATH, `sd-review` under `sd-ship`) run nothing in
+# `[run] include`. tests/coverage_sitecustomize starts coverage in a child only
+# when that child executes a file the include patterns name; the docstring there
+# has the measurements. The installer gate at 100% is what shows nothing is lost.
+export SD_COVERAGE_PROCESS_START="$REPO_ROOT/.coveragerc"
 export COVERAGE_FILE="$work_dir/.coverage"
 export PYTHONPATH="$REPO_ROOT/tests/coverage_sitecustomize${PYTHONPATH:+:$PYTHONPATH}"
 
@@ -110,8 +119,81 @@ if [ "${#modules[@]}" -eq 0 ]; then
   exit 1
 fi
 
-mod_file="$work_dir/modules"
-printf '%s\n' "${modules[@]}" > "$mod_file"
+# Modules split below module level, by test id, into up to TEST_WORKERS shards
+# each. Sharding by module lets the slowest module set the wall clock on its
+# own: on CI (#907, three workers) tests.test_sd_ship ran 1155 s of a 1173 s
+# step while the other workers sat idle. Every test in these modules builds its
+# own fixtures in setUp -- none has setUpClass or setUpModule -- which is what
+# makes a split by id safe; a module that grows class or module fixtures must
+# leave this list or be split by class instead.
+#
+# A name here that matches no file is skipped rather than refused, so a rename
+# costs time and never a test: the renamed module still runs, whole.
+SPLIT_MODULES="tests.test_sd_ship tests.test_sd_ship_dispositions tests.test_sd_ship_disposition_guards"
+
+# The ids a module holds, one per line, loaded the way `python -m unittest
+# <module>` loads them. Fails, printing nothing, if the module does not import
+# or holds no tests; the caller then runs it whole, and the whole-module run
+# reports whatever went wrong.
+module_test_ids() {
+  env -u SD_COVERAGE_PROCESS_START "$PYTHON_BIN" -c '
+import sys
+import unittest
+
+
+def walk(suite):
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            yield from walk(test)
+        else:
+            yield test
+
+
+tests = list(walk(unittest.defaultTestLoader.loadTestsFromName(sys.argv[1])))
+if not tests or any(type(test).__module__.startswith("unittest.") for test in tests):
+    sys.exit(1)
+print("\n".join(test.id() for test in tests))
+' "$1"
+}
+
+# Each shard is a name and a `<name>.ids` file holding the unittest arguments
+# it runs, one per line: the module name for a whole module, test ids for a
+# split one. Split shards are scheduled first, because they are the long ones.
+split_shards=()
+whole_shards=()
+for name in "${modules[@]}"; do
+  split=0
+  case " $SPLIT_MODULES " in
+    *" $name "*)
+      if ids="$(module_test_ids "$name")" && [ -n "$ids" ]; then
+        split=1
+      else
+        printf '%s\n' "warning: could not list the tests in $name; running it as one shard" >&2
+      fi
+      ;;
+  esac
+  if [ "$split" -eq 0 ]; then
+    printf '%s\n' "$name" > "$work_dir/$name.ids"
+    whole_shards+=("$name")
+    continue
+  fi
+  count="$(printf '%s\n' "$ids" | wc -l | tr -d ' ')"
+  parts="$TEST_WORKERS"
+  [ "$parts" -le "$count" ] || parts="$count"
+  part=1
+  while [ "$part" -le "$parts" ]; do
+    # Round robin over the ids in load order: the part holding the kth id is
+    # k mod parts, so every id lands in exactly one part.
+    printf '%s\n' "$ids" | awk -v parts="$parts" -v part="$part" \
+      '(NR - 1) % parts == part - 1' > "$work_dir/$name.part${part}of${parts}.ids"
+    split_shards+=("$name.part${part}of${parts}")
+    part=$((part + 1))
+  done
+done
+shards=("${split_shards[@]+"${split_shards[@]}"}" "${whole_shards[@]+"${whole_shards[@]}"}")
+
+shard_file="$work_dir/shards"
+printf '%s\n' "${shards[@]}" > "$shard_file"
 
 # --- orphan control -------------------------------------------------------
 #
@@ -185,14 +267,23 @@ watchdog() {
   done
 }
 
-# One `coverage run` per module, up to TEST_WORKERS at a time. Each shard's
+# One `coverage run` per shard, up to TEST_WORKERS at a time. Each shard's
 # output goes to its own log so parallel writers never interleave. xargs exits
-# non-zero (123) if any shard command fails.
+# non-zero (123) if any shard command fails. The ids are read from a file, not
+# passed through xargs, because BSD xargs caps a `-I` replacement at 255 bytes.
+# An empty ids file is refused: `python -m unittest` with no names discovers and
+# runs the whole tree.
 run_status=0
 set -m
 xargs -P "$TEST_WORKERS" -I {} bash -c '
-  "$1" -m coverage run --parallel-mode -m unittest "$3" > "$2/$3.log" 2>&1
-' _ "$PYTHON_BIN" "$work_dir" {} < "$mod_file" &
+  set -f
+  ids="$(cat "$2/$3.ids")" && [ -n "$ids" ] || {
+    printf "%s\n" "error: shard $3 has no test names" > "$2/$3.log"
+    exit 1
+  }
+  # Unquoted on purpose: one name per line, and a unittest name has no blanks.
+  "$1" -m coverage run --parallel-mode -m unittest $ids > "$2/$3.log" 2>&1
+' _ "$PYTHON_BIN" "$work_dir" {} < "$shard_file" &
 shard_pgid=$!
 if [ "$gate_ppid" != "1" ]; then
   watchdog &
@@ -215,9 +306,9 @@ shard_pgid=""
 # gate by omission. A run that cannot assemble its own log publishes nothing and
 # says why, leaving the root on the last complete run.
 assembly_status=0
-for module in "${modules[@]}"; do
-  if [ -f "$work_dir/$module.log" ]; then
-    cat "$work_dir/$module.log" >> "$run_log" || assembly_status=1
+for shard in "${shards[@]}"; do
+  if [ -f "$work_dir/$shard.log" ]; then
+    cat "$work_dir/$shard.log" >> "$run_log" || assembly_status=1
   fi
 done
 

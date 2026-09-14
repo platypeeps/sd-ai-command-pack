@@ -431,7 +431,7 @@ class TheModuleLoader(unittest.TestCase):
     Asserted here rather than left to the module that noticed: the failure
     lands in `test_sd_lib.py`, which does nothing wrong, and only under
     `unittest discover`, which is the one way CI never runs the suite --
-    `.github/scripts/run-tests.sh` gives each module its own process. A
+    `.github/scripts/run-tests.sh` gives each shard its own process. A
     defect no gate can see needs its check next to its cause.
     """
 

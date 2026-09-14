@@ -1367,16 +1367,17 @@ def child_environment() -> dict[str, str]:
     """This process's environment, minus the coverage harness.
 
     `.github/scripts/run-tests.sh` exports `PYTHONPATH`, `COVERAGE_FILE` and
-    `COVERAGE_PROCESS_START` so that every subprocess it spawns files a coverage
+    `SD_COVERAGE_PROCESS_START` so that a subprocess it spawns files a coverage
     shard. A run inside a temporary copy would file shards for paths that are
-    gone by the time `coverage combine` reads them, so the three are dropped.
+    gone by the time `coverage combine` reads them, so those are dropped, and
+    coverage's own `COVERAGE_PROCESS_START` with them for a caller that sets it.
     `PYTHONDONTWRITEBYTECODE` is set for the reason the tree is copied at all:
     the run has to leave nothing behind that the restoration check would then
     report as a difference.
     """
 
     environment = dict(os.environ)
-    for name in ("PYTHONPATH", "COVERAGE_FILE", "COVERAGE_PROCESS_START"):
+    for name in ("PYTHONPATH", "COVERAGE_FILE", "SD_COVERAGE_PROCESS_START", "COVERAGE_PROCESS_START"):
         environment.pop(name, None)
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     return environment
@@ -1450,7 +1451,7 @@ def exercise(mutation: Mutation) -> Outcome:
     this tree again.
 
     **In a copy rather than in place, and the runner is the reason.**
-    `.github/scripts/run-tests.sh` shards the suite by module across workers, so
+    `.github/scripts/run-tests.sh` shards the suite across parallel workers, so
     a leg that edited `bin/sd_work.py` in the live tree would be editing it
     while another shard imports it -- a flake that costs a week to find and is
     caused by the check meant to prevent defects. The copy is the *save a copy*
