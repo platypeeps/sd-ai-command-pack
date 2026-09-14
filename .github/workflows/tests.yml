@@ -79,9 +79,9 @@ jobs:
       # and repository. `bin/sd_work.py` reads the set from the library and
       # keeps no copy, so `tests/test_sd_work.py`'s followup tests are red at
       # `dc03956e` and green here, and the pin and those tests move together.
-      # The same commit adds `runner.RUNNABLE_KINDS`, which `sd runner
-      # enqueue` now meets through `runner.enqueue`: a followup carrying a
-      # repository and a branch is refused by kind. The move is
+      # The same commit adds `runner.RUNNABLE_KINDS`, which `sd run` now meets
+      # through `runner.enqueue`: a followup carrying a repository and a
+      # branch is refused by kind. The move is
       # migration-free: `dc03956e..09260ad4` touches nothing under
       # `sd_db/schema` and `SCHEMA_VERSION` stays 9. Of the other thirty
       # commits in that range, the ones that change `sd_db`: the Jira

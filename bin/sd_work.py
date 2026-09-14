@@ -934,7 +934,7 @@ def register(groups: Any, store: Any) -> None:
     where.add_argument("--here", action="store_true",
                        help="refuse unless this is a checkout (one is used by default)")
     where.add_argument("--no-repo", action="store_true",
-                       help="file a task that belongs to no checkout")
+                       help="file the item, whatever --kind names, belonging to no checkout")
     _output(add, "add")
 
     edit = verbs.add_parser("edit", help="change a task's or followup's details, or any hand-filed item's kind")

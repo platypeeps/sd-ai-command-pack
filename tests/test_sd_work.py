@@ -238,7 +238,9 @@ class TaskCLI(unittest.TestCase):
                                            opted_out["item"]["id"], outside["item"]["id"]]))
 
     def test_edit_moves_a_followup_and_changes_its_details(self):
-        """sd:809. `edit_item` refused a followup's every field but `kind`."""
+        """sd:809. `edit_item` edits a followup's title, body, priority, due
+        date and repository, as it does a task's. Before sd:809 it refused
+        every field but `kind`."""
         first, second = self._checkout("first"), self._checkout("second")
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, first, home=self.home)

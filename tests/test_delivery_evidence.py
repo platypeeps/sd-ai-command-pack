@@ -457,10 +457,13 @@ class TaskDeliveryCLITests(unittest.TestCase):
         self.assertEqual("planning", readback["item"]["status"])
 
     def test_a_repository_less_item_says_there_is_nothing_to_verify(self) -> None:
-        """sd:772. A followup or personal item takes task statuses since sd:768
-        and belongs to no checkout, so no commit can be verified for it. The
-        refusal stands; it names the kind and the reason, not `sd work deliver`,
-        which refuses the same row one call later.
+        """sd:772. A followup or personal item takes task statuses since sd:768.
+        Both rows here are filed off every checkout, so neither belongs to one
+        and no commit can be verified for either. A followup that does carry a
+        checkout (sd:809) is refused for the other reason, which
+        `test_a_followup_with_a_checkout_still_takes_no_delivery_evidence`
+        pins. The refusal stands; it names the kind and the reason, not
+        `sd work deliver`, which refuses the same row one call later.
 
         The close hint follows the installed library. CI pins a `sd_db` build
         from before `TASK_STATUS_KINDS`, which refuses `done` for these kinds,
