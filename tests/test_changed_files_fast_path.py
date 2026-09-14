@@ -29,6 +29,7 @@ import sys
 import tempfile
 import types
 import unittest
+import unittest.mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPTS = REPO_ROOT / ".github/scripts"
@@ -261,6 +262,33 @@ class TheRunner(TreeCase):
                 self.assertNotIn("test selection", first)
                 self.assertIn("ignored under CI", stderr)
 
+    def test_a_selection_naming_a_module_this_tree_lacks_matches_nothing(self) -> None:
+        """A name matches a whole line of the selection, never a substring.
+
+        `tests.test_alphabet` is not a module here. Matched as a substring it
+        would pull in `tests.test_alpha`, which the selection never named, and
+        the run would report a count the selector did not give. The same
+        relaxation is what turns a selection nothing here matches -- which
+        must fall back to the full suite -- into a narrowed run under skipped
+        coverage gates.
+        """
+
+        names = [f"tests.{name}" for name in (*ALWAYS_RUN_NAMES, "test_alphabet")]
+        (self.root / ".github/scripts/select-tests.py").write_text(
+            f"print({chr(10).join(names)!r})\n")
+        ran, first, _ = self.run_harness(TEST_CHANGED_FILES="bin/sd-alpha")
+        self.assertEqual(ran, set(ALWAYS_RUN_NAMES))
+        self.assertTrue(first.startswith("test selection: changed files"), first)
+
+    def test_a_selection_no_module_here_matches_runs_everything(self) -> None:
+        """The whole answer is a name this tree lacks, so nothing is selected."""
+
+        (self.root / ".github/scripts/select-tests.py").write_text(
+            "print('tests.test_alphabet')\n")
+        ran, first, _ = self.run_harness(TEST_CHANGED_FILES="bin/sd-alpha")
+        self.assertEqual(ran, self.everything)
+        self.assertNotIn("test selection", first)
+
     def test_a_failing_selector_runs_everything(self) -> None:
         (self.root / ".github/scripts/select-tests.py").write_text("import sys\nsys.exit(2)\n")
         ran, first, _ = self.run_harness(TEST_CHANGED_FILES="bin/sd-alpha")
@@ -381,6 +409,36 @@ class TheGateMark(MakefileTree):
     def test_the_mark_inside_the_first_line_keeps_the_coverage_steps(self) -> None:
         stdout = self.with_log("AssertionError: test selection: changed files, 7 of 85 modules\nOK\n")
         self.assert_coverage_steps(stdout, ran=True)
+
+
+class TheFixtureHarnesses(unittest.TestCase):
+    """The harnesses that copy `run-tests.sh` drop the fast-path variable.
+
+    `make check CHANGED="<paths>"` exports `TEST_CHANGED_FILES` to every
+    recipe and so to every test process. Both modules below build a throwaway
+    tree, copy `run-tests.sh` into it and run it, and that copy reads the
+    variable it inherits. It is inert only while neither copies
+    `select-tests.py` as well -- the selector call then fails and the nested
+    run widens to the whole fixture suite -- so an outer narrowed run would
+    start narrowing its own nested runs the day one of them copies
+    `.github/scripts` whole. The scrub is pinned here rather than left to
+    that accident.
+    """
+
+    def test_an_inherited_fast_path_variable_does_not_reach_a_fixture_run(self) -> None:
+        from tests import test_gate_harness_isolation, test_run_tests_split_fixtures
+
+        builders = (
+            ("test_gate_harness_isolation", test_gate_harness_isolation._fixture_env),
+            ("test_run_tests_split_fixtures", test_run_tests_split_fixtures.fixture_env),
+        )
+        ambient = {"TEST_CHANGED_FILES": "bin/sd-alpha", "CHANGED": "bin/sd-alpha"}
+        with unittest.mock.patch.dict(os.environ, ambient):
+            for name, builder in builders:
+                with self.subTest(module=name):
+                    environment = builder()
+                    self.assertNotIn("TEST_CHANGED_FILES", environment)
+                    self.assertNotIn("CHANGED", environment)
 
 
 if __name__ == "__main__":

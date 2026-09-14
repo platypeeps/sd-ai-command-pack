@@ -163,17 +163,27 @@ def _build_fixture(root, widen_publish=False, widen_assembly=False):
     return harness
 
 
-def _fixture_env(**overrides):
-    """The ambient environment minus everything the outer gate run exports.
+# Dropped from every fixture run. `COVERAGE_*`, `SD_COVERAGE_*` and
+# `PYTHONPATH` would land the fixture's shards in the outer run's collection
+# and point it at the outer config. `TEST_CHANGED_FILES` is the changed-files
+# fast path (sd:10 criterion 16): `make check CHANGED=...` exports it to every
+# recipe and so to this process, and the copy of `run-tests.sh` below reads it.
+# It is inert only while this harness copies `run-tests.sh` alone and not
+# `select-tests.py`, because the selector call then fails and the fixture run
+# widens to the full fixture suite. The day a fixture copies `.github/scripts`
+# whole, an outer narrowed run would narrow its own nested runs. Drop it here
+# rather than rely on that, and `CHANGED` with it, so no `make` in the
+# environment can reach the copy either.
+_DROPPED_FROM_FIXTURES = ("PYTHONPATH", "TEST_CHANGED_FILES", "CHANGED")
 
-    Inheriting `COVERAGE_FILE` or `PYTHONPATH` from the run measuring *this*
-    file would let the fixture's shards land in the outer run's collection, and
-    `SD_COVERAGE_PROCESS_START` would point the fixture at the outer config.
-    """
+
+def _fixture_env(**overrides):
+    """The ambient environment minus everything the outer gate run exports."""
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith(("COVERAGE_", "SD_COVERAGE_")) and key != "PYTHONPATH"
+        if not key.startswith(("COVERAGE_", "SD_COVERAGE_"))
+        and key not in _DROPPED_FROM_FIXTURES
     }
     env["PYTHON_BIN"] = sys.executable
     env["TEST_WORKERS"] = "2"
