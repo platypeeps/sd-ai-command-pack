@@ -46,9 +46,16 @@ a gate-measured file under ``-I``, ``-E`` or ``-S``: it watches the
 ``subprocess.Popen``, ``os.exec`` and ``os.posix_spawn`` audit events and
 raises, which fails the test that did it. "Gate-measured" is anchored where the
 gate combines, at the directory holding the coverage config, so a copy of the
-installer in a temporary tree is not refused. The watch sees argument lists,
-a shell command line and a measured file's own ``#!`` line; it does not see a
-launch from a non-Python parent, nor ``-m`` naming a measured module.
+installer in a temporary tree is not refused. The watch reads a program only
+at command position: an argument list's first word, past ``env`` and its
+options, and the first word of each command in a shell's ``-c`` string --
+split at ``;``, ``&``, ``|``, parentheses and newlines, following ``cd`` and
+nested shells -- plus a measured file's own ``#!`` line. A ``python`` word
+elsewhere is another program's argument, and a shell's words after its ``-c``
+string are positional arguments, so neither is refused. It does not see a
+launch from a non-Python parent, ``-m`` naming a measured module, a wrapper
+other than ``env`` (``exec``, ``nohup``, ``xargs``), or a ``cd`` whose
+directory a variable names.
 
 A process that is already measured -- the ``coverage run`` shard itself -- is
 left alone, as ``coverage.process_startup`` would leave it. A configuration
@@ -77,6 +84,8 @@ UNMEASURED_FLAGS = frozenset("IES")
 LAUNCH_EVENTS = {"subprocess.Popen": 1, "os.exec": 1, "os.posix_spawn": 1}
 #: Programs whose non-option arguments are read as a command line.
 SHELLS = frozenset(("sh", "bash", "dash", "zsh", "ksh"))
+#: What ends one shell command and starts the next, `(` and `)` included.
+SHELL_SEPARATORS = ";&|()\n"
 
 
 def _start(config_file=None):
@@ -125,10 +134,13 @@ def _trace_existing_threads(coverage):
             and callable(install) and callable(set_all)):
         # sys.monitoring cores trace every thread already.
         return
-    # This thread included: its tracer is replaced by a fresh one at its next
-    # call, which is the module body about to run. No measured frame is on its
-    # stack yet, because this start is the first measured `exec`.
+    # `_settraceallthreads` sets this thread too, over the tracer the start just
+    # gave it: that tracer would be orphaned, a second one built at the next
+    # call, and PyTracer warns at exit that its trace function changed. So
+    # this thread gets its own tracer back.
+    here = sys.gettrace()
     set_all(install)
+    sys.settrace(here)
 
 
 def _include_patterns(config_file):
@@ -185,35 +197,146 @@ def _matches(filename, patterns, fnmatchcase, cwd=None):
 
 
 def _unmeasured_script(tokens, measured, cwd):
-    """The measured script an interpreter command line runs with site skipped, if any."""
-    for index, token in enumerate(tokens):
-        if not os.path.basename(token).startswith("python"):
-            continue
-        position = index + 1
-        skipped = False
-        while position < len(tokens):
-            option = tokens[position]
-            if option == "--":
-                position += 1
-                break
-            if option.startswith("--"):
-                position += 1
-                continue
-            if option == "-" or not option.startswith("-"):
-                break
-            letters = option[1:]
-            for offset, letter in enumerate(letters):
-                skipped = skipped or letter in UNMEASURED_FLAGS
-                if letter in "cm":
-                    # Code or a module name follows, not a file.
-                    return None
-                if letter in "WX":
-                    position += offset == len(letters) - 1
-                    break
+    """The measured script an interpreter command line runs with site skipped, if any.
+
+    Only the program itself is an interpreter: a `python` word further along
+    is some other program's argument.
+    """
+    if not tokens or not os.path.basename(tokens[0]).startswith("python"):
+        return None
+    position = 1
+    skipped = False
+    while position < len(tokens):
+        option = tokens[position]
+        if option == "--":
             position += 1
-        if skipped and position < len(tokens) and measured(tokens[position], cwd):
-            return tokens[position]
+            break
+        if option.startswith("--"):
+            position += 1
+            continue
+        if option == "-" or not option.startswith("-"):
+            break
+        letters = option[1:]
+        for offset, letter in enumerate(letters):
+            skipped = skipped or letter in UNMEASURED_FLAGS
+            if letter in "cm":
+                # Code or a module name follows, not a file.
+                return None
+            if letter in "WX":
+                position += offset == len(letters) - 1
+                break
+        position += 1
+    if skipped and position < len(tokens) and measured(tokens[position], cwd):
+        return tokens[position]
     return None
+
+
+def _unwrapped(words):
+    """The program a command runs, past shell assignments and `env` with its options."""
+    while words:
+        name, equals, _ = words[0].partition("=")
+        if equals and name.isidentifier():
+            words = words[1:]
+        elif os.path.basename(words[0]) == "env":
+            words = words[1:]
+            while words:
+                word = words[0]
+                if word == "--":
+                    words = words[1:]
+                    break
+                if word in ("-S", "--split-string") and len(words) > 1:
+                    import shlex
+
+                    try:
+                        words = shlex.split(words[1]) + words[2:]
+                    except ValueError:
+                        return []
+                elif word in ("-u", "--unset", "-C", "--chdir", "-P") and len(words) > 1:
+                    words = words[2:]
+                elif word.startswith("-") or "=" in word:
+                    words = words[1:]
+                else:
+                    break
+        else:
+            break
+    return words
+
+
+def _shell_line(words):
+    """The `-c` string of a shell's argv, or None; the words after it are positional."""
+    reads_line = False
+    position = 1
+    while position < len(words):
+        word = words[position]
+        if word in ("--", "-"):
+            position += 1
+            break
+        if word.startswith("--"):
+            position += 1 + (word in ("--rcfile", "--init-file"))
+            continue
+        if word[:1] not in ("-", "+"):
+            break
+        reads_line = reads_line or (word[0] == "-" and "c" in word)
+        # `-o name` and bash's `-O name` take the next word.
+        position += 1 + ("o" in word or "O" in word)
+    if reads_line and position < len(words):
+        return words[position]
+    return None
+
+
+def _shell_commands(line, cwd):
+    """Each simple command of a shell line, with the directory a `cd` before it left."""
+    import shlex
+
+    lexer = shlex.shlex(line, posix=True, punctuation_chars=SHELL_SEPARATORS)
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        words = list(lexer)
+    except ValueError:
+        return []
+    commands, current, subshells, previous = [], [], [], ""
+    for word in words + [";"]:
+        # The `&` of a `2>&1` redirect is not a separator.
+        if word and not word.strip(SHELL_SEPARATORS) and not previous.endswith(("<", ">")):
+            if current:
+                commands.append((current, cwd))
+                cwd = _after_cd(current, cwd)
+                current = []
+            for mark in word:
+                if mark == "(":
+                    subshells.append(cwd)
+                elif mark == ")" and subshells:
+                    cwd = subshells.pop()
+        else:
+            current.append(word)
+        previous = word
+    return commands
+
+
+def _after_cd(words, cwd):
+    if words[0] != "cd":
+        return cwd
+    targets = [word for word in words[1:] if word not in ("-L", "-P", "--")]
+    if not targets:
+        return os.path.expanduser("~")
+    if len(targets) > 1 or targets[0] == "-":
+        return cwd
+    return os.path.join(cwd or "", targets[0])
+
+
+def _programs(words, cwd, depth=0):
+    """Each argv a launch runs at command position: its own, then its shell lines' commands."""
+    words = _unwrapped(words)
+    if not words:
+        return
+    yield words, cwd
+    if depth < 4 and os.path.basename(words[0]) in SHELLS:
+        line = _shell_line(words)
+        if line is not None:
+            for command, where in _shell_commands(line, cwd):
+                yield from _programs(command, where, depth + 1)
 
 
 def _shebang(path, cwd):
@@ -245,24 +368,15 @@ def _refuse_unmeasured_launch(event, arguments, measured):
         command = [os.fsdecode(os.fspath(token)) for token in argv]
     except TypeError:
         return
-    commands = [command]
-    if command and os.path.basename(command[0]) in SHELLS:
-        # A shell's `-c` line is a command line of its own. Only a shell's: a
-        # space in another program's argument, `python -c` source included,
-        # is not parsed as one.
-        import shlex
-
-        for token in command[1:]:
-            if not token.startswith("-"):
-                try:
-                    commands.append(shlex.split(token))
-                except ValueError:
-                    pass
-    for tokens in commands:
-        found = _unmeasured_script(tokens, measured, cwd)
-        if found is None and tokens and measured(tokens[0], cwd):
+    # A shell's `-c` string is a command line of its own. Only a shell's, and
+    # only that string: a space in another program's argument, `python -c`
+    # source included, is not parsed as one, nor are a shell's positional
+    # arguments after the string.
+    for tokens, where in _programs(command, cwd):
+        found = _unmeasured_script(tokens, measured, where)
+        if found is None and measured(tokens[0], where):
             # The file itself is the program: its `#!` line picks the flags.
-            found = _unmeasured_script(_shebang(tokens[0], cwd) + tokens, measured, cwd)
+            found = _unmeasured_script(_unwrapped(_shebang(tokens[0], where) + tokens), measured, where)
         if found is not None:
             raise RuntimeError(
                 f"sitecustomize: {found} would run with -I, -E or -S, which skip the coverage "
