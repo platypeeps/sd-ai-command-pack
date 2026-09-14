@@ -235,6 +235,8 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["bash", "-c", "a=(\npython -I bin/sd_install.py\n)"],
         # Passes before sd:776 too: `popd` returns to where `pushd` left from.
         ["bash", "-c", "pushd sub; popd; python -I ../bin/sd_install.py"],
+        # A subshell's `pushd` leaves the outer stack alone.
+        ["bash", "-c", "pushd sub; (pushd other); popd; python -I ../bin/sd_install.py"],
     )
 
     #: Command lines that run a gate-measured file with site skipped.

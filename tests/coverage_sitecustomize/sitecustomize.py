@@ -388,8 +388,9 @@ def _shell_commands(line, cwd):
         words = list(lexer) + [";"]
     except ValueError:
         return []
-    # `nested` holds, for each open `(`, backtick or array, the directory
-    # before it and which of the three it is.
+    # `nested` holds, for each open `(`, backtick or array, which of the three
+    # it is, and the directory and `pushd` stack before it: a subshell's
+    # `cd`, `pushd` and `popd` change neither.
     commands, current, nested, pushed, before = [], [], [], [], ";"
     for index, word in enumerate(words):
         previous = words[index - 1] if index else ""
@@ -405,7 +406,7 @@ def _shell_commands(line, cwd):
         for mark in word:
             in_array = bool(nested) and nested[-1][1] == "="
             if mark == "(" and not in_array and current and _opens_array(current[-1]):
-                nested.append((cwd, "="))
+                nested.append((cwd, "=", pushed[:]))
                 continue
             if not in_array and not flushed:
                 flushed = True
@@ -417,9 +418,9 @@ def _shell_commands(line, cwd):
                     current = []
                 before = word
             if mark in "(`" and not (mark == "`" and nested and nested[-1][1] == "`"):
-                nested.append((cwd, mark))
+                nested.append((cwd, mark, pushed[:]))
             elif mark in ")`" and nested:
-                cwd = nested.pop()[0]
+                cwd, _, pushed = nested.pop()
     return commands
 
 
