@@ -127,7 +127,7 @@ before starting step 2.
       as did the second `sys.path` insert, which existed only so
       `import sd_ledger` resolved.
 
-- [ ] **2. `queues` becomes a native system view.** System repository only;
+- [x] **2. `queues` becomes a native system view.** System repository only;
       nothing in the pack changes. `queues` is the one of the six legacy views
       with no system-side path — the other five already render, four through the
       `collect` at
@@ -145,6 +145,12 @@ before starting step 2.
       screen rather than as an empty table. The pack is untouched, so
       `git status` in the pack is clean, which is the control that this step did
       not leak across the boundary.
+
+      **Landed as system pull request #335, squash `0b5394ae`.** `queues`
+      joined `VIEWS` in `reports_screen.py` with a 5-second view budget, and two
+      new cases in `tests/test_resource_reports.py` cover the fixture rows and
+      the on-screen failure. The dashboard suite ran `Ran 336 tests ... OK` on
+      that head.
 
 - [ ] **3. The plugin loader retires, and the manifest loses two keys.** System
       commit first, and it is not nothing: **remove the `tabs` and `tile` keys
