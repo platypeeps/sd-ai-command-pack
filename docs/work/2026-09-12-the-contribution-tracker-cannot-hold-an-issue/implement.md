@@ -30,7 +30,7 @@ happening once already.
       through `source:bin/sd_lib.py::display_fields`, and each renderer's test
       module asserts a key neither tuple names is printed (item note 1219).*
 
-- [ ] **2 — library: the row can hold an issue (system).** `ISSUE`, its own
+- [x] **2 — library: the row can hold an issue (system).** `ISSUE`, its own
       validator beside the one at `sd_db/contributions.py:42`, `issue_url` and
       the three `draft` fields in the allow-list at
       `sd_db/contributions.py:30-31`; the identity dichotomy at
@@ -56,8 +56,11 @@ happening once already.
       operator-facing text either. Green on
       its own: a row can be registered, listed and filed without any collector
       existing.
+      *Done by sd:611 in system #307 (squash ad443fd1): the row holds a filed
+      issue or an issue draft, keyed `issue:<url>`, and `LANES` gains
+      `closed` (sd:611 note 1189).*
 
-- [ ] **3 — library: the collector watches it (system).** `observe_issue`
+- [x] **3 — library: the collector watches it (system).** `observe_issue`
       beside `sd_db/contributions.py:412`; `_issue_attention` beside
       `sd_db/contributions.py:323`; the two new event kinds added to the
       accepted set at `sd_db/contributions.py:451-452`; a
@@ -70,6 +73,10 @@ happening once already.
       `sd_db/contribution_sync.py:74`, `sd_db/contributions.py:536-537`); and
       the widened comment trigger on the issue path per `design.md` D3. This is the natural second seam D7 names — if step 2 has shipped,
       sd:244 already has a durable home even if this step slips.
+      *Done by sd:611 in system #308 (squash f18295d8), after the issue
+      timeline query in #306: `observe_issue`, `_issue_attention`, the
+      `issue` dependency kind in D2's nine places, and the sync routed by key
+      prefix (sd:611 note 1189).*
 
 - [x] **4 — move the pin (pack).** Bump
       `.github/workflows/tests.yml:84` to the system commit that carries steps
