@@ -40,7 +40,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import actions, collect, now, plugins, sessions, skills, store, work
+from . import actions, collect, now, sessions, skills, store, work
 
 # Per process, in memory, never written down. A restart invalidates it, which
 # is correct: the page fetches it with the page, and a token that outlived the
@@ -272,10 +272,6 @@ PAGE = """<!doctype html>
  nav button{font:inherit;padding:.2rem .8rem;cursor:pointer;background:none;
   border:1px solid rgba(128,128,128,.4);border-radius:.25rem;color:inherit}
  nav button[aria-selected=true]{border-color:currentColor;font-weight:600}
- /* `display:contents` so plugin buttons sit in the nav's own flex row rather
-    than in a box of their own -- the container exists to be replaced wholesale
-    on every poll, not to group anything visually. */
- #plugin-tabs{display:contents}
  /* Severity is a band derived from `rank` and never from `kind` (R11-D20):
     the pill says how loud, the row says what. */
  .pill{display:inline-block;padding:0 .45rem;border-radius:.75rem;font-size:.8rem;
@@ -326,7 +322,6 @@ PAGE = """<!doctype html>
   aria-controls="panel-skills">skills</button>
  <button id="tab-sessions" role="tab" aria-selected="false"
   aria-controls="panel-sessions">sessions</button>
- <span id="plugin-tabs"></span>
 </nav>
 <section id="panel-now" role="tabpanel" aria-labelledby="tab-now">
 <p class="sub" id="now-sub"></p>
@@ -392,7 +387,6 @@ PAGE = """<!doctype html>
  <th>pid</th><th>elapsed</th><th>command</th>
 </tr></thead><tbody id="session-procs"></tbody></table>
 </section>
-<div id="plugin-panels"></div>
 <h2>run</h2>
 <p class="sub" id="run-sub">every button here is one allow-listed command</p>
 <div id="run-buttons"></div>
@@ -476,25 +470,24 @@ def make_handler(cache: Cache, script: str, record=_drop,
                 body = json.dumps(cache.state()).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/work":
-                # Its own endpoint for the reason /api/plugins is: this reads
-                # several hundred files across the fleet, and /api/state is
-                # cached against a git fan-out on a different timer. Neither
-                # should be able to hold up the other.
+                # Its own endpoint: this reads several hundred files across
+                # the fleet, and /api/state is cached against a git fan-out on
+                # a different timer. Neither should be able to hold up the
+                # other.
                 body = json.dumps(work.collect_work(cache.root)).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/now":
-                # Merged here rather than in the page: the two halves arrive
-                # on two clocks, and joining them client-side would put the
-                # ranking and the row text somewhere no test can reach. Both
-                # sources are already cached -- the fleet for twenty seconds,
-                # the loader for five -- so this adds a merge, not a collect.
+                # Merged here rather than in the page: joining the sources
+                # client-side would put the ranking and the row text somewhere
+                # no test can reach. The fleet is already cached for twenty
+                # seconds, so this adds a merge, not a collect. The plugin
+                # loader's rows stopped arriving at sd:719 step 3.
                 dismissed = acked()
                 body = json.dumps({
                     "rows": [row for row in now.merge(
                         now.backbone_rows(cache.state()["repos"])
                         + now.pr_rows(tracker_payload("pull"))
                         + now.session_rows(sessions.fleet_worktrees(cache.root)),
-                        plugins.cached_load()["rows"],
                     ) if row.get("id") not in dismissed],
                 }).encode()
                 return self.send_body(body, "application/json")
@@ -519,21 +512,8 @@ def make_handler(cache: Cache, script: str, record=_drop,
                 body = json.dumps(tracker_payload("pull")).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/actions":
-                # Ids and labels; the argv never leaves the process. The
-                # registry's complaint rides along, because "none declared"
-                # for a loader that cannot be read is the quiet it refuses.
-                entries, failure = plugins.catalog()
-                body = json.dumps(
-                    {"actions": actions.catalog(entries), "reason": failure}
-                ).encode()
-                return self.send_body(body, "application/json")
-            if path == "/api/plugins":
-                # Not folded into /api/state: that payload is cached for
-                # twenty seconds against a git fan-out, and a tile budgeted at
-                # five seconds does not belong behind the same timer. Keeping
-                # them apart also means one slow plugin cannot delay the repo
-                # table, which is the view that works when nothing else does.
-                body = json.dumps(plugins.cached_load()).encode()
+                # Ids and labels; the argv never leaves the process.
+                body = json.dumps({"actions": actions.catalog()}).encode()
                 return self.send_body(body, "application/json")
             self.send_error(404)
 
@@ -609,7 +589,6 @@ def make_handler(cache: Cache, script: str, record=_drop,
                 return self.send_body(b'{"ok":true}', "application/json")
             body, status = actions.run(
                 sent.get("action") if isinstance(sent, dict) else None,
-                plugins.catalog()[0],
             )
             # After the guards and after the action, and only when the action
             # was *served*: an unknown verb or a failed run comes back 4xx/5xx

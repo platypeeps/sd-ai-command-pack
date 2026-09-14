@@ -10,8 +10,8 @@
 >
 > Three lessons below outlive their subject and are worth keeping: "Don't:
 > treat multiplicity as ambiguity" (its `claude plugin list --json` example is
-> still live, and `dashboard/plugins.py` reads a `sd plugin list --json` of the
-> same shape), "Don't: block on a normal steady state", and "Don't: say 'this
+> still live, and `sd plugin list --json` prints one of the same shape), "Don't:
+> block on a normal steady state", and "Don't: say 'this
 > command' in a diagnostic that gets forwarded". That last one's example names
 > `sd-ai-command-pack-review.py`, which is gone; the rule is not about that file.
 >

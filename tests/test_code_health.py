@@ -85,7 +85,7 @@ SHEBANG_LIMIT = 4096
 
 #: How many public functions the dead-code check cannot speak for, because
 #: another function in the corpus carries the same name. Downward only.
-AMBIGUOUS_CEILING = 154
+AMBIGUOUS_CEILING = 145
 
 
 def tracked(*pathspecs: str, root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:
@@ -644,7 +644,7 @@ COMPLEX = frozenset({
     "bin/sd_work.py::run",  # 29
     "bin/sd_writing.py::register",  # 22
     "bin/sd_writing.py::run",  # 37
-    "dashboard/plugins.py::bounded_run",  # 23
+    "dashboard/actions.py::bounded_run",  # 23
     "dashboard/server.py::make_handler.Handler.do_POST",  # 26
 })
 
@@ -662,22 +662,18 @@ LONG = frozenset({
     "bin/sd_work.py::register",  # 58
     "bin/sd_writing.py::register",  # 57
     "bin/sd_writing.py::run",  # 83
-    "dashboard/plugins.py::bounded_run",  # 67
+    "dashboard/actions.py::bounded_run",  # 67
 })
 
 DEEP: frozenset[str] = frozenset()
 
 #: Names the dead-code check must not flag, because something other than a
-#: call site reaches them. `html.parser.HTMLParser` dispatches to its
-#: `handle_*` methods by name from inside the base class, so no caller appears
-#: anywhere. This is the whole exemption list; it is not a place to put a
-#: function nobody could find a caller for.
-DYNAMIC = frozenset({
-    "dashboard/markup.py::Filter.handle_comment",
-    "dashboard/markup.py::Filter.handle_data",
-    "dashboard/markup.py::Filter.handle_endtag",
-    "dashboard/markup.py::Filter.handle_startendtag",
-})
+#: call site reaches them -- a base class dispatching to a method by name, say.
+#: Empty since sd:719 step 3 deleted `dashboard/markup.py`, whose
+#: `html.parser.HTMLParser` handlers were the four entries. This is the whole
+#: exemption list; it is not a place to put a function nobody could find a
+#: caller for.
+DYNAMIC: frozenset[str] = frozenset()
 
 #: Duplicate function pairs already in the tree, each as a sorted 2-tuple.
 CLONES = frozenset({
