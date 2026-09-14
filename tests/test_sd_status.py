@@ -4140,5 +4140,34 @@ class ProvisionedButBrokenLibraryTests(StatusFixture):
         self.assertEqual(answer["rows"], [])
 
 
+class ReviewUnacknowledgedPartialReadTests(InventoryFixture):
+    """`pr-review-unacknowledged` when only some pull requests could be read."""
+
+    def test_one_unreadable_pull_request_keeps_the_rows_read_on_the_others(self) -> None:
+        """sd:631: a failed read on #7 must not erase #8's unanswered findings.
+
+        The class is unchecked either way, but `pending`, `next` and `--actions`
+        are built from rows alone. Dropping #8 because #7's comments endpoint
+        errored hides a pull request whose findings were read in full, so it
+        surfaces nowhere. Both orders, because the loop could fail by
+        discarding a row it already built or by never reaching one.
+        """
+        blind = self.pull(failing=[], review_findings={
+            "reviews": 1, "in_body": 1, "reviewers": ["bot"], "ids": ["aa11"],
+            "inline": 0, "unreadable": "gh api exited 1", "indeterminate": []})
+        read = self.pull(failing=[], number=8, title="Two", review_findings={
+            "reviews": 1, "in_body": 2, "reviewers": ["bot"], "ids": ["cc33", "dd44"],
+            "inline": 0, "unreadable": "", "indeterminate": []})
+        for order in ([blind, read], [read, blind]):
+            with self.subTest(first=order[0]["number"]):
+                found = status.actionable_inventory(self.repo, self.sections(
+                    pull_requests={"repo": "acme/widget", "pull_requests": order}), self.TODAY)
+                rows = self.by_check(found.rows, "pr-review-unacknowledged")
+                self.assertEqual([row["key"] for row in rows], ["acme/widget!8"])
+                self.assertIn("2 of 2 review finding(s) unanswered", rows[0]["detail"])
+                self.assertIn("#7", found.unchecked["pr-review-unacknowledged"])
+                self.assertNotIn("clear", status.banner(found)["summary"])
+
+
 if __name__ == "__main__":
     unittest.main()

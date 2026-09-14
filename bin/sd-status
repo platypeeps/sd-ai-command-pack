@@ -2688,11 +2688,11 @@ def _review_rows(
     network -- `actionable_inventory` reads `sections`, local git and the
     filesystem, and that is the whole of it.
 
-    A pull request whose inline comments could not be read marks the entire
-    class `unchecked` rather than reporting the body findings alone as the
-    total, because a partial count presented as a count is precisely the
-    failure this class is about. `_mark_unasked` uses `setdefault` so this more
-    specific sentence survives the generic one.
+    A pull request whose inline comments could not be read gets no row and
+    marks the class `unchecked`: a partial count presented as a count is the
+    failure this class is about. The others keep their rows, since `pending`
+    and `next` read rows alone (sd:631). `setdefault`, so this sentence
+    survives `_mark_unasked`'s generic one.
     """
     ack = sd_lib.sibling("sd_review_ack", "sd-review-ack")
     slug = pulls.get("repo") or "?"
@@ -2710,7 +2710,7 @@ def _review_rows(
                 f"the inline comments on #{pull['number']} could not be read "
                 f"({stated['unreadable']})",
             )
-            return []
+            continue
         found = list(stated.get("ids") or [])
         standing = ack.unacknowledged(root, found, ref, stated.get("stated") or {})
         if not standing:
