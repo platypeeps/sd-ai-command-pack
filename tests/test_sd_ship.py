@@ -1721,16 +1721,70 @@ class ReviewWatchdogTests(unittest.TestCase):
         self.assertEqual(diagnostic["captured_report"], json.loads(body))
         self.assertFalse(diagnostic["cleanup"]["drained"])
 
-    def test_deep_captured_json_stays_a_typed_timeout(self):
-        body = ('{"deep":' + '[' * 10000 + '0' + ']' * 10000 + '}').encode()
+    @staticmethod
+    def nested(depth: int) -> bytes:
+        """A report whose deepest container sits `depth` levels down."""
+        return ('{"deep":' + '[' * (depth - 1) + '0' + ']' * (depth - 1) + '}').encode()
+
+    def expired(self, body: bytes) -> dict:
         process = unittest.mock.Mock(pid=123)
         process.communicate.side_effect = [subprocess.TimeoutExpired([], 1), (body, b""), (body, b"")]
         process.poll.return_value = 0
         with patch.object(ship.subprocess, "Popen", return_value=process), patch.object(ship.os, "killpg"):
             with self.assertRaises(ship.ReviewTimeout) as raised:
                 ship.review_process(self.root, ["fixture"], timeout=1)
-        self.assertNotIn("captured_report", raised.exception.diagnostic)
-        self.assertEqual(raised.exception.diagnostic["stdout"]["bytes"], len(body))
+        return raised.exception.diagnostic
+
+    def test_deep_captured_json_stays_a_typed_timeout(self):
+        # One level past the limit this file states, not past whatever the
+        # running interpreter's C recursion guard happens to allow. At 10000
+        # -- what this fixture used until sd:818 -- the refusal came from
+        # `json.loads` on 3.13 and did not come at all on 3.14, so the test
+        # read the interpreter rather than the rule.
+        body = self.nested(ship.REVIEW_CAPTURE_DEPTH + 1)
+        diagnostic = self.expired(body)
+        self.assertNotIn("captured_report", diagnostic)
+        # `cleanup` names why each of its own steps failed; a dropped capture
+        # is named the same way, or the receipt cannot tell a report refused
+        # for depth from output that was never JSON at all.
+        self.assertEqual(diagnostic["captured_report_refused"],
+                         f"nesting deeper than {ship.REVIEW_CAPTURE_DEPTH}")
+        self.assertEqual(diagnostic["stdout"]["bytes"], len(body))
+
+    def test_output_that_is_not_json_is_not_reported_as_too_deep(self):
+        # The other half of the sentence above. Naming depth is only useful if
+        # depth is the only thing it names: output the review never meant as a
+        # report must leave the receipt silent rather than accuse it of nesting.
+        diagnostic = self.expired(b"review aborted: provider unreachable\n")
+        self.assertNotIn("captured_report", diagnostic)
+        self.assertNotIn("captured_report_refused", diagnostic)
+
+    def test_captured_json_at_the_depth_limit_is_still_evidence(self):
+        body = self.nested(ship.REVIEW_CAPTURE_DEPTH)
+        self.assertEqual(self.expired(body)["captured_report"], json.loads(body))
+
+    def test_a_report_with_more_findings_than_the_limit_is_still_evidence(self):
+        # The shape the limit must never refuse, end to end. `sd-review` caps
+        # each provider's response at MAX_FINDINGS (50) and merges every
+        # provider's rows into one list, so a report grows wide long before it
+        # grows deep: these 150 findings are three responses' worth, and 3
+        # levels deep. A reader that counted containers instead of nesting
+        # would drop exactly this, and drop it silently.
+        body = json.dumps({"scope": "branch", "subject": {"head": "a" * 40},
+                           "findings": [{"path": "bin/sd-ship", "line": n} for n in range(150)],
+                           "authored_with": ["claude"]}).encode()
+        self.assertFalse(ship.capture_too_deep(body, limit=3))
+        self.assertEqual(self.expired(body)["captured_report"], json.loads(body))
+
+    def test_brackets_inside_a_string_are_text_and_not_depth(self):
+        # A shallow report that quotes some JSON is still evidence. Counting
+        # every bracket would refuse it, and the tail it quotes is often the
+        # only thing that says what the review was doing when it expired. The
+        # leading quote is escaped in the encoded body, so a scan that does not
+        # honour escapes ends the string there and counts the rest as depth.
+        body = json.dumps({"deep": '"' + "[" * (ship.REVIEW_CAPTURE_DEPTH * 10)}).encode()
+        self.assertIn(rb'\"[[[', body)
+        self.assertEqual(self.expired(body)["captured_report"], json.loads(body))
 
     def test_interrupt_also_cleans_the_owned_group(self):
         process = unittest.mock.Mock(pid=123)
@@ -1763,6 +1817,118 @@ class ReviewWatchdogTests(unittest.TestCase):
         for requested in (1, 2):
             self.assertEqual(ship.timing_plan(subprocess.CompletedProcess(
                 [], 0, json.dumps(dict(report, requested_reviews=requested)), "")), timing)
+
+
+class CaptureDepthTests(unittest.TestCase):
+    """`capture_too_deep` is read directly, not only through the watchdog.
+
+    Until sd:818 the depth rule was CPython's C recursion guard, which is
+    correct by construction. This scan replaces it with a reader of our own,
+    and a reader can be wrong in two directions: drop a report the operator
+    needed, or admit one the limit exists to refuse. Strings are where that
+    goes wrong -- #941 had just fixed the same class of bug in the launch
+    check's reader of bash quoting -- so each escape case is a row here.
+    """
+
+    def test_a_real_shaped_report_is_nowhere_near_the_limit(self):
+        # The part of a report `timeout_evidence` reads: the report object,
+        # `findings`, a finding -- 3 levels, with `subject` beside `findings`
+        # and not under it. It is not as deep as a report gets. Real reports go
+        # deeper in fields that reader passes over, 7 in the store on
+        # 2026-09-14, which is what `REVIEW_CAPTURE_DEPTH` is measured against.
+        # The two limits below keep this comment's "3" honest.
+        body = json.dumps({"scope": "branch", "subject": {"head": "a" * 40},
+                           "findings": [{"path": "bin/sd-ship", "summary": "x"}],
+                           "authored_with": ["claude"]}).encode()
+        self.assertTrue(ship.capture_too_deep(body, limit=2))
+        self.assertFalse(ship.capture_too_deep(body, limit=3))
+        self.assertFalse(ship.capture_too_deep(body))
+
+    def test_the_limit_is_the_deepest_container_that_is_kept(self):
+        at_limit = b"[" * ship.REVIEW_CAPTURE_DEPTH + b"0" + b"]" * ship.REVIEW_CAPTURE_DEPTH
+        self.assertFalse(ship.capture_too_deep(at_limit))
+        self.assertTrue(ship.capture_too_deep(b"[" + at_limit + b"]"))
+
+    def test_every_kind_of_closed_container_gives_its_depth_back(self):
+        # Depth is nesting, not a running count of opening brackets. Siblings
+        # must not accumulate, or a long findings list is refused for its
+        # length rather than its shape.
+        #
+        # Both kinds, and interleaved. Asserting on `[]` alone left a reader
+        # that decrements for `]` and not for `}` passing: braces are what a
+        # findings list is actually made of, so that reader refused every real
+        # report while this row stayed green (review-950, M6).
+        many = ship.REVIEW_CAPTURE_DEPTH * 100
+        for body in (b"[]" * many, b"{}" * many, b"[]{}" * many, b"[{}]" * many):
+            with self.subTest(body=body[:8]):
+                self.assertFalse(ship.capture_too_deep(body))
+
+    def test_brackets_inside_a_string_are_text(self):
+        deep = b"[" * (ship.REVIEW_CAPTURE_DEPTH + 1)
+        self.assertTrue(ship.capture_too_deep(deep))
+        self.assertFalse(ship.capture_too_deep(b'{"quoted":"' + deep + b'"}'))
+
+    def test_an_escaped_quote_does_not_end_a_string(self):
+        # A `\"` in the body is a quote in the text, not the end of the string,
+        # so what follows it is still text. Read as an ending, the brackets
+        # after it become structure and a legitimate report is refused.
+        body = rb'{"quoted":"\"' + b"[" * (ship.REVIEW_CAPTURE_DEPTH + 1) + b'"}'
+        self.assertEqual(json.loads(body)["quoted"][0], '"')
+        self.assertFalse(ship.capture_too_deep(body))
+
+    def test_an_escaped_backslash_leaves_the_closing_quote_closing(self):
+        # The mirror case, and the one that fails the other way. A `\\` is a
+        # backslash in the text and consumes itself, so the quote after it does
+        # end the string and the brackets that follow are structure. A reader
+        # that lets that backslash escape the quote hides them, and admits a
+        # report past the limit.
+        deep = ship.REVIEW_CAPTURE_DEPTH + 1
+        body = rb'{"quoted":"x\\","deep":' + b"[" * deep + b"0" + b"]" * deep + b"}"
+        self.assertEqual(json.loads(body)["quoted"], "x\\")
+        self.assertTrue(ship.capture_too_deep(body))
+
+    def test_an_unterminated_string_swallows_what_follows(self):
+        # Under-counting is the safe direction here: an unterminated string is
+        # not JSON, so `json.loads` refuses the body a moment later and no
+        # report is kept either way. Recorded because it is a real input --
+        # output cut off mid-write by the kill the watchdog just sent.
+        body = b'{"quoted":"' + b"[" * (ship.REVIEW_CAPTURE_DEPTH + 1)
+        self.assertFalse(ship.capture_too_deep(body))
+        with self.assertRaises(ValueError):
+            json.loads(body)
+
+    def test_the_largest_body_the_gate_admits_is_read_in_one_pass(self):
+        # `REVIEW_CAPTURE_BYTES` is the size bound the gate applies before this
+        # scan, so these are the worst cases that can reach it. The 60s bound
+        # is a guard against a hang and nothing more; a reader that became
+        # quadratic is caught by the ratio below, not by this loop.
+        cap = ship.REVIEW_CAPTURE_BYTES
+        deep = b"[" * (ship.REVIEW_CAPTURE_DEPTH + 1)
+        front = deep + b"x" * (cap - len(deep))
+        for body in (front,                       # too deep at the first bytes
+                     b'"' * cap,                  # nothing but quotes
+                     b'"' + b"x" * (cap - 1)):    # one unterminated string
+            started = time.monotonic()
+            ship.capture_too_deep(body)
+            self.assertLess(time.monotonic() - started, 60)
+        self.assertTrue(ship.capture_too_deep(front))
+        # Eight times the bytes should cost about eight times the work; a reader
+        # that copies the rest of the body at every byte (`data[index:][0]`)
+        # costs 62 to 77 times as much. That ratio is measured in this thread's
+        # CPU time, `time.thread_time`, not on the clock: at load average 107
+        # the same scan by wall clock gave the linear reader ratios from 1.6 to
+        # 154.3, because the 1 MB scan spans many scheduler slices and the
+        # 125 KB scan few, while CPU time gave it 6.0 to 12.0 across sixteen
+        # runs on 3.13 and 3.14. The 24 sits between those two ranges.
+        small, large = b'"' * 125_000, b'"' * 1_000_000
+        small_cpu: list[float] = []
+        large_cpu: list[float] = []
+        for _ in range(3):
+            for body, spent in ((small, small_cpu), (large, large_cpu)):
+                started = time.thread_time()
+                ship.capture_too_deep(body)
+                spent.append(time.thread_time() - started)
+        self.assertLess(min(large_cpu) / min(small_cpu), 24)
 
 
 if __name__ == "__main__":
