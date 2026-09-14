@@ -228,6 +228,8 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["bash", "-c", "true", "python -I bin/sd_install.py"],
         ["bash", "-c", "grep -e python -E bin/sd_install.py; true"],
         ["bash", "-c", "(cd sub && true); python -I ../bin/sd_install.py"],
+        ["bash", "-c", "cd sub | true; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "cd sub & wait; python -I ../bin/sd_install.py"],
     )
 
     #: Command lines that run a gate-measured file with site skipped.
@@ -243,6 +245,11 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["sh", "-c", "echo hi | python -S bin/sd_install.py"],
         ["sh", "-c", "true\npython -I bin/sd_install.py"],
         ["bash", "-c", "sh -c 'python -I bin/sd_install.py'"],
+        ["env", "-C", "sub", "python", "-I", "../bin/sd_install.py"],
+        ["env", "--chdir=sub", "python", "-I", "../bin/sd_install.py"],
+        ["bash", "-c", ">log python -I bin/sd_install.py"],
+        ["bash", "-c", "2> /dev/null FOO=1 python -E bin/sd_install.py"],
+        ["bash", "-c", "2>&1 python -S bin/sd_install.py"],
     )
 
     def test_an_interpreter_word_off_command_position_is_not_refused(self) -> None:

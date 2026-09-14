@@ -47,10 +47,12 @@ a gate-measured file under ``-I``, ``-E`` or ``-S``: it watches the
 raises, which fails the test that did it. "Gate-measured" is anchored where the
 gate combines, at the directory holding the coverage config, so a copy of the
 installer in a temporary tree is not refused. The watch reads a program only
-at command position: an argument list's first word, past ``env`` and its
-options, and the first word of each command in a shell's ``-c`` string --
-split at ``;``, ``&``, ``|``, parentheses and newlines, following ``cd`` and
-nested shells -- plus a measured file's own ``#!`` line. A ``python`` word
+at command position: an argument list's first word, past assignments,
+redirections and ``env`` with its options (``-C`` followed), and the first
+word of each command in a shell's ``-c`` string -- split at ``;``, ``&``,
+``|``, parentheses and newlines, following a ``cd`` that is not in a pipeline,
+the background or a subshell, and nested shells -- plus a measured file's own
+``#!`` line. A ``python`` word
 elsewhere is another program's argument, and a shell's words after its ``-c``
 string are positional arguments, so neither is refused. It does not see a
 launch from a non-Python parent, ``-m`` naming a measured module, a wrapper
@@ -231,12 +233,17 @@ def _unmeasured_script(tokens, measured, cwd):
     return None
 
 
-def _unwrapped(words):
-    """The program a command runs, past shell assignments and `env` with its options."""
+def _unwrapped(words, cwd):
+    """The program a command runs and where: past assignments, redirections, and `env` with its options."""
     while words:
         name, equals, _ = words[0].partition("=")
+        redirect = words[0].lstrip("0123456789")
         if equals and name.isidentifier():
             words = words[1:]
+        elif redirect[:1] in ("<", ">"):
+            # `>log`, or `>` and `2>&` with the target in the next word.
+            bare = not redirect.strip("<>&")
+            words = words[1 + bare + (bare and words[1:2] == ["&"]):]
         elif os.path.basename(words[0]) == "env":
             words = words[1:]
             while words:
@@ -250,8 +257,14 @@ def _unwrapped(words):
                     try:
                         words = shlex.split(words[1]) + words[2:]
                     except ValueError:
-                        return []
-                elif word in ("-u", "--unset", "-C", "--chdir", "-P") and len(words) > 1:
+                        return [], cwd
+                elif word in ("-C", "--chdir") and len(words) > 1:
+                    cwd = os.path.join(cwd or "", words[1])
+                    words = words[2:]
+                elif word.startswith("--chdir="):
+                    cwd = os.path.join(cwd or "", word.partition("=")[2])
+                    words = words[1:]
+                elif word in ("-u", "--unset", "-P") and len(words) > 1:
                     words = words[2:]
                 elif word.startswith("-") or "=" in word:
                     words = words[1:]
@@ -259,7 +272,7 @@ def _unwrapped(words):
                     break
         else:
             break
-    return words
+    return words, cwd
 
 
 def _shell_line(words):
@@ -296,14 +309,17 @@ def _shell_commands(line, cwd):
         words = list(lexer)
     except ValueError:
         return []
-    commands, current, subshells, previous = [], [], [], ""
+    commands, current, subshells, previous, before = [], [], [], "", ";"
     for word in words + [";"]:
         # The `&` of a `2>&1` redirect is not a separator.
         if word and not word.strip(SHELL_SEPARATORS) and not previous.endswith(("<", ">")):
             if current:
                 commands.append((current, cwd))
-                cwd = _after_cd(current, cwd)
+                # A `cd` in a pipeline or in the background runs in a subshell.
+                if not any(mark in (before, word) for mark in ("|", "|&", "&")):
+                    cwd = _after_cd(current, cwd)
                 current = []
+            before = word
             for mark in word:
                 if mark == "(":
                     subshells.append(cwd)
@@ -328,7 +344,7 @@ def _after_cd(words, cwd):
 
 def _programs(words, cwd, depth=0):
     """Each argv a launch runs at command position: its own, then its shell lines' commands."""
-    words = _unwrapped(words)
+    words, cwd = _unwrapped(words, cwd)
     if not words:
         return
     yield words, cwd
@@ -376,7 +392,8 @@ def _refuse_unmeasured_launch(event, arguments, measured):
         found = _unmeasured_script(tokens, measured, where)
         if found is None and measured(tokens[0], where):
             # The file itself is the program: its `#!` line picks the flags.
-            found = _unmeasured_script(_unwrapped(_shebang(tokens[0], where) + tokens), measured, where)
+            interpreter, there = _unwrapped(_shebang(tokens[0], where) + tokens, where)
+            found = _unmeasured_script(interpreter, measured, there)
         if found is not None:
             raise RuntimeError(
                 f"sitecustomize: {found} would run with -I, -E or -S, which skip the coverage "
