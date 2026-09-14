@@ -148,6 +148,16 @@ because three of the loader's four documented properties are real:
 4. *Bounded reads rather than checked-after reads.* Kept: `reports_screen` reads
    65,537 bytes and no more.
 
+**One more loss, recorded on 2026-09-13 after step 3 landed** (review-928 N1,
+owner decision): *a plugin's declared actions as dashboard buttons.* The four
+`sys/queue-*` actions — `queue-blog`, `queue-tip`, `queue-topic` and
+`queue-watch` — were buttons in the pack dashboard's run strip. Step 3 reduced
+the catalog to the backbone's own actions, and no dashboard renders them now.
+The pack dashboard is not served, and the system dashboard renders from `VIEWS`,
+which reads no manifest. They stay reachable as `dashboard.sh queue-open <q>`
+and in `sd plugin list`. The loader's docstring did not list this among its
+properties, which is why the list above missed it.
+
 ## Question 3 — the `PAGE` string and `app.js`
 
 **Both are deleted. Neither is ported. Six behaviours are carried out of them by

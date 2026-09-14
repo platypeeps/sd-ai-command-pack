@@ -152,7 +152,7 @@ before starting step 2.
       the on-screen failure. The dashboard suite ran `Ran 336 tests ... OK` on
       that head.
 
-- [ ] **3. The plugin loader retires, and the manifest loses two keys.** System
+- [x] **3. The plugin loader retires, and the manifest loses two keys.** System
       commit first, and it is not nothing: **remove the `tabs` and `tile` keys
       from `/Users/sven/repos/system/sd-plugin.json`.** They are the system half
       of this step because they advertise a discovery contract to the registry,
@@ -160,7 +160,8 @@ before starting step 2.
       deleted — the same system-first order every other step follows, and an
       earlier draft had this step alone running backwards. The `actions` key
       stays: `sd plugin list --json` still reports it and the four queue-open
-      actions are not tabs.
+      actions are not tabs. **They stay in the manifest and leave every
+      dashboard**, which is the third give-up recorded below.
 
       Pack commit: delete `dashboard/plugins.py` (719 lines, 357 code), the
       `plugin-tabs` span and the `plugin-panels` div in `PAGE`
@@ -214,6 +215,21 @@ before starting step 2.
       indefinitely accepted gap there and a required row here would be two
       documents asking one commit for opposite things.
 
+      **A third, recorded on 2026-09-13 after the step landed** (review-928 N1,
+      owner decision). The four `sys/queue-*` actions — `queue-blog`,
+      `queue-tip`, `queue-topic` and `queue-watch` — were buttons in the pack
+      dashboard's run strip, and this step leaves them reachable from no
+      dashboard. The pack commit reduced `catalog`
+      (`source:dashboard/actions.py::catalog`) to `RUN_ALLOWLIST`, so
+      `/api/actions` offers `index` alone and a POST naming `sys/queue-blog` is
+      a 404. Nothing replaced them, for two reasons: the pack dashboard is not
+      served, because step 1 removed `serve`, and the system dashboard renders
+      from `VIEWS`, which reads no manifest. They remain reachable as
+      `dashboard.sh queue-open <q>` in the system repository and in
+      `sd plugin list`. The plan said to reduce the catalog and did not list
+      what that cost; this paragraph is the listing, and `design.md` carries the
+      same entry.
+
       Verify: `bin/sd plugin list --json` still reports the `sys` plugin with its
       four actions and no `tabs` key; `python -m unittest tests.test_loc_caps`
       passes with `DASHBOARD_CODE_CAP` lowered.
@@ -248,6 +264,19 @@ before starting step 2.
       prose becomes `target-missing`, which is red, and the enumeration is
       `grep -rn 'dashboard/plugins.py:' --include='*.md' .` outside
       `docs/work/archive/`.
+
+      **Landed as system pull request #342, squash `95568487`, then pack pull
+      request #928, squash `68fa908c`.** The system manifest's `dashboard`
+      block keeps `actions` only; its dashboard suite ran
+      `Ran 346 tests ... OK`. The pack commit deleted `dashboard/plugins.py`,
+      `dashboard/markup.py` and their tests, moved `bounded_run` into
+      `dashboard/actions.py`, and lowered `DASHBOARD_CODE_CAP` from 2,328 to
+      1,850 against 1,848 measured, the first fall `CEILING_HISTORY` records
+      (R11-D49, pull request #922). `AMBIGUOUS_CEILING` fell from 154 to 145 and
+      `STRANDED_RULE_IDS` from 23 to 20. CI was green on head `45752934`, and
+      review-928 found nothing blocking. Its N1 is the third give-up above. Its
+      N5, three line citations into files this step deleted, is left for the
+      step 8 sweep and listed in `prd.md`'s Log.
 
 - [ ] **4. PRs and Issues are served from `sd_db.shadow`; the legacy index
       retires.** System commit: the tracker views read `tracker_items` and
