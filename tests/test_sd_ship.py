@@ -1890,15 +1890,16 @@ class CaptureDepthTests(unittest.TestCase):
             json.loads(body)
 
     def test_the_largest_body_the_gate_admits_is_read_in_one_pass(self):
-        # 2_000_000 is the size bound `review_process` applies just before this
+        # `REVIEW_CAPTURE_BYTES` is the size bound the gate applies before this
         # scan, so these are the worst cases that can reach it. The five
         # seconds is about fifty times the measured time; it is here to fail a
         # reader that became quadratic, not to police speed.
+        cap = ship.REVIEW_CAPTURE_BYTES
         deep = b"[" * (ship.REVIEW_CAPTURE_DEPTH + 1)
-        front = deep + b"x" * (2_000_000 - len(deep))
+        front = deep + b"x" * (cap - len(deep))
         for body in (front,                       # too deep at the first bytes
-                     b'"' * 2_000_000,            # nothing but quotes
-                     b'"' + b"x" * 1_999_999):    # one unterminated string
+                     b'"' * cap,                  # nothing but quotes
+                     b'"' + b"x" * (cap - 1)):    # one unterminated string
             started = time.monotonic()
             ship.capture_too_deep(body)
             self.assertLess(time.monotonic() - started, 5)

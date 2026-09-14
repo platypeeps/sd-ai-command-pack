@@ -37,6 +37,10 @@ REVIEW_DIAGNOSTIC_BYTES = 4096
 #: `findings`, a finding -- so a legitimate one has an order of magnitude of
 #: room here. A body that reaches 100 is not a report this pack emitted.
 REVIEW_CAPTURE_DEPTH = 100
+#: How large a captured report may be before it is not read at all. This bound
+#: is older than the depth one and stays outermost: it is what keeps the depth
+#: scan off a body of unbounded length.
+REVIEW_CAPTURE_BYTES = 2_000_000
 
 
 class ReviewTimeout(Exception):
@@ -89,6 +93,40 @@ def capture_too_deep(data: bytes, limit: int = REVIEW_CAPTURE_DEPTH) -> bool:
     return False
 
 
+def captured_evidence(output: bytes) -> dict:
+    """What a timed-out review's stdout adds to the receipt, and why.
+
+    Captured JSON is evidence only; expiry cannot establish completion. Three
+    outcomes, and the receipt must be able to tell them apart: a report kept,
+    a report refused for its shape, and output that was never a report. The
+    middle one used to look like the last, so a reader could not tell a
+    rejected report from a review that emitted nothing. `cleanup` names why
+    each of its own steps failed and this names its own refusal the same way.
+
+    Lifted out of `review_process` rather than nested inside it, because the
+    decision is not the work: the caller bounds a process group, and this
+    reads bytes.
+    """
+    if len(output) > REVIEW_CAPTURE_BYTES:
+        return {}
+    if capture_too_deep(output):
+        return {"captured_report_refused": f"nesting deeper than {REVIEW_CAPTURE_DEPTH}"}
+    try:
+        captured = json.loads(output)
+    # `RecursionError` is defence now, not the rule: the depth limit above is.
+    # It stays because the scan reads structure and the decoder reads JSON,
+    # and only the decoder is authoritative about which is which.
+    except (ValueError, UnicodeError, RecursionError):
+        return {}
+    if not isinstance(captured, dict):
+        return {}
+    try:
+        json.dumps(captured)
+    except (ValueError, RecursionError):
+        return {}
+    return {"captured_report": captured}
+
+
 def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> subprocess.CompletedProcess:
     """Bound the owned process group, including pipes left by an exited leader."""
     process = subprocess.Popen(argv, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
@@ -126,27 +164,7 @@ def review_process(root: pathlib.Path, argv: list[str], *, timeout: float) -> su
             for name, data in (("stdout", output), ("stderr", errors)):
                 diagnostic[name] = {"bytes": len(data), "truncated": len(data) > REVIEW_DIAGNOSTIC_BYTES,
                                     "tail": data[-REVIEW_DIAGNOSTIC_BYTES:].decode("utf-8", "replace")}
-            # Captured JSON is evidence only; expiry cannot establish completion.
-            # The size bound stays outermost: it is what keeps the depth scan
-            # off a body of unbounded length.
-            if len(output) <= 2_000_000 and capture_too_deep(output):
-                # `cleanup` names why each of its steps failed, and a dropped
-                # capture deserves the same: without this the receipt cannot
-                # tell a report refused for depth from output that was never
-                # JSON, and both look like a review that emitted nothing.
-                diagnostic["captured_report_refused"] = f"nesting deeper than {REVIEW_CAPTURE_DEPTH}"
-            elif len(output) <= 2_000_000:
-                try:
-                    captured = json.loads(output)
-                    if isinstance(captured, dict):
-                        json.dumps(captured)
-                        diagnostic["captured_report"] = captured
-                # `RecursionError` is defence now, not the rule: the depth
-                # limit above is. It stays because the scan reads structure and
-                # the decoder reads JSON, and only the decoder is authoritative
-                # about which is which.
-                except (ValueError, UnicodeError, RecursionError):
-                    pass
+            diagnostic.update(captured_evidence(output))
             raise ReviewTimeout(diagnostic) from None
         return subprocess.CompletedProcess(argv, process.returncode, output.decode("utf-8", "replace"),
                                            errors.decode("utf-8", "replace"))
