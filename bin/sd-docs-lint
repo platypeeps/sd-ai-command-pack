@@ -372,7 +372,8 @@ def resolve_citation(item: pathlib.Path, work_root: pathlib.Path, cited: str) ->
 
     Only `docs/work` markdown resolves. A citation into code is the adjacency
     rule's business, in tests/test_doc_citations.py, which checks that the
-    symbol beside it appears at the line; these citations name prose, which has
+    symbol beside it appears at the line, and since sd:811 that a line with no
+    symbol beside it is not past the end of its file; these citations name prose, which has
     no symbol to anchor to, so they are checked against a recorded snippet
     instead.
     """

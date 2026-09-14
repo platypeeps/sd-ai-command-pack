@@ -61,7 +61,12 @@ reason                         live  archiv   total
 `quoted`                          1       0       1
 `quoted-not-there`                0       0       0
 `line-into-code`                  0       0       0
+`line-past-end`                 12       0      12
 ===========================  ======  ======  ======
+
+The last row was added by sd:811 and measured apart, at a3baf6d9, from rows
+above that are older: its 12 left `no-adjacent-anchor`, and the 36 archived
+tokens of the same shape joined `archived-stale`.
 
 Each reason, with why it exists:
 
@@ -106,6 +111,12 @@ Each reason, with why it exists:
   checked.
 * **`line-into-code`** -- a live anchored citation whose target is not
   markdown. Red since sd:525: cite `source:<path>::<symbol>` or write prose.
+* **`line-past-end`** -- a live citation with no symbol to compare (the three
+  unanchored shapes) whose line, or range end, is past the last line of a file
+  inside the checkout. Red since sd:811. The line is gone, so the claim cannot
+  be true, and only a deletion puts a citation here: an insertion lengthens
+  the file, so it never turns this red for a lane not editing documentation.
+  In an archive the same shape is `archived-stale`.
 
 **The corpus is every tracked markdown file, asked of git**, with
 `CHANGELOG.md` excluded by name carrying rule 7's reason: the changelog names
@@ -148,7 +159,10 @@ leave the marker green.
 Three shapes are named and counted rather than resolved, and saying so is more
 honest than a number that implies they were handled: the bare comma and
 semicolon (134), the elided path (2,358), and the token with no anchoring
-shape at all (2,731).
+shape at all (2,731). Since sd:811 one question is asked of the first and last
+of those, and of `anchor-not-a-symbol`: does the file they name have the
+cited line at all. That is the length of the file and nothing about its
+content, so no insertion can fail it.
 
 **sd:525: the symbol is authoritative and a line into code is not.** Every
 insertion above a cited line used to turn this gate red for a lane that was
@@ -300,6 +314,7 @@ REASONS = frozenset({
     "quoted",
     "quoted-not-there",
     "line-into-code",
+    "line-past-end",
 })
 
 
@@ -595,6 +610,7 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
     """
 
     rows: list[Citation] = []
+    lengths: dict[pathlib.Path, int | None] = {}
     for doc in (corpus() if docs is None else docs):
         raw = doc.read_text(encoding="utf-8", errors="replace")
         # Newlines flattened: a citation routinely wraps away from its symbol.
@@ -628,20 +644,18 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                 rows.append(Citation(doc, "", path, None, start, end, "elided-path"))
                 continue
             found = anchor_for(flat, match.span())
-            if found is None:
-                rows.append(
-                    Citation(doc, "", path, None, start, end, "no-adjacent-anchor"))
-                continue
-            anchor, adjacent = found
-            if not adjacent:
-                rows.append(
-                    Citation(doc, anchor, path, None, start, end,
-                             "separator-not-adjacent"))
-                continue
-            if not is_symbol(anchor):
-                rows.append(
-                    Citation(doc, anchor, path, None, start, end,
-                             "anchor-not-a-symbol"))
+            anchor, adjacent = found or ("", False)
+            unanchored = ("no-adjacent-anchor" if found is None
+                          else "separator-not-adjacent" if not adjacent
+                          else "anchor-not-a-symbol" if not is_symbol(anchor)
+                          else None)
+            if unanchored is not None:
+                # sd:811. No symbol to compare, but a line past the end of the
+                # file it names is stale whatever the prose claims. Only a
+                # deletion can make it so: an insertion lengthens the file.
+                if past_end(path, max(start, end), lengths):
+                    unanchored = "archived-stale" if archived else "line-past-end"
+                rows.append(Citation(doc, anchor, path, None, start, end, unanchored))
                 continue
             target = REPO_ROOT / path
             if not is_under_repo(target):
@@ -678,6 +692,25 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                 reason = "line-into-code"
             rows.append(Citation(doc, anchor, path, target, start, end, reason))
     return rows
+
+
+def past_end(path: str, line: int, lengths: dict[pathlib.Path, int | None]) -> bool:
+    """Is `line` past the last line of the file `path` names? sd:811.
+
+    Only a real file inside the checkout is opened, so a path out of the tree
+    or naming another repository answers no and keeps its bucket. Lines are
+    counted as `numbered_lines` counts them, and a final newline ends the last
+    line rather than starting another. `lengths` caches one count per file for
+    one `classify` call.
+    """
+    target = REPO_ROOT / path
+    if target not in lengths:
+        lengths[target] = None
+        if is_under_repo(target) and target.is_file():
+            lines = numbered_lines(target.read_text(encoding="utf-8", errors="replace"))
+            lengths[target] = len(lines) - (lines[-1] == "")
+    length = lengths[target]
+    return length is not None and line > length
 
 
 def names_its_symbol(anchor: str, target: pathlib.Path, start: int, end: int) -> bool:
@@ -815,9 +848,12 @@ class DocCitationTests(unittest.TestCase):
         fixes = {"line-into-code": (
             " cite `source:<path>::<symbol>` instead (`python3"
             " tests/test_doc_citations.py --repoint --apply` rewrites each one"
-            " whose symbol is declared once) or say it in prose; sd:525")}
+            " whose symbol is declared once) or say it in prose; sd:525"),
+            "line-past-end": (
+                " the file is shorter than the cited line, so the line is gone;"
+                " cite `source:<path>::<symbol>` or the line where it lives now; sd:811")}
         for reason in ("target-missing", "absent-but-present", "quoted-not-there",
-                       "line-into-code"):
+                       "line-into-code", "line-past-end"):
             offenders = [
                 f"{row.doc.relative_to(REPO_ROOT)}: `{row.path}:{row.start}`"
                 for row in rows if row.reason == reason
@@ -2746,6 +2782,94 @@ class InsertionIsHarmlessToASymbolTests(unittest.TestCase):
             self.assertEqual([row.reason for row in classify([page])], ["compared"])
             self.assertEqual([row.reason for row in classify([archived])], ["compared"])
         self.gate()
+
+
+class ALinePastTheEndTests(unittest.TestCase):
+    """sd:811: an unanchored `path:line` into a file shorter than the line.
+
+    The instance: sd:7's `design.md` cites `bin/sd_skill.py:217` in prose, and
+    the file has 89 lines. No symbol sits beside it, so it was
+    `no-adjacent-anchor`, counted and never opened, and every gate passed.
+    """
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = pathlib.Path(temporary.name)
+        (self.root / "bin").mkdir()
+        self.target = self.root / "bin" / "sd_skill.py"
+        self.target.write_text("x = 1\n" * 89, encoding="utf-8")
+        (self.root / "docs").mkdir()
+
+    def reasons(self, text: str, name: str = "docs/page.md") -> list[str]:
+        doc = self.root / name
+        doc.parent.mkdir(parents=True, exist_ok=True)
+        doc.write_text(text + "\n", encoding="utf-8")
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root}):
+            return [row.reason for row in classify([doc])]
+
+    def test_the_instance_in_prose_is_red(self) -> None:
+        self.assertEqual(
+            self.reasons("and `bin/sd_skill.py:217` already reaches across for it"),
+            ["line-past-end"])
+
+    def test_every_unanchored_shape_is_asked_and_a_range_by_its_end(self) -> None:
+        for text in ("it is at `bin/sd_skill.py:90`",
+                     "it is at `bin/sd_skill.py:88-90`",
+                     "`one`, `bin/sd_skill.py:90`",
+                     "`bin/other.py` (`bin/sd_skill.py:90`)"):
+            with self.subTest(text=text):
+                self.assertEqual(self.reasons(text), ["line-past-end"])
+
+    def test_green_the_last_line_and_a_file_with_no_final_newline(self) -> None:
+        """CONTROLS. Line 89 exists; a final newline does not add a line 90."""
+        self.assertEqual(self.reasons("it is at `bin/sd_skill.py:89`"), ["no-adjacent-anchor"])
+        self.assertEqual(self.reasons("it is at `bin/sd_skill.py:88-89`"),
+                         ["no-adjacent-anchor"])
+        self.target.write_text("x = 1\n" * 88 + "x = 1", encoding="utf-8")
+        self.assertEqual(self.reasons("it is at `bin/sd_skill.py:89`"), ["no-adjacent-anchor"])
+        self.assertEqual(self.reasons("it is at `bin/sd_skill.py:90`"), ["line-past-end"])
+
+    def test_lines_are_counted_the_way_the_parser_counts_them(self) -> None:
+        """A form feed and U+2028 end no line, so they cannot lengthen the file."""
+        self.target.write_bytes(("x = 'a\x0c b'\n" * 89).encode("utf-8"))
+        self.assertEqual(self.reasons("it is at `bin/sd_skill.py:90`"), ["line-past-end"])
+
+    def test_an_insertion_never_turns_it_red(self) -> None:
+        """sd:525's objection, answered: only a deletion reaches this bucket."""
+        text = "it is at `bin/sd_skill.py:89`"
+        self.assertEqual(self.reasons(text), ["no-adjacent-anchor"])
+        self.target.write_text("# inserted\n" * 40 + self.target.read_text(), encoding="utf-8")
+        self.assertEqual(self.reasons(text), ["no-adjacent-anchor"])
+        self.target.write_text("x = 1\n" * 50, encoding="utf-8")
+        self.assertEqual(self.reasons(text), ["line-past-end"], "and a deletion does")
+
+    def test_an_archive_keeps_its_record(self) -> None:
+        self.assertEqual(
+            self.reasons("at `bin/sd_skill.py:217`", "docs/archive/2026-01/old.md"),
+            ["archived-stale"])
+
+    def test_what_is_not_a_file_in_the_checkout_keeps_its_bucket_and_is_not_opened(self) -> None:
+        (self.root / "bin" / "dir").mkdir()
+        outside = self.root.parent / f"outside-{os.getpid()}.py"
+        outside.write_text("x = 1\n", encoding="utf-8")
+        self.addCleanup(outside.unlink)
+        with mock.patch.object(pathlib.Path, "read_text", wraps=pathlib.Path.read_text,
+                               autospec=True) as read:
+            for text in (f"at `../{outside.name}:99999`", "at `bin/missing.py:99999`",
+                         "at `bin/dir:99999`"):
+                with self.subTest(text=text):
+                    self.assertEqual(self.reasons(text), ["no-adjacent-anchor"])
+        opened = {call.args[0].name for call in read.call_args_list}
+        self.assertEqual(opened, {"page.md"}, "only the page itself was read")
+
+    def test_the_gate_names_the_bucket_and_the_fix(self) -> None:
+        (self.root / "docs" / "page.md").write_text(
+            "and `bin/sd_skill.py:217` already reaches across\n", encoding="utf-8")
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root}):
+            with self.assertRaisesRegex(AssertionError, r"line-past-end:.*sd:811[\s\S]*"
+                                        r"docs/page.md: `bin/sd_skill.py:217`"):
+                DocCitationTests().test_the_red_buckets_are_empty()
 
 
 if __name__ == "__main__":
