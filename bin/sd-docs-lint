@@ -756,7 +756,14 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
 # metavariable itself, and not on a list of known template strings, is what
 # keeps the escape a property of the rule: a new template invents no new
 # exception, and a real path can never contain one.
-METAVARIABLE_RE = re.compile(r"YYYY|MM|DD|<")
+#
+# `YYYY`, `MM` and `DD` are metavariables only as whole tokens, bounded by
+# something other than a letter or digit (`YYYY-MM-DD`, `archive/YYYY-MM/`).
+# Matched as substrings they turned a real name into a pattern: `COMMANDS.md`
+# carries `MM`, `ADDING.md` carries `DD`, and a broken reference to either was
+# passed over as a template rather than checked (sd:801). `<` needs no
+# boundary; no path this repository tracks can carry one.
+METAVARIABLE_RE = re.compile(r"(?<![A-Za-z0-9])(?:YYYY|MM|DD)(?![A-Za-z0-9])|<")
 
 
 def check_work_references(repo: pathlib.Path, work_dir: str, report: Report) -> None:
