@@ -341,8 +341,11 @@ first ten after each class's `pending_cap` (`pending_rows`) — and `next`. It
 has no top-level `pending` key, and the two nested ones are something else
 again: `handoff.packet.pending` is a boolean about the handoff packet, and
 `pull_requests.pull_requests[].checks.pending` an integer count of that pull
-request's queued or running checks (`rollup_buckets` in `bin/sd-pr-state`).
-Neither is this list.
+request's checks that have not finished. `_BUCKETS` in `bin/sd-pr-state` folds
+six states into it: `PENDING`, `QUEUED`, `IN_PROGRESS`, `WAITING`, `REQUESTED`
+and `EXPECTED`, the last three a check GitHub expects and has not heard from.
+`rollup_buckets` writes only the buckets it saw, so with no such check the key
+is absent, not 0. Neither is this list.
 **`next` is an object with `id`, `check` and `suggest`, not a bare string**,
 because a caller acting on the suggestion needs the id it belongs to in the
 same breath.

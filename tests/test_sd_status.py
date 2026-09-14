@@ -42,6 +42,33 @@ SD_HANDOFF = BIN / "sd-handoff"
 #: no answer to any of them. The control for the automatic acknowledgement.
 UNANSWERED_ROUND = BIN.parent / "tests" / "fixtures" / "sd-631-unanswered-round.json"
 
+#: The skill page whose claims about this tool's output are measured against a
+#: real run below (sd:804). Nothing else gates its prose.
+SKILL_MD = BIN.parent / "skills" / "sd-status" / "SKILL.md"
+
+#: The number words the skill page spells its limits in.
+_NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+                 "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+
+
+def _skill_unit(pattern: str) -> re.Match[str]:
+    """The one paragraph or list item of SKILL.md that matches `pattern`.
+
+    Each is flattened to one line first, so a line break cannot split a claim
+    from its number. Exactly one must match: a claim the page no longer makes,
+    or makes twice, is a question for whoever changed the page.
+    """
+    units = [" ".join(unit.split())
+             for block in re.split(r"\n\s*\n", SKILL_MD.read_text(encoding="utf-8"))
+             for unit in re.split(r"\n(?=- )", block)]
+    found = [match for unit in units if (match := re.search(pattern, unit))]
+    assert len(found) == 1, f"{len(found)} units of {SKILL_MD.name} match {pattern!r}"
+    return found[0]
+
+
+def _number(word: str) -> int | None:
+    return int(word) if word.isdigit() else _NUMBER_WORDS.get(word.lower())
+
 
 def _load(name: str, module_name: str) -> Any:
     path = BIN / name
@@ -4456,6 +4483,41 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         self.assertIn(f"  1 {self.CHECK} row not shown, ranked below the first 4, "
                       "in --actions\n", text)
 
+    def test_the_skill_page_describes_the_held_back_line_a_real_run_prints(self) -> None:
+        """SKILL.md's bullet on the cap, read against the three shapes rendered (sd:804).
+
+        The page restates the cap and the limit in prose and quotes the line,
+        and #940's review changed each of those and inverted the crowd-out
+        rule with every gate still green. Each claim is measured here against
+        a run rather than against a phrase: the quoted fragments must be ones
+        the line prints, the numbers must be the constants, and the cause the
+        page says a crowded class under its cap names must be the one printed.
+        """
+        bullet = _skill_unit(r"^- \*\*At most (\w+) of its rows in `pending`\*\*")
+        text = bullet.string
+        self.assertEqual(status.MERGED_PENDING_CAP, _number(bullet.group(1)))
+
+        _, crowded = self.merged_pending(10, 1)
+        _, capped = self.merged_pending(0, 5)
+        _, both = self.merged_pending(10, 5)
+        printed = crowded + capped + both
+        quoted = re.findall(r'"([^"]+)"', text)
+        self.assertTrue(quoted, "the bullet quotes no part of the line")
+        for fragment in quoted:
+            self.assertIn(fragment, printed)
+
+        filled = re.findall(r"fill all (\w+) slots", text)
+        self.assertTrue(filled)
+        self.assertEqual({status.PENDING_LIMIT}, {_number(word) for word in filled})
+
+        under = [sentence for sentence in re.split(r"(?<=\.) ", text) if "under its cap" in sentence]
+        self.assertEqual(1, len(under), "one sentence says what a class under its cap names")
+        rule = re.search(r"names (?:the )?(rank|cap) alone, never (?:the )?(rank|cap)\b", under[0])
+        assert rule is not None, under[0]
+        cause = {"rank": "ranked below the first", "cap": "cap"}
+        self.assertIn(cause[rule.group(1)], crowded)
+        self.assertNotIn(cause[rule.group(2)], crowded)
+
     def test_one_unreadable_merged_pull_request_is_unchecked_and_hides_no_other(self) -> None:
         blind = self.merged(7, 2, ["bb11"], unreadable="gh api exited 1")
         read = self.merged(8, 3, ["cc11", "cc22"])
@@ -4620,6 +4682,135 @@ class CollectMergedTests(unittest.TestCase):
                 payload, error = status.pr_state.gh_json(["api", "x", "--paginate"], BIN.parent)
                 self.assertEqual(expected, payload)
                 self.assertEqual(expected is None, bool(error))
+
+
+class SkillPageClaimTests(StatusFixture):
+    """What `skills/sd-status/SKILL.md` says about the output, held to a run (sd:804).
+
+    #940's review wrote nine mutations of that page -- a top-level `pending`
+    key, three nested ones, a boolean called an integer, two symbols that do
+    not exist -- and every test and `bin/sd-docs-lint` stayed green. The page
+    is prose, so these read the claim out of it and measure the thing it is
+    about: the keys from a real `--json` payload, the buckets from
+    `bin/sd-pr-state`, the symbols from the two tools' sources.
+    """
+
+    @staticmethod
+    def pending_keys(node: Any, path: str = "") -> list[tuple[str, Any]]:
+        """Every `pending` key in `node`, as a dotted path with `[]` for a list."""
+        found: list[tuple[str, Any]] = []
+        if isinstance(node, dict):
+            for key, value in node.items():
+                here = f"{path}.{key}" if path else key
+                if key == "pending":
+                    found.append((here, value))
+                found.extend(SkillPageClaimTests.pending_keys(value, here))
+        elif isinstance(node, list):
+            for value in node:
+                found.extend(SkillPageClaimTests.pending_keys(value, f"{path}[]"))
+        return found
+
+    def test_the_pending_keys_the_page_names_are_the_ones_json_carries(self) -> None:
+        """The census walks a payload with a handoff packet and a check still running.
+
+        A second pull request has no such check, which is the shape the page
+        says leaves the key out rather than writing 0.
+        """
+        pull = {"baseRefName": "main", "isDraft": False, "mergeable": "MERGEABLE",
+                "mergeStateStatus": "BLOCKED", "reviewDecision": "",
+                "headRepositoryOwner": {"login": "acme"}}
+        self.with_github(pulls=[
+            dict(pull, number=12, title="Running", headRefName="task/running",
+                 statusCheckRollup=[{"name": "lint", "conclusion": "SUCCESS"},
+                                    {"name": "build", "status": "IN_PROGRESS"}]),
+            dict(pull, number=13, title="Done", headRefName="task/done",
+                 statusCheckRollup=[{"name": "lint", "conclusion": "SUCCESS"}]),
+        ])
+        HandoffTests.write_packet(self)
+        payload = self.report()
+        found = self.pending_keys(payload)
+        nested = {path for path, _ in found if "." in path}
+        self.assertEqual({"handoff.packet.pending",
+                          "pull_requests.pull_requests[].checks.pending"}, nested,
+                         "the census itself: a new pending key needs the page to name it")
+
+        claim = _skill_unit(r"^The `--json` schema is version").string
+        top = re.search(r"has (no|a) top-level `pending` key", claim)
+        assert top is not None, claim
+        self.assertEqual(top.group(1) == "no", "pending" not in payload)
+
+        named = set(re.findall(r"`((?:[\w\[\]]+\.)+pending)`", claim))
+        self.assertEqual(nested, named)
+        count = re.search(r"the (\w+) nested ones", claim)
+        assert count is not None, claim
+        self.assertEqual(len(nested), _number(count.group(1)))
+
+        kinds = {"boolean": bool, "integer": int}
+        for path, value in found:
+            said = re.search(rf"`{re.escape(path)}` (?:is )?an? (\w+)", claim)
+            assert said is not None, f"the page gives no type for {path}"
+            self.assertIs(kinds.get(said.group(1)), type(value), path)
+
+        checks = {pr["number"]: pr["checks"] for pr in payload["pull_requests"]["pull_requests"]}
+        absent = re.search(r"`rollup_buckets` [^.]*\bthe key is (absent|0)\b", claim)
+        assert absent is not None, claim
+        self.assertEqual({"success": 1, "pending": 1}, checks[12])
+        self.assertEqual(absent.group(1) == "absent", "pending" not in checks[13])
+
+    def test_the_states_the_page_says_count_as_pending_are_the_buckets(self) -> None:
+        """`_BUCKETS` folds six GitHub states into `pending`, not only queued and running."""
+        claim = _skill_unit(r"^The `--json` schema is version").string
+        folds = re.search(r"folds (\w+) states into it: (.*?)\. ", claim)
+        assert folds is not None, claim
+        named = re.findall(r"`([A-Z_]+)`", folds.group(2))
+        buckets = status.pr_state._BUCKETS
+        self.assertEqual({state for state, bucket in buckets.items() if bucket == "pending"},
+                         set(named))
+        self.assertEqual(len(named), _number(folds.group(1)))
+        rollup = [{"name": state, "status": state} for state in named]
+        self.assertEqual({"pending": len(named)}, status.pr_state.rollup_buckets(rollup))
+
+    def test_every_ten_the_page_gives_pending_is_pending_limit(self) -> None:
+        """The page spells the list's length in five places; the code reads one constant."""
+        prose = " ".join(SKILL_MD.read_text(encoding="utf-8").split())
+        said = [word for pattern in (r"at most (\w+) actionable rows",
+                                     r"`pending` is the first (\w+)",
+                                     r"`pending` caps at (\w+)",
+                                     r"capped at (\w+)",
+                                     r"ranked below the first (\w+)")
+                for word in re.findall(pattern, prose)]
+        self.assertGreaterEqual(len(said), 5)
+        self.assertEqual({status.PENDING_LIMIT}, {_number(word) for word in said})
+
+    def test_every_symbol_the_page_cites_is_in_the_tools_it_describes(self) -> None:
+        """A renamed function leaves the page citing nothing, and nothing said so.
+
+        A backticked name with an underscore or in capitals must appear in
+        `bin/sd-status` or `bin/sd-pr-state`. A private name, or one the page
+        places "in `bin/...`", must be defined there, not just mentioned.
+        """
+        sources = {name: (BIN / name).read_text(encoding="utf-8")
+                   for name in ("sd-status", "sd-pr-state")}
+
+        def defines(source: str, name: str) -> bool:
+            return bool(re.search(rf"^\s*(?:(?:def|class)\s+{name}\b|{name}\s*[:=])",
+                                  source, re.MULTILINE))
+
+        prose = " ".join(SKILL_MD.read_text(encoding="utf-8").split())
+        cited = {name for name in re.findall(r"`([A-Za-z_]\w*)`", prose)
+                 if "_" in name or name.isupper()}
+        self.assertTrue(any(name.startswith("_") for name in cited), "not vacuous")
+        for name in sorted(cited):
+            with self.subTest(name):
+                self.assertTrue(any(re.search(rf"\b{name}\b", source)
+                                    for source in sources.values()))
+                if name.startswith("_"):
+                    self.assertTrue(any(defines(source, name) for source in sources.values()))
+        placed = re.findall(r"`([A-Za-z_]\w*)` in `bin/(sd-status|sd-pr-state)`", prose)
+        self.assertTrue(placed)
+        for name, tool in placed:
+            with self.subTest(f"{name} in bin/{tool}"):
+                self.assertTrue(defines(sources[tool], name))
 
 
 if __name__ == "__main__":
