@@ -2,6 +2,8 @@
 
 import argparse
 import contextlib
+import importlib.machinery
+import importlib.util
 import io
 import json
 import subprocess
@@ -119,6 +121,54 @@ class SkillRequests(unittest.TestCase):
             "shutil.move",
         ):
             self.assertNotIn(needle, source)
+
+
+class SkillHelpText(unittest.TestCase):
+    """What `sd skill --help` promises for `promote` and `demote`.
+
+    The queue design landed without its documentation: the command stopped
+    opening a pull request and the help text went on offering one, so an
+    operator reading `--help` was told to expect a branch that nothing was
+    going to write. These two guards fail if either the rendered help or the
+    comment above the parsers claims a pull request again.
+    """
+
+    def skill_verbs(self) -> dict[str, str]:
+        """The one-line help argparse prints for each `sd skill` verb."""
+        loader = importlib.machinery.SourceFileLoader(
+            "sd_cli_under_test", str(ROOT / "bin/sd")
+        )
+        spec = importlib.util.spec_from_file_location(
+            "sd_cli_under_test", str(ROOT / "bin/sd"), loader=loader
+        )
+        assert spec is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["sd_cli_under_test"] = module
+        loader.exec_module(module)
+        for action in module.build_parser()._subparsers._group_actions:
+            for name, parser in action.choices.items():
+                if name != "skill":
+                    continue
+                verbs = parser._subparsers._group_actions[0]
+                return {
+                    choice.dest: choice.help or ""
+                    for choice in verbs._choices_actions
+                }
+        raise AssertionError("sd has no `skill` group")
+
+    def test_promotion_and_demotion_help_promises_no_pull_request(self) -> None:
+        verbs = self.skill_verbs()
+        for verb in ("promote", "demote"):
+            with self.subTest(verb=verb):
+                text = " ".join(verbs[verb].split()).lower()
+                self.assertNotIn("pull request", text)
+                self.assertIn("queue", text)
+
+    def test_the_parser_comment_promises_no_pull_request(self) -> None:
+        source = (ROOT / "bin/sd").read_text()
+        start = source.index("trying = skill.add_subparsers")
+        end = source.index("sd_skill.register_extra(trying)")
+        self.assertNotIn("pull request", source[start:end])
 
 
 if __name__ == "__main__":
