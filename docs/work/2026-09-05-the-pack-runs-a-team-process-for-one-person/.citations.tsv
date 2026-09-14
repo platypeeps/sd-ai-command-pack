@@ -4,7 +4,7 @@ design.md:250	prd.md:447-450	2026-09-05-the-pack-runs-a-team-process-for-one-per
 implement.md:110	prd.md:1220-1221	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1220	4. Exactly one second-model lane is named anywhe
 implement.md:128	prd.md:1208-1212	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1208	asserts the set of keys `WORKFLOW.md` documents
 implement.md:188	prd.md:1114-1162	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1114	adaptation and omission ledgers and the approval
-implement.md:190	prd.md:1659-1663	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1659	return the same reviewer order from the same `pr
+implement.md:190	prd.md:1664-1668	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1664	return the same reviewer order from the same `pr
 implement.md:243	prd.md:1289	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1289	same second slice resolves the same, from A's ro
 implement.md:501	prd.md:871	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	871	- `README.md`'s claim that the pack writes "noth
 implement.md:509	prd.md:1405-1406	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1405	fixture remote whose default branch does not req
@@ -14,8 +14,11 @@ implement.md:709	prd.md:1450-1464	2026-09-05-the-pack-runs-a-team-process-for-on
 implement.md:710	prd.md:1485-1494	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1485	never, and a guest clone retained on the fork's
 implement.md:711	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	the delivering case on a fixture remote that gai
 implement.md:721	prd.md:582	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	582	`docs/work/.status-source`, one line, `row`, bes
-implement.md:721	prd.md:2627	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	2627	retire commit adds a tracked marker, `docs/work/
+implement.md:721	prd.md:2632	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	2632	retire commit adds a tracked marker, `docs/work/
 implement.md:784	prd.md:1197-1198	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1197	row open, requirement 5. Before the second slice
 implement.md:788	prd.md:1181-1185	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1181	## Landing order
 implement.md:1289	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	the delivering case on a fixture remote that gai
-implement.md:1812	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	the delivering case on a fixture remote that gai
+implement.md:1499	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	identical. Every skill that runs a review names
+implement.md:1541	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	identical. Every skill that runs a review names
+implement.md:1840	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	identical. Every skill that runs a review names
+implement.md:1848	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	the delivering case on a fixture remote that gai

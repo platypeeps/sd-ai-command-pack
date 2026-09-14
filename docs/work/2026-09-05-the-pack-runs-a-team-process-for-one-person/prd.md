@@ -1626,13 +1626,18 @@ confirmed by the next `sd-ship` run alone.
     `surface`, `mode` and `cwd`, and the Codex nightly parse writes the same
     shape. A test feeds one recorded session of each kind and asserts the rows.
 27. Promotion and demotion each queue one code review task, a `skill-apply`
-    assignment, and open no pull request. The library queues it, never the
+    assignment, and themselves open no pull request: no branch, no request
+    against `main`, no move in this checkout. One pull request is still the
+    deliverable. The queued agent prepares it later, from the brief the
+    library writes, "follow its sd-ship skill to prepare one pull request.
+    The operator owns merging." (`sd_db/skills_catalog.py:253-255`), and the
+    operator merges it. The library queues the assignment, never the
     dashboard directly, and writes nothing to git. A test asserts the queued
     assignment and that git is unchanged. The `sd` help text for both verbs
-    says so, and does not say they open a pull request. (Rewritten
-    2026-09-14 by owner decision note 1942, which accepts #802's design,
-    `505431b8`. The stale help text at `bin/sd:3031-3046` is still to fix.
-    The original text is quoted in the log.)
+    says they queue the task, and does not say the verbs open a pull
+    request. (Rewritten 2026-09-14 by owner decision note 1942, accepting
+    #802's design, `505431b8`. The help text at `bin/sd:3031-3046` landed in
+    #939, `0feecae9`. The original text is quoted in the log.)
 28. `sd-suggest` writes a row in every mode and files nothing, asserted by a
     test per mode against a recording GitHub fixture that saw no call; `sd
     suggest publish` files one issue at the destination `--to` names,
@@ -5424,3 +5429,26 @@ from a number the operator types.
   to record every cut, rewrite and deferral before it. `implement.md`'s
   "The closure state today" and its closure table carry the same list and
   order.
+
+  **Later the same day, four of those pull requests merged.** #935
+  (`48d1d58e`) closed criterion 5's vendor clause and no more of criterion
+  5: its review found the clause at `:1235-1236`, that every skill which
+  runs a review names its point in the table and reads the cap from it,
+  unasserted and outside that pull request's scope. Criterion 5 is
+  part-closed and that clause is open. #936 (`c3604594`) closed criterion
+  22. #939 (`0feecae9`) fixed the help text at `bin/sd:3031-3046` and closed
+  criterion 27, whose other clauses #802 had already met. #940 (`075eecf2`)
+  is sd:787's and touches no criterion of this item. Criterion 16 is still
+  open, in #938. Open after those merges: 5 (the table-reads clause), 13
+  (the refusal test), 16, 18, 21 and 31 (a, b and c). The lane order loses
+  its first step and keeps the other four.
+
+  **A gap this note leaves, recorded and not filled.** Criterion 13's
+  refusal test is in the open list above and in the `Delivers:` gate, and in
+  no step of the lane order. Criterion 5's table-reads clause is now in the
+  same position. Decision note 1942 is silent about both, so no plan is
+  invented here. What is recorded instead is the constraint the gate already
+  carries: `Delivers: sd:10` waits on every open criterion, so criterion 13
+  and criterion 5's remaining clause must both be closed before 31(c)
+  carries the trailer. Which pull request carries them is an owner decision
+  that no note has made.
