@@ -30,12 +30,14 @@ REVIEW_SETUP_SECONDS = 3600
 REVIEW_CLEANUP_SECONDS = 5
 REVIEW_DIAGNOSTIC_BYTES = 4096
 #: How deep a captured review report may nest and still be kept as evidence.
-#: Measured rather than chosen: the 156 review reports the local store held on
-#: 2026-09-14 nest 5 levels at the median and 7 at the deepest, and the whole
-#: ship receipts that carry them reach 10. The deepest a report can be by its
-#: own shape is the four `timeout_evidence` reads -- report, `subject`,
-#: `findings`, a finding -- so a legitimate one has an order of magnitude of
-#: room here. A body that reaches 100 is not a report this pack emitted.
+#: Measured rather than chosen: of the 156 review reports the local store held
+#: on 2026-09-14, 134 nest 5 levels and 22 nest 7, and the whole ship receipts
+#: that carry them reach 10. That depth is not in what `timeout_evidence` reads
+#: -- the report, `findings`, a finding is 3 levels, with `subject` beside
+#: `findings` rather than under it -- but in fields it passes over: a check's
+#: command list reaches 5 and a provider's sanitized response reaches 7.
+#: Nothing in a report's schema bounds those fields, so 100 is an order of
+#: magnitude over the deepest report seen, not a proof about every report.
 REVIEW_CAPTURE_DEPTH = 100
 #: How large a captured report may be before it is not read at all. This bound
 #: is older than the depth one and stays outermost: it is what keeps the depth

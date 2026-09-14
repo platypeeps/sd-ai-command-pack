@@ -1764,14 +1764,16 @@ class ReviewWatchdogTests(unittest.TestCase):
         self.assertEqual(self.expired(body)["captured_report"], json.loads(body))
 
     def test_a_report_with_more_findings_than_the_limit_is_still_evidence(self):
-        # The shape the limit must never refuse, end to end. `sd-review` emits
-        # at most MAX_FINDINGS per provider across three of them, so 150 flat
-        # findings is the widest real report -- and it is four levels deep, not
-        # 150. A reader that counted containers instead of nesting would drop
-        # exactly this, and drop it silently.
+        # The shape the limit must never refuse, end to end. `sd-review` caps
+        # each provider's response at MAX_FINDINGS (50) and merges every
+        # provider's rows into one list, so a report grows wide long before it
+        # grows deep: these 150 findings are three responses' worth, and 3
+        # levels deep. A reader that counted containers instead of nesting
+        # would drop exactly this, and drop it silently.
         body = json.dumps({"scope": "branch", "subject": {"head": "a" * 40},
                            "findings": [{"path": "bin/sd-ship", "line": n} for n in range(150)],
                            "authored_with": ["claude"]}).encode()
+        self.assertFalse(ship.capture_too_deep(body, limit=3))
         self.assertEqual(self.expired(body)["captured_report"], json.loads(body))
 
     def test_brackets_inside_a_string_are_text_and_not_depth(self):
@@ -1829,11 +1831,17 @@ class CaptureDepthTests(unittest.TestCase):
     """
 
     def test_a_real_shaped_report_is_nowhere_near_the_limit(self):
-        # The shape `timeout_evidence` requires, which is as deep as a captured
-        # report gets: the report object, `subject`, `findings`, a finding.
+        # The part of a report `timeout_evidence` reads: the report object,
+        # `findings`, a finding -- 3 levels, with `subject` beside `findings`
+        # and not under it. It is not as deep as a report gets. Real reports go
+        # deeper in fields that reader passes over, 7 in the store on
+        # 2026-09-14, which is what `REVIEW_CAPTURE_DEPTH` is measured against.
+        # The two limits below keep this comment's "3" honest.
         body = json.dumps({"scope": "branch", "subject": {"head": "a" * 40},
                            "findings": [{"path": "bin/sd-ship", "summary": "x"}],
                            "authored_with": ["claude"]}).encode()
+        self.assertTrue(ship.capture_too_deep(body, limit=2))
+        self.assertFalse(ship.capture_too_deep(body, limit=3))
         self.assertFalse(ship.capture_too_deep(body))
 
     def test_the_limit_is_the_deepest_container_that_is_kept(self):
@@ -1891,9 +1899,12 @@ class CaptureDepthTests(unittest.TestCase):
 
     def test_the_largest_body_the_gate_admits_is_read_in_one_pass(self):
         # `REVIEW_CAPTURE_BYTES` is the size bound the gate applies before this
-        # scan, so these are the worst cases that can reach it. The five
-        # seconds is about fifty times the measured time; it is here to fail a
-        # reader that became quadratic, not to police speed.
+        # scan, so these are the worst cases that can reach it. The bound is
+        # here to fail a reader that became quadratic, not to police speed, so
+        # it is set for a loaded machine: one of these took 0.09s idle and
+        # 3.33s at load average 290 (verify-950). A quadratic reader is not
+        # near it either way -- about 2e12 byte steps on 2 MB, hours at the
+        # tens of millions of steps a second this loop manages.
         cap = ship.REVIEW_CAPTURE_BYTES
         deep = b"[" * (ship.REVIEW_CAPTURE_DEPTH + 1)
         front = deep + b"x" * (cap - len(deep))
@@ -1902,7 +1913,7 @@ class CaptureDepthTests(unittest.TestCase):
                      b'"' + b"x" * (cap - 1)):    # one unterminated string
             started = time.monotonic()
             ship.capture_too_deep(body)
-            self.assertLess(time.monotonic() - started, 5)
+            self.assertLess(time.monotonic() - started, 60)
         self.assertTrue(ship.capture_too_deep(front))
 
 
