@@ -31,7 +31,7 @@ opens with fourteen top-level lines; the thirteen below are the sections.
 | Section | What it shows |
 |---|---|
 | `abnormalities` | every abnormal class in the ranking table, whether or not it fired: `clear`, `n findings`, or `unchecked: <reason>`. At most three findings print per class, and the elision says how many were held back |
-| `pending` | at most ten actionable rows by rank, with the line above them stating the denominator — `10 of 123, by rank`. A class with a cap shows at most that many rows, and a line under the list says how many it held back |
+| `pending` | at most ten actionable rows by rank, with the line above them stating the denominator — `10 of 123, by rank`. A class with a cap shows at most that many rows, and a line under the list says how many of its rows the list does not show |
 | `next` | one row: the top-ranked id and its `suggest`. Not a menu, not three options |
 | `open threads` | a count per `source`, then the exclusions named in full, so the counts are never read as a total of everything that exists |
 | `work items` | derived item status from `docs/work`, counted, with the parked ones counted and not listed |
@@ -199,7 +199,9 @@ oldest. So three rules apply now:
   acted on.
 - **At most three of its rows in `pending`** (`pending_cap`). The rows it holds
   back leave their slots to the classes below, and a line under the list says
-  how many were held back. `--actions` and `--json` still carry every row.
+  how many of its rows the list does not show. When higher classes fill all ten
+  slots, that is every row of the class, not just the rows past the cap.
+  `--actions` and `--json` still carry every row.
 
 It asks the same question through the same code as the open class. A finding
 is answered when `bin/sd-review-ack` says so, and the merged pull request's
@@ -215,8 +217,9 @@ The read runs two `gh` commands, however many pull requests merged: `gh pr list
 repository's review comments. That call's `since` is the oldest merged pull
 request's creation time, since no review comment predates its pull request. It
 is still as many HTTP pages as there are comments since then, and one
-long-lived pull request that merges widens it. If it runs past `gh`'s 60-second
-limit, every merged pull request reads unreadable and the class is `unchecked`.
+long-lived pull request that merges widens it. If it runs past `sd-pr-state`'s
+60-second limit on each `gh` call, every merged pull request reads unreadable
+and the class is `unchecked`.
 The data arrives in `--json` as `merged_pull_requests`. The text report has no section for it;
 its rows print in `pending`.
 
@@ -253,7 +256,11 @@ answer three questions to express one choice.
 shortcut.** Render exactly **one** question, `multiSelect: true`, whose four
 options are pending rows 1 to 4, each labelled by its id. Rows 5 to 10 are
 addressable by typing the id, which the component's own free-text answer
-already supports, and `--actions` lists every row beyond the tenth.
+already supports, and `--actions` lists every row, the ones `pending` leaves
+out included. Take the options from the text report's `pending`, not from
+`actions` in `--json`: `pending` is the first ten after each class's
+`pending_cap` (`pending_rows`), so a class past its cap can make rows 1 to 10
+of `actions` differ from it.
 
 Three rules on that question:
 
@@ -326,8 +333,10 @@ so capping it would make the cap the interface.
 The `--json` schema is version **3**. Beyond the section keys it carries
 `merged_pull_requests` (the pull requests merged inside the review window, with
 the findings each carries), `inventory` (`rows` plus the `unchecked` map),
-`abnormalities`, `actions` — the
-uncapped inventory, of which `pending` is a view of the first ten — and `next`.
+`abnormalities`, `actions` — the uncapped inventory, of which `pending` is the
+first ten after each class's `pending_cap` (`pending_rows`) — and `next`. It
+has no top-level `pending` key; `handoff.packet.pending` is a boolean
+about the handoff packet, not this list.
 **`next` is an object with `id`, `check` and `suggest`, not a bare string**,
 because a caller acting on the suggestion needs the id it belongs to in the
 same breath.
