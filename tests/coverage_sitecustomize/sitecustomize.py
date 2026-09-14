@@ -71,11 +71,18 @@ and a ``<(...)`` put the directory back where they found it, and so does a
 pipeline, while a ``&`` puts back the whole list it backgrounded: the shell
 runs each of those in a child of its own. A function definition puts it back
 as well, its body not having run yet, and a call to a function defined on the
-same line reads that body again, where the caller stands -- once: a second
-call to the same function keeps the directory, because a relative ``cd`` that
-moved once fails the next time. A compound command (``{ }``, ``if``, ``while``,
-``until``, ``for``, ``select``, ``case``) is one command to the pipeline around
-it, and a ``)`` that closes a ``case`` pattern closes no subshell. A ``python`` word elsewhere is another program's argument,
+same line reads that body again, where the caller stands. Which functions are
+defined, and which have been called, is part of that state, so a definition or
+a call inside a subshell, a pipeline or a ``&`` goes back with it, as it does
+in the shell. A second call to the same function keeps the directory, which is
+a choice rather than the shell's rule: the relative ``cd`` that moved once
+usually fails the next time, but ``f() { cd ..; }`` called twice really moves
+twice, and so does ``f() { cd sub; }`` where ``sub/sub`` exists. After
+``f; f`` there the check stands one directory short, so it misses a launch
+that runs and refuses a line that launches nothing. A compound command
+(``{ }``, ``if``, ``while``, ``until``, ``for``, ``select``, ``case``)
+is one command to the pipeline around it, and a ``)`` that closes a ``case``
+pattern closes no subshell. A ``python`` word elsewhere is another program's argument,
 a bash array's ``a=(...)`` words are values, a ``for``'s are names, and a
 shell's words after its ``-c`` string are positional arguments, so none of
 those is refused.
@@ -99,8 +106,11 @@ It does not see:
   ANSI-C ``$'...'`` string: quoted text is one word;
 - a command after ``coproc``: only the words above are skipped;
 - a ``cd`` in an ``eval``: the line it is read as ends with it;
-- a call to a function defined anywhere but the same line, named by a variable
-  or written in quotes, or more than ``SHELL_REPLAYS`` calls deep;
+- a call to a function defined anywhere but the same line, or named by a
+  variable or a substitution, or more than ``SHELL_REPLAYS`` calls deep;
+- a launch written in a function body, which is read where the body is
+  defined: that is a refusal rather than a miss, even when nothing calls the
+  function;
 - which branch the shell takes: every arm of a ``&&``, a ``||`` and a ``case``
   is read in order, so a ``cd`` in an arm the shell skips is followed, and a
   launch in one is refused;
@@ -563,16 +573,31 @@ def _defines_function(current, tokens, index):
             and tokens[index:index + 1] == [(")", True, False)])
 
 
+def _defined(state, name, body):
+    """The state a definition leaves: the shell that ran it knows one more function.
+
+    The functions live in the state, so a subshell, a pipeline or a `&` loses
+    the ones defined inside it when its state goes back, as the shell does.
+    """
+    return (*state[:3], {**state[3], name: body}, state[4])
+
+
+def _calls(state, name):
+    """The state a call leaves: this function has moved the directory here once."""
+    return (*state[:4], state[4] | {name})
+
+
 def _shell_commands(line, cwd):
     """Each simple command of a shell line, with the directory a `cd` before it left."""
     tokens = _shell_tokens(line)
     tokens.append((";", True, False))
-    # The state is the directory, the one `cd -` goes back to, and the `pushd`
-    # stack. `frames` holds it as each subshell, block and array was opened.
-    state, previous, pending, index = (cwd, ELSEWHERE, ()), ("", True), "", 0
+    # The state is the directory, the one `cd -` goes back to, the `pushd`
+    # stack, the functions defined here as the tokens of their bodies, and the
+    # ones already called. `frames` holds it as each subshell, block and array
+    # was opened, so what a child defines or calls goes back with it.
+    state = (cwd, ELSEWHERE, (), {}, frozenset())
+    previous, pending, named, replays, index = ("", True), "", "", 0, 0
     commands, current, frames = [], [], [_frame("", state)]
-    # Each function defined on this line, by name, as the tokens of its body.
-    defined, called, named, replays = {}, set(), "", 0
     while index < len(tokens):
         text, operator, quoted = tokens[index]
         index += 1
@@ -586,15 +611,36 @@ def _shell_commands(line, cwd):
             elif frame["case"] == "pattern":
                 if text == "esac" and not quoted:
                     state = _closed(frames, state)
+            elif (not current and text in state[3] and replays < SHELL_REPLAYS
+                  and tokens[index:index + 1] != [("(", True, False)]
+                  and not any(entry["defines"] for entry in frames)):
+                # A call reads the body again, where the caller stands, as one
+                # command to the pipeline around it -- which is what a call is.
+                # A body being defined is not running, so a name in one is not
+                # a call, and a name a `()` follows is a definition of its own.
+                # A second call to the same function keeps the directory, as a
+                # definition does: a modelling choice the docstring names, not
+                # the shell's rule. The `:` that ends the replay takes the
+                # call's own words, which are the body's arguments.
+                replays += 1
+                named, pending = "", "body" if text in state[4] else ""
+                body = state[3][text]
+                # The pipeline and the list this call is in began before it,
+                # so what they put back is the state without the call in it.
+                _begin(frame, state)
+                state = _calls(state, text)
+                tokens[index:index] = [("{", False, False), *body, (";", True, False),
+                                       ("}", False, False), (":", False, False)]
             elif current or quoted:
                 _begin(frame, state)
                 current.append((text, quoted))
             elif pending == "name":
                 named, pending = text, "body"
             elif text == SHELL_BLOCKS.get(frame["kind"]):
-                if frame["defines"]:
-                    defined[frame["defines"]] = tokens[frame["start"]:index - 1]
+                body = tokens[frame["start"]:index - 1] if frame["defines"] else None
                 state = _closed(frames, state)
+                if body is not None:
+                    state = _defined(state, frame["defines"], body)
             elif text in SHELL_BRANCHES:
                 frame["header"] = False
                 state = _ends_pipeline(frame, state)
@@ -610,18 +656,6 @@ def _shell_commands(line, cwd):
                 frames[-1]["defines"] = named if pending == "body" else ""
                 frames[-1]["start"] = index
                 pending = ""
-            elif text in defined and replays < SHELL_REPLAYS:
-                # A call reads the body again, where the caller stands, as one
-                # command to the pipeline around it -- which is what a function
-                # call is. A second call to the same function keeps the
-                # directory, as a body opened as a definition does: a relative
-                # `cd` that moved once fails the next time. The `:` that ends
-                # the replay takes the call's own words, the body's arguments.
-                replays += 1
-                named, pending = "", "body" if text in called else ""
-                called.add(text)
-                tokens[index:index] = [("{", False, False), *defined[text], (";", True, False),
-                                       ("}", False, False), (":", False, False)]
             elif not (text in SHELL_RESERVED or (text in ("-p", "--") and previous[0] in ("time", "-p"))):
                 pending = ""
                 _begin(frame, state)
@@ -710,7 +744,7 @@ def _after_cd(words, state):
         words = words[taken or 1:]
     if not kept or kept[0] not in ("cd", "pushd", "popd"):
         return state
-    cwd, back, stack = state
+    cwd, back, stack = state[:3]
     name, arguments, moves = kept[0], list(kept[1:]), True
     while arguments:
         option = arguments[0]
@@ -730,7 +764,7 @@ def _after_cd(words, state):
             return state
         there = back if target == "-" else (os.path.join(cwd or "", target) if target
                                            else os.path.expanduser("~"))
-        return (there, cwd, stack)
+        return (there, cwd, stack, *state[3:])
     entries = [cwd, *reversed(stack)]
     index = _stack_entry(target, len(entries))
     if index == -1:
@@ -747,7 +781,7 @@ def _after_cd(words, state):
         elif moves:
             entries = [os.path.join(cwd or "", target), *entries]
         else:
-            return (cwd, back, stack + (os.path.join(cwd or "", target),))
+            return (cwd, back, stack + (os.path.join(cwd or "", target),), *state[3:])
     else:
         if index is None and target or len(entries) < 2:
             return state
@@ -759,7 +793,7 @@ def _after_cd(words, state):
             return state
         entries = entries[:gone] + entries[gone + 1:]
     there = entries[0]
-    return (there, cwd if there != cwd else back, tuple(reversed(entries[1:])))
+    return (there, cwd if there != cwd else back, tuple(reversed(entries[1:])), *state[3:])
 
 
 def _programs(words, cwd, depth=0):

@@ -253,6 +253,10 @@ class LazySubprocessCoverage(unittest.TestCase):
         ["bash", "-c", "function f() { cd sub; }; f; python -I bin/sd_install.py"],
         # A call in a pipeline runs in that pipeline's subshell.
         ["bash", "-c", "f() { cd sub; }; f | cat; python -I ../bin/sd_install.py"],
+        # A name in a body being defined is not a call: nothing there has run.
+        ["bash", "-c", "f() { cd sub; }; g() { f; }; f; python -I bin/sd_install.py"],
+        # The call in the subshell moved nothing here, so this one is the first.
+        ["bash", "-c", "f() { cd sub; }; (f); f; python -I bin/sd_install.py"],
         # A quoted word is a program or an argument, never the shell's own.
         ["bash", "-c", '"if" python -I bin/sd_install.py'],
         ["bash", "-c", "echo ';' python -I bin/sd_install.py"],
@@ -311,7 +315,7 @@ class LazySubprocessCoverage(unittest.TestCase):
         # A `#` mid-word is not a comment, and a backslash escapes the quote
         # after it: neither cuts the launch on the next command.
         ["bash", "-c", "echo a#b; python -I bin/sd_install.py"],
-        ["bash", "-c", "echo \\'; true # it's\npython -I bin/sd_install.py"],
+        ["bash", "-c", "echo \\'; python -I bin/sd_install.py # it's"],
         # A backslash escape ends a word's first character too: what follows
         # the `#` is the word's, not a comment's.
         ["bash", "-c", "echo \\b#c; python -I bin/sd_install.py"],
@@ -345,6 +349,24 @@ class LazySubprocessCoverage(unittest.TestCase):
         # second call to it does not move again: the relative `cd` would fail.
         ["bash", "-c", "f() { cd sub; }; f; python -I ../bin/sd_install.py"],
         ["bash", "-c", "f() { cd sub; }; f; f; python -I ../bin/sd_install.py"],
+        # A quoted name calls the function, and a body defined inside another
+        # body is defined when that one is called.
+        ["bash", "-c", 'f() { cd sub; }; "f"; python -I ../bin/sd_install.py'],
+        ["bash", "-c", "g() { f() { cd sub; }; }; g; f; python -I ../bin/sd_install.py"],
+        # A name in a body being defined is not a call, so this `f` is the
+        # first one, and a call in a pipeline leaves the next call the first.
+        ["bash", "-c", "f() { cd sub; }; g() { f; }; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; f | cat; f; python -I ../bin/sd_install.py"],
+        # A definition in a subshell is the subshell's: `f` here is a command
+        # that does not exist, and the launch runs where it stands.
+        ["bash", "-c", "( f() { cd sub; } ); f; python -I bin/sd_install.py"],
+        # A name a `()` follows is a new definition, not a call of the old one;
+        # a body that calls a function twice moves once, as a line does.
+        ["bash", "-c", "f() { cd sub; }; f() { cd other; }; f; python -I ../bin/sd_install.py"],
+        ["bash", "-c", "f() { cd sub; }; g() { f; f; }; g; python -I ../bin/sd_install.py"],
+        # A call reached through another function in a pipeline moves only the
+        # pipeline, so the launch runs where the line stands.
+        ["bash", "-c", "f() { cd sub; }; g() { f; }; g | cat; python -I bin/sd_install.py"],
         ["bash", "-c", "time -- python -I bin/sd_install.py"],
         ["env", "-a", "name", "python", "-I", "bin/sd_install.py"],
         # A pattern is expanded where the command runs, as the shell expands it.
