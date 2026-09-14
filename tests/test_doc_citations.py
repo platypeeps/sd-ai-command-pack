@@ -128,14 +128,22 @@ opens, and a reason that does not carry the citation lands in
 
 Since sd:765 the reason can also be `source:<path>::<symbol>`, and a
 `path:line` into code no longer pins its number. Into a markdown page the
-named line must carry the citation, as before. Into code, sd:525's ruling
-applies to the reason as it does to a citation: the number goes stale at the
-next insertion above it, so the file must carry the citation somewhere, and
-`source:<path>::<symbol>` is the precise form -- the one declaration of that
-name must carry it between its first and last line. Found by being caught
-again: the one live marker quotes this module's own docstring by line, and a
-blank line added above it turned three tests red with no repair but a hand
-edit in another item's page.
+named line must carry the citation, as before. Into code, the line number is
+a hint the gate does not check or repair, kept for the one legacy marker: the
+file must carry the citation somewhere, and nothing more is asked. That is a
+relaxation, not sd:525's rule -- sd:525 removes a line number into code, and
+this keeps one unchecked. `source:<path>::<symbol>` is the precise form: the
+one declaration of that name must carry the citation between its first and
+last line. Found by being caught again: the one live marker quotes this
+module's own docstring by line, and a blank line added above it turned three
+tests red with no repair but a hand edit in another item's page.
+
+Because the file-wide check is satisfied by any line, this module must carry
+the legacy marker's quoted citation on exactly one line, inside
+`marker_after`. Every fixture spells it split, and
+`test_the_quoted_example_is_carried_once_and_only_by_marker_after` fails
+the day one of them types it whole; otherwise deleting the example would
+leave the marker green.
 
 Three shapes are named and counted rather than resolved, and saying so is more
 honest than a number that implies they were handled: the bare comma and
@@ -255,11 +263,11 @@ MARKER = re.compile(r"\[(quoted|absent):[ \t]*([^\]" + TERMINATORS + r"]*?)[ \t]
 #: nothing else. The path shape is TOKEN's own, so a reason cannot name
 #: something a citation could not.
 #:
-#: Where the gate looks depends on what the reason names, and sd:525 is why.
-#: Into markdown, the line is where the quoted text must be. Into code, a line
-#: is not authoritative -- the next insertion above it moves it, made by a
-#: lane that was not editing documentation -- so a `path:line` into code holds
-#: when the file carries the quoted text at all, and the number is a hint. The
+#: Where the gate looks depends on what the reason names. Into markdown, the
+#: line is where the quoted text must be. Into code, a `path:line` holds when
+#: the file carries the quoted text at all: the line number is a hint the gate
+#: does not check or repair, kept for the one legacy marker, because an
+#: insertion above it by an unrelated lane used to turn the gate red. The
 #: `source:` form is the precise spelling for code: the quoted text must sit
 #: inside that one declaration, which no insertion elsewhere can move (sd:765).
 QUOTED_REASON = re.compile(
@@ -473,12 +481,13 @@ def quotes(reason: str, token: str, doc: pathlib.Path,
 
     * `path:line` into markdown -- that line carries it. A line past the end,
       or a line that does not carry it, answers no.
-    * `path:line` into anything else -- some line of the file carries it.
-      sd:525 made a line into code non-authoritative for citations, and a
-      quoted reason is a citation: before sd:765 this was the one line number
-      into code the gate still enforced, so an edit above the gate module's
-      own docstring turned three tests red, and the only repair was a hand
-      edit in another item's page. Deleting the quoted text still answers no.
+    * `path:line` into anything else -- some line of the file carries it. The
+      line number is a hint this function does not check and the repointer
+      does not repair, kept for the one legacy marker: before sd:765 an edit
+      above the gate module's own docstring turned three tests red, and the
+      only repair was a hand edit in another item's page. Deleting the quoted
+      text from the file still answers no -- provided no other line of the
+      file carries it, which is why this module spells its fixtures split.
     * `source:<path>::<symbol>` -- the one declaration of `symbol` in that
       Python file carries it, between its first and last line. Declared
       twice, not at all, or in a file that does not parse, answers no.
@@ -869,7 +878,11 @@ class TheMarkerGrammar(unittest.TestCase):
     to justify is a silencer with better manners.
     """
 
-    QUOTABLE = "`bin/sd:1231`"
+    #: Split on purpose, and every fixture below builds from this. The live
+    #: marker in sd:5's `design.md` quotes this module by `path:line`, which
+    #: sd:765 made file-wide; a fixture typing the token whole would satisfy
+    #: that marker for ever, whatever happened to `marker_after`'s example.
+    QUOTABLE = "`bin/sd:" + "1231`"
 
     def quoting(self, token: str) -> str:
         """A `path:line` reason naming a line of this file that carries `token`.
@@ -915,7 +928,7 @@ class TheMarkerGrammar(unittest.TestCase):
             return rows[0].reason
 
     #: A page with the example on line 3, and a line 1 that does not carry it.
-    PAGE = {"notes.md": "# notes\n\nthe example is `bin/sd:1231` here\n"}
+    PAGE = {"notes.md": f"# notes\n\nthe example is {QUOTABLE} here\n"}
 
     def test_a_marker_with_a_reason_exempts_the_citation_it_follows(self) -> None:
         self.assertEqual(
@@ -1038,9 +1051,9 @@ class TheMarkerGrammar(unittest.TestCase):
         "def other():\n"                        # 1
         "    pass\n"                            # 2
         "\n\n"                                  # 3-4
-        'def marker_after():\n    """The shape is `bin/sd:1231`."""\n'  # 5-6
+        f'def marker_after():\n    """The shape is {QUOTABLE}."""\n'  # 5-6
         "\n"                                    # 7
-        "MENTION = '`bin/sd:1231`'\n")}         # 8
+        f"MENTION = '{QUOTABLE}'\n")}           # 8
 
     def inserted(self, sources: dict[str, str], lines: int = 7) -> dict[str, str]:
         return {name: "# inserted\n" * lines + body for name, body in sources.items()}
@@ -1083,7 +1096,8 @@ class TheMarkerGrammar(unittest.TestCase):
         for name, sources, symbol in (
                 ("renamed away", self.CODE, "gone"),
                 ("declared twice", {"bin/tool.py": body + body}, "marker_after"),
-                ("not Python", {"bin/tool.py": "function marker_after() { `bin/sd:1231` }\n"},
+                ("not Python",
+                 {"bin/tool.py": f"function marker_after() {{ {self.QUOTABLE} }}\n"},
                  "marker_after"),
                 ("no file", {}, "marker_after")):
             with self.subTest(name):
@@ -1103,7 +1117,7 @@ class TheMarkerGrammar(unittest.TestCase):
     def test_the_live_marker_survives_an_edit_above_the_line_it_names(self) -> None:
         """The defect itself, on this checkout's real page and this real module.
 
-        `design.md` quotes `bin/sd:1231` from this module by line. With a blank
+        `design.md` quotes bin/sd:1231 from this module by line. With a blank
         line inserted above that line in a copy of this module, the page's
         marker must still be `quoted` and the repointer must have nothing to
         say about it -- the three tests that went red were those two answers.
@@ -1124,9 +1138,48 @@ class TheMarkerGrammar(unittest.TestCase):
                 rows = [row for row in classify([copy]) if row.path == "bin/sd"
                         and row.start == 1231]
             _, moves, refusals = repoint_document(copy, root)
-        self.assertTrue(rows, "the page no longer quotes `bin/sd:1231`, so this proves nothing")
+        self.assertTrue(
+            rows, f"the page no longer quotes {self.QUOTABLE}, so this proves nothing")
         self.assertEqual({row.reason for row in rows}, {"quoted"})
         self.assertEqual((moves, refusals), ([], []))
+
+    def test_the_quoted_example_is_carried_once_and_only_by_marker_after(self) -> None:
+        """B1 of the sd:765 review: the live marker has to be able to fail.
+
+        A `path:line` reason into code is file-wide, so any line of this module
+        carrying the token satisfies sd:5's marker. The first head of sd:765
+        typed it whole in seven fixtures, and replacing the example in
+        `marker_after`'s docstring left the whole module green. One line, and
+        inside `marker_after`, is what keeps "delete the example and the row
+        goes red" true.
+        """
+        import ast
+
+        here = pathlib.Path(__file__)
+        text = here.read_text(encoding="utf-8")
+        carrying = [number for number, line in enumerate(text.split("\n"), 1)
+                    if self.QUOTABLE in line]
+        self.assertEqual(len(carrying), 1,
+                         f"{self.QUOTABLE} is typed whole at lines {carrying} of"
+                         f" {here.name}; build fixtures from QUOTABLE instead")
+        spans = declared_spans(ast.parse(text), "marker_after")
+        self.assertEqual(len(spans), 1, spans)
+        first, last = spans[0]
+        self.assertTrue(first <= carrying[0] <= last,
+                        f"line {carrying[0]} is outside marker_after ({first}-{last})")
+
+    def test_a_source_locator_reason_reads_a_one_line_declaration(self) -> None:
+        """The window includes the declaration's first line, which is its last too."""
+        sources = {"bin/tool.py": (
+            f"def one(): return '{self.QUOTABLE}'\n"
+            f"LIMIT = '{self.QUOTABLE}'\n")}
+        for symbol in ("one", "LIMIT"):
+            with self.subTest(symbol=symbol):
+                self.assertEqual(
+                    self.reason_in_checkout(
+                        sources,
+                        f"`f` ({self.QUOTABLE}) [quoted: source:bin/tool.py::{symbol}]"),
+                    "quoted")
 
     def test_a_marker_with_no_reason_does_not_exempt(self) -> None:
         self.assertNotEqual(self.reason_for("`f` (`bin/x.py:1`) [quoted:]"), "quoted")
