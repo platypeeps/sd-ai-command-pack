@@ -42,6 +42,9 @@ class GitHub:
     def __init__(self, root: Path, repository: str):
         self.root, self.repository = root, repository
         self.prefix = f"repos/{repository}"
+        #: What the remote last said to `owned`, so the caller that catches
+        #: its refusal can write the demotion note with the same reason.
+        self.answer: sd_lib.RemoteAnswer | None = None
 
     def api(self, path: str, *, method: str = "GET", body: dict | None = None) -> Any:
         argv = ["gh", "api", path, "--method", method]
@@ -85,7 +88,7 @@ class GitHub:
             except Refusal as error:
                 return None, str(error)
 
-        answer = sd_lib.remote_permits_full(self.root, ask=ask)
+        answer = self.answer = sd_lib.remote_permits_full(self.root, ask=ask)
         if (not answer.full or str(metadata.get("full_name", "")).lower() != self.repository
                 or metadata.get("fork") is not False or metadata.get("permissions", {}).get("admin") is not True):
             raise Refusal(answer.reason or "GitHub ownership did not match origin")

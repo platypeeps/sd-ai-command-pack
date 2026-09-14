@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
@@ -262,6 +263,219 @@ class TheReviewGate(Fixture):
         self.assertNotIn("Traceback", done.stderr)
         self.assertNotIn("guest mode", done.stderr)
         self.assertNotIn("fork's integration branch", done.stderr)
+
+
+#: sd:789 -- a `gh api` for the ship adapter's own transport, which appends a
+#: query string to the collaborator page it asks for. `__PEOPLE__` is the
+#: collaborator list, so one stub covers a remote the operator alone holds and
+#: one a second collaborator may push to.
+SHIP_GH_STUB = """#!/bin/sh
+case "$2" in
+  user) printf '%s' '{"login": "sven"}' ;;
+  */collaborators*) printf '%s' '__PEOPLE__' ;;
+  *) printf '%s' '__REPO__' ;;
+esac
+"""
+
+ALONE = '[{"login": "sven", "permissions": {"push": true}}]'
+WITH_MALLORY = '[{"login": "sven", "permissions": {"push": true}}, {"login": "mallory", "permissions": {"push": true}}]'
+
+
+class TheDemotionAnswer(Fixture):
+    """`sd_lib.mode_answer`: the mode, and the answer that lowered it if one did.
+
+    sd:789. `sd_lib.mode` handed back a word, and the word `guest` cannot say
+    whether the operator wrote it or the remote imposed it, nor why. The
+    demotion note needs the second thing, so the resolver returns it.
+    """
+
+    def test_a_written_full_the_remote_lowers_returns_the_answer(self) -> None:
+        root = self.make_repo()
+        self.write_mode(root, "full")
+        resolved, lowered = sd_lib.mode_answer(root, ask=Asker(answers(full=False)))
+        self.assertEqual(resolved, "guest")
+        self.assertEqual(lowered, sd_lib.RemoteAnswer(False, True, "sven/thing is a fork of acme/thing"))
+
+    def test_a_full_the_remote_confirms_was_not_lowered(self) -> None:
+        root = self.make_repo()
+        self.assertEqual(sd_lib.mode_answer(root, ask=Asker(answers(full=True))), ("full", None))
+
+    def test_a_written_guest_was_not_lowered_and_asks_nothing(self) -> None:
+        root = self.make_repo()
+        self.write_mode(root, "guest")
+        ask = Asker({})
+        self.assertEqual(sd_lib.mode_answer(root, ask=ask), ("guest", None))
+        self.assertEqual(ask.asked, [])
+
+    def test_the_word_alone_still_comes_from_mode(self) -> None:
+        root = self.make_repo()
+        self.write_mode(root, "full")
+        self.assertEqual(sd_lib.mode(root, ask=Asker(answers(full=False))), "guest")
+
+    def test_the_note_names_the_remote_first_and_the_answer_second(self) -> None:
+        marker, body = sd_lib.demotion_note(
+            "sven/thing", sd_lib.RemoteAnswer(False, True, "sven/thing lets mallory push too")
+        )
+        self.assertEqual(marker, "Mode demoted to guest on sven/thing")
+        self.assertTrue(body.startswith(marker + "\n"), body)
+        self.assertIn("the remote answered: sven/thing lets mallory push too", body)
+        self.assertIn("shared tree", body)
+
+    def test_an_unanswered_question_is_said_as_one(self) -> None:
+        _, body = sd_lib.demotion_note(
+            "sven/thing", sd_lib.RemoteAnswer(False, False, "gh could not be run: no such file")
+        )
+        self.assertIn("the remote could not be asked: gh could not be run", body)
+        self.assertNotIn("the remote answered", body)
+
+
+class TheDemotionNote(Fixture):
+    """sd:789 -- the note `sd-ship` writes on the item when the remote lowers the mode.
+
+    Criterion 11 of sd:10: a `mode: full` repository gains a second
+    collaborator, `sd-ship` refuses to push the triad to that remote, "and the
+    item carries a demotion note". `remote_permits_full` had two callers, the
+    mode resolver and the ownership check, and neither wrote one. Both go
+    through `Ship` here: `resolve_mode`, which `prepare` calls before the body
+    and before the push, and `owned`, which `merge` calls at merge time. A
+    fixture database in a scratch HOME, a real repository, and a `gh` stub on
+    PATH answering for the remote; nothing here reaches the operator's
+    database or the network.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        import importlib.machinery
+        import importlib.util
+
+        try:
+            from sd_db import connect, create_item, initialise, upsert_repo
+        except ImportError as error:  # pragma: no cover - CI installs the library
+            self.skipTest(f"sd_db is not importable here: {error}")
+        home = self.tmp / "home"
+        home.mkdir()
+        self.database = home / ".local/share/sd/sd.db"
+        initialise(self.database)
+        self.connection = connect(self.database)
+        self.addCleanup(self.connection.close)
+        self.root = self.make_repo()
+        self.git(self.root, "checkout", "-b", "topic")
+        self.write_mode(self.root, "full")
+        # `merge: auto` on the row, so the merge-time case can assert that a
+        # demotion changes the repository's merge policy not at all: the
+        # policy is the operator's standing setting, and a remote that gained
+        # a collaborator is a reason to stop this merge, not to rewrite it.
+        upsert_repo(self.connection, str(self.root), remote="https://github.com/sven/thing.git",
+                    status_source="row", merge_policy="auto")
+        self.item = create_item(
+            self.connection, kind="work", title="a thing", status="in_progress", repo=str(self.root), branch="topic"
+        )
+        loader = importlib.machinery.SourceFileLoader("sd_ship_demotion_tested", str(REPO_ROOT / "bin" / "sd-ship"))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        assert spec is not None
+        self.ship = importlib.util.module_from_spec(spec)
+        loader.exec_module(self.ship)
+        self.bindir = self.tmp / "path"
+        self.bindir.mkdir()
+        for tool in ("git", "python3"):
+            found = shutil.which(tool)
+            self.assertIsNotNone(found, f"{tool} must be installed to run this test")
+            (self.bindir / tool).symlink_to(str(found))
+        self.environment = dict(os.environ, HOME=str(home), PATH=str(self.bindir))
+        self.patched = mock.patch.dict(os.environ, self.environment, clear=True)
+        self.patched.start()
+        self.addCleanup(self.patched.stop)
+
+    def remote(self, people: str, repo: str = OWN_JSON) -> None:
+        stub = self.bindir / "gh"
+        stub.write_text(SHIP_GH_STUB.replace("__PEOPLE__", people).replace("__REPO__", repo), encoding="utf-8")
+        stub.chmod(0o755)
+
+    def operation(self, command: str = "prepare"):
+        extra = ["--manual", "--expected-head", "HEAD"] if command == "merge" else []
+        args = self.ship.parser().parse_args([command, "--item", str(self.item), "--json", *extra])
+        return self.ship.Ship(self.root, self.connection, self.database, args)
+
+    def notes(self) -> list[str]:
+        rows = self.connection.execute(
+            "SELECT kind, body FROM note WHERE item = ? AND body LIKE 'Mode demoted%' ORDER BY id", (self.item,)
+        ).fetchall()
+        for row in rows:
+            self.assertEqual(row["kind"], sd_lib.DEMOTION_NOTE_KIND)
+        return [row["body"] for row in rows]
+
+    def test_a_collaborator_the_remote_names_lowers_the_mode_and_the_item_carries_the_note(self) -> None:
+        self.remote(WITH_MALLORY)
+        self.assertEqual(self.operation().resolve_mode(), "guest")
+        notes = self.notes()
+        self.assertEqual(len(notes), 1, notes)
+        self.assertTrue(notes[0].startswith("Mode demoted to guest on sven/thing\n"), notes[0])
+        self.assertIn("sven/thing lets mallory push too", notes[0])
+        self.assertEqual(
+            (self.root / sd_lib.LOCAL_FILE_NAME).read_text(encoding="utf-8").count("mode: full"), 1,
+            "the written line is the operator's; detection never edits it",
+        )
+
+    def test_a_second_lowering_for_the_same_item_and_remote_writes_no_second_note(self) -> None:
+        self.remote(WITH_MALLORY)
+        delivery = self.operation()
+        self.assertEqual(delivery.resolve_mode(), "guest")
+        # `prepare` resolves twice, before the body and before the push, and
+        # a rerun after the refusal resolves twice more. One note.
+        self.assertEqual(delivery.resolve_mode(), "guest")
+        self.assertEqual(self.operation().resolve_mode(), "guest")
+        self.assertEqual(len(self.notes()), 1, self.notes())
+
+    def test_a_remote_the_operator_alone_holds_lowers_nothing_and_writes_nothing(self) -> None:
+        self.remote(ALONE)
+        self.assertEqual(self.operation().resolve_mode(), "full")
+        self.assertEqual(self.notes(), [])
+
+    def test_a_written_guest_is_not_a_demotion(self) -> None:
+        self.write_mode(self.root, "guest")
+        self.remote(WITH_MALLORY)
+        self.assertEqual(self.operation().resolve_mode(), "guest")
+        self.assertEqual(self.notes(), [])
+
+    def test_the_merge_time_refusal_names_the_collaborator_and_leaves_the_same_note(self) -> None:
+        """The ownership check `merge` runs is the other caller, and it shares the marker."""
+
+        self.remote(WITH_MALLORY)
+        delivery = self.operation("merge")
+        with self.assertRaisesRegex(self.ship.Refusal, "mallory"):
+            delivery.merge_ownership()
+        self.assertEqual(len(self.notes()), 1, self.notes())
+        # The push-time lowering and the merge-time one are the same demotion.
+        self.assertEqual(delivery.resolve_mode(), "guest")
+        self.assertEqual(len(self.notes()), 1, self.notes())
+        self.assertEqual(
+            self.connection.execute(
+                "SELECT merge_policy FROM repo WHERE path = ?", (str(self.root),)
+            ).fetchone()["merge_policy"],
+            "auto",
+            "a demotion stops this merge; it does not rewrite the operator's standing policy",
+        )
+
+    def test_a_remote_that_lets_the_merge_through_writes_nothing(self) -> None:
+        self.remote(ALONE)
+        self.assertEqual(self.operation("merge").merge_ownership().get("full_name"), "sven/thing")
+        self.assertEqual(self.notes(), [])
+
+    def test_prepare_and_merge_resolve_through_the_noting_methods(self) -> None:
+        """The wiring: the two `prepare` resolutions and the `merge` ownership read.
+
+        A `Ship` method nobody calls writes no note. `prepare` is not run here
+        end to end -- its harness is `tests/test_sd_ship.py` -- so the call
+        sites are pinned by reading the adapter: two mode resolutions, two
+        ownership reads, both in `merge`, and no remaining direct call to
+        `sd_lib.mode` or, outside the wrapper, to `GitHub.owned`.
+        """
+
+        source = (REPO_ROOT / "bin" / "sd-ship").read_text(encoding="utf-8")
+        self.assertEqual(source.count("mode = self.resolve_mode()"), 2)
+        self.assertEqual(source.count("sd_lib.mode("), 0)
+        self.assertEqual(source.count("self.merge_ownership()"), 2)
+        self.assertEqual(source.count("self.api.owned()"), 1, "only the wrapper reads it now")
 
 
 if __name__ == "__main__":
