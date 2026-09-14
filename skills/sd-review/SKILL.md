@@ -132,6 +132,8 @@ no stored `OPENAI_API_KEY` field. **Never work around a preflight refusal** —
 never export a key, never invoke the entry's `start` program by hand to get
 past it. Automatic fallback uses only the separately consented registry entries;
 it never changes that entry's authentication or bypasses its refusal.
+`R10-D4` is a row in `bin/sd_rules.py`, which names `codex_preflight` as its
+checker and states the mutation that proves it.
 
 Each provider receives only `PATH`, `HOME`, `LANG`, `TERM`, `TMPDIR` and the
 variables declared in its registry `env` list. Codex also receives the exact

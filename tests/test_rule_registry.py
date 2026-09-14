@@ -197,8 +197,8 @@ DANGLING_RULE_IDS = frozenset({"R11-D1", "R11-D30", "R11-D46", "R5-D1"})
 #: one was newly stranded in the same change -- two baselines in one file
 #: keeping two different standards, which review caught.
 #:
-#: **24 on this branch, down from the 26 measured on `cddd3b98`.** `R10-D5` and
-#: `R10-D6` are rows in `bin/sd_rules.py` now.
+#: **23 on this branch, down from the 26 measured on `cddd3b98`.** `R10-D5`,
+#: `R10-D6` and `R10-D4` are rows in `bin/sd_rules.py` now.
 #:
 #: `R10-D6` took two slices to land, and what held it is worth keeping. Its
 #: enforcement was never in doubt --
@@ -213,11 +213,11 @@ DANGLING_RULE_IDS = frozenset({"R11-D1", "R11-D30", "R11-D46", "R5-D1"})
 #: the meta-check passed it. `checker` is a `path::symbol` location now, so a
 #: test is nameable, and leg d is what makes naming one mean something.
 #:
-#: The other twenty-four were each looked at and each has a recorded reason it
+#: The other twenty-three were each looked at and each has a recorded reason it
 #: is not a row yet, in the backfill section of this item's `implement.md`,
 #: rather than left for the next reader to rediscover.
 STRANDED_RULE_IDS = frozenset({
-    "R10-D1", "R10-D2", "R10-D3", "R10-D4", "R10-D7",
+    "R10-D1", "R10-D2", "R10-D3", "R10-D7",
     "R11-D10", "R11-D12", "R11-D13", "R11-D14", "R11-D15", "R11-D16",
     "R11-D17", "R11-D18", "R11-D19", "R11-D20", "R11-D21", "R11-D23",
     "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D4", "R11-D5", "R11-D6",
@@ -1315,7 +1315,7 @@ def enforcement_error(mutation: Mutation, outcome: Outcome) -> str | None:
     **An error is refused even though it is red.** A checker that reddens by
     raising is indistinguishable from a child this leg broke, and the row has
     the cheaper answer available: state a mutation whose named test fails an
-    assertion. Both rows in `MUTATIONS` do.
+    assertion. Every row in `MUTATIONS` does.
     """
 
     counts = unittest_counts(outcome.violated_output)
@@ -1360,6 +1360,13 @@ MUTATIONS: dict[str, Mutation] = {
             test="tests.test_verb_inventory.InventoryTests"
                  ".test_no_command_accepts_a_repository_path",
         ),
+    "bin/sd-review::codex_preflight": Mutation(
+        path="bin/sd-review",
+        old='    if mode != "chatgpt":',
+        new="    if False:  # leg d: the auth_mode guard, defeated",
+        test="tests.test_sd_review_codex.PreflightTests"
+             ".test_a_non_chatgpt_auth_mode_refuses",
+    ),
 }
 
 
@@ -1728,7 +1735,7 @@ fails this control, which is why it exists.
         """`edit` refuses a path that leaves the private tree.
 
         Hardening rather than a live defect: `MUTATIONS` is a literal in this
-        module and both entries name a tracked file. But `tree / mutation.path`
+        module and every entry names a tracked file. But `tree / mutation.path`
         follows an absolute path or a `..` out of the copy, and the tree just
         outside it is this checkout -- so the escape would write the files the
         copy exists to keep untouched, which is the one guarantee leg d makes
