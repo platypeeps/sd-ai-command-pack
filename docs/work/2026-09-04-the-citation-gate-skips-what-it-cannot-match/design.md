@@ -122,8 +122,8 @@ buckets under-count against the corpus and conservation fails on the real tree
 rather than on a fixture.
 
 **The marker read is line-aware, and the flattening does not prevent it.**
-`classify` flattens with `.replace("\n", " ")`
-(`tests/test_doc_citations.py:518`), which a reviewer read as making 0.71.34's
+`classify` (`source:tests/test_doc_citations.py::classify`) flattens with
+`.replace("\n", " ")`, which a reviewer read as making 0.71.34's
 "same line" rule unimplementable. It does not: the substitution is one
 character for one character, so offsets in the flattened text are offsets in
 the original. `marker_after()` matches against the flattened text and then
@@ -241,9 +241,9 @@ and it covers one citation, not a document, a region or a path.
 
 **Delivered, and demonstrated here rather than described.** This page can now
 show the literal shape it is about.
-`frontmatter` (`bin/sd:1231`) [quoted: tests/test_doc_citations.py:379]
+`frontmatter` (`bin/sd:1231`) [quoted: tests/test_doc_citations.py:382]
 is the citation that went stale, quoted here as the example it is and carrying
-a marker that tells the gate not to read it as a claim. The live one is `frontmatter` (`bin/sd:1257`),
+a marker that tells the gate not to read it as a claim. The live one is `frontmatter` (`source:bin/sd::frontmatter`),
 and 1231 now sits inside another function's docstring -- which is the whole
 point, and a first draft of this paragraph called 1231 "its real line number"
 and was wrong in the document arguing against exactly that.
@@ -451,7 +451,7 @@ particular `bin/sd-docs-lint` is not edited: rule 6's `CITATION_RE`
 `docs/work/` paths, so neither is the home for a rule about citations into
 code.
 
-That citation was written `` (`CITATION_RE`, `bin/sd-docs-lint:351`) `` in the
+That citation was written `` (`CITATION_RE`, `source:bin/sd-docs-lint::CITATION_RE`) `` in the
 first draft of this page, and rewriting it is worth recording. In that shape it
 is one of the parenthesised comma citations this design proposes to start
 checking — so today it is silent, tomorrow it is a claim, and it was correct

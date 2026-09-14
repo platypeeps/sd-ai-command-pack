@@ -98,7 +98,7 @@ it has, so local refs alone are the complete answer and the annotations are
 `live` and `gone` as usual. `unknown` is reserved for a root that is not a
 checkout at all and for a git invocation that returns non-zero — the two cases
 where the answer is missing rather than empty, and both of them the two ways
-`sd_lib._git` returns `None` (`bin/sd_lib.py:136-139`).
+`sd_lib._git` (`source:bin/sd_lib.py::_git`) returns `None`.
 
 **`_upstream` becomes `upstream`, and the change is a rename.** It is private
 today and `bin/sd_skill.py:217` already reaches across for it, carrying a

@@ -60,6 +60,7 @@ reason                         live  archiv   total
 `escapes-checkout`                0       0       0
 `quoted`                          1       0       1
 `quoted-not-there`                0       0       0
+`line-into-code`                  0       0       0
 ===========================  ======  ======  ======
 
 Each reason, with why it exists:
@@ -102,6 +103,8 @@ Each reason, with why it exists:
 * **`quoted-not-there`** -- it carries one whose line does not. Red: a reason
   that parses but does not hold is worse than free text, because it looks
   checked.
+* **`line-into-code`** -- a live anchored citation whose target is not
+  markdown. Red since sd:525: cite `source:<path>::<symbol>` or write prose.
 
 **The corpus is every tracked markdown file, asked of git**, with
 `CHANGELOG.md` excluded by name carrying rule 7's reason: the changelog names
@@ -127,40 +130,28 @@ honest than a number that implies they were handled: the bare comma and
 semicolon (134), the elided path (2,358), and the token with no anchoring
 shape at all (2,731).
 
-**sd:525, measured 2026-09-12, and a recommendation rather than a change.**
-The item reports that line-anchored citations make any insertion in a source
-file a docs failure, sighted three times in one parallel round by three lanes
-none of whom were editing documentation, and puts the population at "2,147
-line-anchored citations across docs/". The census above says otherwise, and
-the difference is the whole answer: of 5,699 `path:line` tokens, exactly 53
-are `compared`, and only a `compared` row can go stale. `anchored_citations`
-filters to that bucket. So the mechanism imposing repoint churn on every
-writer lane is staleness-checking about 1% of what it classifies.
+**sd:525: the symbol is authoritative and a line into code is not.** Every
+insertion above a cited line used to turn this gate red for a lane that was
+not editing documentation, and the gate had begun deciding where code went:
+`bin/sd_lib.py` grew two sections appended at the end of the file with comments
+saying why, and a docstring was held to one line to keep a count fixed. The
+owner's ruling was to remove the incentive rather than tolerate it.
 
-Narrowed further, it is 38 rows, because the other 15 are archived and an
-archive is not edited. Every one of the 38 cites source code -- 30 in `bin/`,
-4 in `tests/`, 4 in `dashboard/` -- and 34 of the 38 sit in a single
-document. The insertion has to be large to bite: `WINDOW` absorbs a shift of
-two, and inserting one line into `bin/sd_lib.py` broke nothing while
-inserting seven broke six citations.
+So a live `path:line` citation anchored to a symbol and pointing into anything
+other than markdown is `line-into-code`, and red, whether or not the line is
+right today: it will not be right after the next insertion, and the lane that
+inserts is not the lane that wrote it. The stable spelling is
+`source:<path>::<symbol>`, which `source_declaration_error` resolves by
+declaration and which no insertion can break. A claim about a line that is not
+a declaration is written as prose naming the enclosing declaration; losing
+that line number was accepted. `dashboard/app.js` has no locator, being the
+only non-Python file under `bin/` and `dashboard/`, so its citations are prose.
 
-The migration is therefore small and specific rather than a redesign. Running
-`source_declaration_error` over all 38 today, 34 resolve to exactly one
-declaration and could be rewritten as `source:<path>::<symbol>`, the form
-`test_inserted_lines_do_not_break_a_declaration_locator` already guarantees
-and the live corpus already carries 36 of -- one of them migrated by this
-commit, which is where 39 and 35 went. The 4 that cannot are two
-`dashboard/app.js` citations, which the locator cannot parse because it is
-Python-only, and two whose anchor is not a symbol at all -- `None` and
-`.replace("\n", " ")`.
-
-Not done here, and the reason is the item's own complaint: all 34 are in
-an active work item another lane holds, so migrating them from this lane would
-commit the cross-lane write that sd:525 exists to object to. The recommended
-sequence is one lane that owns that item migrating its 34, a decision on the
-JavaScript locator and the two non-symbol anchors, and only then making a bare
-`path:line` into a source file fail -- in that order, because reversing it
-turns CI red on the first commit.
+Markdown targets keep `path:line`: a line in a page is `bin/sd-docs-lint` rule
+6's subject and the repointer's, not this rule's. Archives are records and keep
+whatever they cite. The migration was made by the repointer, which rewrites a
+line into code as its `source:` locator when the anchor is declared exactly
+once and refuses otherwise.
 """
 
 from __future__ import annotations
@@ -279,6 +270,7 @@ REASONS = frozenset({
     "no-adjacent-anchor",
     "quoted",
     "quoted-not-there",
+    "line-into-code",
 })
 
 
@@ -305,6 +297,17 @@ def is_symbol(token: str) -> bool:
     """A name a line can be checked against, as opposed to a path or a phrase."""
 
     return bool(SYMBOL.match(token)) and "/" not in token and not EXTENSION.search(token)
+
+
+def points_into_code(path: str) -> bool:
+    """Is this citation target code for sd:525's rule, rather than a page?
+
+    Everything but markdown. A line in a page is `bin/sd-docs-lint` rule 6's
+    subject and the repointer's; a line anywhere else moves under an insertion
+    no documentation lane made, and `source:<path>::<symbol>` does not.
+    """
+
+    return not path.endswith(".md")
 
 
 def is_under_repo(target: pathlib.Path) -> bool:
@@ -589,6 +592,11 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                 reason = "absent-but-present"
             elif archived and not names_its_symbol(anchor, target, start, end):
                 reason = "archived-stale"
+            elif not archived and points_into_code(path):
+                # sd:525. The symbol is authoritative and the number is not: a
+                # line into code goes stale at the next insertion above it,
+                # made by a lane that was not editing documentation.
+                reason = "line-into-code"
             rows.append(Citation(doc, anchor, path, target, start, end, reason))
     return rows
 
@@ -725,12 +733,18 @@ class DocCitationTests(unittest.TestCase):
         """
 
         rows = classify()
-        for reason in ("target-missing", "absent-but-present", "quoted-not-there"):
+        fixes = {"line-into-code": (
+            " cite `source:<path>::<symbol>` instead (`python3"
+            " tests/test_doc_citations.py --repoint --apply` rewrites each one"
+            " whose symbol is declared once) or say it in prose; sd:525")}
+        for reason in ("target-missing", "absent-but-present", "quoted-not-there",
+                       "line-into-code"):
             offenders = [
                 f"{row.doc.relative_to(REPO_ROOT)}: `{row.path}:{row.start}`"
                 for row in rows if row.reason == reason
             ]
-            self.assertEqual(offenders, [], f"{reason}:\n" + "\n".join(offenders))
+            self.assertEqual(offenders, [], f"{reason}:{fixes.get(reason, '')}\n"
+                             + "\n".join(offenders))
 
     def test_a_citation_cannot_send_this_test_outside_the_checkout(self) -> None:
         """A citation is a string in a document, and this test opens what it names.
@@ -1109,9 +1123,12 @@ def stable_source_citations(root: pathlib.Path) -> list[tuple[pathlib.Path, str,
     # from `contained`. `classify` deliberately *does* read archives -- it
     # reports a stale archived citation instead of failing it -- so a shared
     # filter would have made one rule's corpus an accident of the other's.
-    documents = [d for d in sorted(root.glob("docs/**/*.md"))
-                 if "archive" not in d.parts]
+    # The same living pages `line-into-code` fails and the repointer rewrites,
+    # since sd:525: a locator the repointer writes into `AGENTS.md` or a skill
+    # would otherwise be checked by nothing.
+    documents = [d for d in corpus(root) if "archive" not in d.parts]
     documents += [root / name for name in ROOT_DOCUMENTS if (root / name).is_file()]
+    documents = list(dict.fromkeys(documents))
     found = []
     for doc in contained(root, documents):
         found.extend((doc, path, symbol) for path, symbol in
@@ -1283,6 +1300,18 @@ def anchored_repoint(root: pathlib.Path, flat: str, match: re.Match) -> tuple | 
     target = inside(root, path)
     if target is None:
         return None
+    if points_into_code(path):
+        # sd:525. A line into code is not repointed to another line, which the
+        # next insertion would break again: it becomes the declaration locator,
+        # right number or wrong. Only a symbol declared exactly once can be
+        # named that way, and anything else is a claim for prose.
+        name = anchor.split("(", 1)[0].lstrip(".")
+        declared = (declaration_lines(root, path, name)
+                    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) else [])
+        if len(declared) != 1:
+            return (f"`{anchor}` is declared {len(declared)} times in {path}, so"
+                    " no source: locator names it; say it in prose")
+        return (match.start(1), match.end()), f"source:{path}::{name}`"
     start = int(match.group(2))
     end = int(match.group(3) or match.group(2))
     if names_its_symbol(anchor, target, start, end):
@@ -1537,12 +1566,15 @@ class StableSourceCitationTests(unittest.TestCase):
             self.assertEqual(anchored_citations(), [])
 
     def test_existing_line_citations_still_reject_line_movement(self) -> None:
+        """Into a page, where `path:line` is still the form, a move still fails."""
         from unittest import mock
 
         docs = self.root / "docs"
         docs.mkdir()
-        (docs / "current.md").write_text("`render` (`bin/tool:1`)\n", encoding="utf-8")
-        self.target.write_text("# inserted\n" * 100 + self.target.read_text(), encoding="utf-8")
+        notes = self.root / "notes.md"
+        notes.write_text("render\n", encoding="utf-8")
+        (docs / "current.md").write_text("`render` (`notes.md:1`)\n", encoding="utf-8")
+        notes.write_text("# inserted\n" * 100 + notes.read_text(), encoding="utf-8")
         with mock.patch.dict(globals(), {"REPO_ROOT": self.root}):
             with self.assertRaisesRegex(AssertionError, "is not at"):
                 DocCitationTests().test_every_anchored_citation_names_its_symbol_at_the_cited_line()
@@ -1921,33 +1953,46 @@ class CitationRepointerTests(unittest.TestCase):
         (self.root / "bin").mkdir()
         self.source = self.root / "bin" / "tool.py"
         self.source.write_text("def render():\n    return 1\n", encoding="utf-8")
+        # A page, which keeps `path:line`: the number-moving half of the tool.
+        self.notes = self.root / "notes.md"
+        self.notes.write_text("render\nmore\n", encoding="utf-8")
         self.doc = self.root / "page.md"
 
     def page(self, body: str) -> pathlib.Path:
         self.doc.write_text(body, encoding="utf-8")
         return self.doc
 
-    def test_a_symbol_that_moved_is_repointed_to_its_declaration(self) -> None:
+    def test_a_line_into_code_becomes_its_declaration_locator(self) -> None:
+        """sd:525. Not moved to the new line, which the next insertion breaks."""
         self.page("The renderer is `render` (`bin/tool.py:1`).\n")
         self.source.write_text(
             "# inserted\n" * 9 + self.source.read_text(encoding="utf-8"), encoding="utf-8")
         text, moves, refusals = repoint_document(self.doc, self.root)
         self.assertEqual(refusals, [])
         self.assertEqual([(move.citation, move.now) for move in moves],
-                         [("`bin/tool.py:1`", "10`")])
-        self.assertIn("`bin/tool.py:10`", text)
+                         [("`bin/tool.py:1`", "source:bin/tool.py::render`")])
+        self.assertIn("`render` (`source:bin/tool.py::render`)", text)
+        self.assertIsNone(source_declaration_error(self.root, "bin/tool.py", "render"))
 
-    def test_a_range_keeps_its_width_when_it_moves(self) -> None:
+    def test_a_line_into_code_that_is_still_right_is_converted_too(self) -> None:
+        """The number being right today is not the claim sd:525 accepts."""
         self.page("The renderer is `render` (`bin/tool.py:1-2`).\n")
-        self.source.write_text(
-            "# inserted\n" * 9 + self.source.read_text(encoding="utf-8"), encoding="utf-8")
+        text, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(refusals, [])
+        self.assertEqual([move.now for move in moves], ["source:bin/tool.py::render`"])
+        self.assertIn("`source:bin/tool.py::render`", text)
+
+    def test_a_range_into_a_page_keeps_its_width_when_it_moves(self) -> None:
+        self.page("The renderer is `render` (`notes.md:1-2`).\n")
+        self.notes.write_text(
+            "# inserted\n" * 9 + self.notes.read_text(encoding="utf-8"), encoding="utf-8")
         text, _, refusals = repoint_document(self.doc, self.root)
         self.assertEqual(refusals, [])
-        self.assertIn("`bin/tool.py:10-11`", text)
+        self.assertIn("`notes.md:10-11`", text)
 
-    def test_green_a_citation_that_is_still_right_is_not_touched(self) -> None:
+    def test_green_a_citation_into_a_page_that_is_still_right_is_not_touched(self) -> None:
         """CONTROL. A repointer that rewrites a correct citation is a churn engine."""
-        original = self.page("The renderer is `render` (`bin/tool.py:1`).\n").read_text(
+        original = self.page("The renderer is `render` (`notes.md:1`).\n").read_text(
             encoding="utf-8")
         text, moves, refusals = repoint_document(self.doc, self.root)
         self.assertEqual((moves, refusals), ([], []))
@@ -1958,16 +2003,15 @@ class CitationRepointerTests(unittest.TestCase):
 
         `rstrip("()")` removed only the trailing parenthesis, leaving
         `render("x"`. That is not an identifier, so the AST lookup never saw
-        `render` and the fallback searched malformed text: a declaration that
-        moved exactly once was reported gone.
+        `render`: a declaration that exists exactly once was reported gone.
         """
         self.page('The renderer is `render("x")` (`bin/tool.py:1`).\n')
         self.source.write_text(
             "# inserted\n" * 9 + self.source.read_text(encoding="utf-8"), encoding="utf-8")
         text, moves, refusals = repoint_document(self.doc, self.root)
         self.assertEqual(refusals, [])
-        self.assertEqual([move.now for move in moves], ["10`"])
-        self.assertIn("`bin/tool.py:10`", text)
+        self.assertEqual([move.now for move in moves], ["source:bin/tool.py::render`"])
+        self.assertIn("`source:bin/tool.py::render`", text)
 
     def test_a_removed_anchor_is_not_repointed_onto_a_longer_name(self) -> None:
         """The fallback matches an identifier, never a substring.
@@ -1977,40 +2021,53 @@ class CitationRepointerTests(unittest.TestCase):
         rewrote a citation to unrelated text instead of refusing. In a tool
         that writes pages, that is the worst available outcome.
         """
-        self.source.write_text(
-            "# pad\n" * 5 + "renderer = 1\n", encoding="utf-8")
-        self.page("The renderer is `render` (`bin/tool.py:1`).\n")
+        self.notes.write_text("# pad\n" * 5 + "renderer = 1\n", encoding="utf-8")
+        self.page("The renderer is `render` (`notes.md:1`).\n")
         text, moves, refusals = repoint_document(self.doc, self.root)
         self.assertEqual(moves, [])
         self.assertIn("is gone from", refusals[0].reason)
-        self.assertIn("`bin/tool.py:1`", text)
+        self.assertIn("`notes.md:1`", text)
 
     def test_green_a_longer_name_still_moves_when_it_is_the_anchor(self) -> None:
         """CONTROL. The boundary must not stop a real match from being found."""
-        self.source.write_text(
-            "# pad\n" * 5 + "def renderer():\n    return 1\n", encoding="utf-8")
-        self.page("The renderer is `renderer` (`bin/tool.py:1`).\n")
+        self.notes.write_text("# pad\n" * 5 + "renderer\n", encoding="utf-8")
+        self.page("The renderer is `renderer` (`notes.md:1`).\n")
         _, moves, refusals = repoint_document(self.doc, self.root)
         self.assertEqual(refusals, [])
         self.assertEqual([move.now for move in moves], ["6`"])
 
     def test_an_ambiguous_anchor_refuses_rather_than_guessing(self) -> None:
         """Two candidates, so it moves nothing and says which citation it left."""
-        self.source.write_text(
-            "helper()\n" + "# pad\n" * 10 + "helper()\n", encoding="utf-8")
-        self.page("The helper is `helper` (`bin/tool.py:6`).\n")
+        self.notes.write_text("helper()\n" + "# pad\n" * 10 + "helper()\n", encoding="utf-8")
+        self.page("The helper is `helper` (`notes.md:6`).\n")
         text, moves, refusals = repoint_document(self.doc, self.root)
         self.assertEqual(moves, [])
-        self.assertEqual([refusal.citation for refusal in refusals], ["`bin/tool.py:6`"])
+        self.assertEqual([refusal.citation for refusal in refusals], ["`notes.md:6`"])
         self.assertIn("ambiguous", refusals[0].reason)
-        self.assertIn("`bin/tool.py:6`", text)
+        self.assertIn("`notes.md:6`", text)
+
+    def test_a_symbol_declared_twice_in_code_refuses_rather_than_guessing(self) -> None:
+        self.source.write_text("def helper():\n    pass\n" * 2, encoding="utf-8")
+        self.page("The helper is `helper` (`bin/tool.py:3`).\n")
+        text, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(moves, [])
+        self.assertIn("declared 2 times in bin/tool.py", refusals[0].reason)
+        self.assertIn("`bin/tool.py:3`", text)
 
     def test_a_vanished_anchor_refuses_rather_than_deleting(self) -> None:
         self.page("The renderer is `render` (`bin/tool.py:1`).\n")
         self.source.write_text("# nothing here\n" * 5, encoding="utf-8")
         _, moves, refusals = repoint_document(self.doc, self.root)
         self.assertEqual(moves, [])
-        self.assertIn("is gone from bin/tool.py", refusals[0].reason)
+        self.assertIn("declared 0 times in bin/tool.py", refusals[0].reason)
+
+    def test_an_anchor_that_is_not_a_declaration_refuses_to_prose(self) -> None:
+        """`None` and `.replace(...)` were the census's two; neither has a locator."""
+        self.source.write_text("def render():\n    return None\n", encoding="utf-8")
+        self.page("It returns `None` (`bin/tool.py:2`).\n")
+        _, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(moves, [])
+        self.assertIn("say it in prose", refusals[0].reason)
 
     def test_a_quoted_reason_moves_and_the_citation_it_covers_does_not(self) -> None:
         """sd:568's marker is a citation too, and its anchored text is the citation.
@@ -2075,6 +2132,88 @@ class CitationRepointerTests(unittest.TestCase):
         self.assertEqual([doc for doc in repointable() if "archive" in doc.parts], [])
         self.assertTrue(any("archive" in doc.parts for doc in corpus()),
                         "the corpus carries no archived page, so this proves nothing")
+
+    def test_the_repoint_command_itself_runs_in_the_unittest_shard(self) -> None:
+        """sd:525. `--repoint` was dispatched only under `__main__`.
+
+        `.github/scripts/run-tests.sh` runs `python -m unittest <module>`, which
+        never reaches that branch, so the command CONTRIBUTING.md tells a
+        person to run had no CI coverage: its dispatch, its report and its exit
+        status could all break with the suite green. This runs it as a person
+        would, against this checkout, read-only.
+        """
+        import sys
+
+        result = subprocess.run(
+            [sys.executable, str(pathlib.Path(__file__).resolve()), "--repoint"],
+            cwd=REPO_ROOT, capture_output=True, text=True, timeout=120,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        report = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, report)
+        self.assertIn("would repoint 0 citation(s); refused 0", result.stdout, report)
+
+
+class InsertionIsHarmlessToASymbolTests(unittest.TestCase):
+    """sd:525's acceptance: lines inserted above a cited symbol break nothing.
+
+    Asked of the gate's own test methods under a fixture root, so what is
+    proved is what CI runs: the stable locator still resolves after the
+    insertion, and a bare `path:line` into code fails the red-bucket test --
+    before the insertion as well as after, because a line that is right today
+    is the same claim waiting for the next insertion.
+    """
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = pathlib.Path(temporary.name)
+        self.target = self.root / "bin" / "tool.py"
+        self.target.parent.mkdir()
+        self.target.write_text("def render():\n    return 1\n", encoding="utf-8")
+        (self.root / "docs").mkdir()
+        self.stable = self.root / "docs" / "stable.md"
+        self.stable.write_text("`render` (`source:bin/tool.py::render`)\n", encoding="utf-8")
+
+    def insert_above_the_symbol(self) -> None:
+        self.target.write_text(
+            "# inserted\n" * 7 + self.target.read_text(encoding="utf-8"), encoding="utf-8")
+
+    def gate(self) -> None:
+        """The two live-corpus tests this change relies on, against the fixture."""
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root}):
+            DocCitationTests().test_the_red_buckets_are_empty()
+            DocCitationTests().test_every_anchored_citation_names_its_symbol_at_the_cited_line()
+            StableSourceCitationTests().test_every_explicit_source_locator_resolves_in_the_live_corpus()
+
+    def test_the_symbol_form_survives_an_insertion(self) -> None:
+        self.gate()
+        self.insert_above_the_symbol()
+        self.assertEqual(declaration_lines(self.root, "bin/tool.py", "render"), [8],
+                         "the insertion did not move the symbol, so this proves nothing")
+        self.assertIsNone(source_declaration_error(self.root, "bin/tool.py", "render"))
+        self.gate()
+
+    def test_a_bare_line_into_code_fails_the_gate_before_and_after(self) -> None:
+        (self.root / "docs" / "line.md").write_text(
+            "`render` (`bin/tool.py:1`)\n", encoding="utf-8")
+        with self.assertRaisesRegex(AssertionError, "line-into-code"):
+            self.gate()
+        self.insert_above_the_symbol()
+        with self.assertRaisesRegex(AssertionError, "line-into-code"):
+            self.gate()
+
+    def test_the_bucket_is_code_only_and_live_only(self) -> None:
+        """CONTROLS. A page keeps `path:line`; an archive keeps what it cited."""
+        (self.root / "notes.md").write_text("render\n", encoding="utf-8")
+        page = self.root / "docs" / "page.md"
+        page.write_text("`render` (`notes.md:1`)\n", encoding="utf-8")
+        archived = self.root / "docs" / "archive" / "old.md"
+        archived.parent.mkdir()
+        archived.write_text("`render` (`bin/tool.py:1`)\n", encoding="utf-8")
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root}):
+            self.assertEqual([row.reason for row in classify([page])], ["compared"])
+            self.assertEqual([row.reason for row in classify([archived])], ["compared"])
+        self.gate()
 
 
 if __name__ == "__main__":

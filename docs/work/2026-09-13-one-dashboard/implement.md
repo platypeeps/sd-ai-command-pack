@@ -23,7 +23,7 @@ at step 7.** The two ceilings behave differently and an earlier draft of this
 paragraph flattened them into one sentence. The code cap is the one with slack of
 29 against a live gap of 2, so a commit deleting more than 27 code lines must
 lower it in the same commit to keep `test_the_code_ceiling_is_paid_for_in_kind`
-(`tests/test_loc_caps.py:522`) green — and every deletion here is larger than
+(`source:tests/test_loc_caps.py::test_the_code_ceiling_is_paid_for_in_kind`) green — and every deletion here is larger than
 that. The total cap is 4,600 over a directory that only shrinks, so it is never
 crossed on the way down.
 
@@ -74,7 +74,7 @@ before starting step 2.
       | `os` | 20 | one use, `os.getuid()` at line 149, inside `cmd_install`. |
 
       `collect` and `store` **stay** in the `dashboard` import: `cmd_index`
-      (`bin/sd-dashboard:32`) and `issue_lines` (`bin/sd-dashboard:56`) still
+      (`source:bin/sd-dashboard::cmd_index`) and `issue_lines` (`source:bin/sd-dashboard::issue_lines`) still
       use them, and steps 4 and 5 still read the cache the `index` verb fills.
 
       **The module docstring is part of this step, because `--help` prints it.**
@@ -158,7 +158,7 @@ before starting step 2.
 
       Pack commit: delete `dashboard/plugins.py` (719 lines, 357 code), the
       `plugin-tabs` span and the `plugin-panels` div in `PAGE`
-      (`dashboard/server.py:238`), and the loader's rows from the Now merge in
+      (`source:dashboard/server.py::PAGE`), and the loader's rows from the Now merge in
       `dashboard/now.py`.
 
       **The plugin half of `app.js` is `drawPlugins` and `panelId`. It is not
@@ -168,9 +168,9 @@ before starting step 2.
 
       | Function | Step | Why |
       |---|---|---|
-      | `drawPlugins` (`dashboard/app.js:690`) | **3** | It polls `/api/plugins`, which this step's `server.py` edit removes. Delete it *with all three of its call sites* — `drawPlugins()` at `dashboard/app.js:780`, `setInterval(drawPlugins, 10000)` at `:784`, and its entry in the redraw list at `:828` — or the page polls a deleted endpoint every ten seconds. |
-      | `panelId` (`dashboard/app.js:526`) | **3** | Plugin-only, and its single caller is `drawPlugins` (`dashboard/app.js:690`). |
-      | `enhance` (`dashboard/app.js:517`) | **6**, with `app.js` | **Not plugin-only.** `for (const [, panel] of STATIC) enhance(...)` at `dashboard/app.js:426` runs it over all seven static panels at startup. `drawPlugins` calling it at `:745` is the *second* caller, not the only one. Deleting it in step 3 is an uncaught `ReferenceError` at load, and it silently takes the skills-table filter with it. Step 3 removes the call at `:745` and nothing else. |
+      | `drawPlugins` (in `dashboard/app.js`) | **3** | It polls `/api/plugins`, which this step's `server.py` edit removes. Delete it *with all three of its call sites* — `drawPlugins()` at `dashboard/app.js:780`, `setInterval(drawPlugins, 10000)` at `:784`, and its entry in the redraw list at `:828` — or the page polls a deleted endpoint every ten seconds. |
+      | `panelId` (in `dashboard/app.js`) | **3** | Plugin-only, and its single caller is `drawPlugins` (in `dashboard/app.js`). |
+      | `enhance` (in `dashboard/app.js`) | **6**, with `app.js` | **Not plugin-only.** `for (const [, panel] of STATIC) enhance(...)` at `dashboard/app.js:426` runs it over all seven static panels at startup. `drawPlugins` calling it at `:745` is the *second* caller, not the only one. Deleting it in step 3 is an uncaught `ReferenceError` at load, and it silently takes the skills-table filter with it. Step 3 removes the call at `:745` and nothing else. |
       | `addFilter` (`:463`), `addSort` (`:480`) | **6**, with `app.js` | Reached only through `enhance`. Their dispositions are in `design.md`: both dropped, the filter because the system page has one, the sort because no shipped table asks for it. |
 
       **`dashboard/actions.py` depends on the module this step deletes, and it
@@ -227,10 +227,10 @@ before starting step 2.
       **`tests/test_code_health.py` is part of this step's cleanup, not only the
       cap check.** It carries persistent baseline entries naming the files this
       commit deletes: `dashboard/plugins.py::bounded_run` in both `COMPLEX`
-      (`tests/test_code_health.py:618`) and `LONG` (`tests/test_code_health.py:651`)
+      (`source:tests/test_code_health.py::COMPLEX`) and `LONG` (`source:tests/test_code_health.py::LONG`)
       — the entries themselves are at `:647` and `:665` — and the four
       `dashboard/markup.py::Filter.handle_*` methods in `DYNAMIC`
-      (`tests/test_code_health.py:675`), entries `:676` to `:679`.
+      (`source:tests/test_code_health.py::DYNAMIC`), entries `:676` to `:679`.
       `test_every_baseline_entry_still_earns_its_place` fails on a baseline whose
       subject is gone. The `markup.py` four are deleted. The `bounded_run` two are
       **repointed, not deleted** — the function moves to `dashboard/actions.py`
@@ -247,16 +247,16 @@ before starting step 2.
       retires.** System commit: the tracker views read `tracker_items` and
       `tracker_freshness` from `sd_db`, which already take a tracker argument, and
       derive a Jira row's key as `url.rpartition("/")[2]` — the rule sd:361 step
-      7b writes into `where` (`dashboard/app.js:115`), carried across rather than
+      7b writes into `where` (in `dashboard/app.js`), carried across rather than
       reinvented. No new column: the key is the last path segment of the URL, and
       a `key` column would be a second copy of a stored fact, which is the ruling
       sd:603 already recorded.
 
       Pack commit: delete `dashboard/store.py`, `dashboard/github.py`,
-      `dashboard/jira.py`, `cmd_index` (`bin/sd-dashboard:32`) and the `index`
+      `dashboard/jira.py`, `cmd_index` (`source:bin/sd-dashboard::cmd_index`) and the `index`
       verb. This is the step that closes the criterion 2 problem outright, because
-      `sqlite3.connect` (`dashboard/store.py:89`) and `sqlite3.connect`
-      (`dashboard/store.py:94`) are the two connections the port could not carry.
+      the read and the write `sqlite3.connect` in `connect`
+      (`source:dashboard/store.py::connect`) are the two connections the port could not carry.
 
       **Four live callers import those modules, and three of them are not the
       dashboard.** Each was found by grepping importers rather than by reading the
@@ -266,7 +266,7 @@ before starting step 2.
       | Caller | Line | What it needs |
       |---|---|---|
       | `dashboard/server.py` | `:43` | imports `collect` and `store`; survives to step 6, so this commit drops both from the import line and the endpoints behind them. |
-      | `bin/sd-dashboard` | `:29` | `from dashboard import collect, store` (step 1 removed `server`) — `store` goes with `issue_lines` (`bin/sd-dashboard:56`) and the `index` verb this step deletes. |
+      | `bin/sd-dashboard` | `:29` | `from dashboard import collect, store` (step 1 removed `server`) — `store` goes with `issue_lines` (`source:bin/sd-dashboard::issue_lines`) and the `index` verb this step deletes. |
       | `bin/sd` | `:2728` | `from dashboard.collect import discover_checkouts, repo_root`, inside `sd plugin list --fleet`. **This one is not a dashboard file and nothing in this plan would otherwise touch it.** |
       | `bin/sd-trackers` | `:42` | `from dashboard import github, jira`. The whole tool is built on the two modules this step deletes, so it retires in the same commit or it is a broken entry point. |
 
@@ -341,7 +341,7 @@ before starting step 2.
       never honoured.
 
       **`deliver`'s successor is a prerequisite of this step, not a question left
-      inside it.** `deliver` (`dashboard/work.py:232`) is one of the two facts the
+      inside it.** `deliver` (`source:dashboard/work.py::deliver`) is one of the two facts the
       two dashboards share on disk, and it is a **write**; a write path deleted
       without a successor is a capability lost by accident. The earlier draft
       offered "or the operator uses `sd work deliver` from the CLI" as the fallback
@@ -351,23 +351,23 @@ before starting step 2.
       control, built in this step's **system** commit, and the pack commit does not
       start until it exists. Acceptance is mechanical and it is listed in the
       verification below: a delivery made through the successor writes a
-      `status_change` note naming `DELIVERED_BY` (`dashboard/work.py:229`). If the
+      `status_change` note naming `DELIVERED_BY` (`source:dashboard/work.py::DELIVERED_BY`). If the
       decision is instead to build a CLI verb, that verb is a prerequisite item and
       this step waits on it; what it may not be is undecided at the moment
       `work.py` is deleted.
-      Verify: `band` (`dashboard/app.js:547`)'s severity mapping is reproduced on
+      Verify: `band` (in `dashboard/app.js`)'s severity mapping is reproduced on
       the system page, asserted against the same rank numbers; a fixture
       collector that exits non-zero produces a visible row in the merged view;
       and `deliver`'s chosen successor — the system control this step's system
       commit builds, per the prerequisite above — still records a `status_change`
-      note naming `DELIVERED_BY` (`dashboard/work.py:229`).
+      note naming `DELIVERED_BY` (`source:dashboard/work.py::DELIVERED_BY`).
 
 - [ ] **7. `dashboard/` is deleted, and the ceilings retire in the same commit.**
       **Read this before starting step 2.** Three tests interlock and the
       interaction decides how steps 3 to 6 are written:
 
       (a) `test_the_code_ceiling_is_paid_for_in_kind`
-      (`tests/test_loc_caps.py:522`) asserts
+      (`source:tests/test_loc_caps.py::test_the_code_ceiling_is_paid_for_in_kind`) asserts
       `DASHBOARD_CODE_CAP - code_line_count(tracked("dashboard")) <=
       DASHBOARD_CODE_SLACK`, which is 29 against a live gap of 2. **Every pack
       commit here that deletes code must lower `DASHBOARD_CODE_CAP` in the same
@@ -379,12 +379,12 @@ before starting step 2.
       itself, for the reader who applies the rule to a smaller removal elsewhere.
 
       (b) `test_each_ceiling_is_the_last_value_its_history_records`
-      (`tests/test_loc_caps.py:552`) requires each new value appended to
-      `CEILING_HISTORY` (`tests/test_loc_caps.py:287`) in the same commit.
+      (`source:tests/test_loc_caps.py::test_each_ceiling_is_the_last_value_its_history_records`) requires each new value appended to
+      `CEILING_HISTORY` (`source:tests/test_loc_caps.py::CEILING_HISTORY`) in the same commit.
 
       (c) `test_the_recorded_history_is_raises_only`
-      (`tests/test_loc_caps.py:577`) asserts the downward count is zero, at
-      `tests/test_loc_caps.py:590`. `ceiling_moves` (`tests/test_loc_caps.py:331`)
+      (`source:tests/test_loc_caps.py::test_the_recorded_history_is_raises_only`) asserts the downward count is zero, at
+      `tests/test_loc_caps.py:590`. `ceiling_moves` (`source:tests/test_loc_caps.py::ceiling_moves`)
       returns `(29, 26, 0)` today, and **the first append from (b) makes it red.**
       Its docstring says that is deliberate: it fails "the day a ceiling finally
       comes down", and the fix is to rewrite the paragraph in the module docstring
@@ -411,13 +411,13 @@ before starting step 2.
 
       Then this step: delete the remaining tracked files under `dashboard/` and
       `bin/sd-dashboard` itself, and in the same commit delete `DASHBOARD_CAP`
-      (`tests/test_loc_caps.py:223`), `DASHBOARD_CODE_CAP`
-      (`tests/test_loc_caps.py:231`), `DASHBOARD_CODE_SLACK`
-      (`tests/test_loc_caps.py:239`) and the four tests that read them —
+      (`source:tests/test_loc_caps.py::DASHBOARD_CAP`), `DASHBOARD_CODE_CAP`
+      (`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`), `DASHBOARD_CODE_SLACK`
+      (`source:tests/test_loc_caps.py::DASHBOARD_CODE_SLACK`) and the four tests that read them —
       `test_the_dashboard_stays_under_its_ceiling`
-      (`tests/test_loc_caps.py:487`),
+      (`source:tests/test_loc_caps.py::test_the_dashboard_stays_under_its_ceiling`),
       `test_the_dashboard_code_stays_under_its_own_ceiling`
-      (`tests/test_loc_caps.py:500`), (a) and (b) — **keeping both
+      (`source:tests/test_loc_caps.py::test_the_dashboard_code_stays_under_its_own_ceiling`), (a) and (b) — **keeping both
       `CEILING_HISTORY` entries**, in the shape `BIN_CAP` retired at R11-D48 and
       for the reason that entry's own comment gives.
 

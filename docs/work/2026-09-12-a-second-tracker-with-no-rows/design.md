@@ -8,7 +8,7 @@ operator intend to work Jira tickets. Note #1244 on sd:361 answers it, dated
 stated order — configuration first, one proving collect against the existing
 loop, sd:603 taken, and only then the port planned with the item's "what to
 build" list rewritten as a migration. This document is that plan. It does not
-rebuild `refresh_issues` (`dashboard/collect.py:151`); it moves the shape of
+rebuild `refresh_issues` (`source:dashboard/collect.py::refresh_issues`); it moves the shape of
 that function into the library the nightly job already runs, and it says
 which reader shows the first Jira row and how.
 
@@ -29,7 +29,7 @@ What remains is exactly the port.
 
 The counts note #1149 ran, re-run today against the live database
 `sd_db.default_path()` opened read-only, and the legacy index at the path
-`index_path` (`dashboard/store.py:66`) builds — derived, not spelled, because
+`index_path` (`source:dashboard/store.py::index_path`) builds — derived, not spelled, because
 that function honours `XDG_CACHE_HOME` (unset on this machine when this ran):
 
 ```
@@ -77,7 +77,7 @@ them." Read literally, and the plan follows it literally:
   the availability check, match by account id, window in relative minutes —
   and the no-default-host rule at `dashboard/jira.py:25` move with it,
   verbatim. Nothing new is designed here; the module has tests in the pack
-  (`JiraTests`, `tests/test_sd_dashboard_index.py:465`) that move with it.
+  (`JiraTests`, `source:tests/test_sd_dashboard_index.py::JiraTests`) that move with it.
 - **The caller iterates.** `sync`, defined at `sd_db/shadow_sync.py:566`, already takes a
   `tracker` argument and already keys the watermark, the heartbeat and the
   row on it. It stays one-tracker-per-call. What changes is that `tracker`
@@ -89,8 +89,8 @@ them." Read literally, and the plan follows it literally:
   Nobody calls it that way, and after this change nobody can.
 - **The library exports the order.** `sd_db.TRACKERS = ("github", "jira")`,
   in report order, the same enumerated-not-discovered shape as
-  `TRACKERS` (`dashboard/collect.py:24`) and for the same reason its comment
-  gives. The verb `shadow_sync` (`bin/sd_shadow.py:141`) iterates it and calls
+  `TRACKERS` (`source:dashboard/collect.py::TRACKERS`) and for the same reason its comment
+  gives. The verb `shadow_sync` (`source:bin/sd_shadow.py::shadow_sync`) iterates it and calls
   `sync_shadow(connection, tracker=name, **options)` once per name, printing
   one block per tracker, each line prefixed `shadow sync[<tracker>]:`. A pin
   that predates the export yields `("github",)` through `getattr`, so the
@@ -113,7 +113,7 @@ Per tracker, already. `read_watermark` at `sd_db/shadow_sync.py:143` binds
 records `key=tracker`. Jira's cursor lives under key `jira` in the same
 `state` kind, written only when Jira's own collect returned `ok` — no
 errors, no truncation. **That is a change from the pack module**, whose
-`collect` (`dashboard/jira.py:285`) sets `ok` from `not error` alone at
+`collect` (`source:dashboard/jira.py::collect`) sets `ok` from `not error` alone at
 `dashboard/jira.py:322` and reports truncation beside it, leaving the
 watermark decision to `refresh_issues`, which reads only `ok`. The library's
 `Collected` convention folds truncation in — `ok=not errors and not
@@ -136,14 +136,14 @@ recovery flags do not reach Jira (below).
 
 The three required names are the `ENV_*` constants `dashboard/jira.py:84-86`
 declares; the optional fourth is read as a literal inside `settings`
-(`dashboard/jira.py:89`) at `dashboard/jira.py:96`:
+(`source:dashboard/jira.py::settings`) at `dashboard/jira.py:96`:
 
 | Variable | Required | Read as |
 |---|---|---|
 | `JIRA_BASE_URL` | yes | trimmed, trailing `/` stripped; **no default, ever** |
 | `JIRA_EMAIL` | yes | trimmed |
 | `JIRA_API_TOKEN` | yes | trimmed; never printed, never logged |
-| `JIRA_JQL` | no | replaces `DEFAULT_JQL` (`dashboard/jira.py:78`) when set |
+| `JIRA_JQL` | no | replaces `DEFAULT_JQL` (`source:dashboard/jira.py::DEFAULT_JQL`) when set |
 
 They are read from the process environment and nowhere else — not a `.env`,
 not a config file, not a plist the library knows about. **Where to set them
@@ -158,7 +158,7 @@ line; the export itself is the operator's step and is the first step in
 
 The GitHub collector has no equivalent because it has no configuration: it
 reads `gh auth status` (`sd_db/shadow_sync.py:205`). Jira's `missing`
-(`dashboard/jira.py:100`) is the analogue of `available`, and reports names
+(`source:dashboard/jira.py::missing`) is the analogue of `available`, and reports names
 only.
 
 ### The "not collected" line, and which report prints it
@@ -173,10 +173,10 @@ differently, and the difference is deliberate:
 | `sd-dashboard index` | `issues[jira]: not collected (JIRA_BASE_URL and JIRA_EMAIL not set)` | 0 — already today, `bin/sd-dashboard:239-240` |
 
 The verb's line is the new one. Its wording matches the dashboard's because
-`issue_lines` (`bin/sd-dashboard:219`) settled it: "a tracker that cannot be
+`issue_lines` (`source:bin/sd-dashboard::issue_lines`) settled it: "a tracker that cannot be
 reached is a reported row, never an exit code." The reason text comes from the
 collector's `missing` list, joined as "A, B and C", the same sentence
-`collect` (`dashboard/jira.py:285`) already builds. With every variable set
+`collect` (`source:dashboard/jira.py::collect`) already builds. With every variable set
 and the credentials wrong, the line is instead `cursor held: Jira rejected the
 credentials (401 Unauthorized); check JIRA_EMAIL and JIRA_API_TOKEN`, which
 `--strict` does turn into exit 1 — that is a configured tracker failing, and
@@ -194,10 +194,10 @@ it does today. `--strict` exits 1 when any tracker with `configured` true has
 
 ### Rows: keyed on (tracker, url), and what sd:603 changed so this is safe
 
-A Jira row is `normalize` (`dashboard/jira.py:229`) as it stands: `tracker`
+A Jira row is `normalize` (`source:dashboard/jira.py::normalize`) as it stands: `tracker`
 `jira`, `url` `{JIRA_BASE_URL}/browse/{KEY}`, `repo` the project key,
 `number` `NULL`, `kind` `issue`, `state` `open`/`closed` from the status
-*category* via `state_of` (`dashboard/jira.py:217`), `author` the reporter's
+*category* via `state_of` (`source:dashboard/jira.py::state_of`), `author` the reporter's
 display name. `store` at `sd_db/shadow_sync.py:477` writes it through
 `upsert_shadow` at `sd_db/writes.py:442`, whose conflict target is now
 `(tracker, url)` (`sd_db/writes.py:468`). Before `platypeeps/system#305` it was `url` alone
@@ -236,14 +236,14 @@ The PRD records that `LOG-23818`'s state was not re-measured, and this
 document does not re-measure it either. If it has closed since 2026-09-10 the
 row's `state` is `closed`, which is the *correct* answer and is itself the
 third acceptance line. The first window is 90 days
-(`FIRST_RUN_WINDOW`, `dashboard/jira.py:64`), so the tail of Done tickets the
+(`FIRST_RUN_WINDOW`, `source:dashboard/jira.py::FIRST_RUN_WINDOW`), so the tail of Done tickets the
 item lists (`LOG-21060`, `LOG-21118`, `LOG-21119`, `LOG-21338`, `RS-6`
 through `RS-41`) lands as `closed` rows in the same run if their `updated`
 falls inside it.
 
 ### Readers
 
-**`sd-status`.** `_database_issues` (`bin/sd-status:1134`) reads
+**`sd-status`.** `_database_issues` (`source:bin/sd-status::_database_issues`) reads
 `tracker_items(connection, tracker="github", repo=slug, ...)` at
 `bin/sd-status:1146` and `tracker_freshness(connection, "github")` at
 `bin/sd-status:1147`. Both library functions already take the tracker
@@ -253,14 +253,14 @@ hard-coded. Two things are wrong with widening it naively:
 1. The section is "this repo": `repo=slug` scopes to the checkout's GitHub
    slug, and a Jira row's `repo` is a project key. No Jira row would ever
    match, and the section would silently keep saying `github` only.
-2. `_render_issues` (`bin/sd-status:3378`) prints `#{row['number']:<6}` at
+2. `_render_issues` (`source:bin/sd-status::_render_issues`) prints `#{row['number']:<6}` at
    `bin/sd-status:3394`. With `number` `NULL` that is
    `TypeError: unsupported format string passed to NoneType.__format__`,
    confirmed on this interpreter. The first Jira row the section tried to
    print would take `sd-status` down with a traceback.
 
 And a third thing, which rules out a block *inside* the issues section:
-`issues_section` (`bin/sd-status:1181`) returns at `bin/sd-status:1197-1199`
+`issues_section` (`source:bin/sd-status::issues_section`) returns at `bin/sd-status:1197-1199`
 with `no GitHub remote` before any database is opened, and `_database_issues`
 closes its only connection before `_render_issues` runs. There is no path
 through that section that reaches a Jira row in every checkout, and its
@@ -279,8 +279,8 @@ applies the seven-day rule below**: it drops every closed row whose
 `last_seen` is older than seven days before returning, so the `rows` list
 in the status dict is the list both renderers see and `--json` cannot
 expose a closed row the text hides. The same producer-side contract
-`issues_section` keeps: `_database_issues` (`bin/sd-status:1134`) filters
-before anything renders. `render()` (`bin/sd-status:3305`) gains an
+`issues_section` keeps: `_database_issues` (`source:bin/sd-status::_database_issues`) filters
+before anything renders. `render()` (`source:bin/sd-status::render`) gains an
 explicit `_render_jira(result["jira"], write)` immediately after the
 `_render_issues(result["issues"], write)` call at `bin/sd-status:3328`;
 without that call the section would exist in `--json` and be absent from
@@ -329,7 +329,7 @@ The section is added to the heading order the skeleton test recites at
 the key `jira`.
 
 **The dashboard.** `sd-dashboard` reads `index.sqlite` through `store.issues`
-(`dashboard/server.py:662`), not `shadow`, and its collector is
+in `tracker_payload` (`source:dashboard/server.py::tracker_payload`), not `shadow`, and its collector is
 `refresh_issues` with Jira already in `TRACKERS`. A Jira row reaches the
 page the moment the same three variables are exported and `sd-dashboard
 index` runs — that is the PRD's proving step, and it is step 2 of
@@ -338,7 +338,7 @@ state", which is the item's fifth acceptance line, and an earlier draft of
 this paragraph said it did. Two readers were checked and both say
 otherwise:
 
-- `where` (`dashboard/app.js:115-120`) renders a row whose `number` is null
+- `where` (in `dashboard/app.js`) renders a row whose `number` is null
   as `issue.repo || issue.tracker`, which for `LOG-23818` is the project
   key `LOG` — every ticket in the project reads the same. The key is in the
   link target, not in the text.
@@ -353,7 +353,7 @@ back to `issue.repo || issue.tracker` only when there is no URL. That is
 one expression in one function, guarded by a source-reading test in
 `tests/test_dashboard_now.py` of the kind that file already applies to
 `fillIssues`, and it stays under `DASHBOARD_CODE_CAP`
-(`tests/test_loc_caps.py:231`) without moving it. **The state** is not a
+(`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`) without moving it. **The state** is not a
 dashboard fact: the page shows an open ticket while it is open and drops
 it when it closes, because that is what an open worklist is, and the
 recorded state — the item's third acceptance line — is what the
@@ -378,7 +378,7 @@ acceptance line is a grep.
   `dashboard/jira.py` until `index.sqlite` retires.** Two copies of the Jira
   rules for a while, both under test. Reversed the day the dashboard reads
   `shadow`; that item deletes the pack copy and 363 lines of `DASHBOARD_CAP`
-  (`tests/test_loc_caps.py:223`) with it.
+  (`source:tests/test_loc_caps.py::DASHBOARD_CAP`) with it.
 - **2026-09-12 — the verb iterates; `sync` stays one tracker per call.**
   Reversed if a third tracker arrives with GitHub's shape (details, budget
   split, protection) rather than Jira's, at which point the per-tracker stage

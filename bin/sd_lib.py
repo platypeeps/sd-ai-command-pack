@@ -1668,11 +1668,6 @@ def delivered(root: pathlib.Path, item: str) -> Answer:
 # --------------------------------------------------------------------------
 # Guest mode: the planning artifacts that do not belong in an upstream tree
 # --------------------------------------------------------------------------
-#
-# Placed at the end of the file rather than beside `mode` so that adding it
-# moves no line in this module: `tests/test_doc_citations.py` anchors work
-# items to `bin/sd_lib.py:<line>`, and an insertion higher up invalidates
-# every citation below it.
 
 
 #: The three trees `WORKFLOW.md` keeps out of an upstream checkout in
@@ -1735,10 +1730,6 @@ def guest_artifact_refusal(root: pathlib.Path, paths: Any, *, ask: Asker = gh_ap
 # --------------------------------------------------------------------------
 # The trailer block git actually reads, and the lines that fell out of it
 # --------------------------------------------------------------------------
-#
-# Appended at the end of the file for the reason stated above `GUEST_REFUSED_DIRS`:
-# `tests/test_doc_citations.py` anchors work items to `bin/sd_lib.py:<line>`,
-# and an insertion higher up invalidates every citation below it.
 
 
 #: The trailer names whose demotion costs something. `Delivers:` and `Closes:`
