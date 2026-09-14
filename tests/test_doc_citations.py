@@ -334,9 +334,26 @@ def points_into_code(path: str) -> bool:
     Everything but markdown. A line in a page is `bin/sd-docs-lint` rule 6's
     subject and the repointer's; a line anywhere else moves under an insertion
     no documentation lane made, and `source:<path>::<symbol>` does not.
+
+    Markdown is `.md` or `.markdown`, in any case. Since sd:765 this also
+    decides whether a quoted reason's line is the claim, so a `NOTES.MD:1`
+    read as code was satisfied by any line of the page (sd:794).
     """
 
-    return not path.endswith(".md")
+    return not path.lower().endswith((".md", ".markdown"))
+
+
+def numbered_lines(text: str) -> list[str]:
+    """`text` split into the lines `ast` numbers: on `\\n`, `\\r\\n` and `\\r` only.
+
+    `str.splitlines()` also breaks on a form feed, `\\x1c`-`\\x1e`, `\\x85`,
+    U+2028 and U+2029, none of which ends a line for the parser. A declaration's
+    `lineno` indexed into `splitlines()` then lands below the declaration after
+    any such character above it: the window read the wrong lines, green for a
+    neighbour carrying the text and red for the declaration itself (sd:794).
+    """
+
+    return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
 
 
 def is_under_repo(target: pathlib.Path) -> bool:
@@ -532,7 +549,7 @@ def quotes(reason: str, token: str, doc: pathlib.Path,
         if len(spans) != 1:
             return False
         first, last = spans[0]
-        return token in "\n".join(text.splitlines()[first - 1:last])
+        return token in "\n".join(numbered_lines(text)[first - 1:last])
     if points_into_code(path):
         return token in source.read_text(encoding="utf-8", errors="replace")
     try:
@@ -1181,6 +1198,60 @@ class TheMarkerGrammar(unittest.TestCase):
                         f"`f` ({self.QUOTABLE}) [quoted: source:bin/tool.py::{symbol}]"),
                     "quoted")
 
+    def test_a_line_into_a_page_is_the_claim_whatever_the_suffix_case(self) -> None:
+        """sd:794 N2. `.MD` and `.markdown` are pages; `.txt` is still file-wide.
+
+        The example sits on line 2 and the reason names line 1. Read as code,
+        any line of the file satisfies it, so both used to answer `quoted`.
+        """
+        for name in ("NOTES.MD", "notes.Md", "n.markdown", "N.MARKDOWN"):
+            with self.subTest(page=name):
+                sources = {name: f"pad\nthe example is {self.QUOTABLE} here\n"}
+                self.assertEqual(
+                    self.reason_in_checkout(sources, f"`f` ({self.QUOTABLE}) [quoted: {name}:1]"),
+                    "quoted-not-there")
+                self.assertEqual(
+                    self.reason_in_checkout(sources, f"`f` ({self.QUOTABLE}) [quoted: {name}:2]"),
+                    "quoted", "the control: the line that carries it")
+        self.assertEqual(
+            self.reason_in_checkout(
+                {"notes.txt": f"pad\nthe example is {self.QUOTABLE} here\n"},
+                f"`f` ({self.QUOTABLE}) [quoted: notes.txt:1]"),
+            "quoted", "CONTROL: a text file is not a page, so its number is a hint")
+
+    def test_a_source_locator_window_counts_lines_the_way_the_parser_does(self) -> None:
+        """sd:794 N3. `splitlines()` breaks where `ast` does not, and shifts the window.
+
+        S15 put two form-feed lines above `other`, which carries the example,
+        and cited `f`: the shifted window read `other` and answered `quoted`.
+        S16 and S17 put a form feed in a comment and U+2028 in a string above
+        `f`, which carries it: the window slid past `f` and answered red. CRLF
+        is the control, numbered alike by both.
+        """
+        body = f"    return '{self.QUOTABLE}'\n"
+        cases = (
+            ("S15 form feeds above a neighbour",
+             "\x0c\n\x0c\ndef other():\n" + body + "\ndef f():\n    pass\n", "quoted-not-there"),
+            ("S16 form feed in a comment", "# a \x0c comment\ndef f():\n" + body, "quoted"),
+            ("S17 U+2028 in a string", "X = 'a b'\ndef f():\n" + body, "quoted"),
+            ("vertical tab and \\x1c-\\x1e, \\x85, U+2029",
+             "X = 'a\x0b\x1c\x1d\x1e\x85 b'\ndef f():\n" + body, "quoted"),
+            ("CONTROL: CRLF", ("X = 1\ndef f():\n" + body).replace("\n", "\r\n"), "quoted"),
+        )
+        for name, source, expected in cases:
+            with self.subTest(name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = pathlib.Path(tmp)
+                    (root / "bin").mkdir()
+                    # Bytes, so no newline translation touches the fixture.
+                    (root / "bin" / "tool.py").write_bytes(source.encode("utf-8"))
+                    (root / "doc.md").write_text(
+                        f"`f` ({self.QUOTABLE}) [quoted: source:bin/tool.py::f]\n",
+                        encoding="utf-8")
+                    with mock.patch.dict(globals(), {"REPO_ROOT": root}):
+                        rows = classify([root / "doc.md"])
+                self.assertEqual([row.reason for row in rows], [expected])
+
     def test_a_marker_with_no_reason_does_not_exempt(self) -> None:
         self.assertNotEqual(self.reason_for("`f` (`bin/x.py:1`) [quoted:]"), "quoted")
 
@@ -1519,6 +1590,22 @@ def anchor_lines(root: pathlib.Path, path: str, anchor: str) -> list[int]:
     return [n for n, line in enumerate(lines, 1) if needle in line]
 
 
+def calls_by_name(target: pathlib.Path, start: int, end: int, name: str) -> bool:
+    """Does the cited window mention `name` as an identifier? The use-site test.
+
+    Not `names_its_symbol`, whose substring match gave both wrong answers
+    (sd:765). A stale `get` whose old window held `budget` read as a use and
+    refused, and an anchor `helper(a, b)` cited at `helper(a,b)` read as no use
+    and converted, because the argument spelling differs. The callee alone, on
+    an identifier boundary, answers both. The boundary is `\\w`, which is
+    Unicode-aware, because `geté` is one Python identifier and not a use of
+    `get`.
+    """
+    lines = numbered_lines(target.read_text(encoding="utf-8", errors="replace"))
+    window = "\n".join(lines[max(0, start - 1 - WINDOW):end + WINDOW])
+    return re.search(rf"(?<!\w){re.escape(name)}(?!\w)", window) is not None
+
+
 def inside(root: pathlib.Path, path: str) -> pathlib.Path | None:
     """The cited file, when it is a real file inside `root`. Containment only."""
     try:
@@ -1562,7 +1649,7 @@ def anchored_repoint(root: pathlib.Path, flat: str, match: re.Match) -> tuple | 
         # stale citation to the declaration, which is what converts.
         start, end = int(match.group(2)), int(match.group(3) or match.group(2))
         if (not start - WINDOW <= declared[0] <= end + WINDOW
-                and names_its_symbol(anchor, target, start, end)):
+                and calls_by_name(target, start, end, name)):
             return (f"`{anchor}` at {path}:{start} is a use, not its declaration at"
                     f" {declared[0]}; say it in prose")
         return (match.start(1), match.end()), f"source:{path}::{name}`"
@@ -1612,9 +1699,20 @@ def quoted_repoint(
     if parsed is not None and parsed.group(2):
         # sd:765. A declaration locator has no number to move, so a failed one
         # is a claim for a person: the declaration was renamed, duplicated, or
-        # no longer carries the example.
+        # no longer carries the example. Each cause is named before the last
+        # one is assumed (sd:794): a missing file, a file that is not Python,
+        # and the page itself all used to print "is not inside one declaration".
+        path, symbol = parsed.group(1), parsed.group(2)
+        resolved = (root / path).resolve()
+        if not resolved.is_relative_to(root.resolve()):
+            return f"[quoted: {reason}] names a file outside the checkout"
+        if resolved == doc.resolve():
+            return f"[quoted: {reason}] names the page it sits on, which cannot quote itself"
+        problem = source_declaration_error(root, path, symbol)
+        if problem is not None:
+            return f"[quoted: {reason}] -- {problem}"
         return (f"[quoted: {reason}] -- {match.group(0)} is not inside one"
-                f" declaration of `{parsed.group(2)}` in {parsed.group(1)}")
+                f" declaration of `{symbol}` in {path}")
     path, _, _ = reason.rpartition(":")
     source = inside(root, path)
     if source is None or source.resolve() == doc.resolve():
@@ -2401,6 +2499,87 @@ class CitationRepointerTests(unittest.TestCase):
                 self.assertEqual(refusals, [])
                 self.assertEqual([move.now for move in moves],
                                  [f"source:bin/tool.py::{name}`"])
+
+    def test_the_use_test_matches_the_callee_on_an_identifier_boundary(self) -> None:
+        """sd:765 R1 and R2. The substring test gave a wrong answer each way.
+
+        R1: a stale `get` cited where the old window holds only `budget` is a
+        stale citation to the declaration, and it refused as a use. R2: an
+        anchor `helper(a, b)` cited at `helper(a,b)` is a use, and it converted,
+        because the spelling of the arguments differs.
+        """
+        self.source.write_text(
+            "def lookup():\n"                      # 1
+            "    budget = geté() + éget()\n"       # 2
+            "    return helper(a,b)\n"             # 3
+            + "# pad\n" * 10 +                     # 4-13
+            "def get():\n"                         # 14
+            "    pass\n"                           # 15
+            "\n\n"                                 # 16-17
+            "def helper(a, b):\n"                  # 18
+            "    pass\n",                          # 19
+            encoding="utf-8")
+        self.page("It reads with `get` (`bin/tool.py:1`).\n")
+        _, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(refusals, [], "R1: `budget`, `geté` and `éget` are not uses of `get`")
+        self.assertEqual([move.now for move in moves], ["source:bin/tool.py::get`"])
+        self.page("It calls `helper(a, b)` (`bin/tool.py:3`).\n")
+        text, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(moves, [], "R2: `helper(a,b)` is a use of `helper`")
+        self.assertIn("is a use, not its declaration at 18", refusals[0].reason)
+        self.assertIn("`bin/tool.py:3`", text)
+
+    def test_a_declaration_at_either_edge_of_the_window_converts(self) -> None:
+        """The window's two bounds, which no test pinned (mutations Md and Me).
+
+        The declaration sits WINDOW lines under the cited line, and inside a
+        cited range but more than WINDOW lines under its start. Each is a
+        citation to the declaration. The use on line 2 is inside the range's
+        first lines, so ignoring the range end refuses it as a use whether the
+        mutation narrows the bound alone or the window as well.
+        """
+        self.source.write_text(
+            "# a\nx = render\n" + "# a\n" * 5 + "def render():\n    pass\n",
+            encoding="utf-8")
+        for citation in (f"bin/tool.py:{8 - WINDOW}", "bin/tool.py:1-6"):
+            with self.subTest(citation=citation):
+                self.page(f"The renderer is `render` (`{citation}`).\n")
+                _, moves, refusals = repoint_document(self.doc, self.root)
+                self.assertEqual(refusals, [])
+                self.assertEqual([move.now for move in moves], ["source:bin/tool.py::render`"])
+
+    def test_a_failed_source_reason_names_its_own_cause(self) -> None:
+        """sd:794 N4. Five causes printed the one message meant for the sixth.
+
+        A missing file, a file that is not Python, a markdown page, the page
+        itself and a path out of the checkout all said the example "is not
+        inside one declaration". Nothing is rewritten in any case.
+        """
+        (self.root / "bin" / "run").write_text("#!/bin/sh\necho {\n", encoding="utf-8")
+        (self.root / "docs.md").write_text("# notes\n\n- a (b\n", encoding="utf-8")
+        self.source.write_text("def render():\n    pass\n" * 2, encoding="utf-8")
+        for path, symbol, cause in (
+                ("bin/gone.py", "render", "bin/gone.py: target is missing"),
+                ("bin/run", "render", "bin/run: cannot read a Python source declaration"),
+                ("docs.md", "render", "docs.md: cannot read a Python source declaration"),
+                ("page.md", "render", "names the page it sits on"),
+                ("../../etc/passwd", "render", "names a file outside the checkout"),
+                ("bin/tool.py", "render", "found 2"),
+                ("bin/tool.py", "gone", "found 0")):
+            with self.subTest(path=path, symbol=symbol):
+                marker = f"[quoted: source:{path}::{symbol}]"
+                self.page(f"`render` (`bin/tool.py:1`) {marker}\n")
+                text, moves, refusals = repoint_document(self.doc, self.root)
+                self.assertEqual(moves, [])
+                self.assertEqual(len(refusals), 1, refusals)
+                self.assertIn(cause, refusals[0].reason)
+                self.assertNotIn("is not inside one declaration", refusals[0].reason)
+                self.assertIn(marker, text)
+        self.source.write_text("def render():\n    pass\n", encoding="utf-8")
+        self.page("`render` (`bin/tool.py:1`) [quoted: source:bin/tool.py::render]\n")
+        _, _, refusals = repoint_document(self.doc, self.root)
+        self.assertIn("is not inside one declaration of `render`", refusals[0].reason,
+                      "CONTROL: one declaration that does not carry it keeps its message")
 
     def test_a_quoted_reason_moves_and_the_citation_it_covers_does_not(self) -> None:
         """sd:568's marker is a citation too, and its anchored text is the citation.
