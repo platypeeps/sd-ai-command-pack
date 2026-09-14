@@ -3,9 +3,11 @@
 These verbs do not need a checkout. A new task takes the repository enclosing
 the current directory by default; ``--no-repo`` files one that belongs to no
 checkout, and ``--here`` refuses rather than filing a repo-less task.
-``--kind`` files one of the four item kinds that carry no repository at all,
-for which the repository question is already answered, and ``edit --kind``
-moves a row between the same five -- see ``LibraryKinds``.
+``--kind`` files one of the other hand kinds: a ``followup`` takes a checkout
+as a task does, and the three that carry no repository at all -- ``personal``,
+``work-idea`` and ``personal-idea`` -- have the repository question already
+answered. ``edit --kind`` moves a row between the same five -- see
+``LibraryKinds``.
 """
 
 from __future__ import annotations
@@ -74,8 +76,10 @@ class LibraryKinds:
 
 
 #: What `add --kind` and `edit --kind` read from `sd_db.workflow`, as
-#: attributes. `REPO_LESS_KINDS` is the four of the hand kinds that carry no
-#: repository, read as a group by `reads.backlog_items(repo=reads.NO_REPO)`.
+#: attributes. `REPO_LESS_KINDS` is the three of the hand kinds that carry no
+#: repository -- `personal`, `work-idea` and `personal-idea` -- read as a group
+#: by `reads.backlog_items(repo=reads.NO_REPO)`. `followup` was a fourth until
+#: sd:809.
 KIND_NEEDS = ("HAND_KINDS", "REPO_LESS_KINDS")
 
 
@@ -122,10 +126,15 @@ def _task_repo(args: argparse.Namespace, connection: Any, workflow: Any) -> str 
     the two reasons applied.
 
     A kind in `workflow.REPO_LESS_KINDS` settles the question before any of that. Those
-    four carry no repository by definition, and the group is read by asking
-    for exactly that (`reads.backlog_items(repo=reads.NO_REPO)`), so a
-    `personal` row that took the checkout cwd happened to be in would be
-    missing from the one query written to list it. `--no-repo` is therefore
+    three -- `personal`, `work-idea` and `personal-idea` -- carry no repository
+    by definition, and the group is read by asking for exactly that
+    (`reads.backlog_items(repo=reads.NO_REPO)`), so a `personal` row that took
+    the checkout cwd happened to be in would be missing from the one query
+    written to list it. A `followup` is not one of them since sd:809: a
+    followup from a code review is about the checkout it was filed in, so it
+    takes the rule a task takes, `--here` and `--no-repo` included. The set
+    is the installed library's, so a build older than sd:809 still files a
+    followup with no repository. `--no-repo` is therefore
     implied rather than required: this function's own history is that a flag
     nobody remembers prevents nothing. `--here` is refused instead of ignored,
     because it asks for a repository the kind cannot have, and a flag that
@@ -918,16 +927,17 @@ def register(groups: Any, store: Any) -> None:
     add.add_argument("--due", help="YYYY-MM-DD")
     kind = add.add_argument(
         "--kind", default="task",
-        help="what the item is (default: task); the four others carry no repository")
+        help="what the item is (default: task); a followup takes a checkout as a task "
+             "does, and personal, work-idea and personal-idea carry no repository")
     kind.choices = LibraryKinds()  # after add_argument: see `LibraryKinds`
     where = add.add_mutually_exclusive_group()
     where.add_argument("--here", action="store_true",
                        help="refuse unless this is a checkout (one is used by default)")
     where.add_argument("--no-repo", action="store_true",
-                       help="file a task that belongs to no checkout")
+                       help="file the item, whatever --kind names, belonging to no checkout")
     _output(add, "add")
 
-    edit = verbs.add_parser("edit", help="change a task's details, or any hand-filed item's kind")
+    edit = verbs.add_parser("edit", help="change a task's or followup's details, or any hand-filed item's kind")
     edit.add_argument("item", type=int)
     edit.add_argument("--title")
     edit.add_argument("--body")
@@ -942,12 +952,13 @@ def register(groups: Any, store: Any) -> None:
     # both verbs.
     belongs = edit.add_mutually_exclusive_group()
     belongs.add_argument("--belongs-to", metavar="PATH",
-                         help="move the task to a registered checkout (`.` is this one)")
+                         help="move the item to a registered checkout (`.` is this one)")
     belongs.add_argument("--no-repo", action="store_true",
-                         help="leave the task belonging to no checkout")
+                         help="leave the item belonging to no checkout")
     kind = edit.add_argument(
-        "--kind", help="reclassify the item; a move to one of the four repo-less kinds "
-                       "needs --no-repo in the same command")
+        "--kind", help="reclassify the item; a move to personal, work-idea or "
+                       "personal-idea carries no repository and needs --no-repo in "
+                       "the same command")
     kind.choices = LibraryKinds()  # after add_argument: see `LibraryKinds`
     _output(edit, "edit", revision=True)
 

@@ -162,9 +162,13 @@ branch and carrying a `Delivers: sd:42` trailer in the block
 `git interpret-trailers` reads — and is recorded on the transition, so the
 history answers "what delivered this" for a task and for a work item alike.
 A commit that states the trailer outside that block is refused by name rather
-than reported as carrying none. A `followup` or `personal` item belongs to no
-checkout, so no commit can be verified for it: the flag is refused and the
-item closes without it.
+than reported as carrying none. An item that belongs to no checkout has no
+default branch to verify a commit against, so `--delivered-by` on a
+`personal` item, or on a `followup` filed off every checkout, is refused for
+that reason and the item closes without it. A `followup` filed in a
+registered checkout carries that checkout since sd:809, but only a task's
+move to done records a delivering commit, so the flag is refused there too,
+on that second reason, and the item closes without it just the same.
 
 `sd store items --open` lists the backlog; `sd store item 42 --json` includes
 history and a revision that edits can require with `--if-revision`. Notes,

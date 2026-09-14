@@ -72,7 +72,30 @@ jobs:
       # this suite's library underneath it. It moves when this pack starts
       # using something the old pin does not carry, and only then: the suite
       # fails on a skip, so a capability the library lacks is a red run here
-      # rather than a quietly unexercised test. It last moved for sd:743
+      # rather than a quietly unexercised test. It last moved for sd:809
+      # (#360, `09260ad4`): `followup` leaves `workflow.REPO_LESS_KINDS`, so
+      # `sd task add --kind followup` in a registered checkout records it, and
+      # `workflow.edit_item` edits a followup's title, body, priority, due date
+      # and repository. `bin/sd_work.py` reads the set from the library and
+      # keeps no copy, so `tests/test_sd_work.py`'s followup tests are red at
+      # `dc03956e` and green here, and the pin and those tests move together.
+      # The same commit adds `runner.RUNNABLE_KINDS`, which `sd run` now meets
+      # through `runner.enqueue`: a followup carrying a repository and a
+      # branch is refused by kind. The move is
+      # migration-free: `dc03956e..09260ad4` touches nothing under
+      # `sd_db/schema` and `SCHEMA_VERSION` stays 9. Of the other thirty
+      # commits in that range, the ones that change `sd_db`: the Jira
+      # collector and its base URL checks (sd:361, #338, #339; sd:771, #345;
+      # sd:784, #353; sd:797, #359; `shadow_sync`, `shadow_jira`), followup
+      # and personal items taking the task statuses and the status control
+      # alone (sd:768, #341; sd:772, #344; `workflow`), which
+      # `bin/sd_work.py` reads, bulk acknowledgement of clean reports and an
+      # `ingest` that takes an actor and a record (sd:755, #347; `reporting`,
+      # which `bin/sd_controls.py` ingests through, and `retention`), the
+      # remove plan (sd:754, #350; `removal`) and the night's setup refusals
+      # (sd:805, #358; `runner_exec`). The rest do not touch `sd_db`.
+      #
+      # The move before that was for sd:743
       # (#332, `dc03956e`): `workflow.edit_item` accepts `kind`, guarded to
       # `workflow.HAND_KINDS`, and `workflow` now names `HAND_KINDS` and
       # `REPO_LESS_KINDS`. `bin/sd_work.py` reads both from the library in
@@ -148,7 +171,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          ref: dc03956e92e8716c22bf68985eafa3995b9630e5
+          ref: 09260ad42803238b0b83749ba35bda965fbfe433
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false
