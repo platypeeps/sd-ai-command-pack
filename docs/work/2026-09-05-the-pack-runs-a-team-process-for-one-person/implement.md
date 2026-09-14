@@ -1469,8 +1469,9 @@ paragraph.
   below), criterion 23's second half (`be76962e`, above), and criterion 28's
   `commands.yaml` and writing-manifest clauses (decision note 1904).
 - **Closed by this repository's pull requests:** every other criterion and
-  clause, as the table under "What closes the criteria" assigns them. Of
-  criterion 7, that is the grep.
+  clause, as the table under "What closes the criteria" assigns them. The
+  exception is criterion 7's grep. No pull request closes it: it passes from
+  any checkout, and it was re-run on 2026-09-13.
 
 The first instruction in this section, that `prd.md` goes to `status: done`
 and drops `branch:`, predates criterion 13. `prd.md` now has no `status:`
