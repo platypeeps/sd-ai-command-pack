@@ -3379,7 +3379,7 @@ def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:
         # iterated the tuple alone dropped five live keys without a word.
         for key in sd_lib.display_fields(row, CONTRIBUTION_ORDER, ("lane", "title")):
             value = row.get(key)
-            if value is not None and value != [] and value != "":
+            if sd_lib.display_value(value):
                 write(f"    {key}: " + json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n")
 
 

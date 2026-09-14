@@ -796,7 +796,7 @@ def _emit_contributions(value: Any, *, machine: bool) -> None:
         # not name were dropped in silence on every live contribution.
         for field in sd_lib.display_fields(
                 row, CONTRIBUTION_ORDER, CONTRIBUTION_SHOWN + trailer):
-            if row.get(field):
+            if sd_lib.display_value(row.get(field)):
                 print(f"  {field}: {json.dumps(row[field], ensure_ascii=False)}")
     if not rows:
         print("No contributions.")

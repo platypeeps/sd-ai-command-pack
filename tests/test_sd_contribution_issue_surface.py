@@ -84,21 +84,23 @@ class IssueRowsAreShownInBothTextReports(unittest.TestCase):
         for key in ISSUE_KEYS:
             self.assertIn(f"    {key}: ", text)
 
-    def test_contribution_list_shows_the_issue_keys_it_can(self) -> None:
-        """`draft_verified` is excluded, and the exclusion is the finding.
-
-        `_emit_contributions` skips a falsy value where `_render_contributions`
-        skips only `None`, `[]` and `""`. So `draft_verified: false` -- the
-        state where a draft body no longer matches its digest -- prints in
-        `sd-status` and is dropped by `sd task contribution list`. The two
-        reports disagree about what empty means. That is the same class of
-        silent drop the display-order work removed, it is not this change's to
-        fix, and asserting the four keys rather than five is how this test
-        declines to pretend otherwise.
-        """
+    def test_contribution_list_shows_every_issue_key(self) -> None:
         text = _work_text(FILED)
-        for key in ISSUE_KEYS[:-1]:
+        for key in ISSUE_KEYS:
             self.assertIn(f"  {key}: ", text)
+
+    def test_an_unverified_draft_says_so_in_both_reports(self) -> None:
+        """sd:360. `draft_verified: false` is an answer, not an absence.
+
+        `FILED` carries `draft_verified: True`, so the two tests above print
+        the key whichever predicate a renderer uses. They were blind to the
+        case that matters: a draft whose body no longer matches its digest.
+        `sd task contribution list` used to skip every falsy value and so said
+        nothing at all about it, while `sd-status` printed `false`.
+        """
+        unverified = {**FILED, "draft_verified": False}
+        for text in (_status_text(unverified), _work_text(unverified)):
+            self.assertIn("draft_verified: false", text)
 
     def test_the_issue_keys_are_named_rather_than_left_in_the_sorted_tail(self) -> None:
         """The control. Membership already came from the row; order did not.
@@ -126,6 +128,47 @@ class IssueRowsAreShownInBothTextReports(unittest.TestCase):
             self.assertIn("draft_title: ", text)
             self.assertIn("draft_path: ", text)
             self.assertNotIn("url: ", text)
+
+
+class BothReportsAgreeWhatEmptyMeans(unittest.TestCase):
+    """sd:360, owner decision 2026-09-13: skip only `None`, `[]` and `""`.
+
+    `False` and `0` are values. `needs_you: false` and a count of zero are
+    what the row says, and a report that hides them reads the same as one
+    whose producer never set the key.
+    """
+
+    #: Invented tail keys as well as named ones: the sorted tail is where a
+    #: field the library adds later lands, and it must obey the same rule.
+    SHOWN = {"needs_you": False, "draft_verified": False, "aaa_count": 0,
+             "aaa_ratio": 0.0, "aaa_mapping": {}}
+    SKIPPED = {"blocked_on": None, "reasons": [], "local_branch": ""}
+
+    def _row(self, fields: dict) -> dict:
+        return {"key": "item:360", "lane": "awaiting_them", "title": "Upstream", **fields}
+
+    def test_false_and_zero_are_shown_in_both_reports(self) -> None:
+        row = self._row(self.SHOWN)
+        for text in (_status_text(row), _work_text(row)):
+            self.assertIn("needs_you: false", text)
+            self.assertIn("draft_verified: false", text)
+            self.assertIn("aaa_count: 0", text)
+            self.assertIn("aaa_ratio: 0.0", text)
+            self.assertIn("aaa_mapping: {}", text)
+
+    def test_none_an_empty_list_and_an_empty_string_are_still_skipped(self) -> None:
+        """The control. Without it, printing every key passes the test above."""
+        row = self._row(self.SKIPPED)
+        for text in (_status_text(row), _work_text(row)):
+            for key in self.SKIPPED:
+                self.assertNotIn(f"{key}:", text)
+
+    def test_the_two_reports_give_one_answer_for_every_value(self) -> None:
+        for value in (*self.SHOWN.values(), *self.SKIPPED.values()):
+            row = self._row({"aaa_probe": value})
+            with self.subTest(value=value):
+                self.assertEqual(
+                    "aaa_probe:" in _status_text(row), "aaa_probe:" in _work_text(row))
 
 
 class TheClosedLaneNeedsNoRendererChange(unittest.TestCase):

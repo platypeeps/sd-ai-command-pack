@@ -1813,3 +1813,15 @@ def display_fields(
     named = list(dict.fromkeys(key for key in order if key not in skip))
     known = skip | set(order)
     return named + sorted(key for key in row if key not in known)
+
+
+def display_value(value: Any) -> bool:
+    """Whether a text report prints a field holding `value`.
+
+    Only `None`, `[]` and `""` are empty. `False` and `0` are answers:
+    `draft_verified: false` says a draft no longer matches its digest, and a
+    report that hides it reads the same as one whose producer never set the
+    key (sd:360). The two contribution renderers share this so they cannot
+    disagree again about what empty means.
+    """
+    return value is not None and value != [] and value != ""
