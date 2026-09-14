@@ -40,6 +40,37 @@ priced in isolation and nothing ever looks at them together. R11-D48 is what
 that finding eventually produced: the ceiling it was written about is the one
 that has been retired, and the other two kept.
 
+That finding is dated, and it stays as written because it is what one decision
+read on one day. It is no longer asserted. The test that asserted it is below,
+and what it asserts now is R11-D49's.
+
+**R11-D49, 2026-09-13: a ceiling may be recorded coming down.** Until this
+record, `test_the_recorded_history_is_raises_only` failed on any downward move
+in `CEILING_HISTORY`, and its docstring said what that failure was for: the day
+a ceiling came down, the R11-D41 paragraph above had to be rewritten. That day
+is sd:719, which retires `dashboard/` in steps. Each step deletes more code
+than `DASHBOARD_CODE_SLACK` lets a removal leave under an unmoved cap, so each
+must lower `DASHBOARD_CODE_CAP` and append the lower value to its history. The
+first append is the first fall the history records.
+
+This record is made in its own change, before the first fall, and not in the
+pull request that lowers the cap. That is R11-D24's clause in the mirror: a cap
+is never raised in the pull request that crossed it, and a ceiling is never
+lowered in the pull request that needed it.
+
+Three things follow, and nothing else moves:
+
+* A downward move is legal on `DASHBOARD_CODE_CAP` and on no other ceiling.
+  `DASHBOARD_CAP` is not named. It bounds a directory that only shrinks from
+  here, so it is never crossed on the way down, and it moves once, to nothing,
+  when it retires. A fall on any ceiling not named here fails the test by
+  name, date and both values, and needs its own record first.
+* No ceiling repeats a value, up or down. Every row after a ceiling's first
+  changes the number. That was the second assertion's real subject all along;
+  it read `upward` alone only because there had never been a `downward`.
+* The test keeps its name. sd:719's plan and design cite it by that name, and
+  the name is R11-D41's finding. The assertions are this record's.
+
 **No count of those moves is written in this file.** The nine above is dated
 and attributed because it is what one decision read on one day; every live
 figure is `ceiling_moves()` below, which counts recorded values and upward and
@@ -276,9 +307,10 @@ DASHBOARD_CODE_SLACK = 29
 # by every raise since. Data, not prose: the docstring above records each raise
 # where it happened, and no reader of that many separate paragraphs can see the
 # shape they make together.
-# `bin/` nearly doubled in a week. Nothing here has ever fallen, and nothing
-# here has ever refused. That is the finding R11-D41 was written from, and it
-# is only visible in one place because this list exists.
+# `bin/` nearly doubled in a week. When R11-D41 read this list nothing here had
+# ever fallen, and nothing here had ever refused. That is the finding R11-D41
+# was written from, and it is only visible in one place because this list
+# exists. R11-D49 is what lets `DASHBOARD_CODE_CAP` record a fall here.
 #
 # The dates are the day the value landed on `main`, not the day its record was
 # written. A new value goes on the end in the same change that moves the
@@ -575,34 +607,48 @@ class LineCountCaps(unittest.TestCase):
                 )
 
     def test_the_recorded_history_is_raises_only(self) -> None:
-        """R11-D41's finding, asserted instead of recited.
+        """R11-D41's name, R11-D49's assertions.
 
-        The finding was that nothing ever looked at the raises together. This
-        is the looking, and it fails the day a ceiling finally comes down --
-        at which point the paragraph in R11-D41 that reasons from "not one
-        downward move" needs rewriting, which is what a failure here is for.
+        R11-D41's finding was that nothing ever looked at the raises together.
+        This is the looking. Until R11-D49 it failed the day a ceiling came
+        down; now a fall is legal on the one ceiling that record names, and a
+        fall anywhere else fails with the ceiling, its date and both values,
+        so an undecided fall surfaces as a row rather than as a count.
 
-        The message carries the live figures so the number lives in output
-        rather than in prose that goes stale between readings.
+        Either way no ceiling repeats a value: every recorded row after a
+        ceiling's first moves the number, up or down. The message carries the
+        live figures so the number lives in output rather than in prose that
+        goes stale between readings.
         """
 
         values, upward, downward = ceiling_moves()
+        # R11-D49 names this one ceiling, and the module docstring says why
+        # `DASHBOARD_CAP` is not beside it.
+        may_fall = {"DASHBOARD_CODE_CAP"}
+        undecided = [
+            f"{name} {before} -> {after} on {date}"
+            for name, history in CEILING_HISTORY.items() if name not in may_fall
+            # `strict=False` for the reason `ceiling_moves` gives.
+            for (_, before), (date, after) in zip(history, history[1:], strict=False)
+            if after < before
+        ]
         self.assertEqual(
-            downward,
-            0,
-            f"CEILING_HISTORY now records a downward move: {values} recorded "
-            f"values, {upward} up, {downward} down across "
-            f"{len(CEILING_HISTORY)} ceilings. R11-D41 reasons from there "
-            f"being none; update that paragraph rather than this assertion.",
+            undecided,
+            [],
+            f"CEILING_HISTORY records a fall on a ceiling R11-D49 does not "
+            f"name: {values} recorded values, {upward} up, {downward} down "
+            f"across {len(CEILING_HISTORY)} ceilings. A fall is legal on "
+            f"{sorted(may_fall)} only; any other ceiling coming down needs its "
+            f"own record first.",
         )
         self.assertEqual(
-            upward,
+            upward + downward,
             values - len(CEILING_HISTORY),
             f"a ceiling repeats a value: {values} recorded values across "
             f"{len(CEILING_HISTORY)} ceilings leaves "
-            f"{values - len(CEILING_HISTORY)} moves, but only {upward} of "
-            f"them changed the number. A row that moves nothing is a raise "
-            f"nobody made.",
+            f"{values - len(CEILING_HISTORY)} moves, but only "
+            f"{upward + downward} of them changed the number ({upward} up, "
+            f"{downward} down). A row that moves nothing is a move nobody made.",
         )
 
     def test_the_code_measure_does_not_count_prose_as_code(self) -> None:
