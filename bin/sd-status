@@ -3379,10 +3379,39 @@ def _render_pending(rows: list[dict[str, Any]], write: Any) -> None:
     write(f"  {len(shown)} of {len(rows)}, by rank\n")
     for row in shown:
         write(f"  {row['id']}  {row['check']:<{CHECK_WIDTH}} {row['title']}\n")
+    totals: dict[str, int] = {}
+    for row in rows:
+        totals[row["check"]] = totals.get(row["check"], 0) + 1
     for check, count in held.items():
-        write(f"  {count} {check} row{'' if count == 1 else 's'} not shown "
-              f"(its cap is {BY_CHECK[check].pending_cap}), in --actions\n")
+        write(_held_back_line(check, count, totals[check]))
     _widened_note(rows, write)
+
+
+def _held_back_line(check: str, held: int, total: int) -> str:
+    """Why `held` of the class's `total` rows are not in `pending`.
+
+    The count is every row of the class the list does not show, the reading
+    `pending_rows` settled, and the line used to name the cap for all of them.
+    That misread the ordinary case: one row of a class capped at three, crowded
+    out by ten higher-ranked rows, read as "(its cap is 3)" when the cap had no
+    part in it, while a displaced row of an uncapped class got no line at all.
+    `past` is what the cap alone removes -- those rows stay out however short
+    the list above them is -- and the rest lost their slot to higher rank,
+    which a quieter day gives back.
+    """
+
+    cap = BY_CHECK[check].pending_cap
+    past = max(0, total - cap)
+    ranked = held - past
+    crowded = f"ranked below the first {PENDING_LIMIT}"
+    if not ranked:
+        cause = f", past its cap of {cap}"
+    elif not past:
+        cause = f", {crowded}"
+    else:
+        cause = f": {past} past its cap of {cap}, {ranked} {crowded}"
+    return (f"  {held} {check} row{'' if held == 1 else 's'} not shown"
+            f"{cause}, in --actions\n")
 
 
 def pending_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:

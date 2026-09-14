@@ -4353,7 +4353,7 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
             return sum(1 for line in text.splitlines()
                        if line.split()[1:2] == [self.CHECK] and re.match(r"^\s*[a-z][0-9a-f]{4,} ", line))
         self.assertEqual(3, listed(pending.getvalue()))
-        self.assertIn(f"  9 {self.CHECK} rows not shown (its cap is 3), in --actions\n",
+        self.assertIn(f"  9 {self.CHECK} rows not shown, past its cap of 3, in --actions\n",
                       pending.getvalue())
         self.assertEqual(12, listed(actions.getvalue()))
 
@@ -4381,8 +4381,8 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         pending = io.StringIO()
         status._render_pending(rows, pending.write)
         self.assertIn("  10 of 15, by rank\n", pending.getvalue())
-        self.assertIn(f"  5 {self.CHECK} rows not shown (its cap is 3), in --actions\n",
-                      pending.getvalue())
+        self.assertIn(f"  5 {self.CHECK} rows not shown: 2 past its cap of 3, "
+                      "3 ranked below the first 10, in --actions\n", pending.getvalue())
 
     def merged_pending(self, opened: int, merged: int) -> tuple[list[dict[str, Any]], str]:
         """`opened` open pull requests waiting on a merge and `merged` merged rows, rendered."""
@@ -4409,7 +4409,8 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
                 self.assertNotIn("not shown", text)
         rows, text = self.merged_pending(9, 2)
         self.assertEqual({self.CHECK: 1}, status.pending_rows(rows)[1])
-        self.assertIn(f"  1 {self.CHECK} row not shown (its cap is 3), in --actions\n", text)
+        self.assertIn(f"  1 {self.CHECK} row not shown, ranked below the first 10, "
+                      "in --actions\n", text)
 
     def test_the_line_prints_the_class_s_own_cap(self) -> None:
         """The cap comes from `CLASSES`; one class at 3 cannot tell that from a literal (N-3)."""
@@ -4417,7 +4418,43 @@ class MergedReviewUnacknowledgedTests(InventoryFixture):
         with mock.patch.dict(status.BY_CHECK, {self.CHECK: capped}):
             rows, text = self.merged_pending(0, 5)
             self.assertEqual({self.CHECK: 3}, status.pending_rows(rows)[1])
-        self.assertIn(f"  3 {self.CHECK} rows not shown (its cap is 2), in --actions\n", text)
+        self.assertIn(f"  3 {self.CHECK} rows not shown, past its cap of 2, in --actions\n", text)
+
+    def test_the_held_back_line_names_the_cause_not_always_the_cap(self) -> None:
+        """Rank and the cap hold rows back for different reasons (sd:787, #932 N-6).
+
+        The line named the cap whatever the reason, so one merged row under a
+        cap of three that ten higher-ranked rows crowded out read as capped.
+        Each shape is now worded by its own cause, and the mixed shape splits
+        the count between the two.
+        """
+        _, crowded = self.merged_pending(10, 1)
+        self.assertIn("  10 of 11, by rank\n", crowded)
+        self.assertIn(f"  1 {self.CHECK} row not shown, ranked below the first 10, "
+                      "in --actions\n", crowded)
+        self.assertNotIn("cap", crowded)
+
+        _, capped = self.merged_pending(0, 5)
+        self.assertIn("  3 of 5, by rank\n", capped)
+        self.assertIn(f"  2 {self.CHECK} rows not shown, past its cap of 3, in --actions\n",
+                      capped)
+        self.assertNotIn("ranked below", capped)
+
+        _, both = self.merged_pending(10, 5)
+        self.assertIn(f"  5 {self.CHECK} rows not shown: 2 past its cap of 3, "
+                      "3 ranked below the first 10, in --actions\n", both)
+
+    def test_the_line_reads_the_list_s_own_limit_not_a_literal_ten(self) -> None:
+        """`PENDING_LIMIT` is the number the crowd-out half names (sd:787).
+
+        A literal 10 in the sentence agrees with the default and stops agreeing
+        the day the list gets longer, which is the failure `_held_back_line`'s
+        cap half already avoids by reading `CLASSES`.
+        """
+        with mock.patch.object(status, "PENDING_LIMIT", 4):
+            _, text = self.merged_pending(4, 1)
+        self.assertIn(f"  1 {self.CHECK} row not shown, ranked below the first 4, "
+                      "in --actions\n", text)
 
     def test_one_unreadable_merged_pull_request_is_unchecked_and_hides_no_other(self) -> None:
         blind = self.merged(7, 2, ["bb11"], unreadable="gh api exited 1")
