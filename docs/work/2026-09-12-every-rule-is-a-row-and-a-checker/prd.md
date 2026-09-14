@@ -120,12 +120,24 @@ status checks.
    > the three properties of the predicate that are now pinned by tests.
    >
    > The 26 archive-only R-ids in this requirement were reproducible and are
-   > not affected by that correction; the backfill and one deletion have since
-   > moved them to 20, which `STRANDED_RULE_IDS` records and the Log dates.
+   > not affected by that correction. Four changes have since moved them to 20:
+   > three backfill slices registered one id each, and one commit deleted the
+   > only live files citing three more, which left the set with nothing
+   > registered for them. "The backfill and one deletion" stood here until
+   > 2026-09-14: accurate about the commits, misleading about the count, since
+   > "one deletion" is one commit that took three ids out and not one id.
+   > `STRANDED_RULE_IDS` records the set and the Log dates each move;
+   > re-measured against `075eecf2` on 2026-09-14, it is 20.
 7. **The pre-commit tier is scoped by measurement, not by assumption.** A
    checker runs over the whole repository when a whole-repository run is fast,
    and is diff-scoped only where it is not. The backbone item asserts the
-   opposite of what the clock says; `design.md` carries the timings.
+   opposite of what the clock said; `design.md` carries the timings, and
+   records on 2026-09-14 that all three have expired, that no replacement
+   record is offered in their place, and that step 7's own pull request
+   re-measures and re-decides. The requirement is unchanged — scoped by
+   measurement — but the measurement it was scoped by is gone, so nothing
+   downstream should read a live diff-scoping decision out of this document
+   until that pull request lands.
 8. **Rescoping is expected and must be recorded.** Two of the three prose rules
    proposed in the backbone item do not survive measurement unchanged. See
    `design.md`.
@@ -209,3 +221,13 @@ status checks.
   the only live citations of three stranded ids, and deleting them takes the
   stranded baseline 23 → 20 with nothing registered. The ids are in that
   commit's message; naming them here would cite them again
+- 2026-09-14 document repair, no code change. Steps 1 to 3 are ticked in
+  `implement.md` — they merged in `bb379027` and the checklist never moved. The
+  backfill's figures are re-measured against `075eecf2` and rewritten: 45 ids
+  cited in live prose, 51 defined by the bold-run form, 3 rows, 20 stranded of
+  which 17 are taught by no skill section and 3 are taught, 4 dangling.
+  `R10-D7`, a stranded id no revision of these documents had named, gets its
+  recorded reason. `design.md` records the `MUTATIONS`-versus-`proof`
+  divergence as an accepted gap, and retires the three step-7 timings, which no
+  longer reproduce. The owner decisions of 2026-09-14 (note 1989) are written
+  onto the questions in `implement.md` that they answer

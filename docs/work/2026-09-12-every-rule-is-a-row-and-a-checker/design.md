@@ -219,28 +219,75 @@ The backbone item justifies diff-scoping like this:
 > Full-repo complexity and duplication over 781 functions is too slow to run
 > per commit, and a slow hook gets bypassed.
 
-The premise is false. Timed on `e6c2cb20`, on this machine:
+The premise is false. Timed on `e6c2cb20`, on the machine of the day:
 
-| Whole-repository pass | Wall time |
+| Whole-repository pass | Wall time, `e6c2cb20` — **expired, see below** |
 |---|---|
 | `tests/test_code_health.py` — complexity, length, depth, clones | 1.71 s |
 | `tests/test_doc_citations.py` — the whole citation corpus | 0.84 s |
 | `bin/sd-docs-lint` — rules 1 to 7 over the corpus | 19.87 s |
 
-The code pass the item calls too slow finishes in under two seconds over the
-whole tree. The tool the item proposes to *extend* — because it "already walks
-the corpus" — is the one that takes twenty.
+On those numbers the code pass the item calls too slow finished in under two
+seconds over the whole tree, and the tool the item proposes to *extend* —
+because it "already walks the corpus" — was the one that took twenty.
+
+#### Retired 2026-09-14: none of those three numbers reproduces
+
+The table above is kept as the record of what was measured on `e6c2cb20` and
+is no longer a description of this repository. Two independent re-measurements
+have been taken since, and they disagree with the record and with each other:
+
+| Whole-repository pass | `e6c2cb20`, recorded | `fea53e96`, clone, one run each | `075eecf2`, this checkout, 2026-09-14 |
+|---|---|---|---|
+| `tests/test_code_health.py` | 1.71 s | 2.12 s | 2.18 s – 6.24 s over four runs; 1.66 s user + 0.35 s sys |
+| `tests/test_doc_citations.py` | 0.84 s | 2.26 s | 2.44 s – 5.69 s over four runs; 1.67 s user + 0.67 s sys |
+| `bin/sd-docs-lint` | 19.87 s | 2.85 s | 32.6 s – 35.9 s over three runs; 2.0 s – 2.2 s user + 1.7 s – 2.3 s sys |
+
+**No row of the right-hand column is offered as a replacement record.** The
+`075eecf2` figures were taken on a machine running many concurrent agents, and
+the gap between wall time and CPU time says so plainly: `bin/sd-docs-lint`
+spends about four seconds of CPU and about thirty-three seconds of wall clock,
+and it starts no subprocess and opens no socket, so the difference is
+contention and not work. A wall-clock number taken under that load measures the
+machine, not the checker.
+
+Two things survive the noise, because CPU time is not load-sensitive the way
+wall time is:
+
+1. **The code pass is over two seconds.** Every reading since `e6c2cb20` puts
+   it there, on two machines and two commits. That is exactly the condition the
+   decision below names as its own reversal trigger, so the trigger has fired
+   and the diff-scoping decision is reopened rather than inherited.
+2. **`bin/sd-docs-lint` is no longer twenty seconds of work.** Its CPU cost is
+   of the same order as the other two passes. The sole justification recorded
+   below for diff-scoping it — that it is an order of magnitude slower than
+   everything else — is not supported by any reading taken since.
+
+Where the replacement numbers come from: step 7's own pull request, which
+re-runs all three passes and times the assembled hook on a one-file diff, on a
+machine whose load is stated, and records them beside their commit.
+`implement.md` step 7 carries that instruction, and the owner confirmed it on
+2026-09-14 (note 1989) rather than dropping the pre-commit tier for CI alone.
 
 The function count is also stale: `bin/` carries 768 `def` lines today, not
 781. That figure is a literal count restating something enumerable, which is
 the exact defect prose rule 2 forbids, committed inside the item that proposes
 prose rule 2. It is quoted here only to be retired.
 
-**So the tiering inverts.** The code checkers run whole, in both tiers, and
-there is no second scope to disagree with the first. Only `bin/sd-docs-lint`
-earns diff-scoping, and earning it is a prerequisite: its 19.87 s must be
-attributed to a stage before anyone scopes around it, because a tool that is
-slow for a reason nobody measured will be slow again after the workaround.
+**So the tiering inverted**, on those numbers: the code checkers run whole in
+both tiers, there is no second scope to disagree with the first, and only
+`bin/sd-docs-lint` earns diff-scoping — with earning it as a prerequisite,
+since its cost had to be attributed to a stage before anyone scoped around it,
+because a tool that is slow for a reason nobody measured will be slow again
+after the workaround.
+
+**That conclusion is now unsupported in both halves, and step 7 re-makes it.**
+The code pass is over two seconds, so "run it whole, it is free" no longer
+follows; and `bin/sd-docs-lint` is no longer the outlier, so the one pass
+singled out for diff-scoping may not need it. The prerequisite stands whatever
+the timing says — nobody scopes around a cost that has not been attributed —
+and so does the argument in the paragraph below, which never depended on a
+number.
 
 A hook that is slow does get bypassed, and a bypassed hook is worse than none —
 it is an advisory rule wearing the costume of an enforced one, which is the
@@ -299,6 +346,13 @@ apply to the checkers the item aims it at.
   `bin/sd-docs-lint` is.** Measured, not assumed. Reversed if the whole-tree
   code pass passes two seconds, at which point the timing is re-run and the
   decision re-made on the new number rather than on this one.
+  **Reversal clause triggered 2026-09-14, and the decision is reopened, not
+  re-made here.** The code pass is over two seconds on every reading taken
+  since `e6c2cb20`, and the numbers that singled out `bin/sd-docs-lint` have
+  expired in the other direction too. The re-run and the re-decision belong to
+  step 7's own pull request, per the owner decision of 2026-09-14 (note 1989);
+  nothing in this document should be read as a live diff-scoping decision until
+  that lands.
 - **2026-09-12 — the meta-check lands before any rule.** A registry with zero
   rows must pass its own tests. This makes step 1 independently landable and
   independently green.
@@ -338,6 +392,34 @@ judging whether two English sentences say the same thing. The requirement was
 narrowed to the checkable half rather than left standing as an enforcement
 claim with no enforcer — which would have reproduced, in this item's own
 requirements list, the `WORKFLOW.md` defect that motivates the item.
+
+**Accepted, recorded 2026-09-14: `MUTATIONS` is a second copy of `proof`, and
+it is the one second list this item keeps.** A row states its mutation twice.
+`Rule.proof` states it in a sentence a reader can execute, in `bin/sd_rules.py`
+beside the row. `MUTATIONS`, in `tests/test_rule_registry.py`, states it as
+`(path, old, new, test)`, and that tuple is what leg d actually applies. This
+is the shape the whole item exists to end, committed inside the item's own
+machinery, so it is recorded here as an accepted gap rather than left for the
+next reader to discover and file as a defect.
+
+It is accepted because the two copies cannot be collapsed. Prose does not run,
+so the sentence cannot be the mutation; and a tuple of `old` and `new` strings
+is not a sentence a reviewer can follow to a rule's meaning, so the mutation
+cannot be the sentence. Deleting either one loses something the row needs.
+
+What holds them together, and how far it reaches:
+`source:tests/test_rule_registry.py::LegD` carries
+`test_every_proof_names_the_file_and_the_test_its_mutation_uses`, which
+requires the proof sentence to contain the file the mutation edits and the leaf
+name of the test that reddens. That is string containment over two of the four
+fields. **The edit itself — `old` and `new` — is held by nothing.** A proof
+sentence describing a different change to the same file, reddening the same
+test, passes. The gap is narrow and it is real, and it is the reason a row's
+proof is reviewed as prose rather than trusted as a specification.
+
+Reconsidered if a row is ever found whose proof and mutation disagree, or if a
+form is found that is both executable and readable — at which point the field
+becomes one thing and this paragraph goes.
 
 **Not accepted, and it needs an answer during implementation: what a rule id
 means when its rule is repealed.** A repealed rule's id must not become
