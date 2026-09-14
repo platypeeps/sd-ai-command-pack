@@ -1304,8 +1304,10 @@ def anchored_repoint(root: pathlib.Path, flat: str, match: re.Match) -> tuple | 
         # sd:525. A line into code is not repointed to another line, which the
         # next insertion would break again: it becomes the declaration locator,
         # right number or wrong. Only a symbol declared exactly once can be
-        # named that way, and anything else is a claim for prose.
-        name = anchor.split("(", 1)[0].lstrip(".")
+        # named that way, and anything else is a claim for prose. The leading
+        # dot is kept: `.replace(...)` is an attribute, and stripping it would
+        # name an unrelated top-level `replace` instead of refusing.
+        name = anchor.split("(", 1)[0]
         declared = (declaration_lines(root, path, name)
                     if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) else [])
         if len(declared) != 1:
@@ -2068,6 +2070,16 @@ class CitationRepointerTests(unittest.TestCase):
         _, moves, refusals = repoint_document(self.doc, self.root)
         self.assertEqual(moves, [])
         self.assertIn("say it in prose", refusals[0].reason)
+
+    def test_an_attribute_anchor_is_not_converted_onto_a_same_named_function(self) -> None:
+        """`.replace(...)` is a method call; a top-level `replace` is something else."""
+        self.source.write_text(
+            "def replace():\n    pass\ntext = 'a'.replace('a', 'b')\n", encoding="utf-8")
+        self.page('It flattens with `.replace("a", "b")` (`bin/tool.py:3`).\n')
+        text, moves, refusals = repoint_document(self.doc, self.root)
+        self.assertEqual(moves, [])
+        self.assertIn("say it in prose", refusals[0].reason)
+        self.assertNotIn("source:bin/tool.py::replace", text)
 
     def test_a_quoted_reason_moves_and_the_citation_it_covers_does_not(self) -> None:
         """sd:568's marker is a citation too, and its anchored text is the citation.
