@@ -4996,10 +4996,16 @@ class SkillPageClaimTests(StatusFixture):
         covered: list[int] = []
         for phrase in self.TENS:
             said = phrase.format(**fields)
+            # Bounded, not a raw substring: "by rank" is inside "by ranking",
+            # so a site reworded by attaching a word to its last one would
+            # still be counted and would still hold its ten in place
+            # (#965's review). The phrase has to end where the page ends it.
+            bounded = rf"(?<![\w-]){re.escape(said)}(?![\w-])"
+            whole = list(re.finditer(bounded, prose))
             with self.subTest(said):
-                self.assertEqual(1, prose.count(said),
+                self.assertEqual(1, len(whole),
                                  f"{SKILL_MD.name} no longer says this once: {said!r}")
-                at = prose.index(said)
+                at = whole[0].start()
                 here = [at + m.start() for m in re.finditer(ten, said, re.IGNORECASE)]
                 self.assertEqual(1, len(here), "the phrase names one ten, not several")
                 covered.extend(here)
