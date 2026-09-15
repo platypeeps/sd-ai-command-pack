@@ -5092,3 +5092,5 @@ class SkillPageClaimTests(StatusFixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+# Probe for sd:878: the control run, on a head that merges cleanly.
