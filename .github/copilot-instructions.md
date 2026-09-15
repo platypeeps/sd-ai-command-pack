@@ -40,7 +40,18 @@ somebody deliberately wrote under `docs/work/`.
   focused fixture in the local guard suite.
 - Separate current, non-outdated unresolved findings from stale or outdated
   review threads.
-- Broad automation or CI diffs carry an explicit scope section in the PR body —
-  `Tooling/generated scope:`, `Automation scope:`, or `CI/review scope:`, per
-  `.github/PULL_REQUEST_TEMPLATE.md`. If the matching section is missing,
-  request it once instead of scattering scope comments across files.
+- A diff that touches a path in the table below carries the matching scope
+  line in the PR body, on its own line, per `.github/PULL_REQUEST_TEMPLATE.md`.
+  `bin/sd-docs-lint --pr-body` rule 8 reads this table and fails a body that
+  lacks the line a changed path demands, so the author sees it before you do;
+  if a body still lacks it, request it once instead of scattering scope
+  comments across files. The table is the one place the classes are spelled:
+  the linter enumerates its rows, so adding a row here is what adds a class.
+
+| Scope line | Paths that demand it | Why |
+|---|---|---|
+| `CI/review scope:` | `.github/**`, `actions/**`, `Makefile` | What CI runs and what a reviewer reads: the workflows, the scripts they call, the review routing policy, this file and the template, the composite actions a consumer's workflow runs, and the local gate CI mirrors. |
+| `Automation scope:` | `bin/sd_setup_github.py`, `bin/sd_setup_guard.py` | What writes the framework's own automation into another repository: the routing workflow and the Dependabot guard `sd-review setup-github` installs. |
+
+`Tooling/generated scope:` was the third heading, for copied payload. Nothing
+here is a copy of anything, so no path demands it and the heading is retired.

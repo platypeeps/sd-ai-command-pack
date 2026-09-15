@@ -63,8 +63,9 @@ A change with no work item needs no PRD or database row to ship.
    before anything leaves the machine. When the selected work root exists
    (`docs/work` by default), run `sd-docs-lint` for that root with its applicable
    rules enforced locally regardless of repo mode: shape · ready · decision
-   shape · spec index · PR link, the last against the pull request body
-   `sd-ship` has built by then. With no work root, omit that artifact lint;
+   shape · spec index · PR link · PR scope, the last two against the pull
+   request body `sd-ship` has built by then, and PR scope against the branch's
+   diff from `origin/HEAD`. With no work root, omit that artifact lint;
    do not create a planning directory to satisfy it. The repository's checks
    and local code review still run. The review is the development flow's *code, before
    merge* point. Its cap is the one on that row in the sd-ai-command-pack

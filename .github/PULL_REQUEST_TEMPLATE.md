@@ -1,11 +1,11 @@
 ## Summary
 
 <!-- 1-3 bullets: what changed and why. Name every behavior change in the diff. -->
-<!-- If the diff touches copied pack/Trellis tooling, broad automation, or
-CI/review files, add the matching explicit scope section on its own line —
-"Tooling/generated scope:", "Automation scope:", or "CI/review scope:" — as
-described in .github/copilot-instructions.md. A pack-version adoption PR, whose diff
-is only files the pack itself installs, does not need one. -->
+<!-- If the diff touches a CI/review or automation path, add the matching
+scope line on its own line — "CI/review scope:" or "Automation scope:". The
+paths in each class are the table in .github/copilot-instructions.md, and
+bin/sd-docs-lint --pr-body (rule 8) fails a body that lacks the line a changed
+path demands, naming both. -->
 
 ## Test plan
 

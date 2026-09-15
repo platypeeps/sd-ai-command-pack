@@ -1,4 +1,4 @@
-"""Green and red fixtures for each of the six rules in bin/sd-docs-lint."""
+"""Green and red fixtures for each rule in bin/sd-docs-lint."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import importlib.util
 import io
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import unittest
@@ -108,11 +109,13 @@ class LintFixture(unittest.TestCase):
             ["git", "-C", str(self.repo), *args], check=True, capture_output=True
         )
 
-    def run_lint(self, pr_body: str | None = None) -> lint.Report:
+    def run_lint(
+        self, pr_body: str | None = None, changed: list[str] | None = None
+    ) -> lint.Report:
         # Staged, not committed: `ls-files` reads the index, and every test
         # here writes its fixture immediately before asking for a verdict.
         self.git("add", "-A")
-        return lint.run(self.repo, "docs/work", "docs/spec", "docs/decisions", pr_body)
+        return lint.run(self.repo, "docs/work", "docs/spec", "docs/decisions", pr_body, changed)
 
     def assert_clean(self) -> None:
         report = self.run_lint()
@@ -132,8 +135,10 @@ class LintFixture(unittest.TestCase):
     def record(self) -> tuple[int, list[tuple[str, str, str, str]]]:
         return lint.write_citation_manifest(self.cited_item(), self.work)[:2]
 
-    def assert_fails(self, needle: str, pr_body: str | None = None) -> list[str]:
-        report = self.run_lint(pr_body)
+    def assert_fails(
+        self, needle: str, pr_body: str | None = None, changed: list[str] | None = None
+    ) -> list[str]:
+        report = self.run_lint(pr_body, changed)
         joined = "\n".join(report.failures)
         self.assertIn(needle, joined)
         return report.failures
@@ -523,6 +528,287 @@ class Rule5PullRequestLinkTests(LintFixture):
             "Add database reads; dashboard controls follow in the next slice.\n\n"
             "Work: docs/work/2026-08-29-a-workable-item\n"
         )
+        self.assertEqual(report.failures, [])
+
+
+#: A policy file with the two classes this repository declares, in the shape
+#: rule 8 reads: a row per class, the line in the first cell, the globs in the
+#: second. The prose around the table is not what the rule reads.
+SCOPE_POLICY = """# Repository Copilot Instructions
+
+## Where to spend review budget
+
+- A diff that touches a path in the table below carries the matching line.
+
+| Scope line | Paths that demand it | Why |
+|---|---|---|
+| `CI/review scope:` | `.github/**`, `actions/**`, `Makefile` | What CI runs and a reviewer reads. |
+| `Automation scope:` | `bin/sd_setup_github.py` | What writes automation elsewhere. |
+"""
+
+#: The four paths #968 changed, the pull request whose body ran clean without
+#: a scope line and raised sd:931.
+PR_968_PATHS = [
+    ".github/scripts/check-zizmor-personas.py",
+    ".github/workflows/tests.yml",
+    "Makefile",
+    "tests/test_zizmor_persona_decisions.py",
+]
+
+
+class Rule8PullRequestScopeTests(LintFixture):
+    """A diff touching a scope class carries that class's line in the body.
+
+    `bin/sd-docs-lint --pr-body` ran clean on #968, whose diff touched
+    `.github/workflows/tests.yml` and whose body carried no scope line; the
+    template asked for one and only the reviewer noticed (sd:931). The
+    classes come from `.github/copilot-instructions.md`, so the fixture
+    writes that file and the rule is asserted against what it wrote.
+    """
+
+    def policy(self, text: str = SCOPE_POLICY) -> None:
+        path = self.repo / lint.SCOPE_POLICY
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def rule_8(self, report: lint.Report) -> str:
+        return "\n".join(note for note in report.notes if note.startswith("rule 8"))
+
+    def test_no_policy_file_is_no_scope_classes_and_is_said(self) -> None:
+        # A consumer repository has no Copilot instructions of this shape;
+        # sd-ship runs this linter there, and a rule with nothing to read
+        # says so rather than failing every pull request in it.
+        report = self.run_lint("Work: sd:1\n", changed=PR_968_PATHS)
+        self.assertEqual(report.failures, [])
+        self.assertIn("declares no scope classes; not run", self.rule_8(report))
+
+    def test_no_body_is_not_run_whatever_changed(self) -> None:
+        self.policy()
+        report = self.run_lint(None, changed=PR_968_PATHS)
+        self.assertEqual(report.failures, [])
+        self.assertIn("no --pr-body supplied, not run", self.rule_8(report))
+
+    def test_red_the_968_diff_with_no_scope_line_names_the_path_and_the_line(self) -> None:
+        # The fail-first case. The path named is the first one the class
+        # claims, and the line named is the one the body must carry.
+        self.policy()
+        failures = self.assert_fails(
+            'touches .github/scripts/check-zizmor-personas.py, which '
+            '.github/copilot-instructions.md puts under "CI/review scope:", '
+            'and carries no "CI/review scope:" line',
+            pr_body="Work: sd:876\n\nNo scope line anywhere.\n",
+            changed=PR_968_PATHS,
+        )
+        self.assertEqual(len(failures), 1, failures)
+
+    def test_green_the_line_on_its_own_satisfies_the_class(self) -> None:
+        self.policy()
+        report = self.run_lint(
+            "Work: sd:876\n\nCI/review scope: one step added to the lint job.\n",
+            changed=PR_968_PATHS,
+        )
+        self.assertEqual(report.failures, [])
+        self.assertIn('demands "CI/review scope:", and the body carries it', self.rule_8(report))
+
+    def test_green_a_markdown_heading_is_the_line_on_its_own(self) -> None:
+        # How #968 wrote it once asked: `## CI/review scope:`.
+        self.policy()
+        report = self.run_lint("Work: sd:876\n\n## CI/review scope:\n\nThe CI surface.\n",
+                               changed=PR_968_PATHS)
+        self.assertEqual(report.failures, [])
+
+    def test_green_a_bold_or_list_form_is_the_line_on_its_own(self) -> None:
+        self.policy()
+        for form in ("**CI/review scope:** the lint job\n", "- CI/review scope: the lint job\n",
+                     "> ci/review scope: the lint job\n"):
+            with self.subTest(form=form):
+                report = self.run_lint(f"Work: sd:876\n\n{form}", changed=PR_968_PATHS)
+                self.assertEqual(report.failures, [], form)
+
+    def test_red_a_mention_in_prose_is_not_the_line(self) -> None:
+        # The template asks for the line on its own; a sentence that names
+        # the heading has not declared a scope.
+        self.policy()
+        self.assert_fails(
+            'carries no "CI/review scope:" line',
+            pr_body="Work: sd:876\n\nRemember to add the CI/review scope: line later.\n",
+            changed=PR_968_PATHS,
+        )
+
+    def test_red_another_class_s_line_does_not_stand_in(self) -> None:
+        self.policy()
+        self.assert_fails(
+            'carries no "CI/review scope:" line',
+            pr_body="Work: sd:876\n\nAutomation scope: none.\n",
+            changed=PR_968_PATHS,
+        )
+
+    def test_each_touched_class_is_demanded_and_failed_on_its_own(self) -> None:
+        self.policy()
+        failures = self.assert_fails(
+            'carries no "Automation scope:" line',
+            pr_body="Work: sd:876\n\nCI/review scope: the workflow.\n",
+            changed=[".github/workflows/tests.yml", "bin/sd_setup_github.py"],
+        )
+        self.assertEqual(len(failures), 1, failures)
+        self.assertNotIn("CI/review", "\n".join(failures))
+
+    def test_green_a_path_in_no_class_demands_nothing(self) -> None:
+        self.policy()
+        report = self.run_lint("Work: sd:1\n", changed=["bin/sd_lib.py", "docs/work/x/prd.md"])
+        self.assertEqual(report.failures, [])
+        self.assertIn("2 changed path(s) from --changed, 0 class(es) demanded", self.rule_8(report))
+
+    def test_the_glob_crosses_directories(self) -> None:
+        # `.github/**` claims `.github/scripts/x.py`, two levels down; a
+        # `*` that stopped at `/` would leave the scripts CI runs unclaimed.
+        self.policy()
+        self.assert_fails('touches .github/scripts/deep/er/x.py',
+                          pr_body="Work: sd:1\n", changed=[".github/scripts/deep/er/x.py"])
+        self.assertTrue(lint.matches_scope("Makefile", "Makefile"))
+        self.assertFalse(lint.matches_scope("sub/Makefile", "Makefile"))
+
+    def test_the_classes_are_read_from_the_table_and_not_from_the_linter(self) -> None:
+        # A row added to the policy is a class the linter enforces, with no
+        # edit here: the enumeration is the table's, which is the point of
+        # sd:931's "not retyped in the linter".
+        self.policy(SCOPE_POLICY + "| `Kitchen scope:` | `kitchen/**` | Everything and the sink. |\n")
+        self.assert_fails(
+            'touches kitchen/sink.py, which .github/copilot-instructions.md puts under '
+            '"Kitchen scope:", and carries no "Kitchen scope:" line',
+            pr_body="Work: sd:1\n", changed=["kitchen/sink.py"],
+        )
+        self.assertEqual(
+            [line for line, _ in lint.scope_classes(self.repo)],
+            ["CI/review scope:", "Automation scope:", "Kitchen scope:"],
+        )
+
+    def test_a_policy_file_with_no_table_declares_no_class_and_is_said(self) -> None:
+        self.policy("# Repository Copilot Instructions\n\nNo table here.\n")
+        report = self.run_lint("Work: sd:1\n", changed=PR_968_PATHS)
+        self.assertEqual(report.failures, [])
+        self.assertIn("tabulates no scope class; not run", self.rule_8(report))
+
+    def commit_all(self, message: str) -> None:
+        self.git("add", "-A")
+        self.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", message)
+
+    def test_changed_paths_come_from_git_against_origin_head_when_not_listed(self) -> None:
+        # sd-ship pins `origin/HEAD` to the remote default branch before it
+        # runs this linter, and passes no list; the diff from the merge base
+        # is what the pull request will carry.
+        self.policy()
+        self.commit_all("base")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        (self.repo / ".github" / "workflows").mkdir(parents=True)
+        (self.repo / ".github" / "workflows" / "tests.yml").write_text("on: push\n", encoding="utf-8")
+        self.commit_all("touch a workflow")
+        report = self.run_lint("Work: sd:1\n")
+        self.assertEqual(len(report.failures), 1, report.failures)
+        self.assertIn("touches .github/workflows/tests.yml", report.failures[0])
+        self.assertIn("1 changed path(s) from origin/HEAD", self.rule_8(report))
+
+    def test_origin_main_is_read_when_origin_head_is_not_set(self) -> None:
+        self.policy()
+        self.commit_all("base")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        (self.repo / "Makefile").write_text("check:\n", encoding="utf-8")
+        self.commit_all("touch the gate")
+        report = self.run_lint("Work: sd:1\n")
+        self.assertIn("touches Makefile", "\n".join(report.failures))
+        self.assertIn("from origin/main", self.rule_8(report))
+
+    def test_no_base_ref_and_no_list_is_a_failure_and_not_a_pass(self) -> None:
+        # The body is there, so the rule is supposed to run. A rule that
+        # cannot see the diff and reports clean is the bug in sd:931 with a
+        # different cause.
+        self.policy()
+        self.commit_all("base")
+        self.assert_fails(
+            "rule 8 cannot enumerate the changed paths: neither origin/HEAD nor origin/main "
+            "resolves; pass --changed <file> listing them, one per line",
+            pr_body="Work: sd:1\n",
+        )
+
+    def test_cli_reads_the_changed_list_and_fails_by_name(self) -> None:
+        self.policy()
+        self.git("add", "-A")
+        body = self.repo / "body.md"
+        body.write_text("Work: sd:876\n", encoding="utf-8")
+        listed = self.repo / "changed.txt"
+        listed.write_text("\n".join(PR_968_PATHS) + "\n  \n", encoding="utf-8")
+        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said:
+            self.assertEqual(lint.main(["--pr-body", str(body), "--changed", str(listed)]), 1)
+        self.assertIn('carries no "CI/review scope:" line', said.getvalue())
+
+    def test_cli_changed_without_a_body_is_an_argument_error(self) -> None:
+        listed = self.repo / "changed.txt"
+        listed.write_text("Makefile\n", encoding="utf-8")
+        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said:
+            self.assertEqual(lint.main(["--changed", str(listed)]), 2)
+        self.assertIn("--changed needs --pr-body", said.getvalue())
+
+    def test_cli_rejects_an_unreadable_changed_list(self) -> None:
+        body = self.repo / "body.md"
+        body.write_text("Work: sd:1\n", encoding="utf-8")
+        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said:
+            self.assertEqual(
+                lint.main(["--pr-body", str(body), "--changed", str(self.repo / "missing")]), 2)
+        self.assertIn("cannot read --changed", said.getvalue())
+
+
+class ScopePolicyTests(unittest.TestCase):
+    """This repository's own table, and the template that points at it.
+
+    Rule 8 reads its classes from `.github/copilot-instructions.md`, so a
+    table deleted from that file switches the rule off with a note and no
+    failure. These pin the table's presence and its agreement with the
+    template, which is the only other place the lines are named.
+    """
+
+    TEMPLATE = REPO_ROOT / ".github" / "PULL_REQUEST_TEMPLATE.md"
+
+    def classes(self) -> list[tuple[str, tuple[str, ...]]]:
+        found = lint.scope_classes(REPO_ROOT)
+        assert found is not None, f"{lint.SCOPE_POLICY} is not here"
+        return found
+
+    def test_the_table_is_here_and_names_the_two_live_classes(self) -> None:
+        self.assertEqual([line for line, _ in self.classes()],
+                         ["CI/review scope:", "Automation scope:"])
+        for line, globs in self.classes():
+            with self.subTest(line=line):
+                self.assertTrue(globs, f"{line} has no path that demands it")
+
+    def test_the_template_names_exactly_the_lines_the_table_has(self) -> None:
+        # The template quotes the lines for an author; the table defines
+        # them for the linter. One dropped from either is drift.
+        quoted = re.findall(r'"([^"]*scope:)"', self.TEMPLATE.read_text(encoding="utf-8"))
+        self.assertEqual(sorted(set(quoted)), sorted(line for line, _ in self.classes()))
+
+    def test_every_glob_in_the_table_names_a_tracked_path(self) -> None:
+        # A row whose globs match nothing tracked is a class that demands
+        # nothing and reads as if it did.
+        tracked = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "--deduplicate"],
+            check=True, capture_output=True, text=True,
+        ).stdout.splitlines()
+        for line, globs in self.classes():
+            for glob in globs:
+                with self.subTest(line=line, glob=glob):
+                    self.assertTrue(any(lint.matches_scope(path, glob) for path in tracked), glob)
+
+    def test_the_968_diff_demands_the_ci_review_line_here(self) -> None:
+        # The fixture that raised sd:931, run against this repository's own
+        # table rather than the test's copy of it.
+        report = lint.Report()
+        lint.check_pr_scope(REPO_ROOT, "Work: sd:876\n", PR_968_PATHS, report)
+        self.assertEqual(len(report.failures), 1, report.failures)
+        self.assertIn('carries no "CI/review scope:" line', report.failures[0])
+        report = lint.Report()
+        lint.check_pr_scope(REPO_ROOT, "Work: sd:876\n\n## CI/review scope:\n\nOne step.\n",
+                            PR_968_PATHS, report)
         self.assertEqual(report.failures, [])
 
 
