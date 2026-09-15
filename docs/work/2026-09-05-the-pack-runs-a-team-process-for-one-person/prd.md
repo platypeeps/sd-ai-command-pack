@@ -937,14 +937,14 @@ Usage counts cannot decide what stays, because none exist. Cohesion can.
   and on reads of `skills/*/SKILL.md`, a `UserPromptSubmit` hook for typed
   `/sd-*` commands (marked `direct`), a nightly parse of `~/.codex/sessions`
   for the same, and an OpenCode plugin when that surface is in use.
-- Promotion is a pull request that moves `contrib/<name>` to `skills/<name>` and
-  adds it to a path; direct use counts as a path of length one. Demotion is the
-  reverse. A trial that expires with zero rows is removed at the next install
-  run, which says so. A path skill with no use in ninety days is proposed for
-  demotion. No demotion on counts happens before ninety days of data exist.
+- Promotion moves `contrib/<name>` to `skills/<name>` and adds it to a path; direct use
+  counts as a path of length one. Demotion is the reverse. Each queues one `skill-apply`
+  task and opens no pull request itself. A trial that expires with zero rows is removed
+  at the next install run, which says so. A path skill with no use in ninety days is
+  proposed for demotion. No demotion on counts happens before ninety days of data exist.
 - The dashboard's skills section (B) is a catalog: what each skill does, when to
   use it, use per surface, trials and their expiry, and three buttons. Promote
-  and demote call the library to open the pull request. Review runs one
+  and demote call the library to queue that task and open nothing. Review runs one
   reviewer pass on the skill, installed, on trial or in `contrib/`, for
   internal consistency and for fit with the installed set, and files each
   recommendation as a proposal; accepted proposals ship as one pull request.
