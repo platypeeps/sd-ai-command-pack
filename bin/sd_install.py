@@ -907,11 +907,25 @@ LEGACY_BLOCK_MARKERS = (
     ("<!-- sd-ai-command-pack:end -->", BLOCK_END),
 )
 
+#: The unmarked prose the same installer wrote into the body: two lines from
+#: 43170716 (2026-08-30), three from ffb86115 (the morning of 2026-09-06),
+#: verbatim. Neither is `key: value`, so the reader raised on the body and
+#: `--repo` stopped before the write that would have replaced it. These lines
+#: are ours, and a refresh reads past them; any other line the reader refuses
+#: is the operator's, and is refused with the file left as it was, because a
+#: mistyped denial dropped on the floor would widen consent.
+LEGACY_BLOCK_PROSE = frozenset({
+    "sd-ai-command-pack, machine-scope. Work items live under `docs/work/`; nothing",
+    "else in this repo belongs to the framework.",
+    "else in this repo belongs to the framework. The workflow these keys override is",
+    "`WORKFLOW.md` in the pack checkout; it is the one page that states the policy.",
+})
+
 # Commented, because the body is the reader's grammar and not prose with keys
 # in it: `parse_scalars` refuses a line that is neither blank, a comment, nor
 # `key: value`. Unmarked, these three lines raised `ConfigError` on every read
 # -- a second way the same block was unreadable, and one the marker fix alone
-# would have left standing.
+# would have left standing; `without_legacy_prose` is how a refresh gets past it.
 #: The menu of keys, not the answers. Every key line here is written out
 #: commented -- see `consent_body` -- so this is the template a reader
 #: uncomments a line of, and the one place the key set is spelled.
@@ -1049,16 +1063,40 @@ def consent_body(consent: str | None) -> str:
     return BLOCK_KEY_LINE.sub(commented_unless_granted, DEFAULT_BLOCK_BODY)
 
 
+def without_legacy_prose(body: str) -> str:
+    """`body` less the unmarked lines this installer once wrote into it.
+
+    The block written until 2026-09-06 opened with prose the reader's grammar
+    has no room for, so the reader raised on the body's second line and
+    `--repo` stopped before `write_local_block`, the one place that could
+    have replaced it: every repository set up before then failed its first
+    refresh on the block the refresh exists to correct. Only our own lines
+    come out; what is left, the operator's `reviewers` line among it, still
+    goes through the reader whole, so a grant survives the refresh and a
+    line the operator got wrong is refused exactly as it was before.
+    """
+    return "\n".join(line for line in body.split("\n") if line.strip() not in LEGACY_BLOCK_PROSE)
+
+
 def standing_consent(repo: Path) -> str | None:
-    """Read local consent through its canonical grammar, preserving empty denial."""
+    """Read local consent through its canonical grammar, preserving empty denial.
+
+    The markers are checked whole and refused whole -- a half-open or doubled
+    pair is the operator's file -- and then the body is read with our own
+    old prose taken out, and nothing else forgiven.
+    """
     lib = sibling("sd_lib")
     try:
         text = migrated((repo / LOCAL_BLOCK_FILE).read_text(encoding="utf-8"))
-        value = lib.parse_local_block(text).get(CONSENT_KEY)
     except FileNotFoundError:
         if (repo / LOCAL_BLOCK_FILE).is_symlink():
             raise lib.ConfigError("cannot read dangling local configuration link") from None
         return None
+    body = lib.local_block_body(text)
+    if body is None:
+        return None
+    fields = lib.parse_scalars(without_legacy_prose(body), comments=True, label=LOCAL_BLOCK_FILE)
+    value = fields.get(CONSENT_KEY)
     return None if value == lib.parse_scalars(DEFAULT_BLOCK_BODY, comments=True).get(CONSENT_KEY) else value
 
 
