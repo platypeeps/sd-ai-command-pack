@@ -172,8 +172,14 @@ def work_section(root: pathlib.Path) -> dict[str, Any]:
 
 
 def setup_section(root: pathlib.Path) -> dict[str, Any]:
+    # sd:789, criterion 11 of sd:10. A demotion keeps new planning artifacts
+    # out of the shared tree and can do nothing about the ones already there,
+    # which are the operator's to move -- so the report names them, and only
+    # while the mode is `guest`, where they are a thing to act on rather than
+    # the ordinary contents of a `full` repository.
+    lowered: sd_lib.RemoteAnswer | None = None
     try:
-        resolved = sd_lib.mode(root)
+        resolved, lowered = sd_lib.mode_answer(root)
         mode_error = ""
     except sd_lib.ConfigError as error:
         resolved, mode_error = sd_lib.DEFAULT_MODE, str(error)
@@ -186,6 +192,8 @@ def setup_section(root: pathlib.Path) -> dict[str, Any]:
     return {
         "mode": resolved,
         "mode_error": mode_error,
+        "demoted": lowered.reason if lowered is not None else "",
+        "shared_tree": list(sd_lib.shared_tree_artifacts(root)) if resolved == "guest" else [],
         "source": detection.source,
         "origin": str(detection.origin) if detection.origin else None,
         "detected": detection.reason,
@@ -3490,6 +3498,18 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     write(f"  mode: {setup['mode']}\n")
     if setup["mode_error"]:
         write(f"  ! {setup['mode_error']}\n")
+    if setup.get("demoted"):
+        write(f"  lowered to guest: {setup['demoted']}\n")
+    # Named, not counted: the operator moves these by path. Ten is where a
+    # list stops being a list and becomes a screenful, and the tail is one
+    # line saying how much was not shown.
+    shared = setup.get("shared_tree") or []
+    if shared:
+        write(f"  already in the shared tree ({len(shared)}), yours to move:\n")
+        for path in shared[:10]:
+            write(f"    {path}\n")
+        if len(shared) > 10:
+            write(f"    ... and {len(shared) - 10} more\n")
     write(f"  entrypoints: {setup['source'] or 'none'} ({setup['detected']})\n")
     for name, argv in setup["entrypoints"].items():
         write(f"    {name:<6} {' '.join(argv)}\n")

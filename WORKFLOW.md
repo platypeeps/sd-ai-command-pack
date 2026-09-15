@@ -239,7 +239,10 @@ that gains a collaborator stops
 receiving your planning artifacts before the next push, not after the
 next merge. The push check is of the destination: your fork's integration
 branch is your own remote, and the guest push there proceeds while the
-same branch offered upstream is refused. Mode never decides merging.
+same branch offered upstream is refused. A lowered run leaves a note on the
+item saying which answer lowered it, once per item and remote however many
+runs it takes, and `sd-status` names the planning artifacts the shared tree
+was already carrying, which are yours to move. Mode never decides merging.
 `merge: auto` is a per-repository policy you set once on the dashboard, off by
 default, and nothing derives it. It is necessary, not sufficient: every merge
 asks the same three questions again, one function for both gates, and a no

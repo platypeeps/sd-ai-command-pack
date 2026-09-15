@@ -555,7 +555,7 @@ class Ship:
         # three -- so this is the form, not a fix (sd:841).
         local_work = (self.item["kind"] == "work" and self.item.get("path")
                       and git(self.root, "ls-files", "--deduplicate", "--", self.item["path"]))
-        mode = sd_lib.mode(self.root, ask=lambda endpoint, root: self._mode_ask(endpoint))
+        mode = self.resolve_mode()
         if (mode != "guest" or local_work) and f"Work: sd:{self.args.item}" not in body:
             body += f"\n\nWork: sd:{self.args.item}\n"
         if not self.state:
@@ -584,7 +584,7 @@ class Ship:
         self.save(warnings=warnings)
         self.assert_scope()
         # Artifact exposure is checked again against the actual push target.
-        mode = sd_lib.mode(self.root, ask=lambda endpoint, root: self._mode_ask(endpoint))
+        mode = self.resolve_mode()
         if mode == "guest":
             if not local_work:
                 body = body.replace(f"\n\nWork: sd:{self.args.item}\n", "")
@@ -678,6 +678,58 @@ class Ship:
         except Refusal as error:
             return None, str(error)
 
+    def resolve_mode(self) -> str:
+        """`sd_lib.mode` against this push target, with the demotion noted.
+
+        The remote is asked fresh each time, before the body is built and
+        again before the push. When it lowers a written or defaulted `full`
+        to `guest`, the item carries a note saying so, once: the refusal that
+        follows names only the destination, and the operator reading the item
+        later needs the answer that lowered it -- the collaborator, the fork,
+        the permission -- not the fact that something did.
+        """
+        mode, lowered = sd_lib.mode_answer(self.root, ask=lambda endpoint, root: self._mode_ask(endpoint))
+        if lowered is not None:
+            self.note_demotion(lowered)
+        return mode
+
+    def merge_ownership(self) -> dict:
+        """`GitHub.owned`, with the demotion noted when the remote refuses it.
+
+        Merge authority is the same three questions `prepare` asks, put again
+        at merge time and never at dispatch. A `no` here leaves the item at
+        `ready_to_send` with the row's `merge: auto` untouched, and it is the
+        same demotion as a refused push: the note is written by the same
+        marker, so a remote that lowered the mode at both points leaves one.
+        A written `guest` or `minimal` was not lowered, and gets no note.
+        """
+        try:
+            return self.api.owned()
+        except Refusal:
+            answer = self.api.answer
+            if answer is not None and not answer.full and sd_lib.local_block(self.root).get("mode", "").strip() not in ("guest", "minimal"):
+                self.note_demotion(answer)
+            raise
+
+    def note_demotion(self, answer) -> None:
+        """One demotion note per item and remote, through `sd_db`'s note API.
+
+        Idempotent on the marker line `sd_lib.demotion_note` returns: a second
+        run that the same remote lowers finds it and writes nothing, so the
+        item does not fill with one note per attempt. The lookup and the
+        insert share a transaction, as `sd_db.ship.note_merge` does for the
+        merge marker.
+        """
+        from sd_db.database import transaction
+        from sd_db.writes import add_note
+        marker, body = sd_lib.demotion_note(self.repository, answer)
+        with transaction(self.connection):
+            present = self.connection.execute(
+                "SELECT 1 FROM note WHERE item = ? AND substr(body, 1, ?) = ?",
+                (self.args.item, len(marker), marker)).fetchone()
+            if not present:
+                add_note(self.connection, self.args.item, sd_lib.DEMOTION_NOTE_KIND, body)
+
     def merge(self) -> dict:
         from sd_db import runner
         if not self.state.get("pull_request"):
@@ -704,7 +756,7 @@ class Ship:
             self.save(watch_started=True)
             run(self.root, ["gh", "pr", "checks", str(observed["number"]), "--repo", self.repository,
                             "--watch", "--fail-fast"], timeout=self.args.wait_seconds)
-        metadata = self.api.owned()
+        metadata = self.merge_ownership()
         base = metadata.get("default_branch")
         if base != self.state["base"] or metadata.get("allow_squash_merge") is not True:
             raise Refusal("default branch changed or squash merging is disabled")
@@ -750,7 +802,7 @@ class Ship:
             raise Refusal("HEAD moved immediately before merge")
         if self.args.run:
             runner.merge_authority(self.connection, self.args.run, head)
-        if self.api.owned().get("default_branch") != base or self.api.protection(base) != protection:
+        if self.merge_ownership().get("default_branch") != base or self.api.protection(base) != protection:
             raise Refusal("ownership or branch protection changed before merge")
         self.save(phase="merge_dispatch", merge_message=body)
         try:

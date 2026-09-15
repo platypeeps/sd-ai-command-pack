@@ -414,6 +414,12 @@ Queue execution belongs to `sd runner`.
   (`sd-status` prints the gaps) rather than asserting the merge was gated.
 - **Never weaken a test, skip a check, or bypass a guard to reach green.**
 - **In `mode: guest`, never post reviews or labels** in the upstream repo.
+- **A remote that lowers the mode leaves a note on the item**, written by
+  `bin/sd-ship` through the shared database whenever a run that would otherwise
+  be `full` comes out `guest` — the three questions came back `no`, or the
+  remote could not be asked at all — once per item and remote, naming the
+  answer that lowered it. It is a record, not an approval: the push or the
+  merge is refused all the same.
 
 ## State of the tooling
 

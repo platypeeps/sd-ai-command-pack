@@ -294,8 +294,11 @@ def machine_config(path: pathlib.Path | None = None) -> dict[str, object]:
 @dataclass(frozen=True)
 class RemoteAnswer:
     """What the remote said when asked whether this run may be `full`. Not a
-    bool: the demotion note, the merge suspension and the dashboard each show
-    *which* answer said no, and a bool throws that away at that moment."""
+    bool: the demotion note `sd-ship` writes on the item, through
+    `demotion_note`, and the merge refusal `sd_ship_remote.GitHub.owned`
+    raises each name *which* answer said no, and a bool throws that away at
+    that moment. `sd-status` prints the reason beside the word, through
+    `mode_answer`; `mode` is for the readers that want the word alone."""
 
     #: Three yeses, or the no-remote / no-git case. Never reached from an error.
     full: bool
@@ -389,8 +392,8 @@ def remote_permits_full(root: pathlib.Path, *, ask: Asker = gh_api) -> RemoteAns
     return RemoteAnswer(full=True, answered=True)
 
 
-def mode(root: pathlib.Path, *, ask: Asker = gh_api) -> str:
-    """The resolved mode: the local block's `mode:` line, lowered by detection.
+def mode_answer(root: pathlib.Path, *, ask: Asker = gh_api) -> tuple[str, RemoteAnswer | None]:
+    """The resolved mode and, when the remote lowered it, the answer that did.
 
     Detection is a ceiling and never a floor. A written `full`, and no line at
     all, are both offered to `remote_permits_full` and come back `guest` unless
@@ -399,13 +402,60 @@ def mode(root: pathlib.Path, *, ask: Asker = gh_api) -> str:
     produce it, and it already writes no artifacts anywhere -- so rewriting it
     to `guest`, which puts a triad on a fork's branch, would raise exposure
     rather than lower it, the one thing detection is forbidden to do.
+
+    The second value is the demotion, or None when nothing was lowered: a
+    written `guest` or `minimal` asks the remote nothing, and a `full` the
+    remote confirmed was not lowered. `sd-ship` writes that answer on the item
+    as the demotion note, so the reason travels with the item and not only
+    with the refusal that printed it.
     """
     value = local_block(root).get("mode", "").strip()
     if value and value not in MODES:
         raise ConfigError(f"mode {value!r} is not one of {', '.join(MODES)}")
     if value in ("minimal", "guest"):
-        return value
-    return DEFAULT_MODE if remote_permits_full(root, ask=ask).full else "guest"
+        return value, None
+    answer = remote_permits_full(root, ask=ask)
+    return (DEFAULT_MODE, None) if answer.full else ("guest", answer)
+
+
+def mode(root: pathlib.Path, *, ask: Asker = gh_api) -> str:
+    """The resolved mode: the local block's `mode:` line, lowered by detection.
+
+    `mode_answer` with the demotion dropped, for the readers that need only
+    the word: `sd-suggest`, the GitHub setup, and `guest_artifact_refusal`
+    below. Not `sd-status`, which prints the reason beside the word and so
+    reads `mode_answer` itself.
+    """
+    return mode_answer(root, ask=ask)[0]
+
+
+#: The kind of the demotion note. A comment, not a decision: nobody decided
+#: anything; the remote answered differently from what the line says.
+DEMOTION_NOTE_KIND = "comment"
+
+
+def demotion_note(repository: str, answer: RemoteAnswer) -> tuple[str, str]:
+    """The note `sd-ship` writes on an item when `repository` lowered its mode.
+
+    Returns `(marker, body)`. The marker is the body's first line and the
+    idempotence key: one note per item and remote, however many runs the
+    remote lowers, so a second refusal for the same item on the same remote
+    finds the marker and writes nothing. The body names which answer said no,
+    as `RemoteAnswer` keeps it, and what the operator is left holding: the
+    written line stays, and the mode is `full` again the day the remote says
+    yes, with no edit to the line.
+    """
+    marker = f"Mode demoted to guest on {repository}"
+    said = ("the remote answered: " if answer.answered else "the remote could not be asked: ") + (
+        answer.reason or "no reason was given"
+    )
+    body = (
+        f"{marker}\n{said}. The written mode stays as it is: detection is a ceiling, and the next run "
+        "is full again once the remote says yes to all three questions. Planning artifacts this branch "
+        "carries under docs/work/, docs/spec/ or docs/decisions/ were not pushed to that remote; what is "
+        "already in its shared tree from before the answer changed is yours to move."
+    )
+    return marker, body
 
 
 
@@ -1725,6 +1775,31 @@ def guest_artifact_refusal(root: pathlib.Path, paths: Any, *, ask: Asker = gh_ap
         "(WORKFLOW.md, `mode: guest`). Detection is a ceiling: a `mode: full` line "
         "the remote lowers, and a remote that cannot be asked, both resolve guest here."
     )
+
+
+def shared_tree_artifacts(root: pathlib.Path) -> tuple[str, ...]:
+    """The planning artifacts the remote's default branch already carries.
+
+    The refusal keeps new ones out; it can do nothing about what a repository
+    was already carrying on the day the remote's answer changed. That is the
+    operator's to move, and moving it needs the list. Read off the remote's
+    default branch as this checkout last saw it -- `refs/remotes/<remote>/<default>`
+    -- and not off the working tree, because the question is what the shared
+    tree holds, not what this branch does. Nothing is fetched: `sd-status`
+    reports, and a report does not reach the network on the reader's behalf.
+
+    Empty for a checkout with no remote, for a remote-tracking ref this clone
+    does not have, and for a shared tree holding none of the three trees --
+    all of which are the same answer to the reader, "nothing to move".
+    """
+    remote, default = upstream(root)
+    if not remote:
+        return ()
+    listed = git_output(["ls-tree", "-r", "--name-only", "-z", f"refs/remotes/{remote}/{default}",
+                         "--", *GUEST_REFUSED_DIRS], root)
+    if listed is None:
+        return ()
+    return tuple(sorted(name for name in listed.split("\0") if name))
 
 
 # --------------------------------------------------------------------------
