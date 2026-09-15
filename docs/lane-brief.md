@@ -5,10 +5,11 @@ back to the session that launched it. This page is the brief that agent
 receives. Copy the template below into the launch prompt, fill every `<...>`,
 and delete the clause that does not apply to the repository.
 
-Keep the template here rather than rewriting it per session. Each numbered
-rule in "How to work" was paid for by a session that got it wrong first; the
-notes under [Why these rules](#why-these-rules) say which failure bought which
-line, so nobody has to rediscover them.
+Keep the template here rather than rewriting it per session. Several of its
+rules were paid for by a session that got them wrong first, and the notes under
+[Why these rules](#why-these-rules) say which failure bought which line, so
+nobody has to rediscover them. Rules with no note there are ordinary practice,
+not hard-won: they need no incident to justify them.
 
 Related pages: [`review-learnings.md`](review-learnings.md) for what reviews
 have taught this repository, [`workflow-controls.md`](workflow-controls.md)
@@ -122,19 +123,33 @@ for the controls a run passes through.
 >    check run can also report `status: in_progress` while carrying a
 >    `completed_at` in the past; trust the timestamps, not the status field.
 > 6. **Review cap is 1, plus one verification of the fix.** Read the review
->    through `mcp__github__pull_request_read` `get_reviews`, never through
->    thread counts: the verdict line, `Comments generated: N`, the
->    `Suppressed comments (N)` section, the per-file table, `Files reviewed:
->    N/M`, and the effort level. A suppressed finding has no thread and
->    `get_review_comments` does not show it. `copilot-pull-request-reviewer` may
->    run more than once on one pull request, may not re-run on a push, and may
->    fail outright with a body that is an error message rather than a verdict —
->    so key every review by its `commit_id`, read every one the call returns,
->    and check again after each push. A review whose `commit_id` is not your
->    current head says nothing about your current head: it is evidence about the
->    code it ran on, and nothing else. An error body is not a verdict either.
->    The round is answered only by a review that names the head you pushed AND
->    carries a real verdict; anything else means keep waiting, not proceed.
+>    through BOTH `mcp__github__pull_request_read` surfaces, never through
+>    thread counts alone. `get_reviews` gives the review body — the verdict
+>    line, `Comments generated: N`, the `Suppressed comments (N)` section, the
+>    per-file table, `Files reviewed: N/M`, and the effort level.
+>    `get_review_comments` gives the inline threads. Neither is the whole
+>    finding set: a suppressed finding has no thread and appears only in the
+>    body, and an unsuppressed inline finding appears only as a thread. One
+>    round of this repository's own history has both at once
+>    (`tests/fixtures/sd-631-unanswered-round.json`). Read both, every time, and
+>    paginate `get_review_comments` to the end rather than trusting one page.
+>
+>    `copilot-pull-request-reviewer` may run more than once on one pull request,
+>    may not re-run on a push, and may fail outright with a body that is an
+>    error message rather than a verdict — so key every review by its
+>    `commit_id`, read every one the call returns, and check again after each
+>    push. A review whose `commit_id` is not your current head says nothing
+>    about your current head: it is evidence about the code it ran on, and
+>    nothing else. An error body is not a verdict either.
+>
+>    **This round is advisory and it gates nothing.** Its findings are read and
+>    dispositioned; they never block a merge, and no pack surface requests a
+>    round ([`WORKFLOW.md`](../WORKFLOW.md), the advisory section;
+>    [`skills/sd-ship/SKILL.md`](../skills/sd-ship/SKILL.md)). The gate that
+>    does bind ran on the machine before the push. So if no review ever names
+>    your head, or the only one that does is an error body, do NOT wait
+>    indefinitely: record under **NOT VERIFIED** what you asked for, what came
+>    back, and which head it named, then report and stop. I decide from there.
 >    Quote every finding verbatim and address or rebut each with evidence.
 >    `<system only: do NOT request a Copilot review; that repository's CLAUDE.md
 >    forbids it, because its CI runs the reviewer itself.>`
@@ -153,10 +168,12 @@ for the controls a run passes through.
 > - Never write into the pack `.venv`. Never base a venv on another lane's copy.
 > - Before editing a file, check it against every OTHER lane's open pull
 >   request (`list_pull_requests`, then `pull_request_read get_files`; skip your
->   own number once you have one). If a file you need is in another lane's open
->   pull request, tell me and WAIT. Your own pull request holds every file you
->   are fixing, so a check that does not exclude it stops the review-fix pass
->   on itself. Do not merge
+>   own number once you have one). Exhaust both listings — they paginate, and a
+>   single default page silently drops the lane whose files overlap yours, which
+>   is the one case the check exists for. If a file you need is in another
+>   lane's open pull request, tell me and WAIT. Your own pull request holds
+>   every file you are fixing, so a check that does not exclude it stops the
+>   review-fix pass on itself. Do not merge
 >   main into your branch; check
 >   `/usr/bin/git merge-tree --write-tree origin/main HEAD` rc 0 before the push
 >   instead.
@@ -189,11 +206,25 @@ for the controls a run passes through.
 >   Name the interpreter by the path I give you rather than hard-coding one;
 >   a checkout lives wherever it lives.
 >
->   It must exit 0 and end `sd-docs-lint: clean`. Note that it passes a body
->   lacking the template's scope section, so check that section by eye. A
->   `system` lane does not run this at all; the linter is a pack tool.
-> - End the body and the commit message with the attribution lines the session
->   is using.
+>   It must exit 0 and end `sd-docs-lint: clean`. Read its per-rule lines
+>   rather than only the last one: which rules ran, and which reported
+>   themselves not run. What it checks in a pull request body grows over time,
+>   so do not assume any particular section is covered — check the body against
+>   `.github/PULL_REQUEST_TEMPLATE.md` by eye as well, whatever the linter says.
+>   A `system` lane does not run this at all; the linter is a pack tool.
+> - End the body with the attribution lines the session is using, and then, as
+>   the LAST paragraph, a contiguous trailer block: `Item: sd:<N>`, and
+>   `Delivers: sd:<N>` only on the merge that completes the item. Attribution
+>   paragraph above, trailers below, nothing after them, no blank line among
+>   them. The order is load-bearing, not style: a squash merge concatenates the
+>   body into the commit message, git reads trailers only out of the final
+>   paragraph, and GitHub's appended `Co-authored-by:` joins a trailer block
+>   that ends the message but opens a new paragraph after anything else —
+>   demoting every trailer above it to prose no tool can read
+>   ([`WORKFLOW.md`](../WORKFLOW.md), the trailers paragraph;
+>   [`.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md)).
+>   A change with no work item omits the trailers rather than inventing a row.
+>   End the commit message with the session's attribution lines.
 > - One push, then freeze the head until the review has been read and
 >   dispositioned. You get one further push after that: every review fix in a
 >   single batch, gate re-run before it, never one commit per finding. That
