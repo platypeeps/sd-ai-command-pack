@@ -94,6 +94,21 @@ JOB_NAME_REASON = (
 #: Every finding zizmor's default persona drops, with why it stays dropped.
 #: Add to this only after reading the audit's documentation; an entry whose
 #: finding is gone fails, so nothing here can be a leftover.
+#:
+#: What is deliberately not here: `self-repository`, the audit zizmor 1.30.0
+#: added for a `uses: ./...` reference. It is answered by the reference, not
+#: by a decision. `.github/workflows/sd-review-route.yml` names the pack's
+#: action as `$/actions/review-route` since item 839, and the audit is what
+#: that was for: `./` resolves against the runner's workspace, which the
+#: checkout step above it fills with the pull request's head, so the pull
+#: request would supply the action that routes it. And it could not be here
+#: even if it were wanted, because it is not a persona-gated finding: zizmor
+#: reports it at the default persona, so on a `./` reference it reddens the
+#: plain gate beside this script, and a `Decision` for it would reconcile as
+#: "decided but not found" at every version. The pin in
+#: `requirements-security.txt` is at or above 1.30.0 so the gate can see the
+#: audit at all; `tests/test_zizmor_persona_decisions.py` holds that floor and
+#: the reference's shape, and either moving fails by name (item 933).
 DECIDED: tuple[Decision, ...] = (
     Decision(
         key=Key(ident="anonymous-definition",

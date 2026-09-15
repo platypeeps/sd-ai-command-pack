@@ -20,8 +20,11 @@ that list-free answer depends on:
   the failure that lets the next reader believe a reason that no longer applies;
 * `render_route()` makes the key a route rather than a line number, so editing
   anything above a finding does not fail the run;
-* and every entry of `DECIDED` is distinct, reasoned, and about a workflow that
-  is in this checkout.
+* every entry of `DECIDED` is distinct, reasoned, and about a workflow that
+  is in this checkout;
+* and the one audit answered outside `DECIDED`, `self-repository`, is answered
+  where it says: the pin is not below the zizmor that added it, and the pack's
+  own action reference is the repository, not a workspace path (item 933).
 
 The run itself is asserted too, through a zizmor that is a shell script: it
 records the arguments it was given and prints whatever JSON the test wants. A
@@ -39,6 +42,7 @@ import importlib.util
 import io
 import json
 import pathlib
+import re
 import shutil
 import sys
 import tempfile
@@ -47,6 +51,13 @@ from typing import Any
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / ".github/scripts/check-zizmor-personas.py"
+SECURITY_PINS = REPO_ROOT / "requirements-security.txt"
+OWN_WORKFLOW = REPO_ROOT / ".github/workflows/sd-review-route.yml"
+
+#: The zizmor that added `self-repository`, the audit of a `uses: ./...`
+#: reference. Below it the gate cannot see one, and the pin -- not anything
+#: anyone decided -- is what stands between the audit and the workflows.
+SELF_REPOSITORY_SINCE = (1, 30, 0)
 
 
 def load() -> Any:
@@ -319,6 +330,62 @@ class TheDecisionTable(unittest.TestCase):
             text = (REPO_ROOT / decision.key.path).read_text(encoding="utf-8")
             with self.subTest(key=str(decision.key)):
                 self.assertIn(f"\n  {job}:\n", text)
+
+
+def pinned_zizmor() -> tuple[str, tuple[int, ...]]:
+    """The one `zizmor==` pin in `requirements-security.txt`, as text and as numbers."""
+
+    pins = re.findall(r"^zizmor==(\d+(?:\.\d+)+)\b", SECURITY_PINS.read_text(encoding="utf-8"),
+                      flags=re.MULTILINE)
+    if len(pins) != 1:
+        raise AssertionError(f"{SECURITY_PINS.name} pins zizmor {len(pins)} times, not once: {pins}")
+    return pins[0], tuple(int(part) for part in pins[0].split("."))
+
+
+class TheAuditAnsweredByTheReference(unittest.TestCase):
+    """`self-repository` is not in `DECIDED`, and this is why that is right.
+
+    zizmor 1.30.0 added the audit for a `uses: ./...` reference: the path
+    resolves against the runner's workspace, which the pack's own checkout
+    step fills with the pull request's head, so the pull request would supply
+    the action that routes it. Item 839 answered it in the reference --
+    `$/actions/review-route`, this repository at the commit the workflow is
+    running -- and the pin then sat at 1.29.0, a version that cannot see the
+    audit, so nothing showed whether the answer held (item 933). It is not a
+    persona-gated finding: zizmor reports it at the default persona, so on a
+    `./` reference the plain gate reddens, and a decision here would reconcile
+    as "decided but not found" at every version. What can be held is the floor
+    the gate needs to see the audit and the shape of the reference it audits.
+    """
+
+    def test_the_pin_is_not_below_the_zizmor_that_added_self_repository(self) -> None:
+        # Below this the gate is green on a `./` reference with nothing
+        # decided, and a later bump reddens CI with no code change.
+        text, version = pinned_zizmor()
+        floor = ".".join(str(part) for part in SELF_REPOSITORY_SINCE)
+        self.assertGreaterEqual(
+            version, SELF_REPOSITORY_SINCE,
+            f"{SECURITY_PINS.name} pins zizmor {text}, below {floor}, the version that "
+            "added the self-repository audit; the gate cannot see the audit at that pin")
+
+    def test_no_decision_answers_for_self_repository(self) -> None:
+        # Reported at the default persona, so never in the set this script
+        # reconciles: an entry would be a reason for a finding this cannot
+        # find, and the live run would say so.
+        self.assertEqual(
+            [str(decision.key) for decision in personas.DECIDED
+             if decision.key.ident == "self-repository"], [])
+
+    def test_the_packs_own_action_reference_is_the_repository_and_not_a_path(self) -> None:
+        # The answer itself, read off the tracked workflow rather than off the
+        # generator that writes it: `tests/test_sd_review_setup_github.py`
+        # holds the generator's arm and that the tracked file is its output,
+        # and this holds the shape the audit is about.
+        uses = [line.split("uses:", 1)[1].strip()
+                for line in OWN_WORKFLOW.read_text(encoding="utf-8").splitlines()
+                if line.lstrip().startswith("uses:")]
+        self.assertEqual([ref for ref in uses if ref.startswith("./")], [], uses)
+        self.assertEqual([ref for ref in uses if ref.startswith("$/")], ["$/actions/review-route"])
 
 
 class TheBinaryItRuns(unittest.TestCase):
