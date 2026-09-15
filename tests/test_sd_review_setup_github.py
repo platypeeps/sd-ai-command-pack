@@ -22,6 +22,7 @@ import sys
 import tempfile
 import unittest
 from typing import Any
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SD_REVIEW = REPO_ROOT / "bin" / "sd-review"
@@ -206,6 +207,16 @@ class WorkflowContentTests(SetupFixture):
         # to land in both places or in neither.
         tracked = (REPO_ROOT / setup.WORKFLOW_RELATIVE_PATH).read_text(encoding="utf-8")
         self.assertEqual(tracked, setup.workflow_text(setup.action_reference(None)))
+        # The self-install writes one file, not two. Its workflow names no pin
+        # (`action_reference(None)`), so there is nothing for Dependabot to
+        # bump and no guard to hold it: the pack's own `dependabot.yml` carries
+        # none, and `--check` in this checkout agrees rather than reporting
+        # the guard it would have written as drift (item 940).
+        dependabot = (REPO_ROOT / guard.DEPENDABOT_RELATIVE_PATH).read_text(encoding="utf-8")
+        self.assertEqual(guard.guard_state(dependabot), "absent")
+        stream = io.StringIO()
+        code = setup.check_files(REPO_ROOT, setup_args(check=True, pin=None), stream)
+        self.assertEqual((code, stream.getvalue()), (0, f"same {setup.WORKFLOW_RELATIVE_PATH}\n"))
 
     def test_the_lane_holds_no_write_permission_and_requests_nobody(self) -> None:
         root = self.make_repo()
@@ -504,6 +515,62 @@ class GuardTests(SetupFixture):
         result = install(root, dry_run=True)
         self.assertEqual(result["would_write_dependabot"], guard.minimal_file())
         self.assertIn("sd-review route", result["would_write"])
+
+
+class SelfInstallTests(SetupFixture):
+    """The pack's own checkout: the workflow is written, `dependabot.yml` is not.
+
+    `action_reference(None)` writes `$/actions/review-route`, a reference with
+    no pin in it, so the self-install has no dependency for Dependabot to bump
+    and nothing for the guard to hold. Found by the sd:932 lane, which saw
+    `setup-github --force` in its worktree write a guard for a dependency the
+    pack's workflow does not name (item 940). The pack is whichever checkout
+    the installer runs from, so these tests point `pack_root` at the fixture.
+    """
+
+    def as_pack(self, root: pathlib.Path) -> Any:
+        return mock.patch.object(setup, "pack_root", return_value=root)
+
+    def test_no_dependabot_file_is_created(self) -> None:
+        root = self.make_repo()
+        with self.as_pack(root):
+            result = install(root)
+        self.assertEqual((result["pin"], result["action"]), (None, setup.action_reference(None)))
+        self.assertEqual(result["guard"], "missing")
+        self.assertTrue(self.workflow(root).is_file())
+        self.assertFalse(self.dependabot(root).exists())
+
+    def test_an_existing_file_keeps_its_bytes_and_a_rerun_is_unchanged(self) -> None:
+        root = self.make_repo()
+        self.seed_dependabot(root, NO_GUARD)
+        with self.as_pack(root):
+            self.assertEqual(install(root)["status"], "installed")
+            self.assertEqual(install(root)["status"], "unchanged")
+            result = install(root, dry_run=True)
+        self.assertEqual(self.dependabot(root).read_text(encoding="utf-8"), NO_GUARD)
+        self.assertNotIn(guard.DEPENDENCY, self.dependabot(root).read_text(encoding="utf-8"))
+        # Dry run shows the file as it would stand after the run: as it is.
+        self.assertEqual(result["would_write_dependabot"], NO_GUARD)
+
+    def test_a_hand_written_guard_is_still_read_and_left_alone(self) -> None:
+        # Skipping the write must not skip the read: a guard someone put in the
+        # pack's own file by hand is reported as it is found, and neither
+        # refused over nor replaced, because there is no pin for it to guard.
+        root = self.make_repo()
+        self.seed_dependabot(root, OLD_WORDING)
+        with self.as_pack(root):
+            result = install(root)
+        self.assertEqual(result["guard"], "differs")
+        self.assertEqual(self.dependabot(root).read_text(encoding="utf-8"), OLD_WORDING)
+
+    def test_check_reports_the_workflow_only(self) -> None:
+        root = self.make_repo()
+        self.seed_dependabot(root, OLD_WORDING)
+        stream = io.StringIO()
+        with self.as_pack(root):
+            install(root)
+            code = setup.check_files(root, setup_args(check=True, pin=None), stream)
+        self.assertEqual((code, stream.getvalue()), (0, f"same {setup.WORKFLOW_RELATIVE_PATH}\n"))
 
 
 #: `mezmo/mezmo-world-simulator`'s file, trimmed to the entry under test: it
