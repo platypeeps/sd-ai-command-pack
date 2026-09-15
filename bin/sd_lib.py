@@ -422,7 +422,9 @@ def mode(root: pathlib.Path, *, ask: Asker = gh_api) -> str:
     """The resolved mode: the local block's `mode:` line, lowered by detection.
 
     `mode_answer` with the demotion dropped, for the readers that need only
-    the word: `sd-status`, `sd-suggest` and the GitHub setup.
+    the word: `sd-suggest`, the GitHub setup, and `guest_artifact_refusal`
+    below. Not `sd-status`, which prints the reason beside the word and so
+    reads `mode_answer` itself.
     """
     return mode_answer(root, ask=ask)[0]
 

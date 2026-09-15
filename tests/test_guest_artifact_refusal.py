@@ -277,6 +277,15 @@ case "$2" in
 esac
 """
 
+#: sd:789 -- the other half of the demotion: a `gh` that cannot answer at all.
+#: The adapter's `run` turns a non-zero exit into a `Refusal`, `_mode_ask`
+#: hands that back as the error half of the pair, and `remote_permits_full`
+#: reads it as `answered=False` -- guest, with no answer behind it.
+UNREACHABLE_GH_STUB = """#!/bin/sh
+echo 'gh: could not resolve host: api.github.com' >&2
+exit 1
+"""
+
 ALONE = '[{"login": "sven", "permissions": {"push": true}}]'
 WITH_MALLORY = '[{"login": "sven", "permissions": {"push": true}}, {"login": "mallory", "permissions": {"push": true}}]'
 
@@ -312,6 +321,30 @@ class TheDemotionAnswer(Fixture):
         self.write_mode(root, "full")
         self.assertEqual(sd_lib.mode(root, ask=Asker(answers(full=False))), "guest")
 
+    def test_the_readers_of_the_word_alone_are_enumerated_not_recited(self) -> None:
+        """sd:789 -- `mode`'s docstring names who still wants the word alone.
+
+        This change moved one of them: `sd-status` prints the reason beside
+        the word now, so it reads `mode_answer` and is no longer a reader of
+        `mode`. A recited list drifts the next time a caller moves, so the
+        list is checked against the callers `bin/` actually holds.
+        """
+
+        callers = set()
+        for path in sorted((REPO_ROOT / "bin").iterdir()):
+            if not path.is_file() or path.name == "sd_lib.py":
+                continue
+            if "sd_lib.mode(" in path.read_text(encoding="utf-8", errors="replace"):
+                callers.add(path.name)
+        self.assertEqual(callers, {"sd_suggest.py", "sd_setup_github.py"}, sorted(callers))
+        status = (REPO_ROOT / "bin" / "sd-status").read_text(encoding="utf-8")
+        self.assertIn("sd_lib.mode_answer(", status)
+        self.assertNotIn("sd_lib.mode(", status)
+        doc = sd_lib.mode.__doc__ or ""
+        for named in ("sd-suggest", "GitHub setup", "guest_artifact_refusal"):
+            self.assertIn(named, doc, f"{named} reads `mode` and the docstring does not say so")
+        self.assertIn("Not `sd-status`", doc, "sd-status reads `mode_answer` now; the docstring says which")
+
     def test_the_note_names_the_remote_first_and_the_answer_second(self) -> None:
         marker, body = sd_lib.demotion_note(
             "sven/thing", sd_lib.RemoteAnswer(False, True, "sven/thing lets mallory push too")
@@ -326,6 +359,36 @@ class TheDemotionAnswer(Fixture):
             "sven/thing", sd_lib.RemoteAnswer(False, False, "gh could not be run: no such file")
         )
         self.assertIn("the remote could not be asked: gh could not be run", body)
+        self.assertNotIn("the remote answered", body)
+
+    def test_a_remote_that_could_not_be_asked_is_returned_as_the_demotion_too(self) -> None:
+        """sd:789 -- `answered=False` lowers the mode, so it is handed back.
+
+        The two demotions differ in one word of the note and in nothing else:
+        a remote that says `no` and a remote that cannot be asked both leave
+        a run that was written `full` running as `guest`. `demotion_note`
+        composes a body for the second ("the remote could not be asked: ..."),
+        and `Ship.resolve_mode` writes whenever the second value is not None.
+        So `mode_answer` must return the answer on this route as well -- a
+        `None` here would drop the note silently for the one case whose
+        reason the operator cannot go and read off the remote afterwards.
+        """
+
+        root = self.make_repo()
+        self.write_mode(root, "full")
+        unreachable = "gh could not be run: [Errno 2] No such file or directory: 'gh'"
+        ask = Asker({sd_lib.VIEWER_QUERY: (None, unreachable)})
+        resolved, lowered = sd_lib.mode_answer(root, ask=ask)
+        self.assertEqual(resolved, "guest")
+        self.assertIsNotNone(lowered, "the unreachable remote lowered the mode; the note needs its answer")
+        assert lowered is not None  # for the type checker; the assertion above is the test
+        self.assertFalse(lowered.full)
+        self.assertFalse(lowered.answered, "the question was not put, so it was not answered")
+        self.assertIn(unreachable, lowered.reason)
+        # The rest of the route, from this answer to the sentence on the item.
+        marker, body = sd_lib.demotion_note("sven/thing", lowered)
+        self.assertTrue(body.startswith(marker + "\n"), body)
+        self.assertIn("the remote could not be asked", body)
         self.assertNotIn("the remote answered", body)
 
 
@@ -391,6 +454,13 @@ class TheDemotionNote(Fixture):
         stub.write_text(SHIP_GH_STUB.replace("__PEOPLE__", people).replace("__REPO__", repo), encoding="utf-8")
         stub.chmod(0o755)
 
+    def unreachable_remote(self) -> None:
+        """A `gh` that fails every call: the remote that cannot be asked."""
+
+        stub = self.bindir / "gh"
+        stub.write_text(UNREACHABLE_GH_STUB, encoding="utf-8")
+        stub.chmod(0o755)
+
     def operation(self, command: str = "prepare"):
         extra = ["--manual", "--expected-head", "HEAD"] if command == "merge" else []
         args = self.ship.parser().parse_args([command, "--item", str(self.item), "--json", *extra])
@@ -414,6 +484,28 @@ class TheDemotionNote(Fixture):
         self.assertEqual(
             (self.root / sd_lib.LOCAL_FILE_NAME).read_text(encoding="utf-8").count("mode: full"), 1,
             "the written line is the operator's; detection never edits it",
+        )
+
+    def test_a_remote_that_cannot_be_reached_lowers_the_mode_and_the_item_carries_the_note(self) -> None:
+        """sd:789 -- the unanswerable remote, through `Ship.resolve_mode`.
+
+        The consumer of `mode_answer`'s second value. `gh` here exits non-zero
+        on every call, which is the shape of no network and of a remote that
+        refused the call; the run comes out `guest` and the note says the
+        remote could not be asked, rather than no note at all.
+        """
+
+        self.unreachable_remote()
+        self.assertEqual(self.operation().resolve_mode(), "guest")
+        notes = self.notes()
+        self.assertEqual(len(notes), 1, notes)
+        self.assertTrue(notes[0].startswith("Mode demoted to guest on sven/thing\n"), notes[0])
+        self.assertIn("the remote could not be asked", notes[0])
+        self.assertIn("could not resolve host", notes[0])
+        self.assertNotIn("the remote answered", notes[0])
+        self.assertEqual(
+            (self.root / sd_lib.LOCAL_FILE_NAME).read_text(encoding="utf-8").count("mode: full"), 1,
+            "a remote that could not be asked is not permission to edit the written line either",
         )
 
     def test_a_second_lowering_for_the_same_item_and_remote_writes_no_second_note(self) -> None:
