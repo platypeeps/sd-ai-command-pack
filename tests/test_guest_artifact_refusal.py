@@ -289,6 +289,15 @@ exit 1
 ALONE = '[{"login": "sven", "permissions": {"push": true}}]'
 WITH_MALLORY = '[{"login": "sven", "permissions": {"push": true}}, {"login": "mallory", "permissions": {"push": true}}]'
 
+#: sd:853 -- the second remote, whose name has the first one's as a prefix.
+#: `sven/thing` is a prefix of `sven/thing-two`, and the demotion marker is
+#: built from the name, so the shorter marker is a prefix of the longer note's
+#: body. That is the collision the idempotence key has to survive.
+OWN_TWO_JSON = (
+    '{"full_name": "sven/thing-two", "fork": false, '
+    '"permissions": {"admin": true, "push": true}}'
+)
+
 
 class TheDemotionAnswer(Fixture):
     """`sd_lib.mode_answer`: the mode, and the answer that lowered it if one did.
@@ -390,6 +399,74 @@ class TheDemotionAnswer(Fixture):
         self.assertTrue(body.startswith(marker + "\n"), body)
         self.assertIn("the remote could not be asked", body)
         self.assertNotIn("the remote answered", body)
+
+    def test_a_repository_name_that_prefixes_another_does_not_share_its_key(self) -> None:
+        """sd:853 -- the idempotence key is the marker *line*, not the marker.
+
+        The marker is built from the repository name, so one marker is a
+        prefix of another whenever one name is a prefix of another --
+        `sven/thing` of `sven/thing-two`, which is what a renamed or forked
+        sibling looks like. Looking a note up by the bare marker would read
+        the longer name's note as the shorter name's own. The key carries the
+        terminator, and no repository name holds a newline, so it ends at the
+        name and matches one marker only.
+        """
+
+        answer = sd_lib.RemoteAnswer(False, True, "someone else may push too")
+        short_marker, short_body = sd_lib.demotion_note("sven/thing", answer)
+        long_marker, long_body = sd_lib.demotion_note("sven/thing-two", answer)
+        self.assertTrue(
+            long_marker.startswith(short_marker),
+            "the premise of this test: the bare markers do collide",
+        )
+        short_key = sd_lib.demotion_note_key(short_marker)
+        long_key = sd_lib.demotion_note_key(long_marker)
+        self.assertTrue(short_body.startswith(short_key))
+        self.assertTrue(long_body.startswith(long_key))
+        self.assertFalse(
+            long_body.startswith(short_key),
+            "sven/thing-two's note must not answer for sven/thing",
+        )
+        self.assertFalse(short_body.startswith(long_key))
+
+    def test_the_written_modes_detection_leaves_alone_are_stated_once(self) -> None:
+        """sd:854 -- `remote_can_lower` is the one statement of that rule.
+
+        `mode_answer` returns a `None` demotion for a written `guest` or
+        `minimal` because the remote is never asked about one. `sd-ship`'s
+        merge-time ownership check reaches `remote_permits_full` by a
+        different route, so it has to ask the same question itself -- and it
+        used to answer it by re-reading the local block and re-listing the two
+        words at the call site. Both now read the one predicate, and this
+        pins the two against each other over every value `mode:` can hold.
+        """
+
+        root = self.make_repo()
+        lowering = answers(full=False)
+        for written in ("", *sd_lib.MODES):
+            with self.subTest(written=written):
+                if written:
+                    self.write_mode(root, written)
+                else:
+                    (root / sd_lib.LOCAL_FILE_NAME).unlink(missing_ok=True)
+                resolved, lowered = sd_lib.mode_answer(root, ask=Asker(lowering))
+                self.assertEqual(
+                    sd_lib.remote_can_lower(sd_lib.written_mode(root)),
+                    lowered is not None,
+                    f"mode_answer and remote_can_lower disagree about {written!r} -> {resolved}",
+                )
+        self.assertEqual(sorted(sd_lib.SETTLED_MODES), ["guest", "minimal"])
+        self.assertTrue(set(sd_lib.SETTLED_MODES) < set(sd_lib.MODES))
+
+    def test_the_merge_time_check_reads_the_rule_and_does_not_restate_it(self) -> None:
+        """sd:854 -- the call site no longer carries its own copy of the rule."""
+
+        source = (REPO_ROOT / "bin" / "sd-ship").read_text(encoding="utf-8")
+        start = source.index("    def merge_ownership(")
+        body = source[start:source.index("    def note_demotion(", start)]
+        self.assertIn("sd_lib.remote_can_lower(", body)
+        self.assertNotIn("sd_lib.local_block(", body)
+        self.assertNotIn('"minimal"', body, "the list of settled modes lives in sd_lib, once")
 
 
 class TheDemotionNote(Fixture):
@@ -552,6 +629,63 @@ class TheDemotionNote(Fixture):
         self.remote(ALONE)
         self.assertEqual(self.operation("merge").merge_ownership().get("full_name"), "sven/thing")
         self.assertEqual(self.notes(), [])
+
+    def repoint(self, origin: str, repo_json: str, people: str = WITH_MALLORY) -> None:
+        """Move origin, the row's remote and the stub's answer together.
+
+        `Ship.__init__` refuses a checkout whose origin and row disagree, so
+        the three have to move as one. This is the shape of a repository that
+        was renamed or moved between two runs against the same item.
+        """
+
+        from sd_db import upsert_repo
+
+        self.git(self.root, "remote", "set-url", "origin", origin)
+        upsert_repo(self.connection, str(self.root), remote=origin,
+                    status_source="row", merge_policy="auto")
+        self.remote(people, repo_json)
+
+    def test_a_second_remote_whose_name_extends_the_first_still_gets_its_own_note(self) -> None:
+        """sd:853 -- one note per item *and remote*, when one name prefixes the other.
+
+        The idempotence key was the first `len(marker)` characters of the
+        body, and the marker is built from the repository name. `sven/thing`
+        is a prefix of `sven/thing-two`, so once the longer name had left its
+        note the shorter name's lookup matched it and wrote nothing: the
+        remote actually refusing the push left no reason on the item, and the
+        note that was there named a different remote.
+        """
+
+        self.repoint("https://github.com/sven/thing-two.git", OWN_TWO_JSON)
+        self.assertEqual(self.operation().resolve_mode(), "guest")
+        self.repoint("https://github.com/sven/thing.git", OWN_JSON)
+        self.assertEqual(self.operation().resolve_mode(), "guest")
+        notes = self.notes()
+        self.assertEqual(len(notes), 2, notes)
+        self.assertTrue(notes[0].startswith("Mode demoted to guest on sven/thing-two\n"), notes[0])
+        self.assertTrue(notes[1].startswith("Mode demoted to guest on sven/thing\n"), notes[1])
+        # And the key is still a key: neither remote writes a second note.
+        self.assertEqual(self.operation().resolve_mode(), "guest")
+        self.assertEqual(len(self.notes()), 2, self.notes())
+
+    def test_a_written_guest_is_not_a_demotion_at_merge_time_either(self) -> None:
+        """sd:854 -- the merge-time reader applies the written-mode rule too.
+
+        `merge_ownership` does not reach `remote_permits_full` through
+        `mode_answer`, so the `None` that resolver returns for a written
+        `guest` never arrives here: the answer it holds is a plain `no` from
+        the ownership check, and a `no` about a repository already written
+        down as `guest` lowered nothing. Nothing pinned that half before
+        sd:854 -- only the `resolve_mode` half was covered -- so dropping the
+        guard wrote a demotion note for a demotion that never happened.
+        """
+
+        self.write_mode(self.root, "guest")
+        self.remote(WITH_MALLORY)
+        delivery = self.operation("merge")
+        with self.assertRaisesRegex(self.ship.Refusal, "mallory"):
+            delivery.merge_ownership()
+        self.assertEqual(self.notes(), [], "a written guest was not lowered by anyone")
 
     def test_prepare_and_merge_resolve_through_the_noting_methods(self) -> None:
         """The wiring: the two `prepare` resolutions and the `merge` ownership read.
