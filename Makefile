@@ -25,6 +25,21 @@ setup:
 # the installer gate, which only the full suite can meet; a run it widened to
 # the full suite keeps both. CI calls run-tests.sh itself and never passes it.
 #
+# A narrowed run then exits 2, so that a zero from `test` means the full suite
+# ran with both coverage gates and means nothing else. Until sd:840 it printed
+# the notice below and exited 0, and a caller that reads the status rather than
+# the transcript -- a script, a hook, the left half of an `&&` -- could not
+# tell a partial run from a green one.
+#
+# 2 rather than 1 is for whoever reads this recipe: 1 is already the
+# skipped-test gate below and a failing shard inside run-tests.sh. It buys
+# nothing at the call site, and the number is not a signal a caller can read.
+# `make` reports 2 for any failed recipe whatever the recipe exited -- a 1
+# here would reach a caller of `make check` as 2 as well -- so the recipe's
+# own number appears only on make's `*** [test] Error 2` line. The
+# distinction this does deliver, and the one the item asked for, is 0 for the
+# whole suite with both coverage gates and non-zero for anything less.
+#
 # The value is exported rather than written into the recipe as a quoted word:
 # a path holding a quote would otherwise end the quoting and the rest would be
 # read as shell. And with no CHANGED on the command line the runner is given a
@@ -42,6 +57,7 @@ test:
 	@if grep -Eq 'skipped=[1-9][0-9]*' unittest-output.log; then printf '%s\n' "Tests skipped locally; install required tools or make the skip explicit."; exit 1; fi
 	@if head -n 1 unittest-output.log | grep -q '^test selection: changed files'; then \
 		printf '%s\n' "Changed-files fast path: coverage combine and the installer gate were not run. Run make check without CHANGED before a push."; \
+		exit 2; \
 	else \
 		"$(VENV_PYTHON)" -m coverage combine && \
 		PYTHON_BIN="$(VENV_PYTHON)" bash .github/scripts/check-installer-coverage.sh; \
@@ -155,4 +171,13 @@ docs-lint:
 # bash 3.2 parse inside `lint` runs only where a bash 3.2 exists, which is
 # this machine when it is a Mac and no runner (sd:10 criterion 17 cut the job
 # that built one).
-check: test lint audit docs-lint
+#
+# `test` runs last, and the order is load-bearing twice over (sd:840). `make`
+# stops at the first prerequisite that fails, and a narrowed `test` now fails
+# by design, so anything listed after it would not run at all on the
+# changed-files fast path: with `test` last, `make check CHANGED="<paths>"`
+# still runs the three whole-tree lanes and still comes out non-zero. And on
+# a full run the cheap gates now go first, so a Ruff error is seconds away
+# rather than a whole suite away. tests/test_changed_files_fast_path.py pins
+# the position; do not move `test` back to the front.
+check: lint audit docs-lint test

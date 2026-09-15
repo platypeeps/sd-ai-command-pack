@@ -22,6 +22,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import pathlib
+import re
 import shutil
 import stat
 import subprocess
@@ -135,12 +136,20 @@ class TreeCase(unittest.TestCase):
             shutil.copy2(SELECTOR, scripts / "select-tests.py")
         return scripts
 
-    def run_in_tree(self, command: list[str], **extra: str) -> subprocess.CompletedProcess:
+    def run_in_tree(self, command: list[str], *, expect: int = 0, **extra: str) -> subprocess.CompletedProcess:
+        """Run `command` in the throwaway tree and assert its exit status.
+
+        `expect` is asserted rather than defaulted away because the status is
+        the subject of part of this module: a narrowed `make test` exits 2
+        (sd:840), and a harness that only ever accepted 0 was how that went
+        unnoticed. Every call names the status it expects.
+        """
+
         shutil.rmtree(self.ran_dir, ignore_errors=True)
         self.ran_dir.mkdir()
         result = subprocess.run(command, cwd=self.root, text=True, capture_output=True, timeout=600,
                                 env=clean_environment(RAN_DIR=str(self.ran_dir), **extra))
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.returncode, expect, result.stdout + result.stderr)
         return result
 
 
@@ -337,8 +346,12 @@ class MakefileTree(TreeCase):
             f'exec "{sys.executable}" "$@"\n')
         python.chmod(python.stat().st_mode | stat.S_IXUSR)
 
-    def make(self, *arguments: str, **extra: str) -> tuple[set[str], str]:
-        result = self.run_in_tree(["make", "--no-print-directory", "test", "VENV=venv", *arguments], **extra)
+    def run_make(self, *arguments: str, expect: int = 0, **extra: str) -> subprocess.CompletedProcess:
+        return self.run_in_tree(["make", "--no-print-directory", "test", "VENV=venv", *arguments],
+                                expect=expect, **extra)
+
+    def make(self, *arguments: str, expect: int = 0, **extra: str) -> tuple[set[str], str]:
+        result = self.run_make(*arguments, expect=expect, **extra)
         return ran_modules(self.ran_dir), result.stdout
 
     def assert_coverage_steps(self, stdout: str, ran: bool) -> None:
@@ -356,7 +369,7 @@ class TheMakefile(MakefileTree):
         self.assert_coverage_steps(stdout, ran=True)
 
     def test_changed_on_the_command_line_takes_the_fast_path(self) -> None:
-        ran, stdout = self.make("CHANGED=bin/sd-alpha")
+        ran, stdout = self.make("CHANGED=bin/sd-alpha", expect=2)
         self.assertEqual(ran, set(ALWAYS_RUN_NAMES) | {"test_alpha"})
         self.assert_coverage_steps(stdout, ran=False)
         self.assertIn("Run make check without CHANGED before a push", stdout)
@@ -398,6 +411,69 @@ class TheMakefile(MakefileTree):
         self.assert_coverage_steps(stdout, ran=True)
 
 
+class TheNarrowedExitStatus(MakefileTree):
+    """sd:840 -- a narrowed run exits 2, and only a full run with both gates exits 0.
+
+    The notice said the coverage gates had not run, and the target exited 0
+    all the same: the status a caller reads -- a script, a hook, the left half
+    of an `&&` -- said the same thing for a partial run as for a green one,
+    and only the transcript held the difference. It says 2 now.
+
+    `make` reports 2 for any failed recipe whatever the recipe itself exited,
+    so the status alone cannot tell this 2 from a 1; the recipe's own number
+    is on make's `*** [test] Error 2` line, and that line is asserted here so
+    the constant in the `Makefile` is pinned rather than swallowed. What the
+    status carries, which is what the item asked for, is 0 for the full suite
+    with both gates and non-zero for anything less.
+    """
+
+    def test_a_narrowed_run_exits_two(self) -> None:
+        result = self.run_make("CHANGED=bin/sd-alpha", expect=2)
+        self.assertEqual(ran_modules(self.ran_dir), set(ALWAYS_RUN_NAMES) | {"test_alpha"})
+        self.assert_coverage_steps(result.stdout, ran=False)
+        self.assertIn("Run make check without CHANGED before a push", result.stdout,
+                      "the notice stays; the exit status is what changed")
+        self.assertRegex(result.stderr, r"\*\*\* \[[^]]*\btest\] Error 2")
+
+    def test_the_full_suite_with_both_gates_is_what_exits_zero(self) -> None:
+        """The other half of the contract: 0 still means the gates ran."""
+
+        result = self.run_make(expect=0)
+        self.assertEqual(ran_modules(self.ran_dir), self.everything)
+        self.assert_coverage_steps(result.stdout, ran=True)
+
+
+class TheCheckOrder(unittest.TestCase):
+    """`check` runs `test` last, so a narrowed run still reaches the other three lanes.
+
+    sd:840. `test` exits 2 when the selector narrowed the run, and `make`
+    stops at the first prerequisite that fails -- so the last prerequisite is
+    the one whose status `check` carries, and anything listed after `test`
+    would not run at all on the changed-files fast path. With `test` last,
+    `make check CHANGED="<paths>"` still runs `lint`, `audit` and `docs-lint`
+    whole, which is what CONTRIBUTING.md promises of the fast path, and still
+    comes out non-zero. Move `test` back to the front and both halves break
+    without a sound: three lanes stop running on the fast path, that promise
+    becomes false, and nothing fails to say so. Hence a test for the order of
+    four words.
+
+    Only the position of `test` is pinned. The three cheap lanes may be
+    reordered among themselves; nothing depends on which of them goes first.
+    """
+
+    def prerequisites(self) -> list[str]:
+        rules = re.findall(r"^check:(.*)$", (REPO_ROOT / "Makefile").read_text(encoding="utf-8"),
+                           flags=re.MULTILINE)
+        self.assertEqual(len(rules), 1, "the Makefile has exactly one `check` rule")
+        return rules[0].split()
+
+    def test_test_is_the_last_gate_check_runs(self) -> None:
+        self.assertEqual(self.prerequisites()[-1], "test")
+
+    def test_check_still_runs_all_four_gates(self) -> None:
+        self.assertEqual(set(self.prerequisites()), {"lint", "audit", "docs-lint", "test"})
+
+
 class TheGateMark(MakefileTree):
     """The mark that skips the coverage steps counts on the first line, at its start.
 
@@ -413,11 +489,11 @@ class TheGateMark(MakefileTree):
         (self.root / ".github/scripts/run-tests.sh").write_text(
             'printf "%s" "$LOG_FIXTURE" > unittest-output.log\n')
 
-    def with_log(self, log: str) -> str:
-        return self.make(LOG_FIXTURE=log)[1]
+    def with_log(self, log: str, expect: int = 0) -> str:
+        return self.make(LOG_FIXTURE=log, expect=expect)[1]
 
     def test_the_mark_on_the_first_line_skips_the_coverage_steps(self) -> None:
-        stdout = self.with_log("test selection: changed files, 7 of 85 modules\n...\nOK\n")
+        stdout = self.with_log("test selection: changed files, 7 of 85 modules\n...\nOK\n", expect=2)
         self.assert_coverage_steps(stdout, ran=False)
 
     def test_the_mark_below_the_first_line_keeps_the_coverage_steps(self) -> None:

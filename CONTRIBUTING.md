@@ -33,10 +33,13 @@ make docs-lint
 make check
 ```
 
-`make check` is exactly `test lint audit docs-lint`, and CI runs the same
-commands with one difference: the `lint` target's bash 3.2 parse runs only
-locally, because no runner has bash 3.2 and the job that built one was cut
-(sd:10, criterion 17). Everything else `make check` runs, CI runs.
+`make check` is exactly `lint audit docs-lint test`, cheap gates first: a
+narrowed `test` exits 2 (sd:840) and `make` stops at the first target that
+fails, so `test` goes last or the three lanes after it would not run on the
+changed-files fast path below. CI runs the same commands with one difference:
+the `lint` target's bash 3.2 parse runs only locally, because no runner has
+bash 3.2 and the job that built one was cut (sd:10, criterion 17). Everything
+else `make check` runs, CI runs.
 `make full-check` and `make generate` are gone: the first wrapped a shipped
 script that no longer exists, and the second regenerated committed per-platform
 copies that no longer exist either — the installer renders from `skills/` at
@@ -45,9 +48,12 @@ install time, so there is nothing to keep in sync.
 While you work, `make check CHANGED="<paths>"` is the changed-files fast path
 (sd:10, criterion 16). It runs the test modules those paths need plus an
 always-run set of whole-tree checks, and it skips `coverage combine` and the
-installer coverage gate, which only the full suite can meet. `lint`, `audit`
-and `docs-lint` still run whole. To cover everything you changed against
-`main`, committed or not:
+installer coverage gate, which only the full suite can meet. A narrowed run
+then exits 2, so a zero from `make check` means the full suite ran with both
+coverage gates and means nothing else (sd:840); a notice line says the same
+thing in words. `lint`, `audit` and `docs-lint` still run whole -- they run
+before `test`, which is why a narrowed run still gets all three. To cover
+everything you changed against `main`, committed or not:
 
 ```bash
 make check CHANGED="$(git diff --name-only origin/main) $(git ls-files --others --exclude-standard)"
