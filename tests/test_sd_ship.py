@@ -1759,6 +1759,40 @@ class ReviewWatchdogTests(unittest.TestCase):
         self.assertNotIn("captured_report", diagnostic)
         self.assertNotIn("captured_report_refused", diagnostic)
 
+    def test_an_oversize_body_is_refused_by_name_and_the_largest_admitted_one_is_kept(self):
+        # The size bound is older than the depth one and sits outside it, and
+        # until sd:837 it was the one refusal that stayed silent: a 2 MB report
+        # left the receipt looking exactly like a review that emitted nothing.
+        # The sentence names the budget and what was measured against it, as
+        # the depth one names the depth. `stdout.bytes` already carries the
+        # length, but a reader of the refusal should not have to correlate two
+        # fields to learn why the report is not there.
+        cap = ship.REVIEW_CAPTURE_BYTES
+        frame = b'{"pad":"' + b'"}'
+        largest = b'{"pad":"' + b"x" * (cap - len(frame)) + b'"}'
+        self.assertEqual(len(largest), cap)
+        self.assertEqual(self.expired(largest)["captured_report"], json.loads(largest))
+        oversize = largest[:-2] + b'x"}'
+        self.assertEqual(len(oversize), cap + 1)
+        diagnostic = self.expired(oversize)
+        self.assertNotIn("captured_report", diagnostic)
+        self.assertEqual(diagnostic["captured_report_refused"], f"{cap + 1} bytes, more than {cap}")
+        self.assertEqual(diagnostic["stdout"]["bytes"], cap + 1)
+
+    def test_json_that_is_not_an_object_is_refused_by_its_kind(self):
+        # A review's stdout that decodes but is not an object was dropped at
+        # `isinstance(captured, dict)` since #802, explicitly and silently. The
+        # decoder said what it found, so the receipt says it too, in JSON's
+        # own names rather than Python's: a reader of the receipt is looking
+        # at a review's output, not at an interpreter.
+        cases = ((b"[1]", "array"), (b'"report"', "string"), (b"42", "number"),
+                 (b"4.2", "number"), (b"true", "boolean"), (b"null", "null"))
+        for body, kind in cases:
+            with self.subTest(body=body):
+                diagnostic = self.expired(body)
+                self.assertNotIn("captured_report", diagnostic)
+                self.assertEqual(diagnostic["captured_report_refused"], f"a JSON {kind}, not an object")
+
     def test_captured_json_at_the_depth_limit_is_still_evidence(self):
         body = self.nested(ship.REVIEW_CAPTURE_DEPTH)
         self.assertEqual(self.expired(body)["captured_report"], json.loads(body))

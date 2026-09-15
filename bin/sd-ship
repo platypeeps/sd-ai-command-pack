@@ -45,8 +45,13 @@ REVIEW_DIAGNOSTIC_BYTES = 4096
 REVIEW_CAPTURE_DEPTH = 100
 #: How large a captured report may be before it is not read at all. This bound
 #: is older than the depth one and stays outermost: it is what keeps the depth
-#: scan off a body of unbounded length.
+#: scan off a body of unbounded length. A body of exactly this many bytes is
+#: read; one more is refused, and the refusal says so.
 REVIEW_CAPTURE_BYTES = 2_000_000
+#: What a decoded value is called when the receipt refuses it for not being an
+#: object. JSON's names, not Python's: the reader is looking at a review's
+#: output. `bool` is looked up by exact type, so it does not fall into `int`.
+JSON_KINDS = {list: "array", str: "string", int: "number", float: "number", bool: "boolean", type(None): "null"}
 
 
 class ReviewTimeout(Exception):
@@ -104,17 +109,20 @@ def captured_evidence(output: bytes) -> dict:
 
     Captured JSON is evidence only; expiry cannot establish completion. Three
     outcomes, and the receipt must be able to tell them apart: a report kept,
-    a report refused for its shape, and output that was never a report. The
-    middle one used to look like the last, so a reader could not tell a
-    rejected report from a review that emitted nothing. `cleanup` names why
-    each of its own steps failed and this names its own refusal the same way.
+    a report refused, and output that was never a report. The middle one used
+    to look like the last, so a reader could not tell a rejected report from a
+    review that emitted nothing. `cleanup` names why each of its own steps
+    failed and this names its own refusal the same way, whichever of the three
+    bounds refused it: size, then depth, then the decoded value not being an
+    object. Only output the decoder could not read at all stays silent, since
+    silence is the one true statement about it.
 
     Lifted out of `review_process` rather than nested inside it, because the
     decision is not the work: the caller bounds a process group, and this
     reads bytes.
     """
     if len(output) > REVIEW_CAPTURE_BYTES:
-        return {}
+        return {"captured_report_refused": f"{len(output)} bytes, more than {REVIEW_CAPTURE_BYTES}"}
     if capture_too_deep(output):
         return {"captured_report_refused": f"nesting deeper than {REVIEW_CAPTURE_DEPTH}"}
     try:
@@ -125,7 +133,8 @@ def captured_evidence(output: bytes) -> dict:
     except (ValueError, UnicodeError, RecursionError):
         return {}
     if not isinstance(captured, dict):
-        return {}
+        kind = JSON_KINDS.get(type(captured), type(captured).__name__)
+        return {"captured_report_refused": f"a JSON {kind}, not an object"}
     try:
         json.dumps(captured)
     except (ValueError, RecursionError):
