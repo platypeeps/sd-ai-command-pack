@@ -183,10 +183,29 @@ class WorkflowContentTests(SetupFixture):
         text = self.workflow(root).read_text(encoding="utf-8")
         self.assertIn(f"uses: {setup.ACTION_REPOSITORY}/{setup.ACTION_SUBPATH}@{PIN}", text)
 
-    def test_the_pack_itself_gets_the_local_path(self) -> None:
+    def test_the_pack_itself_gets_the_self_repository_reference(self) -> None:
         # The bootstrap the digest cannot close: the pull request installing the
         # lane in the pack would pin a commit that only exists once it merges.
-        self.assertEqual(setup.action_reference(None), f"./{setup.ACTION_SUBPATH}")
+        # `$/` closes it without a digest -- GitHub resolves it to this
+        # repository at the commit the workflow is running.
+        self.assertEqual(setup.action_reference(None), f"$/{setup.ACTION_SUBPATH}")
+        # And specifically not `./`, which resolves against the runner's
+        # workspace -- which the checkout step fills with the pull request's
+        # head, so the pull request would supply the action that routes it.
+        # That is zizmor's `self-repository` audit, and it is the whole reason
+        # the pack's own arm of this function is not a path (item 839).
+        self.assertNotIn("./", setup.action_reference(None))
+
+    def test_the_packs_own_workflow_is_what_this_build_writes(self) -> None:
+        # The pack's `.github/workflows/sd-review-route.yml` is not a
+        # hand-maintained file that happens to resemble the template: it is
+        # the template's self-install output, tracked. Nothing compared the
+        # two, so an edit to either drifted in silence -- and `setup-github`
+        # re-run in the pack would then refuse over a file it wrote itself.
+        # Found while fixing the `./` reference (item 839), where the fix had
+        # to land in both places or in neither.
+        tracked = (REPO_ROOT / setup.WORKFLOW_RELATIVE_PATH).read_text(encoding="utf-8")
+        self.assertEqual(tracked, setup.workflow_text(setup.action_reference(None)))
 
     def test_the_lane_holds_no_write_permission_and_requests_nobody(self) -> None:
         root = self.make_repo()
