@@ -2608,6 +2608,26 @@ class ACitationPastTheEndOfItsFile(unittest.TestCase):
 
         self.assertEqual(self.reason_for("see `bin/tool.py:9-2`\n"), "line-past-end")
 
+    def test_a_range_with_a_zero_at_either_end_is_judged_by_its_smaller_line(
+            self) -> None:
+        """`2-0` into a 2-line file. The larger line is in range; the smaller is 0.
+
+        sd:838 asked whether a range whose end precedes its start is a gate
+        failure or input to normalise. It is judged, not normalised, and both
+        of its lines are: `:0` alone has `start == end`, and `9-2` is caught
+        by its larger line, so between them the predicate's `min(start, end)`
+        was reachable by neither -- a predicate reading `start` in its place
+        passed `2-0` as `no-adjacent-anchor`, a citation to a line no file has,
+        and one reading `end` passed `0-2` the same way. Both spellings, so
+        that neither substitution survives.
+        """
+
+        for spelling in ("2-0", "0-2"):
+            with self.subTest(spelling=spelling):
+                self.assertEqual(
+                    self.reason_for(f"see `bin/tool.py:{spelling}`\n"),
+                    "line-past-end")
+
     def test_a_carried_key_that_differs_only_in_its_range_end_does_not_carry(
             self) -> None:
         """The key is the whole citation, its range end included.
