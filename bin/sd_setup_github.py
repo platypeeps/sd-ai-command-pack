@@ -229,14 +229,14 @@ def setup_github(
 
     policy, policy_source = load_policy(root)
     pack = pack_root()
-    pin = None if root == pack else resolve_pin(pack, args.pin)
+    self_install = root == pack
+    pin = None if self_install else resolve_pin(pack, args.pin)
     target = root / WORKFLOW_RELATIVE_PATH
     text = workflow_text(action_reference(pin))
     existing = _read(target)
     dependabot = root / sd_setup_guard.DEPENDABOT_RELATIVE_PATH
     current = _read(dependabot)
     found = sd_setup_guard.guard_state(current)
-    guard_text = sd_setup_guard.rendered(current)
 
     result: dict[str, Any] = {
         "repo": str(root),
@@ -259,13 +259,8 @@ def setup_github(
             f"{WORKFLOW_RELATIVE_PATH} exists and differs from what this build writes; "
             "rerun with --force to replace it"
         )
-    if found == "differs" and not args.force:
-        raise Refusal(
-            f"{sd_setup_guard.DEPENDABOT_RELATIVE_PATH} carries a guard for "
-            f"{sd_setup_guard.DEPENDENCY} that differs from what this build writes; rerun "
-            "with --force to replace it"
-        )
-    if existing == text and found == "same":
+    guard_text = guard_after(current, found, self_install=self_install, force=args.force)
+    if existing == text and guard_text == current:
         result["status"] = "unchanged"
 
     if args.dry_run:
@@ -278,8 +273,9 @@ def setup_github(
         (root / rel).unlink()
         result["legacy_removed"].append(rel)
     # The one write site in the lane; `tests/test_sd_review_boundary.py` counts it.
+    # `content` is None only for a self-install with no `dependabot.yml`: no file, none written.
     for path, content, before in ((target, text, existing), (dependabot, guard_text, current)):
-        if content != before:
+        if content is not None and content != before:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
     return result
@@ -289,8 +285,30 @@ def _read(path: pathlib.Path) -> str | None:
     return path.read_text(encoding="utf-8") if path.is_file() else None
 
 
+def guard_after(current: str | None, found: str, *, self_install: bool, force: bool) -> str | None:
+    """What `dependabot.yml` holds after the run; None when there is no file and none is written.
+
+    The guard holds a pin, and the pack's own workflow names none (see
+    `action_reference`): nothing for Dependabot to bump, nothing to guard. So
+    the self-install leaves the file as it stands, whatever it carries --
+    `found` still reads a hand-written guard back for the report, it just
+    decides nothing here. Everywhere else the file gains the guard, and a
+    guard that differs from the template is a refusal without `force`.
+    """
+
+    if self_install:
+        return current
+    if found == "differs" and not force:
+        raise Refusal(
+            f"{sd_setup_guard.DEPENDABOT_RELATIVE_PATH} carries a guard for "
+            f"{sd_setup_guard.DEPENDENCY} that differs from what this build writes; rerun "
+            "with --force to replace it"
+        )
+    return sd_setup_guard.rendered(current)
+
+
 def check_files(root: pathlib.Path, args: argparse.Namespace, stream: TextIO) -> int:
-    """`--check`: both files this build would write, against the tracked ones.
+    """`--check`: the files this build would write, against the tracked ones.
 
     The pin is the repository's own, read from its tracked workflow, so the
     comparison is "does the template still match", not "is the pin current" --
@@ -300,15 +318,16 @@ def check_files(root: pathlib.Path, args: argparse.Namespace, stream: TextIO) ->
     """
 
     tracked = _read(root / WORKFLOW_RELATIVE_PATH) or ""
-    pin = None if root == pack_root() else args.pin or sd_setup_guard.read_pin(tracked)
-    if pin is None and root != pack_root():
+    self_install = root == pack_root()
+    pin = None if self_install else args.pin or sd_setup_guard.read_pin(tracked)
+    if pin is None and not self_install:
         raise Refusal(f"{WORKFLOW_RELATIVE_PATH} names no pin to render at; pass --pin <sha>")
-    expected = {
-        WORKFLOW_RELATIVE_PATH: workflow_text(action_reference(pin)),
-        sd_setup_guard.DEPENDABOT_RELATIVE_PATH: sd_setup_guard.rendered(
+    expected = {WORKFLOW_RELATIVE_PATH: workflow_text(action_reference(pin))}
+    if not self_install:
+        # The pack's own workflow names no pin, so it has no guard to compare.
+        expected[sd_setup_guard.DEPENDABOT_RELATIVE_PATH] = sd_setup_guard.rendered(
             _read(root / sd_setup_guard.DEPENDABOT_RELATIVE_PATH)
-        ),
-    }
+        )
     return sd_setup_guard.report_drift(root, expected, stream)
 
 

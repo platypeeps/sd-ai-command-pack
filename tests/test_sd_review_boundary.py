@@ -352,11 +352,20 @@ class LineBudgetTests(unittest.TestCase):
         # pull request gets no run at all. Three lines say what was measured
         # and name the window the head ref is held for, in the file every
         # consumer installs, where the claim would otherwise be read as fact.
+        #
+        # 2130 -> 2149 is sd:940. `setup-github` run in the pack's own
+        # checkout rendered the Dependabot guard for a pin its workflow does
+        # not name, and `--check` there reported that guard as drift. The
+        # self-install now leaves `dependabot.yml` as it stands and diffs the
+        # workflow alone. The decision is its own function, `guard_after`,
+        # with the guard refusal moved into it: left inline, the extra branch
+        # put `setup_github` one over the complexity ceiling in
+        # `tests/test_code_health.py`, and that ceiling does not move.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2130,
+            2149,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

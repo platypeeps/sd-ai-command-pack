@@ -177,9 +177,12 @@ it is never skipped no matter what `docs_skip` says.
 
 `sd-review setup-github` installs the opt-in CI routing lane, two files:
 `.github/workflows/sd-review-route.yml`, and a Dependabot guard in
-`.github/dependabot.yml`. The code lives in `bin/sd_setup_github.py`, reached
-through the `SETUP_GITHUB_SEAM` dispatch in `bin/sd-review`, and it is the
-only surface in this lane that writes.
+`.github/dependabot.yml`. In the pack's own checkout it writes the workflow
+only: that workflow names the action as `$/actions/review-route`, no pin, so
+there is nothing for Dependabot to bump and `dependabot.yml` is left as it
+stands. The code lives in `bin/sd_setup_github.py`, reached through the
+`SETUP_GITHUB_SEAM` dispatch in `bin/sd-review`, and it is the only surface
+in this lane that writes.
 
 **The guard.** The workflow pins the action by commit, and the action runs the
 pack's own code out of that checkout, so a Dependabot bump of the pin is a
@@ -205,7 +208,8 @@ simply gains one.
 
 **`--check`.** `sd-review setup-github --check` renders both files at the
 repository's own pin -- read from the tracked workflow, or `--pin` when there
-is none -- and diffs them against what is tracked. One line per file, `same
+is none -- and diffs them against what is tracked; in the pack's own checkout
+it renders and diffs the workflow alone. One line per file, `same
 <path>` or `DIFFERS <path>`, a unified diff under each `DIFFERS`, exit 1 on
 any difference and 0 otherwise; nothing is written, and it asks nothing of the
 mode or the policy. `DIFFERS` is the word `machine-setup.sh status` already
