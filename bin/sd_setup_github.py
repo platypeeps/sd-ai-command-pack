@@ -104,16 +104,16 @@ def resolve_pin(pack: pathlib.Path, given: str | None) -> str:
 def action_reference(pin: str | None) -> str:
     """How the workflow names the action.
 
-    In the pack's own repository the action is a path in the same checkout, and
-    a digest there would be a bootstrap that cannot close: the pull request
-    installing the lane would pin a commit that exists only once it merges.
+    In the pack's own repository a digest cannot close its bootstrap: it names
+    a commit that exists only once the pull request merges. `$/` needs none;
+    `./` reads the action out of the head checkout above (`self-repository`).
     Everywhere else the digest is the point -- which is also why the pin is
     resolved only when it will be written, so a dirty pack checkout cannot block
     a self-install that never names a commit.
     """
 
     if pin is None:
-        return f"./{ACTION_SUBPATH}"
+        return f"$/{ACTION_SUBPATH}"
     return f"{ACTION_REPOSITORY}/{ACTION_SUBPATH}@{pin}"
 
 

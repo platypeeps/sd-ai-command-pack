@@ -64,4 +64,4 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Report the routing plan
-        uses: ./actions/review-route
+        uses: $/actions/review-route
