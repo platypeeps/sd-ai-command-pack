@@ -8,6 +8,7 @@ import io
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -110,12 +111,13 @@ class LintFixture(unittest.TestCase):
         )
 
     def run_lint(
-        self, pr_body: str | None = None, changed: list[str] | None = None
+        self, pr_body: str | None = None, changed: list[str] | None = None, body_only: bool = False
     ) -> lint.Report:
         # Staged, not committed: `ls-files` reads the index, and every test
         # here writes its fixture immediately before asking for a verdict.
         self.git("add", "-A")
-        return lint.run(self.repo, "docs/work", "docs/spec", "docs/decisions", pr_body, changed)
+        mode = {"body_only": True} if body_only else {}
+        return lint.run(self.repo, "docs/work", "docs/spec", "docs/decisions", pr_body, changed, **mode)
 
     def assert_clean(self) -> None:
         report = self.run_lint()
@@ -796,6 +798,131 @@ class Rule8PullRequestScopeTests(LintFixture):
             self.assertEqual(
                 lint.main(["--pr-body", str(body), "--changed", str(self.repo / "missing")]), 2)
         self.assertIn("cannot read --changed", said.getvalue())
+
+    def test_a_rename_out_of_a_class_names_the_path_it_left(self) -> None:
+        # Git detects renames by default and `--name-only` then prints the
+        # new name alone, so a workflow moved out of `.github/` read as one
+        # changed path in no class and the diff that retired it passed
+        # clean (#972 review, measured at ac0f954b). Both paths of a move
+        # are what the pull request touches, and the one it left demands
+        # the line.
+        self.policy()
+        (self.repo / ".github" / "workflows").mkdir(parents=True)
+        (self.repo / ".github" / "workflows" / "tests.yml").write_text(
+            "on: push\njobs:\n  a:\n    runs-on: ubuntu\n    steps:\n      - run: echo hi\n",
+            encoding="utf-8",
+        )
+        self.commit_all("base")
+        self.git("update-ref", "refs/remotes/origin/main", "HEAD")
+        self.git("mv", ".github/workflows/tests.yml", "docs/tests.yml.retired")
+        self.commit_all("retire the workflow")
+        self.assertEqual(
+            lint.sd_lib.git_output(["diff", "--name-status", "origin/main...HEAD"], self.repo).split(),
+            ["R100", ".github/workflows/tests.yml", "docs/tests.yml.retired"],
+            "the fixture is a rename git detects, or it tests nothing",
+        )
+        report = self.run_lint("Work: sd:1\n")
+        self.assertIn("touches .github/workflows/tests.yml", "\n".join(report.failures))
+        self.assertIn("2 changed path(s) from origin/main, 1 class(es) demanded", self.rule_8(report))
+
+    def test_cli_a_body_that_is_not_utf8_is_refused_by_name_and_not_by_traceback(self) -> None:
+        # `UnicodeDecodeError` is a `ValueError`, not an `OSError`, so a body
+        # file of bytes that do not decode escaped the argument guard as a
+        # traceback with exit 1, where every other bad argument is a named
+        # refusal with exit 2 (#972 review).
+        body = self.repo / "body.md"
+        body.write_bytes(b"Work: sd:1\n\xff\n")
+        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said:
+            self.assertEqual(lint.main(["--pr-body", str(body)]), 2)
+        self.assertIn("error: cannot read --pr-body: 'utf-8' codec can't decode", said.getvalue())
+
+    def test_cli_a_changed_list_that_is_not_utf8_is_refused_by_name(self) -> None:
+        body = self.repo / "body.md"
+        body.write_text("Work: sd:1\n", encoding="utf-8")
+        listed = self.repo / "changed.txt"
+        listed.write_bytes(b"Makefile\n\xff\n")
+        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said:
+            self.assertEqual(lint.main(["--pr-body", str(body), "--changed", str(listed)]), 2)
+        self.assertIn("error: cannot read --changed: 'utf-8' codec can't decode", said.getvalue())
+
+
+class BodyOnlyTests(LintFixture):
+    """`--body-only`: rules 5 and 8 with no work root, and nothing else.
+
+    Rule 8 was reached only inside `sd-ship`'s `if work.is_dir()` block,
+    because the linter fails on a missing work root before any rule runs
+    and `sd-ship` withheld the whole call rather than fail every repository
+    without a planning directory. So a pull request in such a repository
+    could change `.github/**` and ship without its scope line (#972 review,
+    the suppressed finding on `skills/sd-ship/SKILL.md:68`). The body rules
+    need no work root; this mode runs them alone.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        shutil.rmtree(self.work)
+        path = self.repo / lint.SCOPE_POLICY
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(SCOPE_POLICY, encoding="utf-8")
+
+    def test_red_the_968_diff_with_no_work_root_and_no_scope_line_fails_by_name(self) -> None:
+        # The fail-first case: before this mode, the only answer with no
+        # work root was the missing-root failure, and `sd-ship` skipped the
+        # call to avoid it.
+        report = self.run_lint("Work: sd:876\n\nNo scope line.\n", PR_968_PATHS, body_only=True)
+        self.assertEqual(
+            report.failures,
+            ['pull request body: touches .github/scripts/check-zizmor-personas.py, which '
+             '.github/copilot-instructions.md puts under "CI/review scope:", '
+             'and carries no "CI/review scope:" line'],
+        )
+
+    def test_green_the_line_passes_and_every_tree_rule_says_it_did_not_run(self) -> None:
+        report = self.run_lint("Work: sd:876\n\n## CI/review scope:\n\nthe lint job\n",
+                               PR_968_PATHS, body_only=True)
+        self.assertEqual(report.failures, [])
+        notes = "\n".join(report.notes)
+        self.assertIn("rules 1-4, 6-7: --body-only, not run", notes)
+        self.assertIn("rule 5 PR link: database association sd:876", notes)
+        self.assertIn('demands "CI/review scope:", and the body carries it', notes)
+        for tree_rule in ("rules 1-2 work items", "rule 3 decision", "rule 4 spec", "rule 6 citations", "rule 7 work"):
+            self.assertNotIn(tree_rule, notes)
+
+    def test_a_path_shaped_work_value_resolves_against_the_root_that_is_not_there(self) -> None:
+        # Rule 5 still runs, and a path claim in a repository with no work
+        # root is a claim onto nothing.
+        report = self.run_lint("Work: docs/work/2026-08-29-a-workable-item\n", ["src.py"], body_only=True)
+        self.assertEqual(
+            report.failures,
+            ["pull request body: Work: docs/work/2026-08-29-a-workable-item does not resolve to a work item"],
+        )
+
+    def test_without_the_flag_no_work_root_is_still_the_failure_it_was(self) -> None:
+        # The mode is opt-in. A mistyped `--work-dir` on a full run stays a
+        # failure by name rather than a body-only run nobody asked for.
+        report = self.run_lint("Work: sd:876\n", PR_968_PATHS)
+        self.assertEqual(report.failures, [f"{self.work.resolve()}: the work directory does not exist"])
+
+    def test_the_flag_without_a_body_is_a_failure_in_the_library_and_an_argument_error_at_the_cli(self) -> None:
+        report = self.run_lint(None, None, body_only=True)
+        self.assertEqual(report.failures, ["--body-only: needs --pr-body; rules 5 and 8 read it"])
+        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said:
+            self.assertEqual(lint.main(["--body-only"]), 2)
+        self.assertIn("--body-only needs --pr-body", said.getvalue())
+
+    def test_cli_body_only_fails_by_name_on_the_968_diff(self) -> None:
+        self.git("add", "-A")
+        body = self.repo / "body.md"
+        body.write_text("Work: sd:876\n", encoding="utf-8")
+        listed = self.repo / "changed.txt"
+        listed.write_text("\n".join(PR_968_PATHS) + "\n", encoding="utf-8")
+        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said, \
+                contextlib.redirect_stdout(io.StringIO()) as printed:
+            self.assertEqual(
+                lint.main(["--body-only", "--pr-body", str(body), "--changed", str(listed)]), 1)
+        self.assertIn('carries no "CI/review scope:" line', said.getvalue())
+        self.assertIn("rules 1-4, 6-7: --body-only, not run", printed.getvalue())
+        self.assertNotIn("the work directory does not exist", said.getvalue())
 
 
 class ScopePolicyTests(unittest.TestCase):

@@ -28,7 +28,10 @@ Eight rules (each past the fifth arrived with a decision record, not a patch):
 Rules 1 to 4, 6 and 7 read the tree. Rules 5 and 8 need the pull request body,
 so they run only when `--pr-body` supplies one and report themselves as not run
 otherwise. Rule 8 also needs the changed paths: `--changed` lists them, and
-without it they are read from git against `origin/HEAD`.
+without it they are read from git against `origin/HEAD`, with renames split
+into their two paths so a file moved out of a scope class still names it.
+`--body-only` runs rules 5 and 8 and nothing else, for a repository with no
+work root: the tree rules need one and say so, the body rules do not.
 
 Exits 0 when every rule that ran passed, 1 when any of them failed, and 2 when
 the arguments themselves were wrong.
@@ -423,9 +426,14 @@ def changed_paths(repo: pathlib.Path) -> tuple[list[str] | None, str]:
     for base in ("origin/HEAD", "origin/main"):
         if sd_lib.git_output(["rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"], repo) is None:
             continue
-        listed = sd_lib.git_output(["diff", "--name-only", f"{base}...HEAD"], repo)
+        # `--no-renames`: with rename detection, which git turns on by
+        # default, `--name-only` prints a moved file under its new name only.
+        # A workflow moved out of `.github/` was then a change to nowhere in
+        # any class, and the diff that retired it passed clean (#972 review).
+        # Both paths of a move are what the pull request touches.
+        listed = sd_lib.git_output(["diff", "--name-only", "--no-renames", f"{base}...HEAD"], repo)
         if listed is None:
-            return None, f"git diff --name-only {base}...HEAD failed"
+            return None, f"git diff --name-only --no-renames {base}...HEAD failed"
         return [line for line in listed.splitlines() if line], base
     return None, "neither origin/HEAD nor origin/main resolves"
 
@@ -1097,8 +1105,18 @@ def run(
     decisions_dir: str,
     pr_body: str | None,
     changed: list[str] | None = None,
+    body_only: bool = False,
 ) -> Report:
-    """Every rule over `repo`. `changed` is rule 8's path list; None reads git."""
+    """Every rule over `repo`. `changed` is rule 8's path list; None reads git.
+
+    `body_only` runs the two body rules, 5 and 8, and none of the tree rules.
+    It exists for `sd-ship` in a repository with no work root: the tree rules
+    fail on the missing root before anything runs, so the whole linter was
+    withheld there, and with it the scope check on a diff that touched
+    `.github/**` (#972 review). The body rules need no work root. Rule 5
+    still resolves a path-shaped `Work:` value against the root it was told,
+    and a root that is not there resolves nothing, which is the right answer.
+    """
     report = Report()
     repo = repo.resolve()
     # Also here, and not only at the flag: `run` is the library entry point,
@@ -1122,6 +1140,14 @@ def run(
     spec_dir = roots["--spec-dir"]
     decisions_dir = roots["--decisions-dir"]
     work_root = repo / work_dir
+    if body_only:
+        if pr_body is None:
+            report.fail("--body-only", "needs --pr-body; rules 5 and 8 read it")
+            return report
+        report.note("rules 1-4, 6-7: --body-only, not run")
+        check_pr_link(repo, work_root, pr_body, report)
+        check_pr_scope(repo, pr_body, changed, report)
+        return report
     if not work_root.is_dir():
         report.fail(str(work_root), "the work directory does not exist")
         return report
@@ -1170,6 +1196,32 @@ def record_citations(work_root: pathlib.Path) -> int:
     return 0
 
 
+def body_arguments(args: argparse.Namespace) -> tuple[str | None, list[str] | None, str]:
+    """The body and changed list the flags name, or the problem with them.
+
+    `UnicodeDecodeError` beside `OSError`: it is a `ValueError`, and a body
+    or list that is not UTF-8 was a traceback with exit 1, where every other
+    bad argument is a named refusal with exit 2 (#972 review).
+    """
+    body: str | None = None
+    if args.pr_body is not None:
+        try:
+            body = args.pr_body.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as error:
+            return None, None, f"cannot read --pr-body: {error}"
+    if args.body_only and body is None:
+        return None, None, "--body-only needs --pr-body; rules 5 and 8 read it"
+    if args.changed is None:
+        return body, None, ""
+    if body is None:
+        return None, None, "--changed needs --pr-body; rule 8 reads both"
+    try:
+        listed = args.changed.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        return None, None, f"cannot read --changed: {error}"
+    return body, [line.strip() for line in listed.splitlines() if line.strip()], ""
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Lint docs/work, docs/spec and docs/decisions.")
     parser.add_argument("--work-dir", default="docs/work", help="work item root, repo-relative")
@@ -1187,6 +1239,12 @@ def main(argv: list[str] | None = None) -> int:
         type=pathlib.Path,
         help="the pull request's changed paths, one per line, for rule 8; "
         "without it they are read from git against origin/HEAD",
+    )
+    parser.add_argument(
+        "--body-only",
+        action="store_true",
+        help="run rules 5 and 8, the ones that read --pr-body, and no tree rule; "
+        "for a repository with no work root",
     )
     parser.add_argument(
         "--update-citations",
@@ -1219,26 +1277,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.update_citations:
         return record_citations(root / args.work_dir)
 
-    body: str | None = None
-    if args.pr_body is not None:
-        try:
-            body = args.pr_body.read_text(encoding="utf-8")
-        except OSError as error:
-            print(f"error: cannot read --pr-body: {error}", file=sys.stderr)
-            return 2
-    changed: list[str] | None = None
-    if args.changed is not None:
-        if body is None:
-            print("error: --changed needs --pr-body; rule 8 reads both", file=sys.stderr)
-            return 2
-        try:
-            listed = args.changed.read_text(encoding="utf-8")
-        except OSError as error:
-            print(f"error: cannot read --changed: {error}", file=sys.stderr)
-            return 2
-        changed = [line.strip() for line in listed.splitlines() if line.strip()]
+    body, changed, problem = body_arguments(args)
+    if problem:
+        print(f"error: {problem}", file=sys.stderr)
+        return 2
 
-    report = run(root, args.work_dir, args.spec_dir, args.decisions_dir, body, changed)
+    report = run(root, args.work_dir, args.spec_dir, args.decisions_dir, body, changed, args.body_only)
     for note in report.notes:
         print(note)
     for failure in report.failures:

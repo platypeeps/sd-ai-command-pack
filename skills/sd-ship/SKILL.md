@@ -60,15 +60,15 @@ A change with no work item needs no PRD or database row to ship.
    `sd-writing-pack`), not by its remote: a checkout under another folder
    name gets no warning.
 2. **Local review.** `sd-review --scope branch --challenge` on the commits,
-   before anything leaves the machine. When the selected work root exists
-   (`docs/work` by default), run `sd-docs-lint` for that root with its applicable
-   rules enforced locally regardless of repo mode: shape · ready · decision
-   shape · spec index · PR link · PR scope, the last two against the pull
-   request body `sd-ship` has built by then, and PR scope against the branch's
-   diff from `origin/HEAD`. With no work root, omit that artifact lint;
-   the body rules, PR link and PR scope, are omitted with it, because
-   `sd-docs-lint` reads the work root before any rule runs. Do not create a
-   planning directory to satisfy it. The repository's checks
+   before anything leaves the machine. Run `sd-docs-lint` against the pull
+   request body `sd-ship` has built by then, regardless of repo mode. When the
+   selected work root exists (`docs/work` by default), every applicable rule
+   runs: shape · ready · decision shape · spec index · PR link · PR scope, the
+   last two against that body, and PR scope against the branch's diff from
+   `origin/HEAD`, both paths of a rename counted. With no work root, run it
+   with `--body-only`: PR link and PR scope still run, and the tree rules
+   report themselves not run rather than failing on the root that is not
+   there. Do not create a planning directory to satisfy them. The repository's checks
    and local code review still run. The review is the development flow's *code, before
    merge* point. Its cap is the one on that row in the sd-ai-command-pack
    checkout's `.claude/rules/sd-planning-adversarial-review.md`. Dispose every blocking
