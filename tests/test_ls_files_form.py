@@ -19,8 +19,19 @@ index, every time the suite runs.
 **What a site must carry.** One of the options that fixes git's output shape
 -- `--deduplicate` for a list of paths, `-u`/`-s` for merge stages,
 `--error-unmatch` for a probe, `--others` for what the index does not hold --
-written on the same line as the subcommand. A call that is deliberately plain,
-because plain output is what it is testing, says so in a comment and says why.
+written on the same line as the subcommand, in the half of the line the call
+itself is in. A call that is deliberately plain, because plain output is what
+it is testing, says so in a comment and says why.
+
+**Which half of the line.** A declaration has to be the thing the machine
+does, not a sentence beside it. `run(["git", <subcommand>])  # --deduplicate`
+asks for plain output and says the opposite, and a docstring that quotes the
+plain marker while explaining it is prose, not an exemption. So the line is
+split at the comment that opens on it: the option counts in the half the call
+is in, and the marker counts only in the comment half. Without that split
+either one is a text search over the whole line, and the guard is defeated by
+writing the right words anywhere near the call -- which is worse than the
+hand-written list it replaces, because it looks like a declaration.
 
 **What this does not do**, stated rather than left to be discovered. It does
 not decide whether a site chose the right form; a reader does that. It reads
@@ -36,10 +47,12 @@ refuse the absence of one, which is the part that was drifting.
 from __future__ import annotations
 
 import dataclasses
+import importlib.util
 import pathlib
 import re
 import subprocess
 import tempfile
+import types
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -137,36 +150,66 @@ def is_call(line: str, start: int, end: int) -> bool:
     return rest == "" or rest.startswith(ARGUMENT)
 
 
-def calls(text: str) -> list[tuple[int, str]]:
-    """Every call in `text`, as `(line number, line)`."""
+def calls(text: str) -> list[tuple[int, str, int]]:
+    """Every call in `text`, as `(line number, line, column)`."""
 
     found = []
     for number, line in enumerate(text.splitlines(), 1):
         for match in TOKEN.finditer(line):
             if is_call(line, match.start(), match.end()):
-                found.append((number, line))
+                found.append((number, line, match.start()))
     return found
 
 
-def declares_form(lines: list[str], number: int) -> bool:
-    """Whether the call on line `number` of `lines` says what its form is.
+def split_comment(line: str) -> tuple[str, str]:
+    """`line` as its command half and its comment half.
+
+    `#` opens a comment in every language this scan reaches -- Python, the
+    shell, `make`, YAML -- when it begins a word outside a quoted string. Both
+    of those conditions earn their place: `$#` and `${#name}` are shell
+    parameters, and a pathspec may hold a `#` inside quotes, so a split on the
+    first `#` anywhere would cut a command in half and lose the option in it.
+    """
+
+    quote, index = "", 0
+    while index < len(line):
+        char = line[index]
+        if quote:
+            if char == "\\":
+                index += 1
+            elif char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif char == "#" and (index == 0 or line[index - 1].isspace()):
+            return line[:index], line[index:]
+        index += 1
+    return line, ""
+
+
+def declares_form(lines: list[str], number: int, column: int = 0) -> bool:
+    """Whether the call at `column` on line `number` of `lines` says its form.
 
     The option must be on the call's own line: every site in this repository
     writes it there, an argv list that wraps puts the subcommand and its
     options on the first line, and "somewhere in the same statement" is not a
-    place a reader can check at a glance.
+    place a reader can check at a glance. It must also be in the half of the
+    line the call is in, so that a comment cannot answer for a command that
+    did not ask -- and so that a command written out inside a comment, which
+    is how a shell file parks one, still reads its own option.
 
-    The plain marker may also sit on the line directly above, because the line
-    holding the subcommand is often already the longest one in the call. One
-    line of reach and no more, so the marker cannot be mistaken for the
-    neighbouring call's.
+    The plain marker is a comment, and only a comment. It may sit on the line
+    directly above, because the line holding the subcommand is often already
+    the longest one in the call. One line of reach and no more, so the marker
+    cannot be mistaken for the neighbouring call's.
     """
 
     line = lines[number - 1]
-    if OPTION.search(line):
+    command, comment = split_comment(line)
+    if OPTION.search(comment if column >= len(command) else command):
         return True
     for candidate in (line, lines[number - 2] if number >= 2 else ""):
-        marker = PLAIN.search(candidate)
+        marker = PLAIN.search(split_comment(candidate)[1])
         if marker and len(marker.group(1).split()) >= REASON_WORDS:
             return True
     return False
@@ -200,7 +243,8 @@ def scan(root: pathlib.Path = REPO_ROOT) -> tuple[list[Site], list[str]]:
     to commit it.
     """
 
-    found, unreadable = [], []
+    found: list[Site] = []
+    unreadable: list[str] = []
     for name in surface(root):
         try:
             text = (root / name).read_text(encoding="utf-8")
@@ -208,8 +252,8 @@ def scan(root: pathlib.Path = REPO_ROOT) -> tuple[list[Site], list[str]]:
             unreadable.append(f"{name}: {error}")
             continue
         lines = text.splitlines()
-        found.extend(Site(name, number, line, declares_form(lines, number))
-                     for number, line in calls(text))
+        found.extend(Site(name, number, line, declares_form(lines, number, column))
+                     for number, line, column in calls(text))
     return found, unreadable
 
 
@@ -263,7 +307,7 @@ class TheRecogniserTellsCallsFromProse(unittest.TestCase):
     """
 
     def found(self, text: str) -> list[int]:
-        return [number for number, _ in calls(text)]
+        return [number for number, _, _ in calls(text)]
 
     def test_an_argv_element_is_a_call(self) -> None:
         self.assertEqual(self.found(f'["git", "{SUBJECT}", "-z"]'), [1])
@@ -312,8 +356,8 @@ class TheRecogniserTellsCallsFromProse(unittest.TestCase):
 class TheDeclarationHasToSaySomething(unittest.TestCase):
     """The other half: what counts as having declared a form."""
 
-    def declared(self, *lines: str) -> bool:
-        return declares_form(list(lines), len(lines))
+    def declared(self, *lines: str, column: int = 0) -> bool:
+        return declares_form(list(lines), len(lines), column)
 
     def test_an_option_on_the_call_line_declares_the_form(self) -> None:
         for option in FORM_OPTIONS:
@@ -352,6 +396,51 @@ class TheDeclarationHasToSaySomething(unittest.TestCase):
     def test_a_bare_call_declares_nothing(self) -> None:
         self.assertFalse(self.declared(f'["git", "{SUBJECT}"]'))
         self.assertFalse(self.declared(f'["git", "{SUBJECT}", "--", "f.py"]'))
+
+    def test_an_option_in_a_trailing_comment_does_not_speak_for_the_command(self) -> None:
+        """The command asks for plain output; the comment says the opposite.
+
+        Without this the guard is a text search over the line, and the way
+        past it is to type the option somewhere it does nothing -- a cheaper
+        exemption than the marker, and a silent one.
+        """
+
+        for line in (f'    run(["git", "{SUBJECT}"])  # --deduplicate',
+                     f'    run(["git", "{SUBJECT}", "--", "f"])  # not -u, on purpose'):
+            with self.subTest(line=line):
+                self.assertFalse(self.declared(line))
+
+    def test_an_option_in_the_command_still_declares_with_a_comment_after(self) -> None:
+        """The control for the case above: the split must not refuse a real one."""
+
+        self.assertTrue(self.declared(
+            f'    run(["git", "{SUBJECT}", "--deduplicate"])  # one row per path'))
+
+    def test_a_call_written_inside_a_comment_reads_the_comment_as_its_half(self) -> None:
+        """A parked command line is all comment, so its option is there too."""
+
+        line = f"    # git {SUBJECT} --deduplicate -- bin"
+        self.assertTrue(self.declared(line, column=line.index(SUBJECT)))
+
+    def test_a_hash_inside_a_quoted_word_does_not_end_the_command(self) -> None:
+        """A pathspec may hold one, and the option after it still counts."""
+
+        self.assertTrue(self.declared(f"git {SUBJECT} -- 'a #b' --deduplicate"))
+
+    def test_the_marker_outside_a_comment_declares_nothing(self) -> None:
+        """A docstring about the marker, and a string holding it, are prose.
+
+        Both spellings exist in this repository -- the paragraph above and the
+        failure message this file prints both write the marker out -- so the
+        marker has to mean something only where a machine would ignore it.
+        """
+
+        docstring = f'    """Paths, once each. {SUBJECT}-form: plain -- stages are the point."""'
+        call = f'    return run(["git", "{SUBJECT}", "-z"])'
+        self.assertFalse(self.declared(docstring, call))
+        self.assertFalse(self.declared(
+            f'    note = "{SUBJECT}-form: plain -- stages are the point"'
+            f'; run(["git", "{SUBJECT}"])'))
 
 
 class TheGuardAgainstTheGuard(unittest.TestCase):
@@ -423,6 +512,77 @@ class TheGuardAgainstTheGuard(unittest.TestCase):
         (root / "scratch.py").write_text(f'run(["git", "{SUBJECT}"])\n',
                                          encoding="utf-8")
         self.assertEqual(undeclared(root), [])
+
+    def test_a_bare_call_with_the_option_only_in_a_comment_is_named(self) -> None:
+        """The whole path, over the bypass the string cases above pin."""
+
+        text = f'run(["git", "{SUBJECT}"])  # --deduplicate'
+        root = self.repository(**{"tool.py": f"{text}\n"})
+        self.assertEqual(undeclared(root), [f"tool.py:1: {text}"])
+
+    def test_a_bare_call_under_a_docstring_holding_the_marker_is_named(self) -> None:
+        text = f'run(["git", "{SUBJECT}"])'
+        root = self.repository(**{"tool.py": (
+            f'"""Every path. {SUBJECT}-form: plain -- stages are the point."""\n'
+            f"{text}\n")})
+        self.assertEqual(undeclared(root), [f"tool.py:2: {text}"])
+
+
+class TheFastPathCannotSkipThisGuard(unittest.TestCase):
+    """`make check CHANGED=...` must run this module whatever changed.
+
+    The fast path runs the modules the changed paths name, plus an always-run
+    set. This module names no path -- it enumerates them from the index -- so
+    nothing a person edits selects it. Left out of that set it would be
+    skipped by every narrowed run, and a bare call landing in the edited file
+    would pass the check that was supposed to catch it: sd:841's own defect,
+    inside sd:841's fix. It was, until this case.
+
+    A membership assertion would pass by agreeing with the list. This runs the
+    selector over a path taken from the index at run time instead, so what is
+    checked is that a narrowed run includes this module, not that two copies
+    of a hand-written tuple still match.
+    """
+
+    MODULE = "tests.test_ls_files_form"
+    SELECTOR = REPO_ROOT / ".github/scripts/select-tests.py"
+
+    def selector(self) -> types.ModuleType:
+        spec = importlib.util.spec_from_file_location("select_tests", self.SELECTOR)
+        self.assertIsNotNone(spec, f"{self.SELECTOR} is not importable")
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def probes(self) -> list[str]:
+        """Tracked code paths this module's own source does not name.
+
+        From the index, so the case cannot survive on an example that was
+        hand-picked while it was still selectable. A path this file names
+        would select this module by naming and prove nothing about the
+        always-run set.
+        """
+
+        own = (REPO_ROOT / "tests/test_ls_files_form.py").read_text(encoding="utf-8")
+        return [name for name in surface()
+                if name.startswith("bin/") and name.split("/")[-1] not in own]
+
+    def test_a_narrowed_run_over_an_unrelated_path_still_runs_this_module(self) -> None:
+        selector = self.selector()
+        self.assertIn(self.MODULE, selector.ALWAYS_RUN)
+        probes = self.probes()
+        self.assertNotEqual(probes, [], "no tracked path under bin/ is unrelated")
+        for probe in probes:
+            selection, reason = selector.select(REPO_ROOT, [probe])
+            if selection is None:
+                continue
+            self.assertIn(self.MODULE, selection,
+                          f"a narrowed check over {probe} ({reason}) would not "
+                          "run this guard, so a bare call landing in that file "
+                          "would pass it")
+            return
+        self.fail(f"no path in {probes[:3]}... narrows, so nothing was checked")
 
 
 if __name__ == "__main__":

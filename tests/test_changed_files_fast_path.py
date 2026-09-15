@@ -47,8 +47,9 @@ def load_selector() -> types.ModuleType:
 
 
 ALWAYS_RUN_NAMES = (
-    "test_code_health", "test_doc_citations", "test_loc_caps", "test_no_shipped_shell",
-    "test_suite_shape", "test_verb_inventory", "test_workflow_policy",
+    "test_code_health", "test_doc_citations", "test_loc_caps", "test_ls_files_form",
+    "test_no_shipped_shell", "test_suite_shape", "test_verb_inventory",
+    "test_workflow_policy",
 )
 
 # Each optional module names what it tests the way real ones do: a path, a
