@@ -290,6 +290,19 @@ jobs:
       - name: Zizmor (workflow security)
         run: zizmor --offline .github/workflows/
 
+      # The step above prints "No findings to report. Good job! (3
+      # suppressed)", and nobody wrote those suppressions: there is no zizmor
+      # configuration file in this repository and no `# zizmor: ignore`
+      # comment in any workflow. The three are findings whose persona the
+      # default gate drops, and until sd:876 the only place they were written
+      # down was a sentence in a tracked-work note, which is a list and ages
+      # like one. This asks zizmor for the set and requires it to match the
+      # decisions in the script, in both directions -- so a workflow edit that
+      # earns a fourth one fails here, and so does a decision whose finding is
+      # gone. `make audit` runs the same pair locally.
+      - name: Zizmor persona-gated findings (enumerated, not recited)
+        run: python3 .github/scripts/check-zizmor-personas.py --zizmor zizmor
+
       # Consumers vendor ~6k lines of pack shell and exempt it from line
       # review ("reviewed upstream"), so upstream lint rigor is the
       # compensating control. Warning severity is the achieved baseline;

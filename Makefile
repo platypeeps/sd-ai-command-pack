@@ -133,6 +133,16 @@ lint:
 # `make audit` reports success having audited nothing. STRICT=1 makes that
 # fatal, matching the node and shellcheck lanes above, so a CI lane or a
 # release gate can demand the audit actually ran.
+# The zizmor lane runs twice. The first is the gate, and it has been reporting
+# "No findings to report. Good job! (3 suppressed)" for as long as anyone has
+# looked; the second says what those three are. They are not suppressions
+# anybody wrote -- there is no zizmor configuration file here and no
+# `# zizmor: ignore` comment in any workflow -- they are findings carrying a
+# persona the default gate drops, and until sd:876 the only enumeration of
+# them was a sentence in a tracked-work note. The script asks zizmor for the
+# set instead of reciting it, and fails when a workflow earns a fourth one or
+# when a decision outlives its finding. The same binary is handed to both, so
+# the enumeration can never be measured by a different zizmor than the gate.
 audit:
 	@if [ -x "$(VENV_BIN)/bandit" ]; then \
 		"$(VENV_BIN)/bandit" -q -r --severity-level medium bin; \
@@ -146,10 +156,12 @@ audit:
 		printf '%s\n' "warning: bandit not found; skipping Python security audit."; \
 	fi
 	@if [ -x "$(VENV_BIN)/zizmor" ]; then \
-		"$(VENV_BIN)/zizmor" --offline .github/workflows/; \
+		"$(VENV_BIN)/zizmor" --offline .github/workflows/ && \
+		"$(VENV_PYTHON)" .github/scripts/check-zizmor-personas.py --zizmor "$(VENV_BIN)/zizmor"; \
 	elif command -v zizmor >/dev/null 2>&1; then \
 		printf '%s\n' "warning: $(VENV_BIN)/zizmor is missing; using an UNPINNED zizmor from PATH ($$(zizmor --version 2>&1 | head -1 | tr -d '\r')). CI uses the requirements-security.txt pin; run 'make setup' to match it."; \
-		zizmor --offline .github/workflows/; \
+		zizmor --offline .github/workflows/ && \
+		"$(PYTHON)" .github/scripts/check-zizmor-personas.py --zizmor zizmor; \
 	elif [ "$(STRICT)" = "1" ]; then \
 		printf '%s\n' "error: zizmor not found and STRICT=1; the workflow security audit is required." >&2; \
 		exit 1; \
