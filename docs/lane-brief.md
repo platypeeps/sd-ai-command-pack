@@ -66,8 +66,10 @@ for the controls a run passes through.
 > requires. Work done in the checkout the agent picked is the failure that rule
 > exists to prevent.
 >
-> <one paragraph: the citation — `path:line` for a line of a markdown page,
-> `source:<path>::<symbol>` for code, never a line number into code
+> <one paragraph: the citation — `path:line` for a line of a markdown page;
+> `source:<path>::<symbol>` for a Python function, class, method or
+> module-level assignment; prose naming the enclosing declaration or the file
+> for anything else, `dashboard/app.js` say; never a line number into code
 > ([`CONTRIBUTING.md`](../CONTRIBUTING.md), "Repository Conventions") — the
 > quoted text, the related pull requests and decision notes to read>
 >
@@ -142,8 +144,11 @@ for the controls a run passes through.
 >    (`tests/fixtures/sd-631-unanswered-round.json`: four suppressed in the
 >    body, one inline finding that the body's table summarises and the thread
 >    quotes). Read both, every time, and paginate both to the end rather than
->    trusting one page: `get_reviews` paginates as `get_review_comments` does,
->    and a review dropped from the first page takes its `commit_id` with it.
+>    trusting one page. They paginate differently: `get_reviews` by
+>    `page`/`perPage`, `get_review_comments` by cursor, `after` set to the
+>    previous page's `endCursor` until `hasNextPage` is false; `after` is not
+>    a `get_reviews` parameter. A review dropped from the first page takes its
+>    `commit_id` with it.
 >
 >    `copilot-pull-request-reviewer` may run more than once on one pull request,
 >    may not re-run on a push, and may fail outright with a body that is an
@@ -157,8 +162,10 @@ for the controls a run passes through.
 >    dispositioned; they never block a merge, and no pack surface requests a
 >    round ([`WORKFLOW.md`](../WORKFLOW.md), the advisory section;
 >    [`skills/sd-ship/SKILL.md`](../skills/sd-ship/SKILL.md)). The gates that
->    bind are two, and neither is this round: the local gate under How to work
->    ran on the machine before the push, and after it the required CI checks
+>    bind are elsewhere, and none of them is this round: on the machine before
+>    the push, the local gate under How to work and, on the `sd-ship` path,
+>    the capped `sd-review` pass above, whose blocking findings are disposed
+>    before anything is published; after the push, the required CI checks
 >    and GitHub's merge rules bind the merge (the skill, the merge readiness
 >    paragraph: "passing required checks and GitHub's satisfied merge rules").
 >    A green local run is not readiness; the report names every CI leg with
@@ -204,8 +211,10 @@ for the controls a run passes through.
 > - Publishing path: <one of: "you push the branch and open the pull request
 >   with `mcp__github__create_pull_request`, and I merge by API" | "you ship
 >   with `bin/sd-ship`">. The two differ in who writes the body's owned lines.
->   `bin/sd-ship` writes `Work:` itself and its `prepare` stage refuses a
->   `--body-file` that carries `Item:`, `Delivers:`, `Closes:`,
+>   `bin/sd-ship` writes `Work:` itself — except in `guest` mode for an item
+>   that is not local to the destination, where `prepare` omits the line on
+>   purpose and strips one it finds before the push — and its `prepare` stage
+>   refuses a `--body-file` that carries `Item:`, `Delivers:`, `Closes:`,
 >   `Authored-with:`, `Attributes:` or `Work:` — "the ship adapter owns
 >   association and delivery trailers" — and its `merge` stage appends `Item:`,
 >   `Delivers:` and `Authored-with:` to the squash. So on the `sd-ship` path
@@ -265,8 +274,9 @@ for the controls a run passes through.
 >   places. Pull request body: <the session's pull request attribution line>,
 >   as the paragraph directly above the trailers — never below them, for the
 >   reason the previous bullet gives. Commit message: <the session's commit
->   attribution line>, as its last line. The commit message carries no
->   `Item:`/`Delivers:` block; those are the body's.
+>   attribution line>, as its last line. The commits you author carry no
+>   `Item:`/`Delivers:` block; those are the body's, and the squash message
+>   the merge composes from the body is where they end up.
 > - One push, then freeze the head until the review has been read and
 >   dispositioned. You get one further push after that: every review fix in a
 >   single batch, gate re-run before it, never one commit per finding. That
