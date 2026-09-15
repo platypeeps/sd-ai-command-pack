@@ -408,6 +408,7 @@ class BareVendorTokens(unittest.TestCase):
                 "the fixture did not leave an unmerged index, so the case "
                 "below proves nothing")
 
+            # ls-files-form: plain -- the repetition is what this case asserts
             repeated = git("ls-files", "-z", "--", "skills").stdout
             self.assertEqual(
                 [name for name in repeated.split("\0") if name],

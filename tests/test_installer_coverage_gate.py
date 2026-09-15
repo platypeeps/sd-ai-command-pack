@@ -38,7 +38,14 @@ PATHSPEC = "bin/sd_install*.py"
 
 
 def _scratch_repo_listing(root, paths, pathspec):
-    """Track `paths` in a throwaway repo and return `git ls-files -- pathspec`."""
+    """Track `paths` in a throwaway repo and list the ones matching `pathspec`.
+
+    `--deduplicate` is the form, not a fix: this repository is built, added
+    and read in one breath, so it has no merge stages to collapse. It is
+    written because the gate this exercises carries it, and a probe that reads
+    the index differently from the thing it is probing is a probe that can
+    agree with it for the wrong reason (sd:841).
+    """
 
     def run(*argv):
         return subprocess.run(
@@ -51,7 +58,7 @@ def _scratch_repo_listing(root, paths, pathspec):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("x = 1\n")
     run("git", "add", "-A")
-    return run("git", "ls-files", "--", pathspec).stdout.split()
+    return run("git", "ls-files", "--deduplicate", "--", pathspec).stdout.split()
 
 
 class PathspecSemanticsTests(unittest.TestCase):
@@ -199,6 +206,7 @@ class UnmergedIndexTests(unittest.TestCase):
             ["1", "2", "3"],
         )
         self.assertEqual(
+            # ls-files-form: plain -- the repetition is what this case asserts
             self.git("ls-files", "--", PATHSPEC).stdout.split(),
             ["bin/sd_install.py"] * 3,
             "this git no longer repeats an unmerged path; if that is now the "

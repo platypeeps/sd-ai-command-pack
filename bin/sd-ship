@@ -549,8 +549,12 @@ class Ship:
         body = self.args.body_file.read_text() if self.args.body_file else self.state.get("body") or f"Code changes associated with sd:{self.args.item}."
         if self.args.body_file and re.search(r"(?im)^(?:Item|Delivers|Closes|Authored-with|Attributes|Work):", body):
             raise Refusal("the ship adapter owns association and delivery trailers")
+        # `--deduplicate`: the answer wanted here is whether the index holds
+        # the item's page at all, and an unmerged path arrives once per merge
+        # stage. Nothing moves -- a non-empty list is truthy at one row or at
+        # three -- so this is the form, not a fix (sd:841).
         local_work = (self.item["kind"] == "work" and self.item.get("path")
-                      and git(self.root, "ls-files", "--", self.item["path"]))
+                      and git(self.root, "ls-files", "--deduplicate", "--", self.item["path"]))
         mode = sd_lib.mode(self.root, ask=lambda endpoint, root: self._mode_ask(endpoint))
         if (mode != "guest" or local_work) and f"Work: sd:{self.args.item}" not in body:
             body += f"\n\nWork: sd:{self.args.item}\n"
