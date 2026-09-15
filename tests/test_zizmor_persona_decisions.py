@@ -22,6 +22,13 @@ that list-free answer depends on:
   anything above a finding does not fail the run;
 * and every entry of `DECIDED` is distinct, reasoned, and about a workflow that
   is in this checkout.
+
+The run itself is asserted too, through a zizmor that is a shell script: it
+records the arguments it was given and prints whatever JSON the test wants. A
+typo in `--persona=auditor` or `--format=json-v1` would otherwise leave every
+test here green and be found only once CI reached the gate. The findings that
+fake prints for the end-to-end run are built from `DECIDED` rather than written
+out again, so this file never becomes the second copy of the list.
 """
 
 from __future__ import annotations
@@ -30,8 +37,11 @@ import contextlib
 import importlib.machinery
 import importlib.util
 import io
+import json
 import pathlib
+import shutil
 import sys
+import tempfile
 import unittest
 from typing import Any
 
@@ -167,6 +177,23 @@ class TheGatedSet(unittest.TestCase):
                                 finding("secrets-outside-env", "Auditor")])
         self.assertEqual([item.persona for item in found], ["Pedantic", "Auditor"])
 
+    def test_a_finding_with_no_persona_stops_the_run(self) -> None:
+        # Defaulting the field to "" would make this look gated, and a gated
+        # finding whose key is already decided reconciles to zero: the run
+        # would report agreement about a persona it never managed to read.
+        unreadable = finding("anonymous-definition", "Pedantic")
+        del unreadable["determinations"]["persona"]
+        with self.assertRaises(ValueError) as caught:
+            personas.gated([unreadable])
+        self.assertIn("determinations.persona", str(caught.exception))
+
+    def test_a_persona_that_is_not_a_string_stops_the_run(self) -> None:
+        renamed = finding("anonymous-definition", "Pedantic")
+        renamed["determinations"]["persona"] = ["Pedantic"]
+        with self.assertRaises(ValueError) as caught:
+            personas.gated([renamed])
+        self.assertIn("determinations.persona", str(caught.exception))
+
     def test_the_reported_line_is_the_one_a_reader_would_open(self) -> None:
         # zizmor counts rows from zero and prints them from one. Off by one,
         # every line this prints points at the line above the finding.
@@ -265,6 +292,126 @@ class TheBinaryItRuns(unittest.TestCase):
                                   "zizmor-that-is-not-installed-anywhere"])
         self.assertEqual(code, 2)
         self.assertIn("cannot run", said.getvalue())
+
+
+def as_zizmor_json(decided: tuple) -> str:
+    """`decided` in zizmor's shape, derived from the table rather than retyped.
+
+    A hand-written copy of the three findings would be the second list this
+    whole change exists to remove, and it would go stale the same way: this
+    builds the run from whatever `DECIDED` currently says.
+    """
+
+    payload = []
+    for row, decision in enumerate(decided):
+        key = decision.key
+        payload.append({
+            "ident": key.ident,
+            "determinations": {"confidence": "High", "severity": "Medium",
+                               "persona": "Auditor"},
+            "locations": [{
+                "symbolic": {
+                    "key": {"Local": {"verbatim_path": key.path}},
+                    "route": {"route": [{"Key": part}
+                                        for part in key.route.strip("/").split("/")]},
+                    "kind": "Primary",
+                },
+                "concrete": {"feature": key.feature,
+                             "location": {"start_point": {"row": row, "column": 0}}},
+            }],
+        })
+    return json.dumps(payload)
+
+
+class WithAFakeZizmor:
+    """A zizmor that is a shell script: it records its argv and prints a payload."""
+
+    def setUp(self) -> None:
+        self.directory = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.directory, ignore_errors=True)
+        self.argv = self.directory / "argv"
+
+    def fake(self, stdout: str) -> str:
+        payload = self.directory / "stdout"
+        payload.write_text(stdout, encoding="utf-8")
+        binary = self.directory / "zizmor"
+        binary.write_text(
+            "#!/bin/sh\n"
+            f'printf "%s\\n" "$@" > "{self.argv}"\n'
+            f'cat "{payload}"\n'
+            # Real zizmor exits non-zero whenever it has findings, which is the
+            # normal case here, so the fake does too: a run that started
+            # checking the status would go green only on a clean workflow tree.
+            "exit 14\n", encoding="utf-8")
+        binary.chmod(0o755)
+        return str(binary)
+
+
+class TheRunItMakes(WithAFakeZizmor, unittest.TestCase):
+    def test_the_flags_are_the_auditor_persona_read_offline_as_json(self) -> None:
+        # The one place these four strings are checked. Misspell any of them
+        # and zizmor prints a usage error instead of findings, which every
+        # other test in this file is too far from the process to notice.
+        personas.run_zizmor(self.fake("[]"), REPO_ROOT)
+        self.assertEqual(
+            self.argv.read_text(encoding="utf-8").split(),
+            ["--offline", "--persona=auditor", "--format=json-v1", "--no-progress",
+             personas.WORKFLOWS])
+
+    def test_the_findings_come_back_parsed(self) -> None:
+        findings = personas.run_zizmor(
+            self.fake(json.dumps([finding("anonymous-definition", "Pedantic")])), REPO_ROOT)
+        self.assertEqual([item["ident"] for item in findings], ["anonymous-definition"])
+
+    def test_output_that_is_not_json_is_refused(self) -> None:
+        # What a zizmor given an option it does not have actually does.
+        with self.assertRaises(ValueError) as caught:
+            personas.run_zizmor(self.fake("error: unexpected argument found\n"), REPO_ROOT)
+        self.assertIn("printed no JSON", str(caught.exception))
+
+    def test_json_that_is_not_a_list_is_refused(self) -> None:
+        with self.assertRaises(ValueError) as caught:
+            personas.run_zizmor(self.fake('{"findings": []}'), REPO_ROOT)
+        self.assertIn("not a list", str(caught.exception))
+
+
+class TheWholeRun(WithAFakeZizmor, unittest.TestCase):
+    """`main()` from its arguments to its exit code, through the fake binary."""
+
+    def run_main(self, stdout: str) -> tuple[int, str, str]:
+        said, printed = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stderr(said), contextlib.redirect_stdout(printed):
+            code = personas.main(["check-zizmor-personas.py", "--zizmor",
+                                  self.fake(stdout), "--root", str(REPO_ROOT)])
+        return code, printed.getvalue(), said.getvalue()
+
+    def test_a_run_that_agrees_with_the_table_is_zero(self) -> None:
+        code, printed, said = self.run_main(as_zizmor_json(personas.DECIDED))
+        self.assertEqual((code, said), (0, ""))
+        self.assertIn(f"{len(personas.DECIDED)} decided", printed)
+
+    def test_a_finding_nobody_decided_fails_the_run(self) -> None:
+        run = json.loads(as_zizmor_json(personas.DECIDED))
+        run.append(finding("cache-poisoning", "Auditor", route="lint",
+                           feature="actions/cache"))
+        code, _, said = self.run_main(json.dumps(run))
+        self.assertEqual(code, 1)
+        self.assertIn("no decision for cache-poisoning", said)
+
+    def test_a_decision_the_run_does_not_carry_fails_the_run(self) -> None:
+        code, _, said = self.run_main(as_zizmor_json(personas.DECIDED[1:]))
+        self.assertEqual(code, 1)
+        self.assertIn(f"decided but not found: {personas.DECIDED[0].key}", said)
+
+    def test_a_zizmor_that_cannot_be_read_is_named_and_not_a_traceback(self) -> None:
+        # The entrypoint contract: helper errors are caught and reported.
+        # Exit 2 is "could not be answered", which is not exit 1's "answered,
+        # and the answer is a disagreement".
+        code, _, said = self.run_main("error: unexpected argument found\n")
+        self.assertEqual(code, 2)
+        self.assertIn("could not be enumerated", said)
+        self.assertIn("printed no JSON", said)
+        self.assertNotIn("Traceback", said)
 
 
 class TheLanesThatRunIt(unittest.TestCase):

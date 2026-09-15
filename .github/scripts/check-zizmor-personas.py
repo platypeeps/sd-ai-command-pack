@@ -108,22 +108,32 @@ DECIDED: tuple[Decision, ...] = (
                 route="/jobs/unittest",
                 feature="secrets.SYSTEM_REPO_TOKEN"),
         reason=(
-            "Accepted, and this is the one of the three worth re-reading when "
-            "anything about the job changes. The audit wants the secret behind "
-            "a GitHub environment, so that environment protection rules govern "
-            "who can start a run that reads it. Two things stand in for that "
-            "here. The token is read by one step -- a checkout of "
-            "`platypeeps/system` at a pinned commit -- and that step sets "
-            "`persist-credentials: false`, so it is not written into the "
-            "workspace's git config for the steps after it. And the workflow "
-            "runs on `pull_request` and on `push` to `main`: GitHub hands no "
-            "secret to a `pull_request` run from a fork, so the only heads that "
-            "reach this token are heads in this repository, pushed by somebody "
-            "who can already push here. An environment would narrow that to "
-            "\"and approved by a named reviewer\", at the price of a manual "
-            "approval on every run of the default test lane, which is declined "
-            "while the two populations are the same one. What would reopen it: "
-            "this repository taking fork pull requests with secrets, this job "
+            "Accepted on a trusted-writer threat model, which is named here "
+            "rather than implied, and this is the one of the three worth "
+            "re-reading when anything about the job changes. The audit wants "
+            "the secret behind a GitHub environment, so that environment "
+            "protection rules govern who can start a run that reads it. What "
+            "stands in for that is the population who can start such a run, "
+            "and nothing narrower. The workflow runs on `pull_request` and on "
+            "`push` to `main`, and GitHub hands no secret to a `pull_request` "
+            "run from a fork, so every head that reaches this token is a head "
+            "in this repository pushed by somebody who already has write "
+            "access. Such a writer controls the workflow YAML on their own "
+            "branch and can therefore print the secret whatever this job does "
+            "with it, so the acceptance is exactly this: every writer here is "
+            "trusted with it. The mitigations inside the job are real but do "
+            "not carry that weight and are not offered as if they did -- the "
+            "token is referenced by one step, a checkout of "
+            "`platypeeps/system` at a pinned commit, and `persist-credentials: "
+            "false` keeps that checkout's credential out of the workspace's "
+            "git config for the steps after it, which stops a later step "
+            "picking it up by accident and stops nothing a later step does on "
+            "purpose. An environment would narrow the population to \"and "
+            "approved by a named reviewer\", at the price of a manual approval "
+            "on every run of the default test lane, which is declined while "
+            "every writer is trusted. What would reopen it: a writer this "
+            "repository does not trust with a `platypeeps/system` token, this "
+            "repository taking fork pull requests with secrets, this job "
             "running a third party's code, or the token being read anywhere "
             "but that one pinned checkout.")),
 )
@@ -196,7 +206,17 @@ def gated(findings: list) -> list[Found]:
     found = []
     for finding in findings:
         determinations = finding.get("determinations", {})
-        persona = str(determinations.get("persona", ""))
+        persona = determinations.get("persona") if isinstance(determinations, dict) else None
+        if not isinstance(persona, str):
+            # Defaulting a missing or renamed field to "" would call the
+            # finding gated, and a gated finding whose key is already decided
+            # reconciles to zero -- reporting agreement about a persona this
+            # never read. Which findings the gate drops is the whole question,
+            # so a run that cannot answer it stops.
+            raise ValueError(
+                f"{finding.get('ident')!r} has no string `determinations.persona` "
+                f"({persona!r}); zizmor's output shape has changed and this script "
+                "must be re-read")
         if persona == DEFAULT_PERSONA:
             continue
         location = primary(finding)
@@ -226,6 +246,9 @@ def run_zizmor(zizmor: str, root: pathlib.Path) -> list:
     depends on whether GitHub answered. The exit status is deliberately not
     checked -- zizmor exits non-zero whenever it has findings, and having
     findings is the normal case here.
+
+    Raises `ValueError` for anything it cannot read, which `main()` turns into
+    a named message and exit 2 rather than a traceback.
     """
 
     completed = subprocess.run(
@@ -235,12 +258,11 @@ def run_zizmor(zizmor: str, root: pathlib.Path) -> list:
     try:
         findings = json.loads(completed.stdout)
     except json.JSONDecodeError as error:
-        raise SystemExit(
-            f"check-zizmor-personas: {zizmor} printed no JSON (exit {completed.returncode}): "
-            f"{error}\n{completed.stderr.strip()}") from error
+        raise ValueError(
+            f"printed no JSON (exit {completed.returncode}): {error}"
+            f"\n{completed.stderr.strip()}") from error
     if not isinstance(findings, list):
-        raise SystemExit(
-            f"check-zizmor-personas: {zizmor} printed {type(findings).__name__}, not a list")
+        raise ValueError(f"printed {type(findings).__name__}, not a list of findings")
     return findings
 
 
@@ -276,7 +298,17 @@ def main(argv: list[str]) -> int:
               "the persona enumeration cannot run.", file=sys.stderr)
         return 2
 
-    found = gated(run_zizmor(zizmor, root))
+    try:
+        found = gated(run_zizmor(zizmor, root))
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        # The entrypoint contract: a tool that moved, a zizmor whose JSON this
+        # has not been read against, a shape `primary()` refuses. Each is a
+        # reason this could not be answered, and each reads as one line rather
+        # than as a traceback -- and never as agreement.
+        print(f"error: {zizmor} could not be enumerated: "
+              f"{type(error).__name__}: {error}", file=sys.stderr)
+        return 2
+
     undecided, unfound = reconcile(found, DECIDED)
 
     print(f"check-zizmor-personas: {len(found)} finding(s) the default persona drops, "
