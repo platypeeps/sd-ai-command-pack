@@ -37,9 +37,19 @@ for the controls a run passes through.
 > not this brief:
 >
 > ```
-> sqlite3 -readonly ~/.local/share/sd/sd.db "SELECT id, status, priority, title, json_extract(body,'$.text') FROM item WHERE id=<N>;"
-> sqlite3 -readonly ~/.local/share/sd/sd.db "SELECT id, kind, body FROM note WHERE item=<N> ORDER BY id;"
+> sd store item <N> --json
 > ```
+>
+> That is the canonical read — the row, every note, and the revision, in one
+> call. It is a read verb; it writes nothing. Do not hand-roll a `sqlite3`
+> projection instead: one written from the schema you remember drops the fields
+> you were not thinking about, and `repo` is the one that matters most.
+>
+> **Check `repo` before you touch anything.** It names the checkout the row
+> belongs to. If it is not the checkout you were given, stop and print both
+> paths, exactly as [`skills/sd-plan/SKILL.md`](../skills/sd-plan/SKILL.md)
+> requires. Work done in the checkout the agent picked is the failure that rule
+> exists to prevent.
 >
 > `<one paragraph: the cited file:line, the quoted text, the related pull
 > requests and decision notes to read>`
@@ -58,13 +68,27 @@ for the controls a run passes through.
 >    decisive assertion line, then fix, then watch it pass. A test that does not
 >    kill its mutation has not earned its place.
 > 3. **Mutations, with a byte-copy revert.** Before each mutation, copy every
->    file you will mutate: `cp <file> <scratchpad>/<lane>/pre/<file>`. Apply the
->    mutation, confirm the test dies naming itself, then restore from the copy
->    and prove it: `diff -q <scratchpad>/<lane>/pre/<file> <file>` must return
->    rc 0. Never prove a revert with `git diff --exit-code` or
->    `git checkout -- <file>`: when the mutated file is one your change modifies
->    and the fix is uncommitted, rc 0 against HEAD means the fix was LOST, not
->    preserved. Record the exact failure text of each mutation.
+>    file you will mutate. The paths are nested, so make the parent first or
+>    `cp` aborts before the mutation even runs:
+>
+>    ```
+>    dest=<scratchpad>/<lane>/pre/<file>
+>    mkdir -p "$(dirname "$dest")" && cp <file> "$dest"
+>    ```
+>
+>    Apply the mutation, confirm the test dies naming itself, then restore from
+>    the copy and prove it: `diff -q <scratchpad>/<lane>/pre/<file> <file>` must
+>    return rc 0. Never prove a revert with `git diff --exit-code` or
+>    `git checkout -- <file>`. Both answer a question about the index, not about
+>    your bytes: bare `git diff` compares the worktree with the index, and
+>    `checkout --` restores the file from the index. So when the mutated file is
+>    one your change also modifies and that fix is unstaged, `checkout --`
+>    discards the fix along with the mutation and `git diff --exit-code` then
+>    reports clean — success, from the one check that should have caught it.
+>    Stage the fix and the same commands behave differently again. The answer
+>    depends on the index's state, which is not what you are measuring. A byte
+>    copy compares against the bytes you intended, whatever the index holds.
+>    Record the exact failure text of each mutation.
 > 4. **Gate.** `<gate command>`. Never end a gate command with a pipe; the
 >    reported status is the pipe's. Redirect to a file and grep it afterwards.
 >    Report rc, suite count, test count, and a grep for `FAILED`/`ERROR`.
@@ -72,11 +96,17 @@ for the controls a run passes through.
 >    environment CI uses; do not point `HOME` at a scratch directory, because
 >    the suites resolve the store and the config from the real one and the
 >    worktree cannot execute that clause.
-> 5. **Time.** Never state an elapsed duration unless the current time and the
->    start time come out of the SAME command: `date -u` beside the API
->    timestamp, in one call. A check run can report `status: in_progress` while
->    carrying a `completed_at` in the past; trust the timestamps, not the status
->    field.
+> 5. **Time.** Never state an elapsed duration from a start time you
+>    remembered. Both ends must come from one source, and there are only two
+>    that qualify. For anything timed against an API, subtract two timestamps
+>    carried by the SAME response — `started_at` and `completed_at` of one check
+>    run, say. For anything timed locally, emit both ends from one shell
+>    command. `date -u` in the terminal beside a timestamp from an MCP call does
+>    NOT qualify: they are two calls, taken at two moments, and the gap between
+>    them is exactly the quantity you are claiming to measure. If neither source
+>    gives you both ends, state the two timestamps and omit the duration. A
+>    check run can also report `status: in_progress` while carrying a
+>    `completed_at` in the past; trust the timestamps, not the status field.
 > 6. **Review cap is 1, plus one verification of the fix.** Read the review
 >    through `mcp__github__pull_request_read` `get_reviews`, never through
 >    thread counts: the verdict line, `Comments generated: N`, the
@@ -118,9 +148,22 @@ for the controls a run passes through.
 > - First line of the body: `Work: sd:<N>`. Then the problem, the fix, the tests
 >   with fail-first lines, the mutation table, the gate lines, and a
 >   **NOT VERIFIED** section.
-> - Run `bin/sd-docs-lint --pr-body <body file>` from the pack checkout with its
->   `.venv/bin/python`. It must end `sd-docs-lint: clean`. Note that it passes a
->   body lacking the template's scope section, so check that section by eye.
+> - Pack lanes only: run `sd-docs-lint` with your own worktree as the working
+>   directory, invoking the pack interpreter explicitly. It resolves the
+>   repository from cwd, not from where the script lives (`bin/sd-docs-lint`,
+>   the `R10-D6` comment), so running it from the pack checkout lints the pack
+>   and tells you nothing about your branch:
+>
+>   ```
+>   cd <your worktree>
+>   /Users/sven/repos/platypeeps/sd-ai-command-pack/.venv/bin/python \
+>       /Users/sven/repos/platypeeps/sd-ai-command-pack/bin/sd-docs-lint \
+>       --pr-body <body file>
+>   ```
+>
+>   It must exit 0 and end `sd-docs-lint: clean`. Note that it passes a body
+>   lacking the template's scope section, so check that section by eye. A
+>   `system` lane does not run this at all; the linter is a pack tool.
 > - End the body and the commit message with the attribution lines the session
 >   is using.
 > - One push, then freeze the head until the review is read. Do NOT merge.
@@ -139,17 +182,21 @@ for the controls a run passes through.
 > `completed_at`, the reviewer's verdict line and suppressed count, every
 > finding quoted verbatim with your disposition, a **NOT VERIFIED** section, and
 > a proposed decision note in plain text with no backticks. If the item turns
-> out to be already fixed, or wrong, close it out with the measurement instead
-> of inventing a change.
+> out to be already fixed, or wrong, report that measurement and stop. Do not
+> close it yourself — the rule above stands, I run every `sd` write verb and I
+> close the item.
 
 ## Why these rules
 
 **Rule 3, the byte-copy revert.** A lane proved a mutation reverted with
-`git diff --exit-code` while its own fix was still uncommitted. The command
-compares against HEAD, so rc 0 meant the fix had been thrown away along with
-the mutation — the strongest possible evidence that the revert worked, reported
-by a check that cannot tell the two apart. A pre-mutation byte copy and
-`diff -q` compare against the intended state instead.
+`git diff --exit-code` while its own fix sat unstaged in the same file. Bare
+`git diff` compares the worktree with the index, so once the revert had taken
+the fix away with the mutation, the two matched and rc 0 said clean — the
+strongest possible evidence that the revert worked, produced by a check that
+cannot tell a restored file from a lost one. Stage the fix instead and the same
+commands answer differently, which is the point: they report on the index, and
+the index is not what you are measuring. A byte copy compares against the bytes
+you meant to have.
 
 **Rule 4, the real HOME.** Pointing `HOME` at a scratch directory looks like
 good hygiene and breaks the suites, which resolve the store and the
