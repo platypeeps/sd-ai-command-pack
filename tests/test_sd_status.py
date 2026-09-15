@@ -82,8 +82,20 @@ def _number(word: str) -> int | None:
 
 
 def _word(number: int) -> str:
-    """The number word the page spells `number` with, so a pin reads the constant."""
-    return {value: word for word, value in _NUMBER_WORDS.items()}[number]
+    """The number word the page spells `number` with, so a pin reads the constant.
+
+    A number `_NUMBER_WORDS` does not spell fails here by name (sd:836 N-3).
+    It used to raise `KeyError` out of whichever test was mid-sentence, so
+    raising `PENDING_LIMIT` past ten made those tests error rather than say
+    what to do, and the reading was that the page had not been re-read. The
+    table above is the thing to extend, and the message says so.
+    """
+    spelled = {value: word for word, value in _NUMBER_WORDS.items()}
+    if number not in spelled:
+        raise AssertionError(
+            f"_NUMBER_WORDS spells one to {max(spelled)}, not {number}: add the word "
+            f"there before a test can look for how the page spells {number}")
+    return spelled[number]
 
 
 def _load(name: str, module_name: str) -> Any:
@@ -4930,28 +4942,107 @@ class SkillPageClaimTests(StatusFixture):
         rollup = [{"name": state, "status": state} for state in named]
         self.assertEqual({"pending": len(named)}, status.pr_state.rollup_buckets(rollup))
 
-    def test_every_ten_the_page_gives_pending_is_pending_limit(self) -> None:
-        """Every ten on the page is the list's length; the code reads one constant.
+    #: Every place the page gives `pending` its length, as the phrase that
+    #: holds it: `{n}` for the digit, `{w}` for the word, `{W}` for the word
+    #: starting a sentence. #946 chose five phrases and missed three sites,
+    #: and sd:821's count of all of them identified none, so one site
+    #: reworded to "twelve" and another given a second `ten` cancelled out
+    #: with the suite green and the page telling a reader the list holds
+    #: twelve (sd:836 N-1). Naming each site is what closes that: a phrase
+    #: reworded is one that is no longer found, wherever the arithmetic
+    #: lands. The limit is a field in every one, so raising the constant
+    #: rewrites the whole enumeration and the page has to be re-read.
+    TENS = (
+        "at most {w} actionable rows by rank",
+        "stating the denominator — `{n} of 123, by rank`",
+        "{W} of them with one unanswered inline comment",
+        "would fill all {w} `pending` slots at 36",
+        "When higher classes fill all {w} slots",
+        'rows "ranked below the first {n}"',
+        "{W} pending rows do not fit",
+        "Rows 5 to {n} are addressable by typing the id",
+        "`--json`: `pending` is the first {w} after each class's",
+        "can make rows 1 to {n} of `actions` differ from it",
+        "`pending` caps at {w} because a report is read whole",
+        "of which `pending` is the first {w} after each class's",
+        "It is capped at {w} and says so",
+    )
 
-        The sites are enumerated, not chosen. #946 chose five phrases and
-        missed three sites, and its threshold of five let one of them say
-        "twelve" (sd:821 N-3). Here every `ten` or `10` on the page counts
-        once a table cell that is only a number is dropped (the class table
-        ranks four checks at 10), the number word being the constant's, so a
-        limit of twelve looks for twelve. That is thirteen sites on
-        2026-09-14, which
-        `sed -E 's/\\|[[:space:]]*[0-9]+[[:space:]]*\\|/|/g' skills/sd-status/SKILL.md | grep -oiw -e ten -e 10 | wc -l`
-        gives; a site reworded to another number drops one, which no list of
-        phrases could see, and a site added or removed fails here until the
-        count is brought up to date.
+    def test_every_ten_the_page_gives_pending_is_pending_limit(self) -> None:
+        """Every ten on the page is the list's length, and each one is named.
+
+        The sites are enumerated, not chosen, and now identified rather than
+        counted: `TENS` names all thirteen, each phrase must be on the page
+        exactly once, each must hold exactly one ten, and the positions they
+        cover must be every ten the page carries. A total alone let one site
+        say "twelve" while another grew a second `ten`, because the two
+        cancelled (sd:836 N-1); a phrase that no longer reads as written
+        fails wherever the count lands, and a fourteenth ten fails as one no
+        phrase covers.
+
+        The number-only table cells go first, because the class table ranks
+        four checks at 10. Both regexes are below rather than in a shell
+        approximation of them: sd:821's docstring gave a `sed` that consumed
+        the closing pipe, so on a row `| 10 | 10 | x |` it left a ten standing
+        that the lookahead here drops (sd:836 N-2).
         """
         limit = status.PENDING_LIMIT
+        fields = {"n": limit, "w": _word(limit), "W": _word(limit).capitalize()}
         lines = [re.sub(r"\|\s*\d+\s*(?=\|)", "|", line)
                  for line in SKILL_MD.read_text(encoding="utf-8").splitlines()]
-        sites = [line.strip() for line in lines
-                 for _ in re.findall(rf"(?<![\w#-])(?:{_word(limit)}|{limit})(?![\w-])",
-                                     line, re.IGNORECASE)]
-        self.assertEqual(13, len(sites), "\n".join(sites))
+        prose = " ".join(" ".join(lines).split())
+        ten = rf"(?<![\w#-])(?:{_word(limit)}|{limit})(?![\w-])"
+
+        covered: list[int] = []
+        for phrase in self.TENS:
+            said = phrase.format(**fields)
+            with self.subTest(said):
+                self.assertEqual(1, prose.count(said),
+                                 f"{SKILL_MD.name} no longer says this once: {said!r}")
+                at = prose.index(said)
+                here = [at + m.start() for m in re.finditer(ten, said, re.IGNORECASE)]
+                self.assertEqual(1, len(here), "the phrase names one ten, not several")
+                covered.extend(here)
+        self.assertEqual([m.start() for m in re.finditer(ten, prose, re.IGNORECASE)],
+                         sorted(covered),
+                         "every ten on the page is one of the sites TENS names")
+
+    def test_the_rule_against_reading_pending_as_the_whole_list_is_a_run(self) -> None:
+        """The page's rule on the cap, pinned whole and measured (sd:836 N-5).
+
+        The sentence sat on the page with nothing reading it, and "and says
+        so" inverted to "but never says so" was green and false. It claims
+        three things at once -- the list stops at `PENDING_LIMIT`, the line
+        above it carries the total, and the flags carry what the list drops
+        -- so a pin alone would prove only that the page says them. Each is
+        read here off a report with more rows than the list holds.
+        """
+        limit = status.PENDING_LIMIT
+        rule = (f"It is capped at {_word(limit)} and says so; the total is on its own "
+                "heading line, and `--actions` and `--json` carry the rest.")
+        _skill_says(rule)
+
+        for index in range(limit + 3):
+            self.item(f"2026-08-{index + 1:02d}-item", status="in_progress")
+        payload = self.report()
+        rows = payload["inventory"]["rows"]
+        self.assertGreater(len(rows), limit, "the list has to be short of the inventory")
+
+        # "capped at ten": the list is the limit's length, not the inventory's.
+        shown, _ = status.pending_rows(rows)
+        self.assertEqual(limit, len(shown))
+        dropped = [row for row in rows if row not in shown]
+        self.assertTrue(dropped, "the list has to drop rows for the rest to be carried")
+
+        # "and says so; the total is on its own heading line".
+        text = self.run_tool(SD_STATUS).stdout
+        self.assertIn(f"\n  {limit} of {len(rows)}, by rank\n", text)
+
+        # "`--actions` and `--json` carry the rest": both hold the held rows.
+        actions = self.run_tool(SD_STATUS, "--actions").stdout
+        for row in rows:
+            self.assertIn(f"{row['id']} {row['check']}", actions)
+        self.assertEqual(rows, payload["actions"])
 
     def test_every_symbol_the_page_cites_is_in_the_tools_it_describes(self) -> None:
         """A renamed function leaves the page citing nothing, and nothing said so.
@@ -4965,6 +5056,12 @@ class SkillPageClaimTests(StatusFixture):
         prose = _skill_prose()
         tools = {"sd-status", "sd-pr-state", *re.findall(r"`bin/([\w-]+)`", prose)}
         self.assertGreater(len(tools), 2, "the page names a tool beyond the two")
+        # Reading the set the page names, rather than two fixed ones, makes a
+        # tool it names but `bin/` does not hold a `FileNotFoundError` from
+        # inside the comprehension -- an error naming a path, where what went
+        # wrong is a page citing a tool that is gone (sd:836 N-7).
+        self.assertEqual([], sorted(name for name in tools if not (BIN / name).is_file()),
+                         "the page names a bin/ tool that is not in bin/")
         sources = {name: (BIN / name).read_text(encoding="utf-8") for name in sorted(tools)}
 
         def defines(source: str, name: str) -> bool:
