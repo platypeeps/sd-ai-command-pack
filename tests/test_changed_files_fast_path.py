@@ -317,7 +317,12 @@ class TheRunner(TreeCase):
             f"print({chr(10).join(names)!r})\n")
         ran, first, _ = self.run_harness(TEST_CHANGED_FILES="bin/sd-alpha")
         self.assertEqual(ran, set(ALWAYS_RUN_NAMES) | {"test_alpha"})
-        self.assertTrue(first.startswith("test selection: changed files, 8 of"), first)
+        # Counted off the fixture's own selection rather than written out: the
+        # number is the always-run set plus `test_alpha`, and a literal here
+        # goes stale the day that set grows, which is what it did.
+        selected = len(names) - len(padding)
+        self.assertTrue(
+            first.startswith(f"test selection: changed files, {selected} of"), first)
 
     def test_a_failing_selector_runs_everything(self) -> None:
         (self.root / ".github/scripts/select-tests.py").write_text("import sys\nsys.exit(2)\n")
