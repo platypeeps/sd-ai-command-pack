@@ -1303,6 +1303,7 @@ class Rule7UnmergedIndexTests(unittest.TestCase):
             "the fixture did not leave an unmerged index, so the cases below "
             "prove nothing -- they would pass against any clean checkout",
         )
+        # ls-files-form: plain -- the repetition is what this case asserts
         listed = self.git("ls-files", "-z", "--", "NOTES.md").stdout
         self.assertEqual(
             [name for name in listed.split("\0") if name],

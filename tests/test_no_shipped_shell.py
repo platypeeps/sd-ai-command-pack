@@ -233,6 +233,7 @@ class EnumerationTests(unittest.TestCase):
                 "below proves nothing")
 
             repeated = subprocess.run(
+                # ls-files-form: plain -- the repetition is what this asserts
                 ["git", "ls-files", "-z", "--", "tool.sh"], cwd=root,
                 capture_output=True, text=True, check=True).stdout
             self.assertEqual(

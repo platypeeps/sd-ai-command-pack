@@ -24,8 +24,9 @@ Every doubt resolves to running more, never less:
   to "I changed nothing I can name".
 * The always-run set runs on every fast path. It is the modules that walk the
   whole tree rather than naming a file: shape, line caps, code health,
-  citations, shell placement, verbs and workflow policy. If one of them is
-  missing, the set has drifted and the answer is `full`.
+  citations, shell placement, verbs, workflow policy, and the form every call
+  to git's index lister declares. If one of them is missing, the set has
+  drifted and the answer is `full`.
 
 A test module is selected when its source names the changed path, its file
 name, or its module stem, as a whole token. A change under `bin/` or
@@ -55,6 +56,7 @@ ALWAYS_RUN = (
     "tests.test_code_health",
     "tests.test_doc_citations",
     "tests.test_loc_caps",
+    "tests.test_ls_files_form",
     "tests.test_no_shipped_shell",
     "tests.test_suite_shape",
     "tests.test_verb_inventory",

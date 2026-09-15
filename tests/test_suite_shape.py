@@ -269,6 +269,7 @@ class EnumerationTests(unittest.TestCase):
             _repo_with_a_spaced_path(root)
 
             raw = subprocess.run(
+                # ls-files-form: plain -- git's own unadorned output is the subject
                 ["git", "ls-files"], cwd=root,
                 capture_output=True, text=True, check=True).stdout
             self.assertIn(
@@ -315,6 +316,7 @@ class EnumerationTests(unittest.TestCase):
                 "below proves nothing")
 
             repeated = subprocess.run(
+                # ls-files-form: plain -- the repetition is what this asserts
                 ["git", "ls-files", "-z", "--", "f.py"], cwd=root,
                 capture_output=True, text=True, check=True).stdout
             self.assertEqual(

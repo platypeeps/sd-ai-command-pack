@@ -799,6 +799,7 @@ class AnUnmergedIndex(unittest.TestCase):
             "the fixture did not leave an unmerged index, so nothing below "
             "proves anything")
         raw = subprocess.run(
+            # ls-files-form: plain -- the repetition is what this asserts
             ["git", "ls-files", "-z", "--", "dashboard/panel.py"],
             cwd=self.root, capture_output=True, text=True, check=True).stdout
         self.assertEqual(
