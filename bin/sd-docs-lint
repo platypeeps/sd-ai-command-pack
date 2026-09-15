@@ -761,8 +761,15 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
 # something other than a letter or digit (`YYYY-MM-DD`, `archive/YYYY-MM/`).
 # Matched as substrings they turned a real name into a pattern: `COMMANDS.md`
 # carries `MM`, `ADDING.md` carries `DD`, and a broken reference to either was
-# passed over as a template rather than checked (sd:801). `<` needs no
-# boundary; no path this repository tracks can carry one.
+# passed over as a template rather than checked (sd:801).
+#
+# `<` needs no boundary: it is a placeholder delimiter and no path this
+# repository tracks carries one. That reason covers less than it sounds like.
+# What this arm reads is the reference as written, not the path it resolves
+# to, and a CommonMark angle-bracket destination carries a `<` that the path
+# inside it does not: `[x](<docs/gone.md>)` is taken for a template and its
+# link is never checked, where `[x](docs/gone.md)` is reported broken. No
+# document in either repository writes one (sd:833).
 METAVARIABLE_RE = re.compile(r"(?<![A-Za-z0-9])(?:YYYY|MM|DD)(?![A-Za-z0-9])|<")
 
 

@@ -1108,8 +1108,17 @@ class MetavariableTests(unittest.TestCase):
                 self.assertIsNotNone(lint.METAVARIABLE_RE.search(token))
 
     def test_a_name_that_merely_contains_the_letters_is_not_one(self) -> None:
+        # The last two names separate the halves of the boundary, and until
+        # they were added nothing did. In every other name here the date token
+        # sits between two alphanumerics -- `MM` inside `COMMANDS`, `DD` inside
+        # `ADDING` -- so either lookaround rejects the whole table on its own,
+        # and deleting either one left all 133 tests green (sd:833). Only the
+        # lookbehind rejects `docs/ADD/plan.md`, where a `/` follows the `DD`;
+        # only the lookahead rejects `docs/MMap.md`, where a `/` precedes the
+        # `MM`.
         for token in ("docs/COMMANDS.md", "ADDING.md", "HAPPYYYYEAR", "2026-08-29-slug",
-                      "SUMMARY.md", "0MM0", "docs/work/2026-09-04-an-item/prd.md"):
+                      "SUMMARY.md", "0MM0", "docs/work/2026-09-04-an-item/prd.md",
+                      "docs/ADD/plan.md", "docs/MMap.md"):
             with self.subTest(token=token):
                 self.assertIsNone(lint.METAVARIABLE_RE.search(token))
 
