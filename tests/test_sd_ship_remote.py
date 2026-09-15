@@ -1,22 +1,34 @@
-"""Unit cover for the branch-protection guard in `bin/sd_ship_remote.py`.
+"""Unit cover for the branch-protection guards in `bin/sd_ship_remote.py`.
 
-`tests/test_sd_ship.py` drives `GitHub.protection` end to end, through a real
-bare Git fixture and an HTTP double, and its fixture always answers with a
-protection document whose `required_pull_request_reviews` is an object. So the
-guard that refuses a document where it is *not* an object had no test at all:
-it was the one refusal in that method nothing reached, while the three around
-it were exercised (sd:852, found by the review of sd:957).
+`GitHub.protection` raises five refusals, one per guard, in a fixed order:
+the body is not an object; `enforce_admins` is not enabled; there is no
+`required_pull_request_reviews` object; the status checks are not strict or
+name nothing; a bypass allowance lists someone. `tests/test_sd_ship.py`
+drives the method end to end, through a real bare Git fixture and an HTTP
+double, but its fixture answers with one valid document and its tests vary
+one field of it: the `enforce_admins` guard is reached there, and nothing
+else is. The test that sets the double's protection to `None` reads a 404
+from the transport, which `run` refuses before the method sees a body, so
+the first guard was credited to a test that never executes it (sd:929,
+measured with coverage on this file; sd:852 had added the reviews guard
+alone and called the other three covered).
 
-That branch does not need the end-to-end rig to be reached -- it is a decision
-about one field of one JSON document -- so this module stubs the single API
-call the method makes and reads the refusal back. No network, no `gh`, no Git.
+None of these guards needs the end-to-end rig to be reached -- each is a
+decision about one field of one JSON document -- so this module stubs the
+single API call the method makes and reads the refusal back. No network, no
+`gh`, no Git. Every test hands the method a document that is valid in every
+field but the one it is about, so the message it asserts can only come from
+that field's guard. The merge's comparison of its two reads of the document
+needs the rig, and is driven in `tests/test_sd_ship_disposition_guards.py`.
 """
 
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 import unittest
+from types import MappingProxyType
 from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -54,6 +66,125 @@ class StubbedGitHub(sd_ship_remote.GitHub):
 
 
 class ProtectionCase(unittest.TestCase):
+    def assert_refused(self, value: Any, message: str) -> None:
+        """`value`, served as the protection document, refuses with `message`.
+
+        The pattern is anchored at both ends, so a refusal from a different
+        guard, or a longer sentence wrapping this one, fails the assertion.
+        """
+        remote = StubbedGitHub(value)
+        with self.assertRaisesRegex(sd_ship_remote.Refusal, rf"^{re.escape(message)}$"):
+            remote.protection("main")
+        self.assertEqual(remote.requested, ["repos/fixture/repo/branches/main/protection"])
+
+    def test_a_body_that_is_not_an_object_is_refused_as_unobserved(self) -> None:
+        """A protection document is an object or it is nothing.
+
+        A list, a scalar, or `null` parsed from the transport is not a
+        document whose fields can be read, and the method says so before it
+        reads any: the refusal names the observation, not a field. This is
+        the guard `tests/test_sd_ship.py` credited to its `protection = None`
+        case, which the double answers with a 404 the transport refuses
+        first, so the guard was never reached from there.
+        """
+        for label, value in (
+            ("null", None),
+            ("array", []),
+            ("populated array", [protection_document()]),
+            ("string", "protected"),
+            ("boolean", True),
+            ("number", 1),
+        ):
+            with self.subTest(shape=label):
+                self.assert_refused(value, "branch protection could not be observed")
+
+    def test_a_document_that_does_not_enforce_administrators_is_refused_by_name(self) -> None:
+        """`enforce_admins.enabled` is `true` or the branch is not protected
+        from the people who can merge to it: `false`, absent, and any
+        near-miss of `true` refuse alike."""
+        absent = protection_document()
+        del absent["enforce_admins"]
+        for label, value in (
+            ("disabled", protection_document(enforce_admins={"enabled": False})),
+            ("absent", absent),
+            ("empty object", protection_document(enforce_admins={})),
+            ("enabled is a string", protection_document(enforce_admins={"enabled": "true"})),
+            ("enabled is one", protection_document(enforce_admins={"enabled": 1})),
+        ):
+            with self.subTest(shape=label):
+                self.assert_refused(value, "branch protection does not enforce administrators")
+
+    def test_a_document_without_strict_named_checks_is_refused_by_name(self) -> None:
+        """Both halves of the CI rule refuse on their own: checks that are
+        not strict, and strict checks that name nothing in either the legacy
+        `contexts` list or the app-bound `checks` list. A document with no
+        `required_status_checks` at all is both."""
+        absent = protection_document()
+        del absent["required_status_checks"]
+        for label, value in (
+            ("not strict", protection_document(
+                required_status_checks={"strict": False, "contexts": ["check"]})),
+            ("strict absent", protection_document(
+                required_status_checks={"contexts": ["check"]})),
+            ("strict but nothing named", protection_document(
+                required_status_checks={"strict": True, "contexts": [], "checks": []})),
+            ("strict with neither list", protection_document(
+                required_status_checks={"strict": True})),
+            ("required_status_checks absent", absent),
+            ("required_status_checks null", protection_document(required_status_checks=None)),
+        ):
+            with self.subTest(shape=label):
+                self.assert_refused(value, "branch protection requires strict, named CI checks")
+
+    def test_a_document_with_a_bypass_allowance_is_refused_by_name(self) -> None:
+        """One user, one team, or one app allowed past the review rule is a
+        review rule that does not hold, and the refusal names the allowance.
+        Empty allowance lists are the shape GitHub serves for "nobody", and
+        those pass."""
+        for label, allowances in (
+            ("one user", {"users": [{"login": "someone"}]}),
+            ("one team", {"teams": [{"slug": "maintainers"}]}),
+            ("one app", {"apps": [{"slug": "bot"}]}),
+            ("one user beside empty lists", {"users": [{"login": "someone"}], "teams": [], "apps": []}),
+        ):
+            with self.subTest(shape=label):
+                reviews = {"required_approving_review_count": 1, "bypass_pull_request_allowances": allowances}
+                self.assert_refused(
+                    protection_document(required_pull_request_reviews=reviews),
+                    "pull-request protection has bypass allowances")
+
+    def test_the_guards_fire_in_order_so_each_refusal_names_the_first_fault(self) -> None:
+        """Two faults in one document refuse for the earlier guard.
+
+        The order is the method's: the object check before administrators
+        before reviews before checks before allowances. A caller reading the
+        message can act on it knowing there may be more behind it, but never
+        that a later guard was consulted first.
+
+        The object check is pinned against being *moved* and not only
+        deleted, which the shapes in
+        `test_a_body_that_is_not_an_object_is_refused_as_unobserved` cannot
+        do: none of them answers `.get`, so a later guard reading their
+        fields raises rather than refusing, and the refusal that guard would
+        have made is never seen. A mapping proxy is not a `dict` and does
+        answer `.get`, so with the object check moved below them the field
+        guards would read its fields and refuse for one of those instead.
+        Its `enforce_admins` is disabled, so that is the sentence a reordered
+        method would produce, and it is not the one asserted here.
+        """
+        self.assert_refused(MappingProxyType(protection_document(enforce_admins={"enabled": False})),
+                            "branch protection could not be observed")
+        both = protection_document(enforce_admins={"enabled": False})
+        del both["required_pull_request_reviews"]
+        self.assert_refused(both, "branch protection does not enforce administrators")
+        both = protection_document(required_status_checks={"strict": False, "contexts": ["check"]})
+        del both["required_pull_request_reviews"]
+        self.assert_refused(both, "branch protection does not require pull requests")
+        reviews = {"bypass_pull_request_allowances": {"users": [{"login": "someone"}]}}
+        both = protection_document(required_pull_request_reviews=reviews,
+                                   required_status_checks={"strict": True, "contexts": []})
+        self.assert_refused(both, "branch protection requires strict, named CI checks")
+
     def test_a_protection_document_without_a_reviews_object_is_refused_by_name(self) -> None:
         """Every non-object shape of `required_pull_request_reviews` refuses.
 
@@ -83,10 +214,25 @@ class ProtectionCase(unittest.TestCase):
                 self.assertEqual(
                     remote.requested, ["repos/fixture/repo/branches/main/protection"])
 
-    def test_a_document_that_does_require_pull_requests_is_returned_unchanged(self) -> None:
-        """The guard refuses a shape, not every document: the valid one passes."""
-        value = protection_document()
-        self.assertIs(StubbedGitHub(value).protection("main"), value)
+    def test_a_document_that_passes_every_guard_is_returned_unchanged(self) -> None:
+        """The guards refuse shapes, not every document: the valid ones pass.
+
+        The fixture's document, one whose CI rule names its checks in the
+        app-bound `checks` list and not in `contexts`, and one whose
+        allowance lists are present and empty. The object handed back is the
+        one the transport parsed, so the merge's second read compares against
+        exactly what GitHub said.
+        """
+        for label, value in (
+            ("fixture", protection_document()),
+            ("app-bound checks only", protection_document(
+                required_status_checks={"strict": True, "checks": [{"context": "check", "app_id": 7}]})),
+            ("empty allowance lists", protection_document(required_pull_request_reviews={
+                "required_approving_review_count": 1,
+                "bypass_pull_request_allowances": {"users": [], "teams": [], "apps": []}})),
+        ):
+            with self.subTest(shape=label):
+                self.assertIs(StubbedGitHub(value).protection("main"), value)
 
 
 if __name__ == "__main__":

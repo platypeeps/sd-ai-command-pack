@@ -413,7 +413,12 @@ roles:
         self.remote.collaborators = []
         saved = self.remote.protection
         self.remote.protection = None
-        with self.assertRaises(ship.Refusal):
+        # An unprotected branch is a 404 from GitHub, which `gh` reports on
+        # stderr with exit 1 and the transport refuses verbatim, before
+        # `GitHub.protection` ever sees a body. So this is the transport's
+        # refusal, named; the guard that refuses a body that is not an object
+        # is reached only from `tests/test_sd_ship_remote.py` (sd:929).
+        with self.assertRaisesRegex(ship.Refusal, "Branch not protected"):
             self.merge()
         self.remote.protection = saved
         self.remote.protection["enforce_admins"]["enabled"] = False
