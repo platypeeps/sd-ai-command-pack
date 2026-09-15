@@ -783,6 +783,35 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "policy changed"):
             self.merge()
 
+    def set_written_mode(self, word):
+        local = self.root / "CLAUDE.local.md"
+        local.write_text(local.read_text().replace("mode: full", f"mode: {word}"))
+
+    def test_written_guest_mode_has_no_merge_authority(self):
+        self.set_written_mode("guest")
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        with self.assertRaisesRegex(ship.Refusal, "guest mode has no merge authority"):
+            self.merge()
+        self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
+
+    def test_merge_authority_reads_the_one_validated_mode_line(self):
+        """The merge-authority check reads `sd_lib.written_mode`, not the raw line (sd:930).
+
+        On the real path a `mode:` word that is not a mode never reaches the
+        check: `prepare` refuses it through `resolve_mode`, and a line changed
+        after `prepare` trips the binding in `check_review` first. So this
+        test stands the binding guard down to put the misspelled word in front
+        of the check itself, and asks that the check name the word the way
+        every other reader of the line does, rather than compare it to
+        `"guest"` and let it through.
+        """
+        self.prepare()
+        self.set_written_mode("gust")
+        with patch.object(ship.Ship, "check_review", return_value=None):
+            with self.assertRaisesRegex(ship.sd_lib.ConfigError, "mode 'gust' is not one of"):
+                self.merge()
+        self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
+
     def test_delivery_clone_identity_cannot_be_replaced(self):
         from sd_db.progress import deliver_work
         from sd_db.workflow import WorkflowError
