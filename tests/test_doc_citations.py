@@ -511,17 +511,41 @@ def numbered_lines(text: str) -> list[str]:
 def file_lines(target: pathlib.Path) -> list[str]:
     """This file's lines, numbered the way `numbered_lines` numbers them.
 
-    Every reader that OPENS a cited file comes through here (sd:822), which is
-    the whole claim and was overstated as "every reader" while `quotes`' own
-    `source:` branch still split a string: that branch must number the very
-    text it handed `ast` rather than read the file a second time, and it does
-    it with the same `numbered_lines`, so the two cannot disagree -- measured
-    over 148 tracked Python files, where `numbered_lines` is a prefix-superset
-    of `file_lines` and no span's `end_lineno` reaches past it (sd:846). sd:794 moved
-    the `source:` window and the use test onto `numbered_lines` and left
+    **The claim is about NUMBERING, not about opening.** Every reader that
+    turns a cited file into numbered lines numbers it this way: `line_count`,
+    and through it `within_file` and `describe`; `quotes`' markdown branch;
+    `names_its_symbol`; `anchor_lines`' fallback; `calls_by_name`; and
+    `quoted_repoint`. Four other functions read a file directly, and not one of
+    them can give a different answer than this for the same line (review-959):
+
+    * `quotes`' `source:<path>::<symbol>` branch reads the cited file itself,
+      because `ast` reports line numbers for the exact string it was handed and
+      a second read need not be that string; it numbers that string with the
+      same `numbered_lines`.
+    * `source_declaration_error` and `declaration_lines` read the cited file
+      and never split it at all. Their numbers are `ast`'s own `lineno`, which
+      is the authority `numbered_lines` was written to mirror.
+    * `quotes`' `path:line`-into-code branch reads the cited file and numbers
+      nothing: it is a substring test over the whole text, and the line in the
+      marker is a hint that branch does not check.
+    * `undecoded_text` reads bytes, for the one guard whose subject is the
+      newlines themselves, and numbers nothing.
+
+    `classify`, `repoint_document`, `stable_source_citations` and
+    `rule_path_citations` read the citing *page*, which is not a cited file.
+
+    `file_lines` is `numbered_lines` minus the empty final element, so the two
+    agree on the text of line N for every N that `file_lines` has: a reader on
+    either of them reads the same line (sd:846). This paragraph is an
+    enumeration, and an enumeration recited in prose drifts -- sd:794 moved the
+    `source:` window and the use test onto `numbered_lines` and left
     `names_its_symbol`, `anchor_lines`' fallback and the markdown branches on
     `splitlines()`, which counted two lines more than the parser past this
-    module's own U+2028 fixture; two counts of the same file are two answers.
+    module's own U+2028 fixture, and sd:822 then wrote that every reader came
+    through here while three of them did not. So
+    `test_every_direct_read_of_a_cited_file_is_named_here` enumerates the four
+    from this module's syntax tree and fails if a fifth appears or a name here
+    goes missing, rather than trusting the prose again.
 
     A trailing newline *ends* the last line, it does not start another, so the
     empty final element `split("\\n")` leaves behind is dropped. Without that
@@ -545,10 +569,74 @@ def undecoded_text(target: pathlib.Path) -> str:
     module for a carriage return would find none however many it carried, and
     pass. `read_bytes` was the right choice and an unanchored one -- this
     module holds no carriage return of its own, so nothing here could show the
-    difference (sd:846).
+    difference (sd:846). `invisible_separators` is where the guard reads, and
+    it takes the file to read, so the difference can be shown on a fixture that
+    has one (review-959).
     """
 
     return target.read_bytes().decode("utf-8")
+
+
+#: Every terminator `str.splitlines()` breaks on that `ast` does not count as
+#: ending a line. As code points, not as escapes: the escapes are what the
+#: guard below permits in a fixture, so writing the list itself that way puts
+#: the characters it hunts one editor slip away from being the characters
+#: themselves -- which is exactly what happened while this constant was being
+#: written, and the guard caught it (review-959).
+INVISIBLE_SEPARATORS = tuple(chr(code) for code in (
+    0x0D, 0x0B, 0x0C, 0x1C, 0x1D, 0x1E, 0x85, 0x2028, 0x2029))
+
+
+def invisible_separators(target: pathlib.Path) -> dict[str, int]:
+    """Which of `INVISIBLE_SEPARATORS` this file carries literally, and how many.
+
+    Through `undecoded_text`, so no newline translation hides one: `read_text`
+    turns every `\\r\\n` and every bare `\\r` into `\\n` on the way in, and the
+    guard would then report a clean file whatever carriage returns it carried.
+
+    A parameter rather than `__file__`, which is the whole reason this is a
+    function (review-959). The guard's only subject used to be this module,
+    which holds no carriage return of its own, so running it could not tell a
+    byte read from a text read: reverting the read to `read_text` survived all
+    126 tests. Given a path, the guard itself can be asked of a fixture that
+    does carry one.
+    """
+
+    text = undecoded_text(target)
+    return {f"U+{ord(char):04X}": text.count(char)
+            for char in INVISIBLE_SEPARATORS if char in text}
+
+
+def cited_file_openers() -> dict[str, list[int]]:
+    """Every module-level function that reads a file other than the citing page.
+
+    Enumerated from this module's own syntax tree, because `file_lines`'
+    docstring names this set in prose and prose drifts: the claim there has
+    been wrong twice (sd:822, review-959). A `read_text` or `read_bytes` inside
+    a module-level `def`, keyed by the function and carrying the lines it is
+    on. Reads whose receiver is the name `doc` are the citing page, a different
+    subject. Methods are not module-level: a test that reads back the scratch
+    file it just wrote is not a reader of a cited file.
+    """
+
+    import ast
+
+    tree = ast.parse(undecoded_text(pathlib.Path(__file__)))
+    found: dict[str, list[int]] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for call in ast.walk(node):
+            if not isinstance(call, ast.Call):
+                continue
+            opened = call.func
+            if not (isinstance(opened, ast.Attribute)
+                    and opened.attr in ("read_text", "read_bytes")):
+                continue
+            if isinstance(opened.value, ast.Name) and opened.value.id == "doc":
+                continue
+            found.setdefault(node.name, []).append(call.lineno)
+    return found
 
 
 def line_count(target: pathlib.Path) -> int:
@@ -1598,29 +1686,58 @@ class TheMarkerGrammar(unittest.TestCase):
         `\\n` is not, so a fixture written with any of them is caught the same
         way.
         """
-        text = undecoded_text(pathlib.Path(__file__))
-        found = {f"U+{ord(char):04X}": text.count(char)
-                 for char in ("\r", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e",
-                              "\x85", "\u2028", "\u2029")
-                 if char in text}
-        self.assertEqual(found, {}, "write these as escapes, not as the character")
+        self.assertEqual(invisible_separators(pathlib.Path(__file__)), {},
+                         "write these as escapes, not as the character")
 
     def test_the_separator_guard_reads_bytes_and_not_translated_text(self) -> None:
-        """sd:846 NB5. Reading this module as text would hide what the guard hunts.
+        """sd:846 NB5. Reading the file as text would hide what the guard hunts.
 
         The guard above is a search for characters that universal newlines
-        translates away, so `read_text` would make it report a clean module
-        whatever it carried -- the mutation survived every test in the module.
-        This module holds no carriage return of its own and so cannot show the
-        difference; a fixture with a CRLF and a bare CR can, and holds two
-        carriage returns by bytes and none by text.
+        translates away, so `read_text` would make it report a clean file
+        whatever it carried. This runs **the guard**, not `undecoded_text`
+        beneath it: the earlier version of this test called `undecoded_text`
+        directly, which left the guard's own read unpinned, and reverting it to
+        `pathlib.Path(__file__).read_text()` was still green across all 126
+        tests of the module (review-959). This module holds no carriage return
+        of its own and so cannot show the difference; a fixture with a CRLF and
+        a bare CR can, and holds two carriage returns by bytes and none by text.
         """
         with tempfile.TemporaryDirectory() as tmp:
             fixture = pathlib.Path(tmp) / "carriage.txt"
             fixture.write_bytes(b"a\r\nb\rc\n")
-            self.assertEqual(undecoded_text(fixture).count("\r"), 2)
+            self.assertEqual(invisible_separators(fixture), {"U+000D": 2})
             self.assertEqual(fixture.read_text(encoding="utf-8").count("\r"), 0,
                              "the premise: universal newlines translates both away")
+
+    def test_every_direct_read_of_a_cited_file_is_named_here(self) -> None:
+        """review-959. `file_lines`' docstring lists them; the list is enumerated.
+
+        That docstring claimed every reader of a cited file came through
+        `file_lines` while `quotes` opened one on two of its three branches,
+        and the narrowing that followed moved the claim the wrong way -- it
+        said "every reader that OPENS a cited file" when opening is exactly
+        what those two lines do. A list written in prose beside the code it
+        lists goes stale the next time a reader is added. So it is enumerated
+        from the syntax tree instead, and each name has to appear in the claim.
+        """
+        openers = cited_file_openers()
+        self.assertEqual(
+            sorted(openers),
+            ["declaration_lines", "file_lines", "quotes",
+             "source_declaration_error", "undecoded_text"],
+            "a reader of a cited file was added or removed; say so in"
+            " `file_lines`' docstring and then update this list")
+        self.assertEqual(
+            len(openers["quotes"]), 2,
+            "`quotes` opens a cited file on its `source:` and its"
+            " into-code branch; its markdown branch goes through `file_lines`")
+        claim = file_lines.__doc__ or ""
+        for name in sorted(openers):
+            if name == "file_lines":
+                continue
+            self.assertIn(f"`{name}`", claim,
+                          f"`{name}` reads a cited file without going through"
+                          " `file_lines`; the numbering claim must name it")
 
     def test_a_marker_with_no_reason_does_not_exempt(self) -> None:
         self.assertNotEqual(self.reason_for("`f` (`bin/x.py:1`) [quoted:]"), "quoted")
