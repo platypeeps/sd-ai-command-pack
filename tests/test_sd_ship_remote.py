@@ -28,6 +28,7 @@ import pathlib
 import re
 import sys
 import unittest
+from types import MappingProxyType
 from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -155,11 +156,24 @@ class ProtectionCase(unittest.TestCase):
     def test_the_guards_fire_in_order_so_each_refusal_names_the_first_fault(self) -> None:
         """Two faults in one document refuse for the earlier guard.
 
-        The order is the method's: administrators before reviews before
-        checks before allowances. A caller reading the message can act on it
-        knowing there may be more behind it, but never that a later guard was
-        consulted first.
+        The order is the method's: the object check before administrators
+        before reviews before checks before allowances. A caller reading the
+        message can act on it knowing there may be more behind it, but never
+        that a later guard was consulted first.
+
+        The object check is pinned against being *moved* and not only
+        deleted, which the shapes in
+        `test_a_body_that_is_not_an_object_is_refused_as_unobserved` cannot
+        do: none of them answers `.get`, so a later guard reading their
+        fields raises rather than refusing, and the refusal that guard would
+        have made is never seen. A mapping proxy is not a `dict` and does
+        answer `.get`, so with the object check moved below them the field
+        guards would read its fields and refuse for one of those instead.
+        Its `enforce_admins` is disabled, so that is the sentence a reordered
+        method would produce, and it is not the one asserted here.
         """
+        self.assert_refused(MappingProxyType(protection_document(enforce_admins={"enabled": False})),
+                            "branch protection could not be observed")
         both = protection_document(enforce_admins={"enabled": False})
         del both["required_pull_request_reviews"]
         self.assert_refused(both, "branch protection does not enforce administrators")
