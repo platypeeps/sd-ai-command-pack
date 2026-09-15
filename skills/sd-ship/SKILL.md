@@ -63,9 +63,10 @@ A change with no work item needs no PRD or database row to ship.
    before anything leaves the machine. Run `sd-docs-lint` against the pull
    request body `sd-ship` has built by then, regardless of repo mode. When the
    selected work root exists (`docs/work` by default), every applicable rule
-   runs: shape · ready · decision shape · spec index · PR link · PR scope, the
-   last two against that body, and PR scope against the branch's diff from
-   `origin/HEAD`, both paths of a rename counted. With no work root, run it
+   runs: shape · ready · decision shape · spec index · PR link · PR scope ·
+   citations · work references, PR link and PR scope against that body, and
+   PR scope against the branch's diff from `origin/HEAD`, both paths of a
+   rename counted. With no work root, run it
    with `--body-only`: PR link and PR scope still run, and the tree rules
    report themselves not run rather than failing on the root that is not
    there. Do not create a planning directory to satisfy them. The repository's checks
