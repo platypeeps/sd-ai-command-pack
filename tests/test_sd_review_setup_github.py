@@ -249,9 +249,10 @@ class WorkflowContentTests(SetupFixture):
     def test_the_lane_checks_out_the_head_not_the_merge_ref(self) -> None:
         # `actions/checkout` defaults to `refs/pull/N/merge` on a
         # `pull_request` event, and GitHub does not create that ref for a
-        # pull request with conflicts -- so the default fails this job at
-        # checkout on exactly the pull requests already in trouble. An
-        # advisory lane that reddens a conflicted pull request is the
+        # pull request with conflicts. The head ref is held for the window
+        # the merge ref would lose -- mergeable when the event fires,
+        # conflicted by the time the runner checks out -- and for forks,
+        # below. An advisory lane that reddens a pull request is the
         # framework making someone's pull request worse, which is the one
         # thing it must never do.
         text = setup.workflow_text("./x")
@@ -276,6 +277,22 @@ class WorkflowContentTests(SetupFixture):
             if line.strip().startswith("repository:")
         ]
         self.assertEqual(keys, [])
+
+    def test_the_head_ref_comment_does_not_claim_a_checkout_failure_on_conflicts(self) -> None:
+        # The comment above `ref:` said the merge-ref default "fails this job
+        # at checkout" on a conflicted pull request. Measured on probe PR
+        # #966 (sd:878): GitHub creates no `pull_request` run at all in that
+        # state, so no job reaches checkout to fail there. A consumer's
+        # installed copy is this function's output, so the generated text
+        # is what has to say what was measured (sd:932). Read as prose, with
+        # the comment markers and line wraps removed, so the assertions do
+        # not depend on where a sentence happens to break.
+        prose = " ".join(
+            line.strip().lstrip("#").strip() for line in setup.workflow_text("./x").splitlines()
+        )
+        self.assertNotIn("fails this job at checkout", prose)
+        self.assertIn("starts no `pull_request` run at all", prose)
+        self.assertIn("#966", prose)
 
     def test_the_action_referenced_exists_in_this_checkout(self) -> None:
         # A workflow naming an action path that is not shipped is a lane that
