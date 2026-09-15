@@ -66,7 +66,9 @@ A change with no work item needs no PRD or database row to ship.
    shape · spec index · PR link · PR scope, the last two against the pull
    request body `sd-ship` has built by then, and PR scope against the branch's
    diff from `origin/HEAD`. With no work root, omit that artifact lint;
-   do not create a planning directory to satisfy it. The repository's checks
+   the body rules, PR link and PR scope, are omitted with it, because
+   `sd-docs-lint` reads the work root before any rule runs. Do not create a
+   planning directory to satisfy it. The repository's checks
    and local code review still run. The review is the development flow's *code, before
    merge* point. Its cap is the one on that row in the sd-ai-command-pack
    checkout's `.claude/rules/sd-planning-adversarial-review.md`. Dispose every blocking

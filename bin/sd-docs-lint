@@ -371,11 +371,19 @@ SCOPE_GLOB_RE = re.compile(r"`([^`]+)`")
 
 
 def scope_classes(repo: pathlib.Path) -> list[tuple[str, tuple[str, ...]]] | None:
-    """Every scope class the policy file tabulates; None when there is no file."""
-    try:
-        text = (repo / SCOPE_POLICY).read_text(encoding="utf-8")
-    except OSError:
+    """Every scope class the policy file tabulates; None when there is no file.
+
+    Absent and unreadable are different answers. A repository with no policy
+    file declares no classes, which is every consumer, and that is None. A
+    policy file that is here and will not read -- a directory in its place, a
+    mode that denies it, bytes that are not UTF-8, a symlink to nothing -- is
+    an error that leaves the caller to fail by name, because reading it as an
+    absent policy would pass a diff the file may well have classified.
+    """
+    path = repo / SCOPE_POLICY
+    if not (path.exists() or path.is_symlink()):
         return None
+    text = path.read_text(encoding="utf-8")
     classes = []
     for line in text.splitlines():
         row = SCOPE_ROW_RE.match(line)
@@ -440,7 +448,15 @@ def check_pr_scope(
     if body is None:
         report.note("rule 8 PR scope: no --pr-body supplied, not run")
         return
-    classes = scope_classes(repo)
+    try:
+        classes = scope_classes(repo)
+    except (OSError, UnicodeDecodeError) as error:
+        report.fail(
+            SCOPE_POLICY,
+            f"rule 8 cannot read the scope policy: {type(error).__name__}: {error}; "
+            "a policy file that is here and unreadable is a failure, not an absent policy",
+        )
+        return
     if classes is None:
         report.note(f"rule 8 PR scope: no {SCOPE_POLICY} here, so this repository declares no scope classes; not run")
         return

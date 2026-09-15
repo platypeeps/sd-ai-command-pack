@@ -582,6 +582,46 @@ class Rule8PullRequestScopeTests(LintFixture):
         self.assertEqual(report.failures, [])
         self.assertIn("declares no scope classes; not run", self.rule_8(report))
 
+    def test_a_policy_file_that_will_not_read_is_a_failure_not_an_absent_policy(self) -> None:
+        # Absent and unreadable are two answers, not one. A directory in the
+        # policy file's place read as "this repository declares no scope
+        # classes" and passed a diff that file may well have classified, so
+        # the rule failed open (#972 review).
+        (self.repo / lint.SCOPE_POLICY).mkdir(parents=True, exist_ok=True)
+        failures = self.assert_fails(
+            "rule 8 cannot read the scope policy: IsADirectoryError",
+            pr_body="Work: sd:876\n\nNo scope line anywhere.\n",
+            changed=PR_968_PATHS,
+        )
+        self.assertEqual(len(failures), 1, failures)
+
+    def test_a_policy_file_that_is_not_utf8_fails_by_name(self) -> None:
+        # The other half of the same guard: bytes that do not decode are an
+        # unreadable policy, reported by name rather than as a traceback.
+        # Rule 8 alone, because rule 7 reads every tracked file and this
+        # fixture is deliberately not text.
+        path = self.repo / lint.SCOPE_POLICY
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"| `CI/review scope:` | `\xff.github/**` | why |\n")
+        report = lint.Report()
+        lint.check_pr_scope(self.repo, "Work: sd:876\n", PR_968_PATHS, report)
+        self.assertIn(
+            "rule 8 cannot read the scope policy: UnicodeDecodeError",
+            "\n".join(report.failures),
+        )
+
+    def test_a_policy_symlink_to_nothing_is_unreadable_and_not_absent(self) -> None:
+        # `exists()` is False for a broken symlink, which is exactly the shape
+        # that would slip back into the absent-policy note.
+        path = self.repo / lint.SCOPE_POLICY
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.symlink_to("copilot-instructions-that-are-not-here.md")
+        self.assert_fails(
+            "rule 8 cannot read the scope policy: FileNotFoundError",
+            pr_body="Work: sd:876\n\nNo scope line anywhere.\n",
+            changed=PR_968_PATHS,
+        )
+
     def test_no_body_is_not_run_whatever_changed(self) -> None:
         self.policy()
         report = self.run_lint(None, changed=PR_968_PATHS)
