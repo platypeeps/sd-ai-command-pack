@@ -701,32 +701,42 @@ class Ship:
         `ready_to_send` with the row's `merge: auto` untouched, and it is the
         same demotion as a refused push: the note is written by the same
         marker, so a remote that lowered the mode at both points leaves one.
-        A written `guest` or `minimal` was not lowered, and gets no note.
+
+        A written `guest` or `minimal` was not lowered, and gets no note. The
+        answer here comes from `GitHub.owned` rather than from
+        `sd_lib.mode_answer`, so nothing has applied that rule to it yet and
+        this reader has to -- through `sd_lib.remote_can_lower`, which is
+        where the rule is stated, rather than through a second copy of the
+        two words here.
         """
         try:
             return self.api.owned()
         except Refusal:
             answer = self.api.answer
-            if answer is not None and not answer.full and sd_lib.local_block(self.root).get("mode", "").strip() not in ("guest", "minimal"):
+            if answer is not None and not answer.full and sd_lib.remote_can_lower(sd_lib.written_mode(self.root)):
                 self.note_demotion(answer)
             raise
 
     def note_demotion(self, answer) -> None:
         """One demotion note per item and remote, through `sd_db`'s note API.
 
-        Idempotent on the marker line `sd_lib.demotion_note` returns: a second
-        run that the same remote lowers finds it and writes nothing, so the
-        item does not fill with one note per attempt. The lookup and the
-        insert share a transaction, as `sd_db.ship.note_merge` does for the
-        merge marker.
+        Idempotent on the whole marker line `sd_lib.demotion_note` returns,
+        which is `sd_lib.demotion_note_key`: a second run that the same remote
+        lowers finds it and writes nothing, so the item does not fill with one
+        note per attempt. The key is the line and not the marker because the
+        marker is built from the repository name and one name prefixes
+        another often enough to matter -- `demotion_note_key` says why. The
+        lookup and the insert share a transaction, as `sd_db.ship.note_merge`
+        does for the merge marker.
         """
         from sd_db.database import transaction
         from sd_db.writes import add_note
         marker, body = sd_lib.demotion_note(self.repository, answer)
+        key = sd_lib.demotion_note_key(marker)
         with transaction(self.connection):
             present = self.connection.execute(
                 "SELECT 1 FROM note WHERE item = ? AND substr(body, 1, ?) = ?",
-                (self.args.item, len(marker), marker)).fetchone()
+                (self.args.item, len(key), key)).fetchone()
             if not present:
                 add_note(self.connection, self.args.item, sd_lib.DEMOTION_NOTE_KIND, body)
 

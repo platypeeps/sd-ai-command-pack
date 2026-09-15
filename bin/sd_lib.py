@@ -392,6 +392,41 @@ def remote_permits_full(root: pathlib.Path, *, ask: Asker = gh_api) -> RemoteAns
     return RemoteAnswer(full=True, answered=True)
 
 
+#: The written modes detection leaves exactly as they are. Both already write
+#: less than `full` does, so a remote's `no` has nothing to take away from
+#: either: there is no demotion to record and no question worth asking.
+SETTLED_MODES = ("guest", "minimal")
+
+
+def written_mode(root: pathlib.Path) -> str:
+    """The `mode:` line as the operator wrote it, validated. No line is `""`.
+
+    Detection's input, before any remote is asked. The validation lives here
+    rather than at each reader, so a `mode:` word that is not a mode is named
+    wherever it is first read instead of quietly failing to match a list.
+    """
+    value = local_block(root).get("mode", "").strip()
+    if value and value not in MODES:
+        raise ConfigError(f"mode {value!r} is not one of {', '.join(MODES)}")
+    return value
+
+
+def remote_can_lower(written: str) -> bool:
+    """Whether a remote's answer can lower `written`, the mode line as written.
+
+    The one statement of that rule, for the two readers that need it.
+    `mode_answer` below asks the remote nothing when this is false and hands
+    back a `None` demotion. `sd-ship`'s merge-time ownership check reaches
+    `remote_permits_full` by the other route, through
+    `sd_ship_remote.GitHub.owned`, so the `None` never arrives there and it
+    has to put the question itself before it writes a demotion note -- and a
+    second copy of the rule at that call site is a second place for it to
+    drift. A repository written down as `guest` or `minimal` was lowered by
+    its operator, not by the remote, and a `no` about it demotes nothing.
+    """
+    return written not in SETTLED_MODES
+
+
 def mode_answer(root: pathlib.Path, *, ask: Asker = gh_api) -> tuple[str, RemoteAnswer | None]:
     """The resolved mode and, when the remote lowered it, the answer that did.
 
@@ -409,10 +444,8 @@ def mode_answer(root: pathlib.Path, *, ask: Asker = gh_api) -> tuple[str, Remote
     as the demotion note, so the reason travels with the item and not only
     with the refusal that printed it.
     """
-    value = local_block(root).get("mode", "").strip()
-    if value and value not in MODES:
-        raise ConfigError(f"mode {value!r} is not one of {', '.join(MODES)}")
-    if value in ("minimal", "guest"):
+    value = written_mode(root)
+    if not remote_can_lower(value):
         return value, None
     answer = remote_permits_full(root, ask=ask)
     return (DEFAULT_MODE, None) if answer.full else ("guest", answer)
@@ -437,10 +470,13 @@ DEMOTION_NOTE_KIND = "comment"
 def demotion_note(repository: str, answer: RemoteAnswer) -> tuple[str, str]:
     """The note `sd-ship` writes on an item when `repository` lowered its mode.
 
-    Returns `(marker, body)`. The marker is the body's first line and the
-    idempotence key: one note per item and remote, however many runs the
-    remote lowers, so a second refusal for the same item on the same remote
-    finds the marker and writes nothing. The body names which answer said no,
+    Returns `(marker, body)`. The marker is the body's first line, and
+    `demotion_note_key` below turns it into the idempotence key: one note per
+    item and remote, however many runs the remote lowers, so a second refusal
+    for the same item on the same remote finds it and writes nothing. The
+    marker is not itself the key -- it is built from the repository name, and
+    one name prefixes another often enough that a bare prefix match reads the
+    wrong remote's note. The body names which answer said no,
     as `RemoteAnswer` keeps it, and what the operator is left holding: the
     written line stays, and the mode is `full` again the day the remote says
     yes, with no edit to the line.
@@ -456,6 +492,23 @@ def demotion_note(repository: str, answer: RemoteAnswer) -> tuple[str, str]:
         "already in its shared tree from before the answer changed is yours to move."
     )
     return marker, body
+
+
+def demotion_note_key(marker: str) -> str:
+    """The idempotence key for `marker`: the marker line, terminator included.
+
+    `sd-ship` finds an existing note by matching the head of its body, and the
+    bare marker is the wrong thing to match: markers are built from repository
+    names, so one marker is a prefix of another whenever one name is a prefix
+    of another -- `sven/thing` of `sven/thing-two`, which is what a rename, a
+    move between owners, or a sibling fork looks like. Matched bare, the
+    longer name's note answers for the shorter name and the shorter name's
+    demotion is never written down: the remote that is actually refusing the
+    push leaves nothing on the item, and the note that is there names some
+    other remote. The terminator ends the name, and no repository name carries
+    a newline, so one key matches one marker and no other.
+    """
+    return marker + "\n"
 
 
 
