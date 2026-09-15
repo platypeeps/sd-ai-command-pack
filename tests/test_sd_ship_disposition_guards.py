@@ -119,6 +119,19 @@ class DispositionGuardTests(unittest.TestCase):
     def test_policy_change_during_ci_refuses_at_final_merge_gate(self):
         self.assert_final_merge_revalidation(self.change_policy, "review tools or repository policy changed")
 
+    def test_protection_change_during_ci_refuses_at_final_merge_gate(self):
+        """The merge reads branch protection twice and compares the reads.
+
+        The field that changes keeps the document valid under every guard
+        in `GitHub.protection`, so the second read passes them and the only
+        thing left to refuse on is that it is not the first read. A change
+        the guards would catch is their refusal, not this one (sd:929).
+        """
+        def raise_the_review_count():
+            self.remote.protection["required_pull_request_reviews"]["required_approving_review_count"] = 2
+
+        self.assert_final_merge_revalidation(raise_the_review_count, "ownership or branch protection changed before merge")
+
     def test_accepted_dispositions_preserve_exact_head_and_app_ci_requirements(self):
         self.prepare_accepted()
         pull = self.remote.pull(1)
