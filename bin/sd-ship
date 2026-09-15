@@ -774,7 +774,10 @@ class Ship:
             raise Refusal("merge needs a separate owned --run assignment or explicit --manual invocation")
         else:
             self.store.manual_merge_guard(self.connection, self.repo["path"])
-        if sd_lib.local_block(self.root).get("mode") == "guest":
+        # The one validated reader of the `mode:` line, as `merge_ownership`
+        # and `resolve_mode` read it: a word that is not a mode is named here
+        # instead of failing to match "guest" and passing (sd:930).
+        if sd_lib.written_mode(self.root) == "guest":
             raise Refusal("guest mode has no merge authority")
         self.assert_scope()
         if self.args.watch and not self.state.get("watch_started"):
