@@ -912,6 +912,201 @@ class ConsentPromptTests(InstallerHarness):
         self.assertIn("needs the entry names", out.getvalue())
 
 
+#: `DEFAULT_BLOCK_BODY` as `bin/sd_install.py` spelled it at 43170716
+#: (2026-08-30, "machine-scope installer replaces the render payload"), the
+#: body every `--repo` run wrote for the week that followed. Verbatim, not
+#: paraphrased: the second line is what the reader raises on.
+OLD_BODY_43170716 = """\
+sd-ai-command-pack, machine-scope. Work items live under `docs/work/`; nothing
+else in this repo belongs to the framework.
+
+    mode: full
+    check: <the command that verifies this repo, e.g. `make check`>
+"""
+
+#: The same at d48d7a19, the last commit before 26501c3e switched the markers
+#: on 2026-09-06: ffb86115 had grown the prose to three lines and the menu to
+#: five keys that same morning. Also verbatim.
+OLD_BODY_D48D7A19 = """\
+sd-ai-command-pack, machine-scope. Work items live under `docs/work/`; nothing
+else in this repo belongs to the framework. The workflow these keys override is
+`WORKFLOW.md` in the pack checkout; it is the one page that states the policy.
+
+    mode: full
+    check: <the command that verifies this repo, e.g. `make check`>
+    test: <optional, when this repo spells its tests separately>
+    lint: <optional, same>
+    reviewers: <registry entries allowed to receive this repo's diff>
+"""
+
+OLD_BODIES = {"43170716": OLD_BODY_43170716, "d48d7a19": OLD_BODY_D48D7A19}
+
+
+class OldBlockRefreshTests(InstallerHarness):
+    """`--repo` refreshes the block it wrote before 2026-09-06 (sd:928).
+
+    `cmd_repo` reads the standing consent before it writes, through
+    `migrated` and then the reader. `migrated` rewrites only the markers; the
+    old body opens with unmarked prose, which is not `key: value`, so the
+    reader raised `ConfigError` on line 2, `cmd_repo` printed `error:` and
+    returned 2, and `write_local_block` -- the one place that could replace
+    the body -- was never reached. The refresh failed on exactly the block it
+    exists to correct, on every machine set up before then. The migration
+    test beside this one never saw it: it calls `write_local_block` directly
+    with a consent in hand, and so never crosses the read.
+    """
+
+    OLD_BEGIN, OLD_END = (old for old, _ in sd_install.LEGACY_BLOCK_MARKERS)
+    GRANT = "plain@inference.baseten.co"
+    PLACEHOLDER = "    reviewers: <registry entries allowed to receive this repo's diff>\n"
+
+    def make_repo(self, name: str) -> Path:
+        repo = self.home / name
+        repo.mkdir(parents=True)
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+        return repo
+
+    def seed_registry(self) -> None:
+        path = self.home / sd_install.REGISTRY_RELATIVE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(REGISTRY_FIXTURE, encoding="utf-8")
+
+    def read_back(self, repo: Path) -> dict:
+        sys.path.insert(0, str(REPO_ROOT / "bin"))
+        import sd_lib
+
+        return sd_lib.local_block(repo)
+
+    def old_file(self, body: str, *, grant: str | None = None) -> str:
+        """The operator's notes, then the old block as the installer left it.
+
+        A grant is what an operator would have written by hand into that
+        block: the placeholder line replaced (d48d7a19) or a line added under
+        the two keys the template had (43170716), on its own line either way.
+        """
+        if grant is not None:
+            body = body.replace(self.PLACEHOLDER, "") + f"    {sd_install.CONSENT_KEY}: {grant}\n"
+        return f"# notes\n\n{self.OLD_BEGIN}\n{body}{self.OLD_END}\n"
+
+    def assert_refreshed(self, repo: Path, text: str) -> None:
+        self.assertNotIn(self.OLD_BEGIN, text, "the unreadable markers survived")
+        self.assertNotIn(self.OLD_END, text, "the unreadable markers survived")
+        self.assertEqual(text.count(sd_install.BLOCK_BEGIN), 1, "a second block")
+        self.assertEqual(text.count(sd_install.BLOCK_END), 1, "a second block")
+        self.assertTrue(text.startswith("# notes\n"), "the operator's notes moved")
+        # The new body says the same thing behind `#`; the unmarked line is
+        # the one the reader raised on.
+        self.assertNotIn("\nsd-ai-command-pack, machine-scope", text, "the unmarked prose survived")
+
+    def test_an_old_block_with_a_grant_is_refreshed_and_the_grant_kept(self):
+        """rc 0, the reader's markers, a body the reader parses, the grant.
+
+        The grant is the one thing an operator could have written into the
+        old body and the one key with no fallback, so it must come through
+        the refresh: read on its own line when the body as a whole raises.
+        """
+        for commit, body in OLD_BODIES.items():
+            with self.subTest(commit=commit):
+                self.seed_registry()
+                repo = self.make_repo(f"granted-{commit}")
+                target = repo / sd_install.LOCAL_BLOCK_FILE
+                target.write_text(self.old_file(body, grant=self.GRANT), encoding="utf-8")
+                self.assertEqual(sd_install.standing_consent(repo), self.GRANT)
+                rc, output = self.run_cli("--repo", str(repo))
+                self.assertEqual(rc, 0, output)
+                self.assertIn("already answered here", output)
+                self.assertIn("refreshed the sd block", output)
+                text = target.read_text(encoding="utf-8")
+                self.assert_refreshed(repo, text)
+                self.assertEqual(self.read_back(repo), {sd_install.CONSENT_KEY: self.GRANT})
+
+    def test_an_old_block_without_a_grant_is_refreshed_and_asked(self):
+        """No grant in the old body is no standing answer: the prompt runs,
+        `--reviewers` answers it, and the placeholder is still not an answer."""
+        for commit, body in OLD_BODIES.items():
+            with self.subTest(commit=commit):
+                self.seed_registry()
+                repo = self.make_repo(f"asked-{commit}")
+                target = repo / sd_install.LOCAL_BLOCK_FILE
+                target.write_text(self.old_file(body), encoding="utf-8")
+                self.assertIsNone(sd_install.standing_consent(repo))
+                rc, output = self.run_cli("--repo", str(repo), "--reviewers", "plain")
+                self.assertEqual(rc, 0, output)
+                self.assertNotIn("already answered", output)
+                self.assert_refreshed(repo, target.read_text(encoding="utf-8"))
+                self.assertEqual(self.read_back(repo), {sd_install.CONSENT_KEY: self.GRANT})
+
+    def test_the_prose_the_refresh_reads_past_is_the_prose_the_installer_wrote(self):
+        """Two spellings of the old prose, one here and one in the installer,
+        and the fixture is the one copied out of git: every unmarked line of
+        both old bodies is in `LEGACY_BLOCK_PROSE`, and nothing else is."""
+        unmarked = {
+            line.strip()
+            for body in OLD_BODIES.values()
+            for line in body.split("\n")
+            if line.strip() and ":" not in line
+        }
+        self.assertEqual(unmarked, set(sd_install.LEGACY_BLOCK_PROSE))
+
+    def test_a_malformed_grant_in_an_old_block_still_refuses(self):
+        """Reading past our prose is not reading loosely: what the grant line
+        says still goes through `parse_consent`, and a bare name consents to
+        nobody."""
+        repo = self.make_repo("bare-name")
+        target = repo / sd_install.LOCAL_BLOCK_FILE
+        before = self.old_file(OLD_BODY_D48D7A19, grant="plain")
+        target.write_text(before, encoding="utf-8")
+        rc, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(rc, 2)
+        self.assertIn("bare name", output)
+        self.assertEqual(target.read_text(encoding="utf-8"), before, "a refused run wrote")
+
+    def test_an_operators_own_unreadable_line_in_an_old_block_still_refuses(self):
+        """Only our lines come out. `reviewers ""` is a denial with the colon
+        missing; read past it, the refresh would write a block with no
+        `reviewers` line and the repository would inherit the machine's
+        policy -- consent widened by a typo. So it is refused, as
+        `test_malformed_local_syntax_and_unreadable_file_refuse_without_overwrite`
+        requires of a current block, with the file left as it was."""
+        repo = self.make_repo("typo")
+        target = repo / sd_install.LOCAL_BLOCK_FILE
+        before = self.old_file(OLD_BODY_43170716.replace("    mode: full\n", '    reviewers ""\n'))
+        target.write_text(before, encoding="utf-8")
+        rc, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(rc, 2, output)
+        self.assertIn("'reviewers \"\"' is not `key: value`", output)
+        self.assertEqual(target.read_text(encoding="utf-8"), before, "a refused run wrote")
+
+    def test_an_old_block_with_a_half_open_pair_is_still_refused(self):
+        """The body is ours; the markers are the operator's. An old block
+        missing its end marker is refused before its body is read at all,
+        and the file is left exactly as it was."""
+        repo = self.make_repo("half-open")
+        target = repo / sd_install.LOCAL_BLOCK_FILE
+        before = f"# notes\n\n{self.OLD_BEGIN}\n{OLD_BODY_D48D7A19}"
+        target.write_text(before, encoding="utf-8")
+        rc, output = self.run_cli("--repo", str(repo))
+        self.assertEqual(rc, 2)
+        self.assertIn("start marker with no end marker", output)
+        self.assertEqual(target.read_text(encoding="utf-8"), before, "a refused run wrote")
+
+    def test_an_old_block_in_a_tracked_file_is_still_refused(self):
+        """P6 holds for the old block too: tracked is tracked."""
+        repo = self.make_repo("tracked")
+        target = repo / sd_install.LOCAL_BLOCK_FILE
+        before = self.old_file(OLD_BODY_43170716)
+        target.write_text(before, encoding="utf-8")
+        subprocess.run(
+            ["git", "-C", str(repo), "add", "-f", sd_install.LOCAL_BLOCK_FILE],
+            check=True,
+        )
+        ctx = sd_install.Context(checkout=REPO_ROOT, home=self.home, environ={})
+        with self.assertRaises(SystemExit) as caught:
+            sd_install.cmd_repo(ctx, repo, io.StringIO())
+        self.assertIn("refusing to edit a tracked file", str(caught.exception))
+        self.assertEqual(target.read_text(encoding="utf-8"), before, "a refused run wrote")
+
+
 class LegacyReceiptTests(InstallerHarness):
     def write_legacy_receipt(self, rows: list[dict]) -> None:
         path = (

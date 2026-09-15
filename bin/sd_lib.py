@@ -220,13 +220,19 @@ def local_block_path(root: pathlib.Path) -> pathlib.Path:
     return main_worktree_root(root) / LOCAL_FILE_NAME
 
 
-def parse_local_block(text: str, label: str = LOCAL_FILE_NAME) -> dict[str, str]:
-    """Extract the marked block's flat scalars. No block is an empty dict."""
+def local_block_body(text: str, label: str = LOCAL_FILE_NAME) -> str | None:
+    """The text between one well-formed marker pair; None when there is no block.
+
+    The markers and the grammar are two checks, and this is the first alone:
+    the installer reads the body with its own old prose taken out before the
+    grammar sees it, so it needs the markers checked on their own. A marker
+    fault is the operator's file and is refused here whichever caller asks.
+    """
     start = text.find(LOCAL_BLOCK_START)
     if start == -1:
         if LOCAL_BLOCK_END in text:
             raise ConfigError(f"{label}: end marker without a start marker")
-        return {}
+        return None
     if text.find(LOCAL_BLOCK_START, start + len(LOCAL_BLOCK_START)) != -1:
         raise ConfigError(f"{label}: duplicate start markers")
     end = text.find(LOCAL_BLOCK_END, start)
@@ -234,7 +240,14 @@ def parse_local_block(text: str, label: str = LOCAL_FILE_NAME) -> dict[str, str]
         raise ConfigError(f"{label}: start marker with no end marker")
     if text.find(LOCAL_BLOCK_END, end + len(LOCAL_BLOCK_END)) != -1:
         raise ConfigError(f"{label}: duplicate end markers")
-    body = text[start + len(LOCAL_BLOCK_START) : end]
+    return text[start + len(LOCAL_BLOCK_START) : end]
+
+
+def parse_local_block(text: str, label: str = LOCAL_FILE_NAME) -> dict[str, str]:
+    """Extract the marked block's flat scalars. No block is an empty dict."""
+    body = local_block_body(text, label)
+    if body is None:
+        return {}
     return parse_scalars(body, comments=True, label=label)
 
 

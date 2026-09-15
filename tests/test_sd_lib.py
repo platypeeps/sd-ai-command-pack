@@ -193,6 +193,24 @@ class LocalBlockTests(Fixture):
                 with self.assertRaises(sd_lib.ConfigError):
                     sd_lib.parse_local_block(text)
 
+    def test_the_marker_check_stands_on_its_own(self) -> None:
+        """`local_block_body` is the marker half of `parse_local_block`.
+
+        The installer refreshes a block whose body the grammar refuses, so it
+        needs the markers checked without the body parsed: a marker fault
+        still raises, a body that is not `key: value` comes back as text, and
+        no block at all is None rather than an empty dict.
+        """
+        with self.assertRaises(sd_lib.ConfigError):
+            sd_lib.local_block_body(f"{sd_lib.LOCAL_BLOCK_START}\nmode: full\n")
+        self.assertEqual(
+            sd_lib.local_block_body(
+                f"{sd_lib.LOCAL_BLOCK_START}\nnot a pair\n{sd_lib.LOCAL_BLOCK_END}\n"
+            ),
+            "\nnot a pair\n",
+        )
+        self.assertIsNone(sd_lib.local_block_body("no block here\n"))
+
 
 class ModeTests(Fixture):
     def test_declared_modes_and_the_no_line_case_this_fixture_actually_is(self) -> None:
