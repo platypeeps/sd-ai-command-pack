@@ -143,6 +143,10 @@ lint:
 # set instead of reciting it, and fails when a workflow earns a fourth one or
 # when a decision outlives its finding. The same binary is handed to both, so
 # the enumeration can never be measured by a different zizmor than the gate.
+# Neither run is chained behind the other: a workflow edit big enough to redden
+# the gate is exactly the edit most likely to have moved the persona-gated set,
+# so the run that would be skipped is the one worth having. Both statuses are
+# kept and the recipe fails if either does.
 audit:
 	@if [ -x "$(VENV_BIN)/bandit" ]; then \
 		"$(VENV_BIN)/bandit" -q -r --severity-level medium bin; \
@@ -156,12 +160,14 @@ audit:
 		printf '%s\n' "warning: bandit not found; skipping Python security audit."; \
 	fi
 	@if [ -x "$(VENV_BIN)/zizmor" ]; then \
-		"$(VENV_BIN)/zizmor" --offline .github/workflows/ && \
-		"$(VENV_PYTHON)" .github/scripts/check-zizmor-personas.py --zizmor "$(VENV_BIN)/zizmor"; \
+		"$(VENV_BIN)/zizmor" --offline .github/workflows/; gate=$$?; \
+		"$(VENV_PYTHON)" .github/scripts/check-zizmor-personas.py --zizmor "$(VENV_BIN)/zizmor"; names=$$?; \
+		[ $$gate -eq 0 ] && [ $$names -eq 0 ]; \
 	elif command -v zizmor >/dev/null 2>&1; then \
 		printf '%s\n' "warning: $(VENV_BIN)/zizmor is missing; using an UNPINNED zizmor from PATH ($$(zizmor --version 2>&1 | head -1 | tr -d '\r')). CI uses the requirements-security.txt pin; run 'make setup' to match it."; \
-		zizmor --offline .github/workflows/ && \
-		"$(PYTHON)" .github/scripts/check-zizmor-personas.py --zizmor zizmor; \
+		zizmor --offline .github/workflows/; gate=$$?; \
+		"$(PYTHON)" .github/scripts/check-zizmor-personas.py --zizmor zizmor; names=$$?; \
+		[ $$gate -eq 0 ] && [ $$names -eq 0 ]; \
 	elif [ "$(STRICT)" = "1" ]; then \
 		printf '%s\n' "error: zizmor not found and STRICT=1; the workflow security audit is required." >&2; \
 		exit 1; \

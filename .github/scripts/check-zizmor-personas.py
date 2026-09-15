@@ -50,6 +50,11 @@ DEFAULT_PERSONA = "Regular"
 
 WORKFLOWS = ".github/workflows"
 
+#: The two route components zizmor emits, and what each carries. A component
+#: this does not know is a shape the script has not been read against, and
+#: rendering its value anyway would key findings on a guess.
+ROUTE_VARIANTS = {"Key": str, "Index": int}
+
 
 @dataclasses.dataclass(frozen=True)
 class Key:
@@ -165,7 +170,14 @@ def render_route(route: object) -> str:
     for component in route:
         if not isinstance(component, dict) or len(component) != 1:
             raise ValueError(f"route component is not a single-key object: {component!r}")
-        parts.append(str(next(iter(component.values()))))
+        [(variant, value)] = component.items()
+        carries = ROUTE_VARIANTS.get(variant)
+        # `bool` is an `int` to Python and is not an index to zizmor.
+        if carries is None or isinstance(value, bool) or not isinstance(value, carries):
+            raise ValueError(
+                f"route component is not a `Key` of text or an `Index` of a number: "
+                f"{component!r}")
+        parts.append(str(value))
     return "/" + "/".join(parts)
 
 
@@ -177,10 +189,18 @@ def primary(finding: dict) -> dict:
     them. Exactly one `Primary` is the shape every audit produces; anything
     else is a zizmor whose output this script has not been read against, which
     is a stop, not a guess.
+
+    A finding or a location that is not an object at all -- `[null]`, say --
+    is the same stop rather than an `AttributeError` from inside a `.get()`:
+    the entrypoint promises a named refusal, and it can only keep that promise
+    for the failures the helpers actually name.
     """
 
-    locations = [location for location in finding.get("locations", [])
-                 if location.get("symbolic", {}).get("kind") == "Primary"]
+    if not isinstance(finding, dict):
+        raise ValueError(f"finding is not an object: {finding!r}")
+    locations = [location for location in finding.get("locations") or []
+                 if isinstance(location, dict)
+                 and (location.get("symbolic") or {}).get("kind") == "Primary"]
     if len(locations) != 1:
         raise ValueError(
             f"{finding.get('ident')!r} has {len(locations)} primary locations, not 1; "
@@ -205,6 +225,8 @@ def gated(findings: list) -> list[Found]:
 
     found = []
     for finding in findings:
+        if not isinstance(finding, dict):
+            raise ValueError(f"finding is not an object: {finding!r}")
         determinations = finding.get("determinations", {})
         persona = determinations.get("persona") if isinstance(determinations, dict) else None
         if not isinstance(persona, str):
@@ -300,7 +322,7 @@ def main(argv: list[str]) -> int:
 
     try:
         found = gated(run_zizmor(zizmor, root))
-    except (OSError, ValueError, KeyError, TypeError) as error:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError) as error:
         # The entrypoint contract: a tool that moved, a zizmor whose JSON this
         # has not been read against, a shape `primary()` refuses. Each is a
         # reason this could not be answered, and each reads as one line rather

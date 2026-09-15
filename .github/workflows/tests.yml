@@ -300,7 +300,13 @@ jobs:
       # decisions in the script, in both directions -- so a workflow edit that
       # earns a fourth one fails here, and so does a decision whose finding is
       # gone. `make audit` runs the same pair locally.
+      # `if:` because a step's default condition is `success()`, which would
+      # skip this on exactly the runs where a workflow changed enough to redden
+      # the step above -- the runs whose persona-gated set is most likely to
+      # have moved. `!cancelled()` runs it anyway and still reports its own
+      # status, so the job fails for both reasons rather than for the first.
       - name: Zizmor persona-gated findings (enumerated, not recited)
+        if: ${{ !cancelled() }}
         run: python3 .github/scripts/check-zizmor-personas.py --zizmor zizmor
 
       # Consumers vendor ~6k lines of pack shell and exempt it from line

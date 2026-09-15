@@ -112,6 +112,27 @@ class TheRoute(unittest.TestCase):
         with self.assertRaises(ValueError):
             personas.render_route({"Key": "jobs"})
 
+    def test_a_component_naming_a_variant_this_has_not_read_is_refused(self) -> None:
+        # Counting the keys is not reading them: an unknown variant rendered
+        # like a `Key` would key a finding on a guess about what it means.
+        with self.assertRaises(ValueError) as caught:
+            personas.render_route([{"Key": "jobs"}, {"Other": "unittest"}])
+        self.assertIn("Other", str(caught.exception))
+
+    def test_a_key_that_does_not_carry_text_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            personas.render_route([{"Key": 4}])
+
+    def test_an_index_that_does_not_carry_a_number_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            personas.render_route([{"Index": "steps"}])
+
+    def test_an_index_of_true_is_refused(self) -> None:
+        # `bool` is an `int` to Python. It is not a step number to zizmor, and
+        # `/jobs/lint/steps/True` is not a route anything can be read against.
+        with self.assertRaises(ValueError):
+            personas.render_route([{"Index": True}])
+
     def test_a_component_with_two_keys_is_refused(self) -> None:
         # Guessing which of the two names the position would key findings on
         # whichever one `dict` happened to yield first.
@@ -155,6 +176,36 @@ class ThePrimaryLocation(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             personas.primary(doubled)
         self.assertIn("2 primary locations", str(caught.exception))
+
+
+class TheShapesItRefuses(unittest.TestCase):
+    """Malformed JSON is a named refusal, never an `AttributeError` from a `.get()`.
+
+    The entrypoint promises one line and exit 2 for a zizmor it cannot read,
+    and it can only keep that promise for failures the helpers name themselves.
+    """
+
+    def test_a_finding_that_is_not_an_object_is_refused_by_the_gated_set(self) -> None:
+        with self.assertRaises(ValueError) as caught:
+            personas.gated([None])
+        self.assertIn("not an object", str(caught.exception))
+
+    def test_a_finding_that_is_not_an_object_is_refused_by_the_primary(self) -> None:
+        with self.assertRaises(ValueError) as caught:
+            personas.primary("anonymous-definition")
+        self.assertIn("not an object", str(caught.exception))
+
+    def test_a_location_that_is_not_an_object_is_not_a_primary(self) -> None:
+        # Dropped rather than dereferenced, which leaves the count wrong and
+        # the count is already a refusal.
+        with self.assertRaises(ValueError) as caught:
+            personas.primary({"ident": "made-up", "locations": [None]})
+        self.assertIn("0 primary locations", str(caught.exception))
+
+    def test_locations_that_are_missing_entirely_are_refused(self) -> None:
+        with self.assertRaises(ValueError) as caught:
+            personas.primary({"ident": "made-up", "locations": None})
+        self.assertIn("0 primary locations", str(caught.exception))
 
 
 class TheGatedSet(unittest.TestCase):
@@ -403,6 +454,14 @@ class TheWholeRun(WithAFakeZizmor, unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn(f"decided but not found: {personas.DECIDED[0].key}", said)
 
+    def test_a_finding_that_is_not_an_object_is_named_and_not_a_traceback(self) -> None:
+        # The shape the first round's handler missed: `.get()` on `None` is an
+        # `AttributeError`, which is not a `ValueError` and was not caught.
+        code, _, said = self.run_main("[null]")
+        self.assertEqual(code, 2)
+        self.assertIn("could not be enumerated", said)
+        self.assertNotIn("Traceback", said)
+
     def test_a_zizmor_that_cannot_be_read_is_named_and_not_a_traceback(self) -> None:
         # The entrypoint contract: helper errors are caught and reported.
         # Exit 2 is "could not be answered", which is not exit 1's "answered,
@@ -433,6 +492,28 @@ class TheLanesThatRunIt(unittest.TestCase):
         lines = self.run_lines(".github/workflows/tests.yml")
         self.assertEqual(len(lines), 1, lines)
         self.assertTrue(lines[0].startswith("run: "), lines[0])
+
+    def gate_lines(self, path: str) -> list[str]:
+        return [line.strip() for line in
+                (REPO_ROOT / path).read_text(encoding="utf-8").splitlines()
+                if "--offline .github/workflows/" in line
+                and not line.lstrip().startswith("#")]
+
+    def test_neither_make_arm_chains_the_enumeration_behind_the_gate(self) -> None:
+        # `&&` would skip the enumeration on exactly the runs where a workflow
+        # changed enough to redden the gate -- the runs whose persona-gated set
+        # is most likely to have moved.
+        lines = self.gate_lines("Makefile")
+        self.assertEqual(len(lines), 2, lines)
+        for line in lines:
+            with self.subTest(line=line):
+                self.assertNotIn("&&", line)
+
+    def test_the_ci_step_is_not_skipped_by_a_failure_ahead_of_it(self) -> None:
+        # A step's default condition is `success()`, which is the same skip.
+        text = (REPO_ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+        step = text.split("Zizmor persona-gated findings")[1].split("- name:")[0]
+        self.assertIn("!cancelled()", step)
 
     def test_make_audit_runs_it(self) -> None:
         # Once per arm of the zizmor lookup: the pinned copy in the virtualenv
