@@ -26,10 +26,17 @@ for the controls a run passes through.
 >
 > ```
 > /usr/bin/git -C <checkout path> fetch origin
-> /usr/bin/git -C <checkout path> worktree add <scratchpad>/wt-<lane> -b fix/sd-<N>-<slug> origin/main
+> /usr/bin/git -C <checkout path> worktree add <scratchpad>/wt-<lane> -b fix/sd-<N>-<slug> <sha>
 > ```
 >
-> Remove it when the lane ends, after the branch is pushed.
+> Start from `<sha>`, the base named at the top of this brief — not from
+> `origin/main`. They are the same only until main moves, and main moving is
+> what the sha is there to pin. Branch from `origin/main` and a lane launched
+> minutes ago silently carries somebody else's commits, which then appear in
+> its diff and its review. If `<sha>` is not in the checkout after the fetch,
+> stop and say so rather than substituting a branch name.
+>
+> Remove the worktree when the lane ends, after the branch is pushed.
 >
 > ### Your item
 >
@@ -37,13 +44,20 @@ for the controls a run passes through.
 > not this brief:
 >
 > ```
-> sd store item <N> --json
+> <pack checkout>/bin/sd store item <N> --json
 > ```
 >
 > That is the canonical read — the row, every note, and the revision, in one
 > call. It is a read verb; it writes nothing. Do not hand-roll a `sqlite3`
 > projection instead: one written from the schema you remember drops the fields
 > you were not thinking about, and `repo` is the one that matters most.
+>
+> Invoke it by checkout-relative path, `bin/sd`, never as a bare `sd`. That is
+> the only calling convention this repository supports
+> ([`AGENTS.md`](../AGENTS.md), "Calling Convention"), and a bare name resolves
+> against whatever `PATH` happens to hold. The store is machine-wide, so a
+> `system` lane uses the pack checkout's `bin/sd` to read its own item; the
+> rows are the same rows.
 >
 > **Check `repo` before you touch anything.** It names the checkout the row
 > belongs to. If it is not the checkout you were given, stop and print both
@@ -116,8 +130,12 @@ for the controls a run passes through.
 >    run more than once on one pull request, may not re-run on a push, and may
 >    fail outright with a body that is an error message rather than a verdict —
 >    so key every review by its `commit_id`, read every one the call returns,
->    and check again after each push. Quote every finding verbatim and address
->    or rebut each with evidence.
+>    and check again after each push. A review whose `commit_id` is not your
+>    current head says nothing about your current head: it is evidence about the
+>    code it ran on, and nothing else. An error body is not a verdict either.
+>    The round is answered only by a review that names the head you pushed AND
+>    carries a real verdict; anything else means keep waiting, not proceed.
+>    Quote every finding verbatim and address or rebut each with evidence.
 >    `<system only: do NOT request a Copilot review; that repository's CLAUDE.md
 >    forbids it, because its CI runs the reviewer itself.>`
 >
@@ -125,14 +143,20 @@ for the controls a run passes through.
 >
 > - Do NOT use `gh`. Use the `mcp__github__*` tools. Load their schemas with one
 >   `ToolSearch` call.
-> - Do NOT write to the live store, `~/.local/share/sd/sd.db`. Read it with
->   `sqlite3 -readonly`. Do not run any `sd` write verb. I close the item.
+> - Do NOT write to the live store, `~/.local/share/sd/sd.db`, and do not run
+>   any `sd` write verb. I close the item. Read it with `bin/sd store …`, as
+>   above. `sqlite3 -readonly` is for the questions that command cannot answer —
+>   counting rows, joining tables — and never as a substitute for the canonical
+>   item read.
 > - Do NOT restart the dashboard or the runner, and do not run `launchctl`.
 >   I deploy.
 > - Never write into the pack `.venv`. Never base a venv on another lane's copy.
-> - Before editing a file, check it against every open pull request in the
->   repository (`list_pull_requests`, then `pull_request_read get_files`). If a
->   file you need is in an open pull request, tell me and WAIT. Do not merge
+> - Before editing a file, check it against every OTHER lane's open pull
+>   request (`list_pull_requests`, then `pull_request_read get_files`; skip your
+>   own number once you have one). If a file you need is in another lane's open
+>   pull request, tell me and WAIT. Your own pull request holds every file you
+>   are fixing, so a check that does not exclude it stops the review-fix pass
+>   on itself. Do not merge
 >   main into your branch; check
 >   `/usr/bin/git merge-tree --write-tree origin/main HEAD` rc 0 before the push
 >   instead.
@@ -156,18 +180,25 @@ for the controls a run passes through.
 >
 >   ```
 >   cd <your worktree>
->   /Users/sven/repos/platypeeps/sd-ai-command-pack/.venv/bin/python \
->       /Users/sven/repos/platypeeps/sd-ai-command-pack/bin/sd-docs-lint \
->       --pr-body <body file>
+>   <pack venv python> bin/sd-docs-lint --pr-body <body file>
 >   ```
+>
+>   Run your own `bin/sd-docs-lint`, the one in the worktree — not the copy in
+>   the pack checkout. If your branch changes the linter, the pack's copy does
+>   not exercise that change and the result is about code you did not write.
+>   Name the interpreter by the path I give you rather than hard-coding one;
+>   a checkout lives wherever it lives.
 >
 >   It must exit 0 and end `sd-docs-lint: clean`. Note that it passes a body
 >   lacking the template's scope section, so check that section by eye. A
 >   `system` lane does not run this at all; the linter is a pack tool.
 > - End the body and the commit message with the attribution lines the session
 >   is using.
-> - One push, then freeze the head until the review is read. Do NOT merge.
->   I merge.
+> - One push, then freeze the head until the review has been read and
+>   dispositioned. You get one further push after that: every review fix in a
+>   single batch, gate re-run before it, never one commit per finding. That
+>   second push is what the verification round reviews. A third push needs me
+>   to say so. Do NOT merge — I merge.
 >
 > ### Report back
 >
