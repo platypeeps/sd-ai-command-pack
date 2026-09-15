@@ -345,11 +345,18 @@ class LineBudgetTests(unittest.TestCase):
         # here and step 5 gates `planning -> ready` on it. The rule itself, the
         # mode resolution and the sentence are `sd_lib.guest_artifact_refusal`,
         # outside this lane, so nothing else is spent here.
+        #
+        # 2127 -> 2130 is sd:932. The comment `workflow_text` writes above
+        # `ref:` claimed the merge-ref default fails the job at checkout on a
+        # conflicted pull request; measured on probe PR #966 (sd:878), such a
+        # pull request gets no run at all. Three lines say what was measured
+        # and name the window the head ref is held for, in the file every
+        # consumer installs, where the claim would otherwise be read as fact.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2127,
+            2130,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
