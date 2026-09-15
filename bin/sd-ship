@@ -573,16 +573,22 @@ class Ship:
             raise Refusal("existing PR delivery claim or title differs; reconcile the prepared scope first")
         self.save(title=title, body=body, base=base, deliver=deliver, acceptance=claim)
         self.assert_scope()
-        work = self.root / "docs/work"
-        if work.is_dir():
-            # Rule 5 reads the pull request body, and the body is built by
-            # now. Without it the rule reports itself not run and CI is the
-            # first to check the `Work:` line, which the skill said happened
-            # here.
-            with tempfile.TemporaryDirectory(prefix="sd-ship-lint-") as directory:
-                body_path = pathlib.Path(directory) / "pr-body.md"
-                body_path.write_text(body)
-                run(self.root, [sys.executable, str(BIN / "sd-docs-lint"), "--pr-body", str(body_path)], timeout=300)
+        # Rules 5 and 8 read the pull request body, and the body is built by
+        # now. Without it the rules report themselves not run and CI is the
+        # first to check the `Work:` line, which the skill said happened
+        # here. With no work root the tree rules cannot run and the linter
+        # says so before any rule does, so until #972 the whole call was
+        # withheld there, scope rule included, and a diff touching
+        # `.github/**` shipped without its scope line. `--body-only` runs the
+        # two body rules and nothing else; no planning directory is created
+        # to satisfy the rest.
+        lint = [sys.executable, str(BIN / "sd-docs-lint")]
+        if not (self.root / "docs/work").is_dir():
+            lint.append("--body-only")
+        with tempfile.TemporaryDirectory(prefix="sd-ship-lint-") as directory:
+            body_path = pathlib.Path(directory) / "pr-body.md"
+            body_path.write_text(body)
+            run(self.root, [*lint, "--pr-body", str(body_path)], timeout=300)
         self.review(head)
         warnings = []
         if pathlib.Path(self.repo["path"]).name in {"sd-ai-command-pack", "system", "sd-writing-pack"}:
