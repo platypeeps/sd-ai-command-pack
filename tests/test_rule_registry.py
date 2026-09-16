@@ -1658,6 +1658,13 @@ MUTATIONS: dict[str, Mutation] = {
         test="tests.test_sd_review_codex.PreflightTests"
              ".test_a_non_chatgpt_auth_mode_refuses",
     ),
+    "bin/sd-status::_age_rows": Mutation(
+        path="bin/sd-status",
+        old="    if age <= IDLE_DAYS:",
+        new="    if False:  # leg d: the idle threshold, defeated",
+        test="tests.test_sd_status.WorkItemInventoryTests"
+             ".test_a_planning_item_past_the_threshold_ages_into_a_finding",
+    ),
 }
 
 
