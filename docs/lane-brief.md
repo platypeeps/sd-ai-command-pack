@@ -82,7 +82,13 @@ for the controls a run passes through.
 >
 > 1. **Re-measure the premise before fixing anything.** Check every line number
 >    and quoted string against your worktree. If the finding no longer holds,
->    say so with the measurement and do not manufacture work.
+>    say so with the measurement and do not manufacture work. Report the
+>    re-measure as one row per citation — the item's citation as written
+>    (`path:line`, `source:<path>::<symbol>`, a file named in prose, or a
+>    sha), what stands there at the commit the item names
+>    (`git show <sha>:<path>`), what stands there at your base, and whether
+>    the claim holds — and if the item names no commit, say so in the first
+>    row.
 > 2. **Fail-first.** Watch the new test fail on the unfixed code, quote the
 >    decisive assertion line, then fix, then watch it pass. A test that does not
 >    kill its mutation has not earned its place.
@@ -301,6 +307,13 @@ for the controls a run passes through.
 > close the item.
 
 ## Why these rules
+
+**Rule 1, one row per citation.** Four items filed in one night cited branch
+heads a squash had superseded, a commit that did not touch the file, or line
+numbers that had moved under a correctly named sha. Every lane re-measured,
+and each wrote the result up in its own shape. The row form names the commit
+the item measured at, so the next reader sees drift as a diff and not as a
+paragraph, and it names a missing commit up front so nobody re-derives it.
 
 **Rule 3, the byte-copy revert.** A lane proved a mutation reverted with
 `git diff --exit-code` while its own fix sat unstaged in the same file. Bare
