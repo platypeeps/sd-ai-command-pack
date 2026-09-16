@@ -4,9 +4,10 @@ Real git repositories in a scratch root, because every fact the collector
 reports comes out of `git` and a mocked one would only prove the mock agrees
 with itself. The properties worth pinning are the ones a future tab could break
 without noticing: that discovery enumerates rather than recites, that a missing
-upstream reports absence instead of zero, that the dump is canonical, and that
-the server's verb surface stays two (`tests/test_dashboard_actions.py` holds
-what the write path is allowed to do).
+upstream reports absence instead of zero, and that the server's verb surface
+stays two (`tests/test_dashboard_actions.py` holds what the write path is
+allowed to do). The CLI has no verb left since sd:719 step 4 retired `index`,
+and the tests on it assert that.
 """
 
 from __future__ import annotations
@@ -15,7 +16,6 @@ import contextlib
 import importlib.machinery
 import importlib.util
 import io
-import json
 import re
 import subprocess
 import sys
@@ -26,13 +26,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from dashboard import (  # noqa: E402 - after the path insert
-    collect,
-    github,
-    jira,
-    server,
-    store,
-)
+from dashboard import collect, server  # noqa: E402 - after the path insert
 
 
 def load_cli():
@@ -198,100 +192,9 @@ class CacheTests(FleetHarness):
 
 class CommandLineTests(FleetHarness):
     def run_cli(self, *argv: str) -> tuple[int, str]:
-        """The CLI, with both of its outside edges tied down.
-
-        `index` without `--dump` refreshes the issue index, which means a naive
-        harness runs a real `gh` against the network and writes the operator's
-        real `~/.cache/sd-ai-command-pack/index.sqlite`. That is exactly what
-        happened once while 4b-i was being built, and it is why the redirection
-        lives in the shared helper rather than in the one test that needs it:
-        the next verb to grow a side effect gets it for free instead of
-        discovering it in somebody's home directory.
-        """
         out = io.StringIO()
-        original_root = collect.repo_root
-        original_path = store.index_path
-        original_run = github._run
-        original_available = github.available
-        original_settings = jira.settings
-        collect.repo_root = lambda environ=None: self.root  # type: ignore[assignment]
-        store.index_path = lambda environ=None: (  # type: ignore[assignment]
-            self.root / ".cache" / "index.sqlite"
-        )
-        # Two patches, doing different jobs. `available` is pinned so the
-        # assertion does not depend on whether the machine running the suite
-        # happens to have `gh` installed -- it consults `shutil.which` before
-        # it ever reaches a runner, so patching only the runner would make this
-        # test report NO_GH on a CI image without `gh` and NO_AUTH on a laptop
-        # with it. `_run` is patched as the hard stop: whatever the code does,
-        # no argv reaches a real binary.
-        github.available = lambda runner=None: (False, github.NO_AUTH)  # type: ignore[assignment]
-        github._run = lambda argv, runner=None: (1, "", "not logged in")  # type: ignore[assignment]
-        # Jira gets the same treatment for the same reason: a machine with the
-        # three JIRA_* variables exported would otherwise have this harness
-        # open a socket against a real tenant.
-        jira.settings = lambda environ=None: {  # type: ignore[assignment]
-            "base": "",
-            "email": "",
-            "token": "",
-            "jql": "",
-        }
-        try:
-            code = sd_dashboard.main(list(argv), out=out)
-        finally:
-            collect.repo_root = original_root  # type: ignore[assignment]
-            store.index_path = original_path  # type: ignore[assignment]
-            github._run = original_run  # type: ignore[assignment]
-            github.available = original_available  # type: ignore[assignment]
-            jira.settings = original_settings  # type: ignore[assignment]
+        code = sd_dashboard.main(list(argv), out=out)
         return code, out.getvalue()
-
-    def test_index_reports_counts(self):
-        self.make_repo("a")
-        code, output = self.run_cli("index")
-        self.assertEqual(code, 0)
-        self.assertIn("1 repos", output)
-
-    def test_an_unreachable_tracker_is_a_reported_row_not_a_failure(self):
-        """The fleet half answered; refusing to print it would be the bug."""
-        self.make_repo("a")
-        code, output = self.run_cli("index")
-        self.assertEqual(code, 0, "an unreachable tracker failed the whole command")
-        self.assertIn("1 repos", output)
-        self.assertIn("issues[github]: not collected", output)
-        self.assertIn(github.NO_AUTH, output)
-        # One line per tracker, because a merged total hides that half of them
-        # never answered.
-        self.assertIn("issues[jira]: not collected", output)
-
-    def test_an_incomplete_search_says_which_one_and_does_not_blame_a_ceiling(self):
-        """The report has to name the searches whose rows are missing.
-
-        `truncated` covers two causes and only one of them is this program's:
-        GitHub stops handing over results at 1,000 and says the list ended,
-        which no `MAX_PAGES` change can lift. A report reading "page ceiling
-        hit" sends the operator to the wrong knob, and one that omits the
-        bucket names sends them nowhere at all.
-        """
-        self.make_repo("a")
-        original = collect.refresh_issues
-        collect.refresh_issues = lambda connection, now=None, seams=None: {  # type: ignore[assignment]
-            "github": {"ok": True, "reason": "", "inserted": 1000, "updated": 0,
-                       "truncated": ["author"], "window_start": "", "watermark_moved": True},
-        }
-        self.addCleanup(lambda: setattr(collect, "refresh_issues", original))
-        code, output = self.run_cli("index")
-        self.assertEqual(code, 0)
-        self.assertIn("author", output)
-        self.assertNotIn("page ceiling", output)
-
-    def test_dump_is_json_and_identical_across_runs(self):
-        self.make_repo("a")
-        self.make_repo("group/b")
-        first = self.run_cli("index", "--dump")[1]
-        second = self.run_cli("index", "--dump")[1]
-        self.assertEqual(first, second, "the dump is not canonical")
-        self.assertEqual(json.loads(first)["counts"]["repos"], 2)
 
     def test_no_verb_is_refused(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
@@ -308,28 +211,6 @@ class CommandLineTests(FleetHarness):
                     actions.extend(sub._actions)
         named = {opt for action in actions for opt in action.option_strings}
         self.assertEqual(named & banned, set())
-
-    def test_index_is_the_only_verb(self):
-        """`serve` and `install` are gone, and nothing may bring one back quietly.
-
-        Both claimed what the system repository owns on this machine: the
-        :8767 page, and the LaunchAgent label the system workflow server runs
-        under. sd:719 step 1 deleted them rather than renaming them, so the
-        verb set is asserted whole -- a parser registration restored on its
-        own is a failure here, not a warning somebody reads later.
-        """
-        parser = sd_dashboard.build_parser()
-        verbs = [action for action in parser._actions
-                 if hasattr(action, "choices") and action.choices]
-        self.assertEqual(len(verbs), 1)
-        self.assertEqual(set(verbs[0].choices), {"index"})
-        for gone in ("serve", "install"):
-            with self.subTest(verb=gone), \
-                    contextlib.redirect_stderr(io.StringIO()) as err, \
-                    self.assertRaises(SystemExit) as raised:
-                sd_dashboard.main([gone])
-            self.assertEqual(raised.exception.code, 2)
-            self.assertIn("invalid choice", err.getvalue())
 
 
 class RetiredTrackerIndexTests(FleetHarness):
@@ -358,7 +239,12 @@ class RetiredTrackerIndexTests(FleetHarness):
     )
 
     def test_no_verb_remains_and_index_exits_two_with_usage(self):
-        """`index` went the way `serve` and `install` did: the parser refuses it."""
+        """`index` went the way `serve` and `install` did: the parser refuses it.
+
+        Asserted whole, as step 1's test asserted `{"index"}`: a parser
+        registration restored on its own is a failure here, not a warning
+        somebody reads later.
+        """
         parser = sd_dashboard.build_parser()
         verbs = [action for action in parser._actions
                  if hasattr(action, "choices") and action.choices]

@@ -1192,55 +1192,44 @@ class RepoResolutionTests(StatusFixture):
 
 
 class IssueSectionTests(StatusFixture):
-    """The `issues:` lines, which read the index and never collect.
+    """The `issues:` lines, which read the shared database and never collect.
 
-    The fixture HOME is a temp directory, so `store.index_path()` resolves
-    under it and a test can decide whether an index exists at all -- which is
-    the distinction the section is built around: no index is a different answer
-    from no issues, and reporting the second where the first is true is the kind
-    of wrong that looks right.
+    sd:719 step 4 retired the legacy index and the `store` fallback that read
+    it, so every test here seeds `sd_db.shadow` under the fixture HOME the
+    way `JiraSectionTests` does -- the one store the section has left. The
+    distinction the section is built around survives: no database is a
+    different answer from no rows, and reporting the second where the first
+    is true is the kind of wrong that looks right. The `needs_you` split went
+    with the index; the database path reports every open row under `other`.
     """
 
-    def write_index(self, rows: list[dict]) -> None:
-        # `sys.path` is restored: this module also exercises `sd-status`
-        # in-process, and a leftover entry would let a later import resolve
-        # differently depending on which test ran first.
-        saved = list(sys.path)
-        sys.path.insert(0, str(BIN.parent))
-        try:
-            from dashboard import store
-        finally:
-            sys.path[:] = saved
+    def seed_shadow(self, rows: list[dict]) -> None:
+        """Rows through the library, into the database the subprocess resolves under HOME."""
+        import sd_db
 
-        path = self.home / ".cache" / "sd-ai-command-pack" / "index.sqlite"
-        connection = store.connect(path)
+        sd_db.initialise(home=self.home)
+        connection = sd_db.connect(home=self.home)
         try:
-            store.upsert_issues(connection, rows, "2026-08-31T00:00:00Z")
+            for row in rows:
+                sd_db.writes.upsert_shadow(connection, **row)
         finally:
             connection.close()
 
     @staticmethod
-    def jira_row(key: str, why: list[str]) -> dict:
-        """A row shaped the way `dashboard/jira.py` actually writes them.
-
-        No repo, no number, a browse URL. The point of the Jira tests is what
-        production rows look like, so the fixture has to look like one.
-        """
+    def jira_row(key: str, *, repo: str = "") -> dict:
+        """A row shaped the way the Jira collector writes them: a browse URL, no number."""
         return {
             "tracker": "jira",
             "url": f"https://example.atlassian.net/browse/{key}",
-            "repo": "",
+            "repo": repo,
             "number": None,
             "kind": "issue",
             "title": key,
             "state": "open",
-            "author": "someone",
-            "updated_at": "2026-08-30T00:00:00Z",
-            "why": why,
         }
 
     @staticmethod
-    def row(repo: str, number: int, why: list[str], *, tracker: str = "github") -> dict:
+    def row(repo: str, number: int, *, tracker: str = "github") -> dict:
         return {
             "tracker": tracker,
             "url": f"https://github.com/{repo}/pull/{number}",
@@ -1249,16 +1238,7 @@ class IssueSectionTests(StatusFixture):
             "kind": "pull",
             "title": f"work on {number}",
             "state": "open",
-            "author": "someone",
-            "updated_at": "2026-08-30T00:00:00Z",
-            "why": why,
         }
-
-    def test_an_absent_index_says_so_rather_than_reporting_none(self) -> None:
-        self.with_github(pulls=[])
-        completed = self.run_tool(SD_STATUS)
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("no index yet", completed.stdout)
 
     def test_no_shared_database_is_a_reported_gap_that_names_no_index(self) -> None:
         """sd:719 step 4. The shared database is the only source, and its absence says so.
@@ -1279,42 +1259,34 @@ class IssueSectionTests(StatusFixture):
         self.assertIn("sd_db", section["reason"])
         self.assertEqual((section["needs_you"], section["other"]), ([], []))
 
-    def test_rows_for_this_repo_are_split_by_whether_they_need_you(self) -> None:
+    def test_rows_for_this_repo_are_reported_from_the_shared_database(self) -> None:
         self.with_github(pulls=[])
-        self.write_index(
-            [
-                self.row("acme/widget", 1, ["review-requested"]),
-                self.row("acme/widget", 2, ["mentioned"]),
-            ]
-        )
+        self.seed_shadow([self.row("acme/widget", 1), self.row("acme/widget", 2)])
         completed = self.run_tool(SD_STATUS)
-        self.assertIn("needs you: 1", completed.stdout)
-        self.assertIn("#1", completed.stdout)
-        self.assertIn("other open: 1", completed.stdout)
+        self.assertIn("other open: 2", completed.stdout)
+        result = self.report()["issues"]
+        self.assertEqual(result["source"], "database")
+        self.assertEqual(sorted(row["number"] for row in result["other"]), [1, 2])
 
     def test_another_repository_s_rows_are_not_shown(self) -> None:
         """The filter is the point; presence alone would pass without it."""
         self.with_github(pulls=[])
-        self.write_index(
-            [
-                self.row("acme/widget", 1, ["assigned"]),
-                self.row("other/thing", 99, ["assigned"]),
-            ]
-        )
-        completed = self.run_tool(SD_STATUS)
-        self.assertIn("needs you: 1", completed.stdout)
-        self.assertNotIn("#99", completed.stdout, "another repository's issue leaked in")
+        self.seed_shadow([self.row("acme/widget", 1), self.row("other/thing", 99)])
+        result = self.report()["issues"]
+        self.assertEqual([row["number"] for row in result["other"]], [1],
+                         "another repository's issue leaked in")
 
     def test_a_jira_row_is_not_attributed_to_a_checkout(self) -> None:
         """Named gap: no committed fact ties a Jira project to a repository.
 
-        A real Jira row, as `dashboard/jira.py` writes it: no repo slug at all.
+        A real Jira row carries no repo slug at all. It reaches the report
+        through the `jira` section, never this one.
         """
         self.with_github(pulls=[])
-        self.write_index([self.jira_row("RS-9", ["assigned"])])
-        completed = self.run_tool(SD_STATUS)
-        self.assertIn("none open", completed.stdout)
-        self.assertNotIn("RS-9", completed.stdout)
+        self.seed_shadow([self.jira_row("RS-9")])
+        result = self.report()
+        self.assertEqual(result["issues"]["other"], [])
+        self.assertEqual([row["url"].rpartition("/")[2] for row in result["jira"]["rows"]], ["RS-9"])
 
     def test_the_filter_is_on_the_tracker_and_not_only_on_the_slug(self) -> None:
         """Belt to the previous test's braces.
@@ -1325,38 +1297,40 @@ class IssueSectionTests(StatusFixture):
         of the filter.
         """
         self.with_github(pulls=[])
-        self.write_index([self.row("acme/widget", 1, ["assigned"], tracker="jira")])
-        completed = self.run_tool(SD_STATUS)
-        self.assertIn("none open", completed.stdout)
+        self.seed_shadow([self.jira_row("RS-10", repo="acme/widget")])
+        result = self.report()["issues"]
+        self.assertTrue(result["available"])
+        self.assertEqual(result["other"], [], "a Jira row with a matching slug leaked in")
 
-    def test_a_copy_without_the_package_reports_rather_than_crashes(self) -> None:
-        """`bin/` copied alone has no `dashboard` to import.
+    def test_a_copy_of_bin_alone_runs_the_section_without_the_dashboard_package(self) -> None:
+        """`bin/` copied alone has no `dashboard` to import, and no longer needs one.
 
-        The read-only suite runs exactly that copy, and it is how this coupling
-        was found. Every other section here degrades to a reported reason when
-        its reader is missing; this one has to as well, or one absent package
-        takes the whole report down.
+        The read-only suite runs exactly that copy, and it is how the old
+        coupling to the index reader was found. With the fallback gone the
+        section answers from `sd_lib` and the shared database, which travel
+        with `bin/`; the copy reports the same gap the full checkout does.
         """
         tools = self.base / "tools"
         shutil.copytree(BIN, tools, ignore=shutil.ignore_patterns("__pycache__"))
         self.with_github(pulls=[])
         completed = self.run_tool(tools / "sd-status")
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("not importable from this checkout", completed.stdout)
+        self.assertNotIn("not importable from this checkout", completed.stdout)
+        self.assertIn("no shared sd_db database yet", completed.stdout)
 
     def test_the_section_is_in_the_json_report(self) -> None:
         self.with_github(pulls=[])
-        self.write_index([self.row("acme/widget", 1, ["assigned"])])
+        self.seed_shadow([self.row("acme/widget", 1)])
         result = self.report()
         self.assertIn("issues", result)
         self.assertTrue(result["issues"]["available"])
-        self.assertEqual(len(result["issues"]["needs_you"]), 1)
+        self.assertEqual(len(result["issues"]["other"]), 1)
 
-    def test_shared_database_supersedes_legacy_issue_cache_without_stalling_work(self) -> None:
+    def test_the_shared_database_does_not_stall_work(self) -> None:
+        """A tracker row is external context: it raises no `issue-*` action."""
         import sd_db
 
         self.with_github(pulls=[])
-        self.write_index([self.row("acme/widget", 99, ["assigned"])])
         sd_db.initialise(home=self.home)
         connection = sd_db.connect(home=self.home)
         try:
@@ -1380,42 +1354,26 @@ class IssueSectionTests(StatusFixture):
     #: failed from.
     NO_SHARED_LIBRARY = {"sd_db": None, "sd_db.progress": None}
 
-    def test_a_missing_shared_library_is_a_reported_gap_and_not_a_read_of_the_index(
-        self,
-    ) -> None:
-        """sd:746. `_database_issues` had two `None` returns; only one is honest.
+    def test_a_missing_shared_library_is_a_reported_gap(self) -> None:
+        """sd:746, kept after sd:719 step 4 took the index away.
 
-        `None` is this function's word for "ask the index instead", and the
-        library being unimportable is not grounds for it. It says nothing about
-        the shared database, which can be on disk and current while this
-        checkout simply has no reader for it -- and the index the caller then
-        read is the *older* store, served with no `source` key and no
-        `freshness` line, so neither the text report nor `--json` said the rows
-        were old. That is the one thing the function's own docstring undertakes
-        not to do.
-
-        The surviving `None`, one line below, is the honest one: the library
-        imports and there is no shared database yet, so the index is the only
-        store that has ever held these rows.
+        The library being unimportable says nothing about the shared
+        database, which can be on disk and current while this checkout simply
+        has no reader for it, so the answer is a reported gap. Before step 4
+        the wrong branch here sent the caller to the legacy index; there is no
+        index and no `store` name left to send it to, and the second
+        assertion pins that.
 
         This runs in process because the branch is reached by an import
         failing, and the fixture's child process runs on this interpreter,
-        where `sd_db` is installed. The `store` double would hand back a row if
-        it were reached, so the assertions falsify in two independent ways --
-        the fallback is called, or `#99` reaches a reader.
+        where `sd_db` is installed.
         """
         self.with_github(pulls=[])
-        double = mock.Mock()
-        double.issues.return_value = [self.row("acme/widget", 99, ["assigned"])]
-        double.needs_you.return_value = True
         # Nothing provisioned, pinned: a checkout with a `.venv` would otherwise take the other branch.
         library_unimportable(self, self.NO_SHARED_LIBRARY, provisioned=[])
-        with mock.patch.object(status, "store", double):
-            section = status.issues_section(self.repo)
+        section = status.issues_section(self.repo)
 
-        double.index_path.assert_not_called()
-        double.connect.assert_not_called()
-        double.issues.assert_not_called()
+        self.assertFalse(hasattr(status, "store"), "the index reader is back under `store`")
         self.assertFalse(section["available"])
         self.assertIn("not installed", section["reason"])
         self.assertEqual(section["needs_you"], [])
@@ -1428,16 +1386,14 @@ class IssueSectionTests(StatusFixture):
 
         `_render_issues` returns on `available` alone, but the `--json` object
         is one shape per section and every other unavailable answer here --
-        `no GitHub remote`, `not importable from this checkout`, `no index yet`,
-        `shared database unreadable` -- carries both empty lists. A gap that
-        dropped them would be the only one, and a consumer indexing `needs_you`
-        would raise on exactly the machine that is already missing a library.
+        `no GitHub remote`, `no shared sd_db database yet`, `shared database
+        unreadable` -- carries both empty lists. A gap that dropped them would
+        be the only one, and a consumer indexing `needs_you` would raise on
+        exactly the machine that is already missing a library.
         """
         library_unimportable(self, self.NO_SHARED_LIBRARY, provisioned=[])
         answer = status._database_issues("acme/widget")
 
-        self.assertIsNotNone(answer, "None sends `issues_section` to the index")
-        assert answer is not None
         self.assertEqual(
             sorted(answer), ["available", "needs_you", "other", "reason"]
         )
@@ -4410,7 +4366,6 @@ class ProvisionedButBrokenLibraryTests(StatusFixture):
         library_unimportable(self, self.PROGRESS, provisioned=["/pack/site"])
         answer = status._database_issues("acme/widget")
 
-        assert answer is not None
         self.assertFalse(answer["available"])
         self.assert_names_the_provisioned_copy(answer["reason"])
         self.assertEqual((answer["needs_you"], answer["other"]), ([], []))

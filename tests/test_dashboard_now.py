@@ -275,87 +275,14 @@ class PageAndClientAgree(unittest.TestCase):
         """The control. Both sides are regexes over prose-sized documents,
         and a regex that stops matching would make the assertion above pass
         over an empty set forever."""
-        self.assertIn("pr-needs", self.handles())
-        self.assertIn("pr-needs", self.declared())
-        self.assertIn("pr-more", self.declared())
-        self.assertNotIn("pr-other", self.declared())
-
-    def calls(self) -> list[str]:
-        """`fillIssues` call sites, arguments only.
-
-        Matched to the closing `);` rather than the first `)`, because
-        stopping at the first one reads `fillIssues(into, pick(a),
-        payload.other)` as `into, pick(a` and finds nothing to complain
-        about -- the argument that decides the filter is exactly the one a
-        nested call would hide. `(?<!function )` keeps the declaration out:
-        it has no `);` of its own, so it would otherwise swallow its way into
-        the body and match on whatever came first.
-        """
-        from dashboard import server
-        return re.findall(r"(?<!function )fillIssues\((.*?)\);",
-                          server.script_source(), re.S)
-
-    def test_the_main_table_is_never_drawn_from_the_withheld_group(self) -> None:
-        """`other` fills the disclosure and never the table above it.
-
-        A source-level assertion, and worth saying why rather than pretending
-        it is more: `fillIssues` is the only thing that puts rows in a tracker
-        table, so which group each call site is handed *is* the filter, and
-        there is no JavaScript runtime here to observe it any other way.
-
-        Only the calls that fill `into` are constrained. `other` reaching
-        `more.tbody` is the point of the disclosure -- suppressing a bucket
-        from the queue is a ranking decision, but making it unreachable is a
-        different and worse one, and `other` carries Jira's `filed`,
-        `watching` and `matched` as well as GitHub's two.
-        """
-        calls = self.calls()
-        self.assertNotEqual(calls, [], "fillIssues call sites not parsed")
-        main = [call for call in calls if call.lstrip().startswith("into")]
-        self.assertNotEqual(main, [], "no call fills the main table")
-        drawn = [call for call in main if "other" in call]
-        self.assertEqual(drawn, [], f"the main table is filled from `other`: {drawn}")
-
-    def test_the_withheld_group_is_drawn_somewhere(self) -> None:
-        """The other half of the same rule, and the one that fails silently.
-
-        A change that simply stopped passing `other` anywhere would satisfy
-        the assertion above forever while quietly restoring the defect the
-        disclosure exists to prevent: indexed work reduced to a count.
-        """
-        self.assertNotEqual(
-            [call for call in self.calls() if "other" in call], [],
-            "no call site draws the withheld rows; they are unreachable again")
-
-    def where(self) -> str:
-        """The null-number branch of `where`, source-read like `calls` above.
-
-        The arrow is one conditional: the branch between its first `?` and the
-        `:` that opens the `${issue.repo}#` alternative is what a row with no
-        number is named by, and it is the only branch a Jira row reaches.
-        """
-        from dashboard import server
-        match = re.search(r"const where = \(issue\) =>(.*?);\n", server.script_source(), re.S)
-        self.assertIsNotNone(match, "the `where` arrow was not parsed")
-        assert match is not None
-        head, _, tail = match.group(1).partition("?")
-        self.assertIn("issue.number", head)
-        branch, _, numbered = tail.rpartition(":")
-        self.assertIn("${issue.repo}#${issue.number}", numbered)
-        return branch
-
-    def test_a_row_with_no_number_is_named_by_its_url_tail_before_its_repo(self) -> None:
-        """sd:361 step 7b. A Jira row's key is its URL tail, and `repo` is a project.
-
-        `issue.repo || issue.tracker` named `LOG-23929` as `LOG`: the project
-        key, which is the row's `repo`, is the one fact that is not the ticket.
-        The tail of the browse URL is the ticket, as the comment above the
-        arrow already says; `repo || tracker` stays only for a row with no URL.
-        """
-        branch = self.where()
-        self.assertIn('issue.url.split("/").pop()', branch)
-        self.assertLess(branch.index('issue.url.split("/").pop()'), branch.index("issue.repo"),
-                        f"`where` reaches for `issue.repo` before the URL tail: {branch.strip()}")
+        self.assertIn("now-rows", self.handles())
+        self.assertIn("now-rows", self.declared())
+        self.assertIn("now-rows", self.bodies())
+        self.assertNotIn("now-other", self.declared())
+        # The tracker tables went with the index at sd:719 step 4; a `<tbody>`
+        # of theirs coming back is a table nothing fills.
+        for gone in ("pr-needs", "pr-more", "needs", "issue-more"):
+            self.assertNotIn(gone, self.declared())
 
 
 if __name__ == "__main__":

@@ -4262,7 +4262,7 @@ from a number the operator types.
     than reaching an argv, and `deliver` is the same shape — an item id, a row
     write, no interpolation site.
   - the row write behind it — **21**, at `set_watermark`
-    (`source:dashboard/store.py::set_watermark`), the built guarded single-row write.
+    (in `dashboard/store.py`, retired at sd:719 step 4), the built guarded single-row write.
   - the control itself — **31**, at `dismissCell` (in `dashboard/app.js`,
     26) with the five-line comment head above it (`:594-598`). The comment is
     counted in rather than trimmed off: it is there because a control that

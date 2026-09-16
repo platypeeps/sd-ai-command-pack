@@ -58,19 +58,11 @@ if str(_BIN) not in sys.path:
 
 import sd_lib  # noqa: E402
 
-# The index reader lives in the dashboard package, one level above `bin/`.
-# `sd_lib` above is a sibling and always travels with this file; `dashboard` is
-# not, and a copy of `bin/` alone -- which the read-only suite deliberately
-# runs -- has no package to import. So the import is guarded and its absence is
-# a reported state, exactly like an absent `gh` or an unreadable protection
-# object. Crashing the whole report because one section's reader is missing
-# would be the opposite of what every other section here does.
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
-
-try:
-    from dashboard import store  # noqa: E402 - after the path insert
-except ImportError:  # pragma: no cover - exercised by the copied-tools test
-    store = None  # type: ignore[assignment]
+# Nothing here imports from `dashboard/`. The issues section used to fall
+# back to that package's index reader, guarded so a copy of `bin/` alone --
+# which the read-only suite deliberately runs -- still reported rather than
+# crashed; sd:719 step 4 retired the index, and the shared database `sd_lib`
+# resolves is the section's only source.
 
 #: Bumped to 2 when `protection.accepted` arrived. Not merely additive: a
 #: finding the repository has accepted leaves `protection.gaps` for the new
@@ -1145,8 +1137,14 @@ def residue_section(root: pathlib.Path) -> list[dict[str, Any]]:
     return found
 
 
-def _database_issues(slug: str) -> dict[str, Any] | None:
-    """Prefer the shared database; only its absence falls back, never a failure to read it."""
+def _database_issues(slug: str) -> dict[str, Any]:
+    """The shared database, and every absence a reported reason in one shape.
+
+    This used to return `None` for a missing database, which sent the caller
+    to the legacy index. sd:719 step 4 retired that index, so the absence is
+    reported here the way `jira_section` reports it, naming the library the
+    rows live in rather than a verb to run.
+    """
     imported = sd_lib.import_sd_db()  # the provisioned copy's second try, before the first import (sd:746)
     try:
         import sd_db
@@ -1154,7 +1152,7 @@ def _database_issues(slug: str) -> dict[str, Any] | None:
     except ImportError:  # a provisioned copy that will not import is named, not called absent
         return {"available": False, "reason": imported.problem if imported.provisioned else "shared tracker library is not installed", "needs_you": [], "other": []}
     if not sd_db.default_path().exists():
-        return None
+        return {"available": False, "reason": "no shared sd_db database yet", "needs_you": [], "other": []}
     try:
         connection = sd_db.connect(write=False)
         try:
@@ -1258,57 +1256,24 @@ def contributions_section(root: pathlib.Path) -> dict[str, Any]:
 
 
 def issues_section(root: pathlib.Path) -> dict[str, Any]:
-    """Indexed issues for *this* repository, read and never collected.
+    """Tracker rows for *this* repository, read from the shared database and never collected.
 
-    Read-only twice over: it opens the index only if it already exists (opening
-    creates one, and a status command that creates files is not read-only), and
-    it never reaches GitHub or Jira. `sd-status` answering in a second is worth
-    more than it answering with rows five minutes fresher, and the collect has
-    its own command.
+    Read-only: it opens `sd_db` read-only and only when the file already
+    exists, and it never reaches GitHub or Jira. `sd-status` answering in a
+    second is worth more than it answering with rows five minutes fresher,
+    and the sync has its own command, `sd shadow sync`.
 
     GitHub rows only, and the reason is a real gap rather than an oversight: a
     GitHub row carries `owner/name`, which is exactly this repository's
     identity, while a Jira row carries a project key that no committed fact ties
     to a checkout. Attributing Jira issues per repository needs a configured
     mapping that does not exist yet; inventing one here would be a config key
-    with no decision behind it.
+    with no decision behind it. The Jira rows have their own section.
     """
     slug = pr_state.remote_slug(root)
     if slug is None:
         return {"available": False, "reason": "no GitHub remote", "needs_you": [], "other": []}
-    shared = _database_issues(slug)
-    if shared is not None:
-        return shared
-    if store is None:
-        return {
-            "available": False,
-            "reason": "the dashboard package is not importable from this checkout",
-            "needs_you": [],
-            "other": [],
-        }
-    index = store.index_path()
-    if not index.exists():
-        return {
-            "available": False,
-            "reason": "no index yet -- run `sd-dashboard index`",
-            "needs_you": [],
-            "other": [],
-        }
-    connection = store.connect(index, write=False)
-    try:
-        rows = [
-            row
-            for row in store.issues(connection, state="open")
-            if row["tracker"] == "github" and row["repo"] == slug
-        ]
-    finally:
-        connection.close()
-    return {
-        "available": True,
-        "reason": "",
-        "needs_you": [row for row in rows if store.needs_you(row)],
-        "other": [row for row in rows if not store.needs_you(row)],
-    }
+    return _database_issues(slug)
 
 
 # --------------------------------------------------------------------------

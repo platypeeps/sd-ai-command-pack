@@ -16,9 +16,9 @@ rather than assumed.
 | Fact | Value | Where |
 |---|---|---|
 | `dashboard/` total / code | 4,510 / **2,326** | `line_count` and `code_line_count` over `tracked("dashboard")` |
-| `DASHBOARD_CAP` / `DASHBOARD_CODE_CAP` | 4,600 / **2,328** | `tests/test_loc_caps.py:223`, `tests/test_loc_caps.py:231` |
-| `DASHBOARD_CODE_SLACK` | 29, against a live gap of **2** | `tests/test_loc_caps.py:239` |
-| `ceiling_moves()` | `(29, 26, 0)` — 29 values, 26 up, **0 down** | `tests/test_loc_caps.py:331` |
+| `DASHBOARD_CAP` / `DASHBOARD_CODE_CAP` | 4,600 / **2,328** | `DASHBOARD_CAP` (`source:tests/test_loc_caps.py::DASHBOARD_CAP`), `DASHBOARD_CODE_CAP` (`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`); the code cap reads 1,183 since step 4 |
+| `DASHBOARD_CODE_SLACK` | 29, against a live gap of **2** | `DASHBOARD_CODE_SLACK` (`source:tests/test_loc_caps.py::DASHBOARD_CODE_SLACK`) |
+| `ceiling_moves()` | `(29, 26, 0)` — 29 values, 26 up, **0 down** | `ceiling_moves` (`source:tests/test_loc_caps.py::ceiling_moves`); two falls recorded since, at steps 3 and 4 |
 | System package | 4,431 lines of Python, 20 modules; 1,077 of static | `sd_dashboard/**/*.py`, `sd_dashboard/static/` |
 | System suite | **306** tests, `OK` | `grep -c "def test"` returns 293; a mixin in `tests/test_direct_access.py` is inherited twice |
 | `sd_db/shadow_jira.py` | **343 lines, on system `main`** | system pull request #312, squash `b05d684a` |
@@ -166,9 +166,11 @@ properties, which is why the list above missed it.
 **Both are deleted. Neither is ported. Six behaviours are carried out of them by
 name first.**
 
-`PAGE` (`source:dashboard/server.py::PAGE`) is an HTML literal whose nav declares seven
-tabs at `dashboard/server.py:290-306` and whose plugin mount point is the div at
-`dashboard/server.py:371`. The system package already has one page shell and a
+`PAGE` (`source:dashboard/server.py::PAGE`) is an HTML literal whose nav declared seven
+tabs (lines 290-306 of `dashboard/server.py` at `a8295266`) and whose plugin
+mount point was a div (line 371 at that commit; step 3 removed it, and step 4
+removed the `prs` and `issues` tabs, so the nav declares five today). The
+system package already has one page shell and a
 `static/` of one stylesheet and one script, and its package docstring refuses an
 asset pipeline outright: "There is no frontend build step and there will not be
 one." Two shells cannot merge and the surviving one is not the pack's. So `PAGE`
@@ -183,8 +185,8 @@ have, each named so it cannot be lost quietly:
 |---|---|---|
 | Severity band from a rank | `band` (in `dashboard/app.js`) | ports with the Now ranking, step 6. The rank is a server-side number and the band is the rendering choice; the system page needs the second half only. |
 | Per-table filter | `addFilter` (in `dashboard/app.js`) | **dropped, measured rather than assumed.** The system page already filters its listings: the field is `[data-listing-filter]` (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/static/dashboard.js:385`) and `/` is bound to focus it (`:189`). |
-| Per-table sort | `addSort` (in `dashboard/app.js`) | **dropped, and it costs nothing, because no shipped table asks for it.** `PAGE` declares `data-sd-search` on exactly one table (`dashboard/server.py:356`) and `data-sd-sort` on none; the only `data-sd-sort` in the repository was a fixture in `tests/test_dashboard_markup.py`, which step 3 deleted. The system side refuses a client sort on purpose and says why (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/screens.py:135`): `sd today` and the page must list the same ids in the same order. |
-| Panel enhancement | `enhance` (in `dashboard/app.js`) | **not dropped, and not step 3's.** It is the dispatcher for the two rows above and it runs for every *static* panel at startup — `for (const [, panel] of STATIC) enhance(...)` (`dashboard/app.js:426`), seven panels, none of them a plugin. Deleting it in step 3 is a `ReferenceError` on page load. It dies with `app.js` at step 6. |
+| Per-table sort | `addSort` (in `dashboard/app.js`) | **dropped, and it costs nothing, because no shipped table asks for it.** `PAGE` declares `data-sd-search` on exactly one table (the skills table; line 356 of `dashboard/server.py` at `a8295266`, 347 at step 4's landing) and `data-sd-sort` on none; the only `data-sd-sort` in the repository was a fixture in `tests/test_dashboard_markup.py`, which step 3 deleted. The system side refuses a client sort on purpose and says why (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/screens.py:135`): `sd today` and the page must list the same ids in the same order. |
+| Panel enhancement | `enhance` (in `dashboard/app.js`) | **not dropped, and not step 3's.** It is the dispatcher for the two rows above and it runs for every *static* panel at startup — `for (const [, panel] of STATIC) enhance(...)` (line 426 of `dashboard/app.js` at `a8295266`, 275 at step 4's landing), seven panels then and five since step 4, none of them a plugin. Deleting it in step 3 is a `ReferenceError` on page load. It dies with `app.js` at step 6. |
 | Plugin panel id assignment | `panelId` (in `dashboard/app.js`) | **dropped at step 3.** This one *is* plugin-only: its single caller is `drawPlugins` (in `dashboard/app.js`), which goes in the same commit. |
 | Tracker key for a null-number row | `where` (in `dashboard/app.js`) | **specification, not code.** sd:361 step 7b changes this one expression so a Jira row shows `LOG-23818` rather than `LOG`. The system page needs the same rule when it takes the tracker views over. |
 
@@ -242,12 +244,12 @@ Three tests interlock, and a change that moves one without the others is red:
    one downward move* needs rewriting, which is what a failure here is for."
 
 So the cap step is: rewrite the `downward == 0` assertion
-(`tests/test_loc_caps.py:590`) into one that permits a recorded fall and names
+(line 590 of `tests/test_loc_caps.py` at `a8295266`) into one that permits a recorded fall and names
 which ceiling fell and why; rewrite the *second* assertion in the same test
-(`tests/test_loc_caps.py:598`), which asserts `upward == values -
-len(CEILING_HISTORY)` and is arithmetically false the moment one move is not a
-raise; and rewrite the module docstring paragraph that reasons from there being
-none, at `tests/test_loc_caps.py:33-46`. That is a new R-id, not a patch, and it
+(line 598 at that commit), which asserted `upward == values -
+len(CEILING_HISTORY)` and was arithmetically false the moment one move is not a
+raise; and rewrite the module docstring paragraph that reasoned from there being
+none, lines 33-46 at that commit. R11-D49 did all three (pull request #922). That is a new R-id, not a patch, and it
 is the first time this repository has argued a ceiling downward.
 
 **One ceiling moves, not both.** `DASHBOARD_CODE_CAP` comes down in each pack
@@ -320,8 +322,8 @@ this document does not dress it up as a gate.
 
 **sd:705 keeps the two stale comments and nothing else.**
 
-- `DEFAULT_PORT` (`source:dashboard/server.py::DEFAULT_PORT`) carries a comment above it, at
-  `dashboard/server.py:54-56`, saying the system dashboard "landed on 8768 at P3
+- `DEFAULT_PORT` (`source:dashboard/server.py::DEFAULT_PORT`) carried a comment above it
+  (lines 54-56 of `dashboard/server.py` at `a8295266`) saying the system dashboard "landed on 8768 at P3
   so the two could run side by side" and that taking the port "is what makes the
   swap a swap". The swap reversed.
 - `LABEL` (line 52 of `bin/sd-dashboard` at `e80153ee`) carried one at lines 48-51 of that commit saying
@@ -344,7 +346,7 @@ the guard has nothing to protect. Option C, failing loudly on a bind conflict, i
 likewise moot once nothing binds.
 
 One thing #898 flags out of scope stays out of scope and is answered here rather
-than fixed: `dashboard/server.py:14` still says "the replacement dashboard takes
+than fixed: line 14 of `dashboard/server.py` (at `a8295266`, and unmoved at step 4's landing) still says "the replacement dashboard takes
 :8767 with the tailnet reach". As a record of R11-D10 it is historically true, and
 step 1 deletes the module that carries it, so it needs no edit of its own.
 
@@ -374,10 +376,10 @@ not been planned.
    "retire or tombstone" from a preference into an argument.
 4. **The import graph, against the step grouping.** Two defects in
    `implement.md`, both invisible in a plan that groups files by purpose. Step 1
-   left `server` as an unused import at `bin/sd-dashboard:34` after deleting the
+   left `server` as an unused import (line 34 of `bin/sd-dashboard` at `a8295266`) after deleting the
    only six uses of it, which `ruff` fails on. Step 3 deleted
    `dashboard/plugins.py` while `server.py` still imports it at
-   `dashboard/server.py:43` and survives to step 6, which would land a module
+   line 43 of `dashboard/server.py` (at `a8295266`; the same line at step 4's landing, without `plugins` or `store`) and survives to step 6, which would land a module
    that cannot import. Both steps were rewritten. The same pass confirmed
    `markup` is the loader's alone — imported by `dashboard/plugins.py` and
    nowhere else — so its grouping was right.

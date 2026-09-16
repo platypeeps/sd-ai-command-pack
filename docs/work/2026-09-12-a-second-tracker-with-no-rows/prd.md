@@ -16,20 +16,20 @@ not-collected line rather than a failure.
 is cited to the line below; what no measurement here shows is the Jira branch
 of them carrying live rows, which is fact one. Measured at cc93ea85:
 
-- **The iteration.** `TRACKERS` (`source:dashboard/collect.py::TRACKERS`) is
-  `(github, jira)`. The loop over it begins at `dashboard/collect.py:168`.
-- **Per-tracker watermarks.** Inside that loop, `dashboard/collect.py:170`
+- **The iteration.** `TRACKERS` (in `dashboard/collect.py`, retired at sd:719 step 4) is
+  `(github, jira)`. The loop over it begins at `dashboard/collect.py` (line 168 as of sd:361, retired at sd:719 step 4).
+- **Per-tracker watermarks.** Inside that loop, `dashboard/collect.py` (line 170 as of sd:361, retired at sd:719 step 4)
   reads `store.watermark(connection, name)` for that tracker, and
-  `dashboard/collect.py:173-174` writes it back *only* when that tracker's own
+  `dashboard/collect.py` (lines 173-174 as of sd:361, retired at sd:719 step 4) writes it back *only* when that tracker's own
   collect succeeded. The rationale is written out at
-  `dashboard/collect.py:160-162`: "Watermarks are per tracker, so Jira being
+  `dashboard/collect.py` (lines 160-162 as of sd:361, retired at sd:719 step 4): "Watermarks are per tracker, so Jira being
   unconfigured neither blocks GitHub from collecting nor lets GitHub's success
   step Jira's window forward over a gap it never read."
 - **Env-only configuration with no default host.** `settings`
-  (`source:dashboard/jira.py::settings`) reads `JIRA_BASE_URL`, `JIRA_EMAIL`,
+  (in `dashboard/jira.py`, retired at sd:719 step 4) reads `JIRA_BASE_URL`, `JIRA_EMAIL`,
   `JIRA_API_TOKEN` and optional `JIRA_JQL`, and the module docstring at
   `dashboard/jira.py:26-30` states the no-default-host rule and why.
-- **Graceful degradation.** `bin/sd-dashboard:77` already prints
+- **Graceful degradation.** `bin/sd-dashboard` (line 77 as of sd:361, retired at sd:719 step 4) already prints
   `issues[<tracker>]: not collected (<reason>)` and continues.
 
 So sd:361 is not a construction task. **The real question is a migration**: the
@@ -98,7 +98,7 @@ This is the part neither sd:361 nor the retirement commit noticed, and it runs
 the wrong way.
 
 - The pack's store keys a row on **tracker plus URL**. `row_id`
-  (`source:dashboard/store.py::row_id`) returns `f"{tracker}:{url}"`, and its docstring at
+  (in `dashboard/store.py`, retired at sd:719 step 4) returns `f"{tracker}:{url}"`, and its docstring at
   `dashboard/store.py:111-114` says the prefix exists precisely so that "a
   future tracker cannot silently adopt another's rows."
 - The library's store keys on **URL alone**. The schema declares
@@ -125,7 +125,7 @@ the decision be made on the two facts above rather than on sd:361's framing.
 1. **Correct the item's framing before anything else.** sd:361's "what to
    build" list describes work that is already done. Whoever picks it up next
    must read the four line references in the Problem section first, or they
-   will rebuild `dashboard/collect.py:168-186` in the library and call it
+   will rebuild `dashboard/collect.py` (lines 168-186 as of sd:361, retired at sd:719 step 4) in the library and call it
    progress.
 2. **Do not treat this as reversing a decision.** The docstring the item quotes
    said: "When there is a second tracker there will be a second module, and the
@@ -164,7 +164,7 @@ because the plumbing is already generic:
 So the real work is a Jira collector module — most of which can be lifted from
 `dashboard/jira.py`, 363 lines that already carry the three hard-won Jira rules
 its docstring lists — plus a caller that iterates, which can be lifted from
-`dashboard/collect.py:168-186`. Plus sd:603 first.
+`dashboard/collect.py` (lines 168-186 as of sd:361, retired at sd:719 step 4). Plus sd:603 first.
 
 **Value: zero so far, and measurably so.** 3,668 shadow rows, none from Jira,
 ever. Two of three variables unset for at least six days. One seed ticket named
@@ -182,14 +182,14 @@ header discusses at length; `dashboard/jira.py` is 363 lines of it.
       such that a shadow row would be acted on? **Not answerable from the
       repository** — recorded here as the gate, not as a task.
 - [ ] If **no**: sd:361 is closed as not-to-be-built, `dashboard/jira.py` and
-      its entry in `TRACKERS` (`source:dashboard/collect.py::TRACKERS`) retire with the
+      its entry in `TRACKERS` (in `dashboard/collect.py`, retired at sd:719 step 4) retire with the
       legacy collector, and `bin/sd-trackers ref jira:KEY` is decided
       separately — it is a different feature that resolves a reference without
       collecting anything, and it costs nothing to keep.
 - [ ] If **yes**: the first step is configuration, not code —
       `JIRA_BASE_URL` and `JIRA_EMAIL` exported where `sd shadow sync` runs,
       and one successful collect against the existing
-      `dashboard/collect.py:168` loop proving a row can be produced at all.
+      `dashboard/collect.py` (line 168 as of sd:361, retired at sd:719 step 4) loop proving a row can be produced at all.
       Only then is sd:603 taken, and only then is the port planned, with
       sd:361's "what to build" list rewritten to describe the migration rather
       than the construction.

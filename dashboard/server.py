@@ -19,10 +19,10 @@ nothing else. No CORS header is sent, and none should be: the token lives in
 the page, and a cross-origin caller that could read it would already have the
 page.
 
-The issue endpoint reads the index and never collects. A page load that could
-reach GitHub would make refresh latency a property of opening a browser tab, and
-would put a network call behind a verb whose whole promise is that it only
-reads. `sd-dashboard index` is what fills the index; this serves what it finds.
+The PRs and Issues tabs, and the `/api/issues` and `/api/prs` endpoints that
+read the legacy index for them, retired with sd:719 step 4: the system
+dashboard's Operations > Trackers area serves both from `sd_db.shadow`, and
+nothing here opens a database.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import actions, collect, now, sessions, skills, store, work
+from . import actions, collect, now, sessions, skills, work
 
 # Per process, in memory, never written down. A restart invalidates it, which
 # is correct: the page fetches it with the page, and a token that outlived the
@@ -312,10 +312,6 @@ PAGE = """<!doctype html>
   aria-controls="panel-now">now<span class="badge" id="now-badge"></span></button>
  <button id="tab-repos" role="tab" aria-selected="false"
   aria-controls="panel-repos">repos</button>
- <button id="tab-prs" role="tab" aria-selected="false"
-  aria-controls="panel-prs">prs</button>
- <button id="tab-issues" role="tab" aria-selected="false"
-  aria-controls="panel-issues">issues</button>
  <button id="tab-work" role="tab" aria-selected="false"
   aria-controls="panel-work">work</button>
  <button id="tab-skills" role="tab" aria-selected="false"
@@ -334,30 +330,6 @@ PAGE = """<!doctype html>
  <th>repo</th><th>group</th><th>branch</th><th class="n">dirty</th>
  <th class="n">ahead</th><th class="n">behind</th><th>last</th><th>subject</th>
 </tr></thead><tbody id="rows"></tbody></table>
-</section>
-<section id="panel-prs" role="tabpanel" aria-labelledby="tab-prs" hidden>
-<p class="sub" id="pr-sub"></p>
-<h2>waiting on you</h2>
-<table><thead><tr>
- <th>where</th><th>what</th><th>why</th><th>updated</th>
-</tr></thead><tbody id="pr-needs"></tbody></table>
-<details><summary id="pr-more-count">other open pull requests</summary>
-<table><thead><tr>
- <th>where</th><th>what</th><th>why</th><th>updated</th>
-</tr></thead><tbody id="pr-more"></tbody></table>
-</details>
-</section>
-<section id="panel-issues" role="tabpanel" aria-labelledby="tab-issues" hidden>
-<p class="sub" id="issue-sub"></p>
-<h2>needs you</h2>
-<table><thead><tr>
- <th>where</th><th>what</th><th>why</th><th>updated</th>
-</tr></thead><tbody id="needs"></tbody></table>
-<details><summary id="issue-more-count">other open issues</summary>
-<table><thead><tr>
- <th>where</th><th>what</th><th>why</th><th>updated</th>
-</tr></thead><tbody id="issue-more"></tbody></table>
-</details>
 </section>
 <section id="panel-work" role="tabpanel" aria-labelledby="tab-work" hidden>
 <p class="sub" id="work-sub"></p>
@@ -481,12 +453,12 @@ def make_handler(cache: Cache, script: str, record=_drop,
                 # client-side would put the ranking and the row text somewhere
                 # no test can reach. The fleet is already cached for twenty
                 # seconds, so this adds a merge, not a collect. The plugin
-                # loader's rows stopped arriving at sd:719 step 3.
+                # loader's rows stopped arriving at sd:719 step 3, and the
+                # pull request rows at step 4 with the index they read.
                 dismissed = acked()
                 body = json.dumps({
                     "rows": [row for row in now.merge(
                         now.backbone_rows(cache.state()["repos"])
-                        + now.pr_rows(tracker_payload("pull"))
                         + now.session_rows(sessions.fleet_worktrees(cache.root)),
                     ) if row.get("id") not in dismissed],
                 }).encode()
@@ -501,15 +473,6 @@ def make_handler(cache: Cache, script: str, record=_drop,
                 body = json.dumps(
                     skills.collect_skills(Path(__file__).resolve().parent.parent)
                 ).encode()
-                return self.send_body(body, "application/json")
-            if path == "/api/issues":
-                body = json.dumps(tracker_payload("issue")).encode()
-                return self.send_body(body, "application/json")
-            if path == "/api/prs":
-                # The same index and the same shape as /api/issues. A pull
-                # request is not a different fact about the world, only a
-                # different tab, and the collect never knew the difference.
-                body = json.dumps(tracker_payload("pull")).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/actions":
                 # Ids and labels; the argv never leaves the process.
@@ -612,48 +575,6 @@ def make_handler(cache: Cache, script: str, record=_drop,
             self.send_body(json.dumps(body).encode(), "application/json", status)
 
     return Handler
-
-
-def tracker_payload(kind: str, path: Path | None = None) -> dict:
-    """What the Issues or PRs tab renders, read straight from the index.
-
-    One function for both because they are one table: GitHub's search returns
-    issues and pull requests together and the index stores them together, so
-    the only thing that differs between the two tabs is a `kind`.
-
-    An absent index is a reported state, not an empty list and not an error: the
-    two are different answers, and "no issues" where the truth is "nothing has
-    collected yet" is the kind of wrong that looks right. Deliberately checked
-    by existence rather than by opening the database, because `store.connect`
-    creates one -- a GET that quietly creates a file is a write.
-    """
-    target = store.index_path() if path is None else path
-    if not target.exists():
-        return {
-            "available": False,
-            "reason": "no index yet -- run `sd-dashboard index`",
-            "needsYou": [],
-            "other": [],
-            "indexedAt": "",
-        }
-    connection = store.connect(target)
-    try:
-        rows = store.issues(connection, state="open", kind=kind)
-        # From every row, not from `rows`: an index holding only closed issues
-        # has still been collected, and saying otherwise would report a fresh
-        # index as never filled.
-        indexed_at = store.latest_seen(connection)
-    finally:
-        connection.close()
-    return {
-        "available": True,
-        "reason": "",
-        "needsYou": [row for row in rows if store.needs_you(row)],
-        "other": [row for row in rows if not store.needs_you(row)],
-        # The newest evidence in the index, so the page can say how stale it is
-        # rather than implying it is live.
-        "indexedAt": indexed_at,
-    }
 
 
 def script_source() -> str:

@@ -1,106 +1,31 @@
 #!/usr/bin/env python3
-"""The dashboard CLI, down to one verb: `index`, which collects the fleet once.
+"""The dashboard CLI, down to no verb at all.
 
-`sd-dashboard index` reports the fleet's repository counts and refreshes the
-issue index, one line per tracker; `--dump` prints the collected state as
-canonical JSON instead, offline and without touching the index.
+`sd-dashboard index`, which collected the fleet once and refreshed the legacy
+issue index, retired with sd:719 step 4: the system dashboard serves PRs and
+Issues from `sd_db.shadow`, so the pack has no index left to fill and no
+tracker client left to fill it with. `serve` and `install` went at step 1 for
+the same reason -- the dashboard on :8767 is the system repository's workflow
+server, under a LaunchAgent that repository owns. What remains is the parser,
+which refuses every verb with its usage, until step 7 deletes this file with
+the `dashboard/` package it fronted.
 
-This CLI no longer serves a page or keeps one running. The dashboard on :8767 is
-the system repository's workflow server, and launchd runs it under a
-LaunchAgent that repository owns, so a pack verb that served the old view or
-wrote a plist for it was a second claim on a port and a label that are not the
-pack's. sd:719 step 1 deleted both. `index` stays because the pack's tracker
-views still read the cache it fills, until sd:719 retires that cache.
-
-No verb takes a path to a repository. The fleet root comes from `SD_REPO_ROOT`
-or defaults to `~/repos`, so R10-D6 holds here the same as everywhere else: the
-dashboard reads many repos, but no invocation aims it at one.
+No verb takes a path to a repository. R10-D6 holds here the same as
+everywhere else: the dashboard read many repos, and no invocation aimed it at
+one.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from dashboard import collect, store  # noqa: E402 - after the path insert
-
-
-def cmd_index(args: argparse.Namespace, out) -> int:
-    """Collect once and report, or print the payload verbatim.
-
-    `--dump` is canonical on purpose: sorted keys, no wall clock, no cache
-    metadata. Two dumps of an unchanged fleet are byte-identical, which is what
-    makes "diff the dump" a check rather than a ritual. It also makes no network
-    call and touches no database -- the tracker refresh would put a wall clock
-    and a remote service inside a check whose entire value is being repeatable
-    offline.
-    """
-    state = collect.build_state(collect.repo_root())
-    if args.dump:
-        print(json.dumps(state, indent=2, sort_keys=True), file=out)
-        return 0
-    counts = state["counts"]
-    print(
-        f"{counts['repos']} repos, {counts['dirty']} dirty, {counts['ahead']} ahead",
-        file=out,
-    )
-    for line in issue_lines():
-        print(line, file=out)
-    return 0
-
-
-def issue_lines() -> list[str]:
-    """The `issues:` half of the report, one line per tracker.
-
-    A tracker that cannot be reached is a reported row, never an exit code: the
-    fleet half of this command answered fine, and failing the whole run because
-    GitHub is unreachable -- or because Jira was never configured on this
-    machine -- would make an observability tool refuse to observe what it can
-    still see. One line per tracker rather than a merged total, because
-    "18 open" hides that half the trackers never answered.
-    """
-    connection = store.connect()
-    try:
-        results = collect.refresh_issues(connection)
-        open_by_tracker: dict[str, int] = {}
-        for row in store.issues(connection, state="open"):
-            open_by_tracker[row["tracker"]] = open_by_tracker.get(row["tracker"], 0) + 1
-    finally:
-        connection.close()
-    lines: list[str] = []
-    for name, result in results.items():
-        if not result["ok"]:
-            lines.append(f"issues[{name}]: not collected ({result['reason']})")
-            continue
-        line = (
-            f"issues[{name}]: {result['inserted']} new, {result['updated']} updated, "
-            f"{open_by_tracker.get(name, 0)} open"
-        )
-        if result["truncated"]:
-            # Not "page ceiling": the walk stops for two reasons and the one
-            # that actually fires is the service's own result cap, which is
-            # not this program's ceiling and cannot be raised by changing it.
-            # What the operator needs is that rows exist which this collect
-            # did not return, and which searches they are.
-            line += f" (incomplete: {', '.join(result['truncated'])})"
-        lines.append(line)
-    return lines
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="sd-dashboard", description=__doc__)
-    verbs = parser.add_subparsers(dest="verb", required=True)
-    index_verb = verbs.add_parser("index", help="collect the fleet once")
-    index_verb.add_argument(
-        "--dump",
-        action="store_true",
-        help="print the collected state as JSON, offline and without the index",
-    )
-    index_verb.set_defaults(handler=cmd_index)
+    # `required=True` with no verb registered: every invocation exits 2 with
+    # the usage, which is the parser saying the same thing this docstring does.
+    parser.add_subparsers(dest="verb", required=True)
     return parser
 
 
