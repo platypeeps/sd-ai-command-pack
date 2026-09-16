@@ -9,6 +9,7 @@ Stdlib only, Python 3.10+, no network. A caller that cannot proceed gets a
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import pathlib
@@ -577,17 +578,18 @@ class WorkItem:
     archived: bool
     #: The frontmatter's `parked:` line verbatim, empty when the item is live.
     #: Written by whichever pass parked the item: `<date> age-sweep` from the
-    #: 45-day sweep, `<date> bulk-park (D2)` from the one-time fleet-wide park.
-    #: Read the value, do not assume the reason -- fleet-wide the split is 65
-    #: age-sweep to 172 bulk-park. Set here and nowhere else --
+    #: 45-day age sweep the pack used to carry (retired under sd:10, criterion
+    #: 21; nothing writes it now), `<date> bulk-park (D2)` from the one-time
+    #: fleet-wide park. Read the value, do not assume the reason -- fleet-wide
+    #: the split is 65 age-sweep to 172 bulk-park. Set here and nowhere else --
     #: parked is a property of the item, never a row in a separate ledger.
     parked: str = ""
     inconsistencies: tuple[str, ...] = ()
     #: When the database last recorded anything against this item -- its row's
     #: `updated_at` or the newest of its notes, whichever is later. Empty on a
     #: checkout with no database, which is an absence of evidence and never a
-    #: statement that nothing happened. Read by the aging basis in
-    #: `sd_sweep.last_active`, and by nothing that decides a status.
+    #: statement that nothing happened. Read by the aging basis,
+    #: `last_active` below, and by nothing that decides a status.
     activity: str = ""
 
 
@@ -1165,8 +1167,8 @@ def work_items(root: pathlib.Path, work_dir: str = WORK_DIR) -> list[WorkItem]:
 
     The one place the marker is read and the one place the database is
     opened, so every reader that picks an item -- `sd-review`, `sd-plan`,
-    `sd-status`, the sweep -- comes through here and none of them restates
-    where a status comes from.
+    `sd-status` -- comes through here and none of them restates where a
+    status comes from.
     """
     statuses = Statuses.of(root, work_dir)
     try:
@@ -1176,6 +1178,151 @@ def work_items(root: pathlib.Path, work_dir: str = WORK_DIR) -> list[WorkItem]:
         ]
     finally:
         statuses.close()
+
+
+# --------------------------------------------------------------------------
+# The aging basis: when an item last showed evidence of activity
+# --------------------------------------------------------------------------
+#
+# These four names came out of the 45-day age sweep when sd:10's criterion 21
+# cut it. The sweep reported what the threshold would park and nothing else
+# ran it; `sd-status`'s `idle-planning` was its other reader, and the reason
+# the two shared one definition was that two definitions of idle would let
+# the sweep park what the report had just cleared. The report is the reader
+# left, and the definition lives here so that the next reader reads it
+# rather than restating it.
+
+#: R10-D1's threshold, in days: an item idle in `planning` past this is
+#: reported. `sd-status` reads this name; it does not restate 45.
+DEFAULT_DAYS = 45
+
+
+def item_date(item: WorkItem) -> datetime.date | None:
+    """The item's own date, or None when it cannot be established.
+
+    `created:` first, because it is what the item says about itself; the
+    directory prefix second, because every templated item carries one and it is
+    what the bulk-park actually sorted on. None is an answer, not a failure.
+
+    **This is not the aging basis.** It decides whether an item can be aged at
+    all -- None is undated -- and it is the floor `last_active` starts from.
+    Ages are measured from `last_active`, because a birth date says when an
+    item began and the check that reads it says the item has been neglected.
+    """
+    raw = (item.created or "").strip()
+    if raw:
+        try:
+            return datetime.date.fromisoformat(raw[:10])
+        except ValueError:
+            pass
+    if _DATE_PREFIX_RE.match(item.path.name):
+        try:
+            return datetime.date.fromisoformat(item.path.name[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def _item_directory(path: str, work_dir: str) -> str:
+    """The item directory a tracked path belongs to, or `""` for anything else.
+
+    `<work_dir>/<name>/<file>` and `<work_dir>/archive/<month>/<name>/<file>`,
+    the same two shapes `work_item_dirs` enumerates. A path directly inside
+    `<work_dir>` -- `.status-source` is the one this repository has -- names no
+    item and must not be read as one, which is what the length test below is.
+    """
+    parts = path.split("/")
+    head = work_dir.split("/")
+    if parts[: len(head)] != head:
+        return ""
+    rest = parts[len(head):]
+    if rest[:1] == [ARCHIVE_DIR]:
+        rest = rest[2:]
+    return rest[0] if len(rest) > 1 else ""
+
+
+def touched(root: pathlib.Path, work_dir: str = WORK_DIR) -> dict[str, datetime.date]:
+    """The day each item directory was last committed to, keyed by directory.
+
+    One `git log` per root, never one per item: the whole of the cost
+    argument. `--name-only` output is bounded by the commits that touched the
+    item tree rather than by the repository's history -- 2,082 lines and 116
+    KB over this checkout's entire history, measured 2026-09-12 -- so no
+    `--since` window is needed and none is used. A window would have to be
+    bounded by the oldest candidate anyway, and a miss inside one is
+    indistinguishable from no activity at all.
+
+    Merge commits carry no diff and contribute no names. That is right rather
+    than a gap: this repository squash-merges, and the squash is the commit
+    that touched the files.
+
+    An empty map is an answer, and the only one this returns when git refuses.
+    `None` would buy a caller nothing: git refusing and git finding nothing
+    both leave the aging basis on its other two sources, and a third state
+    nobody can act on differently is a state nobody should have to handle.
+    """
+    listing = git_output(["log", "--format=%x00%cs", "--name-only", "--", work_dir], root)
+    found: dict[str, datetime.date] = {}
+    day: datetime.date | None = None
+    for line in (listing or "").splitlines():
+        if line.startswith("\0"):
+            try:
+                day = datetime.date.fromisoformat(line[1:].strip())
+            except ValueError:
+                day = None
+            continue
+        name = _item_directory(line, work_dir)
+        # Newest commit first, so the first sighting of a path is its latest.
+        if day is not None and name and name not in found:
+            found[name] = day
+    return found
+
+
+def last_active(when: datetime.date, name: str, activity: str,
+                marks: dict[str, datetime.date] | None = None) -> datetime.date:
+    """The most recent day this item shows evidence of activity.
+
+    **The one definition of the aging basis.** `sd-status`'s `idle-planning`
+    producer reads it, for the same reason that producer reads `DEFAULT_DAYS`
+    from here rather than restating it: one definition of idle, in one place.
+
+    Three sources, latest wins, each of them evidence that something happened:
+
+    * `when`, the item's own date from `item_date` -- `created:` or the
+      directory prefix. The floor, never the answer on its own: an item is at
+      least as old as its birth, and this is what the check used to read.
+    * the last commit touching `name`, its directory, from `marks`.
+    * `activity`, the last stamp the database holds against it -- its row's
+      `updated_at` or the newest of its notes, which `WorkItem.activity` is.
+
+    Four loose arguments rather than a `WorkItem`, because `sd-status` reads
+    the same three facts off the section dict it already built and would
+    otherwise have to fabricate an item to ask the question.
+
+    A union rather than a precedence chain, because each source is blind where
+    the others see. A `row` checkout records a triage decision as a note and
+    touches no file; a `file` checkout has no database at all; an item nobody
+    has committed or recorded has only its birth date. Twenty-one of
+    mezmo_benchmark's twenty-four planning items read past the threshold on
+    birth dates alone while every one of them had been triaged live the day
+    before, and the triage was notes.
+    """
+    days = [when]
+    marked = (marks or {}).get(name)
+    if marked is not None:
+        days.append(marked)
+    recorded = _stamp(activity)
+    if recorded is not None:
+        days.append(recorded)
+    return max(days)
+
+
+def _stamp(text: str) -> datetime.date | None:
+    """The day part of a database timestamp, or None when it will not parse."""
+    try:
+        return datetime.date.fromisoformat((text or "")[:10])
+    except ValueError:
+        return None
 
 
 # --------------------------------------------------------------------------

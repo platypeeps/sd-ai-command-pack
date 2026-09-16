@@ -328,8 +328,8 @@ An acceptance nobody re-reads is itself a row: `accepted-gap-standing` at rank
 ## Flags
 
 `--json` (one machine-readable object) · `--actions` (every actionable row,
-uncapped, one per line, count first) · `--parked` (list only the items the age
-sweep parked, read from their own `parked:` frontmatter, not from a ledger) ·
+uncapped, one per line, count first) · `--parked` (list only the items that
+carry a `parked:` frontmatter line, read from the item, not from a ledger) ·
 `--limit N` (most PRs to list).
 
 **`--json` wins when both `--json` and `--actions` are given.** `pending` caps

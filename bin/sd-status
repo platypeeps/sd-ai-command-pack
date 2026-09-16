@@ -57,7 +57,6 @@ if str(_BIN) not in sys.path:
     sys.path.insert(0, str(_BIN))
 
 import sd_lib  # noqa: E402
-import sd_sweep  # noqa: E402 - R10-D1's 45-day threshold, read not restated
 
 # The index reader lives in the dashboard package, one level above `bin/`.
 # `sd_lib` above is a sibling and always travels with this file; `dashboard` is
@@ -1691,9 +1690,9 @@ def _s(count: int) -> str:
 
 # -- the work-item producer -------------------------------------------------
 
-#: R10-D1's threshold, read from the sweep that owns it rather than restated,
+#: R10-D1's threshold, read from the library that owns it rather than restated,
 #: so "idle in planning" cannot come to mean two different numbers of days.
-IDLE_DAYS = sd_sweep.DEFAULT_DAYS
+IDLE_DAYS = sd_lib.DEFAULT_DAYS
 
 _ITEM_DATE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
@@ -1703,7 +1702,7 @@ def _item_date(entry: dict[str, Any]) -> datetime.date | None:
 
     `created:` first, because it is what the item says about itself; the
     directory's date prefix second, because every templated item carries one.
-    The same order and the same two sources as `sd_sweep.item_date`, read off
+    The same order and the same two sources as `sd_lib.item_date`, read off
     the dict this section already holds rather than off a second tree walk.
 
     This decides `undated-planning` and nothing else. It used to decide
@@ -1730,10 +1729,10 @@ def _idle_days(
 ) -> int:
     """Days since anything last happened to this item.
 
-    The basis is `sd_sweep.last_active` and deliberately not a second copy of
-    it, for the reason `IDLE_DAYS` reads `sd_sweep.DEFAULT_DAYS` rather than
-    restating 45: two definitions of "idle" would let the sweep park what this
-    report had just stopped calling idle. This wraps that function rather than
+    The basis is `sd_lib.last_active` and deliberately not a second copy of
+    it, for the reason `IDLE_DAYS` reads `sd_lib.DEFAULT_DAYS` rather than
+    restating 45: two definitions of "idle" would let one reader age what the
+    other had just stopped calling idle. This wraps that function rather than
     reimplementing it, handing it the same three facts off the dict the work
     section already holds -- the item's own date, the commit that last touched
     its directory, and the database's last stamp for it.
@@ -1741,7 +1740,7 @@ def _idle_days(
     Never `None`: the caller has already established a date for the item, so
     there is always at least the floor to measure from.
     """
-    active_on = sd_sweep.last_active(
+    active_on = sd_lib.last_active(
         when,
         pathlib.PurePosixPath(entry["path"]).name,
         str(entry.get("activity") or ""),
@@ -1963,7 +1962,7 @@ def _work_rows(
     heads = _branch_names(root)
     # Once per run, not once per item: `touched` is one `git log` over the item
     # tree, and asking it per item would put a subprocess behind every row.
-    marks = sd_sweep.touched(root)
+    marks = sd_lib.touched(root)
     rows: list[dict[str, Any]] = []
     for entry in work.get("items") or []:
         if entry["archived"] or entry["parked"]:
@@ -2967,9 +2966,8 @@ def _origin_heads(root: pathlib.Path) -> set[str] | None:
     **`ls-remote` reads; it does not write**, which is the whole reason this
     class is allowed to ask. `sd-status` never writes -- no cache, no index row,
     no ref -- so `git fetch --prune`, the obvious cure for a remote-tracking ref
-    that has outlived its branch, is not a move this tool can make.
-    `sd_sweep.branches` already reads origin exactly this way, for the same
-    reason and with the same one-call-per-root budget.
+    that has outlived its branch, is not a move this tool can make. One call
+    per root, never one per item.
     """
     listing = sd_lib.git_output(["ls-remote", "--heads", "origin"], root)
     if listing is None:

@@ -78,9 +78,9 @@ create a PRD just to record routine progress or work already merged.
    (`sd-docs-lint` rule 2); in a checkout using row status, the status itself
    remains on the row.
 
-There is no automatic archive or parking step. `sd sweep` reports idle items
-without moving them or changing their status. Planning and the first commit
-leave unrelated work items where they are.
+There is no automatic archive, parking or sweep step. `sd-status` reports
+idle planning items as `idle-planning` rows and moves nothing. Planning and
+the first commit leave unrelated work items where they are.
 
 ## Flags
 

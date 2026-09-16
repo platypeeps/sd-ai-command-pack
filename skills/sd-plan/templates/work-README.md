@@ -12,7 +12,7 @@ reason to fall back to frontmatter. An item that is `ready` or `in_progress`
 states acceptance criteria and carries no open `BLOCKING` line; an
 `in_progress` item records the `branch:` it lives on.
 
-`sd sweep` reports idle items without moving them or changing their status.
+`sd-status` reports idle `planning` items without moving them or changing their status.
 Finishing work leaves its directory in place. A slice merge records progress;
 only a verified delivery closes the item. No status-only commit or automatic
 archive is needed.
