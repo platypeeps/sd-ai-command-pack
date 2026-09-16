@@ -7,8 +7,8 @@ created: 2026-09-16
 
 ## Problem
 
-sd:10's criterion 6 was closed with three parts deferred to this item by the
-owner's decision note 1942 (2026-09-14): the `minimax` meter, the spend cap,
+sd:10's criterion 6 stays open, and three of its parts were deferred to this
+item by the owner's decision note 1942 (2026-09-14): the `minimax` meter, the spend cap,
 and an audit of the attribution clauses whose names `SD_AUTHOR` and
 `slice_base` have no hits in `bin/` or `tests/`. The deferral is recorded on
 sd:10's pages
@@ -46,20 +46,21 @@ behaviour exists and a test asserts it, spelled differently from the clause.
 | `SD_AUTHOR=nosuch` is refused at commit naming the registry | Under another name: `--author nosuch` is refused with the registry's read error, or as "not an enabled author provider" | `source:bin/sd-ship::commit_paths` |
 | The trailer forms the design page documents equal the forms `sd_lib.py` writes and reads, enumerated from the source | Unimplemented: no test reads the design page. The forms are the constants | `source:bin/sd_lib.py::AUTHORED_TRAILER`, `source:bin/sd_lib.py::ATTRIBUTES_TRAILER` |
 | One `claude` and one `codex` trailer resolve to the first entry of neither vendor | Implemented in two halves: the scan returns both vendors, and the chain skips every entry of an author vendor | `FixReviewTests` in `tests/test_sd_review_ship.py`, "every actual squash author vendor is excluded"; `TheReviewerChain`, "an entry of the author's vendor is skipped" |
-| No trailer and no `--author` is refused naming the flag | Implemented; the refusal names `sd attribute`, not `--author` | `source:bin/sd_lib.py::author_vendors`; `FixReviewTests`, "fix commit with no author trailer is refused" |
+| No trailer and no `--author` is refused naming the flag | Cut, the refusal stands: the untagged commit is refused, naming `sd attribute`. `--author` is `sd-ship prepare`'s flag and applies to a commit not yet made; the refusal names the one repair that applies to a commit that exists. Naming the flag would point at a tool that cannot fix the commit | `source:bin/sd_lib.py::author_vendors`; `FixReviewTests`, "fix commit with no author trailer is refused" |
 | An untagged commit before a tagged one is refused naming the commit and `sd attribute`; `sd attribute <sha> claude` resolves it, the attributing commit carrying `Authored-with: human` | Implemented | `source:bin/sd_lib.py::attribute`, `source:bin/sd::cmd_attribute`; `TheRoundTripTests` in `tests/test_sd_attribute.py` |
 | A rebase refuses again; `sd attribute <from>..<to> claude` resolves it; the commit is asserted on the fixture remote after the push | Implemented up to the push; no test pushes | `TheRangeTests` in `tests/test_sd_attribute.py`, "a rebase loses the claim and one range attribution restores it" |
 | Two slices, the first squashed and the default merged back, resolve by `slice_base`; a fresh branch from the default resolves the same | Under another name, in part: `authorship_base` is the merge base with the default, carried across passes by `sd-ship`. No row records a slice head, so a branch continued after its squash still scans the first slice's commits | `review` in `bin/sd-review` sets `authorship_base`; `source:bin/sd-ship::review_history` carries it |
-| A session that edits and exits without committing adds its vendor to the row's `authors` (rounds 44 to 46) | Unimplemented. The only `authors` in `bin/` is the `authors` policy line of `.github/sd-review.json`, which is the consent clause, not a session row | `source:bin/sd-review::DEFAULT_POLICY` |
-| Two clones attributing two commits of one branch both push without force | Designed, unasserted: the attribution is a commit and not a note, so the two do not diverge on a shared ref | `source:bin/sd_lib.py::attribute`, the docstring |
+| A session that edits and exits without committing adds its vendor to the row's `authors` (rounds 44 to 46) | Unimplemented as a session row. Every `authors` in `bin/` is the `authors` policy line of `.github/sd-review.json`, read by `sd-review` and `sd_setup_github.py` and echoed into the review report; none is written by a session or read by the reviewer's vendor set | `source:bin/sd-review::DEFAULT_POLICY`; `review` in `bin/sd-review`, the report's `authors` key |
+| Two clones attributing two commits of one branch both push without force | Unasserted, and not true as stated: each attribution is an empty commit on the clone's head, so two clones from one tip diverge and the second push is non-fast-forward. The sync protocol is: rebase before push; a non-fast-forward refusal is the signal, and the rebase keeps both `Attributes:` lines because the sha they name is unchanged | `source:bin/sd_lib.py::attribute`, the docstring |
 | `sd attribute <sha> human` on an untagged branch resolves to the first enabled entry | Implemented | `TheRoundTripTests`, "human writes the bare word and contributes no vendor" |
 | `sd-review --author claude` is refused as not a review flag | Implemented by omission: `bin/sd-review` declares no `--author`, so `argparse` exits 2. No test names it | `bin/sd-review`, the parser |
 | `SD_AUTHOR=codex` in the review's environment changes nothing | Cut: nothing reads `SD_AUTHOR`, so there is nothing to assert | `grep` above |
 
-Disposition: three clauses are cut here rather than carried, because their
+Disposition: four clauses are cut here rather than carried, because their
 names describe a mechanism the pack did not build and does not need. The
 `SD_AUTHOR` variable is `--author`; the environment clause is void with it;
-the trailer-forms-equal-the-design-page test asserts a page against constants
+the refusal names the repair and not the flag; the
+trailer-forms-equal-the-design-page test asserts a page against constants
 and is a documentation check, not a behaviour. The `slice_base` and session
 `authors` clauses stay open as requirement 5, because a branch continued after
 a squash is a real shape (`sd-ship` merges by squash) and the scan today
@@ -90,12 +91,16 @@ reads the first slice's commits again.
 - [ ] `tests/test_sd_registry.py`: a test writes cost rows against
       `cap_usd_month`, and `reviewer_chain` passes over the bill, and `pick`
       on it refuses naming the bill and the month's total.
+- [ ] An integration test through `review` in `bin/sd-review`: an at-cap bill
+      in the database reaches fallthrough, which passes over it, and
+      `--provider` on it, which refuses; both with the call site wired and
+      neither with `capped_bills` handed in by the test.
 - [ ] A test starts two calls concurrently against room for exactly one; one
       goes, one is refused, and the settled rows sum under the cap.
 - [ ] A test reads a recorded `token_plan/remains` fixture, writes two `meter`
       rows, and asserts the skip and the refusal with each window at zero in
       turn.
-- [ ] `grep -rn token_plan bin tests` counts more than 0 after slice 3.
+- [ ] `grep -rn token_plan bin tests` counts more than 0 after slice 4.
 - [ ] `make check` rc 0, and `bin/sd-docs-lint` ends `sd-docs-lint: clean`.
 
 ## References
