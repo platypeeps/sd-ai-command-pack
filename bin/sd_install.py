@@ -1593,6 +1593,14 @@ def cmd_user(ctx: Context, out) -> int:
     """
     # Before the library: `expire_trials` writes, and a refusal writes nothing.
     plans = link_plan(ctx.checkout, ctx.bin_dir)
+    for plan in plans:
+        if plan.state == "foreign":
+            print(
+                f"error: {plan.path} exists and is not a link to {plan.target}; "
+                "move it or pass --bin-dir",
+                file=out,
+            )
+            return 1
 
     connection, reason = open_library(ctx)
     if reason:
