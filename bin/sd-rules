@@ -33,8 +33,9 @@ round and decision, so a decision numbered 4 precedes one numbered 10 rather
 than following it as text would have it. `0` with the sentence
 `no rule in scope for <path>` when no row matches: an empty answer is an
 answer, not a failure. `2` on a bad path -- one that is an existing directory,
-one that resolves outside the repository the working directory is in, or any
-path when the working directory is not inside a git repository -- with one
+one that resolves outside the repository the working directory is in, one the
+platform will not resolve at all (an embedded NUL, say), or any path when the
+working directory is not inside a git repository -- with one
 sentence on stderr and nothing on stdout. The repository comes from the working
 directory and from nothing else (R10-D6); there is no flag that names another.
 
@@ -105,7 +106,14 @@ def _refusal(path: str, cwd: pathlib.Path) -> str | None:
     root = sd_lib.repo_root(cwd)
     if root is None:
         return f"{cwd} is not inside a git repository"
-    target = (cwd / path).resolve()
+    # `resolve()` raises rather than answers on a path the platform will not
+    # look at -- `ValueError` for an embedded NUL, `OSError` where the walk
+    # fails, `RuntimeError` for a symlink loop on older interpreters -- and
+    # the documented answer to a bad path is exit 2, never a traceback.
+    try:
+        target = (cwd / path).resolve()
+    except (OSError, ValueError, RuntimeError) as failure:
+        return f"{path!r} cannot be resolved: {failure}"
     if not target.is_relative_to(root):
         return f"{path} resolves outside the repository at {root}"
     if target.is_dir():
