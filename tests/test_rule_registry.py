@@ -143,15 +143,86 @@ CLAIM_SCOPES = (LINE, PARAGRAPH, DOCUMENT)
 #:    it is written.
 CLAIM_SCOPE = LINE
 
-#: A definition of a rule id, as this repository has always written one: a run
-#: of bold text opening with the id. There is no other form, because until now
-#: there was no registry -- which is the finding, not an accident.
+#: A definition of a rule id, in every form this repository has written one.
+#: Until sd:431 slice S2 the grammar was one form -- a bold run *opening* with
+#: the id -- and three of the four ids leg c reported as defined nowhere were
+#: defined in a form that grammar could not see. `TheDefinitionGrammar` holds
+#: each form against a fixture, and the step-4 slice paragraph of this item's
+#: `implement.md` names the archive lines they were read off.
+#:
+#: Two inline forms, read in every tracked file, because `tests/test_loc_caps.py`
+#: defines three rules in its docstring and its comments and a suffix filter
+#: would make them dangling:
+#:
+#: 1. a bold run that *contains* the id, anywhere in the run -- team-lead
+#:    decision 2026-09-16, reversible by the owner, taken so that the one id
+#:    defined in no other form, `R11-D46`, counts by the bold sentence that
+#:    re-derives it rather than needing a separate answer;
+#: 2. a bold run, opened and closed, and then on the same line the id opening
+#:    a parenthesis, `**...** (id`. Paired, so that `x** (id)` in a comment is
+#:    an exponent and not a run; same line, so that a bold sentence and a
+#:    parenthesised id in the next paragraph are two things and not one.
+#:
+#: Two block forms, in `MARKDOWN_DEFINITION` below, read in Markdown only.
 #:
 #: Built from `sd_rules.RULE_ID` rather than restating it. A second copy of the
 #: grammar is the second-list defect this module exists to end, and writing one
 #: here -- inside the check that ends it -- is the shape review already caught
 #: once in this branch. `test_the_rule_id_grammar_has_one_source` holds it.
-DEFINITION = re.compile(r"\*\*(" + sd_rules.RULE_ID.pattern + r")")
+#:
+#: The bold run is delimited, not approximated. `BOLD_OPEN` is a `**` with
+#: nothing word-like on its left and no whitespace on its right; `BOLD_CLOSE`
+#: is a `**` with no whitespace on its left. The `**` that closes `**foo**` is
+#: followed by a space or punctuation, so it never opens a run, and the plain
+#: text between two bold runs stays plain. That matters here because this
+#: item's own `implement.md` cites stranded ids in exactly that position,
+#: between one bold slice heading and the next; `TheDefinitionGrammar` holds
+#: it with a control. `BOLD_BODY` stops at the next `**` and at a blank line,
+#: because a run does not cross a paragraph.
+BOLD_OPEN = r"(?<![\w*])\*\*(?=\S)"
+BOLD_CLOSE = r"(?<=\S)\*\*"
+BOLD_BODY = r"(?:[^*\n]|\n(?![ \t]*\n)|\*(?!\*))*?"
+DEFINITION = re.compile(
+    "(?:"
+    + BOLD_OPEN + BOLD_BODY
+    + "(?=" + sd_rules.RULE_ID.pattern + BOLD_BODY + BOLD_CLOSE + ")"
+    + "|" + BOLD_OPEN + BOLD_BODY + BOLD_CLOSE + r"[ \t]*\("
+    + ")(" + sd_rules.RULE_ID.pattern + ")")
+
+#: The two block forms, and why they read Markdown only: a `#` line in any
+#: other file is a comment, and a comment cites -- `tests/test_loc_caps.py`
+#: carries `# R11-D24's clause`, which is not where `R11-D24` is defined.
+#: Measured on `2eafa78b`, reading `#` lines in every file moved six stranded
+#: ids out of their baseline on the strength of code comments.
+#:
+#: 3. an ATX heading that contains the id;
+#: 4. a table cell in which the id opens a parenthesis, `| label (id` -- any
+#:    parenthesis in the cell, not the first, because a cell may carry a
+#:    parenthesised aside before the one that names the rule.
+#:
+#: Both read after `prose_of` has blanked the fenced blocks, for the reason
+#: `markdown_headings` tracks `FENCE`: a `## id` line or a `| label (id) |`
+#: row inside a fenced example is an example, and reading it would let a
+#: code sample move a baseline.
+MARKDOWN_DEFINITION = re.compile(
+    r"(?:^#{1,6}[ \t]+[^\n]*?|\|[^|\n]*\()(" + sd_rules.RULE_ID.pattern + ")",
+    re.MULTILINE)
+
+#: A code span. Blanked before a definition is read, because text inside one
+#: is quoted rather than stated: on `2eafa78b` this item's own `implement.md`
+#: quotes the archived `**...** (R5-D1)` line inside backticks, and read as
+#: prose that quotation would have "defined" `R5-D1` live and moved it out of
+#: both baselines at once. Not stopped at a newline, for the reason `QUOTED`
+#: gives: the quotation spans one. Under the one-form grammar this blanking
+#: changed nothing -- 51 defined ids, 18 live, with and without it.
+#:
+#: Replaced by `CODE_SPAN_STANDIN` rather than by a space, because a bold run
+#: may open with a code span -- `**\`mode: minimal\` and ... refuse it**` in
+#: `skills/sd-review/SKILL.md` does -- and `BOLD_OPEN` wants a non-space on
+#: its right. The stand-in is neither whitespace nor a word character, so it
+#: neither closes a run nor glues to one.
+CODE_SPAN = re.compile(r"`[^`]*`")
+CODE_SPAN_STANDIN = "~"
 
 #: A quoted run in a file no Python parser will read. Single and double quotes
 #: stop at a newline; a backtick run does not, because a JavaScript template
@@ -172,16 +243,21 @@ HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
 # --------------------------------------------------------------------------
 
 #: Rule ids cited in live prose that are defined nowhere at all -- not in the
-#: registry, not in a live document, not even in the archive. Measured on
-#: `cddd3b98`, and the same four the planning pass found on `e6c2cb20`.
+#: registry, not in a live document, not even in the archive. Four on
+#: `cddd3b98`, the same four the planning pass found on `e6c2cb20`, and
+#: **empty since sd:431 slice S2**, which widened `DEFINITION` rather than
+#: repointing them: three of the four were defined in the archive in a form
+#: the one-form grammar could not see and are stranded now, and the fourth is
+#: defined by the bold sentence that re-derives it, under the decision
+#: recorded on `DEFINITION`. Nothing was registered and no prose moved.
 #:
-#: Held as a set rather than a count, because with four entries the set is the
-#: better record: a new dangling id fails by name on the line that invented it,
-#: and no arithmetic can hide one behind another being fixed.
+#: Held as a set rather than a count, because the set is the better record: a
+#: new dangling id fails by name on the line that invented it, and no
+#: arithmetic can hide one behind another being fixed.
 #:
 #: Resolving one means either registering it or repointing the prose that cites
 #: it, and then removing it here in the same change.
-DANGLING_RULE_IDS = frozenset({"R11-D1", "R11-D30", "R11-D46", "R5-D1"})
+DANGLING_RULE_IDS: frozenset[str] = frozenset()
 
 #: Live prose citations whose only definition sits inside `docs/work/archive`.
 #: 26 of them on `cddd3b98`. More than half the rule ids in live prose point
@@ -218,14 +294,29 @@ DANGLING_RULE_IDS = frozenset({"R11-D1", "R11-D30", "R11-D46", "R5-D1"})
 #: the meta-check passed it. `checker` is a `path::symbol` location now, so a
 #: test is nameable, and leg d is what makes naming one mean something.
 #:
-#: The other twenty were each looked at and each has a recorded reason it
-#: is not a row yet, in the backfill section of this item's `implement.md`,
-#: rather than left for the next reader to rediscover.
+#: **Still 20 after sd:431 slice S2, and a different 20.** Widening
+#: `DEFINITION` moved six ids in one change, three in and three out, which a
+#: count would have reported as nothing happening. In: `R5-D1`, `R11-D1` and
+#: `R11-D30`, out of `DANGLING_RULE_IDS`, because the archive defines each of
+#: them in a form the grammar now reads. Out: `R10-D2`, `R11-D4` and
+#: `R11-D20`, because a *live* file defines each of them in the same
+#: closed-bold-then-parenthesis form as the archived `R5-D1` --
+#: `skills/sd-handoff/SKILL.md` for `R10-D2`, `CONTRIBUTING.md` for `R11-D4`,
+#: the module docstring of `dashboard/now.py` for `R11-D20` -- and a grammar
+#: that reads the archive reads the live tree the same way. None of the three
+#: is registered; each is now an id with a live definition and no row, which
+#: is not what this set measures. `R10-D2` in particular no longer has a
+#: meter entry for the repeal Dec-4 decided.
+#:
+#: The rest were each looked at and each has a recorded reason it is not a
+#: row yet, in the backfill section of this item's `implement.md`, rather
+#: than left for the next reader to rediscover.
 STRANDED_RULE_IDS = frozenset({
-    "R10-D1", "R10-D2", "R10-D3", "R10-D7",
-    "R11-D10", "R11-D13", "R11-D14", "R11-D15",
-    "R11-D17", "R11-D18", "R11-D20", "R11-D21", "R11-D23",
-    "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D4", "R11-D5", "R11-D6",
+    "R10-D1", "R10-D3", "R10-D7",
+    "R11-D1", "R11-D10", "R11-D13", "R11-D14", "R11-D15",
+    "R11-D17", "R11-D18", "R11-D21", "R11-D23",
+    "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D30", "R11-D5", "R11-D6",
+    "R5-D1",
 })
 
 #: Tool-behaviour claims in skills that cite no rule id, per document.
@@ -430,14 +521,50 @@ def cited_rule_ids(*, live_only: bool) -> set[str]:
     return found
 
 
+def prose_of(text: str) -> str:
+    """`text` with every fenced block and every code span blanked.
+
+    A fenced line becomes an empty line rather than vanishing, so that a bold
+    run cannot be read across the block that separated its halves. The fence
+    walk is the one `markdown_headings` makes, and it is made on every file
+    for the reason the bold forms are read in every file: a docstring can
+    carry a fence as readily as a page can.
+    """
+
+    kept: list[str] = []
+    fenced = False
+    for line in text.splitlines(keepends=True):
+        if FENCE.match(line):
+            fenced = not fenced
+            kept.append("\n")
+            continue
+        kept.append("\n" if fenced else line)
+    return CODE_SPAN.sub(CODE_SPAN_STANDIN, "".join(kept))
+
+
+def definitions_in(relative: str, text: str) -> set[str]:
+    """Every rule id one file defines, by the forms `DEFINITION` and
+    `MARKDOWN_DEFINITION` name.
+
+    Fences and code spans are blanked first, and the block forms are read
+    only when the file is Markdown; both reasons are on the patterns.
+    """
+
+    prose = prose_of(text)
+    found = set(DEFINITION.findall(prose))
+    if relative.endswith(".md"):
+        found.update(MARKDOWN_DEFINITION.findall(prose))
+    return found
+
+
 def defined_rule_ids(*, live_only: bool) -> set[str]:
-    """Every rule id a document defines, by the bold-run form."""
+    """Every rule id a document defines, by the forms `definitions_in` reads."""
 
     found: set[str] = set()
     for relative, text in read_corpus():
         if live_only and relative.startswith(ARCHIVE):
             continue
-        found.update(DEFINITION.findall(text))
+        found.update(definitions_in(relative, text))
     return found
 
 
@@ -849,9 +976,11 @@ citation so it sits outside the quotes.""")
         but matched differently still fails.
         """
 
-        self.assertIn(sd_rules.RULE_ID.pattern, DEFINITION.pattern,
-                      "DEFINITION restates the rule-id grammar instead of "
-                      "building on sd_rules.RULE_ID")
+        for name, pattern in (("DEFINITION", DEFINITION),
+                              ("MARKDOWN_DEFINITION", MARKDOWN_DEFINITION)):
+            self.assertIn(sd_rules.RULE_ID.pattern, pattern.pattern,
+                          f"{name} restates the rule-id grammar instead of "
+                          "building on sd_rules.RULE_ID")
         for sample in ("R1-D1", "R11-D46", "R123-D7"):
             self.assertTrue(sd_rules.RULE_ID.fullmatch(sample), sample)
             self.assertEqual(DEFINITION.findall(f"**{sample}**, a rule."),
@@ -1148,6 +1277,107 @@ the entry outright when it reaches zero.""")
 # --------------------------------------------------------------------------
 # Leg c -- every rule id cited in live prose resolves
 # --------------------------------------------------------------------------
+
+
+class TheDefinitionGrammar(unittest.TestCase):
+    """What leg c reads as a definition, held against the forms the corpus uses.
+
+    Measured on `239ff624`, three of the four ids `DANGLING_RULE_IDS` then
+    carried were not undefined at all. Each had a definition in a form the
+    bold-run grammar could not see: a table cell, a heading, and a bold run
+    closed before the parenthesised id. A grammar that sees only one of the
+    ways this repository writes a definition reports the other three as
+    missing, and a baseline built on it records a false finding as a fact.
+    """
+
+    #: One line per form, verbatim from the archive on `239ff624` except for
+    #: the ids, which are fixture ids so that this docstring is not a live
+    #: citation of anything. The line numbers those forms stand at are in
+    #: the step-4 slice paragraph of this item's `implement.md`.
+    FORMS = {
+        "a table cell": (
+            "| local exo :52415 (R98-D1, user 2026-08-29 — replaces llama.cpp "
+            "row) | openai-compatible adapter | $0 |"),
+        "a heading": "## PR 1 — R98-D2, re-derive `DASHBOARD_CAP`",
+        "a bold run closed before the parenthesised id": (
+            "| Decision queues | **Obsidian vault stays system-of-record** "
+            "(R98-D3); accessed via `sd store` |"),
+        "a bold run containing the id": (
+            "**Re-derived 2026-09-07 as R98-D4, because the first figure here "
+            "had gone ten\ntimes stale.** This section originally read 12,416 "
+            "lines."),
+        "a bold run opening with the id": "**R98-D5, 2026-09-06: the code cap "
+                                          "is payable in kind.** Until this",
+        "a table cell with an earlier parenthesised aside": (
+            "| codex | $0 (ChatGPT sub; r8). Subscription only (R98-D11, user "
+            "2026-08-29) | x |"),
+        "a bold run opening with a code span, closed before the id": (
+            "- **`mode: minimal` and `mode: guest` refuse it** (R98-D17). "
+            "Shared and OSS"),
+    }
+
+    def test_every_form_the_corpus_writes_a_definition_in_is_seen(self):
+        """Each shape in `FORMS` defines the one id it carries."""
+
+        for form, text in self.FORMS.items():
+            with self.subTest(form=form):
+                expected = set(sd_rules.RULE_ID.findall(text))
+                self.assertEqual(definitions_in("docs/work/archive/x/design.md",
+                                                text), expected, form)
+
+    def test_a_mention_is_not_a_definition(self):
+        """The forms above are not "the id appears near some markup".
+
+        Each control here is a way the widened grammar could over-read. The
+        code-span and comment-line cases were measured on `2eafa78b` to move
+        an id out of a baseline for the wrong reason; the rest are the same
+        over-readings from another side, and the last five are the review
+        round on #993: reverting the fence walk, the cell form or the pairing
+        reddens at least one of them. A quoted example
+        of a definition is a citation of the form, not a definition, so the
+        id inside a code span or a fenced block never counts; the plain text
+        between two bold runs is not bold; an unpaired `**` is an exponent;
+        a bold run does not reach into the next paragraph; and a `#` line in
+        a file that is not Markdown is a comment, and a comment cites.
+        """
+
+        controls = {
+            "an id in a code span inside a bold run": (
+                "docs/work/x/implement.md",
+                "**A stranded id no earlier revision names: `R98-D6`.**"),
+            "a quoted definition inside a code span": (
+                "docs/work/x/implement.md",
+                "`R98-D7` is written `**Obsidian vault stays\n"
+                "system-of-record** (R98-D7)` in the archive."),
+            "plain text between two bold runs": (
+                "docs/work/x/implement.md",
+                "**Slice 1.** `R98-D8` is a row now, and R98-D8 stays "
+                "(**not** a stranded id)."),
+            "a comment line in a Python file": (
+                "tests/test_x.py",
+                "# R98-D9, re-derived 2026-09-07: the ceiling is 4,600."),
+            "a table row in a Python file": (
+                "bin/x.py",
+                "    rows = a | b(R98-D10)"),
+            "a heading inside a backtick fence": (
+                "docs/work/x/design.md",
+                "An example:\n\n```markdown\n## PR 1 — R98-D12, the cap\n```\n"),
+            "a table cell inside a tilde fence": (
+                "docs/work/x/design.md",
+                "~~~\n| local exo (R98-D13, user) | adapter |\n~~~\n"),
+            "a bold run split by a fence": (
+                "docs/work/x/design.md",
+                "**opened here\n```\nR98-D14\n```\nand closed here**"),
+            "an exponent before a parenthesised id in a Python file": (
+                "bin/x.py",
+                "    y = x** (R98-D15)  # not a bold run"),
+            "a bold run and a parenthesised id in different paragraphs": (
+                "docs/work/x/design.md",
+                "**a statement**\n\n(R98-D16) is the next paragraph."),
+        }
+        for control, (relative, text) in controls.items():
+            with self.subTest(control=control):
+                self.assertEqual(definitions_in(relative, text), set(), control)
 
 
 class LegC(unittest.TestCase):
