@@ -83,10 +83,12 @@ for the controls a run passes through.
 > 1. **Re-measure the premise before fixing anything.** Check every line number
 >    and quoted string against your worktree. If the finding no longer holds,
 >    say so with the measurement and do not manufacture work. Report the
->    re-measure as one row per citation — the item's `path:line` or sha, what
->    stands there at the commit the item names (`git show <sha>:<path>`), what
->    stands there at your base, and whether the claim holds — and if the item
->    names no commit, say so in the first row.
+>    re-measure as one row per citation — the item's citation as written
+>    (`path:line`, `source:<path>::<symbol>`, a file named in prose, or a
+>    sha), what stands there at the commit the item names
+>    (`git show <sha>:<path>`), what stands there at your base, and whether
+>    the claim holds — and if the item names no commit, say so in the first
+>    row.
 > 2. **Fail-first.** Watch the new test fail on the unfixed code, quote the
 >    decisive assertion line, then fix, then watch it pass. A test that does not
 >    kill its mutation has not earned its place.
