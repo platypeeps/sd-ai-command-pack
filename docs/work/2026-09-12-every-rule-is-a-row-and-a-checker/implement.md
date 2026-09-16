@@ -413,3 +413,17 @@ tests.test_rule_registry.LegD`: before, on `b4211959`, real 6.81 s for 8 tests
 at load average 39.25; after, real 2.72 s for 9 tests at load average 32.26.
 The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
 1306 tracked files, once per run now instead of once per row or control.
+
+## Log
+
+- 2026-09-16 step 8, first slice: the authoring tier is `bin/sd-rules --for
+  <path>`, by the owner decision of 2026-09-16 (option (a), a read verb that
+  prints the live rows whose scope matches the file being written, id,
+  subject and teaching section, called from a skill's setup step). Built as
+  a standalone command rather than an `sd rules` verb because `bin/sd` was
+  held by another lane that day; the alias is its own slice. The scope rule is
+  `points_into_code`'s, markdown is prose and everything else is code, bound
+  by test. `skills/sd-handoff/SKILL.md`, the skill that teaches the most
+  stranded ids (2 of 20 on `2eafa78b`, `sd-status` 1, no other skill any;
+  on `fa7f870f`, after #993 widened the definition grammar, 1 and 1), names
+  the verb in its restore step. Step 4 is untouched here.

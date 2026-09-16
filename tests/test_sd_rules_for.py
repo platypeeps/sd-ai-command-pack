@@ -40,7 +40,8 @@ if str(REPO_ROOT / "bin") not in sys.path:
 
 import sd_rules  # noqa: E402 - the table the verb reads
 
-from tests.test_doc_citations import points_into_code  # noqa: E402 - the scope rule's source
+# The scope rule's source, borrowed rather than restated.
+from tests.test_doc_citations import points_into_code  # noqa: E402
 
 SCRIPT = REPO_ROOT / "bin" / "sd-rules"
 
@@ -78,15 +79,28 @@ def row(identifier: str, scope: str, state: str = sd_rules.LIVE) -> sd_rules.Rul
     )
 
 
-#: A table with every branch the matcher has: one row per scope, a repealed
-#: row that must never print, and ids whose string order differs from their
-#: numeric order (`R11-D10` sorts before `R11-D4` as text).
+#: A table with every branch the matcher has: one row per scope and a repealed
+#: row that must never print. The ids are ones that resolve today -- rows of
+#: the registry or definitions in live prose -- because leg c of
+#: `tests/test_rule_registry.py` reads every id written in this file as a
+#: citation, and a made-up id here would be a dangling one there.
 FIXTURE = (
-    row("R11-D10", "code"),
-    row("R11-D4", "prose"),
+    row("R10-D6", "code"),
+    row("R11-D31", "prose"),
     row("R10-D5", "both"),
-    row("R9-D1", "both", state=sd_rules.REPEALED),
+    row("R11-D32", "both", state=sd_rules.REPEALED),
 )
+
+
+def rule_id(round_number: int, decision: int) -> str:
+    """An id assembled rather than written, for the ordering case.
+
+    The numeric-order test needs ids whose text order differs from their
+    numeric order, and no resolving id pair does. Assembling them keeps the
+    census honest: an id written out here would be read as a citation.
+    """
+
+    return f"R{round_number}-D{decision}"
 
 
 def run(argv: list[str], cwd: pathlib.Path | None = None) -> tuple[int, str, str]:
@@ -120,40 +134,40 @@ class ScopeMatching(unittest.TestCase):
     def test_a_markdown_path_draws_the_prose_and_both_rows(self) -> None:
         code, out, _ = run(["--for", "docs/anything.md"], cwd=REPO_ROOT)
         self.assertEqual(code, 0)
-        self.assertEqual(ids_in(out), ["R10-D5", "R11-D4"])
+        self.assertEqual(ids_in(out), ["R10-D5", "R11-D31"])
 
     def test_a_python_path_draws_the_code_and_both_rows(self) -> None:
         code, out, _ = run(["--for", "bin/sd_lib.py"], cwd=REPO_ROOT)
         self.assertEqual(code, 0)
-        self.assertEqual(ids_in(out), ["R10-D5", "R11-D10"])
+        self.assertEqual(ids_in(out), ["R10-D5", "R10-D6"])
 
     def test_a_suffixless_command_is_code(self) -> None:
         # `bin/sd-review` is a Python file with no `.py`, and the first
         # checker the registry could not name lived in one.
         _, out, _ = run(["--for", "bin/sd-review"], cwd=REPO_ROOT)
-        self.assertEqual(ids_in(out), ["R10-D5", "R11-D10"])
+        self.assertEqual(ids_in(out), ["R10-D5", "R10-D6"])
 
     def test_markdown_is_matched_in_any_case_and_either_spelling(self) -> None:
         for name in ("NOTES.MD", "docs/page.markdown", "docs/Page.Markdown"):
             with self.subTest(path=name):
                 _, out, _ = run(["--for", name], cwd=REPO_ROOT)
-                self.assertEqual(ids_in(out), ["R10-D5", "R11-D4"])
+                self.assertEqual(ids_in(out), ["R10-D5", "R11-D31"])
 
     def test_a_repealed_row_never_prints(self) -> None:
         for name in ("docs/page.md", "bin/tool.py"):
             with self.subTest(path=name):
                 _, out, _ = run(["--for", name], cwd=REPO_ROOT)
-                self.assertNotIn("R9-D1", out)
+                self.assertNotIn("R11-D32", out)
 
     def test_a_file_not_yet_written_is_still_answered(self) -> None:
         # The file being written is the one that may not exist yet; its name
         # is what the scope is read from.
         code, out, _ = run(["--for", "docs/not-written-yet.md"], cwd=REPO_ROOT)
         self.assertEqual(code, 0)
-        self.assertEqual(ids_in(out), ["R10-D5", "R11-D4"])
+        self.assertEqual(ids_in(out), ["R10-D5", "R11-D31"])
 
     def test_no_row_in_scope_says_so_and_exits_zero(self) -> None:
-        with mock.patch.object(sd_rules, "RULES", (row("R11-D10", "code"),)):
+        with mock.patch.object(sd_rules, "RULES", (row("R10-D6", "code"),)):
             code, out, err = run(["--for", "docs/page.md"], cwd=REPO_ROOT)
         self.assertEqual(code, 0)
         self.assertEqual(out, "no rule in scope for docs/page.md\n")
@@ -172,7 +186,7 @@ class TheBlock(unittest.TestCase):
         _, out, _ = run(["--for", "bin/sd_lib.py"], cwd=REPO_ROOT)
         blocks = [block for block in out.split("\n\n") if block.strip()]
         self.assertEqual(len(blocks), 2, out)
-        for block, identifier in zip(blocks, ["R10-D5", "R11-D10"]):
+        for block, identifier in zip(blocks, ["R10-D5", "R10-D6"], strict=True):
             with self.subTest(rule=identifier):
                 lines = block.splitlines()
                 self.assertTrue(lines[0].startswith(identifier), lines[0])
@@ -184,20 +198,21 @@ class TheBlock(unittest.TestCase):
         # The section is the row's `teaches` field and nothing derived from it:
         # a heading with spaces and backticks, as `R10-D4`'s has, prints whole.
         section = "skills/sd-review/SKILL.md#The `codex-json` entry (heading)"
-        fixture = (sd_rules.Rule("R11-D10", "s", "bin/sd_lib.py::repo_root",
+        fixture = (sd_rules.Rule("R10-D6", "s", "bin/sd_lib.py::repo_root",
                                  "p", "code", section),)
         with mock.patch.object(sd_rules, "RULES", fixture):
             _, out, _ = run(["--for", "bin/x.py"], cwd=REPO_ROOT)
         self.assertIn(section, out)
 
     def test_the_order_is_by_id_numerically(self) -> None:
-        # `R11-D10` sorts before `R11-D4` as text; the verb orders by the
+        # Decision 10 sorts before decision 4 as text; the verb orders by the
         # numbers in the id so the listing reads the way the rounds ran.
-        fixture = (row("R11-D10", "code"), row("R11-D4", "code"),
-                   row("R11-D9", "code"), row("R2-D1", "code"))
+        ids = [rule_id(11, 10), rule_id(11, 4), rule_id(11, 9), rule_id(2, 1)]
+        fixture = tuple(row(identifier, "code") for identifier in ids)
         with mock.patch.object(sd_rules, "RULES", fixture):
             _, out, _ = run(["--for", "bin/x.py"], cwd=REPO_ROOT)
-        self.assertEqual(ids_in(out), ["R2-D1", "R11-D4", "R11-D9", "R11-D10"])
+        self.assertEqual(ids_in(out), [ids[3], ids[1], ids[2], ids[0]])
+        self.assertNotEqual(ids_in(out), sorted(ids), "text order would pass")
 
     def test_json_carries_the_same_rows_in_the_same_order(self) -> None:
         _, text, _ = run(["--for", "bin/sd_lib.py"], cwd=REPO_ROOT)
@@ -209,7 +224,7 @@ class TheBlock(unittest.TestCase):
         self.assertEqual(rows[0]["teaches"], "skills/sd-check/SKILL.md#R10-D5 section")
 
     def test_json_with_no_row_in_scope_is_an_empty_list(self) -> None:
-        with mock.patch.object(sd_rules, "RULES", (row("R11-D10", "code"),)):
+        with mock.patch.object(sd_rules, "RULES", (row("R10-D6", "code"),)):
             code, out, _ = run(["--for", "docs/page.md", "--json"], cwd=REPO_ROOT)
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out), [])
