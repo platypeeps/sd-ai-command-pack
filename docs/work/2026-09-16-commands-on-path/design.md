@@ -142,7 +142,12 @@ executable anywhere" and says what `--user` links and where.
 
 Planning adversarial review, 2026-09-16. Rounds 1-3 are the lane's own;
 round 4 folds Copilot's review of the planning PR (#1000, at `756f5abd`,
-3 inline and 12 suppressed findings, effort Lite) through the same ledger.
+3 inline and 12 suppressed findings, effort Lite) through the same ledger,
+and round 5 folds its pass on the round-4 push (at `d97efc2c`, 1 inline and
+7 suppressed, "eight unresolved moderate findings"). Five rounds is the cap;
+no further round starts on its own. Round 5 changes this ledger only: the
+pages above it are the ones the code lane builds from, and an edit to them
+would call for a sixth round the cap does not allow.
 
 ### Context
 
@@ -157,7 +162,8 @@ review. Copilot's review of the pull request folds through this ledger.
 
 ### Decision
 
-The three pages stand as written after round 4. The owner takes the three
+The three pages stand as written after round 4; round 5 parks eight
+findings on the code lane, none blocking. The owner takes the three
 choices `prd.md` lists under "Decisions for the owner"; the lane's
 recommendation is `~/.local/bin`, links on by default, `--pull` unchanged.
 
@@ -192,6 +198,14 @@ recommendation is `~/.local/bin`, links on by default, `--pull` unchanged.
 | C-25 | 4 | medium | no | addressed |
 | C-26 | 4 | medium | yes | addressed |
 | C-27 | 4 | low | no | addressed |
+| C-28 | 5 | medium | no | parked |
+| C-29 | 5 | medium | no | rebutted |
+| C-30 | 5 | medium | no | parked |
+| C-31 | 5 | medium | no | parked |
+| C-32 | 5 | medium | no | parked |
+| C-33 | 5 | medium | no | parked |
+| C-34 | 5 | low | no | parked |
+| C-35 | 5 | low | no | parked |
 
 **C-1, a third copy of the rule the item names two of.** The item's rule 3
 names the README table and the `command_report` docstring. `AGENTS.md`
@@ -353,9 +367,83 @@ Problem bullet naming `sd-plan` and `sd-research-repo`. Evidence:
 those skills invoke bare, `sd-trackers` and `sd-research-kit`, both
 executables in `bin/`; addressed by naming the commands and their lines.
 
+**Round 5, how the eight are dispositioned.** Copilot rated all eight
+moderate. None is blocking: each is a case inside a rule the pages already
+state (foreign entries refuse, a failed link run leaves no unrecorded link,
+`prune_links` removes only our links, a working-directory hit never counts),
+not a scope, requirement or assumption error. The seven that hold are
+parked, not addressed: trigger, the code PR for this item; owner, the code
+lane, which carries each into the implementation and its tests under the
+rule named. The pages are unchanged by direction of the coordinating
+session, so the code lane reads the cases from this ledger.
+
+**C-28, a directory at the target was not foreign.** Copilot, suppressed.
+"Where the link step sits" lists the foreign shapes as a regular file, a
+dangling link, a link anywhere else; a directory fell through the list, and
+`os.symlink` on it raises `FileExistsError` after the renders. Parked for
+the code lane: `link_plan` treats everything that exists (`lexists`) and is
+not ours as foreign, a directory included, and test 2 runs a fourth
+`subTest` over a directory.
+
+**C-29, the rollback boundary against the writes before the link stage.**
+Copilot, suppressed: the unlink-on-failure leaves the renders, the pruned
+files, the hook and the excludes edit in place, so the rollback is partial.
+Rebutted: that boundary is the one `cmd_user` has today. Evidence:
+`source:bin/sd_install.py::cmd_user` renders, prunes, installs the hook,
+edits excludes and seeds the registry before `write_receipt`, and any
+failure between them already leaves the writes recorded by the previous
+receipt or by nobody; the next `--user` rewrites the same paths and records
+them. The link step neither widens nor narrows that. What it adds is that
+no link outlives a failed run, because a link, unlike a render, is kept on
+the next run rather than rewritten, and a kept link no receipt names would
+be invisible to `--uninstall` for good. The code lane tests the two-run
+recovery (a failed run, then a clean `--user` that records every render and
+link) under step 6.
+
+**C-30, `--bin-dir X` then a plain `--user`.** Copilot, suppressed. The
+design says the flag overrides the default; a later run without it produces
+the default directory's rows, `prune_links` retires X's links, and the new
+receipt does not name them. Parked for the code lane: the receipt carries a
+top-level `binDir`; a run without the flag reuses it; a different flag
+relocates in one run (X's links removed, Y's created, one receipt). Two-run
+test under step 6.
+
+**C-31, `mkdir -p` outside the handled path.** Copilot, suppressed: the
+design names `os.symlink` as the `OSError` source and the directory
+creation could raise first. Parked for the code lane: the `mkdir -p` sits
+inside the same `OSError` handling, the same `error: could not link` line,
+rc 1, no traceback; step 6 tests an unwritable directory (`Path.mkdir`
+patched to raise).
+
+**C-32, `PATH="."` resolves the working directory.** Copilot, suppressed.
+Measured: `shutil.which("sd-probe", path=".")` returns `./sd-probe` on the
+same four CPython versions as C-19. The design's normalised list drops the
+empty components only. Parked for the code lane: the list keeps absolute
+components only, so a relative component counts neither as ours nor as a
+shadow; step 6 tests `PATH="."` next to `PATH=":"`.
+
+**C-33, a malformed `kind: link` row aborts `--uninstall`.** Copilot,
+suppressed. Evidence: `source:bin/sd_install.py::owned_entries` admits any
+dict with a `path`, so a `link` row without a `target` reaches
+`prune_links`, and `PruneTests` already covers malformed rows for
+`prune_stale`. Parked for the code lane: a row whose `path` or `target` is
+missing or not a string is skipped and reported `left in place (malformed
+link row): <path>`; test 3 appends one such row to the receipt.
+
+**C-34, test 3 replaced the relative link before exercising it.** Copilot,
+suppressed. Test 3 replaces the second recorded link, the relative one from
+test 1, with a regular file, so no test removes a relative link. Parked for
+the code lane: the relative link stays and is the one `--uninstall`
+removes; the regular file takes the third slot.
+
+**C-35, no test asserts the not-on-PATH warning.** Copilot, inline. Test 1
+asserts the links and the receipt, not the `warning:` line. Parked for the
+code lane: test 1 runs once with a `PATH` that lacks the directory and
+asserts the line, and once with it on `PATH` and asserts its absence.
+
 ### Cross-artifact sweep
 
-Each value was grepped across the three pages after rounds 2, 3 and 4: `17`,
+Each value was grepped across the three pages after rounds 2, 3, 4 and 5: `17`,
 `Fourteen`/three commands without `Path(__file__)`, `2 of 3`, `12 of 17`,
 the seven and the two existing `command_report` tests, `step 5`,
 `link_plan`, `link_commands`, `prune_links`, `LinkTests` and the four test
@@ -377,8 +465,8 @@ one-word answer suffices.
 
 ### Reversal
 
-Round 5 is Copilot's pass on the round-4 push and the last the cap
-allows; a supported finding there is residue for the owner, not a sixth
+The cap of 5 is spent. Whatever Copilot posts on the round-5 push is
+residue for the owner, read and listed in the lane report, not a sixth
 round. The owner's choices differing from the recommendation on any of the
 three lines rewrites `design.md` and this ledger under a new item or an
-owner-opened round. Four of the cap's 5 rounds are spent.
+owner-opened round.

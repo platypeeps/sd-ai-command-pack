@@ -89,12 +89,14 @@ so the owner reviews and merges the code PR, not a lane.
 - Changed artifacts: `prd.md`, `design.md`, `implement.md`, all new at
   `c6879551` (baseline: absent). The trigger applied because
   `bin/sd_install.py` is `sensitive` and the pages plan a change to it.
-- Host review: completed, four rounds, cap 5 (Development / prd and design);
-  round 4 folded Copilot's 15 findings on PR #1000.
+- Host review: completed, five rounds, cap 5 (Development / prd and design),
+  the cap spent; round 4 folded Copilot's 15 findings on PR #1000 and round
+  5 its 8 findings on the round-4 push, in the ledger only.
 - Additional lanes: the pack defines none; Copilot's review of the planning
   PR folds through the ledger under `design.md` "Review" when it arrives.
-- Concerns: C-1 to C-9, C-12 to C-27 addressed, C-10 rebutted (re-measured
-  in C-19), C-11 parked (size, owner's call, non-blocking). Ledger:
+- Concerns: C-1 to C-9, C-12 to C-27 addressed, C-10 and C-29 rebutted
+  (C-10 re-measured in C-19), C-11 parked (size, owner's call), C-28 and
+  C-30 to C-35 parked on the code lane; no parked concern blocks. Ledger:
   `design.md`, "Review".
 - Implementation: unblocked on the plan; blocked on the owner's three
   choices in `prd.md` and on the owner reviewing the code PR.
