@@ -158,7 +158,10 @@ CLAIM_SCOPE = LINE
 #:    decision 2026-09-16, reversible by the owner, taken so that the one id
 #:    defined in no other form, `R11-D46`, counts by the bold sentence that
 #:    re-derives it rather than needing a separate answer;
-#: 2. a bold run closed and then the id opening a parenthesis, `**...** (id`.
+#: 2. a bold run, opened and closed, and then on the same line the id opening
+#:    a parenthesis, `**...** (id`. Paired, so that `x** (id)` in a comment is
+#:    an exponent and not a run; same line, so that a bold sentence and a
+#:    parenthesised id in the next paragraph are two things and not one.
 #:
 #: Two block forms, in `MARKDOWN_DEFINITION` below, read in Markdown only.
 #:
@@ -183,7 +186,7 @@ DEFINITION = re.compile(
     "(?:"
     + BOLD_OPEN + BOLD_BODY
     + "(?=" + sd_rules.RULE_ID.pattern + BOLD_BODY + BOLD_CLOSE + ")"
-    + "|" + BOLD_CLOSE + r"\s*\("
+    + "|" + BOLD_OPEN + BOLD_BODY + BOLD_CLOSE + r"[ \t]*\("
     + ")(" + sd_rules.RULE_ID.pattern + ")")
 
 #: The two block forms, and why they read Markdown only: a `#` line in any
@@ -193,10 +196,16 @@ DEFINITION = re.compile(
 #: ids out of their baseline on the strength of code comments.
 #:
 #: 3. an ATX heading that contains the id;
-#: 4. a table cell whose label is followed by the id opening a parenthesis,
-#:    `| label (id`.
+#: 4. a table cell in which the id opens a parenthesis, `| label (id` -- any
+#:    parenthesis in the cell, not the first, because a cell may carry a
+#:    parenthesised aside before the one that names the rule.
+#:
+#: Both read after `prose_of` has blanked the fenced blocks, for the reason
+#: `markdown_headings` tracks `FENCE`: a `## id` line or a `| label (id) |`
+#: row inside a fenced example is an example, and reading it would let a
+#: code sample move a baseline.
 MARKDOWN_DEFINITION = re.compile(
-    r"(?:^#{1,6}[ \t]+[^\n]*?|\|[^|(\n]*\()(" + sd_rules.RULE_ID.pattern + ")",
+    r"(?:^#{1,6}[ \t]+[^\n]*?|\|[^|\n]*\()(" + sd_rules.RULE_ID.pattern + ")",
     re.MULTILINE)
 
 #: A code span. Blanked before a definition is read, because text inside one
@@ -206,7 +215,14 @@ MARKDOWN_DEFINITION = re.compile(
 #: both baselines at once. Not stopped at a newline, for the reason `QUOTED`
 #: gives: the quotation spans one. Under the one-form grammar this blanking
 #: changed nothing -- 51 defined ids, 18 live, with and without it.
+#:
+#: Replaced by `CODE_SPAN_STANDIN` rather than by a space, because a bold run
+#: may open with a code span -- `**\`mode: minimal\` and ... refuse it**` in
+#: `skills/sd-review/SKILL.md` does -- and `BOLD_OPEN` wants a non-space on
+#: its right. The stand-in is neither whitespace nor a word character, so it
+#: neither closes a run nor glues to one.
 CODE_SPAN = re.compile(r"`[^`]*`")
+CODE_SPAN_STANDIN = "~"
 
 #: A quoted run in a file no Python parser will read. Single and double quotes
 #: stop at a newline; a backtick run does not, because a JavaScript template
@@ -505,14 +521,36 @@ def cited_rule_ids(*, live_only: bool) -> set[str]:
     return found
 
 
-def definitions_in(relative: str, text: str) -> set[str]:
-    """Every rule id one file defines, by the forms `DEFINITION` names.
+def prose_of(text: str) -> str:
+    """`text` with every fenced block and every code span blanked.
 
-    Code spans are blanked first, and the block forms are read only when the
-    file is Markdown; both reasons are on the patterns.
+    A fenced line becomes an empty line rather than vanishing, so that a bold
+    run cannot be read across the block that separated its halves. The fence
+    walk is the one `markdown_headings` makes, and it is made on every file
+    for the reason the bold forms are read in every file: a docstring can
+    carry a fence as readily as a page can.
     """
 
-    prose = CODE_SPAN.sub(" ", text)
+    kept: list[str] = []
+    fenced = False
+    for line in text.splitlines(keepends=True):
+        if FENCE.match(line):
+            fenced = not fenced
+            kept.append("\n")
+            continue
+        kept.append("\n" if fenced else line)
+    return CODE_SPAN.sub(CODE_SPAN_STANDIN, "".join(kept))
+
+
+def definitions_in(relative: str, text: str) -> set[str]:
+    """Every rule id one file defines, by the forms `DEFINITION` and
+    `MARKDOWN_DEFINITION` name.
+
+    Fences and code spans are blanked first, and the block forms are read
+    only when the file is Markdown; both reasons are on the patterns.
+    """
+
+    prose = prose_of(text)
     found = set(DEFINITION.findall(prose))
     if relative.endswith(".md"):
         found.update(MARKDOWN_DEFINITION.findall(prose))
@@ -1270,6 +1308,12 @@ class TheDefinitionGrammar(unittest.TestCase):
             "lines."),
         "a bold run opening with the id": "**R98-D5, 2026-09-06: the code cap "
                                           "is payable in kind.** Until this",
+        "a table cell with an earlier parenthesised aside": (
+            "| codex | $0 (ChatGPT sub; r8). Subscription only (R98-D11, user "
+            "2026-08-29) | x |"),
+        "a bold run opening with a code span, closed before the id": (
+            "- **`mode: minimal` and `mode: guest` refuse it** (R98-D17). "
+            "Shared and OSS"),
     }
 
     def test_every_form_the_corpus_writes_a_definition_in_is_seen(self):
@@ -1286,12 +1330,15 @@ class TheDefinitionGrammar(unittest.TestCase):
 
         Each control here is a way the widened grammar could over-read. The
         code-span and comment-line cases were measured on `2eafa78b` to move
-        an id out of a baseline for the wrong reason; the other two are the
-        same over-readings from the other side. A quoted example of a
-        definition is a citation of the form, not a definition, so the id
-        inside a code span never counts; the plain text between two bold runs
-        is not bold; a `#` line in a file that is not Markdown is a comment,
-        and a comment cites.
+        an id out of a baseline for the wrong reason; the rest are the same
+        over-readings from another side, and the last five are the review
+        round on #993: reverting the fence walk, the cell form or the pairing
+        reddens at least one of them. A quoted example
+        of a definition is a citation of the form, not a definition, so the
+        id inside a code span or a fenced block never counts; the plain text
+        between two bold runs is not bold; an unpaired `**` is an exponent;
+        a bold run does not reach into the next paragraph; and a `#` line in
+        a file that is not Markdown is a comment, and a comment cites.
         """
 
         controls = {
@@ -1312,6 +1359,21 @@ class TheDefinitionGrammar(unittest.TestCase):
             "a table row in a Python file": (
                 "bin/x.py",
                 "    rows = a | b(R98-D10)"),
+            "a heading inside a backtick fence": (
+                "docs/work/x/design.md",
+                "An example:\n\n```markdown\n## PR 1 — R98-D12, the cap\n```\n"),
+            "a table cell inside a tilde fence": (
+                "docs/work/x/design.md",
+                "~~~\n| local exo (R98-D13, user) | adapter |\n~~~\n"),
+            "a bold run split by a fence": (
+                "docs/work/x/design.md",
+                "**opened here\n```\nR98-D14\n```\nand closed here**"),
+            "an exponent before a parenthesised id in a Python file": (
+                "bin/x.py",
+                "    y = x** (R98-D15)  # not a bold run"),
+            "a bold run and a parenthesised id in different paragraphs": (
+                "docs/work/x/design.md",
+                "**a statement**\n\n(R98-D16) is the next paragraph."),
         }
         for control, (relative, text) in controls.items():
             with self.subTest(control=control):

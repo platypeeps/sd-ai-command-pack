@@ -238,7 +238,7 @@
       those same four ids.
 
       **Slice S2, 2026-09-16. `DANGLING_RULE_IDS` 4 → 0; `STRANDED_RULE_IDS`
-      20 → 20, a different 20.** `source:tests/test_rule_registry.py::DEFINITION`
+      20 → 20, a different 20.** `source:tests/test_rule_registry.py::definitions_in`
       reads four forms now instead of one, and no prose was repointed. The
       three forms the finding above named were read off the archive on
       `2eafa78b`: the table cell at
