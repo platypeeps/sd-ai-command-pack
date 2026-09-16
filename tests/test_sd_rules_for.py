@@ -256,6 +256,13 @@ class BadPaths(unittest.TestCase):
     def test_a_path_that_walks_out_of_the_repository_is_refused(self) -> None:
         self.assert_refused(["--for", "../outside.md"], REPO_ROOT, "outside")
 
+    def test_a_path_the_platform_cannot_resolve_is_refused_not_raised(self) -> None:
+        # Review finding on #997: `Path.resolve()` raises `ValueError` on an
+        # embedded NUL, and the documented answer to a bad path is exit 2
+        # with one sentence, never a traceback.
+        self.assert_refused(["--for", "docs/a\0b.md"], REPO_ROOT,
+                            "cannot be resolved")
+
 
 class TheLiveTable(unittest.TestCase):
     """Against `sd_rules.RULES` as it stands: enumerated, never listed."""
