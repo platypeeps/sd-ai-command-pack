@@ -1,4 +1,9 @@
-"""Criterion 21's archive half: the retire changed nothing under `archive/`.
+"""Criterion 21: the archive is untouched, and nothing in the pack deletes.
+
+Two halves. The archive half: the retire changed nothing under `archive/`. The
+code-path half, `NoDeletionPath` at the end: no sweep or park code path
+remains, and the deletion verbs the tree does carry are a frozen set that
+this file enumerates.
 
 The `docs/work` retire removed every active item's `status:` line and wrote
 `docs/work/.status-source`. Archived items keep their line, because they are
@@ -186,6 +191,102 @@ class TheArchiveStillSaysWhatItSaid(unittest.TestCase):
             carrying_status("docs/work/*/prd.md"),
             [],
             "an active item still answers from its file",
+        )
+
+
+#: Every `git rm`, `rmtree` and `rmdir` under `bin/` and `skills/`, keyed by
+#: file and by the text that carries it -- not by line number, which moves
+#: under every unrelated edit. Eight sites when this was frozen on
+#: 2026-09-16, and the criterion's own words explain why the set is not
+#: empty and cannot be: five are the exact-removal *strings* in `sd-status`'s
+#: `RESIDUE` tuple, telling an operator how to uninstall a Trellis or legacy
+#: footprint; two are `sd_install.py` pruning its own empty parents, once in
+#: the docstring and once in the call, which the criterion allows by name;
+#: one is an error message reading "Untrack it (git rm --cached) and re-run".
+#: None of the eight is a sweep or park code path, and `bin/sd_sweep.py`,
+#: which the cut removed, was never among them. Requirement 13 cuts the
+#: `RESIDUE` tuple after one clean fleet run, which takes five: the assertion
+#: is a subset, so that cut lowers the count without touching this file, and
+#: a ninth site fails it.
+FROZEN_DELETION_SITES = frozenset({
+    ("bin/sd-status", "git rm -r --cached --ignore-unmatch .trellis && rm -rf .trellis"),
+    ("bin/sd-status", "git config --unset core.hooksPath; git rm -r --ignore-unmatch .githooks"),
+    ("bin/sd-status", "git rm -r --ignore-unmatch 'scripts/sd-ai-command-pack-*'"),
+    ("bin/sd-status", "git rm --ignore-unmatch '.github/workflows/sd-ai-command-pack-*.y*ml'"),
+    ("bin/sd-status", "git rm -r --ignore-unmatch '.github/candidate-validation*'"),
+    ("bin/sd_install.py", "Bounded by `rmdir` refusing a non-empty directory: the loop cannot escape"),
+    ("bin/sd_install.py", "current.rmdir()"),
+    ("bin/sd_install.py", "tracked file. Untrack it (git rm --cached) and re-run."),
+})
+
+DELETION_VERBS = r"git rm|rmtree|rmdir"
+
+
+def deletion_sites() -> set[tuple[str, str]]:
+    """Every line under `bin/` and `skills/` carrying a deletion verb.
+
+    `git grep` exits 1 on no match, which is the answer this criterion would
+    most like to hear and not a failure, so it is spelled out. The text is
+    stripped of its indentation and its trailing quote-and-comma, so that the
+    frozen set above reads as the sentence a person sees and not as a line of
+    Python punctuation.
+    """
+    done = subprocess.run(  # nosec B603 - fixed argv, no shell
+        ["git", "-C", str(REPO_ROOT), "grep", "-nIE", DELETION_VERBS, "--",
+         "bin", "skills"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if done.returncode == 1:
+        return set()
+    if done.returncode != 0:
+        raise AssertionError(f"git grep failed: {done.stderr.strip()}")
+    found = set()
+    for row in lines(done.stdout):
+        path, _, text = row.split(":", 2)
+        found.add((path, text.strip().strip('",')))
+    return found
+
+
+class NoDeletionPath(unittest.TestCase):
+    """The code-path half: what deletes, enumerated, and no sweep among it."""
+
+    def test_the_deletion_verbs_are_the_frozen_set_and_no_more(self) -> None:
+        found = deletion_sites()
+        grown = sorted(found - FROZEN_DELETION_SITES)
+        self.assertEqual(
+            grown,
+            [],
+            "a deletion verb appeared outside the frozen set; a new sweep or "
+            "park code path is the thing this criterion forbids: "
+            + "; ".join(f"{path}: {text}" for path, text in grown),
+        )
+
+    def test_the_grep_reaches_the_sites_it_freezes(self) -> None:
+        """The control: an empty enumeration would pass the subset above
+        while measuring nothing. The residue cut may lower this to three, and
+        three is still not zero; zero means the grep did not run."""
+        found = deletion_sites()
+        self.assertTrue(found, "the deletion-verb grep matched nothing")
+        self.assertTrue(
+            found & FROZEN_DELETION_SITES,
+            "the grep found sites but none of the frozen ones, so the frozen "
+            "text has drifted from the tree and the set is not measuring it",
+        )
+
+    def test_no_frozen_site_is_a_sweep_or_park_code_path(self) -> None:
+        """Every site is a string an operator reads, or the installer pruning
+        its own empty parents. Not one is in a file or a function that sweeps
+        or parks a work item, and there is no such file to be in: the sweep
+        module is cut, and this asserts the tree agrees."""
+        for path, _ in FROZEN_DELETION_SITES:
+            self.assertNotIn("sweep", path)
+            self.assertNotIn("park", path)
+        self.assertFalse(
+            (REPO_ROOT / "bin" / "sd_sweep.py").exists(),
+            "bin/sd_sweep.py is still in the tree; the sweep is cut under "
+            "criterion 21 and criterion 31(a)",
         )
 
 
