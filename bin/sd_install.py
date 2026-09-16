@@ -904,12 +904,15 @@ def link_commands(plans: list[Link], bin_dir: Path, *, dry_run: bool = False) ->
     ]
     if dry_run or not plans:
         return rows
-    bin_dir.mkdir(parents=True, exist_ok=True)
     made: list[Path] = []
     for plan in plans:
         if plan.state == "ours":
             continue
+        # The directory is made inside the handler with the link: an
+        # unwritable parent is the same failure as an unwritable link, one
+        # line and rc 1, not a traceback (C-31).
         try:
+            bin_dir.mkdir(parents=True, exist_ok=True)
             os.symlink(plan.target, plan.path)
         except OSError as exc:
             for path in made:
@@ -939,13 +942,22 @@ def prune_links(
     """
     skipped: list[tuple[str, str]] = []
     for entry in previous:
+        if entry.get("kind") != "link":
+            continue
         raw = entry.get("path")
-        if not isinstance(raw, str) or entry.get("kind") != "link" or raw in keep:
+        target = entry.get("target")
+        if not isinstance(raw, str) or not isinstance(target, str):
+            # `owned_entries` admits any dict with a `path`. A row this
+            # function cannot read is nothing it may remove, and it says so
+            # rather than aborting the run (C-33).
+            skipped.append((str(raw), "malformed link row"))
+            continue
+        if raw in keep:
             continue
         path = Path(raw)
         if not path.is_symlink() and not path.exists():
             continue
-        if not (path.is_symlink() and _resolves_to(path, Path(entry.get("target", "")))):
+        if not (path.is_symlink() and _resolves_to(path, Path(target))):
             skipped.append((raw, "not our link"))
             continue
         if not dry_run:
@@ -1535,17 +1547,8 @@ class Context:
     home: Path
     environ: dict[str, str]
     dry_run: bool = False
-    # `--bin-dir`, when given. `link_dir` is what the link step reads.
+    # `--bin-dir`, when given. `link_directory` is what the link step reads.
     bin_dir: Path | None = None
-
-    @property
-    def link_dir(self) -> Path:
-        """Where `--user` links the `bin/` commands: `--bin-dir`, else `~/.local/bin`.
-
-        Derived from the home rather than defaulted at construction, so a
-        Context a test builds with three fields links where the CLI would.
-        """
-        return self.bin_dir if self.bin_dir is not None else self.home / ".local" / "bin"
 
     @property
     def sandboxed(self) -> bool:
@@ -1580,6 +1583,24 @@ class Context:
         return self.home / ".claude" / "settings.json"
 
 
+def link_directory(ctx: Context, receipt: dict) -> Path:
+    """Where `--user` links the `bin/` commands.
+
+    `--bin-dir` when given; else the directory the last run linked into, which
+    the receipt records as `binDir`; else `~/.local/bin`. Reading the receipt
+    is what makes a plain `--user` after `--user --bin-dir X` keep X's links
+    rather than retire them and re-link into the default (C-30). A different
+    flag relocates in one run: the new rows go to the new directory and
+    `prune_links` retires the old ones.
+    """
+    if ctx.bin_dir is not None:
+        return ctx.bin_dir
+    recorded = receipt.get("binDir")
+    if isinstance(recorded, str) and recorded:
+        return Path(recorded)
+    return ctx.home / ".local" / "bin"
+
+
 def cmd_user(ctx: Context, out) -> int:
     """Render what the paths name plus what is on trial, and converge.
 
@@ -1595,7 +1616,9 @@ def cmd_user(ctx: Context, out) -> int:
     the source is still spelled in this file only.
     """
     # Before the library: `expire_trials` writes, and a refusal writes nothing.
-    plans = link_plan(ctx.checkout, ctx.link_dir)
+    recorded = read_receipt(ctx.receipt)
+    bin_dir = link_directory(ctx, recorded)
+    plans = link_plan(ctx.checkout, bin_dir)
     for plan in plans:
         if plan.state == "foreign":
             print(
@@ -1681,12 +1704,12 @@ def cmd_user(ctx: Context, out) -> int:
     # After the renders and before the receipt: a failure here leaves the
     # renders standing for the next run and no link the receipt does not name.
     try:
-        links = link_commands(plans, ctx.link_dir, dry_run=ctx.dry_run)
+        links = link_commands(plans, bin_dir, dry_run=ctx.dry_run)
     except LinkFailed as problem:
         print(f"error: {problem}", file=out)
         return 1
 
-    previous = owned_entries(read_receipt(ctx.receipt))
+    previous = owned_entries(recorded)
     skipped = prune_stale(previous, current, dry_run=ctx.dry_run)
     skipped += prune_links(previous, {row["path"] for row in links}, dry_run=ctx.dry_run)
 
@@ -1726,6 +1749,7 @@ def cmd_user(ctx: Context, out) -> int:
         "checkout": str(ctx.checkout),
         **git_context(ctx.checkout),
         "platformHomes": {home.key: str(home.root) for home in ctx.homes},
+        "binDir": str(bin_dir),
         "owned": owned,
     }
     if not ctx.dry_run:
@@ -1747,13 +1771,13 @@ def cmd_user(ctx: Context, out) -> int:
         kept = sum(1 for plan in plans if plan.state == "ours")
         print(
             f"{'would link' if ctx.dry_run else 'linked'} {len(links)} commands "
-            f"into {ctx.link_dir}"
+            f"into {bin_dir}"
             + (f" ({kept} already linked)" if kept else ""),
             file=out,
         )
         entries = [Path(part) for part in ctx.environ.get("PATH", "").split(os.pathsep) if part]
-        if not any(_resolves_to(entry, ctx.link_dir) for entry in entries):
-            print(f"  warning: {ctx.link_dir} is not on PATH in this shell", file=out)
+        if not any(_resolves_to(entry, bin_dir) for entry in entries):
+            print(f"  warning: {bin_dir} is not on PATH in this shell", file=out)
     if hook_changed:
         events = sorted({event for _, event, _ in specs})
         print(f"  hooks registered: {', '.join(events)}", file=out)
@@ -1793,11 +1817,13 @@ def command_report(checkout: Path, environ: dict[str, str]) -> str:
         return "commands: none in bin/"
 
     own = (checkout / "bin").resolve()
-    # The non-empty components only, for both tests. `shutil.which` reads an
-    # empty component as the working directory, and a command sitting there
-    # is nobody's install; the directory test never counted it, and the
-    # shadow test used to.
-    search = os.pathsep.join(part for part in environ.get("PATH", "").split(os.pathsep) if part)
+    # The absolute components only, for both tests. `shutil.which` reads an
+    # empty component, and a relative one such as `.`, as the working
+    # directory, and a command sitting there is nobody's install; the
+    # directory test never counted it, and the shadow test used to.
+    search = os.pathsep.join(
+        part for part in environ.get("PATH", "").split(os.pathsep) if os.path.isabs(part)
+    )
 
     # A command that resolves somewhere else is worse than one that does not
     # resolve at all: it runs, and it runs another checkout's code.
@@ -2058,7 +2084,8 @@ usage: install.py (--user | --status | --pull | --uninstall | --adopt-legacy
   --dry-run        print what would happen; write nothing
   --home DIR       treat DIR as the home directory (tests and scratch installs)
   --bin-dir DIR    with --user or --pull, link the bin/ commands into DIR
-                   (default: ~/.local/bin); the installer never edits PATH
+                   (default: the directory the last run linked into, else
+                   ~/.local/bin); the installer never edits PATH
 """
 
 MODES = ("user", "status", "pull", "uninstall", "adopt-legacy", "repo",

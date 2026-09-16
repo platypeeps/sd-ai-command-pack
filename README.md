@@ -234,9 +234,10 @@ off `main` or over uncommitted changes.
 `--dry-run` prints what any of them would do and writes nothing. `--home DIR`
 installs into a scratch directory instead of `$HOME`, which is how the tests
 drive it. `--bin-dir DIR` links the commands somewhere other than
-`~/.local/bin`; a link already pointing into this checkout is kept as it is,
-and a file at a link's path that is not such a link makes `--user` refuse by
-name and write nothing.
+`~/.local/bin`, and the receipt remembers the directory, so a later `--user`
+or `--pull` without the flag links there again; a link already pointing into
+this checkout is kept as it is, and anything at a link's path that is not such
+a link makes `--user` refuse by name and write nothing.
 
 ### What it owns, and what it will not touch
 
