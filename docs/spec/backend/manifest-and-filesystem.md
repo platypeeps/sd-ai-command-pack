@@ -45,12 +45,13 @@
 > one edit made since is named in the next paragraph.
 >
 > The text below is the record of what that machinery specified, not guidance
-> for the repository as it stands, and it is edited in one way only: the name
-> of the framework the pack grew out of, and later replaced, is written out of
-> the whole `docs/spec/` tree by sd:10 criterion 18. Where a path, identifier
-> or heading carried that name, `predecessor` stands in its place; nothing
-> else in the body moved. The triage that produced this notice is recorded
-> under step 7 in
+> for the repository as it stands, and it is edited in two ways only, both by
+> sd:10 criterion 18: the name of the framework the pack grew out of, and
+> later replaced, is written out of the whole `docs/spec/` tree, so where a
+> path, identifier or heading carried that name, `predecessor` stands in its
+> place; and the Gitignore Maintenance section is removed, as the paragraph
+> above says. Nothing else in the body moved. The triage that produced this
+> notice is recorded under step 7 in
 > `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
 
 > Manifest-driven install behavior and local filesystem conventions.
@@ -1923,8 +1924,8 @@ A "Gitignore Maintenance" section stood here. It specified a marker-delimited
 block the pre-3e installer wrote into every consuming repository's
 `.gitignore`, and the migration of that repository's own ignore entries into
 it. Nothing writes or reads such a block now, this repository's `.gitignore`
-carries no markers, and the section is removed rather than kept as a record
-(sd:10, criterion 18). The three contracts below were its subsections and
+carries no markers of that block, and the section is removed rather than
+kept as a record (sd:10, criterion 18). The three contracts below were its subsections and
 stand as the record of what the installer did around it.
 
 ### Platform Runtime-Classifier Parity

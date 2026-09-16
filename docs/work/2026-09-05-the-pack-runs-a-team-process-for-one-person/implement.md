@@ -1627,8 +1627,9 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   suite under `env -u TEST_CHANGED_FILES`, so the full suite is the default;
   `.github/scripts/select-tests.py` picks the modules; `check:` is now at
   `Makefile:201` and `test:` at `:55`.)
-- **18, closed 2026-09-16** by the criterion 18 lane; see "Criterion 18
-  landed" at the end of this page. (Measured 2026-09-14: a grep of the
+- **18, swept 2026-09-16 in #998**, down to the exemptions and two words in
+  files #995 held; see "Criterion 18 landed" at the end of this page, which
+  names the remainder and the edit that closes it. (Measured 2026-09-14: a grep of the
   governed tree found `Trellis` in 14 files, `.trellis` in 11 and `task.py`
   in 2, with two exemptions from decision note 1942. The upstream Trellis
   pull-request guard at `AGENTS.md:7-10,31` is exempt while sd:241, sd:242
@@ -2011,7 +2012,7 @@ grep of the governed tree, `Trellis`, `.trellis` and `task.py` as literals,
 returned 123 lines in 19 files; the new test
 `tests/test_no_trellis_residue.py`, run red before the sweep, counted 113 of
 them outside the ten exempt lines. After the sweep the grep returns the ten
-exempt lines and two more, and nothing else.
+exempt lines and the two held lines below, and nothing else.
 
 What the sweep did, by kind:
 
@@ -2034,19 +2035,23 @@ What the sweep did, by kind:
   `.gito/config.toml` lose their mentions in prose. `tests/test_sd_agents.py`
   no longer spells the name itself; the residue test greps `agents/` for it.
 
-The test holds the exemption set as `(path, fragment)` rows: the four guard
-lines of `AGENTS.md`, the three `RESIDUE` lines of `bin/sd-status` and the
-three lines of `tests/test_sd_status.py` that exercise them, each keyed by
-its text so an edit above it does not move it. A second test fails when a row
-matches no line or more than one, so the set cannot outlive its lines. The
-test is in the always-run set of the changed-files fast path, with the other
-tree walkers.
+The test holds the exemption set as `(path, line text)` rows, the whole
+line stripped: the four guard lines of `AGENTS.md`, the three `RESIDUE` lines
+of `bin/sd-status` and the three lines of `tests/test_sd_status.py` that
+exercise them. Keyed by text, an edit above a row does not move it, and an
+edit to the line itself, a second literal appended to an exempt one say, is
+not covered. A second test fails when a row matches no line or more than
+one, so the set cannot outlive its lines. The test is in the always-run set
+of the changed-files fast path, with the other tree walkers.
 
-Two rows in that set are not the decision's exemptions: one word each in
-`bin/sd` (a docstring listing dot-directories) and `skills/sd-plan/SKILL.md`
-(a list of paths the plan skill may not write). Both files were held by
-#995 when the sweep ran, so the lane left them and marked the rows; the first
-edit that touches either file removes the word and its row. Outside the
+A separate `HELD` set, disjoint from the exemptions by a third test, names
+the two lines the sweep could not reach: one word each in `bin/sd` (a
+docstring listing dot-directories) and `skills/sd-plan/SKILL.md` (a list of
+paths the plan skill may not write). Both files were held by #995 when the
+sweep ran, so the lane left them; the first edit that touches either file
+removes the word and its row, the set may only shrink, and the criterion is
+closed in full when it is empty. Until then the tick above is the sweep's,
+with those two words and the #995 lines below as the named remainder. Outside the
 governed tree, `docs/review-learnings.md` keeps its rows marked
 **historical**, which quote review comments by the paths they named at the
 time, and its one curated lesson about journal sessions.
