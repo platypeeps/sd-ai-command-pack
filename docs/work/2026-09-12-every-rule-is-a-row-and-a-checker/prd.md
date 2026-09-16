@@ -78,9 +78,12 @@ status checks.
    second half was added on 2026-09-13, after a row naming `sd_lib.repo_root`
    passed the first half: the resolver a rule constrains is not a guard on it,
    and "the checker exists" cannot tell the two apart. See requirement 5d.
-   A `repealed` row is the one row this does not reach, and it carries no
-   checker at all: a withdrawn rule has nothing left to run, and a name left
-   in its place is a tombstone that still reads as enforcement.
+   A `repealed` row is the one row this does not reach, and it carries
+   neither a checker nor a proof: a withdrawn rule has nothing left to run, a
+   name left in the checker's place is a tombstone that still reads as
+   enforcement, and a sentence left in the proof's place describes a
+   mutation nothing runs. The registry's own test refuses a value in either
+   field on a repealed row.
 3. **A live registry row records: id, what it checks, its checker as a
    `path::symbol` location, the proof that makes that checker redden, its scope
    (`code`, `prose`, or `both`), and the skill section that teaches it.**

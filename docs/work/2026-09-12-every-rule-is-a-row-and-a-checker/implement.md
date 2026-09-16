@@ -266,8 +266,9 @@
       of `dashboard/now.py`, each in the closed-bold-then-parenthesis form
       the archived `R5-D1` uses. A grammar that reads the archive reads the
       live tree the same way, so those three are ids with a live definition
-      and no row, which neither baseline measures. `R10-D2` no longer has a
-      meter entry for the repeal Dec-4 decided; the repeal is still owed.
+      and no row, which neither baseline measures. `R10-D2` no longer had a
+      meter entry for the repeal Dec-4 decided; the repeal was owed until
+      slice B, below.
 
       **Slice B, 2026-09-16. `R10-D2` is the first `repealed` row; both leg c
       baselines unchanged.** Re-measured on `fa7f870f` before the row was
