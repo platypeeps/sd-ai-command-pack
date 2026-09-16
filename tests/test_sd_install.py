@@ -2740,12 +2740,23 @@ class LinkTests(InstallerHarness):
             ],
         )
         self.assertIn(f"linked 3 commands into {bin_dir}", out.getvalue())
+        # C-35, both ways: this shell's PATH lacks the scratch directory; a
+        # PATH that holds it gets no warning.
+        self.assertIn(f"warning: {bin_dir} is not on PATH in this shell", out.getvalue())
+        again = io.StringIO()
+        on_path = sd_install.Context(
+            checkout=checkout,
+            home=self.home,
+            environ={**os.environ, "PATH": f"/usr/bin{os.pathsep}{bin_dir}"},
+        )
+        self.assertEqual(sd_install.cmd_user(on_path, again), 0)
+        self.assertNotIn("not on PATH", again.getvalue())
 
     def test_user_refuses_a_foreign_file_at_a_target(self):
         """Rule 1: a foreign entry at one target refuses the run before it writes.
 
-        Three foreign shapes, each in its own scratch home: a regular file, a
-        dangling link, and a link into a second checkout's copy. The pre-flight
+        Four foreign shapes, each in its own scratch home: a regular file, a
+        dangling link, a link into a second checkout's copy, and a directory. The pre-flight
         runs before the library is opened, and the expired trial in the
         library is the witness: `expire_trials` would have ended it.
         """
@@ -2764,7 +2775,11 @@ class LinkTests(InstallerHarness):
             (other / "sd-handoff").write_text("#!/bin/sh\n", encoding="utf-8")
             path.symlink_to(other / "sd-handoff")
 
-        for shape in (regular_file, dangling_link, other_checkout):
+        def directory(path: Path, checkout: Path) -> None:
+            # C-28: `os.symlink` over a directory raises after the renders.
+            path.mkdir()
+
+        for shape in (regular_file, dangling_link, other_checkout, directory):
             with self.subTest(shape=shape.__name__):
                 self.setUp()
                 checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
@@ -2809,8 +2824,13 @@ class LinkTests(InstallerHarness):
         """
         checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
         ctx = self.context_for(checkout)
-        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
         bin_dir = self.home / ".local" / "bin"
+        bin_dir.mkdir(parents=True)
+        # C-34: the relative link is the one that gets removed, so a link kept
+        # at install is recognised at uninstall.
+        relative = bin_dir / "sd-handoff"
+        relative.symlink_to(os.path.relpath(checkout / "bin" / "sd-handoff", bin_dir))
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
         scratch = self.home / "scratch"
         scratch.write_text("#!/bin/sh\n", encoding="utf-8")
         unrecorded = bin_dir / "sd-other"
@@ -2818,20 +2838,26 @@ class LinkTests(InstallerHarness):
         retargeted = bin_dir / "sd"
         retargeted.unlink()
         retargeted.symlink_to(scratch)
-        regular = bin_dir / "sd-handoff"
+        regular = bin_dir / "sd-review"
         regular.unlink()
         regular.write_text("#!/bin/sh\n", encoding="utf-8")
+        # C-33: a link row without a target is reported, not an abort.
+        receipt_path = self.home / ".local" / "state" / "sd-ai-command-pack" / "installed.json"
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        receipt["owned"].append({"path": str(bin_dir / "sd-ghost"), "kind": "link"})
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
 
         out = io.StringIO()
         self.assertEqual(sd_install.cmd_uninstall(ctx, out), 0)
 
-        self.assertFalse((bin_dir / "sd-review").is_symlink(), "our link was left")
+        self.assertFalse(relative.is_symlink(), "our relative link was left")
         self.assertTrue(retargeted.is_symlink() and retargeted.resolve() == scratch)
         self.assertTrue(regular.is_file() and not regular.is_symlink())
         self.assertTrue(unrecorded.is_symlink(), "an unrecorded link was removed")
         self.assertTrue(bin_dir.is_dir(), "the link directory was removed")
         self.assertIn(f"left in place (not our link): {retargeted}", out.getvalue())
         self.assertIn(f"left in place (not our link): {regular}", out.getvalue())
+        self.assertIn(f"left in place (malformed link row): {bin_dir / 'sd-ghost'}", out.getvalue())
         # Three renders (one skill, three platforms) and one link.
         self.assertIn("removed 4 file(s)", out.getvalue())
 
@@ -2918,19 +2944,56 @@ class LinkEdgeCaseTests(InstallerHarness):
         self.assertEqual(sd_install.main(["--user", "--bin-dir"], out=out), 2)
         self.assertIn("--bin-dir needs a directory", out.getvalue())
 
-    def test_no_warning_when_the_link_directory_is_on_path(self):
+    def test_a_flagless_run_reuses_the_recorded_bin_dir_and_a_new_flag_relocates(self):
+        """C-30: the receipt carries `binDir`; without the flag the next run links there."""
         checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
-        bin_dir = self.home / "on-path"
+        first = self.home / "first"
+        second = self.home / "second"
         ctx = sd_install.Context(
-            checkout=checkout,
-            home=self.home,
-            environ={**os.environ, "PATH": f"/usr/bin{os.pathsep}{bin_dir}"},
-            bin_dir=bin_dir,
+            checkout=checkout, home=self.home, environ=dict(os.environ), bin_dir=first
         )
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        self.assertEqual(self.receipt["binDir"], str(first))
+
+        plain = self.context_for(checkout)
         out = io.StringIO()
-        self.assertEqual(sd_install.cmd_user(ctx, out), 0)
-        self.assertIn(f"linked 3 commands into {bin_dir}", out.getvalue())
-        self.assertNotIn("not on PATH", out.getvalue())
+        self.assertEqual(sd_install.cmd_user(plain, out), 0)
+        self.assertIn(f"linked 3 commands into {first} (3 already linked)", out.getvalue())
+        self.assertFalse((self.home / ".local" / "bin").exists())
+        self.assertEqual(self.receipt["binDir"], str(first))
+
+        moved = sd_install.Context(
+            checkout=checkout, home=self.home, environ=dict(os.environ), bin_dir=second
+        )
+        self.assertEqual(sd_install.cmd_user(moved, io.StringIO()), 0)
+        self.assertEqual(sorted(first.iterdir()), [])
+        self.assertEqual(
+            sorted(entry.name for entry in second.iterdir()), ["sd", "sd-handoff", "sd-review"]
+        )
+        links = [row["path"] for row in self.receipt["owned"] if row.get("kind") == "link"]
+        self.assertEqual({Path(path).parent for path in links}, {second})
+        self.assertEqual(self.receipt["binDir"], str(second))
+
+    def test_an_unwritable_link_directory_is_the_same_error_as_a_failed_link(self):
+        """C-31: the `mkdir -p` sits inside the `OSError` handling."""
+        checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
+        bin_dir = self.home / ".local" / "bin"
+        real = Path.mkdir
+
+        def refuse(self, *args, **kwargs):
+            if self == bin_dir:
+                raise OSError(13, "Permission denied")
+            return real(self, *args, **kwargs)
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(Path, "mkdir", refuse):
+            rc = sd_install.cmd_user(self.context_for(checkout), out)
+        self.assertEqual(rc, 1)
+        self.assertIn(f"error: could not link {bin_dir / 'sd'} (Permission denied)", out.getvalue())
+        self.assertFalse(bin_dir.exists())
+        self.assertFalse(
+            (self.home / ".local" / "state" / "sd-ai-command-pack" / "installed.json").exists()
+        )
 
     def test_a_dry_run_would_link_and_writes_no_link(self):
         checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
@@ -2994,16 +3057,33 @@ class LinkEdgeCaseTests(InstallerHarness):
         self.assertFalse(
             (self.home / ".local" / "state" / "sd-ai-command-pack" / "installed.json").exists()
         )
-
-    def test_prune_links_skips_a_malformed_row(self):
-        """A link row whose path is not a string is nothing to remove, as in `prune_stale`."""
-        skipped = sd_install.prune_links(
-            [{"path": 7, "kind": "link", "target": "x"}, {"path": "/x", "kind": "hook"}], set()
+        # C-29: the next clean run records every render and every link.
+        self.assertEqual(sd_install.cmd_user(self.context_for(checkout), io.StringIO()), 0)
+        owned = self.receipt["owned"]
+        self.assertEqual(
+            sorted(row["path"] for row in owned if row.get("kind") == "link"),
+            [str(bin_dir / name) for name in ("sd", "sd-handoff", "sd-review")],
         )
-        self.assertEqual(skipped, [])
+        for home in sd_install.platform_homes(self.home, dict(os.environ)):
+            self.assertIn(str(home.target_for("sd-probe")), {row["path"] for row in owned})
+
+    def test_prune_links_reports_a_malformed_row(self):
+        """C-33: a link row whose path or target is not a string is reported, never removed."""
+        skipped = sd_install.prune_links(
+            [
+                {"path": 7, "kind": "link", "target": "x"},
+                {"path": "/y", "kind": "link", "target": 3},
+                {"path": "/x", "kind": "hook"},
+            ],
+            set(),
+        )
+        self.assertEqual(
+            skipped, [("7", "malformed link row"), ("/y", "malformed link row")]
+        )
 
     def test_command_report_ignores_a_command_in_the_working_directory(self):
-        """`PATH=":"` is two empty components, which `which` reads as the working directory."""
+        """`PATH=":"` is two empty components and `PATH="."` a relative one;
+        `which` reads both as the working directory (C-19, C-32)."""
         checkout = self.checkout_with_commands("sd-handoff")
         cwd = self.home / "cwd"
         cwd.mkdir()
@@ -3013,9 +3093,11 @@ class LinkEdgeCaseTests(InstallerHarness):
         previous = os.getcwd()
         self.addCleanup(os.chdir, previous)
         os.chdir(cwd)
-        report = sd_install.command_report(checkout, {"PATH": os.pathsep})
-        self.assertIn("not on PATH", report)
-        self.assertNotIn("shadowed", report)
+        for path in (os.pathsep, ".", f".{os.pathsep}{os.pathsep}"):
+            with self.subTest(PATH=path):
+                report = sd_install.command_report(checkout, {"PATH": path})
+                self.assertIn("not on PATH", report)
+                self.assertNotIn("shadowed", report)
 
 
 if __name__ == "__main__":
