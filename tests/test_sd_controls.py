@@ -292,11 +292,12 @@ class Controls(unittest.TestCase):
             return real(sd_db, write=write)
 
         def bulk(**flags):
-            return argparse.Namespace(
+            fields = dict(
                 control_group="reports", control_action="acknowledge", item=None, if_revision=None,
                 resolve_ingest_followups=False, json=True, all_clean=True, before="2026-09-10",
-                apply=False, if_plan=None, who=None, **flags,
+                apply=False, if_plan=None, who=None,
             )
+            return argparse.Namespace(**{**fields, **flags})
 
         out = io.StringIO()
         with patch.dict(os.environ, {"HOME": str(self.home), "SD_SESSION": "test-session"}), \
@@ -379,6 +380,7 @@ class Controls(unittest.TestCase):
         args = argparse.Namespace(
             control_group="reports", control_action="acknowledge", item=int(report),
             if_revision=revision, resolve_ingest_followups=True, json=True,
+            all_clean=False, before=None, apply=False, if_plan=None, who=None,
         )
         from sd_db import reporting
 

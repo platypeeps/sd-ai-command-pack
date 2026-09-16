@@ -6,11 +6,92 @@ import argparse
 import getpass
 import inspect
 import json
+import os
 from pathlib import Path
 from typing import Any
 
 import sd_handoff_rows
 from sd_work import WorkRefusal
+
+
+#: What the bulk apply records as the acting program, beside the login name
+#: `getpass.getuser()` gives as the principal and the name the caller states.
+BULK_PROGRAM = "sd reports acknowledge"
+
+#: The flags that belong to `--all-clean`. With an item id each is refused,
+#: because the single-item branch would otherwise ignore it: `--who tester`
+#: would acknowledge under the login name, which is the defect sd:755 removes.
+BULK_FLAGS = ("before", "apply", "if_plan", "who")
+
+
+def bulk_cutoff(args: argparse.Namespace, reporting: Any) -> str | None:
+    """The stamped cutoff of a bulk acknowledge, or None for the single-item verb.
+
+    Every refusal here fires before the store is opened, so a refused call
+    can write nothing. The caller gives exactly one of an item id and
+    `--all-clean`; the bulk form needs `--before`; an apply needs both the
+    plan and a stated name (design D4), and neither belongs without `--apply`.
+    The date goes through `reporting.cutoff`, so the value passed on is the
+    one stamp both surfaces write, and a bad one is the helper's refusal.
+    """
+    if args.control_action != "acknowledge":
+        return None
+    given = [f"--{flag.replace('_', '-')}" for flag in BULK_FLAGS if getattr(args, flag) not in (None, False)]
+    if (args.item is None) == (not args.all_clean):
+        raise WorkRefusal("give exactly one of an item id and --all-clean")
+    if args.item is not None:
+        if given:
+            raise WorkRefusal(f"{', '.join(given)}: only with --all-clean, not with an item id")
+        return None
+    if args.before is None:
+        raise WorkRefusal("--all-clean needs --before DATE")
+    if args.apply and (args.if_plan is None or args.who is None):
+        raise WorkRefusal("--apply needs --if-plan TOKEN from the dry run and --who NAME")
+    if not args.apply and (args.if_plan is not None or args.who is not None):
+        raise WorkRefusal("--if-plan and --who go with --apply; leave both off for the dry run")
+    return reporting.cutoff(args.before)
+
+
+def bulk_preview(result: dict[str, Any]) -> str:
+    """The dry run for a person: the rows, then the apply command to paste.
+
+    The last line is the exact apply, with the stamped `before` and the plan
+    filled in and `--who NAME` left for the caller. With no plan there is no
+    apply that could succeed, and the last line says so instead.
+    """
+    lines = [f"clean reports before {result['before']}: {result['count']} selected, "
+             f"{result['declined_count']} declined"]
+    lines += [f"  selected #{row['id']}  {row['created_at']}  {row['title']}" for row in result["selected"]]
+    lines += [f"  declined #{row['id']}: {row['why']}" for row in result["declined"]]
+    if result["plan"] is None:
+        lines.append(f"no apply: a bulk acknowledge moves between 1 and {result['max_batch']} reports")
+    else:
+        lines.append(f"sd reports acknowledge --all-clean --before {result['before']} --apply "
+                     f"--if-plan {result['plan']} --who NAME")
+    return "\n".join(lines)
+
+
+def acknowledge(args: argparse.Namespace, connection: Any, reporting: Any, workflow: Any) -> dict[str, Any]:
+    if args.all_clean:
+        if args.apply:
+            return reporting.acknowledge_clean(connection, before=args.before, expected_plan=args.if_plan,
+                                               who=args.who, principal=getpass.getuser(), program=BULK_PROGRAM,
+                                               session=os.environ.get("SD_SESSION"))
+        return reporting.clean_reports(connection, before=args.before)
+    revision = args.if_revision or workflow.item_state(connection, args.item)["revision"]
+    # The keyword is passed only when the flag is on, so a library
+    # from before system #394 still serves the plain verb. With the
+    # flag on, that library would raise TypeError from inside the
+    # call; the signature is read first so the refusal names the
+    # remedy instead.
+    keywords: dict[str, bool] = {}
+    if args.resolve_ingest_followups:
+        if "resolve_ingest_followups" not in inspect.signature(reporting.acknowledge).parameters:
+            raise WorkRefusal("the installed sd_db takes no --resolve-ingest-followups; "
+                              "run bin/sd_install.py --provision-library")
+        keywords["resolve_ingest_followups"] = True
+    return reporting.acknowledge(connection, args.item, expected_revision=revision, who=getpass.getuser(),
+                                 **keywords)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -19,7 +100,16 @@ def run(args: argparse.Namespace) -> int:
         from sd_db import provider_controls, reporting, workflow
     except ImportError:
         raise WorkRefusal("install the current shared library for provider and report controls") from None
-    connection = sd_handoff_rows.connect(sd_db, write=args.control_action != "list")
+    try:
+        before = bulk_cutoff(args, reporting)
+    except sd_db.SdDbError as error:
+        raise WorkRefusal(str(error)) from error
+    if before is not None:
+        args.before = before
+    # The bulk dry run reads the way `list` does: `write=False` opens SQLite
+    # with `mode=ro` and `query_only`, so nothing it does can write.
+    connection = sd_handoff_rows.connect(sd_db, write=args.control_action != "list"
+                                         and not (before is not None and not args.apply))
     try:
         if args.control_group == "providers":
             if args.control_action == "list":
@@ -36,20 +126,10 @@ def run(args: argparse.Namespace) -> int:
         elif args.control_action == "list":
             result = reporting.reports(connection)
         elif args.control_action == "acknowledge":
-            revision = args.if_revision or workflow.item_state(connection, args.item)["revision"]
-            # The keyword is passed only when the flag is on, so a library
-            # from before system #394 still serves the plain verb. With the
-            # flag on, that library would raise TypeError from inside the
-            # call; the signature is read first so the refusal names the
-            # remedy instead.
-            keywords: dict[str, bool] = {}
-            if args.resolve_ingest_followups:
-                if "resolve_ingest_followups" not in inspect.signature(reporting.acknowledge).parameters:
-                    raise WorkRefusal("the installed sd_db takes no --resolve-ingest-followups; "
-                                      "run bin/sd_install.py --provision-library")
-                keywords["resolve_ingest_followups"] = True
-            result = reporting.acknowledge(connection, args.item, expected_revision=revision, who=getpass.getuser(),
-                                           **keywords)
+            result = acknowledge(args, connection, reporting, workflow)
+            if before is not None and not args.apply and not args.json:
+                print(bulk_preview(result))
+                return 0
         else:
             result = reporting.ingest_log(connection, job=args.job, run_id=args.run_id, started=args.started,
                 ended=args.ended, exit_code=args.exit_code, log_path=args.log, offset=args.offset)
@@ -72,8 +152,19 @@ def register(groups: Any) -> None:
             if action == "configure":
                 command.add_argument("--file", required=True, help="JSON containing revision, enabled flags and both role orders")
             if action == "acknowledge":
-                command.add_argument("item", type=int)
+                command.add_argument("item", type=int, nargs="?")
                 command.add_argument("--if-revision")
+                command.add_argument("--all-clean", action="store_true",
+                                     help="every clean planning report filed before --before, as retention "
+                                          "would settle it: a dry run that writes nothing and prints the plan "
+                                          "token; --apply moves exactly that plan or nothing")
+                command.add_argument("--before", metavar="DATE",
+                                     help="the cutoff, YYYY-MM-DD meaning 00:00 UTC, or that exact stamp")
+                command.add_argument("--apply", action="store_true",
+                                     help="move the previewed selection; needs --if-plan and --who")
+                command.add_argument("--if-plan", metavar="TOKEN", help="the plan the dry run printed")
+                command.add_argument("--who", metavar="NAME",
+                                     help="the name recorded as acting, beside the login and this program")
                 command.add_argument("--resolve-ingest-followups", action="store_true",
                                      help="also resolve the followup the ingest itself wrote for this report "
                                           "(session cron, the text derived from the report's own fields), in "
