@@ -108,13 +108,15 @@ before starting step 2.
 
       Verify, and the important half is a negative:
       `launchctl list | grep com.sven.sd-dashboard` still lists the label
-      after the change, the process on `:8767` is still that LaunchAgent's, and
+      after the change; the PID it prints beside the label is the PID
+      `lsof -nP -iTCP:8767 -sTCP:LISTEN` prints for the listener, the two read
+      at one moment, which is what ties the port to the LaunchAgent; and
       `plutil -extract ProgramArguments json -o - ~/Library/LaunchAgents/com.sven.sd-dashboard.plist`
       still prints the system `dashboard.sh` as element 0 — asserted **after**
       the change and before it, so the pair is evidence rather than a hope. The
-      PID is recorded, not compared: it was 37095 when this plan was measured
-      and 76442 when step 1 landed, and every owner-approved restart changes
-      it (review-909 N3). Then
+      PID is never compared across runs: it was 37095 when this plan was
+      measured and 76442 when step 1 landed, and every owner-approved restart
+      changes it (review-909 N3). Then
       `grep -rn "com.sven.sd-dashboard" bin/ dashboard/ tests/` prints nothing:
       the pack no longer names a label it does not own. Then
       `grep -rn "sd-dashboard serve\|sd-dashboard install" . --include='*.md'
@@ -425,10 +427,10 @@ before starting step 2.
       `var noteKinds = ["followup", "comment", "question", "decision", "proposal"]`
       still owns the word `followup` as a note kind, and the form has no path
       to file a followup *item*, the kind `sd task add --kind followup`
-      creates. The system commit adds that path, or records here why it does
-      not; what it may not do is leave the word meaning one thing on the form
-      and another in the store. Verify: a filing through the form produces an
-      item of kind `followup`, and the note-kind path still produces a note.
+      creates. The system commit adds that path; the sub-step has no other
+      completion, and the word may not go on meaning one thing on the form and
+      another in the store. Verify: a filing through the form produces an item
+      of kind `followup`, and the note-kind path still produces a note.
       Verify: `band` (in `dashboard/app.js`)'s severity mapping is reproduced on
       the system page, asserted against the same rank numbers; a fixture
       collector that exits non-zero produces a visible row in the merged view;
@@ -581,12 +583,13 @@ before starting step 2.
 
 - **The negative that matters most is step 1's.** After `serve` and `install` are
   gone, `launchctl list | grep com.sven.sd-dashboard` still lists the label,
-  the process on `:8767` is still that LaunchAgent's, and the plist's
-  `ProgramArguments[0]` is still the system `dashboard.sh`. Asserted before
-  and after, because "it still works" is only evidence if the before was
-  recorded. The PID is part of the record (37095 at planning, 76442 when step
-  1 landed) and not of the check: an owner-approved restart changes it
-  (review-909 N3).
+  the PID beside it is the PID `lsof -nP -iTCP:8767 -sTCP:LISTEN` reports,
+  the two read at one moment, and the plist's `ProgramArguments[0]` is still
+  the system `dashboard.sh`. Asserted before and after, because "it still
+  works" is only evidence if the before was recorded. The PID is compared
+  within one reading and never across two: it is part of the record (37095 at
+  planning, 76442 when step 1 landed), and an owner-approved restart changes
+  it (review-909 N3).
 - **The ceiling claim is proved by a failure, not by a pass.** The step-3
   preparatory commit is correct only if `test_the_recorded_history_is_raises_only`
   is red *before* it and green *after*, with `ceiling_moves()` printing

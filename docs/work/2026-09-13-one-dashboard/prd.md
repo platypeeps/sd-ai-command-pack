@@ -171,8 +171,9 @@ divide.
      loads `collectors.py` by path through `importlib` and calls `collect_ports`
      **in-process**, with `timeout=12`.
 
-   Only `queues` has no system-side path. So the premise that the pack's loader
-   is "the only renderer of the six legacy collector tabs" is false for five of
+   Only `queues` had no system-side path when this was written; step 2 gave it
+   one, as the fifth `VIEWS` entry. So the premise that the pack's loader is
+   "the only renderer of the six legacy collector tabs" was false for five of
    them, and requirement 3 is written against what is there rather than against
    that premise.
 
@@ -302,8 +303,9 @@ decision whose evidence has been deleted cannot be reviewed later.
 - [ ] All six legacy views — `toolbox`, `briefs`, `vault`, `research`, `ports`,
       `queues` — are reachable on :8767, each failing on its own rather than
       taking a screen down with it, and the pack's loader is deleted only after
-      the sixth arrives. Five are reachable today; `queues` is the one to add.
-      The check enumerates from the system package's own declaration rather than
+      the sixth arrives. Five were reachable when this was written; step 2 added
+      `queues`, and step 3 deleted the loader after it, in that order. The
+      check enumerates from the system package's own declaration rather than
       from this list, because a list in prose drifts and a tuple does not.
 - [ ] Every one of the five behaviours `design.md` names out of `app.js` is
       recorded as ported, with the system-side location, or as dropped, with the
