@@ -22,14 +22,22 @@ BULK_PROGRAM = "sd reports acknowledge"
 #: would acknowledge under the login name, which is the defect sd:755 removes.
 BULK_FLAGS = ("before", "apply", "if_plan", "who")
 
+#: The flags that belong to an item id, refused with `--all-clean` for the
+#: same reason in the other direction: the bulk verb checks a plan, not a
+#: revision, and never resolves a followup, so a flag it read and ignored
+#: would let the caller believe it did.
+ITEM_FLAGS = ("if_revision", "resolve_ingest_followups")
+
 
 def bulk_cutoff(args: argparse.Namespace, reporting: Any) -> str | None:
     """The stamped cutoff of a bulk acknowledge, or None for the single-item verb.
 
     Every refusal here fires before the store is opened, so a refused call
     can write nothing. The caller gives exactly one of an item id and
-    `--all-clean`; the bulk form needs `--before`; an apply needs both the
-    plan and a stated name (design D4), and neither belongs without `--apply`.
+    `--all-clean`; the item flags do not go with `--all-clean` and the bulk
+    flags do not go with an item id; the bulk form needs `--before`; an apply
+    needs both the plan and a stated name (design D4), and neither belongs
+    without `--apply`.
     The date goes through `reporting.cutoff`, so the value passed on is the
     one stamp both surfaces write, and a bad one is the helper's refusal.
     """
@@ -42,6 +50,9 @@ def bulk_cutoff(args: argparse.Namespace, reporting: Any) -> str | None:
         if given:
             raise WorkRefusal(f"{', '.join(given)}: only with --all-clean, not with an item id")
         return None
+    stray = [f"--{flag.replace('_', '-')}" for flag in ITEM_FLAGS if getattr(args, flag) not in (None, False)]
+    if stray:
+        raise WorkRefusal(f"{', '.join(stray)}: only with an item id, not with --all-clean")
     if args.before is None:
         raise WorkRefusal("--all-clean needs --before DATE")
     if args.apply and (args.if_plan is None or args.who is None):
