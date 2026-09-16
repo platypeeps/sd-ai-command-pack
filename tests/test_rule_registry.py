@@ -430,6 +430,12 @@ def cited_rule_ids(*, live_only: bool) -> set[str]:
     return found
 
 
+def definitions_in(relative: str, text: str) -> set[str]:
+    """Every rule id one file defines, by the forms `DEFINITION` names."""
+
+    return set(DEFINITION.findall(text))
+
+
 def defined_rule_ids(*, live_only: bool) -> set[str]:
     """Every rule id a document defines, by the bold-run form."""
 
@@ -437,7 +443,7 @@ def defined_rule_ids(*, live_only: bool) -> set[str]:
     for relative, text in read_corpus():
         if live_only and relative.startswith(ARCHIVE):
             continue
-        found.update(DEFINITION.findall(text))
+        found.update(definitions_in(relative, text))
     return found
 
 
@@ -1148,6 +1154,81 @@ the entry outright when it reaches zero.""")
 # --------------------------------------------------------------------------
 # Leg c -- every rule id cited in live prose resolves
 # --------------------------------------------------------------------------
+
+
+class TheDefinitionGrammar(unittest.TestCase):
+    """What leg c reads as a definition, held against the forms the corpus uses.
+
+    Measured on `239ff624`, three of the four ids `DANGLING_RULE_IDS` then
+    carried were not undefined at all. Each had a definition in a form the
+    bold-run grammar could not see: a table cell, a heading, and a bold run
+    closed before the parenthesised id. A grammar that sees only one of the
+    ways this repository writes a definition reports the other three as
+    missing, and a baseline built on it records a false finding as a fact.
+    """
+
+    #: One line per form, verbatim from the archive on `239ff624` except for
+    #: the ids, which are fixture ids so that this docstring is not a live
+    #: citation of anything. The line numbers those forms stand at are in
+    #: the step-4 slice paragraph of this item's `implement.md`.
+    FORMS = {
+        "a table cell": (
+            "| local exo :52415 (R98-D1, user 2026-08-29 — replaces llama.cpp "
+            "row) | openai-compatible adapter | $0 |"),
+        "a heading": "## PR 1 — R98-D2, re-derive `DASHBOARD_CAP`",
+        "a bold run closed before the parenthesised id": (
+            "| Decision queues | **Obsidian vault stays system-of-record** "
+            "(R98-D3); accessed via `sd store` |"),
+        "a bold run containing the id": (
+            "**Re-derived 2026-09-07 as R98-D4, because the first figure here "
+            "had gone ten\ntimes stale.** This section originally read 12,416 "
+            "lines."),
+        "a bold run opening with the id": "**R98-D5, 2026-09-06: the code cap "
+                                          "is payable in kind.** Until this",
+    }
+
+    def test_every_form_the_corpus_writes_a_definition_in_is_seen(self):
+        """Each shape in `FORMS` defines the one id it carries."""
+
+        for form, text in self.FORMS.items():
+            with self.subTest(form=form):
+                expected = set(sd_rules.RULE_ID.findall(text))
+                self.assertEqual(definitions_in("docs/work/archive/x/design.md",
+                                                text), expected, form)
+
+    def test_a_mention_is_not_a_definition(self):
+        """The forms above are not "the id appears near some markup".
+
+        Each control here is a way the widened grammar could over-read that
+        was measured on `2eafa78b` to move an id out of a baseline for the
+        wrong reason. A quoted example of a definition is a citation of the
+        form, not a definition, so the id inside a code span never counts;
+        the plain text between two bold runs is not bold; a `#` line in a
+        file that is not Markdown is a comment, and a comment cites.
+        """
+
+        controls = {
+            "an id in a code span inside a bold run": (
+                "docs/work/x/implement.md",
+                "**A stranded id no earlier revision names: `R98-D6`.**"),
+            "a quoted definition inside a code span": (
+                "docs/work/x/implement.md",
+                "`R98-D7` is written `**Obsidian vault stays\n"
+                "system-of-record** (R98-D7)` in the archive."),
+            "plain text between two bold runs": (
+                "docs/work/x/implement.md",
+                "**Slice 1.** `R98-D8` is a row now, and R98-D8 stays. "
+                "**Slice 2.**"),
+            "a comment line in a Python file": (
+                "tests/test_x.py",
+                "# R98-D9, re-derived 2026-09-07: the ceiling is 4,600."),
+            "a table row in a Python file": (
+                "bin/x.py",
+                "    rows = a | b(R98-D10)"),
+        }
+        for control, (relative, text) in controls.items():
+            with self.subTest(control=control):
+                self.assertEqual(definitions_in(relative, text), set(), control)
 
 
 class LegC(unittest.TestCase):
