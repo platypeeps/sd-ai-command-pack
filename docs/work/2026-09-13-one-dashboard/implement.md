@@ -35,7 +35,7 @@ before starting step 2.
 
 ## Step checklist
 
-- [ ] **0. sd:361, to completion.** Its own `implement.md` is the plan and this
+- [x] **0. sd:361, to completion.** Its own `implement.md` is the plan and this
       item does not restate it. State on `main` at `e80153ee`: steps 1 and 2 are
       `[x]`; step 3 is `[ ]` in the file but **has landed** as system pull
       request #312, squash `b05d684a`, which added
@@ -53,6 +53,17 @@ before starting step 2.
       would read as a pass. **Do not mark step 3 done in sd:361's file from this lane**;
       that item's owner holds the file, and editing it here is the cross-lane
       write sd:525 objects to. Record the landing as a note on sd:361 instead.
+
+      **Done: sd:361 closed on 2026-09-16, and its closing commit is pack pull
+      request #988, squash `2eafa78b`, which ticked its steps 8 and 9.** All
+      ten lines of its checklist are `[x]` at that commit. The verification
+      above, re-run at that commit from the pack's venv:
+      `python -c "import sd_db; print(sd_db.TRACKERS)"` prints
+      `('github', 'jira')`, and the installed library reports `SCHEMA_VERSION`
+      9 where the paragraph above measured 8. `git ls-tree a5347185 -r
+      --name-only | grep shadow_jira` in `/Users/sven/repos/system` still
+      returns both paths. The owner's check of the issues tab is sd:361's note
+      2542, recorded on that item and not restated here.
 
 - [x] **1. `serve` and `install` are removed; `index` stays.** Every
       `bin/sd-dashboard` line number in this step's plan is as of `e80153ee`,
@@ -131,9 +142,9 @@ before starting step 2.
       nothing in the pack changes. `queues` is the one of the six legacy views
       with no system-side path — the other five already render, four through the
       `collect` at
-      /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:44
+      /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:83
       and `ports` in-process through the `_collect` at
-      /Users/sven/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py:12.
+      /Users/sven/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py:32.
       `queues` reads module state in `collectors.py` rather than a `collect_*`
       function, so it is not a fifth entry in `VIEWS` by construction; the
       decision of whether it joins that tuple or takes its own screen belongs to
@@ -152,7 +163,10 @@ before starting step 2.
       the on-screen failure. The dashboard suite ran `Ran 336 tests ... OK` on
       that head.
 
-- [x] **3. The plugin loader retires, and the manifest loses two keys.** System
+- [x] **3. The plugin loader retires, and the manifest loses two keys.** Every
+      `dashboard/` and `tests/test_code_health.py` line number in this step's
+      plan is as of `a8295266`, where it was measured; the step has landed and
+      every line it names is deleted or has moved. System
       commit first, and it is not nothing: **remove the `tabs` and `tile` keys
       from `/Users/sven/repos/system/sd-plugin.json`.** They are the system half
       of this step because they advertise a discovery contract to the registry,
@@ -305,7 +319,7 @@ before starting step 2.
       |---|---|---|
       | `dashboard/server.py` | `:43` | imports `collect` and `store`; survives to step 6, so this commit drops both from the import line and the endpoints behind them. |
       | `bin/sd-dashboard` | `:29` | `from dashboard import collect, store` (step 1 removed `server`) — `store` goes with `issue_lines` (`source:bin/sd-dashboard::issue_lines`) and the `index` verb this step deletes. |
-      | `bin/sd` | `:2728` | `from dashboard.collect import discover_checkouts, repo_root`, inside `sd plugin list --fleet`. **This one is not a dashboard file and nothing in this plan would otherwise touch it.** |
+      | `bin/sd` | `:2729` | `from dashboard.collect import discover_checkouts, repo_root`, inside `sd plugin list --fleet`. **This one is not a dashboard file and nothing in this plan would otherwise touch it.** |
       | `bin/sd-trackers` | `:42` | `from dashboard import github, jira`. The whole tool is built on the two modules this step deletes, so it retires in the same commit or it is a broken entry point. |
 
       **`dashboard/collect.py` is not deleted here. It moves to step 5**, which is
@@ -357,11 +371,11 @@ before starting step 2.
       **`dashboard/server.py` imports all three and survives to step 6, so this
       commit edits it too.** `sessions` and `skills` arrive on the import line at
       `dashboard/server.py:43`; the calls are `sessions.fleet_worktrees` at
-      `dashboard/server.py:472`, `sessions.collect_sessions` at `:478` and
-      `skills.collect_skills` at `:485`. The `/api/sessions` and `/api/skills`
+      `dashboard/server.py:490`, `sessions.collect_sessions` at `:495` and
+      `skills.collect_skills` at `:502`. The `/api/sessions` and `/api/skills`
       endpoints go with their modules, and `/api/now` loses the session rows it
-      merges at `:472`. `bin/sd`'s `from dashboard.collect import ...`
-      (`bin/sd:2728`) is the other caller and `sd plugin list --fleet` loses its
+      merges at `:490`. `bin/sd`'s `from dashboard.collect import ...`
+      (`bin/sd:2729`) is the other caller and `sd plugin list --fleet` loses its
       fleet walk in this commit. Deleting the three modules and leaving the server
       is a pack that does not import, and the next step is the one that would have
       noticed.
@@ -393,6 +407,19 @@ before starting step 2.
       decision is instead to build a CLI verb, that verb is a prerequisite item and
       this step waits on it; what it may not be is undecided at the moment
       `work.py` is deleted.
+
+      **6a. The capture form's followup path, in this step's system commit.**
+      sd:730 closed on 2026-09-16 (its note 2527), and its owner decision (note
+      1844) sent one piece of scope here: filing a standalone followup item
+      from the dashboard. The capture form is a system file,
+      `local-project-dashboard/sd_dashboard/static/dashboard.js`, whose
+      `var noteKinds = ["followup", "comment", "question", "decision", "proposal"]`
+      still owns the word `followup` as a note kind, and the form has no path
+      to file a followup *item*, the kind `sd task add --kind followup`
+      creates. The system commit adds that path, or records here why it does
+      not; what it may not do is leave the word meaning one thing on the form
+      and another in the store. Verify: a filing through the form produces an
+      item of kind `followup`, and the note-kind path still produces a note.
       Verify: `band` (in `dashboard/app.js`)'s severity mapping is reproduced on
       the system page, asserted against the same rank numbers; a fixture
       collector that exits non-zero produces a visible row in the merged view;
@@ -439,6 +466,14 @@ before starting step 2.
       preparatory commit that rewrites only the `downward == 0` assertion lands red
       on this one, reporting a repeated ceiling value that never happened.
 
+      **(c) has been done, as R11-D49 in pull request #922, before step 3's
+      pack commit.** The line numbers in (c) are as of `a8295266`, where they
+      were measured. At `2eafa78b` the test
+      (`source:tests/test_loc_caps.py::test_the_recorded_history_is_raises_only`)
+      permits a recorded fall on `DASHBOARD_CODE_CAP` alone, its second
+      assertion reads `upward + downward == values - len(CEILING_HISTORY)`, and
+      the module docstring carries an R11-D49 paragraph after R11-D41's.
+
       So (c) goes red on **step 3**, not on step 7. The order that follows:
       step 3's pack commit is preceded by its own preparatory commit — a new
       R-id — that rewrites (c)'s assertion and the R11-D41 paragraph and makes a
@@ -462,8 +497,10 @@ before starting step 2.
       **The empty directory breaks more than the caps, and all of it retires in
       this commit.** Enumerated from the tree rather than recalled:
 
-      - `Makefile:45` passes `dashboard` to Ruff and `Makefile:46` passes it to
-        mypy, so `make check` fails on a path that no longer exists.
+      - `LINT_RUFF_PATHS := dashboard $(LINT_BIN) tests` and
+        `LINT_MYPY_PATHS := dashboard $(LINT_BIN)` in the `Makefile` pass
+        `dashboard` to Ruff and to mypy, so `make check` fails on a path that
+        no longer exists.
       - `tests/test_code_health.py` still holds `dashboard/` baseline entries for
         whatever steps 3 to 6 have not already retired, and
         `test_every_baseline_entry_still_earns_its_place` fails on each one.
