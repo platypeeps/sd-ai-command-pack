@@ -73,27 +73,30 @@ jobs:
       # using something the old pin does not carry, and only then: the suite
       # fails on a skip, so a capability the library lacks is a red run here
       # rather than a quietly unexercised test. It last moved for sd:719
-      # (system main after #411, `4b240d28`), and this move is only ahead of
-      # the pack, never behind: no pack test is red at `9d86f092` and green
-      # here, and nothing in `bin/` reaches what the range adds. It moves
-      # because the operator's venv is installed from system main (sd:962,
-      # #403, `c248d82`: the dashboard refuses to start when the installed
-      # `sd_db` lacks the checkout's library commit), so the library this
-      # suite runs against should be the one the operator runs. The move is
-      # migration-free: `9d86f092..4b240d28` touches nothing under
-      # `sd_db/schema` and `SCHEMA_VERSION` stays 9. Of the seventeen
-      # commits in that range, seven change `sd_db`, and the ones that
-      # could reach a pack test are the three in `reporting`, which
-      # `bin/sd_controls.py` ingests and acknowledges through and
-      # `tests/test_sd_controls.py` runs against a real store: an absent
-      # report `fields` has one meaning, `reporting.UNREADABLE_FIELDS`, at
-      # retention, the bulk clean, the backlog and the page (sd:873, #395,
-      # `34eef64`; also `reads` and `retention`), a run that repeats an open
-      # attention report folds into it with a count (sd:920, #398,
-      # `5e2f58a`), and a folded run's replay after the acknowledge answers
-      # with the done report (sd:955, #401, `8aa750e`). `ingest`,
-      # `acknowledge`, `ingest_log` and `reports` keep their signatures. The
-      # other four change only what nothing in `bin/` imports: `removal`
+      # (system main after #411, `4b240d28`), the one exception so far to
+      # that rule: no pack test is red at `9d86f092` and green here, and
+      # nothing in `bin/` imports what the range adds (`ledger`, the
+      # `removal` surface), though three commits change `reporting`
+      # behind the calls `bin/sd_controls.py` makes, named below. It moves
+      # for parity, not capability: the operator's venv is installed from
+      # system main (sd:962, #403, `c248d82`: the dashboard refuses to
+      # start when the installed `sd_db` lacks the checkout's library
+      # commit), so the library this suite runs against is the one the
+      # operator runs. The move is migration-free: `9d86f092..4b240d28`
+      # touches neither `sd_db/schema.py` nor anything under `sd_db/schema`,
+      # and `SCHEMA_VERSION` stays 9. Of the seventeen commits in that
+      # range, seven change `sd_db`, and the ones that could reach a pack
+      # test are the three in `reporting`: `bin/sd_controls.py` calls its
+      # `ingest`, `acknowledge`, `ingest_log` and `reports`, and
+      # `tests/test_sd_controls.py` runs them against a real store. A
+      # report whose `fields` is absent or unreadable has one meaning,
+      # `reporting.UNREADABLE_FIELDS`, at retention, the bulk clean, the
+      # backlog and the page (sd:873, #395, `34eef64`; also `reads` and
+      # `retention`), a run that repeats an open attention report folds
+      # into it with a count (sd:920, #398, `5e2f58a`), and a folded run's
+      # replay after the acknowledge answers with the done report (sd:955,
+      # #401, `8aa750e`). The four calls keep their signatures. The other
+      # four change only what nothing in `bin/` imports: `removal`
       # (sd:795, #399, `a24b6a7`; sd:956, #400, `660ec6c`; sd:754, #407,
       # `20c9497`) and the new `ledger` (sd:234, #406, `4b240d2`), which
       # `sd_db.__init__` re-exports. The rest do not touch `sd_db`: #403,
