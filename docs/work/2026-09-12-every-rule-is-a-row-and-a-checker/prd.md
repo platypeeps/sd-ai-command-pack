@@ -174,9 +174,12 @@ status checks.
       `UNCITED_SKILL_CLAIMS`, and a test asserts it may fall and may not rise.
       The control asserting that a *correctly cited* claim does not redden it
       stands unchanged and is met.
-- [ ] Meta-check leg c reports the 4 currently dangling R-ids — `R11-D1`,
-      `R11-D30`, `R11-D46`, `R5-D1` — as failures on the first run over live
-      prose, and reports zero once they are resolved or registered.
+- [x] Meta-check leg c reports zero dangling R-ids: `DANGLING_RULE_IDS` is
+      `frozenset()` since S2 (`fa7f870f`, 2026-09-16). The first run, on
+      `cddd3b98`, named exactly four — `R11-D1`, `R11-D30`, `R11-D46` and
+      `R5-D1` — and S2 resolved them by reading the definition forms the
+      first grammar could not see, not by registering or repointing any of
+      them; the record is under step 4 of `implement.md`.
 - [ ] The baselines for legs b and c are recorded with the measured numbers
       above, and a test asserts a baseline may fall and may not rise.
 - [ ] `make test` — the repository's own runner, sharding `python -m unittest`
@@ -231,3 +234,8 @@ status checks.
   divergence as an accepted gap, and retires the three step-7 timings, which no
   longer reproduce. The owner decisions of 2026-09-14 (note 1989) are written
   onto the questions in `implement.md` that they answer
+- 2026-09-16 step 4 slice B: `R10-D2` is the first `repealed` row (Dec-4),
+  with no checker and no proof; the tombstone invariant now refuses a proof
+  on a repealed row as well as a checker. Neither leg c baseline moved, and
+  the leg c acceptance criterion above is rewritten to the measured state:
+  zero dangling since S2

@@ -304,9 +304,11 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 #: `skills/sd-handoff/SKILL.md` for `R10-D2`, `CONTRIBUTING.md` for `R11-D4`,
 #: the module docstring of `dashboard/now.py` for `R11-D20` -- and a grammar
 #: that reads the archive reads the live tree the same way. None of the three
-#: is registered; each is now an id with a live definition and no row, which
-#: is not what this set measures. `R10-D2` in particular no longer has a
-#: meter entry for the repeal Dec-4 decided.
+#: was registered by S2; each became an id with a live definition and no row,
+#: which is not what this set measures. `R10-D2` in particular no longer had
+#: a meter entry for the repeal Dec-4 decided, so when that repeal landed as
+#: the first `REPEALED` row, on 2026-09-16, this set did not move for it.
+#: `R11-D4` and `R11-D20` are still rowless.
 #:
 #: The rest were each looked at and each has a recorded reason it is not a
 #: row yet, in the backfill section of this item's `implement.md`, rather

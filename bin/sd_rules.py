@@ -93,12 +93,13 @@ LIVE = "live"
 
 #: A rule that has been withdrawn. Its id stays in the table forever.
 #:
-#: This state exists before the first repeal rather than after it, because a
+#: This state existed before the first repeal rather than after it, because a
 #: repealed id must never become reusable: live prose citing `R5-D1` must not
 #: quietly start resolving to whatever rule next claims that id. A repealed row
-#: carries no checker -- there is nothing left to enforce -- and no skill has
-#: to teach it, so leg a skips it. Leg c still resolves it, which is the point:
-#: prose citing a repealed rule is answered, not left dangling.
+#: carries no checker and no proof -- there is nothing left to enforce -- and
+#: no skill has to teach it, so leg a skips it. Leg c still resolves it, which
+#: is the point: prose citing a repealed rule is answered, not left dangling.
+#: The first row to carry it is `R10-D2`, below.
 REPEALED = "repealed"
 
 #: The scopes a rule can have. `code` rules read source, `prose` rules read the
@@ -210,7 +211,7 @@ RULES: tuple[Rule, ...] = (
                 "the carrier branch, converts it to draft before pushing "
                 "and suppresses the Copilot re-request, so the once-per-head "
                 "rule does not fire on the moved head",
-        checker="bin/sd-handoff::resolve_root",
+        checker=None,
         proof=None,
         scope="code",
         teaches="skills/sd-handoff/SKILL.md#"

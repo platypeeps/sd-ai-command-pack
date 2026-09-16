@@ -166,7 +166,7 @@
       | Id | Taught in | Why it is not a row yet |
       |---|---|---|
       | `R10-D1` | `skills/sd-status/SKILL.md` | `bin/sd-status` carries the id in two strings, one of them the `CLASSES` row whose text the skill's table mirrors. The second-list check wants it out of the string; leg a reads the skill table it would have to change. **Decided 2026-09-14 (owner, note 1989):** rewrite the `CLASSES` row and the reason string to drop the literal id and keep the citation in the adjacent comment — the rephrasing the check's own failure text prescribes, and what `R10-D5` did — and only after sd:10 retires the planning-age sweep, because `bin/sd_sweep.py` is where the threshold this rule constrains lives today. |
-      | `R10-D2` | `skills/sd-handoff/SKILL.md` | The section that teaches it says Lane B is *not implemented*. A live row with a checker would assert an enforcement that does not exist, which is the defect this item is about. **Decided 2026-09-14 (owner, note 1989):** it is repealed in the registry — `state=REPEALED`, no checker. Leg c still resolves the citation; leg a skips a repealed row; and a live false enforcement claim becomes an answered citation. This is the first use of the tombstone state the design says must exist before the first repeal, not after. |
+      | `R10-D2` | `skills/sd-handoff/SKILL.md` | The section that teaches it says Lane B is *not implemented*. A live row with a checker would assert an enforcement that does not exist, which is the defect this item is about. **Decided 2026-09-14 (owner, note 1989):** it is repealed in the registry — `state=REPEALED`, no checker. Leg c still resolves the citation; leg a skips a repealed row; and a live false enforcement claim becomes an answered citation. This is the first use of the tombstone state the design says must exist before the first repeal, not after. **Landed 2026-09-16, slice B**, see the paragraph under S2 below. |
       | `R10-D3` | `skills/sd-handoff/SKILL.md` | Its enforcement lives in `bin/sd-handoff-restore`, which has no `.py` suffix. **The import obstacle recorded here is gone** — a `path::symbol` location needs no import and the path needs no suffix. What is left is leg d: the row needs a mutation that reddens a named test, and finding one for a restore path is the work. |
 
       **A stranded id no earlier revision of this document names: `R10-D7`.**
@@ -269,6 +269,33 @@
       and no row, which neither baseline measures. `R10-D2` no longer has a
       meter entry for the repeal Dec-4 decided; the repeal is still owed.
 
+      **Slice B, 2026-09-16. `R10-D2` is the first `repealed` row; both leg c
+      baselines unchanged.** Re-measured on `fa7f870f` before the row was
+      written: `R10-D2` is in neither `STRANDED_RULE_IDS` nor
+      `DANGLING_RULE_IDS`, because S2's widened grammar reads its definition
+      at `skills/sd-handoff/SKILL.md:123` (`**suppress the Copilot
+      re-request** (R10-D2)`), so the fail-first the plan-pack brief named
+      for this slice — leave the id in the stranded set and watch the
+      baseline redden — was stale, and the tombstone invariant is the
+      fail-first instead. `source:bin/sd_rules.py::STATES` allows `live` and
+      `repealed` and nothing else; this is the first row to carry the
+      second. The row holds `checker=None` and `proof=None`, and its
+      `teaches` names the heading at `skills/sd-handoff/SKILL.md:118`, the
+      section whose title says Lane B is not implemented. Fail-first: the row
+      arrived with a checker string, and
+      `test_every_live_rule_names_a_checker_that_exists` reddened with
+      `R10-D2: repealed, but still holds checker='bin/sd-handoff::resolve_root'`;
+      with `checker=None` the module passes, 30 tests. The invariant was
+      widened in the same change to refuse a `proof` on a repealed row: a
+      proof with no checker was already refused by the pairing check, but as
+      a proof with no checker, which is true and is not the diagnosis.
+      Mutations, each on a byte copy and restored by `diff -q`: a proof on the
+      row reddens the invariant with `repealed, but still holds proof=...`;
+      the row flipped to `live` reddens it with `live, but names no checker`.
+      What no check holds: deleting the row. `R10-D2` is defined live, so it
+      would leave no baseline entry behind — the "defined live, no row" gap
+      S2 recorded, still an owner question on the item.
+
 - [ ] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become
       registry rows pointing at the existing checkers — no new enforcement, only
@@ -350,8 +377,13 @@ the rest of it.
   asserting the case that *should* succeed.
 - Baselines: `pytest` the baseline test with the number raised by one; it must
   go red. A baseline that does not redden when raised is not a ratchet.
-- Leg c's first run must name exactly `R11-D1`, `R11-D30`, `R11-D46` and
-  `R5-D1`. More or fewer means the live-prose scope is wrong.
+- Leg c's dangling set is empty: `DANGLING_RULE_IDS` is `frozenset()` since
+  S2 (`fa7f870f`), because `source:tests/test_rule_registry.py::definitions_in`
+  reads every form the corpus writes a definition in. The first run, on
+  `cddd3b98`, named exactly the four ids the one-form grammar could not see,
+  and that measurement is recorded under step 4; it is no longer the
+  criterion. The criterion now is that the set stays empty: a new id in it
+  means live prose cites a rule no document defines and no row carries.
 - Full suite through the repository's own runner: `make test`, which runs
   `.github/scripts/run-tests.sh` and shards `python -m unittest` across workers.
   That is the authoritative suite and the one CI gates on. A focused run is
