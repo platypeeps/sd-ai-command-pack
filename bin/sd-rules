@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Print the live registry rows in scope for the file about to be written.
+
+    sd-rules --for <path> [--json]
+
+This is the authoring tier of the rule registry: the first of the three call
+sites `design.md` names for one table, and the one that runs while the author
+is still in the file rather than at pre-commit or in CI. A skill's setup step
+calls it for the file it is about to write and gets, per live row in scope,
+the id, the subject and the section that teaches it. The skill then cites the
+rule id; it does not restate the rule, because two copies of a sentence are two
+things that can disagree.
+
+**The rows come off `sd_rules.RULES` at call time.** Nothing here holds a rule
+id, a scope or a checker of its own; `test_no_consumer_carries_a_second_list`
+in `tests/test_rule_registry.py` is what holds this file to that, and it is
+why the fixture tables in `tests/test_sd_rules_for.py` can be patched in.
+
+**The scope rule, exactly.** A row's `scope` is `code`, `prose` or `both`. A
+path is `prose` when its name ends in `.md` or `.markdown`, compared without
+regard to case, and `code` otherwise -- which is the rule `points_into_code`
+in `tests/test_doc_citations.py` applies to decide whether a citation target
+is a page, and the corpus split the registry's own legs read: prose is the
+tracked markdown, code is everything under `bin/` and `tests/`. A row is in
+scope when its `scope` is `both` or equals the path's class, and its `state`
+is `live`; a repealed row is never printed, because there is nothing left to
+teach. The path is read for its name only: the file being written is the one
+that may not exist yet, so existence is not required. `tests/test_sd_rules_for.py`
+binds this classifier to `points_into_code` so the two cannot drift.
+
+**Exit codes.** `0` with one block per row, in id order -- numerically by
+round and decision, so a decision numbered 4 precedes one numbered 10 rather
+than following it as text would have it. `0` with the sentence
+`no rule in scope for <path>` when no row matches: an empty answer is an
+answer, not a failure. `2` on a bad path -- one that is an existing directory,
+one that resolves outside the repository the working directory is in, one the
+platform will not resolve at all (an embedded NUL, say), or any path when the
+working directory is not inside a git repository -- with one
+sentence on stderr and nothing on stdout. The repository comes from the working
+directory and from nothing else (R10-D6); there is no flag that names another.
+
+**Not `sd rules`.** The owner decision of 2026-09-16 names either spelling. The
+standalone command lands first because `bin/sd` was held by another lane on
+the day; a one-line `sd rules` alias into `bin/sd` is its own later slice.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import pathlib
+import re
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import sd_lib  # noqa: E402 - after the path insert that finds it
+import sd_rules  # noqa: E402 - same
+
+#: The markdown suffixes, the same two `points_into_code` recognises.
+PROSE_SUFFIXES = (".md", ".markdown")
+
+#: The numbers in a rule id, for ordering rows the way the rounds ran.
+DIGITS = re.compile(r"\d+")
+
+
+def path_scope(path: str) -> str:
+    """`prose` for a markdown path, `code` for anything else."""
+
+    return "prose" if path.lower().endswith(PROSE_SUFFIXES) else "code"
+
+
+def rule_order(identifier: str) -> tuple[int, ...]:
+    """Round and decision as integers, so decision 4 sorts before decision 10."""
+
+    return tuple(int(number) for number in DIGITS.findall(identifier))
+
+
+def rules_in_scope(path: str) -> list[sd_rules.Rule]:
+    """Every live row whose scope covers `path`, in id order."""
+
+    wanted = path_scope(path)
+    return sorted(
+        (rule for rule in sd_rules.RULES
+         if rule.state == sd_rules.LIVE and rule.scope in (wanted, "both")),
+        key=lambda rule: rule_order(rule.id))
+
+
+def render_rules_for(rules: list[sd_rules.Rule], path: str, as_json: bool) -> str:
+    """One block per row -- id and scope, subject, teaching section."""
+
+    if as_json:
+        return json.dumps([{"id": rule.id, "scope": rule.scope,
+                            "subject": rule.subject, "teaches": rule.teaches}
+                           for rule in rules], indent=2) + "\n"
+    if not rules:
+        return f"no rule in scope for {path}\n"
+    blocks = [f"{rule.id}  ({rule.scope})\n  subject: {rule.subject}\n"
+              f"  teaches: {rule.teaches}\n" for rule in rules]
+    return "\n".join(blocks)
+
+
+def _refusal(path: str, cwd: pathlib.Path) -> str | None:
+    """Why `path` is a bad path, or None when it is one this verb answers."""
+
+    root = sd_lib.repo_root(cwd)
+    if root is None:
+        return f"{cwd} is not inside a git repository"
+    # `resolve()` raises rather than answers on a path the platform will not
+    # look at -- `ValueError` for an embedded NUL, `OSError` where the walk
+    # fails, `RuntimeError` for a symlink loop on older interpreters -- and
+    # the documented answer to a bad path is exit 2, never a traceback.
+    try:
+        target = (cwd / path).resolve()
+    except (OSError, ValueError, RuntimeError) as failure:
+        return f"{path!r} cannot be resolved: {failure}"
+    if not target.is_relative_to(root):
+        return f"{path} resolves outside the repository at {root}"
+    if target.is_dir():
+        return f"{path} is a directory, not a file to write"
+    return None
+
+
+def build_rules_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="sd-rules",
+        description="print the live registry rows in scope for a file")
+    parser.add_argument("--for", dest="path", required=True, metavar="PATH",
+                        help="the file about to be written, relative to cwd")
+    parser.add_argument("--json", action="store_true",
+                        help="one list of {id, scope, subject, teaches}")
+    return parser
+
+
+def run_rules_for(argv: list[str] | None = None, out=sys.stdout,
+                  err=sys.stderr, cwd: pathlib.Path | None = None) -> int:
+    # `cwd` is the test seam every other command here has, not a way to point
+    # the command at another repository: no flag reaches it (R10-D6).
+    args = build_rules_parser().parse_args(sys.argv[1:] if argv is None else argv)
+    base = pathlib.Path(cwd) if cwd is not None else pathlib.Path.cwd()
+    refusal = _refusal(args.path, base)
+    if refusal is not None:
+        print(refusal, file=err)
+        return 2
+    out.write(render_rules_for(rules_in_scope(args.path), args.path, args.json))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(run_rules_for())

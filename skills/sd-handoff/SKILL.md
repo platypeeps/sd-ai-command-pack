@@ -92,7 +92,15 @@ atomic rename, so two sessions racing in one directory cannot both claim it.
 `followup` and `question` notes of this checkout as `sd_db.note_brief` renders
 them: the checked-out branch's item, else every live item, newest first, cut at
 8 KB. Rows go in whether or not a packet is here: a session killed mid-task ran
-no `sd-handoff`, so the rows are all there is. Rows are **not** claimed — every
+no `sd-handoff`, so the rows are all there is. The restored session's setup
+step, before it resumes writing any file the packet's `files[]` lists, is
+`bin/sd-rules --for <path>`, run from the repository root
+(`cd "$(git rev-parse --show-toplevel)"`) because `files[]` entries are
+root-relative and `bin/sd-rules --for` resolves the path against the working
+directory;
+it prints the live registry rows in scope for that file (id, subject, teaching
+section) so the rules act while the author is in the file rather than at
+review. Rows are **not** claimed — every
 session restarting here deserves the same open work, and a note stops being
 handed over when `sd note resolve <id>` closes it, not when a session read it.
 Write one with `sd-note add "..." --item <dir>`, an explicit act and so not what
