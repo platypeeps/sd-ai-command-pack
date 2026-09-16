@@ -524,13 +524,27 @@ def main_document(repo, docs):
     return bad
 
 
+NOT_A_RESEARCH_REPO = 2
+"""`main()`'s exit when the cwd has no `research.conf.py` (sd:10 requirement 13).
+
+Distinct from 1, the exit for a failed mechanical check, so a caller can tell
+"this is not a research repo" from "this one has findings". `check()` returns
+None for it rather than a count: `main()` prints the count it returns as
+"N mechanical check(s) failed", and a 2 there would read as two failures.
+"""
+
+
 def check(repo):
+    """The count of failed mechanical checks, or None outside a research repo."""
+
     repo = os.path.abspath(repo)
     name = os.path.basename(repo)
     docs = load_docs(repo)
     if docs is None:
-        print(f"{name}: no research.conf.py — not a research repo")
-        return 0
+        # The refusal goes where `init_main`'s do; the checklist and the
+        # pass/fail line are for a research repo, and `main()` prints neither.
+        print(f"{name}: no research.conf.py — not a research repo", file=sys.stderr)
+        return None
     bad = 0
     print(f"\n== {name}")
     for cfg in docs:
@@ -679,6 +693,8 @@ def main() -> int:
     # R10-D6: the repository is the one the caller is standing in. This took
     # `review [repo_dir ...]` before the kit moved into the pack.
     bad = check(os.getcwd())
+    if bad is None:
+        return NOT_A_RESEARCH_REPO
     print(CHECKLIST)
     if bad:
         print(f"{bad} mechanical check(s) failed — fix before publishing.")
