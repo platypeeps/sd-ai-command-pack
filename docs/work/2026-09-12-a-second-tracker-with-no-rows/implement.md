@@ -245,7 +245,7 @@ since R11-D48. The pack half is on the order of forty lines in
       (a) is `TheShadowSync` on the pinned library, and the four mutations the
       pull request body records each reddened.*
 
-- [ ] **7. `sd-status` shows the row, in its own section.** The issues
+- [x] **7. `sd-status` shows the row, in its own section.** The issues
       section cannot carry it: `issues_section` (`source:bin/sd-status::issues_section`)
       returns `no GitHub remote` at `bin/sd-status:1197-1199` before any
       database is opened, `_database_issues` (`source:bin/sd-status::_database_issues`) closes
@@ -322,8 +322,13 @@ since R11-D48. The pack half is on the order of forty lines in
       missing heading while (f) stays green, which is why both exist; move
       the seven-day filter into `_render_jira` and (d) reddens on the
       `rows` assertion.
+      *Done 2026-09-15 on pack branch
+      `fix/sd-361-step-7-sd-status-jira-section`: `jira_section()` and
+      `_render_jira` in `bin/sd-status`, `JiraSectionTests` in
+      `tests/test_sd_status.py` carrying (a) to (g), the skeleton test
+      counting fourteen, and the four mutations each reddened as written.*
 
-- [ ] **7b. The dashboard shows the key.** `where` (in `dashboard/app.js`)
+- [x] **7b. The dashboard shows the key.** `where` (in `dashboard/app.js`)
       returns `issue.url.split("/").pop()` when `number` is null and the
       row has a URL, and `issue.repo || issue.tracker` only when it does
       not; the comment above it, which says the identity is in the URL
@@ -338,6 +343,10 @@ since R11-D48. The pack half is on the order of forty lines in
       test reddens. Manual check after step 2 has run: the issues tab shows
       `LOG-23929`, linked, where before this step it showed `LOG`. The key is
       step 2 (d)'s, not the seeded `LOG-23818`, which no collect returns.
+      *Done 2026-09-15 on the same branch: `where` reads the URL tail first,
+      the source-reading test in `tests/test_dashboard_now.py` reddens on
+      the restored branch, and `DASHBOARD_CODE_CAP` did not move. The
+      manual check after step 8 is the owner's.*
 
 - [ ] **8. The first real sync, and the measurement.** With steps 1 to 7
       landed and the venv reinstalled at the new pin, run

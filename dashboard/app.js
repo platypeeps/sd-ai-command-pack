@@ -107,9 +107,12 @@ const link = (text, href) => {
 
 const where = (issue) =>
   // A GitHub row has a number to show; a Jira row's identity is already in its
-  // URL tail, so showing "#null" would be an invented fact.
+  // URL tail, so showing "#null" would be an invented fact. So is its `repo`,
+  // which for Jira is the project: `LOG`, where the ticket is `LOG-23929`.
   issue.number === null || issue.number === undefined
-    ? issue.repo || issue.tracker
+    ? issue.url
+      ? issue.url.split("/").pop()
+      : issue.repo || issue.tracker
     : `${issue.repo}#${issue.number}`;
 
 function fillIssues(tbody, list, emphasise) {
