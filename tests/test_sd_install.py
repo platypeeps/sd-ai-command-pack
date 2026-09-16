@@ -2835,6 +2835,26 @@ class LinkTests(InstallerHarness):
         # Three renders (one skill, three platforms) and one link.
         self.assertIn("removed 4 file(s)", out.getvalue())
 
+    def test_the_link_rule_is_stated_where_the_no_link_rule_was(self):
+        """Rule 3: the three documents that said "links no executable" say the new rule.
+
+        Whitespace is folded before the search because `AGENTS.md` wraps the
+        phrase across a line, and a test that read it as absent for that
+        reason would pass on the very text it exists to retire.
+        """
+        documents = {
+            "README.md": (REPO_ROOT / "README.md").read_text(encoding="utf-8"),
+            "AGENTS.md": (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8"),
+            "command_report docstring": sd_install.command_report.__doc__,
+        }
+        for name, text in documents.items():
+            folded = " ".join(text.split())
+            with self.subTest(document=name):
+                self.assertFalse(
+                    "links no executable" in folded, f"{name} still says it links no executable"
+                )
+                self.assertTrue("~/.local/bin" in folded, f"{name} does not name the link directory")
+
 
 if __name__ == "__main__":
     unittest.main()
