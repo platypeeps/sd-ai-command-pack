@@ -778,6 +778,27 @@ def checker_location_errors(rule: sd_rules.Rule) -> list[str]:
     return [f"{rule.id}: {failure}"] if failure else []
 
 
+#: The fields a repealed row must have surrendered. Both, not the checker
+#: alone: a proof with no checker describes a mutation nothing runs, and on a
+#: repealed row it is a tombstone as much as a stale checker name is.
+TOMBSTONE_FIELDS = ("checker", "proof")
+
+
+def tombstone_errors(rule: sd_rules.Rule) -> list[str]:
+    """Why a repealed row is not a clean tombstone, or nothing at all.
+
+    A withdrawn rule has nothing left to run, so a value in either field is
+    reported by name. Separate from `checker_location_errors` so that a
+    fixture row can be asked the question directly -- `sd_rules.RULES` holds
+    only the valid tombstone, and a test that reads the real table can never
+    reach the reporting branch.
+    """
+
+    return [f"{rule.id}: repealed, but still holds {field}={getattr(rule, field)!r}"
+            for field in TOMBSTONE_FIELDS
+            if getattr(rule, field) is not None]
+
+
 def _lines(rows) -> str:
     return "\n".join(f"  {row}" for row in rows)
 
@@ -812,15 +833,11 @@ class Registry(unittest.TestCase):
         wrong = []
         for rule in sd_rules.RULES:
             if rule.state == sd_rules.REPEALED:
-                for field in ("checker", "proof"):
-                    value = getattr(rule, field)
-                    if value is not None:
-                        wrong.append(f"{rule.id}: repealed, but still holds "
-                                     f"{field}={value!r}")
-                continue
-            wrong += checker_location_errors(rule)
+                wrong += tombstone_errors(rule)
+            else:
+                wrong += checker_location_errors(rule)
         self.assertEqual(wrong, [], f"""
-A registry row's checker does not match its state.
+A registry row's checker or proof does not match its state.
 
 {_lines(wrong)}
 
@@ -829,6 +846,36 @@ A `live` row must name one declaration that exists, as `path::symbol`. A
 name, which the first form of this check accepted: `(state == LIVE) !=
 callable(checker)` is False for a repealed row holding the *string*
 "stale_name", because neither side is true.""")
+
+    def test_a_repealed_row_holding_a_checker_or_a_proof_is_reported_by_field(self):
+        """The reporting branch, driven by fixture rows rather than the table.
+
+        `sd_rules.RULES` carries one repealed row and it is a clean tombstone,
+        so the test above never reaches the branch that reports a value; a
+        change that dropped `proof` from `TOMBSTONE_FIELDS` would leave it
+        green. Review said so. Three fixture rows ask the question directly:
+        one holding a checker, one holding a proof, and the clean one as the
+        control that the helper is not simply always red.
+        """
+
+        def repealed(**held) -> sd_rules.Rule:
+            return sd_rules.Rule(id="R0-D0", subject="a fixture", checker=None,
+                                 proof=None, scope="code", teaches="x#y",
+                                 state=sd_rules.REPEALED)._replace(**held)
+
+        self.assertEqual(tombstone_errors(repealed()), [])
+        self.assertEqual(
+            tombstone_errors(repealed(checker="bin/nope.py::guard")),
+            ["R0-D0: repealed, but still holds checker='bin/nope.py::guard'"])
+        self.assertEqual(
+            tombstone_errors(repealed(proof="break the guard; a test goes red")),
+            ["R0-D0: repealed, but still holds "
+             "proof='break the guard; a test goes red'"])
+        self.assertEqual(
+            tombstone_errors(repealed(checker="bin/nope.py::guard", proof="x")),
+            ["R0-D0: repealed, but still holds checker='bin/nope.py::guard'",
+             "R0-D0: repealed, but still holds proof='x'"],
+            "both fields are reported, checker first")
 
     def test_a_checker_outside_the_checkout_is_refused(self):
         """An escaping checker path is a failure here, not a silent pass.
