@@ -1774,44 +1774,59 @@ def cmd_user(ctx: Context, out) -> int:
 def command_report(checkout: Path, environ: dict[str, str]) -> str:
     """One line on how this checkout's commands, `bin/sd` and `bin/sd-*`, are reached.
 
-    The installer renders surfaces -- skills, agents, companions, hooks -- and
-    links no executable anywhere. A receipt is therefore not evidence that
-    `sd-handoff` resolves, and it never was: `bin/` is invoked by path, the way
-    the two installed hooks invoke it. Leaving that to be inferred from an
-    absence reads as a partial install, and has been read that way.
+    `--user` links every executable in `bin/` into one directory, `~/.local/bin`
+    unless `--bin-dir` names another, and records each link in the receipt.
+    Whether those links resolve is the shell's PATH, which the installer never
+    edits, so the receipt is not evidence that `sd-handoff` resolves and this
+    line is: it asks PATH for each command by name and says how many of them
+    reach this checkout. A checkout that was never `--user` installed is told
+    to invoke by path, the way the installed hooks do.
 
+    Counted per command and not per directory, because a link in `~/.local/bin`
+    is how the commands are reached and no PATH entry ever resolves to `bin/`
+    for it; the same per-name test decides whether a name is ours or a shadow.
     Enumerated at runtime from `bin/` (its extensionless executables; the
     `sd_*.py` beside them are modules) and from `PATH`, never from a list here.
     """
-    binaries = sorted(
-        entry.name
-        for entry in (checkout / "bin").glob("sd*")
-        if entry.suffix == "" and entry.is_file() and os.access(entry, os.X_OK)
-    )
+    binaries = bin_commands(checkout)
     if not binaries:
         return "commands: none in bin/"
 
     own = (checkout / "bin").resolve()
-    entries = [Path(part) for part in environ.get("PATH", "").split(os.pathsep) if part]
-    on_path = any(_resolves_to(entry, own) for entry in entries)
+    # The non-empty components only, for both tests. `shutil.which` reads an
+    # empty component as the working directory, and a command sitting there
+    # is nobody's install; the directory test never counted it, and the
+    # shadow test used to.
+    search = os.pathsep.join(part for part in environ.get("PATH", "").split(os.pathsep) if part)
 
     # A command that resolves somewhere else is worse than one that does not
     # resolve at all: it runs, and it runs another checkout's code.
     #
-    # Resolve the executable, not the directory holding it. A hand-made symlink
-    # in some other `bin` pointing back into this checkout is this checkout's
-    # command reached by another name, not a competing install -- and its
-    # parent directory resolves to that other `bin`, so testing the directory
-    # calls it a shadow when it is not.
-    elsewhere = sorted(
-        name
-        for name in binaries
-        if (found := shutil.which(name, path=environ.get("PATH", "")))
-        and not _resolves_to(Path(found), own / name)
-    )
+    # Resolve the executable, not the directory holding it. A symlink in some
+    # other `bin` pointing back into this checkout is this checkout's command
+    # reached by another name, not a competing install -- and its parent
+    # directory resolves to that other `bin`, so testing the directory calls
+    # it a shadow when it is not.
+    ours: list[str] = []
+    elsewhere: list[str] = []
+    for name in binaries:
+        found = shutil.which(name, path=search)
+        if found is None:
+            continue
+        (ours if _resolves_to(Path(found), own / name) else elsewhere).append(name)
 
-    if on_path:
-        report = f"commands: {len(binaries)} in bin/, on PATH from this checkout"
+    if len(ours) == len(binaries):
+        report = (
+            f"commands: {len(binaries)} in bin/, {len(ours)} resolve on PATH "
+            "from this checkout"
+        )
+    elif ours:
+        missing = [name for name in binaries if name not in ours and name not in elsewhere]
+        report = (
+            f"commands: {len(binaries)} in bin/, {len(ours)} of {len(binaries)} "
+            "resolve on PATH from this checkout"
+            + (f" (missing: {', '.join(missing)})" if missing else "")
+        )
     else:
         report = (
             f"commands: {len(binaries)} in bin/, not on PATH -- "
