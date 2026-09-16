@@ -72,7 +72,40 @@ jobs:
       # this suite's library underneath it. It moves when this pack starts
       # using something the old pin does not carry, and only then: the suite
       # fails on a skip, so a capability the library lacks is a red run here
-      # rather than a quietly unexercised test. It last moved for sd:809
+      # rather than a quietly unexercised test. It last moved for sd:941
+      # (#394, `635764e`, pinned at `9d86f092`): `reporting.acknowledge`
+      # takes `resolve_ingest_followups`, keyword-only and exactly a bool,
+      # and True resolves the followup the ingest itself wrote in the same
+      # transaction as the transition. `sd reports acknowledge
+      # --resolve-ingest-followups` passes it, which `09260ad4` refuses as an
+      # unexpected keyword, so `tests/test_sd_controls.py`'s flag tests are
+      # red at `09260ad4` and green here, and the pin and those tests move
+      # together. The same commit rewrites the refusal a blocked acknowledge
+      # raises: it still opens with `resolve the report's followups before
+      # acknowledging it`, the substring `tests/test_sd_controls.py` asserts,
+      # and now names each blocking note as `sd note resolve <id>`. The move
+      # is migration-free: `09260ad4..9d86f092` touches nothing under
+      # `sd_db/schema` and `SCHEMA_VERSION` stays 9. Of the other twenty-nine
+      # commits in that range, ten change `sd_db`, and the ones that could
+      # reach a pack test: `workflow.item_state` and the revision hash encode
+      # a BLOB `fields` or `body` through `workflow.json_safe` instead of
+      # raising (sd:870, #388, `d0fb3ff`; `bin/sd_work.py` reads
+      # `item_state`), `runner.heartbeat_state` refuses a heartbeat row that
+      # is not a JSON object as `SdDbError` (sd:934, #392, `a681a9a`;
+      # `bin/sd_runner.py` reads it), the control gate in `operations` keeps
+      # the opener's sentence for a lock it cannot open and relabels only a
+      # held one (sd:835, #378, `c3391c3`; `bin/sd_operations.py`), `ship`
+      # takes its repository lock through `runner_journal.lock`, the one
+      # hardened opener (sd:832, #377, `269531c`; sd:857, #382, `e8def66`;
+      # `bin/sd-ship` merges through `sd_db.ship`), and `shadow_jira`
+      # refuses every non-ASCII `JIRA_BASE_URL` host (sd:817, #363,
+      # `2e323f7`; `sd shadow sync` forwards into it). The other four change
+      # only what nothing in `bin/` imports: `runner_exec` (sd:814, #368,
+      # `1be6f40`; sd:820, #371, `446ae91`, a docstring), `backup` (sd:779,
+      # #366, `c4a77ef`) and `removal` with `runner_retention` (sd:770, #364,
+      # `2655a93`). The rest do not touch `sd_db`.
+      #
+      # The move before that was for sd:809
       # (#360, `09260ad4`): `followup` leaves `workflow.REPO_LESS_KINDS`, so
       # `sd task add --kind followup` in a registered checkout records it, and
       # `workflow.edit_item` edits a followup's title, body, priority, due date
@@ -171,7 +204,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          ref: 09260ad42803238b0b83749ba35bda965fbfe433
+          ref: 9d86f092f6b9c21ef725d940317029453475e7c7
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false
