@@ -70,7 +70,7 @@ def bulk_preview(result: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def acknowledge(args: argparse.Namespace, connection: Any, reporting: Any, workflow: Any) -> dict[str, Any]:
+def acknowledge_reports(args: argparse.Namespace, connection: Any, reporting: Any, workflow: Any) -> dict[str, Any]:
     if args.all_clean:
         if args.apply:
             return reporting.acknowledge_clean(connection, before=args.before, expected_plan=args.if_plan,
@@ -125,7 +125,7 @@ def run(args: argparse.Namespace) -> int:
         elif args.control_action == "list":
             result = reporting.reports(connection)
         elif args.control_action == "acknowledge":
-            result = acknowledge(args, connection, reporting, workflow)
+            result = acknowledge_reports(args, connection, reporting, workflow)
             if before is not None and not args.apply and not args.json:
                 print(bulk_preview(result))
                 return 0
