@@ -215,8 +215,11 @@ preview requires its `--if-fingerprint` value. Missing or unproven sources
 refuse recovery; the command cannot invent progress absent from the surviving
 evidence. Retain backups and reconcile authority before resuming dispatch.
 
-`sd shadow sync --strict` fails when any requested tracker interval remains
-incomplete. It retains collected rows and holds the cursor for a later retry.
+`sd shadow sync --strict` fails when any *configured* tracker's interval
+remains incomplete; a tracker whose variables are unset is reported as not
+collected and does not fail the run. It retains collected rows and holds the
+cursor for a later retry. The recovery flags bound GitHub only: given either,
+every other tracker prints `skipped (recovery window is GitHub's)`.
 Bound recovery with `--since` and `--until`, using timezone-aware ISO timestamps
 such as `2026-09-06T10:00:00Z`. Bounds are inclusive UTC seconds; fractional
 seconds round down. The end cannot exceed the current time. Equal bounds

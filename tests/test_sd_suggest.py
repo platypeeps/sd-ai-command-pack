@@ -31,7 +31,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -179,6 +179,12 @@ class SuggestCase(unittest.TestCase):
             GH_CALLS=str(self.calls),
             PATH=f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
         )
+        # `sd shadow sync` runs every tracker in `sd_db.TRACKERS`, and the
+        # Jira path reads its host and credential from the environment. On a
+        # machine whose shell exports them, a test that left them in place
+        # would send the operator's token to the operator's Jira. Unset, the
+        # library answers `configured=False` before any request.
+        self.unset_environment("JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN", "JIRA_JQL")
         previous = Path.cwd()
         os.chdir(self.root)
         self.addCleanup(os.chdir, previous)
@@ -190,6 +196,13 @@ class SuggestCase(unittest.TestCase):
             os.environ[key] = value
             self.addCleanup(lambda k=key, v=was: os.environ.__setitem__(k, v) if v
                             else os.environ.pop(k, None))
+
+    def unset_environment(self, *keys: str) -> None:
+        """Remove env vars for this test and put back what was there."""
+        for key in keys:
+            was = os.environ.pop(key, None)
+            if was is not None:
+                self.addCleanup(os.environ.__setitem__, key, was)
 
     def local_block(self, *lines: str) -> None:
         (self.root / sd_lib.LOCAL_FILE_NAME).write_text(
@@ -447,6 +460,114 @@ class TheShadowSync(SuggestCase):
         self.assertEqual(2, len(self.shadow_rows()))
 
 
+class TheShadowSyncOverTrackers(unittest.TestCase):
+    """sd:361 step 6: the verb runs every tracker the library names.
+
+    The library is a fake here on purpose. The pinned `sd_db` may or may not
+    export `TRACKERS`, and the Jira branches -- the `not collected` line, the
+    strict exit that a failed configured collect earns, the recovery skip --
+    are the verb's to prove whatever the pin holds. The one control that the
+    pin can lag is `TheShadowSync` above, on the real library.
+    """
+
+    class Synced:
+        """`Synced`-shaped, with `report()` under this test's control."""
+
+        def __init__(self, *, ok=True, reason="", configured=True, lines=()):
+            self.written, self.window_start = 0, "2026-09-06T10:00:00Z"
+            self.watermark_moved, self.ok = ok, ok
+            self.reason, self.truncated, self.configured = reason, [], configured
+            self._lines = list(lines)
+
+        def report(self):
+            return ["shadow sync: 0 row(s), watermark moved", *self._lines]
+
+    class Library:
+        """The two names the verb reads off `sd_db`, and the calls it made.
+
+        `trackers=None` leaves `TRACKERS` unset altogether, as a pin before
+        system #338 does.
+        """
+
+        def __init__(self, answers, trackers=("github", "jira")):
+            self.answers, self.calls = answers, []
+            if trackers is not None:
+                self.TRACKERS = trackers
+
+        def sync_shadow(self, connection, **options):
+            # Defaulted as the library defaults it, so a verb that never
+            # passes `tracker` fails these tests on their assertions rather
+            # than on a `KeyError` in the fake.
+            self.calls.append(options)
+            return self.answers[options.get("tracker", "github")]
+
+    def sync(self, answers, trackers=("github", "jira"), **fields):
+        library = self.Library(answers, trackers)
+        output = io.StringIO()
+        with patch.object(sd_handoff_rows, "library", return_value=library), \
+                patch.object(sd_handoff_rows, "connect", return_value=MagicMock()), \
+                contextlib.redirect_stdout(output):
+            code = sd_shadow.shadow_sync(Args(**fields))
+        return code, output.getvalue().splitlines(), library.calls
+
+    def test_an_unconfigured_tracker_is_one_line_and_does_not_fail_strict(self):
+        """The item's second acceptance line: unconfigured Jira is not a failure."""
+        code, lines, calls = self.sync({
+            "github": self.Synced(lines=["shadow sync: contribution detail backlog: 3 queued"]),
+            "jira": self.Synced(ok=False, configured=False,
+                                reason="JIRA_BASE_URL and JIRA_EMAIL not set"),
+        }, strict=True)
+        self.assertEqual(0, code, lines)
+        self.assertIn("shadow sync[jira]: not collected (JIRA_BASE_URL and JIRA_EMAIL not set)",
+                      lines)
+        self.assertEqual(1, len([line for line in lines if "[jira]" in line]), lines)
+        self.assertEqual(["github", "jira"], [call.get("tracker") for call in calls])
+
+    def test_a_forwarded_line_loses_the_library_head_before_gaining_the_verbs(self):
+        """`Synced.report` writes `shadow sync: ` on every line; the verb must
+        not stack its own head on top of it."""
+        _, lines, _ = self.sync({
+            "github": self.Synced(lines=["shadow sync: contribution detail backlog: 3 queued",
+                                         "a line without the head"]),
+            "jira": self.Synced(ok=False, configured=False, reason="JIRA_BASE_URL not set"),
+        })
+        self.assertIn("shadow sync[github]: contribution detail backlog: 3 queued", lines)
+        self.assertIn("shadow sync[github]: a line without the head", lines)
+        self.assertEqual([], [line for line in lines if "shadow sync[github]: shadow sync:" in line])
+        self.assertTrue(all(line.startswith("shadow sync[") for line in lines), lines)
+
+    def test_a_configured_tracker_that_fails_still_fails_strict(self):
+        """CONTROL for the line above: `configured` is what earns the pass,
+        not the tracker's name."""
+        reason = ("Jira rejected the credentials (401 Unauthorized); "
+                  "check JIRA_EMAIL and JIRA_API_TOKEN")
+        code, lines, _ = self.sync({
+            "github": self.Synced(),
+            "jira": self.Synced(ok=False, configured=True, reason=reason),
+        }, strict=True)
+        self.assertEqual(1, code, lines)
+        self.assertIn(f"shadow sync[jira]: cursor held: {reason}", lines)
+        self.assertEqual(f"shadow sync[jira]: cursor held: {reason}", lines[3], lines)
+
+    def test_a_bounded_run_is_githubs_alone_and_says_so_for_the_rest(self):
+        """The 2026-09-12 decision: the recovery flags cannot reach Jira."""
+        code, lines, calls = self.sync({
+            "github": self.Synced(),
+            "jira": self.Synced(ok=False, configured=True, reason="never asked"),
+        }, since=datetime(2026, 9, 6, 10, tzinfo=timezone.utc))
+        self.assertEqual(0, code, lines)
+        self.assertEqual(["github"], [call.get("tracker") for call in calls])
+        self.assertIn("shadow sync[jira]: skipped (recovery window is GitHub's)", lines)
+
+    def test_a_pin_without_the_export_runs_github_alone(self):
+        """The `getattr` default, so the verb's tests pass at either pin."""
+        self.assertFalse(hasattr(self.Library({}, None), "TRACKERS"))
+        code, lines, calls = self.sync({"github": self.Synced()}, trackers=None)
+        self.assertEqual(0, code, lines)
+        self.assertEqual(["github"], [call.get("tracker") for call in calls])
+        self.assertEqual([], [line for line in lines if "[jira]" in line], lines)
+
+
 class TheShadowRecoveryArguments(unittest.TestCase):
     """Bad recovery bounds must stop before the library or database is opened."""
 
@@ -513,7 +634,10 @@ class TheShadowRecoveryWindow(SuggestCase):
         with patch.object(sd_db, "sync_shadow", wraps=sd_db.sync_shadow) as sync:
             code, _ = self.command_sync("--strict")
         self.assertEqual(0, code)
-        self.assertEqual({}, sync.call_args.kwargs)
+        # One call per tracker the library names, in its order, carrying the
+        # tracker and nothing else: the limits stay the library's defaults.
+        self.assertEqual([{"tracker": name} for name in sd_db.TRACKERS],
+                         [call.kwargs for call in sync.call_args_list])
         self.assertEqual(2, len(self.shadow_rows()))
 
     def test_explicit_bounds_and_limits_reach_the_real_library(self):
@@ -524,11 +648,13 @@ class TheShadowRecoveryWindow(SuggestCase):
                 "--until", "2026-09-06T11:00:00.250Z",
                 "--max-requests", "4", "--max-seconds", "15.5")
         self.assertEqual(0, code)
-        self.assertEqual({
+        # Bounded, so GitHub's call is the only one; the flags are its.
+        self.assertEqual([{
+            "tracker": "github",
             "since": datetime(2026, 9, 6, 10, tzinfo=timezone.utc),
             "now": datetime(2026, 9, 6, 11, tzinfo=timezone.utc),
             "max_requests": 4, "max_seconds": 15.5,
-        }, sync.call_args.kwargs)
+        }], [call.kwargs for call in sync.call_args_list])
         self.assertEqual(2, len(self.shadow_rows()))
 
     def test_one_optional_limit_does_not_override_other_defaults(self):
@@ -536,7 +662,8 @@ class TheShadowRecoveryWindow(SuggestCase):
         with patch.object(sd_db, "sync_shadow", wraps=sd_db.sync_shadow) as sync:
             code, _ = self.command_sync("--strict", "--max-requests", "4")
         self.assertEqual(0, code)
-        self.assertEqual({"max_requests": 4}, sync.call_args.kwargs)
+        self.assertEqual([{"tracker": name, "max_requests": 4} for name in sd_db.TRACKERS],
+                         [call.kwargs for call in sync.call_args_list])
 
     def synced(self, **fields):
         """A real `Synced`, so `report()` is the library's and not a stand-in."""
@@ -547,7 +674,16 @@ class TheShadowRecoveryWindow(SuggestCase):
         return Synced(**{**defaults, **fields})
 
     def sync_returning(self, result, *options):
-        with patch.object(sd_db, "sync_shadow", return_value=result):
+        """`result` is GitHub's answer. Every other tracker answers unconfigured,
+        so the lines under test are one block and the counts below stay
+        counts of one report rather than of one per tracker."""
+        unconfigured = self.synced(ok=False, reason="JIRA_BASE_URL not set",
+                                   watermark_moved=False, configured=False)
+
+        def sync(connection, *, tracker, **_):
+            return result if tracker == "github" else unconfigured
+
+        with patch.object(sd_db, "sync_shadow", side_effect=sync):
             return self.command_sync(*options)
 
     def test_a_moved_cursor_says_moved_even_when_the_collect_failed(self):
@@ -609,7 +745,7 @@ class TheShadowRecoveryWindow(SuggestCase):
     def report(self, result, *, strict=False):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            code = self.command.sd_shadow.report_sync(result, strict=strict)
+            code = self.command.sd_shadow.report_sync(result, name="github", strict=strict)
         return code, output.getvalue()
 
     def test_the_backlog_and_the_incomplete_observations_reach_the_log(self):
@@ -633,7 +769,8 @@ class TheShadowRecoveryWindow(SuggestCase):
         silence -- which is sd:602, in the file that just fixed sd:602.
         """
         _, output = self.report(self.Reporting(["shadow sync: something new: 4"]))
-        self.assertIn("shadow sync: something new: 4", output)
+        self.assertIn("shadow sync[github]: something new: 4", output)
+        self.assertNotIn("shadow sync[github]: shadow sync:", output)
 
     def test_the_library_line_the_verb_already_said_is_not_repeated(self):
         """CONTROL. Forwarding wholesale duplicates the truncation and reason."""

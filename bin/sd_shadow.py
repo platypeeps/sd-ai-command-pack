@@ -13,6 +13,15 @@ on the collect's own success. A run that reports "wrote 4, cursor held" is
 therefore not a contradiction -- it is the design -- and the report says both
 numbers rather than one summary word that would have to pick.
 
+The verb runs once per tracker the library names in `sd_db.TRACKERS`, in the
+library's order, and prefixes every line with `shadow sync[<tracker>]:` so a
+log with two blocks reads as two. A tracker whose variables are unset is one
+`not collected (<reason>)` line and exit 0, `--strict` or not: an absent
+configuration is not a failed collect. `--since` and `--until` bound GitHub
+alone -- Jira's window is relative minutes and cannot express them -- so a
+recovery run prints `skipped (recovery window is GitHub's)` for every other
+tracker (sd:361, the 2026-09-12 decision in its design.md).
+
 Nothing here closes anything. `sync` calls `collect`, `store` and
 `write_watermark` and no fourth thing, which is why criterion 28's "the fixture
 saw no close call" is a fact about the library rather than a rule this verb has
@@ -70,36 +79,56 @@ def _rows():
     return sd_handoff_rows
 
 
-def report_sync(result, *, strict: bool) -> int:
-    """Turn one `Synced` into the operator's lines, and the exit code.
+#: The head `Synced.report` writes on each of its lines. The verb strips it
+#: before adding its own, so a forwarded line never reads
+#: `shadow sync[jira]: shadow sync: ...`.
+LIBRARY_HEAD = "shadow sync: "
+
+
+def report_sync(result, *, name: str, strict: bool) -> int:
+    """Turn one tracker's `Synced` into the operator's lines, and the exit code.
 
     Split out of `shadow_sync` because the verb crossed the branch ceiling
     when this grew, and because the reporting is worth driving directly: it
     is the part that was wrong, and it needs no CLI, no database and no
     network to exercise.
+
+    Every line carries `shadow sync[<name>]:`, so two trackers' blocks in one
+    log do not read as one. An unconfigured tracker is one line and exit 0
+    whatever `strict` says: `configured` is read with a default of `True`
+    because a pin that predates the field has only ever had configured
+    trackers.
     """
-    print(f"wrote {result.written} shadow row(s)")
+    def say(line: str) -> None:
+        print(f"shadow sync[{name}]: {line}")
+
+    if not getattr(result, "configured", True):
+        say(f"not collected ({result.reason or 'not configured'})")
+        return 0
+    say(f"wrote {result.written} shadow row(s)")
     if result.truncated:
         # Named, because a truncated page means the next run starts from the
         # same watermark and there is more behind it than this run saw.
-        print("coverage is incomplete; retry a smaller window or increase the request/time limits")
+        say("coverage is incomplete; retry a smaller window or increase the request/time limits")
     # `ok` is the SEARCH's success; `watermark_moved` is the CURSOR's. Reading
     # the cursor line off `ok` said "cursor held" through two nights in which
     # the watermark had in fact moved: one incomplete contribution observation
     # made `ok` false while the search itself had advanced. So the cursor line
     # is read off the cursor, and the reason off the collect.
     if result.watermark_moved:
-        print(f"cursor moved to cover from {result.window_start}")
+        say(f"cursor moved to cover from {result.window_start}")
     elif result.ok:
-        print(f"coverage completed from {result.window_start}; existing cursor retained")
+        say(f"coverage completed from {result.window_start}; existing cursor retained")
     else:
         # The rows above are still written and still true. Only the cursor
         # held, so the next run re-reads the same window rather than skipping.
-        print(f"cursor held: {result.reason or 'the collect did not succeed'}")
+        say(f"cursor held: {result.reason or 'the collect did not succeed'}")
     if not result.ok and result.watermark_moved:
-        print(f"the collect did not succeed: {result.reason or 'no reason given'}")
+        say(f"the collect did not succeed: {result.reason or 'no reason given'}")
     for line in _library_lines(result):
-        print(line)
+        # A line without the head is forwarded as it is, rather than dropped:
+        # the library's wording is not this verb's to police.
+        say(line[len(LIBRARY_HEAD):] if line.startswith(LIBRARY_HEAD) else line)
     return 0 if result.ok else (1 if strict else 0)
 
 
@@ -139,7 +168,11 @@ def _library_lines(result) -> list[str]:
 
 
 def shadow_sync(args) -> int:
-    """Run one sync and report what moved. Writes rows; never closes anything."""
+    """Run one sync per tracker and report what moved. Writes rows; never closes anything.
+
+    The exit code is the maximum over trackers, so one held GitHub cursor
+    under `--strict` still fails the night when Jira was fine.
+    """
     rows = _rows()
     since = getattr(args, "since", None)
     until = getattr(args, "until", None)
@@ -156,10 +189,24 @@ def shadow_sync(args) -> int:
         ) if value is not None
     }
     sd_db = rows.library()
+    # A pin that predates the export has one tracker, and the verb's tests
+    # keep passing at either pin (design.md, "The library exports the order").
+    names = getattr(sd_db, "TRACKERS", ("github",))
+    # The recovery window is GitHub's: the library refuses `since` for any
+    # other tracker, and a relative-minutes Jira window could not honour
+    # `--until` anyway. So a bounded run is GitHub's alone, and the others
+    # say so in their place in the order rather than vanishing from the log.
+    recovery = "since" in options or "now" in options
+    strict = bool(getattr(args, "strict", False))
+    code = 0
     connection = rows.connect(sd_db, write=True)
     try:
-        result = sd_db.sync_shadow(connection, **options)
+        for name in names:
+            if recovery and name != "github":
+                print(f"shadow sync[{name}]: skipped (recovery window is GitHub's)")
+                continue
+            result = sd_db.sync_shadow(connection, tracker=name, **options)
+            code = max(code, report_sync(result, name=name, strict=strict))
     finally:
         connection.close()
-
-    return report_sync(result, strict=bool(getattr(args, "strict", False)))
+    return code
