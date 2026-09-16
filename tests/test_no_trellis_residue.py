@@ -19,9 +19,19 @@ so neither set can outlive the lines it names or quietly widen.
 
 `HELD` is a second, separate set: lines the sweep could not reach because
 another lane's open pull request held the file. They are not the criterion's
-exemptions and the docstring on the set says which pull request held them.
+exemptions and the comment on the set says which pull request held them.
 The criterion is closed when `HELD` is empty; until then
-`test_the_held_set_is_named_and_shrinking` says what is left.
+`test_the_held_set_is_named_and_shrinking` says what is left, and
+`HELD_BOUND` is the frozen ceiling it cannot grow past.
+
+`ALLOWED_IF_PRESENT` is a third set, for lines another open pull request
+adds: a test that names the residue commands must quote them, so #995's
+`tests/test_archive_untouched.py` carries the `.trellis` removal string and a
+comment naming the framework. Those rows are exemptions of the same kind as
+the `sd-status` row, but they are matched by file and content only and may
+match zero lines, so this test is green whether #995 merges before this
+branch or after it. `test_every_allowed_row_names_at_most_one_line` keeps the
+set from widening: a row that matches two lines fails.
 """
 
 from __future__ import annotations
@@ -77,15 +87,37 @@ EXEMPT = frozenset({
     ("tests/test_sd_status.py", 'self.assertIn("rm -rf .trellis", found["trellis"]["remove"])'),
 })
 
-#: Lines the sweep of 2026-09-16 could not reach: both files were held by
-#: #995 when it ran. Neither is a decision-note exemption; each is one word in
-#: a list of dot-directories. The first edit that touches either file removes
-#: the word and the row here with it, and the criterion is closed when this
-#: set is empty.
+#: Held by #995 (fix-10-sweep); reword in the follow-up. Lines the sweep of
+#: 2026-09-16 could not reach because #995 held both files when it ran; #995
+#: merged as 486a223b with both words in place. Neither is a decision-note
+#: exemption; each is one word in a list of dot-directories. The reword
+#: removes the word and the row here with it, and the criterion is closed
+#: when this set is empty.
 HELD = frozenset({
     ("bin/sd", "`.makemd`, `.trellis`), so the rule is the generalisation rather than the"),
     ("skills/sd-plan/SKILL.md",
      "No unrelated rows, `.claude/`, `.trellis/`, hooks, labels, managed gitignore"),
+})
+
+#: The ceiling on `HELD`, frozen at the two rows of 2026-09-16. `HELD` may
+#: lose rows; a row added to it fails `test_the_held_set_is_named_and_shrinking`
+#: unless this set is edited too, which is the point.
+HELD_BOUND = frozenset({
+    ("bin/sd", "`.makemd`, `.trellis`), so the rule is the generalisation rather than the"),
+    ("skills/sd-plan/SKILL.md",
+     "No unrelated rows, `.claude/`, `.trellis/`, hooks, labels, managed gitignore"),
+})
+
+#: Lines #995 (fix-10-sweep) adds to `tests/test_archive_untouched.py`: the
+#: `FROZEN_DELETION_SITES` row that quotes `sd-status`'s `.trellis` removal
+#: command, and the comment above it that names the framework. Exempt on the
+#: same ground as the `sd-status` row itself. Present once #995 merged
+#: (486a223b), absent before; either is green.
+ALLOWED_IF_PRESENT = frozenset({
+    ("tests/test_archive_untouched.py",
+     "#: `RESIDUE` tuple, telling an operator how to uninstall a Trellis or legacy"),
+    ("tests/test_archive_untouched.py",
+     '("bin/sd-status", "git rm -r --cached --ignore-unmatch .trellis && rm -rf .trellis"),'),
 })
 
 
@@ -117,8 +149,9 @@ def named_by(rows: list[tuple[str, int, str]], entries: frozenset[tuple[str, str
 
 class NoResidue(unittest.TestCase):
     def test_no_governed_line_names_the_framework_outside_the_exemptions(self):
+        allowed = EXEMPT | HELD | ALLOWED_IF_PRESENT
         residue = [f"{path}:{number}:{text}" for path, number, text in governed_rows()
-                   if (path, text) not in EXEMPT and (path, text) not in HELD]
+                   if (path, text) not in allowed]
         self.assertEqual([], residue, f"{len(residue)} lines still name the framework")
 
     def test_every_row_still_names_exactly_one_line(self):
@@ -129,11 +162,20 @@ class NoResidue(unittest.TestCase):
                         if path == where and found == text]
                 self.assertEqual(1, len(hits), f"{where}: {text!r} names lines {hits}")
 
-    def test_the_held_set_is_named_and_shrinking(self):
-        """At most the two files #995 held, and no row in both sets."""
+    def test_every_allowed_row_names_at_most_one_line(self):
+        rows = governed_rows()
+        for where, text in sorted(ALLOWED_IF_PRESENT):
+            with self.subTest(path=where, text=text):
+                hits = [number for path, number, found in rows
+                        if path == where and found == text]
+                self.assertLessEqual(len(hits), 1, f"{where}: {text!r} names lines {hits}")
 
-        self.assertLessEqual({path for path, _ in HELD}, {"bin/sd", "skills/sd-plan/SKILL.md"})
+    def test_the_held_set_is_named_and_shrinking(self):
+        """No row past the frozen ceiling, and no row in two sets."""
+
+        self.assertLessEqual(HELD, HELD_BOUND)
         self.assertTrue(EXEMPT.isdisjoint(HELD))
+        self.assertTrue(ALLOWED_IF_PRESENT.isdisjoint(EXEMPT | HELD))
 
 
 if __name__ == "__main__":

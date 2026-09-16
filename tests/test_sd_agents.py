@@ -129,7 +129,7 @@ class ContractTests(unittest.TestCase):
                 fields, _ = frontmatter(path.read_text(encoding="utf-8"))
                 self.assertNotIn("disable-model-invocation", fields)
 
-    def test_no_agent_still_names_the_retired_framework(self) -> None:
+    def test_no_agent_still_uses_the_retired_command_prefix(self) -> None:
         """`se-` as a name, not as three letters inside a hyphenated word.
 
         The framework's own name is the residue test's, which greps `agents/`

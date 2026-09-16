@@ -1600,7 +1600,7 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   No test asserts either refusal message yet, so criterion 13 stays open for
   that test.) (2026-09-16: closed by the pull request that carries this
   line. `ReadyCase` in `tests/test_sd_ship_remote.py` stubs the adapter's one
-  outbound call and asserts `source:bin/sd_ship_remote.py::GitHub.ready` by
+  outbound call and asserts `source:bin/sd_ship_remote.py::ready` by
   message: a moved head and a moved base each refuse "pull-request head or
   default base moved after local review" with no call made, and a `compare`
   answer whose `behind_by` is not 0 refuses "the reviewed branch is behind
@@ -1997,7 +1997,7 @@ Team-lead decision 2026-09-16, under the standing authorization and
 reversible by the owner: criterion 13's refusal test and criterion 5's
 table-reads clause land as one small pull request before 31(b), and criterion
 16's tick rides along. `ReadyCase` in `tests/test_sd_ship_remote.py` asserts
-the two refusals of `source:bin/sd_ship_remote.py::GitHub.ready` by message.
+the two refusals of `source:bin/sd_ship_remote.py::ready` by message.
 `SkillsThatRunAReview` in `tests/test_workflow_policy.py` enumerates the
 skills that invoke a reviewer and asserts the link, the point and the absence
 of a cap literal. Criterion 16 closed when #938 merged as `a3baf6d9`. Open
@@ -2047,11 +2047,35 @@ of the changed-files fast path, with the other tree walkers.
 A separate `HELD` set, disjoint from the exemptions by a third test, names
 the two lines the sweep could not reach: one word each in `bin/sd` (a
 docstring listing dot-directories) and `skills/sd-plan/SKILL.md` (a list of
-paths the plan skill may not write). Both files were held by #995 when the
-sweep ran, so the lane left them; the first edit that touches either file
-removes the word and its row, the set may only shrink, and the criterion is
-closed in full when it is empty. Until then the tick above is the sweep's,
-with those two words and the #995 lines below as the named remainder. Outside the
-governed tree, `docs/review-learnings.md` keeps its rows marked
+paths the plan skill may not write). Both files were held by #995
+(fix-10-sweep) when the sweep ran, so the lane left them, labelled "held by
+#995; reword in the follow-up"; team-lead hands the two rewords to the
+sd:10 31(b) lane. #995 merged as `486a223b` with both words in place: after
+this branch's rebase onto it the grep of those two files returns
+`bin/sd:1753` and `skills/sd-plan/SKILL.md:169`, and nothing else. The
+reword removes the word and its row. The set is
+bounded above by a frozen copy of the two rows, `HELD_BOUND`, so it may only
+shrink, and the criterion is closed in full when it is empty. Until then the
+tick above is the sweep's, with those two words as the named remainder.
+
+A third set, `ALLOWED_IF_PRESENT`, carries the two lines #995 adds to
+`tests/test_archive_untouched.py`: the `FROZEN_DELETION_SITES` row that
+quotes `sd-status`'s `.trellis` removal command and the comment above it
+that names the framework. Team-lead's ruling: a test that names the residue
+commands must name them, so both are permanent exemptions of the same kind as
+`bin/sd-status:1091-1093`. They are matched by file and content, not by line
+number, and may match zero lines, so the test is green whether #995 merges
+before this branch or after it; a fourth test fails a row that matches two
+lines. Proof, 2026-09-16, on a scratch worktree at this branch with
+`git merge --no-commit --no-ff origin/feat/sd-10-sweep-cut` (`5691b193`)
+applied: the only conflicts were this page and its `.citations.tsv`, both
+outside the governed tree; `governed_rows()` returned 14 rows, the two #995
+lines at `tests/test_archive_untouched.py:202` and `:212` among them; and
+`python -m unittest tests.test_no_trellis_residue` ended `Ran 4 tests`, `OK`.
+Without the merge the same command also ends `OK`. #995 then merged as
+`486a223b`; on this branch rebased onto it, the two lines stand at
+`tests/test_archive_untouched.py:202` and `:212` and the test is green.
+
+Outside the governed tree, `docs/review-learnings.md` keeps its rows marked
 **historical**, which quote review comments by the paths they named at the
 time, and its one curated lesson about journal sessions.

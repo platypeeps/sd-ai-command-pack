@@ -1520,7 +1520,7 @@ confirmed by the next `sd-ship` run alone.
     moved after local review" when the pull request's head or base moved,
     and with "the reviewed branch is behind the current default branch"
     when the reviewed branch is behind the default, both in
-    `source:bin/sd_ship_remote.py::GitHub.ready`, and a test asserts each refusal by
+    `source:bin/sd_ship_remote.py::ready`, and a test asserts each refusal by
     its message. (Rewritten 2026-09-14 by owner decision note 1942, which
     accepts #802's refusal instead of an integration update. The test is
     `ReadyCase`, `tests/test_sd_ship_remote.py`, 2026-09-16, see the log.
@@ -5468,7 +5468,7 @@ from a number the operator types.
 
   **Criterion 13, the moved-default-branch clause.** `ReadyCase` in
   `tests/test_sd_ship_remote.py` stubs the adapter's one outbound call and
-  asserts `source:bin/sd_ship_remote.py::GitHub.ready` by message: a moved
+  asserts `source:bin/sd_ship_remote.py::ready` by message: a moved
   head and a moved base each refuse "pull-request head or default base moved
   after local review" before any call, and a `compare` answer whose
   `behind_by` is not 0 refuses "the reviewed branch is behind the current

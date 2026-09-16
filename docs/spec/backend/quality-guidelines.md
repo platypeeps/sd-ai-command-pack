@@ -614,7 +614,7 @@ that exercise the generic JavaScript review preflight.
   the semantic gate. Missing, unreadable, oversized, non-regular, or symlinked
   in-scope PRDs fail closed with path-specific output.
 - A repository-wide bounded scan inspects regular `task.json` files in direct
-  `.predecessor/tasks/` children. A record with `status: completed` fails with the
+  `.predecessor/tasks/` children. A record with `status: completed` fails with
   the predecessor's archive command; the `archive/` subtree, non-completed records,
   nested paths, and symlinks remain outside the scan.
 - Completion-bundle archive identity compares the source record at the base
