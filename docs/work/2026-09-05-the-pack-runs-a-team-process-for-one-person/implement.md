@@ -1653,8 +1653,10 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   rest lands in three pull requests: (a) `sd_sweep`, `parked` and `archived`,
   with criterion 21; (b) the prose symbols and flags; (c) the bug
   regressions and the one-definition greps.) (2026-09-16: `sd_sweep` finds
-  0 governed-tree files. The `parked` and `archived` field cut is still
-  open; see the entry at the end of this page.)
+  0 governed-tree files, so 31(a) is closed for `sd_sweep`. The `parked`
+  and `archived` field cut is deferred to a later lane, team-lead decision
+  2026-09-16, reversible by the owner; the reader set is frozen meanwhile.
+  See the entry at the end of this page.)
 
 **Closed, by the criterion's own check:**
 
@@ -1844,7 +1846,7 @@ recounted.
 |---|---|
 | 1, 4, 8, 20 — the policy page, the lane, the conditional obligations | PR 1 |
 | 5 — the review table in exactly two places, and no bare vendor token in a skill | PR 1 (the two table clauses), PR 6 (the vendor clause whole: a converted token names a role, and no role resolves before PR 6's registry reader) (2026-09-14: the vendor clause is open, see "The closure state today"; being implemented now, from decision note 1942). (2026-09-14, superseding that vendor clause only: #935 closed it, `48d1d58e`. Criterion 5 is part-closed. The clause at `prd.md:1235-1236`, that every skill which runs a review names its point in the table and reads the cap from it, is unasserted and was outside #935's scope, so it stays open and no step of the lane order schedules it) |
-| 31 — requirement 13 line by line | PR 2 (2026-09-14: never merged; open, see "The closure state today"). (2026-09-14, superseding the scope this row's heading names, not the criterion's open state, decision note 1942: rescoped, with `R10-D` and `sd-rust-reviewer` dropped, `parked` and `archived` scoped to the `sd_lib` item field and its readers, and the cross-repository bug regression tests moved to followup sd:790. Three pull requests close it: 31(a) with criterion 21, then 31(b), then 31(c), which carries `Delivers: sd:10`). (2026-09-16: 31(a)'s `sd_sweep` symbol is closed by the sweep cut, asserted by `tests/test_cut_symbols.py`; its `parked` and `archived` field cut is still open, see the 2026-09-16 entry at the end of this page) |
+| 31 — requirement 13 line by line | PR 2 (2026-09-14: never merged; open, see "The closure state today"). (2026-09-14, superseding the scope this row's heading names, not the criterion's open state, decision note 1942: rescoped, with `R10-D` and `sd-rust-reviewer` dropped, `parked` and `archived` scoped to the `sd_lib` item field and its readers, and the cross-repository bug regression tests moved to followup sd:790. Three pull requests close it: 31(a) with criterion 21, then 31(b), then 31(c), which carries `Delivers: sd:10`). (2026-09-16: 31(a)'s `sd_sweep` symbol is closed by the sweep cut, asserted by `tests/test_cut_symbols.py`; its `parked` and `archived` field cut is deferred to a later lane (team-lead decision 2026-09-16, reversible by the owner) with the reader set frozen by `tests/test_cut_symbols.py::ParkedAndArchivedReaders`, see the 2026-09-16 entry at the end of this page) |
 | 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) (2026-09-14: PR 2 never merged; the code-path half is open, see "The closure state today"). (2026-09-14, superseding the PR 2 assignment only, not the code-path half's open state, decision note 1942: one pull request with 31(a), after #932, which merged as `107016fc`, and after the system sweep job and its LaunchAgent are retired). (2026-09-16: the code-path half is closed by the sweep cut, with the frozen deletion-verb set in `tests/test_archive_untouched.py`; see the 2026-09-16 entry at the end of this page) |
 | 14, 15, 16, 17, 30 — the checks | PR 3 (2026-09-14: never merged; 14, 15 and 16 are open, 17 closed by #892 and 30 is CI's, see "The closure state today"). (2026-09-14, superseding that sentence's claim that 14 and 15 are open, and nothing else in it, decision note 1942: 14 is cut and 15's ceilings clause is cut, so 15 is closed on its floor clause; 16 is being implemented now, in #938, and is still open) |
 | 33 — no document names a `docs/work/` path that does not resolve | PR 7, which adds the rule; wired by criterion 14's enumeration in PR 3, which lands first (2026-09-14: PR 3 never merged and criterion 14 is open, so nothing wires the rule into `make check`; see "The closure state today"). (2026-09-14, superseding the sentence before it: criterion 14 is cut by decision note 1942, and #820 runs the whole lint, rule 7 with it, in `make check`) |
@@ -1932,9 +1934,16 @@ readers. The readers are `bin/sd-status` — the `--parked` flag, the parked
 section, and the `entry["archived"]` and `entry["parked"]` filters in three
 producers — and `tests/test_sd_status.py`. This pull request was told to
 leave `bin/sd-status` alone beyond the import, because sd:431's slice D edits
-that file next, so the field and its readers stand, and the third of 31(a)
-that names them is open. It is one edit to `bin/sd_lib.py` plus its readers,
-after slice D, and no note yet says which pull request carries it.
+that file next, so the field and its readers stand. The team-lead's decision
+of 2026-09-16, reversible by the owner: 31(a) is closed for `sd_sweep`, and
+the field cut is deferred to a later lane after slice D. Until that lane,
+`ParkedAndArchivedReaders` in `tests/test_cut_symbols.py` freezes the reader
+set, every `.parked`, `.archived`, `["parked"]` and `["archived"]` read under
+`bin` and `dashboard`, as fourteen `(path, text)` rows, and asserts the set
+has not grown, the shape criterion 21 gives the deletion verbs. The later
+lane removes rows as it cuts readers; nothing before it may add one. It is
+one edit to `bin/sd_lib.py` plus its readers, and no note yet says which
+pull request carries it.
 
 **What criterion 21 still does not assert**, unchanged by this entry: no test
 puts a `planning` item under `docs/work/archive/` and runs `sd-status`,

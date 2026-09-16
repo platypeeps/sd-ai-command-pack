@@ -10,6 +10,13 @@ This is 31(a): `sd_sweep`, the age sweep cut under criterion 21. The parts
 that follow it, 31(b) the prose symbols and flags and 31(c) the bug
 regressions, land in their own pull requests and add their symbols here.
 
+31(a) also names `parked` and `archived`, scoped to the `sd_lib` item field
+and its readers. That cut is deferred to a later lane (team-lead decision
+2026-09-16, reversible by the owner): every reader is in `bin/sd-status`,
+which sd:431 slice D edits next, and a second writer on that file would
+collide. Until that lane, `ParkedAndArchivedReaders` freezes the reader set
+by file and text so it cannot grow while the cut waits.
+
 Two things the tree carries by name and this file leaves alone. `docs/work/`
 and `CHANGELOG.md` are history, excluded by the criterion's own definition of
 the governed tree. `tests/fixtures/*-round.json` are captured review rounds --
@@ -107,6 +114,74 @@ class SweepCut(unittest.TestCase):
         self.assertEqual(sd_lib.DEFAULT_DAYS, 45)
         for name in ("item_date", "last_active", "touched"):
             self.assertTrue(callable(getattr(sd_lib, name, None)), f"sd_lib.{name} is missing")
+
+
+#: Every site under `bin` and `dashboard` that reads the `parked` or
+#: `archived` field, as `path` and the line's text. `bin/sd_lib.py` builds the
+#: item; everything else is `bin/sd-status` (the `--parked` flag, the parked
+#: section and the three "live item" filters). The dashboard row reads the
+#: archived count `dashboard/work.py` derives from the field, kept in the set
+#: so a new reader there surfaces too. The later lane that cuts the field
+#: shrinks this set; nothing before it may grow it.
+FROZEN_FIELD_READERS = frozenset({
+    ("bin/sd_lib.py", "archived=report.archived,"),
+    ("bin/sd-status", '"archived": item.archived,'),
+    ("bin/sd-status", '"parked": item.parked,'),
+    ("bin/sd-status", 'parked = [entry for entry in listed if entry["parked"]]'),
+    ("bin/sd-status", 'active = [entry for entry in listed if not entry["archived"]]'),
+    ("bin/sd-status", 'if entry["archived"] or entry["parked"]:'),
+    ("bin/sd-status", 'if entry["archived"] or entry["parked"] or entry["status"] == "done":'),
+    ("bin/sd-status", 'live = [entry for entry in work["items"] if not entry["archived"]]'),
+    ("bin/sd-status", 'mark = "  parked" if entry["parked"] else ""'),
+    ("bin/sd-status", 'if work["parked"]:'),
+    ("bin/sd-status", 'parked = work["parked"]'),
+    ("bin/sd-status", "if args.parked:"),
+    ("bin/sd-status", '"parked": work["parked"]},'),
+    ("dashboard/app.js", "` \\u00b7 ${payload.archived} archived`;"),
+})
+
+#: An attribute or key read of either field. `git grep -E` on this platform
+#: has no `\b`, so the attribute form is bounded by hand.
+FIELD_READ = r'\.(parked|archived)([^A-Za-z_]|$)|\["(parked|archived)"\]'
+
+
+def field_readers() -> list[tuple[str, str]]:
+    """The `(path, text)` of every field read under `bin` and `dashboard`."""
+    result = subprocess.run(
+        ["git", "grep", "-nIE", FIELD_READ, "--", "bin", "dashboard"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode not in (0, 1):
+        raise AssertionError(result.stderr.strip())
+    sites = []
+    for line in result.stdout.splitlines():
+        path, _, text = line.split(":", 2)
+        sites.append((path, text.strip()))
+    return sites
+
+
+class ParkedAndArchivedReaders(unittest.TestCase):
+    """31(a)'s `parked` and `archived`: the reader set is frozen, not cut.
+
+    The assertion is that the set has not grown, not that the grep is empty,
+    the same shape criterion 21 gives the deletion verbs. When the later lane
+    cuts the field, it removes rows from `FROZEN_FIELD_READERS`; a reader
+    added anywhere before then is a row the set does not carry.
+    """
+
+    def test_the_readers_are_the_frozen_set_and_no_more(self) -> None:
+        unexpected = [site for site in field_readers() if site not in FROZEN_FIELD_READERS]
+        self.assertEqual(unexpected, [], "a new reader of parked/archived appeared")
+
+    def test_the_grep_reaches_the_sites_it_freezes(self) -> None:
+        """The control: a frozen site the grep no longer finds is either cut,
+        which is the later lane's row to remove, or reworded past the
+        pattern, which would let the check above pass on nothing."""
+        found = set(field_readers())
+        missing = sorted(FROZEN_FIELD_READERS - found)
+        self.assertEqual(missing, [], "frozen reader sites the grep did not reach")
 
 
 if __name__ == "__main__":
