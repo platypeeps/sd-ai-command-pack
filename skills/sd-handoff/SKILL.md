@@ -96,7 +96,8 @@ no `sd-handoff`, so the rows are all there is. The restored session's setup
 step, before it resumes writing any file the packet's `files[]` lists, is
 `bin/sd-rules --for <path>`, run from the repository root
 (`cd "$(git rev-parse --show-toplevel)"`) because `files[]` entries are
-root-relative and the command resolves `--for` against the working directory;
+root-relative and `bin/sd-rules --for` resolves the path against the working
+directory;
 it prints the live registry rows in scope for that file (id, subject, teaching
 section) so the rules act while the author is in the file rather than at
 review. Rows are **not** claimed — every
