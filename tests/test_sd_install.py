@@ -2645,5 +2645,68 @@ class StandingPolicyInstallerTests(InstallerHarness):
         self.assertFalse((repo / sd_install.LOCAL_BLOCK_FILE).exists())
 
 
+class LinkTests(InstallerHarness):
+    """`--user` links the `bin/` commands onto PATH, and the receipt names them.
+
+    Three commands stand in for the seventeen: the count is enumerated from
+    `bin/` at run time, so a fixture of three exercises every branch the real
+    checkout would.
+    """
+
+    def checkout_with_commands(self, *names: str) -> Path:
+        """`committed_checkout()` given executables in `bin/`, the way the pack has them."""
+        checkout = self.committed_checkout()
+        (checkout / "bin").mkdir()
+        for name in names:
+            target = checkout / "bin" / name
+            target.write_text("#!/bin/sh\n", encoding="utf-8")
+            target.chmod(0o755)
+        return checkout
+
+    def test_user_links_the_commands_and_the_receipt_names_them(self):
+        """Rule 1: every command is linked, and a link already pointing here is kept.
+
+        One hand-made link is absolute and one is relative, because the hand
+        loop that preceded this made absolute ones and a relative one is what
+        `ln -s` from inside the directory makes; both point here, so both are
+        ours and keep their inodes rather than being rewritten.
+        """
+        checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
+        bin_dir = self.home / ".local" / "bin"
+        bin_dir.mkdir(parents=True)
+        absolute = bin_dir / "sd"
+        absolute.symlink_to(checkout / "bin" / "sd")
+        relative = bin_dir / "sd-handoff"
+        relative.symlink_to(
+            os.path.relpath(checkout / "bin" / "sd-handoff", bin_dir)
+        )
+        inodes = {absolute.lstat().st_ino, relative.lstat().st_ino}
+
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context_for(checkout), out), 0)
+
+        for name in ("sd", "sd-handoff", "sd-review"):
+            link = bin_dir / name
+            self.assertTrue(link.is_symlink(), f"{link} is not a symlink")
+            self.assertEqual(link.resolve(), (checkout / "bin" / name).resolve())
+        self.assertEqual(
+            {absolute.lstat().st_ino, relative.lstat().st_ino}, inodes,
+            "a link that already pointed here was rewritten",
+        )
+        links = [row for row in self.receipt["owned"] if row.get("kind") == "link"]
+        self.assertEqual(
+            links,
+            [
+                {
+                    "path": str(bin_dir / name),
+                    "kind": "link",
+                    "target": str(checkout / "bin" / name),
+                }
+                for name in ("sd", "sd-handoff", "sd-review")
+            ],
+        )
+        self.assertIn(f"linked 3 commands into {bin_dir}", out.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main()
