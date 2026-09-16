@@ -941,7 +941,7 @@ def prune_links(
     skipped: list[tuple[str, str]] = []
     for entry in previous:
         raw = entry.get("path")
-        if entry.get("kind") != "link" or raw in keep:
+        if not isinstance(raw, str) or entry.get("kind") != "link" or raw in keep:
             continue
         path = Path(raw)
         if not path.is_symlink() and not path.exists():
@@ -1538,15 +1538,17 @@ class Context:
     home: Path
     environ: dict[str, str]
     dry_run: bool = False
-    # Where `--user` links the `bin/` commands. `~/.local/bin` unless `--bin-dir`
-    # says otherwise; filled in after construction because the default is a
-    # function of the home, and a Context a test builds with three fields must
-    # link where the CLI would.
+    # `--bin-dir`, when given. `link_dir` is what the link step reads.
     bin_dir: Path | None = None
 
-    def __post_init__(self) -> None:
-        if self.bin_dir is None:
-            self.bin_dir = self.home / ".local" / "bin"
+    @property
+    def link_dir(self) -> Path:
+        """Where `--user` links the `bin/` commands: `--bin-dir`, else `~/.local/bin`.
+
+        Derived from the home rather than defaulted at construction, so a
+        Context a test builds with three fields links where the CLI would.
+        """
+        return self.bin_dir if self.bin_dir is not None else self.home / ".local" / "bin"
 
     @property
     def sandboxed(self) -> bool:
@@ -1596,7 +1598,7 @@ def cmd_user(ctx: Context, out) -> int:
     the source is still spelled in this file only.
     """
     # Before the library: `expire_trials` writes, and a refusal writes nothing.
-    plans = link_plan(ctx.checkout, ctx.bin_dir)
+    plans = link_plan(ctx.checkout, ctx.link_dir)
     for plan in plans:
         if plan.state == "foreign":
             print(
@@ -1682,7 +1684,7 @@ def cmd_user(ctx: Context, out) -> int:
     # After the renders and before the receipt: a failure here leaves the
     # renders standing for the next run and no link the receipt does not name.
     try:
-        links = link_commands(plans, ctx.bin_dir, dry_run=ctx.dry_run)
+        links = link_commands(plans, ctx.link_dir, dry_run=ctx.dry_run)
     except LinkFailed as problem:
         print(f"error: {problem}", file=out)
         return 1
@@ -1751,13 +1753,13 @@ def cmd_user(ctx: Context, out) -> int:
         kept = sum(1 for plan in plans if plan.state == "ours")
         print(
             f"{'would link' if ctx.dry_run else 'linked'} {len(links)} commands "
-            f"into {ctx.bin_dir}"
+            f"into {ctx.link_dir}"
             + (f" ({kept} already linked)" if kept else ""),
             file=out,
         )
         entries = [Path(part) for part in ctx.environ.get("PATH", "").split(os.pathsep) if part]
-        if not any(_resolves_to(entry, ctx.bin_dir) for entry in entries):
-            print(f"  warning: {ctx.bin_dir} is not on PATH in this shell", file=out)
+        if not any(_resolves_to(entry, ctx.link_dir) for entry in entries):
+            print(f"  warning: {ctx.link_dir} is not on PATH in this shell", file=out)
     if hook_changed:
         events = sorted({event for _, event, _ in specs})
         print(f"  hooks registered: {', '.join(events)}", file=out)

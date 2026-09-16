@@ -117,6 +117,16 @@ class InstallerHarness(unittest.TestCase):
             )
         return checkout
 
+    def checkout_with_commands(self, *names: str) -> Path:
+        """`committed_checkout()` given executables in `bin/`, the way the pack has them."""
+        checkout = self.committed_checkout()
+        (checkout / "bin").mkdir()
+        for name in names:
+            target = checkout / "bin" / name
+            target.write_text("#!/bin/sh\n", encoding="utf-8")
+            target.chmod(0o755)
+        return checkout
+
     def context_for(self, checkout: Path) -> "sd_install.Context":
         return sd_install.Context(
             checkout=checkout, home=self.home, environ=dict(os.environ)
@@ -2687,16 +2697,6 @@ class LinkTests(InstallerHarness):
     checkout would.
     """
 
-    def checkout_with_commands(self, *names: str) -> Path:
-        """`committed_checkout()` given executables in `bin/`, the way the pack has them."""
-        checkout = self.committed_checkout()
-        (checkout / "bin").mkdir()
-        for name in names:
-            target = checkout / "bin" / name
-            target.write_text("#!/bin/sh\n", encoding="utf-8")
-            target.chmod(0o755)
-        return checkout
-
     def test_user_links_the_commands_and_the_receipt_names_them(self):
         """Rule 1: every command is linked, and a link already pointing here is kept.
 
@@ -2854,6 +2854,168 @@ class LinkTests(InstallerHarness):
                     "links no executable" in folded, f"{name} still says it links no executable"
                 )
                 self.assertTrue("~/.local/bin" in folded, f"{name} does not name the link directory")
+
+
+class LinkEdgeCaseTests(InstallerHarness):
+    """Rule 4: every branch the link step adds has a test, for the 100% gate."""
+
+    def test_a_sandboxed_bin_dir_outside_the_home_is_refused_before_any_mode_runs(self):
+        """`--pull` fast-forwards before it links, so the check is in `main`.
+
+        `subprocess.run` is patched to fail the test if a pull is attempted,
+        and the serving checkout's commit is read before and after, so a
+        refusal that came one step too late would show twice.
+        """
+        outside = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(outside.rmdir)
+        before = sd_install.git_context(REPO_ROOT)["commit"]
+        real = subprocess.run
+
+        def guard(args, **kwargs):
+            self.assertNotIn("pull", args, "the checkout was pulled before the refusal")
+            return real(args, **kwargs)
+
+        for mode in ("--user", "--pull"):
+            with self.subTest(mode=mode):
+                with unittest.mock.patch("subprocess.run", side_effect=guard):
+                    rc, output = self.run_cli(mode, "--bin-dir", str(outside))
+                self.assertEqual(rc, 2)
+                self.assertIn(f"--bin-dir {outside} is outside --home {self.home}", output)
+                self.assertEqual(sorted(outside.iterdir()), [])
+                self.assertFalse(
+                    (self.home / ".local" / "state" / "sd-ai-command-pack" / "installed.json").exists()
+                )
+        self.assertEqual(sd_install.git_context(REPO_ROOT)["commit"], before)
+
+    def test_a_bin_dir_under_a_symlinked_parent_that_resolves_outside_is_refused(self):
+        """Containment is on the resolved path: `<home>/alias/bin` can write outside."""
+        outside = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(outside.rmdir)
+        (self.home / "alias").symlink_to(outside)
+        rc, output = self.run_cli("--user", "--bin-dir", str(self.home / "alias" / "bin"))
+        self.assertEqual(rc, 2)
+        self.assertIn("is outside --home", output)
+        self.assertEqual(sorted(outside.iterdir()), [])
+
+    def test_a_bin_dir_inside_the_home_takes_the_links(self):
+        """`--bin-dir ~/bin/common` is what a machine whose PATH lacks `~/.local/bin` passes."""
+        common = self.home / "bin" / "common"
+        rc, output = self.run_cli("--user", "--bin-dir", str(common))
+        self.assertEqual(rc, 0)
+        names = sd_install.bin_commands(REPO_ROOT)
+        self.assertIn(f"linked {len(names)} commands into {common}", output)
+        self.assertIn(f"warning: {common} is not on PATH in this shell", output)
+        for name in names:
+            self.assertEqual((common / name).resolve(), (REPO_ROOT / "bin" / name).resolve())
+        self.assertFalse((self.home / ".local" / "bin").exists())
+        links = [row for row in self.receipt["owned"] if row.get("kind") == "link"]
+        self.assertEqual({Path(row["path"]).parent for row in links}, {common})
+
+    def test_bin_dir_without_a_directory_is_an_error(self):
+        """Through `main` directly: `run_cli` would append `--home`, and that
+        would be read as the directory."""
+        out = io.StringIO()
+        self.assertEqual(sd_install.main(["--user", "--bin-dir"], out=out), 2)
+        self.assertIn("--bin-dir needs a directory", out.getvalue())
+
+    def test_no_warning_when_the_link_directory_is_on_path(self):
+        checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
+        bin_dir = self.home / "on-path"
+        ctx = sd_install.Context(
+            checkout=checkout,
+            home=self.home,
+            environ={**os.environ, "PATH": f"/usr/bin{os.pathsep}{bin_dir}"},
+            bin_dir=bin_dir,
+        )
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(ctx, out), 0)
+        self.assertIn(f"linked 3 commands into {bin_dir}", out.getvalue())
+        self.assertNotIn("not on PATH", out.getvalue())
+
+    def test_a_dry_run_would_link_and_writes_no_link(self):
+        checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
+        ctx = self.context_for(checkout)
+        ctx.dry_run = True
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(ctx, out), 0)
+        self.assertIn(f"would link 3 commands into {self.home / '.local' / 'bin'}", out.getvalue())
+        self.assertFalse((self.home / ".local" / "bin").exists())
+
+    def test_a_second_user_run_keeps_the_links_and_says_so(self):
+        checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
+        ctx = self.context_for(checkout)
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(ctx, out), 0)
+        self.assertIn("linked 3 commands into", out.getvalue())
+        self.assertIn("(3 already linked)", out.getvalue())
+
+    def test_a_retired_command_loses_its_link_on_the_next_user(self):
+        """What `--pull` does to links: it re-runs this, so a gone command's link goes."""
+        checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
+        ctx = self.context_for(checkout)
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        (checkout / "bin" / "sd-review").unlink()
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        bin_dir = self.home / ".local" / "bin"
+        self.assertFalse((bin_dir / "sd-review").is_symlink())
+        self.assertTrue((bin_dir / "sd-handoff").is_symlink())
+        links = [row["path"] for row in self.receipt["owned"] if row.get("kind") == "link"]
+        self.assertEqual(links, [str(bin_dir / "sd"), str(bin_dir / "sd-handoff")])
+
+    def test_a_recorded_link_already_gone_is_not_an_error(self):
+        checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
+        ctx = self.context_for(checkout)
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        (self.home / ".local" / "bin" / "sd-review").unlink()
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_uninstall(ctx, out), 0)
+        self.assertNotIn("left in place", out.getvalue())
+
+    def test_a_partial_link_failure_rolls_back_and_writes_no_receipt(self):
+        checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
+        real = os.symlink
+        calls = []
+
+        def second_fails(target, path, *args, **kwargs):
+            calls.append(path)
+            if len(calls) == 2:
+                raise OSError(28, "No space left on device")
+            return real(target, path, *args, **kwargs)
+
+        out = io.StringIO()
+        with unittest.mock.patch("os.symlink", side_effect=second_fails):
+            rc = sd_install.cmd_user(self.context_for(checkout), out)
+        self.assertEqual(rc, 1)
+        bin_dir = self.home / ".local" / "bin"
+        self.assertIn(f"error: could not link {bin_dir / 'sd-handoff'} (No space left on device)", out.getvalue())
+        self.assertFalse((bin_dir / "sd").is_symlink(), "the first link was not rolled back")
+        self.assertEqual(sorted(bin_dir.iterdir()), [])
+        self.assertFalse(
+            (self.home / ".local" / "state" / "sd-ai-command-pack" / "installed.json").exists()
+        )
+
+    def test_prune_links_skips_a_malformed_row(self):
+        """A link row whose path is not a string is nothing to remove, as in `prune_stale`."""
+        removed, skipped = sd_install.prune_links(
+            [{"path": 7, "kind": "link", "target": "x"}, {"path": "/x", "kind": "hook"}], set()
+        )
+        self.assertEqual((removed, skipped), (0, []))
+
+    def test_command_report_ignores_a_command_in_the_working_directory(self):
+        """`PATH=":"` is two empty components, which `which` reads as the working directory."""
+        checkout = self.checkout_with_commands("sd-handoff")
+        cwd = self.home / "cwd"
+        cwd.mkdir()
+        stray = cwd / "sd-handoff"
+        stray.write_text("#!/bin/sh\n", encoding="utf-8")
+        stray.chmod(0o755)
+        previous = os.getcwd()
+        self.addCleanup(os.chdir, previous)
+        os.chdir(cwd)
+        report = sd_install.command_report(checkout, {"PATH": os.pathsep})
+        self.assertIn("not on PATH", report)
+        self.assertNotIn("shadowed", report)
 
 
 if __name__ == "__main__":
