@@ -318,6 +318,25 @@ class Controls(unittest.TestCase):
         self.assertEqual(lines[-1], "no apply: a bulk acknowledge moves between 1 and 1000 reports")
         self.assertNotIn("None", empty.stdout)
 
+    def test_the_apply_with_a_wrong_plan_is_refused_by_the_library_and_writes_nothing(self):
+        # A plan token that is well-formed but not the preview's: the store
+        # opens for writing, the library's savepoint refuses (`StaleItem`),
+        # and `run` turns that into the one-line refusal, exit 1, so the
+        # caller sees the library's sentence and no traceback, and the dump
+        # is the one from before the attempt.
+        first, second = self.clean_reports()
+        before = self.dump()
+        wrong = "f" * 64
+        refused = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-10",
+                           "--apply", "--if-plan", wrong, "--who", "tester")
+        self.assertEqual(refused.returncode, 1, refused.stdout)
+        self.assertEqual(refused.stderr.rstrip("\n"),
+                         "sd: the clean-report selection changed since the preview; preview it again")
+        self.assertEqual(refused.stdout, "")
+        self.assertEqual(self.dump(), before)
+        self.assertEqual(self.status(first), "planning")
+        self.assertEqual(self.status(second), "planning")
+
     def test_the_bulk_dry_run_opens_the_store_read_only_and_the_apply_writes(self):
         # `run` makes one connection call. The dry run must open the store
         # the way `list` does, `write=False`, so the read runs under SQLite's
