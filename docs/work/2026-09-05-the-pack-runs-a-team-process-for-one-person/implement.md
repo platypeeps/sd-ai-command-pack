@@ -1883,14 +1883,19 @@ a reader to run `sd sweep` (`skills/sd-plan/SKILL.md`, the work-item README
 template, `bin/sd-research-kit`'s help, `bin/sd_research_pins.py`) now name
 `sd-status` or nothing.
 
-**What moved rather than died.** `sd-status`'s `idle-planning` read four
-names off the sweep module: the threshold and the three functions behind the
-aging basis. They are `sd_lib`'s now — `source:bin/sd_lib.py::DEFAULT_DAYS`,
-`source:bin/sd_lib.py::item_date`, `source:bin/sd_lib.py::touched`,
-`source:bin/sd_lib.py::last_active` — and `bin/sd-status` changed only where
-it named the module: `IDLE_DAYS = sd_lib.DEFAULT_DAYS`, two call sites and
-three docstring mentions. Nothing else in `sd-status` moved; sd:431's slice D
-rewrites its `R10-D1` strings later and separately. The cases that covered
+**What moved rather than died.** `sd-status`'s `idle-planning` read three
+names off the sweep module: the threshold and two of the functions behind
+the aging basis. They are `sd_lib`'s now — `source:bin/sd_lib.py::DEFAULT_DAYS`,
+`source:bin/sd_lib.py::touched`, `source:bin/sd_lib.py::last_active` — and
+`bin/sd-status` changed only where it named the module: `IDLE_DAYS =
+sd_lib.DEFAULT_DAYS`, two call sites and three docstring mentions. The
+sweep's own date parser, `source:bin/sd_lib.py::item_date`, moved with them
+so the basis is whole in one place, but `sd-status` never read it: its local
+`source:bin/sd-status::_item_date` reads the same two sources in the same
+order off the entry dict, and it stayed local (Copilot's third pass caught
+the entry saying four names where the measurement is three). Nothing else in
+`sd-status` moved; sd:431's slice D rewrites its `R10-D1` strings later and
+separately. The cases that covered
 the moved functions moved with them into `tests/test_sd_lib.py` (`ItemDate`,
 `LastActive`, `ItemDirectory`, `Touched`); the cases that covered the scan,
 the render, the branch annotation and the fleet pins went with the code they

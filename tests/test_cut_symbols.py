@@ -108,9 +108,10 @@ class SweepCut(unittest.TestCase):
         self.assertNotIn("sweep", verbs)
 
     def test_the_aging_basis_survived_the_cut_in_the_library(self) -> None:
-        """What `sd-status` read off the sweep now lives in `sd_lib`: the
-        threshold and the three functions behind `idle-planning`. The cut
-        removed a verb, not the one definition of idle."""
+        """The aging basis now lives in `sd_lib`: the threshold, the two
+        functions `sd-status`'s `idle-planning` read off the sweep, and the
+        sweep's own date parser (`sd-status` keeps its local `_item_date`).
+        The cut removed a verb, not the one definition of idle."""
         self.assertEqual(sd_lib.DEFAULT_DAYS, 45)
         for name in ("item_date", "last_active", "touched"):
             self.assertTrue(callable(getattr(sd_lib, name, None)), f"sd_lib.{name} is missing")
