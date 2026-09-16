@@ -33,8 +33,8 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from dashboard import (  # noqa: E402 - after the path insert
     actions,
+    now,
     server,
-    skills,
     work,
 )
 
@@ -671,15 +671,19 @@ class HandlerShape(unittest.TestCase):
         self.assertNotIn("Access-Control-Allow", source)
 
 
-SEEDED_SKILL = "harness-probe-skill"
-
-
 class Live:
     """A real server on an ephemeral port, for the guards that are HTTP's.
 
     Host and token are header checks inside `BaseHTTPRequestHandler`, and a
     test that called the handler's methods directly would be testing its own
     fake instead of the thing a browser reaches.
+
+    Every route is answered out of a scratch cache or a fleet root that does
+    not exist. `/api/skills` was the one route that read the developer's own
+    `~/.claude/skills` -- 88 directories on the machine where that was found
+    -- and this harness seeded a directory of its own to keep the gate off
+    the real home; the route retired at sd:719 step 5 with `dashboard/skills.py`,
+    and the seeding went with it.
     """
 
     def __init__(self, case: unittest.TestCase) -> None:
@@ -687,24 +691,9 @@ class Live:
 
     def __enter__(self) -> "Live":
         self.scratch = tempfile.TemporaryDirectory()
-        # `/api/skills` is the one route that takes no argument for the side it
-        # reads, so every request made through this harness walked the
-        # developer's own `~/.claude/skills`: 88 directories on the machine
-        # where this was found, none of them anything this repository ships or
-        # controls. The gate then answered differently per machine, and once
-        # answered by timing out. A directory the harness writes is the
-        # controlled one, and one seeded skill tells it apart from a real home.
-        self.installed = Path(self.scratch.name) / "claude" / "skills"
-        (self.installed / SEEDED_SKILL).mkdir(parents=True)
-        (self.installed / SEEDED_SKILL / "SKILL.md").write_text(
-            f"---\nname: {SEEDED_SKILL}\ndescription: seeded by the harness\n---\n",
-            encoding="utf-8")
         self.cache_patch = unittest.mock.patch.dict(
             os.environ, {"XDG_CACHE_HOME": self.scratch.name})
         self.cache_patch.start()
-        self.installed_patch = unittest.mock.patch.object(
-            skills, "installed_root", lambda: self.installed)
-        self.installed_patch.start()
         handler = server.make_handler(server.Cache(REPO_ROOT / "missing"), "// none")
         self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
@@ -716,7 +705,6 @@ class Live:
         self.httpd.shutdown()
         self.httpd.server_close()
         self.thread.join(timeout=5)
-        self.installed_patch.stop()
         self.cache_patch.stop()
         self.scratch.cleanup()
 
@@ -755,7 +743,7 @@ class Guards(unittest.TestCase):
                 "POST", "/api/run", b"{}",
                 {server.TOKEN_HEADER: server.TOKEN}, host="evil.example")
             self.assertEqual(status, 403)
-            read, _ = live.request("GET", "/api/state", host="evil.example")
+            read, _ = live.request("GET", "/api/now", host="evil.example")
         self.assertEqual(read, 403, "the Host guard covers reads too")
 
     def test_a_token_holder_reaches_the_allow_list_and_not_a_shell(self) -> None:
@@ -772,7 +760,7 @@ class Guards(unittest.TestCase):
     def test_the_only_writable_path_is_api_run(self) -> None:
         with Live(self) as live:
             status, _ = live.request(
-                "POST", "/api/state", b"{}", {server.TOKEN_HEADER: server.TOKEN})
+                "POST", "/api/now", b"{}", {server.TOKEN_HEADER: server.TOKEN})
         self.assertEqual(status, 404)
 
     def test_a_body_larger_than_the_cap_is_refused_unread(self) -> None:
@@ -826,7 +814,7 @@ class TokenDelivery(unittest.TestCase):
         token after a restart -- a 403 that looks like a broken dashboard.
         """
         with Live(self) as live:
-            for path in ("/", "/api/state"):
+            for path in ("/", "/api/now"):
                 conn = http.client.HTTPConnection("127.0.0.1", live.port, timeout=10)
                 try:
                     conn.request("GET", path)
@@ -913,40 +901,56 @@ class TheDeliverEndpoint(unittest.TestCase):
         self.assertEqual(seen, [(pathlib.Path("/somewhere"), "an-item")])
 
 
-class TheSkillsRouteReadsTheHarnessAndNotAHome(unittest.TestCase):
-    """The gate must not depend on what the developer happens to have installed.
+class TheFleetRoutesRetired(unittest.TestCase):
+    """sd:719 step 5: Repos, Sessions and Skills are the system dashboard's.
 
-    Every other route here is answered out of a scratch cache or a patched
-    collaborator. `/api/skills` was the exception: it resolved the installed
-    side from a module constant built at import time out of `Path.home()`, so
-    the thing under test on this machine was 88 unrelated directories, and the
-    walk of them is what made `NoGetSideEffect` time out on a Markdown-only
-    diff. Asserting the directory, rather than only that the route answers,
-    is what stops it drifting back: a route reading a real home fails here
-    even when it is fast enough that nobody notices.
+    Operations > Repos and Sessions on :8767 read the fleet through
+    `sd_dashboard/fleet.py` (system pull request #427), so the three routes
+    that served the pack's own copies went with the modules behind them. A
+    route is retired when the live server answers 404 to it, not when its
+    function is gone: a handler branch left behind with a stub payload would
+    still be a route the page could poll.
     """
 
-    def test_the_installed_side_is_the_directory_the_harness_made(self) -> None:
+    def test_the_three_fleet_routes_answer_404(self) -> None:
         with Live(self) as live:
-            status, body = live.request("GET", "/api/skills")
-            controlled = live.installed
+            for path in ("/api/state", "/api/sessions", "/api/skills"):
+                with self.subTest(path=path):
+                    status, _ = live.request("GET", path)
+                    self.assertEqual(status, 404, f"{path} still answers")
+
+    def test_now_still_answers_and_carries_no_session_rows(self) -> None:
+        """`/api/now` survives to step 6; the worktree rows it merged do not.
+
+        Two assertions, because the live one alone passes on an empty fleet
+        root whether or not the merge still calls `session_rows`: the
+        handler's `do_GET` is read out of the syntax tree as well, the way
+        `NoGetSideEffect` reads it, so the call is asserted gone rather than
+        merely quiet.
+        """
+        with Live(self) as live:
+            status, body = live.request("GET", "/api/now")
         self.assertEqual(status, 200)
-        got = json.loads(body)
-        self.assertEqual(got["installedAt"], str(controlled))
-        self.assertTrue(got["installedExists"])
-
-    def test_the_installed_names_are_exactly_what_the_harness_seeded(self) -> None:
-        """One seeded skill. A real home would bring dozens of its own."""
-        with Live(self) as live:
-            _, body = live.request("GET", "/api/skills")
-        got = json.loads(body)
-        self.assertEqual(
-            [row["name"] for row in got["skills"] if row["installed"]], [SEEDED_SKILL])
-        self.assertEqual(got["counts"]["installed"], 1)
-
-    def test_the_production_default_still_names_the_agents_own_directory(self) -> None:
-        """Unpatched, so the fix is an injection point and not a move."""
-        self.assertEqual(skills.installed_root(), Path.home() / ".claude" / "skills")
+        rows = json.loads(body)["rows"]
+        self.assertIsInstance(rows, list)
+        self.assertEqual([row for row in rows if row.get("source") == "sessions"], [])
+        source = (REPO_ROOT / "dashboard" / "server.py").read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if not (isinstance(node, ast.FunctionDef) and node.name == "do_GET"):
+                continue
+            called = {
+                ast.unparse(child.func) for child in ast.walk(node)
+                if isinstance(child, ast.Call)
+            }
+            self.assertNotIn("now.session_rows", called)
+            self.assertFalse({name for name in called if name.startswith("sessions.")},
+                             f"do_GET still reads the sessions module: {called}")
+            break
+        else:
+            raise AssertionError("do_GET is gone")
+        # `session_rows` stays in `dashboard/now.py` uncalled until step 6
+        # decides Now, the way `pr_rows` did after step 4.
+        self.assertTrue(callable(now.session_rows))
 
 
 if __name__ == "__main__":

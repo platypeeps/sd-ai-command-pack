@@ -1,13 +1,16 @@
-"""Behaviour tests for the dashboard's collector and CLI.
+"""Behaviour tests for the dashboard's fleet discovery, its CLI, and what retired.
 
-Real git repositories in a scratch root, because every fact the collector
-reports comes out of `git` and a mocked one would only prove the mock agrees
-with itself. The properties worth pinning are the ones a future tab could break
-without noticing: that discovery enumerates rather than recites, that a missing
-upstream reports absence instead of zero, and that the server's verb surface
-stays two (`tests/test_dashboard_actions.py` holds what the write path is
-allowed to do). The CLI has no verb left since sd:719 step 4 retired `index`,
-and the tests on it assert that.
+Real git repositories in a scratch root, because discovery reads the
+filesystem and a mocked one would only prove the mock agrees with itself. The
+properties worth pinning are the ones a future tab could break without
+noticing: that discovery enumerates rather than recites, and that the server's
+verb surface stays two (`tests/test_dashboard_actions.py` holds what the write
+path is allowed to do). The CLI has no verb left since sd:719 step 4 retired
+`index`, and the tests on it assert that. The repository collector itself --
+`git_facts`, `collect_repos`, `build_state` and the cache in front of them --
+retired with `dashboard/collect.py` at sd:719 step 5, and the tests that read
+git facts went with it; `discover_checkouts` moved to `dashboard/work.py`, the
+one caller left.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from dashboard import collect, server  # noqa: E402 - after the path insert
+from dashboard import server, work  # noqa: E402 - after the path insert
 
 
 def load_cli():
@@ -79,115 +82,14 @@ class DiscoveryTests(FleetHarness):
         self.make_repo("platypeeps/beta")
         self.make_repo("standalone")
         (self.root / "not-a-repo").mkdir()
-        found = collect.discover_checkouts(self.root)
+        found = work.discover_checkouts(self.root)
         self.assertEqual(
             sorted((group, path.name) for group, path in found),
             [(".", "standalone"), ("platypeeps", "alpha"), ("platypeeps", "beta")],
         )
 
     def test_a_missing_root_is_empty_rather_than_an_error(self):
-        self.assertEqual(collect.discover_checkouts(self.root / "nope"), [])
-
-    def test_a_directory_that_is_not_a_checkout_yields_no_facts(self):
-        plain = self.root / "plain"
-        plain.mkdir()
-        self.assertIsNone(collect.git_facts(plain))
-
-
-class FactTests(FleetHarness):
-    def test_dirt_is_counted_and_a_clean_tree_reports_zero(self):
-        clean = collect.git_facts(self.make_repo("clean"))
-        dirty = collect.git_facts(self.make_repo("dirty", dirty=True))
-        self.assertEqual(clean["dirty"], 0)
-        self.assertEqual(dirty["dirty"], 1)
-
-    def test_no_upstream_reports_absence_not_zero(self):
-        """`None` and `0` mean different things and the page renders them apart."""
-        facts = collect.git_facts(self.make_repo("solo"))
-        self.assertIsNone(facts["ahead"])
-        self.assertIsNone(facts["behind"])
-
-    def test_the_subject_and_branch_come_back(self):
-        facts = collect.git_facts(self.make_repo("named"))
-        self.assertEqual(facts["branch"], "main")
-        self.assertEqual(facts["subject"], "first commit")
-
-    def test_a_non_github_remote_leaves_the_web_link_empty(self):
-        path = self.make_repo("local-remote")
-        git(path, "remote", "add", "origin", "/srv/git/local-remote.git")
-        self.assertEqual(collect.git_facts(path)["web"], "")
-
-    def test_a_github_remote_becomes_a_web_link(self):
-        path = self.make_repo("gh")
-        git(path, "remote", "add", "origin", "git@github.com:owner/gh.git")
-        self.assertEqual(collect.git_facts(path)["web"], "https://github.com/owner/gh")
-
-    def test_git_that_fails_returns_empty_rather_than_raising(self):
-        self.assertEqual(collect.run(["git", "--not-a-real-flag"]), "")
-
-    def test_a_missing_binary_returns_empty(self):
-        self.assertEqual(collect.run(["definitely-not-a-binary-here"]), "")
-
-
-class StateTests(FleetHarness):
-    def test_counts_match_the_fleet(self):
-        self.make_repo("a")
-        self.make_repo("group/b", dirty=True)
-        state = collect.build_state(self.root)
-        self.assertEqual(state["counts"]["repos"], 2)
-        self.assertEqual(state["counts"]["dirty"], 1)
-        self.assertEqual(state["counts"]["ahead"], 0)
-
-    def test_an_empty_root_collects_nothing_without_starting_a_pool(self):
-        state = collect.build_state(self.root)
-        self.assertEqual(state["repos"], [])
-        self.assertEqual(state["counts"]["repos"], 0)
-
-    def test_the_root_comes_from_the_environment(self):
-        self.assertEqual(
-            collect.repo_root({"SD_REPO_ROOT": "/tmp/elsewhere"}),
-            Path("/tmp/elsewhere"),
-        )
-
-    def test_a_tilde_in_the_environment_is_expanded(self):
-        """A quoted SD_REPO_ROOT="~/repos" arrives with the tilde intact."""
-        self.assertEqual(
-            collect.repo_root({"SD_REPO_ROOT": "~/repos"}),
-            Path.home() / "repos",
-        )
-
-    def test_an_empty_environment_value_falls_back_to_the_default(self):
-        self.assertEqual(collect.repo_root({"SD_REPO_ROOT": ""}), Path.home() / "repos")
-
-    def test_a_missing_root_is_reported_as_missing_not_as_an_empty_fleet(self):
-        state = collect.build_state(self.root / "nope")
-        self.assertFalse(state["rootExists"])
-        self.assertEqual(state["repos"], [])
-
-    def test_a_real_but_empty_root_is_not_reported_as_missing(self):
-        state = collect.build_state(self.root)
-        self.assertTrue(state["rootExists"])
-
-
-class CacheTests(FleetHarness):
-    def test_a_second_read_inside_the_window_does_not_recollect(self):
-        self.make_repo("one")
-        cache = server.Cache(self.root, seconds=60)
-        first = cache.state(now=100.0)
-        self.make_repo("two")
-        second = cache.state(now=110.0)
-        self.assertEqual(len(second["repos"]), len(first["repos"]))
-
-    def test_the_window_expiring_recollects(self):
-        self.make_repo("one")
-        cache = server.Cache(self.root, seconds=5)
-        cache.state(now=100.0)
-        self.make_repo("two")
-        self.assertEqual(len(cache.state(now=200.0)["repos"]), 2)
-
-    def test_the_default_clock_is_used_when_none_is_given(self):
-        cache = server.Cache(self.root, seconds=60)
-        self.assertEqual(cache.state()["counts"]["repos"], 0)
+        self.assertEqual(work.discover_checkouts(self.root / "nope"), [])
 
 
 class CommandLineTests(FleetHarness):
@@ -214,13 +116,17 @@ class CommandLineTests(FleetHarness):
 
 
 class RetiredTrackerIndexTests(FleetHarness):
-    """sd:719 step 4: the legacy tracker index is gone from the pack.
+    """sd:719 steps 4 and 5: the tracker index and the fleet collectors are gone.
 
-    The system dashboard serves PRs and Issues from `sd_db.shadow` (system
-    pull request #411), so the pack's own index -- `dashboard/store.py`, the
-    two tracker clients, `sd-trackers` and the `index` verb that filled it --
-    retires. Asserted from the filesystem and the index, never from a string
-    the author already knew: a file restored on its own is red here.
+    Step 4: the system dashboard serves PRs and Issues from `sd_db.shadow`
+    (system pull request #411), so the pack's own index -- `dashboard/store.py`,
+    the two tracker clients, `sd-trackers` and the `index` verb that filled it
+    -- retired. Step 5: Operations > Repos and Sessions on the system dashboard
+    (system pull request #427) read the fleet through `sd_dashboard/fleet.py`,
+    so `dashboard/collect.py`, `dashboard/sessions.py` and `dashboard/skills.py`
+    retired with the `/api/state`, `/api/sessions` and `/api/skills` routes.
+    Asserted from the filesystem and the tree, never from a string the author
+    already knew: a file restored on its own is red here.
     """
 
     RETIRED = (
@@ -230,8 +136,13 @@ class RetiredTrackerIndexTests(FleetHarness):
         "dashboard/jira.py",
         "tests/test_sd_trackers.py",
         "tests/test_sd_dashboard_index.py",
+        "dashboard/collect.py",
+        "dashboard/sessions.py",
+        "dashboard/skills.py",
+        "tests/test_dashboard_sessions.py",
+        "tests/test_dashboard_skills.py",
     )
-    RETIRED_MODULES = frozenset({"store", "github", "jira"})
+    RETIRED_MODULES = frozenset({"store", "github", "jira", "collect", "sessions", "skills"})
 
     @classmethod
     def retired_imports(cls, text: str, relative: str) -> list[str]:
@@ -239,9 +150,11 @@ class RetiredTrackerIndexTests(FleetHarness):
 
         Parsed with `ast`, not matched by line (review-1005): a parenthesised
         `from dashboard import (\n    store,\n)` spans lines, and a
-        line-anchored regex read it as clean. Three shapes are caught --
-        `import dashboard.store`, `from dashboard import store` and the
-        package-relative `from . import store` -- and a file `ast` cannot
+        line-anchored regex read it as clean. Four shapes are caught --
+        `import dashboard.store`, `from dashboard import store`, the
+        package-relative `from . import store`, and `from .store import
+        connect`, which names the module before the `import` and which the
+        step 4 walk read as an import of `connect` -- and a file `ast` cannot
         parse is not a Python importer.
         """
         try:
@@ -255,8 +168,10 @@ class RetiredTrackerIndexTests(FleetHarness):
             elif isinstance(node, ast.ImportFrom):
                 module = node.module or ""
                 relative_to_dashboard = node.level and relative.startswith("dashboard/")
-                if module == "dashboard" or relative_to_dashboard:
+                if module == "dashboard" or (relative_to_dashboard and not module):
                     names = [f"dashboard.{alias.name}" for alias in node.names]
+                elif relative_to_dashboard:
+                    names = [f"dashboard.{module}"]
                 else:
                     names = [module]
             else:
@@ -315,15 +230,21 @@ class RetiredTrackerIndexTests(FleetHarness):
 
     def test_a_parenthesised_import_is_seen(self):
         """The shape a line-anchored regex missed (review-1005), plus the other two."""
-        multiline = "from dashboard import (\n    collect,\n    store,\n)\n"
+        multiline = "from dashboard import (\n    work,\n    store,\n)\n"
         self.assertEqual(self.retired_imports(multiline, "bin/x"), ["dashboard.store"])
         self.assertEqual(
             self.retired_imports("import dashboard.jira as j\n", "bin/x"), ["dashboard.jira"])
         self.assertEqual(
-            self.retired_imports("from . import collect, github\n", "dashboard/y.py"),
+            self.retired_imports("from . import work, github\n", "dashboard/y.py"),
             ["dashboard.github"])
+        # The fourth shape, `from .collect import discover_checkouts`: step 5's
+        # importer grep missed it the way step 4's missed `from . import`, and
+        # `dashboard/work.py` carried exactly that line.
+        self.assertEqual(
+            self.retired_imports("from .collect import discover_checkouts\n", "dashboard/w.py"),
+            ["dashboard.collect"])
         self.assertEqual(self.retired_imports("from . import x\n", "tests/z.py"), [])
-        self.assertEqual(self.retired_imports("from dashboard import collect\n", "bin/x"), [])
+        self.assertEqual(self.retired_imports("from dashboard import work\n", "bin/x"), [])
         self.assertEqual(self.retired_imports("#!/bin/sh\necho store\n", "bin/sh"), [])
 
 
@@ -343,4 +264,4 @@ class ServerRouteTests(FleetHarness):
         self.assertFalse(hasattr(handler, "do_DELETE"))
 
     def test_the_client_script_is_readable_from_the_package(self):
-        self.assertIn("api/state", server.script_source())
+        self.assertIn("api/now", server.script_source())
