@@ -1816,6 +1816,40 @@ class StatusTests(InstallerHarness):
         self.assertIn("on PATH from this checkout", report)
         self.assertNotIn("shadowed", report)
 
+    def test_command_report_counts_per_command_links(self):
+        """Rule 2: the count is per command, so a linked set is seen as installed.
+
+        `~/.local/bin/sd-* -> <checkout>/bin/sd-*` is what `--user` makes, and
+        a directory test never saw it: no PATH entry resolves to `bin/`. Two
+        links of three name the missing one; three are the whole set; a foreign
+        file on PATH keeps its shadow warning.
+        """
+        checkout = self._bin_with("sd", "sd-handoff", "sd-review")
+        common = self.home / "common"
+        common.mkdir()
+        environ = {"PATH": str(common)}
+        for name in ("sd", "sd-handoff"):
+            (common / name).symlink_to(checkout / "bin" / name)
+        report = sd_install.command_report(checkout, environ)
+        self.assertIn("3 in bin/, 2 of 3 resolve on PATH from this checkout", report)
+        self.assertIn("(missing: sd-review)", report)
+        self.assertNotIn("shadowed", report)
+
+        (common / "sd-review").symlink_to(checkout / "bin" / "sd-review")
+        report = sd_install.command_report(checkout, environ)
+        self.assertIn("3 in bin/, 3 resolve on PATH from this checkout", report)
+        self.assertNotIn("missing", report)
+
+        (common / "sd-review").unlink()
+        (common / "sd-handoff").unlink()
+        foreign = common / "sd-review"
+        foreign.write_text("#!/bin/sh\n", encoding="utf-8")
+        foreign.chmod(0o755)
+        report = sd_install.command_report(checkout, environ)
+        self.assertIn("1 of 3 resolve on PATH from this checkout", report)
+        self.assertIn("(missing: sd-handoff)", report)
+        self.assertIn("[1 shadowed by another install: sd-review]", report)
+
     def test_command_report_on_a_checkout_with_no_commands(self):
         checkout = self.home / "empty-checkout"
         (checkout / "bin").mkdir(parents=True)
