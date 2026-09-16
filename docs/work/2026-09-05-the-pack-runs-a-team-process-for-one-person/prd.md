@@ -4688,14 +4688,14 @@ from a number the operator types.
     enumerating a directory of state files at `dashboard/sessions.py:45-74`
     `read_worktrees`; 46 for the per-line JSONL parse with its damaged-line
     policy at `bin/sd_ledger.py:143-188` `acked`; 54 for deriving fields at
-    `dashboard/jira.py:229-282` `normalize`, the larger of the two built
+    lines 229-282 of `dashboard/jira.py` at `2a2dbad6` `normalize`, the larger of the two built
     normalisers because recognising an invocation inside a transcript is a
-    derivation and not a field copy; 49 for `dashboard/github.py:270-318`
+    derivation and not a field copy; 49 for lines 270-318 of `dashboard/github.py` at `2a2dbad6`
     `collect`, which returns `ok`/`reason` so a partial run does not advance
-    the watermark; 27 for the watermark itself at `dashboard/store.py:190-218`;
+    the watermark; 27 for the watermark itself at lines 190-218 of `dashboard/store.py` at `2a2dbad6`;
     11 for `bin/sd_ledger.py:46-56` `path`; 35 and 19 for the entry and its
     render half at `bin/sd:2707-2741` and `bin/sd_sweep.py:144-162`; and 22 of
-    glue. `dashboard/jira.py` is 363 lines and `dashboard/github.py` 366, both
+    glue. `dashboard/jira.py` was 363 lines and `dashboard/github.py` 366 (at `2a2dbad6`; both retired at sd:719 step 4), both
     this exact shape — a coincidence worth reporting and not a derivation.
   - **`bin/sd-skill-use`, both events in one file — 240.** One file and not
     two: the events differ only in how the skill name comes off the payload,
@@ -5076,7 +5076,7 @@ from a number the operator types.
 
   **One test was too broad and is narrowed on evidence.** "Never by the
   dashboard directly" was first asserted as no `gh` anywhere under `dashboard/`,
-  which fails: `dashboard/github.py` runs `gh api graphql` to search pull requests.
+  which failed: `dashboard/github.py` (retired at sd:719 step 4) ran `gh api graphql` to search pull requests.
   Criterion 27 forbids the dashboard *opening* one, which is a write, so the
   test now looks for `--method`, `git push` and `pr create`. A companion test
   asserts that exactly one file in all of `bin/` contains `"--method"`, and that

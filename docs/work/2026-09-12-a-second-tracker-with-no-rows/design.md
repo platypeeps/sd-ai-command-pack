@@ -70,12 +70,12 @@ docstring at `sd_db/shadow_sync.py:25-29` set the terms: "When there is a
 second tracker there will be a second module, and the caller will iterate
 them." Read literally, and the plan follows it literally:
 
-- **A second module**, `sd_db/shadow_jira.py`, is `dashboard/jira.py` lifted
+- **A second module**, `sd_db/shadow_jira.py`, is `dashboard/jira.py` (the pack module, retired at sd:719 step 4) lifted
   into the library with its return shape changed from the pack's five-key
   dict to the library's `Collected` dataclass at `sd_db/shadow_sync.py:407`.
   The three carried-over rules in the pack module's docstring — `myself` is
   the availability check, match by account id, window in relative minutes —
-  and the no-default-host rule at `dashboard/jira.py:25` move with it,
+  and the no-default-host rule at line 25 of `dashboard/jira.py` at `2a2dbad6` move with it,
   verbatim. Nothing new is designed here; the module has tests in the pack
   (`JiraTests`, in `tests/test_sd_dashboard_index.py`, retired at sd:719 step 4) that move with it.
 - **The caller iterates.** `sync`, defined at `sd_db/shadow_sync.py:566`, already takes a
@@ -114,7 +114,7 @@ records `key=tracker`. Jira's cursor lives under key `jira` in the same
 `state` kind, written only when Jira's own collect returned `ok` — no
 errors, no truncation. **That is a change from the pack module**, whose
 `collect` (in `dashboard/jira.py`, retired at sd:719 step 4) sets `ok` from `not error` alone at
-`dashboard/jira.py:322` and reports truncation beside it, leaving the
+line 322 of `dashboard/jira.py` at `2a2dbad6` and reports truncation beside it, leaving the
 watermark decision to `refresh_issues`, which reads only `ok`. The library's
 `Collected` convention folds truncation in — `ok=not errors and not
 truncated` at `sd_db/shadow_sync.py:466` — and the port adopts it, so a
@@ -134,9 +134,9 @@ recovery flags do not reach Jira (below).
 
 ### Configuration: environment only, no default host
 
-The three required names are the `ENV_*` constants `dashboard/jira.py:84-86`
+The three required names are the `ENV_*` constants lines 84-86 of `dashboard/jira.py` at `2a2dbad6`
 declares; the optional fourth is read as a literal inside `settings`
-(in `dashboard/jira.py`, retired at sd:719 step 4) at `dashboard/jira.py:96`:
+(in `dashboard/jira.py`, retired at sd:719 step 4) at line 96 of `dashboard/jira.py` at `2a2dbad6`:
 
 | Variable | Required | Read as |
 |---|---|---|
@@ -309,7 +309,7 @@ renderer prints:
    `json.dumps(row["title"], ensure_ascii=False)` — the rule
    `_render_contributions` applies to external text at
    `bin/sd-status:3365-3368` — because a Jira summary is the `summary`
-   field of an external API response (`dashboard/jira.py:274`) and a
+   field of an external API response (line 274 of `dashboard/jira.py` at `2a2dbad6`) and a
    newline or an escape sequence in it would otherwise print as a second
    status line. The quoted form is the shape of the line; no truncation,
    because a cut inside an escape sequence is the injection the encoding
@@ -376,8 +376,8 @@ acceptance line is a grep.
 
 - **2026-09-12 — the port lands in the library; the pack keeps
   `dashboard/jira.py` until `index.sqlite` retires.** Two copies of the Jira
-  rules for a while, both under test. Reversed the day the dashboard reads
-  `shadow`; that item deletes the pack copy and 363 lines of `DASHBOARD_CAP`
+  rules for a while, both under test. Reversed the day the dashboard read
+  `shadow`: sd:719 step 4 (pack pull request #1005) deleted the pack copy and 363 lines of `DASHBOARD_CAP`
   (`source:tests/test_loc_caps.py::DASHBOARD_CAP`) with it.
 - **2026-09-12 — the verb iterates; `sync` stays one tracker per call.**
   Reversed if a third tracker arrives with GitHub's shape (details, budget
@@ -447,8 +447,8 @@ PRD's "sd:603 lands before any migration" is satisfied more completely than
 it knew; nothing in the plan depends on 7.
 
 **Two collectors, one set of credentials.** Exporting the three variables
-configures both `dashboard/jira.py` (through `sd-dashboard index`) and the
-library port. They write to different stores and neither reads the other's
+configured both `dashboard/jira.py` (through `sd-dashboard index`, until sd:719 step 4 retired both) and the
+library port. They wrote to different stores and neither reads the other's
 watermark, so they cannot interfere; they can double the Jira API traffic on
 a machine that runs both, which is bounded by `MAX_PAGES` at 50 per page and
 is accepted.

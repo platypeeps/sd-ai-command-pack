@@ -12,11 +12,11 @@ and the tests on it assert that.
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import importlib.machinery
 import importlib.util
 import io
-import re
 import subprocess
 import sys
 import tempfile
@@ -231,12 +231,41 @@ class RetiredTrackerIndexTests(FleetHarness):
         "tests/test_sd_trackers.py",
         "tests/test_sd_dashboard_index.py",
     )
-    IMPORT = re.compile(
-        r"^\s*from dashboard import .*\b(store|github|jira)\b"
-        r"|^\s*from \. import .*\b(store|github|jira)\b"
-        r"|^\s*(from|import) dashboard\.(store|github|jira)\b",
-        re.M,
-    )
+    RETIRED_MODULES = frozenset({"store", "github", "jira"})
+
+    @classmethod
+    def retired_imports(cls, text: str, relative: str) -> list[str]:
+        """Every import statement in `text` that names a retired module.
+
+        Parsed with `ast`, not matched by line (review-1005): a parenthesised
+        `from dashboard import (\n    store,\n)` spans lines, and a
+        line-anchored regex read it as clean. Three shapes are caught --
+        `import dashboard.store`, `from dashboard import store` and the
+        package-relative `from . import store` -- and a file `ast` cannot
+        parse is not a Python importer.
+        """
+        try:
+            tree = ast.parse(text)
+        except (SyntaxError, ValueError):
+            return []
+        found = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                relative_to_dashboard = node.level and relative.startswith("dashboard/")
+                if module == "dashboard" or relative_to_dashboard:
+                    names = [f"dashboard.{alias.name}" for alias in node.names]
+                else:
+                    names = [module]
+            else:
+                continue
+            found.extend(
+                name for name in names
+                if name.startswith("dashboard.") and name.split(".")[1] in cls.RETIRED_MODULES
+            )
+        return found
 
     def test_no_verb_remains_and_index_exits_two_with_usage(self):
         """`index` went the way `serve` and `install` did: the parser refuses it.
@@ -280,9 +309,22 @@ class RetiredTrackerIndexTests(FleetHarness):
             if path.suffix not in ("", ".py") or not path.is_file():
                 continue
             text = path.read_text(encoding="utf-8", errors="replace")
-            if self.IMPORT.search(text):
-                importers.append(relative)
+            for name in self.retired_imports(text, relative):
+                importers.append(f"{relative}: {name}")
         self.assertEqual(importers, [], f"still import the retired modules: {importers}")
+
+    def test_a_parenthesised_import_is_seen(self):
+        """The shape a line-anchored regex missed (review-1005), plus the other two."""
+        multiline = "from dashboard import (\n    collect,\n    store,\n)\n"
+        self.assertEqual(self.retired_imports(multiline, "bin/x"), ["dashboard.store"])
+        self.assertEqual(
+            self.retired_imports("import dashboard.jira as j\n", "bin/x"), ["dashboard.jira"])
+        self.assertEqual(
+            self.retired_imports("from . import collect, github\n", "dashboard/y.py"),
+            ["dashboard.github"])
+        self.assertEqual(self.retired_imports("from . import x\n", "tests/z.py"), [])
+        self.assertEqual(self.retired_imports("from dashboard import collect\n", "bin/x"), [])
+        self.assertEqual(self.retired_imports("#!/bin/sh\necho store\n", "bin/sh"), [])
 
 
 class ServerRouteTests(FleetHarness):

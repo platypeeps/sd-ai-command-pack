@@ -149,8 +149,8 @@ divide.
    port number and the LaunchAgent label are this item's to decide, and the
    decision is that neither gets a new value. `cmd_serve`
    (line 37 of `bin/sd-dashboard` at `e80153ee`) and `cmd_install` (line 139 of `bin/sd-dashboard` at `e80153ee`) are
-   removed; `cmd_index` (in `bin/sd-dashboard`, retired at sd:719 step 4) stays until the tracker views
-   move. This is the only step that makes the machine safer rather than only
+   removed; `cmd_index` stayed until the tracker views moved, and retired
+   at step 4, where the parser rejects the `index` verb outright. This is the only step that makes the machine safer rather than only
    tidier, and it is first for that reason.
 
 3. **The six plugin tabs become native system views. The plugin contract's

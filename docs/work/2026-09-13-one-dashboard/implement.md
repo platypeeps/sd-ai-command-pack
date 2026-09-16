@@ -558,7 +558,8 @@ before starting step 2.
         `tests/test_dashboard_actions.py`, `tests/test_dashboard_deliver.py`,
         `tests/test_dashboard_now.py`, `tests/test_dashboard_sessions.py`,
         `tests/test_dashboard_skills.py`, `tests/test_dashboard_work.py`,
-        `tests/test_sd_ledger.py` and `tests/test_sd_trackers.py`. The rest only
+        `tests/test_sd_ledger.py` and `tests/test_sd_trackers.py` (the two
+        index suites went at step 4). The rest only
         mention the path and are edited instead. **Re-run the grep inside the
         commit rather than working from this list**, because steps 3 to 6 will have
         moved some of it.

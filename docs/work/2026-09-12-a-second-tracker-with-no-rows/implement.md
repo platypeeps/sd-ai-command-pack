@@ -15,8 +15,8 @@ tests with the pinned build, not assumed.
 `dashboard/` changes by one expression, step 7b, so the page shows a Jira
 row's key instead of its project. `DASHBOARD_CAP`
 (`source:tests/test_loc_caps.py::DASHBOARD_CAP`) and `DASHBOARD_CODE_CAP`
-(`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`) do not move; `dashboard/jira.py` stays until
-the `index.sqlite` retirement deletes it. The pack's `bin/` has no ceiling
+(`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`) do not move; `dashboard/jira.py` stayed until
+the `index.sqlite` retirement deleted it (sd:719 step 4). The pack's `bin/` has no ceiling
 since R11-D48. The pack half is on the order of forty lines in
 `bin/sd_shadow.py`, thirty in `bin/sd-status`, and their tests.
 
@@ -80,7 +80,7 @@ since R11-D48. The pack half is on the order of forty lines in
       not start on credentials that do not reach Jira.
 
 - [x] **3. The library module: `sd_db/shadow_jira.py`.** In
-      `platypeeps/system`, lift `dashboard/jira.py` whole — module docstring
+      `platypeeps/system`, lift `dashboard/jira.py` (the pack module as it stood at `2a2dbad6`; retired at sd:719 step 4) whole — module docstring
       with both lists, `settings`, `missing`, `window_start`,
       `window_minutes`, `_request`, `account_id`, `search`, `state_of`,
       `normalize`, `collect` — with four changes and no others. (i) `collect`
@@ -92,7 +92,7 @@ since R11-D48. The pack half is on the order of forty lines in
       `sd_db/shadow_sync.py:114`; `from . import github` appears nowhere in
       the new module, and an import of it is the first thing the ported test
       module would fail on. (iii) `ok` folds truncation in: the pack's
-      `collect` sets `ok` from `not error` alone at `dashboard/jira.py:322`
+      `collect` sets `ok` from `not error` alone at line 322 of `dashboard/jira.py` at `2a2dbad6`
       and reports `truncated` beside it, because `refresh_issues` reads only
       `ok` and the pack never advanced a cursor over a truncated page only
       because `truncated` was reported, not because it was guarded. The
@@ -109,14 +109,14 @@ since R11-D48. The pack half is on the order of forty lines in
       `local-sd-db/tests/test_shadow_jira.py`, asserting on `Collected`
       fields. The suite is not free of the pack:
       `test_the_window_is_relative_minutes_not_a_timestamp` calls
-      `github.iso(...)` at `tests/test_sd_dashboard_index.py:493` through
+      `github.iso(...)` at line 493 of `tests/test_sd_dashboard_index.py` at `2a2dbad6` through
       the module's `dashboard.github` import, so the port replaces that call
       with the library's `iso` at `sd_db/shadow_sync.py:114` and drops the
       import; a copy that keeps it fails on collection in `local-sd-db`,
       where there is no `dashboard` package.
       Verify: the ported suite passes, and each of the three carried-over
       rules is guarded by a test that goes red under the mutation that
-      breaks it. The rules, as `dashboard/jira.py:254-258` implements them:
+      breaks it. The rules, as lines 254-258 of `dashboard/jira.py` at `2a2dbad6` implements them:
       `myself` is the availability check; account ids are compared when both
       sides have one and email only as the fallback; the JQL window is
       relative minutes. The mutations, each of which must redden its test
@@ -419,7 +419,7 @@ Steps 1 and 2 are the operator's and gate everything after them. Steps 3 and
   over the pack and the system checkout prints nothing — the pattern is
   assembled from a shell variable because a document that spelled it out
   would match itself; today it prints nothing, and
-  the fixture at `tests/test_sd_dashboard_index.py:426` is the shape a test
+  the fixture at line 426 of `tests/test_sd_dashboard_index.py` at `2a2dbad6` is the shape a test
   value takes — a dict literal with a placeholder, never an assignment.
 - The acceptance lines on the item map to steps: line 1 to step 8, line 2
   to step 6 (b), line 3 to a second sync after a ticket closes — not
