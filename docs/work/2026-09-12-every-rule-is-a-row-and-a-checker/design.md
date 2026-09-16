@@ -421,8 +421,22 @@ Reconsidered if a row is ever found whose proof and mutation disagree, or if a
 form is found that is both executable and readable — at which point the field
 becomes one thing and this paragraph goes.
 
-**Not accepted, and it needs an answer during implementation: what a rule id
-means when its rule is repealed.** A repealed rule's id must not become
-reusable, and live prose citing it must not silently start resolving to a
-different rule. The registry needs a tombstone state before the first repeal,
-not after.
+**Accepted, and answered in two steps: what a rule id means when its rule is
+repealed.** A repealed rule's id must not become reusable, and live prose
+citing it must not silently start resolving to a different rule. The
+tombstone state came first, on 2026-09-13 with step 4's second slice:
+`source:bin/sd_rules.py::STATES` allows exactly two values, `live` and
+`repealed`, and a `repealed` row holds `None` in both `checker` and `proof`
+(`test_every_live_rule_names_a_checker_that_exists`, which reports a value
+in either field as "repealed, but still holds"). Leg a skips the row; leg c
+resolves it, because `source:tests/test_rule_registry.py::registered_rule_ids`
+returns live and repealed ids alike; and the id-uniqueness check is what
+keeps it from ever being handed out again. The first repeal came second, on
+2026-09-16, under the owner decision of 2026-09-14 (note 1989, Dec-4):
+`R10-D2` is a `repealed` row, because the section that teaches it, whose
+heading at `skills/sd-handoff/SKILL.md:118` reads "Lane B (`--push`,
+`--park`) is not implemented", says in that heading that the behaviour the
+rule names does not exist. A live row would have asserted an enforcement nothing performs;
+the repealed row answers the citation and asserts nothing. The row's
+`teaches` still names that section, so a reader following it lands on the
+sentence that says why there is nothing to run.
