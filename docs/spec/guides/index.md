@@ -161,7 +161,7 @@ work the commit does not contain.
       the end first. Scope splits get recorded there, not in `task.json`: this
       task's `subtasks` and `children` were both empty while `implement.md:211`
       said two of its four commits had moved to separate tasks. An empty
-      `children` array means "no Trellis parent/child link", not "no scope ever
+      `children` array means "no recorded parent/child link", not "no scope ever
       left this task".
 - [ ] A criterion is satisfied by work that landed under a *different* task →
       say so, and name that task. "Verified against the tree" and "delivered

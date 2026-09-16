@@ -28,10 +28,9 @@
 > whose digest changed. There is no intent journal, no `drifted`/`unowned`
 > classification, no `.bak` restore and no partition gate in the code, so it is
 > a design record, not a map of what runs.
-> And the **Trellis Gitignore Maintenance** section is the only reason the
-> vestigial `SD-AI-COMMAND-PACK` markers in `.gitignore` are still there:
-> `CONTRIBUTING.md` says they are left in place because this section still
-> specifies them. Whatever happens to this page has to settle that too.
+> The Gitignore Maintenance section that once followed Diff Checks is gone,
+> and with it the marker pair it kept alive in this repository's `.gitignore`;
+> the Ignore Hygiene heading below says what stood there.
 >
 > **Three more of its citations went later the same day, and the count above is not
 > re-run.** `docs/FLEET_ROLLOUT.md`, `docs/fleet/consumers.json` and
@@ -39,14 +38,19 @@
 > column was executed, so this page now cites them as absent rather than stale.
 > The 302/377 figure was measured on 2026-09-01 and is left as measured; a
 > figure in prose is a measurement with no owner, and re-running it here would
-> only move the date at which it goes stale. This page's body is deliberately
-> unedited -- the triage decided against rewriting the six mixed pages down to
-> their true parts, because that destroys the record of what the machinery was,
-> which is the only thing they are still good for.
+> only move the date at which it goes stale. The triage left this page's body
+> deliberately unedited -- it decided against rewriting the six mixed pages
+> down to their true parts, because that destroys the record of what the
+> machinery was, which is the only thing they are still good for -- and the
+> one edit made since is named in the next paragraph.
 >
-> The text below is unedited. It is the record of what that machinery
-> specified, not guidance for the repository as it stands. The triage that
-> produced this notice is recorded under step 7 in
+> The text below is the record of what that machinery specified, not guidance
+> for the repository as it stands, and it is edited in one way only: the name
+> of the framework the pack grew out of, and later replaced, is written out of
+> the whole `docs/spec/` tree by sd:10 criterion 18. Where a path, identifier
+> or heading carried that name, `predecessor` stands in its place; nothing
+> else in the body moved. The triage that produced this notice is recorded
+> under step 7 in
 > `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
 
 > Manifest-driven install behavior and local filesystem conventions.
@@ -107,7 +111,7 @@ Generation rules (`.github/scripts/generate-command-surfaces.py`):
 
 - Canonical sources live at `templates/.agents/agents/<name>.md` (neutral
   Markdown + YAML frontmatter). Every pack agent name **must** start with `sd-`;
-  a `trellis-*` name lands inside the Trellis-local agent glob and stops being
+  a `predecessor-*` name lands inside the predecessor-local agent glob and stops being
   pack-managed. The generator raises `GenerationError` on a non-`sd-` name.
 - Markdown platforms (claude, gemini) install the canonical source verbatim; the
   gemini emitter also asserts the agent's tools are within a fixed allowlist,
@@ -115,7 +119,7 @@ Generation rules (`.github/scripts/generate-command-surfaces.py`):
 - The `toml` dialect (codex) renders a twin at `templates/.codex/agents/<name>.toml`
   with the body as a `developer_instructions` string (default
   `sandbox_mode = "read-only"`).
-- Agent paths are **not** added to `trellis_local_only`; pack agents must stay
+- Agent paths are **not** added to `predecessor_local_only`; pack agents must stay
   pack-managed and removable.
 
 Shipping zero agent sources is a valid state — the derivation returns no rows
@@ -1263,13 +1267,13 @@ Reference files:
 
 ## Target Validation
 
-The installer requires `.trellis/config.yaml` [absent: target-repo Trellis path] in the target repository before
+The installer requires `.predecessor/config.yaml` [absent: target-repo predecessor path] in the target repository before
 copying files. Keep that validation early in `main()` through
-`require_trellis_repo()` so invalid targets fail before side effects.
+`require_predecessor_repo()` so invalid targets fail before side effects.
 
 Reference file:
 
-- `installer/manifest.py`, `require_trellis_repo()`
+- `installer/manifest.py`, `require_predecessor_repo()`
 
 ## Installer Inspection Contract
 
@@ -1297,9 +1301,9 @@ Reference file:
      authority.
    - Inspection rejects mutation and selection flags: `--remove`,
      `--dry-run`, `--force`, `--backup`, `--local-only`,
-     `--skip-trellis-init`, `--skip-diff-check`, `--platform`, and `--all`.
+     `--skip-predecessor-init`, `--skip-diff-check`, `--platform`, and `--all`.
      `--audit` and `--json` require an inspection action.
-   - Inspection must not create receipts, provenance, backups, Trellis state,
+   - Inspection must not create receipts, provenance, backups, predecessor state,
      managed blocks, or local excludes. It must not persist the source checkout
      path in consumer state or reports intended for tracking.
 4. **Validation & Error Matrix**:
@@ -1458,17 +1462,17 @@ Reference file:
 ## Selection Rules
 
 Use `selected_files()` for platform filtering, anchor checks, and active
-Trellis platform detection:
+Predecessor platform detection:
 
 - `install: "always"` files are selected by default.
 - `install: "always"` files are also selected when `--platform` filters are
   present; adapters depend on the shared skill being installed.
 - `--all` selects all adapters even when platform directories or active
-  Trellis platform markers are absent.
+  predecessor platform markers are absent.
 - `--platform` selects only requested platforms and bypasses anchor and active
   marker detection for those selected platforms.
 - Default adapter installation depends on both the target anchor directory,
-  such as `.cursor`, `.gemini`, `.github`, or `.opencode`, and a Trellis-owned
+  such as `.cursor`, `.gemini`, `.github`, or `.opencode`, and a predecessor-owned
   marker for that platform. A generic `.github` directory used only for Actions
   must not cause GitHub Copilot prompt files or managed instruction blocks to
   install.
@@ -1491,8 +1495,8 @@ so a manifest row for it looks routine. It is not:
 
 Measured: `PLATFORM_REGISTRY["codex"].markers == ()` and `.init_flag is None`,
 where every peer carries three markers and a flag.
-`ACTIVE_TRELLIS_PLATFORM_MARKERS` has no `codex` entry, so
-`has_active_trellis_platform(target, "codex")` iterates an empty tuple and
+`ACTIVE_PREDECESSOR_PLATFORM_MARKERS` has no `codex` entry, so
+`has_active_predecessor_platform(target, "codex")` iterates an empty tuple and
 returns `False` even in a repository with a fully populated `.codex/`.
 
 **Why it's bad.** Three independent tests encode "a registered platform with
@@ -1501,7 +1505,7 @@ no markers ships no files", and one row breaks all three at once:
 - `tests/test_install_core.py::test_platform_registry_derives_consistent_tables`
   — *"codex has manifest files but no markers"*. A platform that ships files
   must be selectable by an ordinary install.
-- `tests/test_generated_parity.py::test_manifest_declares_current_trellis_platform_adapters`
+- `tests/test_generated_parity.py::test_manifest_declares_current_predecessor_platform_adapters`
   — a hardcoded set of platforms permitted manifest entries, with `codex`
   excluded and `assertIn("codex", install.PLATFORMS)` on the next line. The
   exclusion is deliberate.
@@ -1514,8 +1518,8 @@ no markers ships no files", and one row breaks all three at once:
 
 - *It must reach repositories.* Give the platform real markers and an init
   flag, as a change to install semantics carrying its own review. Check what
-  the markers select before adding them: `.codex/agents/trellis-*.toml` exist
-  wherever Trellis installed its own Codex adapter, so marking on those files
+  the markers select before adding them: `.codex/agents/predecessor-*.toml` exist
+  wherever the predecessor installed its own Codex adapter, so marking on those files
   auto-selects `codex` in essentially every consumer.
 - *It is a practice of this repository.* Ship nothing. Put the file outside
   `templates/`, give it no manifest row, and point at it from `AGENTS.md`.
@@ -1730,7 +1734,7 @@ Generated text writers follow the same safety model:
 2. Signatures: `templates/scripts/sd_ai_command_pack_lib.py` exposes
    `CommandError`, `CacheSetupError`, `ToolExecutionPlan`, `CACHE_ROOT_ENV`,
    `CACHE_ENV_KEYS`, `DEFAULT_COMMAND_TIMEOUT`, `DEFAULT_GIT_TIMEOUT`,
-   `DEFAULT_GH_TIMEOUT`, `DEFAULT_TRELLIS_TIMEOUT`, `command_display(args)`,
+   `DEFAULT_GH_TIMEOUT`, `DEFAULT_PREDECESSOR_TIMEOUT`, `command_display(args)`,
    `command_detail(process, fallback)`, `run_command(args, *, timeout,
    context, check, cwd, allowed_returncodes, capture_output, stdout, stderr,
    text, encoding, errors, env)`,
@@ -1754,7 +1758,7 @@ Generated text writers follow the same safety model:
    dependency-free, must not import `installer.*`, must preserve UTF-8
    replacement decoding for captured output, and must apply bounded subprocess
    execution by default: 60 seconds for generic/git commands and 120 seconds
-   for GitHub or Trellis operations unless a caller supplies a narrower
+   for GitHub or predecessor operations unless a caller supplies a narrower
    timeout. Every pack-owned subprocess that may write tool cache state must
    use the shared execution plan. The plan begins with the inherited
    environment, preserves credentials and `GH_CONFIG_DIR`, and routes
@@ -1862,8 +1866,8 @@ Generated text writers follow the same safety model:
 For a normal tracked install without `--force` or `--dry-run`, run the selected
 payload once in dry-run mode before the first pack-owned write. If any selected
 target conflicts, report every conflict and exit `2` without partially applying
-the refresh. Local-only Trellis bootstrap is outside this boundary because it
-invokes the external Trellis installer before pack files exist.
+the refresh. Local-only predecessor bootstrap is outside this boundary because it
+invokes the external predecessor installer before pack files exist.
 
 An `install: always` target whose bytes differ from the new payload is not a
 conflict when `provenance.json` records those exact bytes for that target. The
@@ -1913,31 +1917,23 @@ Run the final `git diff --check` only against manifest-selected target paths.
 The installer should not fail because an unrelated tracked file in the target
 repo already has whitespace errors.
 
-## Trellis Gitignore Maintenance
+## Ignore Hygiene
 
-For normal tracked installs, maintain a repo root `.gitignore` block between
-`# sd-ai-command-pack trellis-gitignore start` and
-`# sd-ai-command-pack trellis-gitignore end`. The block must ignore Trellis
-local/runtime paths such as `.trellis/.developer`, `.trellis/.runtime/`,
-`.trellis/.cache/`, `.trellis/.backup-*`, `.trellis/worktrees/`, and
-`.trellis/.template-hashes.json` without blanket-ignoring `.trellis/`. It must
-also ignore local AI-tool state under `.claude/`, `.codex/`, `.gemini/`, and
-`.opencode/` without blanket-ignoring those platform directories, so shared
-Trellis and SD command-pack adapters remain trackable.
-
-When adding the block, migrate exact unmarked `.trellis`, `.trellis/`,
-`/.trellis`, and `/.trellis/` entries into the managed block so Trellis specs,
-tasks, workflow, scripts, and shared runtime files remain trackable. Keep
-`--local-only` installs on `.git/info/exclude`; local-only mode must not modify
-tracked `.gitignore`.
+A "Gitignore Maintenance" section stood here. It specified a marker-delimited
+block the pre-3e installer wrote into every consuming repository's
+`.gitignore`, and the migration of that repository's own ignore entries into
+it. Nothing writes or reads such a block now, this repository's `.gitignore`
+carries no markers, and the section is removed rather than kept as a record
+(sd:10, criterion 18). The three contracts below were its subsections and
+stand as the record of what the installer did around it.
 
 ### Platform Runtime-Classifier Parity
 
 1. **Scope / Trigger**: apply this contract whenever a platform's
-   `PlatformInfo.trellis_local_only` entries change or a shipped review-scope
+   `PlatformInfo.predecessor_local_only` entries change or a shipped review-scope
    classifier is added or edited.
-2. **Signatures**: `PLATFORM_REGISTRY[platform].trellis_local_only` is the
-   canonical tuple; `is_trellis_runtime_path()` in the shipped shell scanner
+2. **Signatures**: `PLATFORM_REGISTRY[platform].predecessor_local_only` is the
+   canonical tuple; `is_predecessor_runtime_path()` in the shipped shell scanner
    and the copied-runtime path set in the JavaScript preflight are consumers.
 3. **Contracts**: every exact registry file and every directory/glob-equivalent
    registry entry must be recognized by each shipped runtime classifier. Keep
@@ -1949,7 +1945,7 @@ tracked `.gitignore`.
    shell scanner, and JavaScript classifier is good; an unchanged registry and
    classifiers is the base case; updating only one consumer is invalid drift.
 6. **Tests Required**: registry-coverage tests must assert representative exact
-   settings files and iterate every `trellis_local_only` entry against shipped
+   settings files and iterate every `predecessor_local_only` entry against shipped
    scanners; template-twin checks must compare generated root mirrors.
 7. **Wrong vs Correct**: wrong: hand-edit the root scanner or add a path only
    to the registry. Correct: update the registry and canonical template,
@@ -1965,13 +1961,13 @@ tracked `.gitignore`.
    `installer/registry.py` owns `FORCE_PRESERVED_TARGETS`,
    `REVIEW_ARTIFACT_GITIGNORE_PATTERNS`,
    and `PLATFORM_LOCAL_GITIGNORE_PATTERNS`; `installer/fileops.py` owns
-   `trellis_gitignore_block()`.
+   `predecessor_gitignore_block()`.
 3. Contracts: preserve existing `.prism/rules.json` and `.gito/config.toml`
    files even with `--force`; install or update `.gito/sd-ai-command-pack.env`
    from the pack. Never ignore the whole `.gito/`, `.prism/`, `.claude/`,
    `.codex/`, `.gemini/`, or `.opencode/` directories because pack-owned
    adapters and config must remain trackable.
-4. Ignore matrix: the managed `trellis-gitignore` block must ignore
+4. Ignore matrix: the managed `predecessor-gitignore` block must ignore
    `.build/`, root `code-review-report.json` and `code-review-report.md`, pack
    temp files such as `sd-ai-command-pack-gito.*`,
    `sd-ai-command-pack-review-paths.*`,
@@ -1987,7 +1983,7 @@ tracked `.gitignore`.
    `.git/info/exclude`; a repo-custom `.gito/config.toml` is reported
    `preserved`; a blanket `.gito/` or `.prism/` ignore is wrong.
 6. Tests required: cover fresh block creation, marker-block replacement,
-   migration away from blanket Trellis ignores, local-only exclude behavior,
+   migration away from blanket predecessor ignores, local-only exclude behavior,
    negative `git check-ignore` expectations for `.gito/config.toml` and
    `.prism/rules.json`, and positive `git check-ignore` expectations for
    generated review reports, temp files, and Gito cache/log/tmp files.
@@ -2027,7 +2023,7 @@ tracked `.gitignore`.
    links by semantic category rather than source folder name, normalizes
    platform-root `agents.md`/`AGENTS.md` guidance filenames case-insensitively
    to the same stable destination such as `codex-agents.md`, avoids generated
-   KB file/folder names that start with `.` or use Trellis-specific naming, and
+   KB file/folder names that start with `.` or use predecessor-specific naming, and
    keeps the root path ignored with `/.obsidian-kb` through the managed
    `obsidian-kb` block in `.gitignore` or `.git/info/exclude` for local-only
    installs. The root-anchored rule covers both a real directory and a root
@@ -2066,7 +2062,7 @@ tracked `.gitignore`.
    project manifests, and package documentation instead of folder-name
    headings such as `docs` or `docs/spec/backend`; assert dashboard
    one-line descriptions, the repo-specific dashboard filename, and generated
-   KB paths with no leading-dot components or Trellis-specific names.
+   KB paths with no leading-dot components or predecessor-specific names.
 7. Wrong vs correct:
 
    ```text
@@ -2083,8 +2079,8 @@ rejects manifests with a newer major schema, converts JSON parse errors and
 missing entry fields to single-line `error:` messages (no tracebacks), and
 `validate_manifest()` enforces the closed `KNOWN_MANIFEST_KINDS` set so a
 misspelled kind can never silently downgrade a managed-block entry to a plain
-file copy. `requiresTrellis` is wired: when a manifest sets it false, the
-installer skips the Trellis-repo precondition.
+file copy. `requiresPredecessor` is wired: when a manifest sets it false, the
+installer skips the predecessor-repo precondition.
 
 Reference files:
 
@@ -2092,7 +2088,7 @@ Reference files:
 - `tests/test_install_core.py`, `test_load_manifest_rejects_malformed_manifests`
 - `tests/test_install_core.py`, `test_validate_manifest_rejects_unknown_kind`
 - `tests/test_install_core.py`,
-  `test_install_skips_trellis_requirement_when_manifest_opts_out`
+  `test_install_skips_predecessor_requirement_when_manifest_opts_out`
 
 ## Legacy And Obsolete Artifact Advisories
 
@@ -2107,17 +2103,17 @@ drifted or unvouched files are preserved. Other cleanup responsibility lives in
 the install audit, which emits advisory warnings (never failures) when known
 legacy or obsolete artifacts remain in a consumer repo:
 
-- legacy `trellis-*` and `sd-refresh-specs` adapter, skill, and script names
+- legacy `predecessor-*` and `sd-refresh-specs` adapter, skill, and script names
   replaced by their `sd-*` equivalents
-- the pack rename family: `docs/TRELLIS_REVIEW_PR_PACK.md` replaced by
+- the pack rename family: `docs/PREDECESSOR_REVIEW_PR_PACK.md` replaced by
   `docs/SD_AI_COMMAND_PACK.md`, old generated `sd-command-pack-*` script
   filenames replaced by the canonical `sd-ai-command-pack-*` names, and the
   OpenCode nested `.opencode/commands/sd/` command layout replaced by flat
   `sd-<command>` files
 - stale references to those legacy names inside repo docs, configs, and
-  scripts (boundary-aware token scan; needles cover the `trellis-*` command
+  scripts (boundary-aware token scan; needles cover the `predecessor-*` command
   names, `sd-refresh-specs`, the legacy env-var prefixes, the old
-  `TRELLIS_REVIEW_PR_PACK.md` guide name, and each rename-era
+  `PREDECESSOR_REVIEW_PR_PACK.md` guide name, and each rename-era
   `sd-command-pack-*` script filename)
 
 Generated `docs/repomix-map.md` aggregates are excluded from the reference
@@ -2468,9 +2464,9 @@ identity, order, concurrency, attempts, receipts, blockers, and next actions.
   retries stay on their current stage, and attempt-two head churn parks as
   `retry-exhausted`.
 - Before a new lane installs the pack, checkout validation creates or activates
-  one dedicated consumer Trellis task with substantive release, ownership,
+  one dedicated consumer predecessor task with substantive release, ownership,
   validation, and completion criteria. A conflicting active task or dirty
-  Trellis state stops the lane before installer mutation.
+  predecessor state stops the lane before installer mutation.
 - Loading migrates schema-version-1 state: an absent `recoveries` key becomes an
   empty list, every untagged recovery row gains `kind: "pack-blocker"`, and the
   caller's mapping and rows are left unmutated. Every recovery row binds a
@@ -2704,7 +2700,7 @@ Reference files:
 ### 1. Scope / Trigger
 
 A *managed block* is a marker-delimited region the installer owns inside a file
-the consumer otherwise owns. There are three: `.gitignore`'s Trellis block,
+the consumer otherwise owns. There are three: `.gitignore`'s predecessor block,
 `.github/copilot-instructions.md`, and `AGENTS.md`'s canonical-entry-point
 routing block. Every one is an infra-integration contract, so this carries
 code-spec depth.
@@ -2741,7 +2737,7 @@ response to being asked to write markers nobody declared is to stop.
 
 | target | `create_if_absent` | `strip_on_thin` | `adopt_on_thin` | `preserve_invalid_utf8_on_strip` |
 | --- | --- | --- | --- | --- |
-| `.gitignore` (Trellis block) | yes | yes | yes | no |
+| `.gitignore` (predecessor block) | yes | yes | yes | no |
 | `.github/copilot-instructions.md` | yes | yes | no | yes |
 | `AGENTS.md` (routing block) | **no** | **no** | no | no |
 
@@ -2960,7 +2956,7 @@ honors `--dry-run`, and is incompatible with inspection or removal modes.
 Ordinary installs and all status modes must not mutate user-global state.
 
 The collector is read-only: it may inspect Git, optional GitHub metadata,
-Trellis task JSON, and local version receipts, but must never fetch, pull,
+predecessor task JSON, and local version receipts, but must never fetch, pull,
 switch, stage, commit, push, merge, delete branches, or modify task state.
 It inventories the repository's Git worktrees from `git worktree list
 --porcelain -z` (additive `git.worktrees` and `git.branchesHeldElsewhere`
@@ -2979,7 +2975,7 @@ invariants or prior housekeeping anomalies remain.
 Housekeeping owns mutation and merge safety only. After its action log, it must
 invoke the sibling status collector through the sibling toolchain resolver and
 pass cleanup context as argv values. Status owns final Git comparison,
-GitHub/Trellis inventory, anomalies, and numbered next steps. Do not reintroduce
+GitHub/predecessor inventory, anomalies, and numbered next steps. Do not reintroduce
 parallel expected-state or inventory collectors in the Bash script.
 
 Required tests cover clean, dirty, detached, diverged, unavailable-tool,

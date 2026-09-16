@@ -132,6 +132,9 @@ class ContractTests(unittest.TestCase):
     def test_no_agent_still_names_the_retired_framework(self) -> None:
         """`se-` as a name, not as three letters inside a hyphenated word.
 
+        The framework's own name is the residue test's, which greps `agents/`
+        with the rest of the governed tree.
+
         A bare substring search rejects `case-sensitive` and `false-positives`
         too -- the same false-positive class that turned up while surveying the
         vault for real callers. The lookbehind is what makes this a check for
@@ -142,7 +145,6 @@ class ContractTests(unittest.TestCase):
         for path in agent_files():
             with self.subTest(agent=path.name):
                 text = path.read_text(encoding="utf-8")
-                self.assertNotIn("Trellis", text)
                 self.assertIsNone(retired.search(text), f"{path.name} still names se-*")
 
 

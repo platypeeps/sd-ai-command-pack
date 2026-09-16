@@ -380,7 +380,7 @@ Installation supplies neither grant. A new operator must state their own policy;
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.
 Review depth, author exclusions, spending limits, and the review table's automatic pass caps remain unchanged.
 The additional-review request still needs its separate explicit authorization when the automatic cap is spent.
-The upstream Trellis PR exception still requires permission for that specific PR.
+The upstream pull-request exception in `AGENTS.md` still requires permission for that specific PR.
 
 Review resolution is ordered: machine deny; present local restriction; configured standing policy; otherwise refusal.
 A local named list restricts recipients. An explicit empty list denies all; malformed local consent refuses.

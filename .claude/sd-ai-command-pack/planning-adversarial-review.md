@@ -1,9 +1,9 @@
 # Planning adversarial review contract
 
 Use this contract at the planning convergence boundary when the current run
-creates or materially updates an active Trellis task's `prd.md`, `design.md`,
-or `implement.md`. It supplements the active Trellis planning workflow without
-modifying or replacing Trellis.
+creates or materially updates an active work item's `prd.md`, `design.md`,
+or `implement.md` under `docs/work/`. It supplements the planning workflow
+without modifying or replacing it.
 
 **Two of the obligations below are conditional.** The concern ledger of
 section 3 and the per-round cross-artifact sweep of section 2 apply when the
@@ -69,7 +69,7 @@ Update the owning planning artifact for every supported concern. Rebut an
 unsupported concern with evidence instead of changing the plan to satisfy it.
 Park external, product, or deliberately deferred work explicitly; a parked
 blocking concern still blocks implementation. An unresolved blocker prevents
-implementation approval and prevents `task.py start`.
+implementation approval and prevents the item from moving to `in_progress`.
 
 ## 4. Convergence limit
 
@@ -96,7 +96,7 @@ round rather than only the first.
 
 If a substantive concern persists after the permitted remediation rounds, or
 two lanes ran and remain in material conflict, stop before implementation
-approval or `task.py start` and ask the user for judgment.
+approval or the move to `in_progress` and ask the user for judgment.
 
 ## 5. Completion report
 

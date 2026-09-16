@@ -29,6 +29,6 @@ exclude_files = [
 
 [prompt_vars]
 requirements = """
-- Treat copied Trellis and sd-ai-command-pack files as tooling/generated surfaces unless the change intentionally updates their source or install contract.
+- Treat copied sd-ai-command-pack files as tooling/generated surfaces unless the change intentionally updates their source or install contract.
 - Prefer findings about behavior, security, data integrity, and maintainability over wording or style feedback in copied command-pack files.
 """

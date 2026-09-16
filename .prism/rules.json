@@ -25,8 +25,8 @@
       "text": "Confirm no credentials, API keys, provider tokens, local cache paths, or machine-specific secret locations are committed or logged."
     },
     {
-      "id": "trellis-task-scope",
-      "text": "Check that changes are limited to the active Trellis task and do not silently alter unrelated workflow, task, or platform files."
+      "id": "work-item-scope",
+      "text": "Check that changes are limited to the active work item and do not silently alter unrelated workflow, item, or platform files."
     }
   ]
 }

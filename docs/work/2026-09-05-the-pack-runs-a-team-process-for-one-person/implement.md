@@ -1627,12 +1627,13 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   suite under `env -u TEST_CHANGED_FILES`, so the full suite is the default;
   `.github/scripts/select-tests.py` picks the modules; `check:` is now at
   `Makefile:201` and `test:` at `:55`.)
-- **18, open.** A grep of the governed tree finds `Trellis` in 14 files,
-  `.trellis` in 11 and `task.py` in 2. (2026-09-14: still open, with two
-  exemptions from decision note 1942. The upstream Trellis pull-request
-  guard at `AGENTS.md:7-10,31` is exempt while sd:241, sd:242 and sd:244 are
-  open. The residue detectors are cut only after the gating fleet check
-  passes, and until then the `.trellis` residue line is exempt.)
+- **18, closed 2026-09-16** by the criterion 18 lane; see "Criterion 18
+  landed" at the end of this page. (Measured 2026-09-14: a grep of the
+  governed tree found `Trellis` in 14 files, `.trellis` in 11 and `task.py`
+  in 2, with two exemptions from decision note 1942. The upstream Trellis
+  pull-request guard at `AGENTS.md:7-10,31` is exempt while sd:241, sd:242
+  and sd:244 are open. The residue detectors are cut only after the gating
+  fleet check passes, and until then the `.trellis` residue line is exempt.)
 - **21, open (the code-path half).** `bin/sd_sweep.py` is tracked, and
   `bin/sd:2969` still defines `"sweep", help="report the planning items the
   45-day rule would park"`. No test asserts a frozen set for `git rm`,
@@ -2002,3 +2003,50 @@ of a cap literal. Criterion 16 closed when #938 merged as `a3baf6d9`. Open
 after this and #995 (the entry above): 18, criterion 21's archive-test
 clauses, 31(a)'s `parked` and `archived` field cut, 31(b) and 31(c).
 Followups sd:789 and sd:790 are `done`; sd:788 is still `planning`.
+
+## Criterion 18 landed
+
+2026-09-16, by the criterion 18 lane. At base `2eafa78b` the criterion's own
+grep of the governed tree, `Trellis`, `.trellis` and `task.py` as literals,
+returned 123 lines in 19 files; the new test
+`tests/test_no_trellis_residue.py`, run red before the sweep, counted 113 of
+them outside the ten exempt lines. After the sweep the grep returns the ten
+exempt lines and two more, and nothing else.
+
+What the sweep did, by kind:
+
+- The five `docs/spec/` record pages keep their bodies and lose the name:
+  where a path, identifier or heading carried it, `predecessor` stands in its
+  place, and each page's stale notice says so. The one section removed
+  outright is the gitignore-block section of
+  `docs/spec/backend/manifest-and-filesystem.md`, which was the stated reason
+  `.gitignore` kept its marker pair; the markers went in the same change, and
+  `CONTRIBUTING.md` and `docs/spec/backend/index.md` say what happened.
+- The planning contract under `.claude/` names a work item under `docs/work/`
+  and the move to `in_progress` where it named the framework's task script.
+- The routing block of `AGENTS.md` names git and GitHub workflows instead;
+  the upstream pull-request guard above it is untouched, as the exemption
+  says.
+- The pull-request template's two checklist lines about copied files and
+  journals are one line about `docs/work/` pages. `.github/copilot-instructions.md`,
+  `dashboard/sessions.py`, `dashboard/work.py`, `bin/sd_setup_github.py`, the
+  template-links test, `WORKFLOW.md`, `.prism/rules.json` and
+  `.gito/config.toml` lose their mentions in prose. `tests/test_sd_agents.py`
+  no longer spells the name itself; the residue test greps `agents/` for it.
+
+The test holds the exemption set as `(path, fragment)` rows: the four guard
+lines of `AGENTS.md`, the three `RESIDUE` lines of `bin/sd-status` and the
+three lines of `tests/test_sd_status.py` that exercise them, each keyed by
+its text so an edit above it does not move it. A second test fails when a row
+matches no line or more than one, so the set cannot outlive its lines. The
+test is in the always-run set of the changed-files fast path, with the other
+tree walkers.
+
+Two rows in that set are not the decision's exemptions: one word each in
+`bin/sd` (a docstring listing dot-directories) and `skills/sd-plan/SKILL.md`
+(a list of paths the plan skill may not write). Both files were held by
+#995 when the sweep ran, so the lane left them and marked the rows; the first
+edit that touches either file removes the word and its row. Outside the
+governed tree, `docs/review-learnings.md` keeps its rows marked
+**historical**, which quote review comments by the paths they named at the
+time, and its one curated lesson about journal sessions.

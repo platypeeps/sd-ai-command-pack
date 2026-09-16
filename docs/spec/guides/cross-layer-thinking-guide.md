@@ -7,13 +7,16 @@
 > "Cross-Platform Template Consistency" and "Generated Runtime Template Upgrade
 > Consistency" are about the per-platform command templates under `templates/`,
 > deleted on 2026-08-30 by step 3e (`43170716`, #610), and "Versioned
-> Documentation Boundary" is about the upstream Trellis docs site
+> Documentation Boundary" is about the upstream predecessor docs site
 > (`docs-site/beta/**`, `docs-site/rc/**`), which is not part of this
-> repository. `.trellis/workflow.md`, `.trellis/.version`, `get_context.py` and
-> `workflow_phase.py` are target-repo Trellis paths and unreachable from here.
+> repository. `.predecessor/workflow.md`, `.predecessor/.version`, `get_context.py` and
+> `workflow_phase.py` are target-repo predecessor paths and unreachable from here.
 >
-> The text below is unedited. It is the record of what that machinery
-> specified, not guidance for the repository as it stands. The triage that
+> The text below is the record of what that machinery specified, not guidance
+> for the repository as it stands. It is edited in one way only: the name of
+> the framework the pack grew out of is written out of the whole `docs/spec/`
+> tree by sd:10 criterion 18, and `predecessor` stands where it stood, in
+> paths and identifiers as in prose. The triage that
 > produced this notice is recorded under step 7 in
 > `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
 
@@ -164,14 +167,14 @@ footprint.
 
 ## Cross-Platform Template Consistency
 
-In Trellis, command templates (e.g., `record-session.md`) exist in **multiple platforms** with identical or near-identical content. This is a cross-layer boundary.
+In the predecessor, command templates (e.g., `record-session.md`) exist in **multiple platforms** with identical or near-identical content. This is a cross-layer boundary.
 
 ### Checklist: After Modifying Any Command Template
 
-- [ ] Find all platforms with the same command: `find src/templates/*/commands/trellis/ -name "<command>.*"`
+- [ ] Find all platforms with the same command: `find src/templates/*/commands/predecessor/ -name "<command>.*"`
 - [ ] Update all platform copies (Markdown `.md` and TOML `.toml`)
 - [ ] For Gemini TOML: adapt line continuations (`\\` vs `\`) and triple-quoted strings
-- [ ] Run `/trellis:check-cross-layer` to verify nothing was missed
+- [ ] Run `/predecessor:check-cross-layer` to verify nothing was missed
 
 **Real-world example**: Updated `record-session.md` in Claude to use `--mode record`, but forgot iFlow, Kilo, OpenCode, and Gemini — caught by cross-layer check.
 
@@ -179,8 +182,8 @@ In Trellis, command templates (e.g., `record-session.md`) exist in **multiple pl
 
 ## Generated Runtime Template Upgrade Consistency
 
-Some generated files are both documentation and runtime input. In Trellis,
-`.trellis/workflow.md` [absent: target-repo Trellis path] is parsed by `get_context.py`, `workflow_phase.py`,
+Some generated files are both documentation and runtime input. In the predecessor,
+`.predecessor/workflow.md` [absent: target-repo predecessor path] is parsed by `get_context.py`, `workflow_phase.py`,
 SessionStart filters, and per-turn hooks. Template changes must be validated
 against both fresh init and upgrade paths.
 
@@ -191,7 +194,7 @@ against both fresh init and upgrade paths.
 - [ ] Check whether relevant syntax lives outside obvious managed regions
       such as tag blocks
 - [ ] Verify fresh `init` output and a versioned `update` scenario that writes
-      the older `.trellis/.version` [absent: target-repo Trellis path]
+      the older `.predecessor/.version` [absent: target-repo predecessor path]
 - [ ] Add an upgrade regression using an older pristine template fixture, then
       assert the installed file reaches the current packaged shape
 - [ ] Update the backend spec that owns the runtime contract
@@ -226,7 +229,7 @@ audit for beta markers against the root release tree.
 **Real-world example**: Codex inline mode changed workflow platform markers from
 `[Codex]` / `[Kilo, Antigravity, Windsurf]` to `[codex-sub-agent]` /
 `[codex-inline, Kilo, Antigravity, Windsurf]`. Fresh init was correct, but
-`trellis update` only merged `[workflow-state:*]` blocks and preserved stale
+`predecessor update` only merged `[workflow-state:*]` blocks and preserved stale
 markers outside those blocks. Result: upgraded projects got new hook scripts
 but old workflow routing, so `get_context.py --mode phase --platform codex`
 could return empty Phase 2.1 detail.
@@ -255,7 +258,7 @@ When a CLI auto-detects a mode by probing a remote resource (e.g., checking if `
 
 **Real-world example**: Custom registry flow had 8 bugs across 3 review rounds: (1) probe only ran in interactive mode, (2) transient errors fell through to wrong mode, (3) giget URI had `#ref` in wrong position, (4) prefetched templates leaked across source switches, (5) `--template` shortcut bypassed probe but `downloadTemplateById` internally used catch-all `fetchTemplateIndex`, turning timeouts into "Template not found".
 
-**Real-world example**: Agent-session update hints fetched npm `latest` metadata with `response.read(4096)` and then parsed it as complete JSON. The `@mindfoldhq/trellis` package metadata exceeded 4 KB, so the JSON was truncated, parse failed silently, and the first session injection showed no update hint. Fix: read the complete response before parsing, and add a regression where `version` is followed by an 8 KB metadata tail.
+**Real-world example**: Agent-session update hints fetched npm `latest` metadata with `response.read(4096)` and then parsed it as complete JSON. The `@mindfoldhq/predecessor` package metadata exceeded 4 KB, so the JSON was truncated, parse failed silently, and the first session injection showed no update hint. Fix: read the complete response before parsing, and add a regression where `version` is followed by an 8 KB metadata tail.
 
 ---
 

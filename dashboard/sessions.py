@@ -1,7 +1,7 @@
 """Sessions: the worktrees a parallel run left behind, and what is running now.
 
-The Trellis answer to this was `.runtime/sessions`, a directory the framework
-wrote and read. **No hook carries over.** What replaces it is not a smaller
+The predecessor framework's answer to this was `.runtime/sessions`, a
+directory it wrote and read. **No hook carries over.** What replaces it is not a smaller
 ledger but no ledger at all: a worktree is registered in git's own
 `.git/worktrees/`, and a running command is in the process table. Both are
 already true without anything having recorded them, which is the same reason
