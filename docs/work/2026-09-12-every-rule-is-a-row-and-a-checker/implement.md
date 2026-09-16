@@ -237,6 +237,38 @@
       Re-measured on `075eecf2`, 2026-09-14: the dangling set is unchanged at
       those same four ids.
 
+      **Slice S2, 2026-09-16. `DANGLING_RULE_IDS` 4 → 0; `STRANDED_RULE_IDS`
+      20 → 20, a different 20.** `source:tests/test_rule_registry.py::DEFINITION`
+      reads four forms now instead of one, and no prose was repointed. The
+      three forms the finding above named were read off the archive on
+      `2eafa78b`: the table cell at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:251`
+      for `R11-D1`, the heading at
+      `docs/work/archive/2026-09/2026-09-04-host-parsing-refuses-what-it-cannot-parse/implement.md:12`
+      for `R11-D30`, and the bold run closed before the parenthesised id at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:206`
+      for `R5-D1`. The fourth form is a bold run that *contains* the id, which
+      is the team-lead decision of 2026-09-16, reversible by the owner: it
+      makes the bold sentence at
+      `docs/work/2026-09-04-sd-status-answers-is-anything-wrong-first/implement.md:9`
+      the definition of `R11-D46`, so the answer Dec-5 said that id still
+      needed is this one, and the dangling set is empty. Two readings were
+      narrowed before the sets settled, and each is held by a control in
+      `source:tests/test_rule_registry.py::TheDefinitionGrammar`: a code span
+      is blanked first, because this page quotes the archived `R5-D1` line
+      inside backticks and read as prose that quotation defined the id live;
+      and the heading and table forms read Markdown only, because a `#` line
+      in `tests/test_loc_caps.py` is a comment, and reading it as a heading
+      moved six stranded ids on the strength of citations. The stranded set
+      gains the three ids above and loses three others the same grammar finds
+      defined in a live file: `R10-D2` at `skills/sd-handoff/SKILL.md:123`,
+      `R11-D4` at `CONTRIBUTING.md:204`, and `R11-D20` in the module docstring
+      of `dashboard/now.py`, each in the closed-bold-then-parenthesis form
+      the archived `R5-D1` uses. A grammar that reads the archive reads the
+      live tree the same way, so those three are ids with a live definition
+      and no row, which neither baseline measures. `R10-D2` no longer has a
+      meter entry for the repeal Dec-4 decided; the repeal is still owed.
+
 - [ ] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become
       registry rows pointing at the existing checkers — no new enforcement, only
