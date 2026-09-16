@@ -194,6 +194,29 @@ RULES: tuple[Rule, ...] = (
         teaches="skills/sd-review/SKILL.md#"
                 "The `codex-json` entry is subscription-only (R10-D4)",
     ),
+    #: The first repealed row, and the reason it is one rather than a live row
+    #: with no checker. The section that teaches it says in its heading that
+    #: Lane B is not implemented: `bin/sd-handoff` has no `--push`, so nothing
+    #: converts a pull request to draft and nothing suppresses a re-request. A
+    #: live row here would assert an enforcement nothing performs, which is
+    #: the defect the registry exists to end. The id stays so that the
+    #: citation in that section resolves and the id is never reused; `teaches`
+    #: still names the section, so a reader following the row lands on the
+    #: sentence that says why there is nothing to run (owner decision
+    #: 2026-09-14, Dec-4).
+    Rule(
+        id="R10-D2",
+        subject="`sd-handoff --push`, on finding an open pull request for "
+                "the carrier branch, converts it to draft before pushing "
+                "and suppresses the Copilot re-request, so the once-per-head "
+                "rule does not fire on the moved head",
+        checker="bin/sd-handoff::resolve_root",
+        proof=None,
+        scope="code",
+        teaches="skills/sd-handoff/SKILL.md#"
+                "Lane B (`--push`, `--park`) is not implemented",
+        state=REPEALED,
+    ),
 )
 
 

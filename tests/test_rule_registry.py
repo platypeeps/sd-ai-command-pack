@@ -798,17 +798,23 @@ class Registry(unittest.TestCase):
         import, and an import proves only that the name is there. What it does
         is leg d's question, and asking it was the point of the change.
 
-        A repealed row holds `None` exactly -- a withdrawn rule has nothing
-        left to run, and a stale name left in its place is a tombstone that
-        still looks like a checker.
+        A repealed row holds `None` exactly, in `checker` and in `proof` both
+        -- a withdrawn rule has nothing left to run, and a stale name left in
+        either place is a tombstone that still looks like a checker. The proof
+        half was added with the first repeal, `R10-D2`: before it, a repealed
+        row holding a proof and no checker was reported only by the pairing
+        check below, as a proof with no checker, which is true and is not
+        the diagnosis -- the row is repealed, and that is why it holds nothing.
         """
 
         wrong = []
         for rule in sd_rules.RULES:
             if rule.state == sd_rules.REPEALED:
-                if rule.checker is not None:
-                    wrong.append(f"{rule.id}: repealed, but still holds "
-                                 f"{rule.checker!r}")
+                for field in ("checker", "proof"):
+                    value = getattr(rule, field)
+                    if value is not None:
+                        wrong.append(f"{rule.id}: repealed, but still holds "
+                                     f"{field}={value!r}")
                 continue
             wrong += checker_location_errors(rule)
         self.assertEqual(wrong, [], f"""
@@ -817,9 +823,10 @@ A registry row's checker does not match its state.
 {_lines(wrong)}
 
 A `live` row must name one declaration that exists, as `path::symbol`. A
-`repealed` row must hold `None` -- not a leftover name, which the first form of
-this check accepted: `(state == LIVE) != callable(checker)` is False for a
-repealed row holding the *string* "stale_name", because neither side is true.""")
+`repealed` row must hold `None` in `checker` and in `proof` -- not a leftover
+name, which the first form of this check accepted: `(state == LIVE) !=
+callable(checker)` is False for a repealed row holding the *string*
+"stale_name", because neither side is true.""")
 
     def test_a_checker_outside_the_checkout_is_refused(self):
         """An escaping checker path is a failure here, not a silent pass.
