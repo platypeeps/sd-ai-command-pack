@@ -348,7 +348,7 @@ since R11-D48. The pack half is on the order of forty lines in
       the restored branch, and `DASHBOARD_CODE_CAP` did not move. The
       manual check after step 8 is the owner's.*
 
-- [ ] **8. The first real sync, and the measurement.** With steps 1 to 7
+- [x] **8. The first real sync, and the measurement.** With steps 1 to 7
       landed and the venv reinstalled at the new pin, run
       `bin/sd shadow sync --strict` once by hand — by path, as every verb
       here (`AGENTS.md:57-69`) — then re-run the measurement
@@ -365,8 +365,19 @@ since R11-D48. The pack half is on the order of forty lines in
       remote, prints `LOG-23929` under `jira (shared database, all
       repositories)`. The nightly's next run, read from its log the following
       morning, carries both prefixes.
+      *Done, measured 2026-09-16, note 2522 on sd:361: the nightly's 08:27
+      UTC run on the pinned library was the first real Jira sync, its log
+      carrying `shadow sync[jira]: wrote 12 shadow row(s)` and `cursor moved
+      to cover from 2026-06-18T08:27:41Z`; the hand run by path at 14:54
+      UTC, `bin/sd shadow sync --strict`, exited 0 and printed both prefixes
+      (github 11 rows, jira 0). The measurement block: `shadow` by tracker
+      `github` 3931 and `jira` 12, two rows where there was one; watermark
+      keys `github` and `jira`; the `LOG-23929` browse URL one row, open,
+      last seen `2026-09-16T08:27:42+00:00`; `bin/sd-status` prints
+      `LOG-23929 open` under `jira (shared database, all repositories)`,
+      last successful sync `2026-09-16T14:54:07Z`.*
 
-- [ ] **9. Correct the item.** The PRD's last acceptance line: sd:361's body
+- [x] **9. Correct the item.** The PRD's last acceptance line: sd:361's body
       still says it builds an iteration and per-tracker watermarks that
       exist. Add a note to the item, and edit issue #805's "What to build"
       into the migration this document describes, citing `design.md`, and
@@ -379,6 +390,11 @@ since R11-D48. The pack half is on the order of forty lines in
       longer contains the sentence "The caller iterates trackers" as a thing
       to build, and its fifth acceptance line names the two readers
       separately.
+      *Done 2026-09-16, note 2522 on sd:361: issue #805's "What to build" is
+      now "What was built", the migration `design.md` describes, and its
+      fifth acceptance line names the two readers separately with
+      `LOG-23929`; the body no longer says "The caller iterates trackers" as
+      a thing to build.*
 
 Steps 1 and 2 are the operator's and gate everything after them. Steps 3 and
 4 are one pull request in `platypeeps/system`; step 5 is one here; steps 6,
