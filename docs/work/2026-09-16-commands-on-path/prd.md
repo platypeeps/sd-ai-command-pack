@@ -26,18 +26,23 @@ repository, on every machine. Measured at `c6879551` on sol:
   path (bin/sd)`: `command_report` asks whether a PATH *directory* resolves
   to `bin/`, which per-command links never satisfy, while its shadow check
   already treats such a link as this checkout's command.
-- `skills/sd-handoff/SKILL.md:18` names the command bare; `sd-plan` and
-  `sd-research-repo` do the same. The documented invocation presumes PATH.
+- `skills/sd-handoff/SKILL.md:18` names the command bare, and two prose
+  skills name `bin/` commands bare too: `skills/sd-plan/SKILL.md:103`
+  (`sd-trackers`) and `skills/sd-research-repo/SKILL.md:57`
+  (`sd-research-kit`). The documented invocation presumes PATH.
 
 ## Requirements
 
 The four rules of the item body, numbered as it numbers them.
 
-1. `--user` links every executable in `bin/` into one directory on PATH,
-   records each link in the receipt, refuses to overwrite a file at the target
-   that is not a link to this checkout's copy, keeps a link that already
-   points there rather than rewriting it, and `--uninstall` removes exactly
-   the links the receipt records and nothing else in that directory.
+1. `--user` links every executable in `bin/` into one configured link
+   directory (`~/.local/bin` by default, `--bin-dir DIR` otherwise), warns
+   when no PATH entry resolves to that directory, records each link in the
+   receipt, refuses to overwrite a file at the target that is not a link to
+   this checkout's copy, keeps a link that already points there rather than
+   rewriting it, and `--uninstall` removes exactly the links the receipt
+   records and nothing else in that directory. The installer does not edit
+   the shell: PATH membership is the owner's setup, and `--status` reports it.
 2. `--status` counts per-command links: all 17, or `N of 17` naming every
    missing one, and keeps the shadow warning for a name that resolves to
    another install.
@@ -67,7 +72,8 @@ The four rules of the item body, numbered as it numbers them.
   prepends it (`path=("$HOME/.local/bin" $path)`) and appends `~/bin/common`;
   `~/.local/bin` exists and holds no `sd*` today; `~/.config/shell/env.sh`
   sets neither. The second machine is not measurable from this lane; the item
-  states `~/.local/bin` is on PATH there. `--bin-dir DIR` overrides.
+  states `~/.local/bin` is on PATH there, and if it is not,
+  `--bin-dir ~/bin/common` reuses the directory `~/.zshrc` already appends.
 - **Link by default, or only under `--bin-dir`.** Recommend by default. A
   flag remembered per machine is the hand loop under another name.
 - **What `--pull` does to links.** Recommend nothing new: `--pull` re-runs

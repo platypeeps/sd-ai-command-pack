@@ -11,20 +11,29 @@ so the owner reviews and merges the code PR, not a lane.
 
 - [ ] 1. Test 1 (rule 1, links), `tests/test_sd_install.py`, class
       `LinkTests`: `test_user_links_the_commands_and_the_receipt_names_them`.
-      A `committed_checkout()` given two executables in `bin/` and one
-      hand-made link already at `<home>/.local/bin/<first>`. After `--user`:
-      both targets are symlinks to `<checkout>/bin/<name>`, the hand-made one
-      keeps its inode, the receipt holds two `kind: link` rows with `path`
-      and `target`. Red, then `link_plan`, `link_commands`, `--bin-dir` and
-      the receipt rows (`design.md`, "Where the link step sits"), green.
-- [ ] 2. Test 2 (rule 1, refusal): `test_user_refuses_a_foreign_file_at_a_target`.
-      A regular file at `<home>/.local/bin/<name>` before `--user`: rc 1, the
-      output names the path, no platform home holds a render, no receipt
-      exists, the file's bytes are unchanged. Red, pre-flight refusal, green.
+      A `committed_checkout()` given three executables in `bin/`, one
+      hand-made absolute link already at `<home>/.local/bin/<first>` and one
+      hand-made relative link at `<second>`. After `--user`: all three are
+      symlinks that resolve to `<checkout>/bin/<name>`, the two hand-made
+      ones keep their inodes, the receipt holds three `kind: link` rows with
+      `path` and `target`. Red, then `link_plan`, `link_commands`,
+      `--bin-dir` and the receipt rows (`design.md`, "Where the link step
+      sits"), green.
+- [ ] 2. Test 2 (rule 1, refusal): `test_user_refuses_a_foreign_file_at_a_target`,
+      run three times over the three foreign shapes (`subTest`): a regular
+      file, a dangling symlink, and a symlink into a second checkout's
+      `bin/<name>`. Each: rc 1, the output names the path, no platform home
+      holds a render, no receipt exists, the entry is unchanged (`lstat`
+      before and after), and a library fixture's expired trial is still a
+      row, since the pre-flight runs before `expire_trials`. Red, pre-flight
+      refusal, green.
 - [ ] 3. Test 3 (rule 1, uninstall): `test_uninstall_removes_the_links_and_nothing_else`.
-      `--user`, an unrecorded link `<home>/.local/bin/sd-other` to a scratch
-      file, `--uninstall`: every receipt-named link is gone, `sd-other` and
-      the directory remain. Red, then `prune_links` and the `link` skip in
+      `--user` over the three commands of test 1, then: an unrecorded link
+      `<home>/.local/bin/sd-other` to a scratch file, the first recorded link
+      retargeted to a scratch file, the second replaced by a regular file.
+      `--uninstall`: the third link is gone, the retargeted link and the
+      regular file are `left in place (not our link)`, `sd-other` and the
+      directory remain. Red, then `prune_links` and the `link` skip in
       `prune_stale`, green.
 - [ ] 4. Test 4 (rule 2): `test_command_report_counts_per_command_links` in
       `StatusTests`, `_bin_with("sd", "sd-handoff", "sd-review")` and a
@@ -34,21 +43,38 @@ so the owner reviews and merges the code PR, not a lane.
       PATH keeps `shadowed by another install`. Red, per-name loop, green;
       the seven existing `command_report` tests stay green unchanged.
 - [ ] 5. Docs (rule 3): the `--user` and `--uninstall` rows of the README
-      install table, the `command_report` docstring, `USAGE` for `--bin-dir`,
-      and `AGENTS.md` "Calling Convention" (bare `sd-*` resolves once
-      `--user` has run; by-path still works and is what the hooks use). The
-      "invoke by path" hint stays in the none-resolve branch.
+      install table; the README "What it writes on a machine" list gains
+      `<bin-dir>/sd-*` links, `~/.local/bin` by default; the README ownership
+      paragraph says a link row records its target where a render row
+      records a digest; the `command_report` docstring; `USAGE` for
+      `--bin-dir`; and `AGENTS.md` "Calling Convention" (bare `sd-*` resolves
+      once `--user` has run; by-path still works and is what the hooks and
+      the lane brief use). `docs/lane-brief.md` keeps its by-path rule as a
+      deliberate exception, with one clause saying why. The "invoke by path"
+      hint stays in the none-resolve branch. Test 5, the rule's own:
+      `test_the_link_rule_is_stated_where_the_no_link_rule_was` in
+      `tests/test_sd_install.py` asserts the phrase "links no executable"
+      is gone from `README.md`, `AGENTS.md` and the docstring, and that each
+      names the link directory. Red before the edits, green after.
 - [ ] 6. Coverage (rule 4): tests for the sandboxed `--bin-dir` outside the
-      home (exit 2) and `--dry-run` (`would link`). `make check` with the
-      installer gate at 100%.
+      home under both `--user` and `--pull` (exit 2 before any pull: the
+      fixture checkout's commit is unchanged), a `--bin-dir` under a
+      symlinked parent that resolves outside the home (exit 2), `--dry-run`
+      (`would link`), a partial link failure (`os.symlink` patched to raise on
+      the second call: rc 1, the first link is gone, no receipt), and
+      `command_report` with `PATH=":"` and the command in the working
+      directory (`not on PATH`). `make check` with the installer gate at
+      100%.
 - [ ] 7. Mutations, one per rule test, byte-copy revert each: drop the
       `symlink_to` call (test 1, missing link); drop the foreign refusal
-      (test 2, rc); make `prune_links` skip every row (test 3, surviving
-      link); restore the directory test in `command_report` (test 4, count).
+      (test 2, rc); make `prune_links` unlink without the `_resolves_to`
+      check (test 3, the retargeted link gone); restore the directory test
+      in `command_report` (test 4, count); put "links no executable" back
+      in the docstring (test 5).
 
 ## Verification
 
-- Steps 1-4 each quote `FAILED (failures=1)` before the fix and `OK` after.
+- Steps 1-5 each quote `FAILED (failures=1)` before the fix and `OK` after.
 - `make check VENV=/Users/sven/repos/platypeeps/sd-ai-command-pack/.venv`
   rc 0, `grep -c -E 'FAILED|ERROR'` 0, installer coverage 100%.
 - `tests/test_doc_citations.py` green: `source:` locators only for symbols
@@ -63,10 +89,12 @@ so the owner reviews and merges the code PR, not a lane.
 - Changed artifacts: `prd.md`, `design.md`, `implement.md`, all new at
   `c6879551` (baseline: absent). The trigger applied because
   `bin/sd_install.py` is `sensitive` and the pages plan a change to it.
-- Host review: completed, three rounds, cap 5 (Development / prd and design).
+- Host review: completed, four rounds, cap 5 (Development / prd and design);
+  round 4 folded Copilot's 15 findings on PR #1000.
 - Additional lanes: the pack defines none; Copilot's review of the planning
   PR folds through the ledger under `design.md` "Review" when it arrives.
-- Concerns: C-1 to C-9 and C-12 addressed, C-10 rebutted, C-11 parked
-  (size, owner's call, non-blocking). Ledger: `design.md`, "Review".
+- Concerns: C-1 to C-9, C-12 to C-27 addressed, C-10 rebutted (re-measured
+  in C-19), C-11 parked (size, owner's call, non-blocking). Ledger:
+  `design.md`, "Review".
 - Implementation: unblocked on the plan; blocked on the owner's three
   choices in `prd.md` and on the owner reviewing the code PR.
