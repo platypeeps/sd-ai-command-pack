@@ -1439,8 +1439,9 @@ class JiraSectionTests(StatusFixture):
 
     HEADING = "jira (shared database, all repositories)"
 
-    def seed(self, rows: list[dict[str, Any]], *, heartbeat: dict[str, Any] | None = None) -> None:
-        """Rows and an optional `tracker-sync:jira` heartbeat, through the library.
+    def seed(self, rows: list[dict[str, Any]], *, heartbeat: dict[str, Any] | None = None,
+             collected_at: str | None = None) -> None:
+        """Rows, an optional `tracker-sync:jira` heartbeat and an optional watermark, through the library.
 
         `last_seen` is the collector's clock and `upsert_shadow` stamps it
         `now`; a row that must look older is aged afterwards with one UPDATE,
@@ -1463,6 +1464,9 @@ class JiraSectionTests(StatusFixture):
                                            (seen, row["url"]))
             if heartbeat is not None:
                 sd_db.writes.record_state(connection, "heartbeat", key="tracker-sync:jira", body=heartbeat)
+            if collected_at is not None:
+                from sd_db.shadow_sync import write_watermark
+                write_watermark(connection, "jira", collected_at, collected_at)
         finally:
             connection.close()
 
@@ -1515,6 +1519,27 @@ class JiraSectionTests(StatusFixture):
         self.assertTrue(block.startswith("  never collected (collection time limit exhausted)\n"), block)
         self.assertIn('  LOG-1  open  "First"\n', block)
         self.assertIn('  LOG-2  open  "Second"\n', block)
+
+    def test_a_completed_collect_prints_the_external_context_pair(self) -> None:
+        """The other side of the `last_success_at` key: a watermark exists, so the pair prints.
+
+        A failed heartbeat lands after the watermark, so `tracker_freshness`
+        says `degraded` -- the same word it says with no success at all. Keyed
+        on the state word the line would read `never collected (boom)` and
+        deny a sync that happened; keyed on `last_success_at` it names it.
+        """
+        collected = (datetime.datetime.now(datetime.timezone.utc)
+                     - datetime.timedelta(minutes=1)).isoformat(timespec="seconds")
+        self.seed([self.ticket("LOG-10", "Ten")], collected_at=collected,
+                  heartbeat={"ok": False, "reason": "boom", "truncated": False})
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        block = self.section(completed.stdout)
+        self.assertEqual(f"  external context: degraded; last successful sync {collected}\n"
+                         '  LOG-10  open  "Ten"\n', block)
+        self.assertNotIn("never collected", block)
+        freshness = self.report()["jira"]["freshness"]
+        self.assertEqual((freshness["state"], freshness["last_success_at"]), ("degraded", collected))
 
     def test_a_closed_row_leaves_the_producer_after_seven_days(self) -> None:
         """(d) The cutoff is the producer's, so `--json` cannot carry what the text hides."""

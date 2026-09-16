@@ -4,17 +4,23 @@
 No repo-path argument or fleet walk; the dashboard owns cross-repository views.
 No repository, state-directory or cache writes. Derive from files, Git and GitHub.
 
-Eight sections:
-  pack        the checkout these tools came from
-  work        counted docs/work status from frontmatter or the authoritative row;
-              flag stale status lines and done rows without closing evidence;
-              --parked reads each item's own field, written by age sweep/D2 parking
-  prs         open pull requests through the sd-pr-state code path
-  setup       mode and detected check entrypoints
-  protection  actual enforcement gaps and both r7 merge-settings flags
-  handoff     this directory's pending packet, never consumed, and origin Lane B carriers
-  backends    installed review backend names only
-  residue     legacy leftovers with exact removal commands
+Fourteen sections, in output order, under the `pack` banner naming the checkout these tools came from:
+  abnormalities  every abnormal class, fired or clear or unchecked
+  pending        actionable rows by rank, capped, with the denominator
+  next           the top-ranked row and its suggestion
+  open threads   a count per source, then the exclusions
+  work           counted docs/work status from frontmatter or the authoritative row;
+                 flag stale status lines and done rows without closing evidence;
+                 --parked reads each item's own field, written by age sweep/D2 parking
+  contributions  the shared contribution projection for this repo
+  prs            open pull requests through the sd-pr-state code path
+  setup          mode and detected check entrypoints
+  issues         indexed issues for this repository
+  jira           the operator's Jira rows from the shared database, every repository
+  protection     actual enforcement gaps and both r7 merge-settings flags
+  handoff        this directory's pending packet, never consumed, and origin Lane B carriers
+  backends       installed review backend names only
+  residue        legacy leftovers with exact removal commands
 
 Open-row closing contradictions require trailers reachable from local or remote default refs.
 Enforcing GitHub branch protection is merge authority; mere presence is insufficient.

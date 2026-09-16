@@ -12,7 +12,9 @@ section derives its answer at run time from the filesystem, git, GitHub, or the 
 
 **There is no repo-path argument and no fleet walk (R10-D6).** The repository
 is the one enclosing cwd, full stop. The old fleet-walking sd-status is
-dropped; the dashboard provides the cross-repo view.
+dropped; the dashboard provides the cross-repo view of repositories. The one
+line here that is not scoped to the checkout is the `jira` section: a Jira
+ticket belongs to no repository, so it is read from the shared database whole.
 
 The report leads with the judgement. `abnormalities`, `pending` and `next`
 answer "is anything wrong", "what is waiting" and "what do I do now" before a
