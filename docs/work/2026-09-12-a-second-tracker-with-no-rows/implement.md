@@ -99,9 +99,11 @@ since R11-D48. The pack half is on the order of forty lines in
       library's `Collected` is `ok=not errors and not truncated`
       (`sd_db/shadow_sync.py:466`), and the port returns
       `ok=not error and not cut`, so the watermark guard on `ok` in step 4
-      is sound. (iv) `fetch_issue` (in `dashboard/jira.py`, retired at sd:719 step 4) does not move,
-      because it belongs to `sd-trackers ref`, which the item says needs no
-      change. `TRACKER =
+      is sound. (iv) `fetch_issue` (in `dashboard/jira.py`) did not move,
+      because it belonged to `sd-trackers ref`, which this item left as it
+      was; both retired at sd:719 step 4 (pack pull request #1005), and the
+      reference path is the shadow-row procedure in `skills/sd-plan/SKILL.md`.
+      `TRACKER =
       "jira"`, `OVERLAP` and `FIRST_RUN_WINDOW` are declared in the module,
       not shared, for the reason `window_start` (in `dashboard/jira.py`, retired at sd:719 step 4)
       gives. Port `JiraTests` (in `tests/test_sd_dashboard_index.py`, retired at sd:719 step 4) with

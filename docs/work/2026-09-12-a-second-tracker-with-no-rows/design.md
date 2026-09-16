@@ -363,7 +363,10 @@ its state" to be argued at the check. Porting the dashboard onto `shadow`
 is the retirement of `index.sqlite`, which is a separate item and not
 widened into this one.
 
-**`sd-trackers ref jira:KEY`** — no change, as the item says.
+**`sd-trackers ref jira:KEY`** — unchanged by this item, as the item said;
+retrospective: the command and its `ref` verb retired at sd:719 step 4
+(pack pull request #1005), and a reference now resolves against the shadow
+rows, as `skills/sd-plan/SKILL.md` says.
 
 ### The docstring
 
