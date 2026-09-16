@@ -11,9 +11,13 @@ and only the library holds the transaction. sd:234 slice 8a builds that as
 close it with the real cost, `lose` records a call that never answered,
 `release_orphans` sweeps reservations whose caller died, and `exposure` is the
 month's settled plus reserved total the refusal names. The pack consumes those
-six names and adds none, and every reservation closes: `settle` on a
-response, `lose` on a refusal, timeout or exception, both in a `finally` of
-the dispatch in `review`; a process that dies between the two leaves a row
+six names and adds none, and every reservation closes, one call per terminal
+outcome of `run_provider`: `settle` with the usage the response carries;
+`settle` at the bound when the request reached the provider and the answer
+carries no usable usage, because money may have been spent and the cap
+counts what it cannot see at the ceiling; `lose` on `NOT_RUN`, `REFUSED`,
+a timeout or an exception, since nothing left the machine. All of them in a
+`finally` of the dispatch in `review`; a process that dies between the two leaves a row
 that `release_orphans` sweeps at the next `review` start, before the chain is
 built, so `exposure` is settled plus live reservations and a dead one holds
 the cap for one run at most. The rejected alternative was a `reserve_call` in
@@ -29,7 +33,12 @@ site is `review` in `bin/sd-review`, where the chain is built and where
 estimated tokens times `price.in` plus `max_tokens` times `price.out`, each
 price per million tokens as `providers.yaml` states them, so the bound in
 dollars is `(tokens_in * price.in + max_tokens * price.out) / 1_000_000`.
-The estimate is byte length divided by four. That is an assumption, stated as one: the
+The estimate is byte length divided by four. `price` and `max_tokens` are
+optional in the registry schema and the price keys are not validated, so
+slice 3 refuses by name, fail-closed, at registry read: a `url` entry on a
+capped bill that lacks `price.in`, `price.out` or `max_tokens` is refused
+naming the entry and the key, the way a `start` entry on a capped bill is
+refused today. That is an assumption, stated as one: the
 library's own tokenizer is not consulted, because the cap is a ceiling on
 spend and an over-estimate refuses early rather than late.
 

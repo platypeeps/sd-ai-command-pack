@@ -38,7 +38,16 @@ Four slices, in this order. Slice 1 is not this repository's.
       means not capped. The rows are refreshed by the same `review` call
       through the recorded-fixture reader in tests and the live `GET` in
       production, and a `GET` that fails leaves the last rows standing and
-      says so in the run's output.
+      says so in the run's output. Two focused tests: a `GET` that fails
+      (recorded as a connection error in the fixture) leaves the previous
+      two rows as the newest and the run's output names the failure; and,
+      in slice 3, a reservation whose pid is dead is swept by
+      `release_orphans` at the next `review` start, asserted by writing the
+      row with a pid that does not exist and reading `exposure` before and
+      after.
+- [ ] 3a. Beside slice 3: a `url` entry on a capped bill without `price.in`,
+      `price.out` or `max_tokens` is refused at registry read naming the entry
+      and the key, with a test in `tests/test_sd_registry.py`.
 
 ## Verification
 
