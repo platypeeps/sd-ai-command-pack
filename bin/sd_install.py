@@ -1914,12 +1914,20 @@ def cmd_pull(ctx: Context, out) -> int:
 
 
 def cmd_uninstall(ctx: Context, out) -> int:
-    """Remove exactly what the receipt says we wrote, and nothing else."""
+    """Remove exactly what the receipt says we wrote, and nothing else.
+
+    That is the renders, the hook stanzas and the command links; the link
+    directory and any link the receipt never named stay.
+    """
     previous = owned_entries(read_receipt(ctx.receipt))
     if not previous:
         print(f"nothing to remove (no receipt at {ctx.receipt})", file=out)
         return 0
     skipped = prune_stale(previous, set(), dry_run=ctx.dry_run)
+    # Every link row is a candidate: this run produced none. A link that is no
+    # longer ours joins `skipped` and is subtracted with the modified renders.
+    _, unlinked = prune_links(previous, set(), dry_run=ctx.dry_run)
+    skipped += unlinked
     held = [
         entry.get("command") for entry in previous if entry.get("kind") == "hook"
     ]
