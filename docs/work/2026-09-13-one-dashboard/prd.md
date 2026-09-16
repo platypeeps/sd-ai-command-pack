@@ -56,7 +56,7 @@ until step 3 deleted the loader.
 
 **Only in the system:** its sections, which a reader should enumerate from
 `SECTIONS` at
-/Users/sven/repos/system/local-project-dashboard/sd_dashboard/pages.py:40 rather
+/Users/sven/repos/system/local-project-dashboard/sd_dashboard/pages.py:41 rather
 than from a list in prose. Eight entries today, seven of them in the nav and
 `item` deliberately not. Its Operations areas are a second declaration, `AREAS`
 at
@@ -160,19 +160,21 @@ divide.
    goes through the contract:
 
    - The tuple `VIEWS`, declared at
-     /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:19,
-     is `(("toolbox", …), ("briefs", …), ("vault", …), ("research", …))` — four
-     of the six — and the `collect` below it, at
-     /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:44,
-     spawns `sd_tile.py` by a fixed sibling path with an 18-second wait and a
-     65,537-byte read.
+     /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:24,
+     was `(("toolbox", …), ("briefs", …), ("vault", …), ("research", …))` — four
+     of the six, until step 2 added `queues` — and the `collect` below it, at
+     /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:83,
+     spawns `sd_tile.py` by a fixed sibling path under `VIEW_SECONDS`, 5 s per
+     view, and a shared 64 KB read (sd:758) — an 18-second wait and a
+     65,537-byte read when this was written.
    - The `_collect` at
-     /Users/sven/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py:12
+     /Users/sven/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py:32
      loads `collectors.py` by path through `importlib` and calls `collect_ports`
      **in-process**, with `timeout=12`.
 
-   Only `queues` has no system-side path. So the premise that the pack's loader
-   is "the only renderer of the six legacy collector tabs" is false for five of
+   Only `queues` had no system-side path when this was written; step 2 gave it
+   one, as the fifth `VIEWS` entry. So the premise that the pack's loader is
+   "the only renderer of the six legacy collector tabs" was false for five of
    them, and requirement 3 is written against what is there rather than against
    that premise.
 
@@ -292,14 +294,19 @@ decision whose evidence has been deleted cannot be reviewed later.
 ## Acceptance criteria
 
 - [ ] `cmd_serve` and `cmd_install` are gone from `bin/sd-dashboard`, and after
-      the change `launchctl list` still shows PID 37095 under
-      `com.sven.sd-dashboard` with `ProgramArguments[0]` unchanged. The negative
-      is the point: the pack can no longer stop the surviving dashboard.
+      the change the `com.sven.sd-dashboard` plist's `ProgramArguments[0]` is
+      still the system repository's `local-project-dashboard/dashboard.sh` and
+      the `:8767` listener is still that LaunchAgent's process. Not a PID: the
+      PID changes on every owner-approved restart (37095 at planning, 76442
+      when step 1 landed, 20480 by review-909's N3), so a check that names one
+      is stale by the next deploy. The negative is the point: the pack can no
+      longer stop the surviving dashboard.
 - [ ] All six legacy views — `toolbox`, `briefs`, `vault`, `research`, `ports`,
       `queues` — are reachable on :8767, each failing on its own rather than
       taking a screen down with it, and the pack's loader is deleted only after
-      the sixth arrives. Five are reachable today; `queues` is the one to add.
-      The check enumerates from the system package's own declaration rather than
+      the sixth arrives. Five were reachable when this was written; step 2 added
+      `queues`, and step 3 deleted the loader after it, in that order. The
+      check enumerates from the system package's own declaration rather than
       from this list, because a list in prose drifts and a tuple does not.
 - [ ] Every one of the five behaviours `design.md` names out of `app.js` is
       recorded as ported, with the system-side location, or as dropped, with the
@@ -363,3 +370,14 @@ decision whose evidence has been deleted cannot be reviewed later.
   `markup` paragraph cited that same `plugins.py` import line. The citation gate
   classified all three as `no-adjacent-anchor`, not `target-missing`, so none
   was red. Each now names the file without a line number.
+- 2026-09-16 step 0 closed with sd:361 (pack pull request #988, `2eafa78b`);
+  `implement.md` ticks it with the measurement. The system citations on both
+  pages, and the two rows of `design.md`'s tab table that repeat them, were
+  re-measured at `a5347185` and repointed: `SECTIONS` moved from
+  line 40 to 41 of `pages.py`; `VIEWS` from 19 to 24 of `reports_screen.py`,
+  and it holds five entries since step 2; its `collect` from 44 to 83; and
+  line 12 of `ports_screen.py` is now `_collectors`, with `_collect` at 32.
+  `AREAS`, the package docstring and `test_no_sqlite3_connect_in_the_dashboard`
+  had not moved. The acceptance criterion for step 1 names the plist and the
+  listener instead of a PID (review-909 N3), and sd:730's followup-path scope
+  is step 6a of `implement.md`.

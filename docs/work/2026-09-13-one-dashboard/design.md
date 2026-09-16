@@ -70,21 +70,24 @@ The item says `dashboard/plugins.py` is "the only thing that renders the six
 legacy collector tabs". It is not, for five of the six, and the two paths that
 already exist are in the *surviving* package:
 
-| Tab | System-side path today | Boundary | Budget |
+| Tab | System-side path at `a5347185` | Boundary | Budget |
 |---|---|---|---|
-| `toolbox`, `briefs`, `vault`, `research` | `VIEWS` at .../sd_dashboard/reports_screen.py:19, spawned by the `collect` at .../reports_screen.py:44 | subprocess, `sys.executable -I sd_tile.py <area>` | 18s wait, 65,537-byte read |
-| `ports` | the `_collect` at .../sd_dashboard/ports_screen.py:12 | **in-process**, `importlib` load of `collectors.py` | `timeout=12` |
-| `queues` | none | — | — |
+| `toolbox`, `briefs`, `vault`, `research`, and `queues` since step 2 | `VIEWS` at .../sd_dashboard/reports_screen.py:24, spawned by the `collect` at .../reports_screen.py:83 | subprocess, `sys.executable -I sd_tile.py <area>` | `VIEW_SECONDS`, 5 s per view, and a shared 64 KB read (sd:758); 18 s and 65,537 bytes when this table was written |
+| `ports` | the `_collect` at .../sd_dashboard/ports_screen.py:32 | **in-process**, `importlib` load of `collectors.py` | `timeout=12` |
+
+When this table was written `queues` had no row: no system-side path, no
+boundary, no budget. Step 2 gave it the first row's.
 
 Full paths, so the anchors resolve for a reader: the two files are
 /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py
 and
 /Users/sven/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py.
 
-So the plugin loader is the only renderer of **one** tab, `queues`, and the
-system page has already gone native for the other five without anybody writing it
-down. It went native in two different ways, with three different budgets, and
-neither of them is the contract's.
+So the plugin loader was the only renderer of **one** tab, `queues`, until
+step 2, and the system page had already gone native for the other five without
+anybody writing it down. It went native in two different ways, with three
+different budgets, and neither of them is the contract's. Since step 2 the
+loader renders nothing the system page lacks, and step 3 deleted it.
 
 A second thing falls out of that, and it belongs in the system repository rather
 than here: `collectors.py`'s docstring says "`sd_tile.py` is the only caller",

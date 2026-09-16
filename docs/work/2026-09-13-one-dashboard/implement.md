@@ -35,7 +35,7 @@ before starting step 2.
 
 ## Step checklist
 
-- [ ] **0. sd:361, to completion.** Its own `implement.md` is the plan and this
+- [x] **0. sd:361, to completion.** Its own `implement.md` is the plan and this
       item does not restate it. State on `main` at `e80153ee`: steps 1 and 2 are
       `[x]`; step 3 is `[ ]` in the file but **has landed** as system pull
       request #312, squash `b05d684a`, which added
@@ -53,6 +53,19 @@ before starting step 2.
       would read as a pass. **Do not mark step 3 done in sd:361's file from this lane**;
       that item's owner holds the file, and editing it here is the cross-lane
       write sd:525 objects to. Record the landing as a note on sd:361 instead.
+
+      **Done: sd:361 closed on 2026-09-16, and its closing commit is pack pull
+      request #988, squash `2eafa78b`, which ticked its steps 8 and 9.** All
+      ten lines of its checklist are `[x]` at that commit. The verification
+      above, re-run at that commit from the pack's venv:
+      `python -c "import sd_db; print(sd_db.TRACKERS)"` prints
+      `('github', 'jira')`, and the installed library reports `SCHEMA_VERSION`
+      9 where the paragraph above measured 8. `git ls-tree a5347185 -r
+      --name-only | grep shadow_jira` in `/Users/sven/repos/system` still
+      returns both paths. The measurement behind steps 8 and 9 is sd:361's
+      note 2522; the owner's check of the issues tab, LOG-23929 in the jira
+      section, is its note 2542. Both are recorded on that item and not
+      restated here.
 
 - [x] **1. `serve` and `install` are removed; `index` stays.** Every
       `bin/sd-dashboard` line number in this step's plan is as of `e80153ee`,
@@ -94,12 +107,16 @@ before starting step 2.
       the machine safer rather than tidier.
 
       Verify, and the important half is a negative:
-      `launchctl list | grep com.sven.sd-dashboard` prints the same PID after
-      the change as before it (37095 when this plan was measured, 76442 when
-      step 1 landed), and
+      `launchctl list | grep com.sven.sd-dashboard` still lists the label
+      after the change; the PID it prints beside the label is the PID
+      `lsof -nP -iTCP:8767 -sTCP:LISTEN` prints for the listener, the two read
+      at one moment, which is what ties the port to the LaunchAgent; and
       `plutil -extract ProgramArguments json -o - ~/Library/LaunchAgents/com.sven.sd-dashboard.plist`
       still prints the system `dashboard.sh` as element 0 — asserted **after**
-      the change and before it, so the pair is evidence rather than a hope. Then
+      the change and before it, so the pair is evidence rather than a hope. The
+      PID is never compared across runs: it was 37095 when this plan was
+      measured and 76442 when step 1 landed, and every owner-approved restart
+      changes it (review-909 N3). Then
       `grep -rn "com.sven.sd-dashboard" bin/ dashboard/ tests/` prints nothing:
       the pack no longer names a label it does not own. Then
       `grep -rn "sd-dashboard serve\|sd-dashboard install" . --include='*.md'
@@ -128,16 +145,16 @@ before starting step 2.
       `import sd_ledger` resolved.
 
 - [x] **2. `queues` becomes a native system view.** System repository only;
-      nothing in the pack changes. `queues` is the one of the six legacy views
-      with no system-side path — the other five already render, four through the
-      `collect` at
-      /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:44
+      nothing in the pack changes. When this step was planned, `queues` was the
+      one of the six legacy views with no system-side path — the other five
+      already rendered, four through the `collect` at
+      /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:83
       and `ports` in-process through the `_collect` at
-      /Users/sven/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py:12.
-      `queues` reads module state in `collectors.py` rather than a `collect_*`
-      function, so it is not a fifth entry in `VIEWS` by construction; the
-      decision of whether it joins that tuple or takes its own screen belongs to
-      the system repository and this document does not make it.
+      /Users/sven/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py:32.
+      The plan left open whether `queues` would join `VIEWS` or take its own
+      screen, because it reads module state in `collectors.py` rather than a
+      `collect_*` function; the system repository decided, and the landed
+      state below is that it joined `VIEWS` as the fifth entry.
 
       Verify: the system suite runs `Ran 307 tests` or more — it prints
       `Ran 306 tests ... OK` today — and one new case asserts the `queues` view
@@ -152,7 +169,14 @@ before starting step 2.
       the on-screen failure. The dashboard suite ran `Ran 336 tests ... OK` on
       that head.
 
-- [x] **3. The plugin loader retires, and the manifest loses two keys.** System
+- [x] **3. The plugin loader retires, and the manifest loses two keys.** Every
+      `dashboard/` and `tests/test_code_health.py` line number in this step's
+      plan is as of `a8295266`, where it was measured. The step has landed, and
+      at `2eafa78b` the lines it names are deleted or have moved, except two:
+      `dashboard/server.py:43` is still the import line, now without
+      `plugins`, and the `bounded_run` entries at `:647` and `:665` of
+      `tests/test_code_health.py` still stand, repointed to
+      `dashboard/actions.py` as the step said. System
       commit first, and it is not nothing: **remove the `tabs` and `tile` keys
       from `/Users/sven/repos/system/sd-plugin.json`.** They are the system half
       of this step because they advertise a discovery contract to the registry,
@@ -305,7 +329,7 @@ before starting step 2.
       |---|---|---|
       | `dashboard/server.py` | `:43` | imports `collect` and `store`; survives to step 6, so this commit drops both from the import line and the endpoints behind them. |
       | `bin/sd-dashboard` | `:29` | `from dashboard import collect, store` (step 1 removed `server`) — `store` goes with `issue_lines` (`source:bin/sd-dashboard::issue_lines`) and the `index` verb this step deletes. |
-      | `bin/sd` | `:2728` | `from dashboard.collect import discover_checkouts, repo_root`, inside `sd plugin list --fleet`. **This one is not a dashboard file and nothing in this plan would otherwise touch it.** |
+      | `bin/sd` | `:2729` | `from dashboard.collect import discover_checkouts, repo_root`, inside `sd plugin list --fleet`. **This one is not a dashboard file and nothing in this plan would otherwise touch it.** |
       | `bin/sd-trackers` | `:42` | `from dashboard import github, jira`. The whole tool is built on the two modules this step deletes, so it retires in the same commit or it is a broken entry point. |
 
       **`dashboard/collect.py` is not deleted here. It moves to step 5**, which is
@@ -316,9 +340,10 @@ before starting step 2.
 
       Pin commit, its own pull request, **and it lands before the pack commit
       above, not after it.** The order in this step is: system commit, library
-      merge, pin, venv reinstall, restart PID 37095, verify the new view on :8767,
+      merge, pin, venv reinstall, an owner-run restart of the
+      `com.sven.sd-dashboard` LaunchAgent, verify the new view on :8767,
       *then* the pack deletion. A merged system commit is not a running view while
-      PID 37095 serves the old library, so deleting the pack's tracker path first
+      the process on :8767 serves the old library, so deleting the pack's tracker path first
       would leave the operator with neither. `.github/workflows/tests.yml` moves to
       the squash SHA of the system commit. **And the pin is not only CI's.** The
       running dashboard's own `/health` reports its `library` as
@@ -357,11 +382,11 @@ before starting step 2.
       **`dashboard/server.py` imports all three and survives to step 6, so this
       commit edits it too.** `sessions` and `skills` arrive on the import line at
       `dashboard/server.py:43`; the calls are `sessions.fleet_worktrees` at
-      `dashboard/server.py:472`, `sessions.collect_sessions` at `:478` and
-      `skills.collect_skills` at `:485`. The `/api/sessions` and `/api/skills`
+      `dashboard/server.py:490`, `sessions.collect_sessions` at `:495` and
+      `skills.collect_skills` at `:502`. The `/api/sessions` and `/api/skills`
       endpoints go with their modules, and `/api/now` loses the session rows it
-      merges at `:472`. `bin/sd`'s `from dashboard.collect import ...`
-      (`bin/sd:2728`) is the other caller and `sd plugin list --fleet` loses its
+      merges at `:490`. `bin/sd`'s `from dashboard.collect import ...`
+      (`bin/sd:2729`) is the other caller and `sd plugin list --fleet` loses its
       fleet walk in this commit. Deleting the three modules and leaving the server
       is a pack that does not import, and the next step is the one that would have
       noticed.
@@ -393,6 +418,19 @@ before starting step 2.
       decision is instead to build a CLI verb, that verb is a prerequisite item and
       this step waits on it; what it may not be is undecided at the moment
       `work.py` is deleted.
+
+      **6a. The capture form's followup path, in this step's system commit.**
+      sd:730 closed on 2026-09-16 (its note 2527), and its owner decision (note
+      1844) sent one piece of scope here: filing a standalone followup item
+      from the dashboard. The capture form is a system file,
+      `local-project-dashboard/sd_dashboard/static/dashboard.js`, whose
+      `var noteKinds = ["followup", "comment", "question", "decision", "proposal"]`
+      still owns the word `followup` as a note kind, and the form has no path
+      to file a followup *item*, the kind `sd task add --kind followup`
+      creates. The system commit adds that path; the sub-step has no other
+      completion, and the word may not go on meaning one thing on the form and
+      another in the store. Verify: a filing through the form produces an item
+      of kind `followup`, and the note-kind path still produces a note.
       Verify: `band` (in `dashboard/app.js`)'s severity mapping is reproduced on
       the system page, asserted against the same rank numbers; a fixture
       collector that exits non-zero produces a visible row in the merged view;
@@ -439,6 +477,14 @@ before starting step 2.
       preparatory commit that rewrites only the `downward == 0` assertion lands red
       on this one, reporting a repeated ceiling value that never happened.
 
+      **(c) has been done, as R11-D49 in pull request #922, before step 3's
+      pack commit.** The line numbers in (c) are as of `a8295266`, where they
+      were measured. At `2eafa78b` the test
+      (`source:tests/test_loc_caps.py::test_the_recorded_history_is_raises_only`)
+      permits a recorded fall on `DASHBOARD_CODE_CAP` alone, its second
+      assertion reads `upward + downward == values - len(CEILING_HISTORY)`, and
+      the module docstring carries an R11-D49 paragraph after R11-D41's.
+
       So (c) goes red on **step 3**, not on step 7. The order that follows:
       step 3's pack commit is preceded by its own preparatory commit — a new
       R-id — that rewrites (c)'s assertion and the R11-D41 paragraph and makes a
@@ -462,8 +508,10 @@ before starting step 2.
       **The empty directory breaks more than the caps, and all of it retires in
       this commit.** Enumerated from the tree rather than recalled:
 
-      - `Makefile:45` passes `dashboard` to Ruff and `Makefile:46` passes it to
-        mypy, so `make check` fails on a path that no longer exists.
+      - `LINT_RUFF_PATHS := dashboard $(LINT_BIN) tests` and
+        `LINT_MYPY_PATHS := dashboard $(LINT_BIN)` in the `Makefile` pass
+        `dashboard` to Ruff and to mypy, so `make check` fails on a path that
+        no longer exists.
       - `tests/test_code_health.py` still holds `dashboard/` baseline entries for
         whatever steps 3 to 6 have not already retired, and
         `test_every_baseline_entry_still_earns_its_place` fails on each one.
@@ -534,10 +582,14 @@ before starting step 2.
 **Named before the work starts.**
 
 - **The negative that matters most is step 1's.** After `serve` and `install` are
-  gone, `launchctl list | grep com.sven.sd-dashboard` still prints the PID it
-  printed before (37095 at planning, 76442 when step 1 landed) and the plist's `ProgramArguments[0]` is still the system `dashboard.sh`. Asserted
-  before and after, because "it still works" is only evidence if the before was
-  recorded.
+  gone, `launchctl list | grep com.sven.sd-dashboard` still lists the label,
+  the PID beside it is the PID `lsof -nP -iTCP:8767 -sTCP:LISTEN` reports,
+  the two read at one moment, and the plist's `ProgramArguments[0]` is still
+  the system `dashboard.sh`. Asserted before and after, because "it still
+  works" is only evidence if the before was recorded. The PID is compared
+  within one reading and never across two: it is part of the record (37095 at
+  planning, 76442 when step 1 landed), and an owner-approved restart changes
+  it (review-909 N3).
 - **The ceiling claim is proved by a failure, not by a pass.** The step-3
   preparatory commit is correct only if `test_the_recorded_history_is_raises_only`
   is red *before* it and green *after*, with `ceiling_moves()` printing
