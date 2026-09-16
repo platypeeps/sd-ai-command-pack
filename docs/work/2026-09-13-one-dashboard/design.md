@@ -72,9 +72,9 @@ already exist are in the *surviving* package:
 
 | Tab | System-side path today | Boundary | Budget |
 |---|---|---|---|
-| `toolbox`, `briefs`, `vault`, `research` | `VIEWS` at .../sd_dashboard/reports_screen.py:19, spawned by the `collect` at .../reports_screen.py:44 | subprocess, `sys.executable -I sd_tile.py <area>` | 18s wait, 65,537-byte read |
-| `ports` | the `_collect` at .../sd_dashboard/ports_screen.py:12 | **in-process**, `importlib` load of `collectors.py` | `timeout=12` |
-| `queues` | none | — | — |
+| `toolbox`, `briefs`, `vault`, `research` | `VIEWS` at .../sd_dashboard/reports_screen.py:24, spawned by the `collect` at .../reports_screen.py:83 | subprocess, `sys.executable -I sd_tile.py <area>` | 18s wait, 65,537-byte read |
+| `ports` | the `_collect` at .../sd_dashboard/ports_screen.py:32 | **in-process**, `importlib` load of `collectors.py` | `timeout=12` |
+| `queues` | none when this was written; in `VIEWS` since step 2 | — | — |
 
 Full paths, so the anchors resolve for a reader: the two files are
 /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py

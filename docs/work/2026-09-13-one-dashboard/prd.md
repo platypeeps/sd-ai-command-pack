@@ -369,7 +369,8 @@ decision whose evidence has been deleted cannot be reviewed later.
   was red. Each now names the file without a line number.
 - 2026-09-16 step 0 closed with sd:361 (pack pull request #988, `2eafa78b`);
   `implement.md` ticks it with the measurement. The system citations on both
-  pages were re-measured at `a5347185` and repointed: `SECTIONS` moved from
+  pages, and the two rows of `design.md`'s tab table that repeat them, were
+  re-measured at `a5347185` and repointed: `SECTIONS` moved from
   line 40 to 41 of `pages.py`; `VIEWS` from 19 to 24 of `reports_screen.py`,
   and it holds five entries since step 2; its `collect` from 44 to 83; and
   line 12 of `ports_screen.py` is now `_collectors`, with `_collect` at 32.

@@ -62,8 +62,10 @@ before starting step 2.
       `('github', 'jira')`, and the installed library reports `SCHEMA_VERSION`
       9 where the paragraph above measured 8. `git ls-tree a5347185 -r
       --name-only | grep shadow_jira` in `/Users/sven/repos/system` still
-      returns both paths. The owner's check of the issues tab is sd:361's note
-      2542, recorded on that item and not restated here.
+      returns both paths. The measurement behind steps 8 and 9 is sd:361's
+      note 2522; the owner's check of the issues tab, LOG-23929 in the jira
+      section, is its note 2542. Both are recorded on that item and not
+      restated here.
 
 - [x] **1. `serve` and `install` are removed; `index` stays.** Every
       `bin/sd-dashboard` line number in this step's plan is as of `e80153ee`,
@@ -105,12 +107,14 @@ before starting step 2.
       the machine safer rather than tidier.
 
       Verify, and the important half is a negative:
-      `launchctl list | grep com.sven.sd-dashboard` prints the same PID after
-      the change as before it (37095 when this plan was measured, 76442 when
-      step 1 landed), and
+      `launchctl list | grep com.sven.sd-dashboard` still lists the label
+      after the change, the process on `:8767` is still that LaunchAgent's, and
       `plutil -extract ProgramArguments json -o - ~/Library/LaunchAgents/com.sven.sd-dashboard.plist`
       still prints the system `dashboard.sh` as element 0 — asserted **after**
-      the change and before it, so the pair is evidence rather than a hope. Then
+      the change and before it, so the pair is evidence rather than a hope. The
+      PID is recorded, not compared: it was 37095 when this plan was measured
+      and 76442 when step 1 landed, and every owner-approved restart changes
+      it (review-909 N3). Then
       `grep -rn "com.sven.sd-dashboard" bin/ dashboard/ tests/` prints nothing:
       the pack no longer names a label it does not own. Then
       `grep -rn "sd-dashboard serve\|sd-dashboard install" . --include='*.md'
@@ -165,8 +169,12 @@ before starting step 2.
 
 - [x] **3. The plugin loader retires, and the manifest loses two keys.** Every
       `dashboard/` and `tests/test_code_health.py` line number in this step's
-      plan is as of `a8295266`, where it was measured; the step has landed and
-      every line it names is deleted or has moved. System
+      plan is as of `a8295266`, where it was measured. The step has landed, and
+      at `2eafa78b` the lines it names are deleted or have moved, except two:
+      `dashboard/server.py:43` is still the import line, now without
+      `plugins`, and the `bounded_run` entries at `:647` and `:665` of
+      `tests/test_code_health.py` still stand, repointed to
+      `dashboard/actions.py` as the step said. System
       commit first, and it is not nothing: **remove the `tabs` and `tile` keys
       from `/Users/sven/repos/system/sd-plugin.json`.** They are the system half
       of this step because they advertise a discovery contract to the registry,
@@ -330,9 +338,10 @@ before starting step 2.
 
       Pin commit, its own pull request, **and it lands before the pack commit
       above, not after it.** The order in this step is: system commit, library
-      merge, pin, venv reinstall, restart PID 37095, verify the new view on :8767,
+      merge, pin, venv reinstall, an owner-run restart of the
+      `com.sven.sd-dashboard` LaunchAgent, verify the new view on :8767,
       *then* the pack deletion. A merged system commit is not a running view while
-      PID 37095 serves the old library, so deleting the pack's tracker path first
+      the process on :8767 serves the old library, so deleting the pack's tracker path first
       would leave the operator with neither. `.github/workflows/tests.yml` moves to
       the squash SHA of the system commit. **And the pin is not only CI's.** The
       running dashboard's own `/health` reports its `library` as
@@ -571,10 +580,13 @@ before starting step 2.
 **Named before the work starts.**
 
 - **The negative that matters most is step 1's.** After `serve` and `install` are
-  gone, `launchctl list | grep com.sven.sd-dashboard` still prints the PID it
-  printed before (37095 at planning, 76442 when step 1 landed) and the plist's `ProgramArguments[0]` is still the system `dashboard.sh`. Asserted
-  before and after, because "it still works" is only evidence if the before was
-  recorded.
+  gone, `launchctl list | grep com.sven.sd-dashboard` still lists the label,
+  the process on `:8767` is still that LaunchAgent's, and the plist's
+  `ProgramArguments[0]` is still the system `dashboard.sh`. Asserted before
+  and after, because "it still works" is only evidence if the before was
+  recorded. The PID is part of the record (37095 at planning, 76442 when step
+  1 landed) and not of the check: an owner-approved restart changes it
+  (review-909 N3).
 - **The ceiling claim is proved by a failure, not by a pass.** The step-3
   preparatory commit is correct only if `test_the_recorded_history_is_raises_only`
   is red *before* it and green *after*, with `ceiling_moves()` printing
