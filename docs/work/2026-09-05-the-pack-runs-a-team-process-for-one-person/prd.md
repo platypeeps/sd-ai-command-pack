@@ -1520,7 +1520,7 @@ confirmed by the next `sd-ship` run alone.
     moved after local review" when the pull request's head or base moved,
     and with "the reviewed branch is behind the current default branch"
     when the reviewed branch is behind the default, both in
-    `bin/sd_ship_remote.py:119-127`, and a test asserts each refusal by
+    `source:bin/sd_ship_remote.py::GitHub.ready`, and a test asserts each refusal by
     its message. (Rewritten 2026-09-14 by owner decision note 1942, which
     accepts #802's refusal instead of an integration update. The test is
     `ReadyCase`, `tests/test_sd_ship_remote.py`, 2026-09-16, see the log.
