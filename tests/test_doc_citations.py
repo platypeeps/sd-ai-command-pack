@@ -40,7 +40,7 @@ so it does not drift when prose is reorganised, and it is what would have
 caught each of these on the day it was introduced rather than one at a time by
 being bitten.
 
-Measured over the corpus at 2026-09-16 -- 5,968 tokens -- and re-measurable by
+Measured over the corpus at 2026-09-16 -- 5,965 tokens -- and re-measurable by
 running the module, which prints the census on every run. A snapshot, and the
 only defensible kind: it is dated by the commit that carries it, and `census()`
 is what a reader should run rather than trust it.
@@ -56,8 +56,8 @@ defect as a silent `continue`; it just takes longer to find.
 reason                       live  archiv   total
 =========================  ======  ======  ======
 `compared`                      0       3       3
-`no-adjacent-anchor`          577   2,378   2,955
-`elided-path`                 214   2,180   2,394
+`no-adjacent-anchor`          576   2,378   2,954
+`elided-path`                 212   2,180   2,392
 `archived-stale`                0     325     325
 `anchor-not-a-symbol`          25     130     155
 `separator-not-adjacent`       23     111     134
@@ -131,11 +131,13 @@ Each reason, with why it exists:
   cannot fire on one. Red with no carve-out since sd:829: the nine live
   past-end citations the rule was built over sat on an enumerated, checked
   list as `line-past-end-carried` from 2026-09-14 until each was settled on
-  its own page -- eight dropped the number and kept the file name, and one,
-  `drawPlugins` in `dashboard/app.js`, carries `[absent: ...]` because the
-  symbol is gone on purpose. A tenth the rule cannot see, a unique-suffix
-  path, was fixed by hand on the same pass. The list, its liveness test and
-  its ceiling went with the last row.
+  its own page -- every one dropped the number and kept the file name, and
+  one, `drawPlugins` in `dashboard/app.js`, also says in prose, with an
+  `[absent: ...]` note beside the symbol, that it is gone on purpose. A
+  tenth the rule cannot see, a unique-suffix path, was fixed by hand on the
+  same pass. The list, its liveness test and its ceiling went with the last
+  row, and so did the marker's power to stand this check down: `absent`
+  claims a file is gone, and a file that is here to be opened is not.
 
 **The nine `path:line` sites in this module's own prose are step 8-iv's
 record, and none of them is a claim about today's tree.** Lines 1231 and 1378
@@ -160,11 +162,11 @@ marker_after` requires that `marker_after` be the one place in this file that
 types the 1231 one.)
 
 **What `line-past-end` does not reach, measured rather than waved at.** Of the
-5,968 tokens, 694 have a path that resolves to a tracked file and are the ones
-this rule opens. The other 5,274 do not resolve, and saying which is the only
+5,965 tokens, 693 have a path that resolves to a tracked file and are the ones
+this rule opens. The other 5,272 do not resolve, and saying which is the only
 honest way to state the rule's coverage:
 
-* 2,394 carry **no path at all** -- the elided form, `` `:391-414` ``, whose
+* 2,392 carry **no path at all** -- the elided form, `` `:391-414` ``, whose
   file is named by the prose around it. Resolving one means deciding how far
   back to read, which is the 90-character rule this module threw out. The
   largest unchecked class, and it is unchecked on purpose.
@@ -233,8 +235,8 @@ leave the marker green.
 
 Three shapes have no symbol to compare a line against, and saying so is more
 honest than a number that implies one was found: the bare comma and semicolon
-(134), the elided path (2,394), and the token with no anchoring shape at all
-(2,951). Since sd:811 they are not *unresolved*, which is what this paragraph
+(134), the elided path (2,392), and the token with no anchoring shape at all
+(2,954). Since sd:811 they are not *unresolved*, which is what this paragraph
 used to imply and what the census was read as saying -- each one whose path is
 a file still has its line looked up, and a line the file does not have is
 `line-past-end` whatever shape the prose around it takes. What is not checked
@@ -937,9 +939,13 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
             # `bin/sd_skill.py:217` into an 89-line file spent a week there.
             # The question is asked of the file, not of the anchor, so the
             # answer does not depend on how the prose around it is shaped.
+            # Nor on a marker: `[absent: ...]` claims the file is gone, and a
+            # file that is here to be opened is not gone. Until sd:829 the
+            # marker stood this check down, which let a past-end line into a
+            # file that exists be greened by appending a reason nothing
+            # re-checks.
             target = REPO_ROOT / path
-            if (not (marker and marker[0] == "absent")
-                    and is_under_repo(target) and target.is_file()
+            if (is_under_repo(target) and target.is_file()
                     and not within_file(target, start, end, counted)):
                 if archived:
                     # The archive ruling, unchanged: a record citing a line
@@ -1149,9 +1155,9 @@ class DocCitationTests(unittest.TestCase):
             "line-past-end": (
                 " the file no longer has that line: repoint the citation to"
                 " where the content moved, or, if the content is gone, drop"
-                " the number and keep the file name, or mark the citation"
-                " `[absent: <reason>]` to record that it went on purpose;"
-                " sd:811, sd:829"),
+                " the number, keep the file name, and say in prose -- an"
+                " `[absent: <reason>]` note beside the symbol -- that it went"
+                " on purpose; sd:811, sd:829"),
         }
         for reason in ("target-missing", "absent-but-present", "quoted-not-there",
                        "anchored-line-into-code", "line-past-end"):
@@ -2393,23 +2399,31 @@ class ACitationPastTheEndOfItsFile(unittest.TestCase):
             self.reason_for("`render` (`bin/tool.py:9`) [quoted: other.md:3]\n"),
             "quoted")
 
-    def test_an_absent_marker_records_that_the_cited_content_is_gone(self) -> None:
-        """The one disposition that keeps the number: the content went on purpose.
+    def test_an_absent_marker_does_not_hide_it_either(self) -> None:
+        """`[absent: ...]` claims a file is gone. A line past the end of a file
+        that exists is not that claim, and the marker must not cover it.
 
-        sd:829's ninth citation, `drawPlugins()` at a line `dashboard/app.js`
-        no longer has, because the step that removed it shipped. The marker
-        says so, and the citation is counted by its shape rather than
-        reported as a line the file lost. Unanchored on purpose: an anchored
-        `[absent: ...]` on a file that exists is `absent-but-present` and red,
-        since that marker claims the file is gone and it is not.
+        The past-end check used to stand down for any citation carrying the
+        marker, so an unanchored `bin/tool.py:9 [absent: ...]` landed in
+        `no-adjacent-anchor` with nothing checking the reason: the file could
+        grow back past line 9, or the symbol come back, and the page stayed
+        green. That is a marker no re-check can fail, which is the silencer
+        shape this module refuses (review of sd:829's PR, Copilot). The
+        disposition for content that went on purpose is prose -- drop the
+        number, keep the file name, say so in an `[absent: <reason>]` note
+        beside the symbol -- and a marked past-end citation is red like an
+        unmarked one.
         """
 
         self.assertEqual(
             self.reason_for("`render()` at `bin/tool.py:9`"
                             " [absent: removed when step 3 shipped]\n"),
-            "no-adjacent-anchor")
+            "line-past-end")
+        # CONTROL: a marked citation to a line the file has is unchanged.
         self.assertEqual(
-            self.reason_for("`render()` at `bin/tool.py:9`\n"), "line-past-end")
+            self.reason_for("`render()` at `bin/tool.py:2`"
+                            " [absent: still here]\n"),
+            "no-adjacent-anchor")
 
     def test_a_token_whose_path_is_not_a_file_is_untouched(self) -> None:
         """`sd:811` is an item reference and `TOKEN` matches it.
