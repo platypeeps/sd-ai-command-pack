@@ -40,7 +40,7 @@ so it does not drift when prose is reorganised, and it is what would have
 caught each of these on the day it was introduced rather than one at a time by
 being bitten.
 
-Measured over the corpus at 2026-09-14 -- 5,977 tokens -- and re-measurable by
+Measured over the corpus at 2026-09-16 -- 5,968 tokens -- and re-measurable by
 running the module, which prints the census on every run. A snapshot, and the
 only defensible kind: it is dated by the commit that carries it, and `census()`
 is what a reader should run rather than trust it.
@@ -69,7 +69,6 @@ reason                       live  archiv   total
 `quoted-not-there`              0       0       0
 `anchored-line-into-code`       0       0       0
 `line-past-end`                 0       0       0
-`line-past-end-carried`         9       0       9
 =========================  ======  ======  ======
 
 Each reason, with why it exists:
@@ -129,14 +128,14 @@ Each reason, with why it exists:
   so the red is a true positive, and the failure line names the citing page
   and line, the whole range, the file's length today and the two fixes.
   sd:525's objection was to reds on lines that had merely moved; this rule
-  cannot fire on one.
-* **`line-past-end-carried`** -- one of the nine live past-end citations
-  `KNOWN_PAST_END` enumerates, on pages this item does not own. Counted and
-  visible rather than exempt: the list is keyed on the citing line, a dead or
-  fabricated entry fails `test_every_carried_entry_is_still_a_live_past_end_row`,
-  and `test_the_list_holds_no_more_than_it_was_measured_to_hold` holds it at
-  or under nine, so shrinking it costs nothing and growing it means raising
-  that ceiling in review. The census reports the debt instead of hiding it.
+  cannot fire on one. Red with no carve-out since sd:829: the nine live
+  past-end citations the rule was built over sat on an enumerated, checked
+  list as `line-past-end-carried` from 2026-09-14 until each was settled on
+  its own page -- eight dropped the number and kept the file name, and one,
+  `drawPlugins` in `dashboard/app.js`, carries `[absent: ...]` because the
+  symbol is gone on purpose. A tenth the rule cannot see, a unique-suffix
+  path, was fixed by hand on the same pass. The list, its liveness test and
+  its ceiling went with the last row.
 
 **The nine `path:line` sites in this module's own prose are step 8-iv's
 record, and none of them is a claim about today's tree.** Lines 1231 and 1378
@@ -161,8 +160,8 @@ marker_after` requires that `marker_after` be the one place in this file that
 types the 1231 one.)
 
 **What `line-past-end` does not reach, measured rather than waved at.** Of the
-5,977 tokens, 702 have a path that resolves to a tracked file and are the ones
-this rule opens. The other 5,275 do not resolve, and saying which is the only
+5,968 tokens, 694 have a path that resolves to a tracked file and are the ones
+this rule opens. The other 5,274 do not resolve, and saying which is the only
 honest way to state the rule's coverage:
 
 * 2,394 carry **no path at all** -- the elided form, `` `:391-414` ``, whose
@@ -177,14 +176,17 @@ honest way to state the rule's coverage:
 * 413 name a path whose **basename or suffix matches more than one** tracked
   file. Picking one is a guess and a gate that guesses teaches people to argue
   with it.
-* 176 name a path that **resolves to exactly one tracked file by suffix**,
+* 175 name a path that **resolves to exactly one tracked file by suffix**,
   where the citation elided the leading directory -- `` `prepare-release.py:338` ``
   for a file under `bin/`. This one is not a guess, and measuring it found a
   live past-end citation the rule as written does not catch:
   `sd-propose-skills/SKILL.md:126` in the 2026-09-05 page, against a
   `contrib/sd-propose-skills/SKILL.md` of 114 lines. Thirty-five more sit in
-  archives. Whether the rule should follow a unique suffix is a decision, not
-  an oversight, and it is filed with the nine rather than taken here.
+  archives. Whether the rule should follow a unique suffix was a decision, not
+  an oversight, and sd:829 took it: no. Against that one live finding stand
+  the 413 above, where a suffix rule has to guess, so a path resolves only
+  when it names a tracked file exactly, and the one live finding was fixed by
+  hand -- the number dropped, the file name kept.
 * 2 resolve **outside the checkout** and 1 names a **directory**.
 
 Like the table above, these are a dated snapshot and not an assertion: the
@@ -391,64 +393,7 @@ REASONS = frozenset({
     "quoted-not-there",
     "anchored-line-into-code",
     "line-past-end",
-    "line-past-end-carried",
 })
-
-#: The live past-end citations this gate was built over, enumerated and dated.
-#:
-#: A ratchet, not an exemption. Each entry is
-#: `(citing document, the line it is written on, cited path, start, end)` and
-#: it is *checked*: a listed key that is no longer a past-end citation fails
-#: `test_every_carried_entry_is_still_a_live_past_end_row`, so the list cannot
-#: be padded and cannot outlive its rows. That test cannot stop it growing,
-#: because a new past-end citation keyed in the same commit is a live row;
-#: `test_the_list_holds_no_more_than_it_was_measured_to_hold` is the ceiling,
-#: and growth has to raise it in a diff a reviewer reads.
-#:
-#: **The citing line is in the key on purpose.** Keyed on the document alone,
-#: a deleted page or a corrected citation would leave a dead entry behind that
-#: silently licensed the next past-end citation someone wrote into the same
-#: file. With the line in it, every way the citation can stop existing --
-#: the page deleted, the prose rewritten, the number repointed, the citation
-#: moved up or down the page -- takes the entry with it, and the list shrinks.
-#: The cost is that an insertion above a carried citation settles its entry
-#: and the list has to be re-measured. That is the correct direction to fail:
-#: a stale exemption goes red rather than green.
-#:
-#: Why they are carried rather than corrected here. Measured 2026-09-14 over
-#: `origin/main` at `e9d72ea7`: 701 `path:line` tokens resolve to a tracked
-#: file, 49 name a line the file does not have, and 37 of those are archived
-#: and report `archived-stale` by the standing ruling. Twelve were live. Three
-#: had an exact target and are repointed in the commit that adds this list:
-#: `bin/sd-dashboard:239-240` became `:77`, which is the line that prints
-#: `issues[<tracker>]: not collected (<reason>)`, and `:250` became `:32` with
-#: the parser at `:97-103`. The nine here are not repointable by arithmetic --
-#: `bin/sd_skill.py` went from three hundred lines to 89 and
-#: `dashboard/app.js` to 720, and the cited content is *gone* rather than
-#: moved, so each needs one of three dispositions on a page this item does not
-#: own: drop the number, write an `[absent: ...]`-shaped claim, or archive the
-#: page. That is a separate item; deleting this list is how it finishes.
-KNOWN_PAST_END = frozenset({
-    ("docs/work/2026-09-04-the-sweep-trusts-a-branch-field-it-never-resolves"
-     "/design.md", 104, "bin/sd_skill.py", 217, 217),
-    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/implement.md", 229, ".github/sd-review.json", 28, 28),
-    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/implement.md", 946, "bin/sd_skill.py", 117, 117),
-    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/implement.md", 1046, "bin/sd_skill.py", 278, 278),
-    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/implement.md", 1048, "bin/sd_skill.py", 160, 160),
-    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/prd.md", 5123, "bin/sd_skill.py", 278, 278),
-    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/prd.md", 5125, "bin/sd_skill.py", 160, 160),
-    ("docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person"
-     "/prd.md", 5141, "bin/sd_skill.py", 277, 284),
-    ("docs/work/2026-09-13-one-dashboard"
-     "/implement.md", 178, "dashboard/app.js", 780, 780),
-})
-
 
 class Citation(typing.NamedTuple):
     """One `path:line` token in one document, with why it was or was not checked."""
@@ -461,9 +406,10 @@ class Citation(typing.NamedTuple):
     end: int
     reason: str
     #: The line of `doc` the citation is written on, 1-based. Set on every
-    #: row, not only the ones that need it: `KNOWN_PAST_END` is keyed on it,
-    #: and a field populated on one branch of `classify` would be a trap for
-    #: the next reader who reached for it from another.
+    #: row, not only the ones that need it: `describe` reads it, the carried
+    #: list sd:829 deleted was keyed on it, and a field populated on one
+    #: branch of `classify` would be a trap for the next reader who reached
+    #: for it from another.
     line: int
 
 
@@ -947,18 +893,6 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
         # One character for one, so offsets carry over to `raw` unchanged.
         flat = raw.replace("\n", " ")
         archived = "archive" in doc.parts
-        # The name `KNOWN_PAST_END` spells its documents with, or "" for a
-        # document outside the checkout. `classify` takes its corpus as a
-        # parameter and fixtures routinely pass a page under a temporary
-        # directory without moving `REPO_ROOT` with it, so `relative_to` here
-        # raised `ValueError` out of the whole scan rather than returning a
-        # row: a gate that crashes on a document reports nothing at all
-        # instead of one bad row, which is the failure this module opens by
-        # naming. A document the list cannot name is on no list.
-        try:
-            named = str(doc.relative_to(REPO_ROOT))
-        except ValueError:
-            named = ""
         for match in TOKEN.finditer(flat):
             path, start = match.group(1), int(match.group(2))
             end = int(match.group(3) or match.group(2))
@@ -1013,8 +947,6 @@ def classify(docs: list[pathlib.Path] | None = None) -> list[Citation]:
                     # citing a symbol that moved, and that is reported, not
                     # failed. 37 of the 49 live here.
                     reason = "archived-stale"
-                elif (named, where, path, start, end) in KNOWN_PAST_END:
-                    reason = "line-past-end-carried"
                 else:
                     reason = "line-past-end"
                 rows.append(
@@ -1216,9 +1148,10 @@ class DocCitationTests(unittest.TestCase):
                 " one whose symbol is declared once) or say it in prose; sd:525"),
             "line-past-end": (
                 " the file no longer has that line: repoint the citation to"
-                " where the content moved, or, if the content is gone, add the"
-                " citation's key (citing document, citing line, cited path,"
-                " start, end) to KNOWN_PAST_END and raise its ceiling; sd:811"),
+                " where the content moved, or, if the content is gone, drop"
+                " the number and keep the file name, or mark the citation"
+                " `[absent: <reason>]` to record that it went on purpose;"
+                " sd:811, sd:829"),
         }
         for reason in ("target-missing", "absent-but-present", "quoted-not-there",
                        "anchored-line-into-code", "line-past-end"):
@@ -2460,6 +2393,24 @@ class ACitationPastTheEndOfItsFile(unittest.TestCase):
             self.reason_for("`render` (`bin/tool.py:9`) [quoted: other.md:3]\n"),
             "quoted")
 
+    def test_an_absent_marker_records_that_the_cited_content_is_gone(self) -> None:
+        """The one disposition that keeps the number: the content went on purpose.
+
+        sd:829's ninth citation, `drawPlugins()` at a line `dashboard/app.js`
+        no longer has, because the step that removed it shipped. The marker
+        says so, and the citation is counted by its shape rather than
+        reported as a line the file lost. Unanchored on purpose: an anchored
+        `[absent: ...]` on a file that exists is `absent-but-present` and red,
+        since that marker claims the file is gone and it is not.
+        """
+
+        self.assertEqual(
+            self.reason_for("`render()` at `bin/tool.py:9`"
+                            " [absent: removed when step 3 shipped]\n"),
+            "no-adjacent-anchor")
+        self.assertEqual(
+            self.reason_for("`render()` at `bin/tool.py:9`\n"), "line-past-end")
+
     def test_a_token_whose_path_is_not_a_file_is_untouched(self) -> None:
         """`sd:811` is an item reference and `TOKEN` matches it.
 
@@ -2491,62 +2442,18 @@ class ACitationPastTheEndOfItsFile(unittest.TestCase):
         target.write_text("def render():\n", encoding="utf-8")
         self.assertEqual(self.reason_for("see `bin/tool.py:2`\n"), "line-past-end")
 
-    def test_the_carried_key_is_the_citing_line_and_not_just_the_page(self) -> None:
-        """Keyed on the page alone, a dead entry licenses the next citation.
-
-        The three ways a carried citation stops existing -- the prose
-        rewritten, the number repointed, the page deleted -- all have to take
-        the entry with it. With the line in the key a fourth is covered too:
-        the same citation moved elsewhere on the same page is a different
-        claim in a different paragraph, and it is not the one that was
-        measured. The cost is that an insertion above a carried citation
-        settles its entry and the list must be re-measured, which is the
-        correct direction to fail.
-        """
-
-        doc = self.root / "docs" / "page.md"
-        doc.write_text("The reader is at `bin/tool.py:9`.\n", encoding="utf-8")
-        key = ("docs/page.md", 1, "bin/tool.py", 9, 9)
-        with mock.patch.dict(globals(), {"REPO_ROOT": self.root,
-                                         "KNOWN_PAST_END": frozenset({key})}):
-            self.assertEqual([row.reason for row in classify([doc])],
-                             ["line-past-end-carried"])
-            doc.write_text("# a heading arrived\n\nThe reader is at"
-                           " `bin/tool.py:9`.\n", encoding="utf-8")
-            self.assertEqual([row.reason for row in classify([doc])],
-                             ["line-past-end"])
-
-    def test_a_carried_entry_whose_citation_is_gone_is_reported(self) -> None:
-        """A page deleted, or its citation corrected, shrinks the list.
-
-        The direction nothing else checks: the red bucket stays empty either
-        way, so without this a settled entry would sit in `KNOWN_PAST_END`
-        forever, and the next past-end citation written at that line of that
-        page would be carried by it.
-        """
-
-        doc = self.root / "docs" / "page.md"
-        doc.write_text("The reader is at `bin/tool.py:9`.\n", encoding="utf-8")
-        key = ("docs/page.md", 1, "bin/tool.py", 9, 9)
-        with mock.patch.dict(globals(), {"REPO_ROOT": self.root,
-                                         "KNOWN_PAST_END": frozenset({key})}):
-            TheCarriedPastEndList().test_every_carried_entry_is_still_a_live_past_end_row()
-            doc.unlink()
-            with self.assertRaisesRegex(AssertionError, "no longer past the end"):
-                TheCarriedPastEndList(
-                ).test_every_carried_entry_is_still_a_live_past_end_row()
-
     def test_a_fixture_document_outside_the_checkout_does_not_crash_the_scan(
             self) -> None:
         """`REPO_ROOT` is not moved here, and the document is not under it.
 
         The shape every other fixture class in this module uses: a page under
         a temporary directory, classified against the real checkout, citing a
-        real file. `KNOWN_PAST_END` names its documents relative to
-        `REPO_ROOT`, and taking that name of a document outside it raised
-        `ValueError` out of the whole scan. A gate that crashes on a document
-        reports nothing at all rather than one bad row, which is the failure
-        this module's own docstring opens by naming.
+        real file. The carried list sd:829 deleted named its documents
+        relative to `REPO_ROOT`, and taking that name of a document outside
+        it raised `ValueError` out of the whole scan. A gate that crashes on
+        a document reports nothing at all rather than one bad row, which is
+        the failure this module's own docstring opens by naming. The list is
+        gone; the guard against the next `relative_to` in the scan stays.
         """
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -2587,7 +2494,7 @@ class ACitationPastTheEndOfItsFile(unittest.TestCase):
         self.assertIn("docs/page.md:3: `bin/tool.py:1-9`", message)
         self.assertIn("bin/tool.py has 2 lines", message)
         self.assertIn("repoint", message)
-        self.assertIn("KNOWN_PAST_END", message)
+        self.assertIn("[absent: <reason>]", message)
 
     def test_line_zero_is_past_the_end_too(self) -> None:
         """Files start at line 1. `:0` names nothing, and only the lower bound says so.
@@ -2627,28 +2534,6 @@ class ACitationPastTheEndOfItsFile(unittest.TestCase):
                 self.assertEqual(
                     self.reason_for(f"see `bin/tool.py:{spelling}`\n"),
                     "line-past-end")
-
-    def test_a_carried_key_that_differs_only_in_its_range_end_does_not_carry(
-            self) -> None:
-        """The key is the whole citation, its range end included.
-
-        A carried entry matched on everything but `end` would carry
-        `bin/tool.py:1-9` on the strength of a measured `bin/tool.py:1-8`,
-        which is a different claim about the file.
-        """
-
-        doc = self.root / "docs" / "page.md"
-        doc.write_text("The reader is at `bin/tool.py:1-9`.\n", encoding="utf-8")
-        measured = ("docs/page.md", 1, "bin/tool.py", 1, 8)
-        with mock.patch.dict(globals(), {"REPO_ROOT": self.root,
-                                         "KNOWN_PAST_END": frozenset({measured})}):
-            self.assertEqual([row.reason for row in classify([doc])],
-                             ["line-past-end"])
-        with mock.patch.dict(globals(), {"REPO_ROOT": self.root,
-                                         "KNOWN_PAST_END": frozenset({measured[:4] + (9,)})}):
-            self.assertEqual([row.reason for row in classify([doc])],
-                             ["line-past-end-carried"])
-
 
 class TheHistoricalNumbersInThisModule(unittest.TestCase):
     """sd:799's nine stale sites, answered by pinning them instead of moving them.
@@ -2706,50 +2591,6 @@ class TheHistoricalNumbersInThisModule(unittest.TestCase):
         window = numbered_lines((REPO_ROOT / "bin" / "sd-status").read_text(
             encoding="utf-8", errors="replace"))[500:506]
         self.assertNotIn('"""', "\n".join(window))
-
-
-class TheCarriedPastEndList(unittest.TestCase):
-    """`KNOWN_PAST_END` is a ratchet over an existing debt, and it is checked.
-
-    An allow-list nobody rechecks is the silencer this module exists to
-    remove, so this one is made to fail in the direction that matters: an
-    entry whose citation has been corrected, or whose page has moved or been
-    archived, is no longer a `line-past-end-carried` row and
-    `test_every_carried_entry_is_still_a_live_past_end_row` says so. It
-    cannot be padded with rows that were never past the end, for the same
-    reason. Nothing in that test stops it *growing* -- a new past-end
-    citation and its key arrive together and every entry is live -- so the
-    ceiling in `test_the_list_holds_no_more_than_it_was_measured_to_hold`
-    is what does: growth has to raise the number, in a diff a reviewer reads.
-    """
-
-    def test_every_carried_entry_is_still_a_live_past_end_row(self) -> None:
-        carried = {
-            (str(row.doc.relative_to(REPO_ROOT)), row.line,
-             row.path, row.start, row.end)
-            for row in classify() if row.reason == "line-past-end-carried"
-        }
-        settled = sorted(KNOWN_PAST_END - carried)
-        self.assertEqual(
-            settled, [],
-            "these entries are no longer past the end; delete them from"
-            " KNOWN_PAST_END:\n" + "\n".join(map(str, settled)))
-
-    def test_the_list_holds_no_more_than_it_was_measured_to_hold(self) -> None:
-        """Nine, enumerated 2026-09-14 over `origin/main` at `e9d72ea7`.
-
-        A ceiling, not a count. The first draft asserted equality, and
-        equality does not tell growth from shrinkage: a lane could write a new
-        past-end citation, key it, and move `9` to `10` in the same commit,
-        and the suite was green (review-951, B1). A genuine shrink also had to
-        edit this test, which is a test that fails in the wrong direction.
-        With `<=`, deleting an entry needs no edit here, and adding one has to
-        raise a labelled ceiling in a diff a reviewer reads. It is here
-        because the docstring states the number, and a stated number nothing
-        checks is how this module's census came to say `line-into-code 0 0 0`.
-        """
-
-        self.assertLessEqual(len(KNOWN_PAST_END), 9)
 
 
 class StableSourceCitationTests(unittest.TestCase):
