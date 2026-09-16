@@ -41,6 +41,10 @@ say. A skill in `contrib/` is one command away, and use is what moves it.
 - `~/.codex/skills/sd-*/SKILL.md`
 - `~/.config/opencode/commands/sd-*.md`
 - `~/.claude/agents/sd-*.md`
+- `~/.local/bin/sd` and `~/.local/bin/sd-*` — one symlink per executable in
+  `bin/`, so the commands resolve from any directory; `--bin-dir DIR` puts them
+  elsewhere. The installer never edits `PATH`: `--user` warns when the link
+  directory is not on it, and `--status` says how many commands resolve.
 - three hook entries in `~/.claude/settings.json` — `SessionStart` for
   `sd-handoff-restore`, and `PreToolUse` and `UserPromptSubmit` for
   `sd-skill-use`. `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
@@ -220,30 +224,36 @@ off `main` or over uncommitted changes.
 
 | Command | What it does |
 |---|---|
-| `bin/sd_install.py --user` | Render every `sd-*` surface into this machine's platform homes |
+| `bin/sd_install.py --user` | Render every `sd-*` surface into this machine's platform homes, and link the `bin/` commands into `~/.local/bin` (`--bin-dir DIR` for another directory) |
 | `bin/sd_install.py --status` | What is installed, what has drifted, what legacy residue remains |
 | `bin/sd_install.py --pull` | Fast-forward the serving checkout (clean, on `main`) and re-render |
-| `bin/sd_install.py --uninstall` | Remove exactly what the receipt records having written |
+| `bin/sd_install.py --uninstall` | Remove exactly what the receipt records having written: the renders, the hook entries, and the command links it made |
 | `bin/sd_install.py --adopt-legacy` | Delete the pre-3e fleet installer's successor-less renders |
 | `bin/sd_install.py --repo [PATH]` | Write the marked block into `PATH/CLAUDE.local.md` |
 
 `--dry-run` prints what any of them would do and writes nothing. `--home DIR`
 installs into a scratch directory instead of `$HOME`, which is how the tests
-drive it.
+drive it. `--bin-dir DIR` links the commands somewhere other than
+`~/.local/bin`; a link already pointing into this checkout is kept as it is,
+and a file at a link's path that is not such a link makes `--user` refuse by
+name and write nothing.
 
 ### What it owns, and what it will not touch
 
 The receipt at `~/.local/state/sd-ai-command-pack/installed.json` records every
-path the installer wrote together with the digest of what it wrote. That single
-fact is what makes the rest safe:
+path the installer wrote: a render row carries the digest of what it wrote, and
+a link row the target the link points at. That single fact is what makes the
+rest safe:
 
 - A surface you rename or retire in `skills/` — or move to `contrib/` —
   disappears from every platform on the next `--user`, because the receipt
   knows the old path was ours.
 - A rendered file you have since edited by hand is **kept** and reported, never
   silently deleted.
-- `--uninstall` removes those paths and nothing else. The global excludes line
-  and any `CLAUDE.local.md` blocks are left alone; they are yours.
+- `--uninstall` removes those paths and nothing else. A recorded link that no
+  longer points into this checkout is left and reported, a link the receipt
+  never named is never touched, and the link directory stays. The global
+  excludes line and any `CLAUDE.local.md` blocks are left alone; they are yours.
 - If the receipt will not parse, it grants no delete authority at all — the
   installer converges forward and removes nothing it cannot account for.
 
