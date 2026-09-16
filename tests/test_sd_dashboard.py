@@ -16,6 +16,7 @@ import importlib.machinery
 import importlib.util
 import io
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -329,6 +330,73 @@ class CommandLineTests(FleetHarness):
                 sd_dashboard.main([gone])
             self.assertEqual(raised.exception.code, 2)
             self.assertIn("invalid choice", err.getvalue())
+
+
+class RetiredTrackerIndexTests(FleetHarness):
+    """sd:719 step 4: the legacy tracker index is gone from the pack.
+
+    The system dashboard serves PRs and Issues from `sd_db.shadow` (system
+    pull request #411), so the pack's own index -- `dashboard/store.py`, the
+    two tracker clients, `sd-trackers` and the `index` verb that filled it --
+    retires. Asserted from the filesystem and the index, never from a string
+    the author already knew: a file restored on its own is red here.
+    """
+
+    RETIRED = (
+        "bin/sd-trackers",
+        "dashboard/store.py",
+        "dashboard/github.py",
+        "dashboard/jira.py",
+        "tests/test_sd_trackers.py",
+        "tests/test_sd_dashboard_index.py",
+    )
+    IMPORT = re.compile(
+        r"^\s*from dashboard import .*\b(store|github|jira)\b"
+        r"|^\s*from \. import .*\b(store|github|jira)\b"
+        r"|^\s*(from|import) dashboard\.(store|github|jira)\b",
+        re.M,
+    )
+
+    def test_no_verb_remains_and_index_exits_two_with_usage(self):
+        """`index` went the way `serve` and `install` did: the parser refuses it."""
+        parser = sd_dashboard.build_parser()
+        verbs = [action for action in parser._actions
+                 if hasattr(action, "choices") and action.choices]
+        self.assertEqual(verbs, [], f"a verb is still registered: {verbs}")
+        for gone in ("index", "serve", "install"):
+            with self.subTest(verb=gone), \
+                    contextlib.redirect_stderr(io.StringIO()) as err, \
+                    self.assertRaises(SystemExit) as raised:
+                sd_dashboard.main([gone])
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("usage: sd-dashboard", err.getvalue())
+            self.assertIn("invalid choice", err.getvalue())
+
+    def test_the_index_and_its_clients_are_not_in_the_tree(self):
+        listed = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "--deduplicate", "--", *self.RETIRED],
+            capture_output=True, text=True, check=True,
+        ).stdout.split()
+        self.assertEqual(listed, [], f"still tracked: {listed}")
+        present = [path for path in self.RETIRED if (REPO_ROOT / path).exists()]
+        self.assertEqual(present, [], f"still on disk: {present}")
+
+    def test_nothing_imports_the_retired_modules(self):
+        """Every tracked Python file under bin/, dashboard/ and tests/, read rather than recited."""
+        listed = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "--deduplicate", "--",
+             "bin", "dashboard", "tests"],
+            capture_output=True, text=True, check=True,
+        ).stdout.split()
+        importers = []
+        for relative in listed:
+            path = REPO_ROOT / relative
+            if path.suffix not in ("", ".py") or not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if self.IMPORT.search(text):
+                importers.append(relative)
+        self.assertEqual(importers, [], f"still import the retired modules: {importers}")
 
 
 class ServerRouteTests(FleetHarness):

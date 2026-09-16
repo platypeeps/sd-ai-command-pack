@@ -1260,6 +1260,25 @@ class IssueSectionTests(StatusFixture):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("no index yet", completed.stdout)
 
+    def test_no_shared_database_is_a_reported_gap_that_names_no_index(self) -> None:
+        """sd:719 step 4. The shared database is the only source, and its absence says so.
+
+        The legacy index and the `sd-dashboard index` verb that filled it are
+        gone, so the no-database answer can no longer send the reader to run
+        it. Same shape as the section's other gaps -- both empty lists -- and
+        the reason names the library the rows now live in.
+        """
+        self.with_github(pulls=[])
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertNotIn("sd-dashboard index", completed.stdout)
+        self.assertNotIn("no index yet", completed.stdout)
+        section = self.report()["issues"]
+        self.assertEqual(sorted(section), ["available", "needs_you", "other", "reason"])
+        self.assertFalse(section["available"])
+        self.assertIn("sd_db", section["reason"])
+        self.assertEqual((section["needs_you"], section["other"]), ([], []))
+
     def test_rows_for_this_repo_are_split_by_whether_they_need_you(self) -> None:
         self.with_github(pulls=[])
         self.write_index(
