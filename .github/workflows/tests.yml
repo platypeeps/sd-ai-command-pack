@@ -76,11 +76,15 @@ jobs:
       # (#394, `635764e`, pinned at `9d86f092`): `reporting.acknowledge`
       # takes `resolve_ingest_followups`, keyword-only and exactly a bool,
       # and True resolves the followup the ingest itself wrote in the same
-      # transaction as the transition. `sd reports acknowledge
-      # --resolve-ingest-followups` passes it, which `09260ad4` refuses as an
-      # unexpected keyword, so `tests/test_sd_controls.py`'s flag tests are
-      # red at `09260ad4` and green here, and the pin and those tests move
-      # together. The same commit rewrites the refusal a blocked acknowledge
+      # transaction as the transition. sd:941's own pull request, which
+      # this pin precedes, adds `sd reports acknowledge
+      # --resolve-ingest-followups` to pass it and the flag tests in
+      # `tests/test_sd_controls.py` that run it through a real store;
+      # `09260ad4` refuses the keyword as unexpected, so those tests are red
+      # at `09260ad4` and green here, and the pin and those tests move
+      # together. Until that pull request lands, nothing in the pack reaches
+      # the keyword, and this move is only ahead of it, never behind. The
+      # same commit rewrites the refusal a blocked acknowledge
       # raises: it still opens with `resolve the report's followups before
       # acknowledging it`, the substring `tests/test_sd_controls.py` asserts,
       # and now names each blocking note as `sd note resolve <id>`. The move
