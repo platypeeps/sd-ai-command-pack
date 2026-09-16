@@ -2707,6 +2707,65 @@ class LinkTests(InstallerHarness):
         )
         self.assertIn(f"linked 3 commands into {bin_dir}", out.getvalue())
 
+    def test_user_refuses_a_foreign_file_at_a_target(self):
+        """Rule 1: a foreign entry at one target refuses the run before it writes.
+
+        Three foreign shapes, each in its own scratch home: a regular file, a
+        dangling link, and a link into a second checkout's copy. The pre-flight
+        runs before the library is opened, and the expired trial in the
+        library is the witness: `expire_trials` would have ended it.
+        """
+        sd_db = sd_install.sibling("sd_lib").import_sd_db().module
+        self.assertIsNotNone(sd_db, "the pack's virtualenv carries sd_db")
+
+        def regular_file(path: Path, checkout: Path) -> None:
+            path.write_text("#!/bin/sh\n", encoding="utf-8")
+
+        def dangling_link(path: Path, checkout: Path) -> None:
+            path.symlink_to(self.home / "gone" / "sd-handoff")
+
+        def other_checkout(path: Path, checkout: Path) -> None:
+            other = self.home / "other" / "bin"
+            other.mkdir(parents=True)
+            (other / "sd-handoff").write_text("#!/bin/sh\n", encoding="utf-8")
+            path.symlink_to(other / "sd-handoff")
+
+        for shape in (regular_file, dangling_link, other_checkout):
+            with self.subTest(shape=shape.__name__):
+                self.setUp()
+                checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
+                sd_db.initialise(home=self.home)
+                connection = sd_db.connect(sd_db.default_path(self.home))
+                self.addCleanup(connection.close)
+                sd_db.start_trial(connection, "sd-probe", "2001-01-01T00:00:00Z")
+                foreign = self.home / ".local" / "bin" / "sd-handoff"
+                foreign.parent.mkdir(parents=True)
+                shape(foreign, checkout)
+                before = foreign.lstat()
+
+                out = io.StringIO()
+                rc = sd_install.cmd_user(self.context_for(checkout), out)
+
+                self.assertEqual(rc, 1)
+                self.assertIn(str(foreign), out.getvalue())
+                self.assertIn("not a link to", out.getvalue())
+                for home in sd_install.platform_homes(self.home, dict(os.environ)):
+                    self.assertEqual(
+                        sorted(home.root.glob("sd-*")) if home.root.is_dir() else [],
+                        [], f"{home.key} holds a render after a refusal",
+                    )
+                self.assertFalse(
+                    (self.home / ".local" / "state" / "sd-ai-command-pack" / "installed.json").exists(),
+                    "a receipt was written after a refusal",
+                )
+                self.assertFalse((self.home / ".local" / "bin" / "sd").exists())
+                after = foreign.lstat()
+                self.assertEqual((before.st_ino, before.st_mode), (after.st_ino, after.st_mode))
+                self.assertEqual(
+                    [row["skill"] for row in sd_db.trials(connection)], ["sd-probe"],
+                    "the expired trial was ended before the refusal",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
