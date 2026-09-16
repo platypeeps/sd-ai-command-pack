@@ -66,13 +66,17 @@ for the controls a run passes through.
 > requires. Work done in the checkout the agent picked is the failure that rule
 > exists to prevent.
 >
-> `<one paragraph: the cited file:line, the quoted text, the related pull
-> requests and decision notes to read>`
+> <one paragraph: the citation — `path:line` for a line of a markdown page;
+> `source:<path>::<symbol>` for a Python function, class, method or
+> module-level assignment; prose naming the enclosing declaration or the file
+> for anything else, `dashboard/app.js` say; never a line number into code
+> ([`CONTRIBUTING.md`](../CONTRIBUTING.md), "Repository Conventions") — the
+> quoted text, the related pull requests and decision notes to read>
 >
 > **Scope.** Your files are `<paths>`. Other lanes hold `<paths>` in their own
 > worktrees; do not touch those. If your work needs them, stop and tell me.
 >
-> `<owner-only questions next door, if any: name them and say they are NOT yours>`
+> <owner-only questions next door, if any: name them and say they are NOT yours>
 >
 > ### How to work
 >
@@ -107,7 +111,7 @@ for the controls a run passes through.
 > 4. **Gate.** `<gate command>`. Never end a gate command with a pipe; the
 >    reported status is the pipe's. Redirect to a file and grep it afterwards.
 >    Report rc, suite count, test count, and a grep for `FAILED`/`ERROR`.
->    `<extra checks: shellcheck, ruff, mypy>`. Run the suites with the
+>    <extra checks: shellcheck, ruff, mypy>. Run the suites with the
 >    environment CI uses; do not point `HOME` at a scratch directory, because
 >    the suites resolve the store and the config from the real one and the
 >    worktree cannot execute that clause.
@@ -122,17 +126,29 @@ for the controls a run passes through.
 >    gives you both ends, state the two timestamps and omit the duration. A
 >    check run can also report `status: in_progress` while carrying a
 >    `completed_at` in the past; trust the timestamps, not the status field.
-> 6. **Review cap is 1, plus one verification of the fix.** Read the review
+> 6. **The capped review is the pack's own; the Copilot round is outside the
+>    cap.** The *code, before merge* row of [`WORKFLOW.md`](../WORKFLOW.md)
+>    caps `sd-review` at 1 pass plus one verification of the fix.
+>    `copilot-pull-request-reviewer` is not that pass: it is the advisory
+>    review of the same page, and no cap counts its runs, which is why it may
+>    run more than once, below. Read the review
 >    through BOTH `mcp__github__pull_request_read` surfaces, never through
 >    thread counts alone. `get_reviews` gives the review body — the verdict
 >    line, `Comments generated: N`, the `Suppressed comments (N)` section, the
 >    per-file table, `Files reviewed: N/M`, and the effort level.
 >    `get_review_comments` gives the inline threads. Neither is the whole
 >    finding set: a suppressed finding has no thread and appears only in the
->    body, and an unsuppressed inline finding appears only as a thread. One
+>    body, and an unsuppressed inline finding lives in its thread — the body's
+>    per-file table may summarise it, but the thread is where its text is. One
 >    round of this repository's own history has both at once
->    (`tests/fixtures/sd-631-unanswered-round.json`). Read both, every time, and
->    paginate `get_review_comments` to the end rather than trusting one page.
+>    (`tests/fixtures/sd-631-unanswered-round.json`: four suppressed in the
+>    body, one inline finding that the body's table summarises and the thread
+>    quotes). Read both, every time, and paginate both to the end rather than
+>    trusting one page. They paginate differently: `get_reviews` by
+>    `page`/`perPage`, `get_review_comments` by cursor, `after` set to the
+>    previous page's `endCursor` until `hasNextPage` is false; `after` is not
+>    a `get_reviews` parameter. A review dropped from the first page takes its
+>    `commit_id` with it.
 >
 >    `copilot-pull-request-reviewer` may run more than once on one pull request,
 >    may not re-run on a push, and may fail outright with a body that is an
@@ -145,14 +161,21 @@ for the controls a run passes through.
 >    **This round is advisory and it gates nothing.** Its findings are read and
 >    dispositioned; they never block a merge, and no pack surface requests a
 >    round ([`WORKFLOW.md`](../WORKFLOW.md), the advisory section;
->    [`skills/sd-ship/SKILL.md`](../skills/sd-ship/SKILL.md)). The gate that
->    does bind ran on the machine before the push. So if no review ever names
->    your head, or the only one that does is an error body, do NOT wait
->    indefinitely: record under **NOT VERIFIED** what you asked for, what came
->    back, and which head it named, then report and stop. I decide from there.
+>    [`skills/sd-ship/SKILL.md`](../skills/sd-ship/SKILL.md)). The gates that
+>    bind are elsewhere, and none of them is this round: on the machine before
+>    the push, the local gate under How to work and, on the `sd-ship` path,
+>    the capped `sd-review` pass above, whose blocking findings are disposed
+>    before anything is published; after the push, the required CI checks
+>    and GitHub's merge rules bind the merge (the skill, the merge readiness
+>    paragraph: "passing required checks and GitHub's satisfied merge rules").
+>    A green local run is not readiness; the report names every CI leg with
+>    its conclusion. So if no review ever names your head, or the only one
+>    that does is an error body, do NOT wait indefinitely: record under
+>    **NOT VERIFIED** what you asked for, what came back, and which head it
+>    named, then report and stop. I decide from there.
 >    Quote every finding verbatim and address or rebut each with evidence.
->    `<system only: do NOT request a Copilot review; that repository's CLAUDE.md
->    forbids it, because its CI runs the reviewer itself.>`
+>    <system only: do NOT request a Copilot review; that repository's CLAUDE.md
+>    forbids it, because its CI runs the reviewer itself.>
 >
 > ### Rules
 >
@@ -185,12 +208,26 @@ for the controls a run passes through.
 >
 > ### The pull request
 >
+> - Publishing path: <one of: "you push the branch and open the pull request
+>   with `mcp__github__create_pull_request`, and I merge by API" | "you ship
+>   with `bin/sd-ship`">. The two differ in who writes the body's owned lines.
+>   `bin/sd-ship` writes `Work:` itself — except in `guest` mode for an item
+>   that is not local to the destination, where `prepare` omits the line on
+>   purpose and strips one it finds before the push — and its `prepare` stage
+>   refuses a `--body-file` that carries `Item:`, `Delivers:`, `Closes:`,
+>   `Authored-with:`, `Attributes:` or `Work:` — "the ship adapter owns
+>   association and delivery trailers" — and its `merge` stage appends `Item:`,
+>   `Delivers:` and `Authored-with:` to the squash. So on the `sd-ship` path
+>   you write none of those lines and skip the two bullets below marked *push
+>   path only*; on the push path you write them exactly as those bullets say,
+>   because nothing else will.
 > - Title: `fix(sd:<N>): <what is now true>`.
-> - First line of the body: `Work: sd:<N>`. Then the problem, the fix, the tests
->   with fail-first lines, the mutation table, the gate lines, and a
->   **NOT VERIFIED** section.
-> - Pack lanes only: run `sd-docs-lint` with your own worktree as the working
->   directory, invoking the pack interpreter explicitly. It resolves the
+> - First line of the body: `Work: sd:<N>` (push path only). Then the problem,
+>   the fix, the tests with fail-first lines, the mutation table, the gate
+>   lines, and a **NOT VERIFIED** section.
+> - When the checkout has a `docs/work` directory — the pack and `system` both
+>   do — run `sd-docs-lint` with your own worktree as the working directory,
+>   invoking the pack interpreter explicitly. It resolves the
 >   repository from cwd, not from where the script lives (`bin/sd-docs-lint`,
 >   the `R10-D6` comment), so running it from the pack checkout lints the pack
 >   and tells you nothing about your branch:
@@ -200,20 +237,29 @@ for the controls a run passes through.
 >   <pack venv python> bin/sd-docs-lint --pr-body <body file>
 >   ```
 >
->   Run your own `bin/sd-docs-lint`, the one in the worktree — not the copy in
->   the pack checkout. If your branch changes the linter, the pack's copy does
->   not exercise that change and the result is about code you did not write.
->   Name the interpreter by the path I give you rather than hard-coding one;
->   a checkout lives wherever it lives.
+>   A pack lane runs its own `bin/sd-docs-lint`, the one in the worktree — not
+>   the copy in the pack checkout. If your branch changes the linter, the
+>   pack's copy does not exercise that change and the result is about code you
+>   did not write. A `system` lane has no copy of its own, so it runs
+>   `<pack checkout>/bin/sd-docs-lint` in place of `bin/sd-docs-lint`, still
+>   from its own worktree, as that repository's `CLAUDE.md` prescribes. Name
+>   the interpreter by the path I give you rather than hard-coding one; a
+>   checkout lives wherever it lives.
 >
 >   It must exit 0 and end `sd-docs-lint: clean`. Read its per-rule lines
 >   rather than only the last one: which rules ran, and which reported
 >   themselves not run. What it checks in a pull request body grows over time,
 >   so do not assume any particular section is covered — check the body against
 >   `.github/PULL_REQUEST_TEMPLATE.md` by eye as well, whatever the linter says.
->   A `system` lane does not run this at all; the linter is a pack tool.
-> - End the body with the attribution lines the session is using, and then, as
->   the LAST paragraph, a contiguous trailer block: `Item: sd:<N>`, and
+>   The linter is a pack tool, but the check is not pack-only:
+>   [`skills/sd-ship/SKILL.md`](../skills/sd-ship/SKILL.md) runs it whenever
+>   `docs/work` exists, regardless of repository mode, `bin/sd-ship` runs it
+>   unconditionally inside its work-root block in `prepare`, and the `system`
+>   checkout has that directory. A lane in a checkout with no `docs/work` omits
+>   it and says so; it does not create the directory to satisfy it.
+> - End the body (push path only) with the attribution lines the session is
+>   using, and then, as the LAST paragraph, a contiguous trailer block:
+>   `Item: sd:<N>`, and
 >   `Delivers: sd:<N>` only on the merge that completes the item. Attribution
 >   paragraph above, trailers below, nothing after them, no blank line among
 >   them. The order is load-bearing, not style: a squash merge concatenates the
@@ -224,7 +270,13 @@ for the controls a run passes through.
 >   ([`WORKFLOW.md`](../WORKFLOW.md), the trailers paragraph;
 >   [`.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md)).
 >   A change with no work item omits the trailers rather than inventing a row.
->   End the commit message with the session's attribution lines.
+> - The session's attribution lines are these, and they go in two different
+>   places. Pull request body: <the session's pull request attribution line>,
+>   as the paragraph directly above the trailers — never below them, for the
+>   reason the previous bullet gives. Commit message: <the session's commit
+>   attribution line>, as its last line. The commits you author carry no
+>   `Item:`/`Delivers:` block; those are the body's, and the squash message
+>   the merge composes from the body is where they end up.
 > - One push, then freeze the head until the review has been read and
 >   dispositioned. You get one further push after that: every review fix in a
 >   single batch, gate re-run before it, never one commit per finding. That
@@ -235,7 +287,7 @@ for the controls a run passes through.
 >
 > Write the full report to `<scratchpad>/<lane>/tail.md` (`mkdir -p` first); the
 > message channel truncates. Then send one line to the launching session:
-> `<lane>: PR #<n> at <sha>, CI <state>, report at <path>`, or
+> `<lane>: PR #<n> at <head sha>, CI <state>, report at <path>`, or
 > `<lane>: BLOCKED <why>`.
 >
 > The report holds: whether the citation held, the fail-first line, the mutation
