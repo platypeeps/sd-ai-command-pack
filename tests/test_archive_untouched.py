@@ -203,8 +203,8 @@ class TheArchiveStillSaysWhatItSaid(unittest.TestCase):
 #: footprint; two are `sd_install.py` pruning its own empty parents, once in
 #: the docstring and once in the call, which the criterion allows by name;
 #: one is an error message reading "Untrack it (git rm --cached) and re-run".
-#: None of the eight is a sweep or park code path, and `bin/sd_sweep.py`,
-#: which the cut removed, was never among them. Requirement 13 cuts the
+#: None of the eight is a sweep or park code path, and the sweep module the
+#: cut removed was never among them. Requirement 13 cuts the
 #: `RESIDUE` tuple after one clean fleet run, which takes five: the assertion
 #: is a subset, so that cut lowers the count without touching this file, and
 #: a ninth site fails it.
@@ -277,17 +277,12 @@ class NoDeletionPath(unittest.TestCase):
 
     def test_no_frozen_site_is_a_sweep_or_park_code_path(self) -> None:
         """Every site is a string an operator reads, or the installer pruning
-        its own empty parents. Not one is in a file or a function that sweeps
-        or parks a work item, and there is no such file to be in: the sweep
-        module is cut, and this asserts the tree agrees."""
+        its own empty parents. Not one is in a file that sweeps or parks a
+        work item, and `tests/test_cut_symbols.py` asserts there is no such
+        file to be in."""
         for path, _ in FROZEN_DELETION_SITES:
             self.assertNotIn("sweep", path)
             self.assertNotIn("park", path)
-        self.assertFalse(
-            (REPO_ROOT / "bin" / "sd_sweep.py").exists(),
-            "bin/sd_sweep.py is still in the tree; the sweep is cut under "
-            "criterion 21 and criterion 31(a)",
-        )
 
 
 if __name__ == "__main__":

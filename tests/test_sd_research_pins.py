@@ -371,10 +371,10 @@ def seeded_fleet(root: Path, commits: int = 3) -> Path:
 class GivenCheckoutsTests(unittest.TestCase):
     """`fleet(trees=...)` takes the fleet a caller has already walked.
 
-    `sd sweep --fleet` enumerates the checkouts to age their work items and
-    then asks for the pins in the same ones. Passing that list is what makes
-    the two halves of one report incapable of disagreeing about which
-    repositories exist; discovering the tree a second time here would let them.
+    A caller that has enumerated the checkouts for its own reasons asks for
+    the pins in the same ones. Passing that list is what makes the two halves
+    of one report incapable of disagreeing about which repositories exist;
+    discovering the tree a second time here would let them.
     """
 
     def test_the_given_checkouts_are_the_ones_resolved(self) -> None:
@@ -404,7 +404,7 @@ class GivenCheckoutsTests(unittest.TestCase):
 
 
 class FleetLinesTests(unittest.TestCase):
-    """One renderer, so the standalone verb and the sweep cannot drift apart."""
+    """One renderer, so the standalone verb and any other caller cannot drift apart."""
 
     def test_the_standalone_verb_prints_exactly_the_shared_lines(self) -> None:
         module = load()

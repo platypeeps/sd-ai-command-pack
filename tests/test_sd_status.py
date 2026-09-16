@@ -12,6 +12,7 @@ The fake `gh`, the fixture repository and the read-only digest come from
 
 from __future__ import annotations
 
+import ast
 import datetime
 import hashlib
 import importlib.machinery
@@ -2151,15 +2152,24 @@ class WorkItemInventoryTests(InventoryFixture):
     def test_the_threshold_is_read_from_the_library_and_still_says_45(self) -> None:
         """R10-D1's number lives in `sd_lib` now that the sweep is cut.
 
-        `IDLE_DAYS` used to read `sd_sweep.DEFAULT_DAYS`, so the report and the
+        `IDLE_DAYS` used to read the sweep module's constant, so the report and the
         sweep could not disagree about what idle meant. The sweep is gone
         (sd:10, criterion 21) and the constant moved with the aging basis into
         `sd_lib`, where this is the one reader left. Both halves are asserted:
         that the name is the library's, not a restated literal here, and that
-        the move did not change the number.
+        the move did not change the number. The name is checked in the
+        source, because `assertIs` on two small integers is true whether or
+        not one was read from the other.
         """
         self.assertEqual(status.IDLE_DAYS, 45)
-        self.assertIs(status.IDLE_DAYS, status.sd_lib.DEFAULT_DAYS)
+        self.assertEqual(status.IDLE_DAYS, status.sd_lib.DEFAULT_DAYS)
+        assignments = [
+            ast.unparse(node.value)
+            for node in ast.walk(ast.parse(SD_STATUS.read_text(encoding="utf-8")))
+            if isinstance(node, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "IDLE_DAYS" for t in node.targets)
+        ]
+        self.assertEqual(assignments, ["sd_lib.DEFAULT_DAYS"])
 
     def test_a_planning_item_past_the_threshold_ages_into_a_finding(self) -> None:
         """`created:` is what ages an item, so the fixture writes its own.

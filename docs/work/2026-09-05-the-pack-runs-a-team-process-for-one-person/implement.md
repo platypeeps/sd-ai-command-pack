@@ -1511,7 +1511,8 @@ implemented now (2026-09-14: 5's vendor clause closed in #935, 22 in #936;
 
 1. criterion 27's help text (2026-09-14: done, #939 merged as `0feecae9`);
 2. criterion 21 with 31(a), once the system sweep job and its LaunchAgent
-   are retired;
+   are retired (2026-09-16: the sweep is cut, see the entry at the end of
+   this page; 31(a)'s `parked` and `archived` field cut stays open);
 3. criterion 18;
 4. criterion 31(b);
 5. criterion 31(c), which carries `Delivers: sd:10`.
@@ -1615,7 +1616,10 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   `local-cron-jobs/jobs/sd-sweep-weekly.job` and its LaunchAgent retire
   first, with the operator running the `launchctl` step. Then the verb and
   `bin/sd_sweep.py` are cut, under this criterion and 31(a). The job's last
-  log is from 2026-09-07.)
+  log is from 2026-09-07.) (2026-09-16: the code-path half is closed. The
+  system job retired as system `e029934`, #356, and `launchctl list` names
+  no sweep agent; the verb and the module are cut and a frozen set of eight
+  deletion-verb sites is asserted. See the entry at the end of this page.)
 - **22, open (the test).** The template's one link,
   `.github/copilot-instructions.md`, exists. No test walks the links:
   `tests/test_delivery_evidence.py:148` reads the template for its trailer
@@ -1648,7 +1652,9 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   `adversarial-gate` in the system repository, move to followup sd:790. The
   rest lands in three pull requests: (a) `sd_sweep`, `parked` and `archived`,
   with criterion 21; (b) the prose symbols and flags; (c) the bug
-  regressions and the one-definition greps.)
+  regressions and the one-definition greps.) (2026-09-16: `sd_sweep` finds
+  0 governed-tree files. The `parked` and `archived` field cut is still
+  open; see the entry at the end of this page.)
 
 **Closed, by the criterion's own check:**
 
@@ -1838,8 +1844,8 @@ recounted.
 |---|---|
 | 1, 4, 8, 20 — the policy page, the lane, the conditional obligations | PR 1 |
 | 5 — the review table in exactly two places, and no bare vendor token in a skill | PR 1 (the two table clauses), PR 6 (the vendor clause whole: a converted token names a role, and no role resolves before PR 6's registry reader) (2026-09-14: the vendor clause is open, see "The closure state today"; being implemented now, from decision note 1942). (2026-09-14, superseding that vendor clause only: #935 closed it, `48d1d58e`. Criterion 5 is part-closed. The clause at `prd.md:1235-1236`, that every skill which runs a review names its point in the table and reads the cap from it, is unasserted and was outside #935's scope, so it stays open and no step of the lane order schedules it) |
-| 31 — requirement 13 line by line | PR 2 (2026-09-14: never merged; open, see "The closure state today"). (2026-09-14, superseding the scope this row's heading names, not the criterion's open state, decision note 1942: rescoped, with `R10-D` and `sd-rust-reviewer` dropped, `parked` and `archived` scoped to the `sd_lib` item field and its readers, and the cross-repository bug regression tests moved to followup sd:790. Three pull requests close it: 31(a) with criterion 21, then 31(b), then 31(c), which carries `Delivers: sd:10`) |
-| 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) (2026-09-14: PR 2 never merged; the code-path half is open, see "The closure state today"). (2026-09-14, superseding the PR 2 assignment only, not the code-path half's open state, decision note 1942: one pull request with 31(a), after #932, which merged as `107016fc`, and after the system sweep job and its LaunchAgent are retired) |
+| 31 — requirement 13 line by line | PR 2 (2026-09-14: never merged; open, see "The closure state today"). (2026-09-14, superseding the scope this row's heading names, not the criterion's open state, decision note 1942: rescoped, with `R10-D` and `sd-rust-reviewer` dropped, `parked` and `archived` scoped to the `sd_lib` item field and its readers, and the cross-repository bug regression tests moved to followup sd:790. Three pull requests close it: 31(a) with criterion 21, then 31(b), then 31(c), which carries `Delivers: sd:10`). (2026-09-16: 31(a)'s `sd_sweep` symbol is closed by the sweep cut, asserted by `tests/test_cut_symbols.py`; its `parked` and `archived` field cut is still open, see the 2026-09-16 entry at the end of this page) |
+| 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) (2026-09-14: PR 2 never merged; the code-path half is open, see "The closure state today"). (2026-09-14, superseding the PR 2 assignment only, not the code-path half's open state, decision note 1942: one pull request with 31(a), after #932, which merged as `107016fc`, and after the system sweep job and its LaunchAgent are retired). (2026-09-16: the code-path half is closed by the sweep cut, with the frozen deletion-verb set in `tests/test_archive_untouched.py`; see the 2026-09-16 entry at the end of this page) |
 | 14, 15, 16, 17, 30 — the checks | PR 3 (2026-09-14: never merged; 14, 15 and 16 are open, 17 closed by #892 and 30 is CI's, see "The closure state today"). (2026-09-14, superseding that sentence's claim that 14 and 15 are open, and nothing else in it, decision note 1942: 14 is cut and 15's ceilings clause is cut, so 15 is closed on its floor clause; 16 is being implemented now, in #938, and is still open) |
 | 33 — no document names a `docs/work/` path that does not resolve | PR 7, which adds the rule; wired by criterion 14's enumeration in PR 3, which lands first (2026-09-14: PR 3 never merged and criterion 14 is open, so nothing wires the rule into `make check`; see "The closure state today"). (2026-09-14, superseding the sentence before it: criterion 14 is cut by decision note 1942, and #820 runs the whole lint, rule 7 with it, in `make check`) |
 | 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4; criterion 19 and criterion 23's first half by the operator edit of 2026-09-07; criterion 23's second half, the writing repository's style override, by `sd-writing-pack` #41 (`be76962e`), read on 2026-09-13 and recorded under "Closing the item" (2026-09-14: PR 4 never merged; 18 and 22 are open, and criterion 9's settings clause is removed by decision note 1921, see "The closure state today"). (2026-09-14, superseding that sentence's claim about criterion 9 only, and leaving criteria 19 and 23's recorded landings and 18's open state standing: 9 closed when #931 merged as `0aeb42a1`. By decision note 1942, 22 is being implemented now, and 18 lands after 21 with 31(a), with the `AGENTS.md` upstream Trellis guard and the `.trellis` residue line exempt. Criterion 22 closed later that day: #936 merged as `c3604594`) |
@@ -1857,3 +1863,81 @@ report the operator writes after ten forward passes and a decision recorded
 here. (2026-09-13: that half is now followup sd:777's, by owner decision in
 decision note 1920, and this item no longer carries it.) Neither is code this item ships, so naming a PR for it would be a false
 entry in a table whose whole value is that its entries are checkable.
+
+## 2026-09-16 — criterion 21's code-path half and 31(a)'s `sd_sweep`: the sweep is cut
+
+The system side went first, as decision note 1942 ordered:
+`local-cron-jobs/jobs/sd-sweep-weekly.job` retired in system `e029934`
+(#356), and on 2026-09-16 `launchctl list` filtered for `sweep` returned no
+line. Then the pack cut.
+
+**What is gone.** `bin/sd_sweep.py` (365 lines) and `tests/test_sd_sweep.py`
+(702 lines). In `bin/sd`, the `sweep` verb, `sweep_roots`, the parser
+registration, and the `datetime` and `sd_research_pins` imports that only
+the verb used; `sd-research-kit fleet-pins` is now the one surface for the
+pin report, and `source:bin/sd_research_pins.py::fleet` keeps its `trees`
+parameter for the reason its docstring gives. The four prose sites that told
+a reader to run `sd sweep` (`skills/sd-plan/SKILL.md`, the work-item README
+template, `bin/sd-research-kit`'s help, `bin/sd_research_pins.py`) now name
+`sd-status` or nothing.
+
+**What moved rather than died.** `sd-status`'s `idle-planning` read four
+names off the sweep module: the threshold and the three functions behind the
+aging basis. They are `sd_lib`'s now — `source:bin/sd_lib.py::DEFAULT_DAYS`,
+`source:bin/sd_lib.py::item_date`, `source:bin/sd_lib.py::touched`,
+`source:bin/sd_lib.py::last_active` — and `bin/sd-status` changed only where
+it named the module: `IDLE_DAYS = sd_lib.DEFAULT_DAYS`, two call sites and
+three docstring mentions. Nothing else in `sd-status` moved; sd:431's slice D
+rewrites its `R10-D1` strings later and separately. The cases that covered
+the moved functions moved with them into `tests/test_sd_lib.py` (`ItemDate`,
+`LastActive`, `ItemDirectory`, `Touched`); the cases that covered the scan,
+the render, the branch annotation and the fleet pins went with the code they
+tested.
+
+**The tests.** `tests/test_cut_symbols.py` is criterion 31's file: a
+governed-tree `git grep` per symbol, 31(a)'s `sd_sweep` today, with a control
+that the grep finds a name the tree does carry. It also asserts the module and
+its suite are absent, that `build_parser()` registers no `sweep` group, and
+that the four moved names exist in the library.
+`tests/test_archive_untouched.py` gained `NoDeletionPath`, criterion 21's
+code-path half: `git grep -nE 'git rm|rmtree|rmdir' -- bin skills` is
+compared against a frozen set keyed by file and text, not line number, with a
+subset assertion so the residue cut lowers the count without an edit here, a
+control that the grep still finds the frozen sites, and a check that no site
+is in a sweep or park file. Re-measured on 2026-09-16 the set is the same
+eight of 2026-09-05 on moved lines: the five `RESIDUE` commands in
+`bin/sd-status`, `prune_empty_dirs` in `bin/sd_install.py` twice (docstring
+and call) and its untrack-and-re-run error string. `tests/test_sd_status.py`
+asserts `IDLE_DAYS` is 45 and, by reading the source, that it is assigned
+from `sd_lib.DEFAULT_DAYS` and not restated. Fail-first on `2eafa78b`:
+`FAILED (failures=4, errors=2)`. Mutations: a re-registered `sweep` parser,
+a `shutil.rmtree` added to `bin/sd_lib.py`, `DEFAULT_DAYS = 46`, and
+`IDLE_DAYS = 45` restated in `sd-status` each redden exactly the test that
+guards them. The dead-code check's shared-name blind spot fell from 145 to
+142 with the module, and `AMBIGUOUS_CEILING` in `tests/test_code_health.py`
+fell with it, as that test requires.
+
+**Two things the `sd_sweep` grep leaves alone, by name.** `docs/work/` and
+`CHANGELOG.md`, which the criterion's own definition of the governed tree
+excludes as history. And `tests/fixtures/*-round.json`: captured review
+rounds, read from the GitHub API as they stood, and one Copilot body in the
+sd:543 capture summarises a change to `bin/sd_sweep.py`. Editing a capture
+to satisfy a grep would falsify the record it is kept for, so the captures
+are excluded the way history is, and the exclusion is stated in the test's
+docstring rather than hidden in a pattern.
+
+**What 31(a) still owes: the `parked` and `archived` field cut.** Decision
+note 1942 scopes those two symbols to the `sd_lib` item field and its
+readers. The readers are `bin/sd-status` — the `--parked` flag, the parked
+section, and the `entry["archived"]` and `entry["parked"]` filters in three
+producers — and `tests/test_sd_status.py`. This pull request was told to
+leave `bin/sd-status` alone beyond the import, because sd:431's slice D edits
+that file next, so the field and its readers stand, and the third of 31(a)
+that names them is open. It is one edit to `bin/sd_lib.py` plus its readers,
+after slice D, and no note yet says which pull request carries it.
+
+**What criterion 21 still does not assert**, unchanged by this entry: no test
+puts a `planning` item under `docs/work/archive/` and runs `sd-status`,
+`sd-plan` and `sd-review --scope planning` against it, and no test ships a
+`done` item and re-runs `sd-plan` and `sd-ship` over it. Both clauses were
+recorded open on 2026-09-14 and are still open.

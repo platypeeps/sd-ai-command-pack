@@ -345,12 +345,12 @@ def fleet(root=None, trees=None):
     we clone is what we own.
 
     `trees` is the fleet, already enumerated, for a caller that has walked it
-    once and is entitled to one answer about what it contains. `sd sweep
-    --fleet` is that caller: it discovers checkouts to age their work items and
-    then asks this for the pins in the same ones, and a second discovery here
-    would let the two halves of one report disagree about which repositories
-    exist. Still enumerated from the filesystem either way -- what moves is
-    *who* walked it, never whether a list is maintained somewhere.
+    once and is entitled to one answer about what it contains. The fleet age
+    sweep was that caller until sd:10's criterion 21 cut it; the parameter
+    stays, because a second discovery here would let two halves of one report
+    disagree about which repositories exist. Still enumerated from the
+    filesystem either way -- what moves is *who* walked it, never whether a
+    list is maintained somewhere.
     """
     if trees is None:
         trees = checkouts(search_root() if root is None else Path(root))
@@ -386,12 +386,12 @@ def fleet(root=None, trees=None):
 def fleet_lines(rows):
     """The pin rows as lines, so the two callers cannot drift apart.
 
-    `sd-research-kit fleet-pins` prints this and `sd sweep --fleet` appends it
-    to its own report. Returning lines rather than printing them is what makes
-    that one renderer instead of two: a second copy of the column widths and
-    the "repin stays a hand decision" footer would be two reports claiming to
-    be the same one, and the divergence would show up first to whoever read
-    only the other surface.
+    `sd-research-kit fleet-pins` prints this. Returning lines rather than
+    printing them is what makes it one renderer for any caller that appends
+    the report to its own: a second copy of the column widths and the "repin
+    stays a hand decision" footer would be two reports claiming to be the same
+    one, and the divergence would show up first to whoever read only the other
+    surface.
     """
     if not rows:
         return ["no fleet pins found"]

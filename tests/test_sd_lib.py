@@ -6,6 +6,7 @@ tests, and a mocked `git rev-parse` would have agreed with every wrong answer.
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import pathlib
@@ -662,6 +663,207 @@ class DisplayFieldsTests(unittest.TestCase):
         row = {"a": 1, "b": 2}
         fields = sd_lib.display_fields(row, ("a", "a", "b"), ())
         self.assertEqual(sorted(set(fields)), sorted(set(row)))
+
+
+# -- the aging basis ---------------------------------------------------------
+#
+# `item_date`, `last_active` and `touched` came out of the 45-day age sweep
+# when sd:10's criterion 21 cut it; the cases below came with them. `today`
+# is a literal in every one: the rule under test is arithmetic, and a test
+# that read the clock would pass or fail depending on the day it ran.
+
+
+def dated_item(repo: pathlib.Path, name: str, **fields) -> sd_lib.WorkItem:
+    """One work item on disk, read back through `work_item`."""
+    item = repo / "docs" / "work" / name
+    item.mkdir(parents=True)
+    lines = ["---", f"title: {name}"]
+    lines += [f"{key}: {value}" for key, value in fields.items() if value is not None]
+    lines += ["---", "", "# body"]
+    (item / "prd.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return sd_lib.work_item(item)
+
+
+class ItemDate(unittest.TestCase):
+    """When an item dated itself, and when nothing did."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = pathlib.Path(tmp.name) / "repo"
+        (self.repo / "docs" / "work").mkdir(parents=True)
+
+    def test_created_is_the_date(self) -> None:
+        item = dated_item(self.repo, "2026-07-01-old", status="planning", created="2026-07-01")
+        self.assertEqual(sd_lib.item_date(item), datetime.date(2026, 7, 1))
+
+    def test_the_directory_prefix_dates_an_item_whose_frontmatter_does_not(self) -> None:
+        """Every templated item carries one, and the bulk-park sorted on it."""
+        item = dated_item(self.repo, "2026-01-01-no-created-line", status="planning")
+        self.assertEqual(sd_lib.item_date(item), datetime.date(2026, 1, 1))
+
+    def test_created_outranks_the_directory_prefix(self) -> None:
+        """The item's own statement about itself wins.
+
+        A directory renamed or copied from another item carries a date that is
+        not this item's, so the frontmatter is the more trustworthy of the two
+        whenever both exist.
+        """
+        item = dated_item(self.repo, "2020-01-01-stale-prefix", status="planning",
+                          created="2026-08-30")
+        self.assertEqual(sd_lib.item_date(item), datetime.date(2026, 8, 30))
+
+    def test_an_unparseable_created_falls_back_rather_than_crashing(self) -> None:
+        """`created: soon` is a real thing a person types."""
+        item = dated_item(self.repo, "2026-01-01-vague", status="planning", created="soon")
+        self.assertEqual(sd_lib.item_date(item), datetime.date(2026, 1, 1))
+
+    def test_a_garbage_date_everywhere_is_undated_not_an_error(self) -> None:
+        item = dated_item(self.repo, "2026-13-45-impossible", status="planning", created="nope")
+        self.assertIsNone(sd_lib.item_date(item))
+
+    def test_no_date_anywhere_is_undated(self) -> None:
+        item = dated_item(self.repo, "untitled-thing", status="planning")
+        self.assertIsNone(sd_lib.item_date(item))
+
+
+class LastActive(unittest.TestCase):
+    """The aging basis: what counts as something happening to an item.
+
+    `item_date` answers when an item began. `last_active` answers when anything
+    last happened to it, and it is what the threshold is measured from -- the
+    two are different questions, and `idle-planning` read the first one while
+    saying the second. This is the one definition `sd-status` reads, so it is
+    where the difference is pinned.
+    """
+
+    ITEM = datetime.date(2026, 1, 1)
+
+    def last(self, name: str = "2026-01-01-x", activity: str = "",
+             marks: dict | None = None) -> datetime.date:
+        return sd_lib.last_active(self.ITEM, name, activity, marks)
+
+    def test_an_item_with_no_evidence_ages_from_its_own_date(self) -> None:
+        """The floor, and the whole of the old behaviour."""
+        self.assertEqual(self.last(), self.ITEM)
+
+    def test_a_commit_on_its_directory_is_activity(self) -> None:
+        commit = datetime.date(2026, 9, 5)
+        self.assertEqual(self.last(marks={"2026-01-01-x": commit}), commit)
+
+    def test_a_database_stamp_is_activity(self) -> None:
+        """A note carries a full timestamp; only its day is read."""
+        self.assertEqual(
+            self.last(activity="2026-09-06T09:14:00+00:00"),
+            datetime.date(2026, 9, 6),
+        )
+
+    def test_the_latest_of_the_three_wins_rather_than_the_first_found(self) -> None:
+        """A union, not a precedence chain: each source is blind where the
+        others see, so the newest evidence is the answer whichever gave it."""
+        marks = {"2026-01-01-x": datetime.date(2026, 8, 1)}
+        self.assertEqual(
+            self.last(activity="2026-09-06T09:14:00+00:00", marks=marks),
+            datetime.date(2026, 9, 6),
+        )
+        self.assertEqual(
+            self.last(activity="2026-07-01T09:14:00+00:00", marks=marks),
+            datetime.date(2026, 8, 1),
+        )
+
+    def test_an_unparseable_stamp_lowers_nothing(self) -> None:
+        """Absent evidence degrades to the floor, never below it."""
+        self.assertEqual(self.last(activity="not a date"), self.ITEM)
+        self.assertEqual(self.last(activity=""), self.ITEM)
+
+    def test_a_commit_on_another_item_is_not_this_item_s_activity(self) -> None:
+        self.assertEqual(
+            self.last(marks={"2026-01-01-other": datetime.date(2026, 9, 5)}),
+            self.ITEM,
+        )
+
+
+class ItemDirectory(unittest.TestCase):
+    """Which item a tracked path belongs to, for `touched`'s one `git log`."""
+
+    def resolve(self, path: str) -> str:
+        return sd_lib._item_directory(path, "docs/work")
+
+    def test_a_file_in_an_item_names_that_item(self) -> None:
+        self.assertEqual(self.resolve("docs/work/2026-01-01-x/prd.md"), "2026-01-01-x")
+
+    def test_an_archived_item_is_named_through_its_month(self) -> None:
+        self.assertEqual(
+            self.resolve("docs/work/archive/2026-08/2026-01-01-x/prd.md"),
+            "2026-01-01-x",
+        )
+
+    def test_a_file_directly_in_the_work_directory_names_no_item(self) -> None:
+        """`.status-source` lives there and is not an item."""
+        self.assertEqual(self.resolve("docs/work/.status-source"), "")
+
+    def test_a_path_outside_the_work_directory_names_no_item(self) -> None:
+        self.assertEqual(self.resolve("bin/sd-status"), "")
+
+
+class Touched(unittest.TestCase):
+    """One `git log` per root, and what it maps."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = pathlib.Path(tmp.name) / "repo"
+        (self.repo / "docs" / "work").mkdir(parents=True)
+        self.at("init", "--quiet", "--initial-branch=main")
+        self.at("config", "user.email", "t@example.com")
+        self.at("config", "user.name", "t")
+        self.at("config", "commit.gpgsign", "false")
+
+    def at(self, *args: str, when: str | None = None) -> None:
+        """One git call in the fixture repository.
+
+        Not named `run`: that is `TestCase.run`, and overriding it stops the
+        case from running at all -- which it did, loudly, on the first draft.
+        """
+        env = {**os.environ}
+        if when:
+            env["GIT_COMMITTER_DATE"] = env["GIT_AUTHOR_DATE"] = when
+        subprocess.run(["git", *args], cwd=self.repo, check=True,
+                       capture_output=True, env=env)
+
+    def commit(self, name: str, when: str) -> None:
+        """One item, written as a real item and committed on a chosen day."""
+        item = self.repo / "docs" / "work" / name
+        if item.exists():
+            (item / "touched").write_text(when, encoding="utf-8")
+        else:
+            dated_item(self.repo, name, status="planning")
+        self.at("add", "-A")
+        self.at("commit", "--quiet", "-m", f"touch {name}", when=when)
+
+    def test_each_item_maps_to_the_day_it_was_last_committed_to(self) -> None:
+        self.commit("2026-01-01-a", "2026-08-01T12:00:00 +0000")
+        self.commit("2026-01-01-b", "2026-09-05T12:00:00 +0000")
+        self.assertEqual(
+            sd_lib.touched(self.repo),
+            {"2026-01-01-a": datetime.date(2026, 8, 1),
+             "2026-01-01-b": datetime.date(2026, 9, 5)},
+        )
+
+    def test_the_latest_commit_wins_and_not_the_first_one(self) -> None:
+        """`git log` is newest first, so the first sighting is the latest."""
+        self.commit("2026-01-01-a", "2026-08-01T12:00:00 +0000")
+        self.commit("2026-01-01-a", "2026-09-05T12:00:00 +0000")
+        self.assertEqual(
+            sd_lib.touched(self.repo), {"2026-01-01-a": datetime.date(2026, 9, 5)}
+        )
+
+    def test_a_directory_that_is_not_a_checkout_is_empty_and_not_an_error(self) -> None:
+        """Git refusing and git finding nothing leave the age on its other two
+        sources, so there is no third state for a caller to handle."""
+        loose = self.repo.parent / "not-a-checkout"
+        loose.mkdir()
+        self.assertEqual(sd_lib.touched(loose), {})
 
 
 if __name__ == "__main__":
