@@ -50,7 +50,7 @@ behaviour exists and a test asserts it, spelled differently from the clause.
 | No trailer and no `--author` is refused naming the flag | Cut, the refusal stands: the untagged commit is refused, naming `sd attribute`. `--author` is `sd-ship prepare`'s flag and applies to a commit not yet made; the refusal names the one repair that applies to a commit that exists. Naming the flag would point at a tool that cannot fix the commit | `source:bin/sd_lib.py::author_vendors`; `FixReviewTests`, "fix commit with no author trailer is refused" |
 | An untagged commit before a tagged one is refused naming the commit and `sd attribute`; `sd attribute <sha> claude` resolves it, the attributing commit carrying `Authored-with: human` | Implemented | `source:bin/sd_lib.py::attribute`, `source:bin/sd::cmd_attribute`; `TheRoundTripTests` in `tests/test_sd_attribute.py` |
 | A rebase refuses again; `sd attribute <from>..<to> claude` resolves it; the commit is asserted on the fixture remote after the push | Implemented and asserted up to the push; the post-push half is unasserted, no test pushes | `TheRangeTests` in `tests/test_sd_attribute.py`, "a rebase loses the claim and one range attribution restores it" |
-| Two slices, the first squashed and the default merged back, resolve by `slice_base`; a fresh branch from the default resolves the same | Under another name, in part: `authorship_base` is the merge base with the default, carried across passes by `sd-ship`. No row records a slice head, so a branch continued after its squash still scans the first slice's commits | `review` in `bin/sd-review` writes `authorship_base` into the report; `Ship.review_inputs` in `bin/sd-ship` checks it against the report's subject base, and the merge reads it from the last pass's report |
+| Two slices, the first squashed and the default merged back, resolve by `slice_base`; a fresh branch from the default resolves the same | Under another name, in part: `authorship_base` is the merge base with the default, carried across passes by `sd-ship`. No row records a slice head, so a branch continued after its squash still scans the first slice's commits. Measured 2026-09-16 in a throwaway repository: `c1` and `c2` on `feature`, squashed to `S` on `main`, `main` merged back, `c3` added; `merge-base feature main` is `S`, and `git log --no-merges S..feature`, the range `commit_messages` scans, lists `c3`, `c2` and `c1`, because a squash makes neither original commit an ancestor of `S`. The missing scenario is exactly that one; a fresh branch from the default resolves the same as today | `review` in `bin/sd-review` writes `authorship_base` into the report; `Ship.review_inputs` in `bin/sd-ship` checks it against the report's subject base, and the merge reads it from the last pass's report |
 | A session that edits and exits without committing adds its vendor to the row's `authors` (rounds 44 to 46) | Unimplemented as a session row. The `authors` the grep finds in `bin/` are the policy line of `.github/sd-review.json` (read by `sd-review` and `sd_setup_github.py`, echoed into the review report), the local list `sd-ship` builds from `authored_with` and trailers for the squash, and the local reviewer list in `sd-pr-state`; no session writes an `authors` row and none of these feeds the reviewer's vendor set from a session | `source:bin/sd-review::DEFAULT_POLICY`; `review_history` and `merge` in `bin/sd-ship`; `bin/sd-pr-state`, the reviewer list |
 | Two clones attributing two commits of one branch both push without force | Unasserted, and not true as stated: each attribution is an empty commit on the clone's head, so two clones from one tip diverge and the second push is non-fast-forward. The sync protocol is: rebase before push; a non-fast-forward refusal is the signal, and the rebase keeps both `Attributes:` lines because the sha they name is unchanged | `source:bin/sd_lib.py::attribute`, the docstring |
 | `sd attribute <sha> human` on an untagged branch resolves to the first enabled entry | Implemented | `TheRoundTripTests`, "human writes the bare word and contributes no vendor" |
@@ -77,8 +77,10 @@ Unasserted halves are named in their rows and are not planned here.
    and reserved rows in one transaction, and refuses the call when the bound
    would pass `cap_usd_month`. This half is sd:234 slice 8a, delivered as
    `local-sd-db/sd_db/ledger.py` with `reserve`, `claim`, `settle`, `lose`,
-   `release_orphans` and `exposure`. At `a5347185` that module does not exist
-   yet; this item consumes it and does not build it.
+   `release_orphans` and `exposure`, landed in `platypeeps/system` #406 at
+   `4b240d28` (absent at `a5347185`); this item consumes it and does not
+   build it. `claim` is the transition just before the request goes on the
+   wire, `reserved` to `sending`, and the pack calls it.
 2. `bin/sd-review` supplies `capped_bills` to `reviewer_chain` and `pick`, so
    fallthrough passes over a bill at its cap and `--provider` on it refuses
    with the month's total.
@@ -104,21 +106,48 @@ Unasserted halves are named in their rows and are not planned here.
       neither with `capped_bills` handed in by the test.
 - [ ] A test starts two calls concurrently against room for exactly one; one
       goes, one is refused, and the settled rows sum under the cap.
+- [ ] Four boundary tests through `review`: `sd_handoff_rows.library()`
+      refusing (no `sd_db`) and `connect` refusing (a database that will
+      not open), each once with an uncapped bill, which is dispatched as
+      today, and once with a capped bill, which is refused naming the
+      fault; no test bypasses the cap or blocks an uncapped review.
+- [ ] A preflight test: `--preflight` on a capped `url` entry leaves one
+      ledger row for the probe, `run` or `bound`, never none.
+- [ ] A lifecycle test with a fake client: the row is `sending` when the
+      client is called, `run` with the usage after a response that carries
+      it, `bound` after a timeout, and no row exists after a `REFUSED`
+      returned before the request is built.
 - [ ] A test reads the recorded `tests/fixtures/minimax/token_plan_remains.json`
-      (#1001), writes two `meter` rows, and asserts the skip and the refusal
-      with each window at zero in turn; a second asserts that a metered bill
-      with no row, or a newest row older than the five-hour window, is
-      skipped and refused the same way, naming the missing or stale reading.
+      (#1001), selects the `general` entry, writes two `meter` rows, and
+      asserts the skip and the refusal with each window at zero in turn; a
+      second asserts that a metered bill with no row, or a newest row older
+      than the five-hour window, is skipped and refused the same way, naming
+      the missing or stale reading; a third, one edited fixture per case,
+      asserts that a missing `general` entry, two of them, and a window
+      field that is missing, a string, a boolean, NaN, an infinity or
+      outside 0 to 100 caps the bill naming the field and the value and
+      writes no row.
+- [ ] A pinned-meter test: `meter:` naming another scheme (the same-host
+      `http://` value among the cases), host, port or path is refused naming
+      the value and the pinned four, and no request is sent; a bill with
+      `meter:` and no `meter_env:` is refused at registry read naming the
+      bill.
 - [ ] `grep -rn token_plan bin tests` counts more than 0 after slice 4.
 - [ ] `make check` rc 0, and `bin/sd-docs-lint` ends `sd-docs-lint: clean`.
 
 ## References
 
 - sd:10, criterion 6 and decision note 1942.
-- sd:234 slice 8a, the system reservation ledger.
+- sd:234 slice 8a, the system reservation ledger, `local-sd-db/sd_db/ledger.py`
+  at system `4b240d28` (#406), and sd:234's prd, the claim paragraph.
 - `WORKFLOW.md`, the `cap_usd_month` paragraph, which says the ceiling is
   recorded and not enforced; it changes when slice 3 lands.
 
 ## Log
 
 - 2026-09-16 created, with the attribution audit measured at `2eafa78b`.
+- 2026-09-16 planning review, five rounds: the ledger landed at system
+  `4b240d28` and the pack's pin followed in #999, so slices 1 and 2 are
+  done by other items; the lifecycle, the estimate's name, the meter's
+  pin, credential, selection and order, and the boundary tests are the
+  review's additions.
