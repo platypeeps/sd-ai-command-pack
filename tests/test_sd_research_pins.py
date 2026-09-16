@@ -422,5 +422,47 @@ class FleetLinesTests(unittest.TestCase):
         self.assertEqual(load().fleet_lines([]), ["no fleet pins found"])
 
 
+KIT = REPO_ROOT / "bin" / "sd-research-kit"
+
+
+class FleetPinsVerbTests(unittest.TestCase):
+    """`sd-research-kit fleet-pins` is the one surface that prints the report.
+
+    `sd sweep --fleet` was the other, and its suite carried the only test that
+    ran the report end to end as a process; sd:10's criterion 21 cut both.
+    This is that coverage on the surface that remains: the verb, not
+    `fleet_report(root)`, so the dispatch in the kit and `search_root()`'s
+    `~/repos` are both under the assertion. `HOME` is the only handle the
+    verb takes, so the fleet is seeded under a scratch home's `repos/`.
+    """
+
+    def run_verb(self, home: Path) -> subprocess.CompletedProcess[str]:
+        env = {**os.environ, "HOME": str(home), "XDG_CACHE_HOME": str(home / "cache")}
+        return subprocess.run(
+            [sys.executable, str(KIT), "fleet-pins"],
+            capture_output=True, text=True, env=env, cwd=str(home))
+
+    def test_the_verb_reports_the_pin_behind_and_never_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            seeded_fleet(home / "repos", commits=3)
+            result = self.run_verb(home)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("consumer-probe", result.stdout)
+        self.assertIn("system-probe", result.stdout)
+        self.assertIn("behind 2", result.stdout)
+        self.assertIn("1 pin site(s) across 1 repo(s); 1 behind.", result.stdout)
+        self.assertIn("Report only", result.stdout)
+
+    def test_a_home_with_no_fleet_says_so_and_exits_zero(self) -> None:
+        """The control: an empty `~/repos` must not be reading the real one."""
+        with tempfile.TemporaryDirectory() as scratch:
+            home = Path(scratch)
+            (home / "repos").mkdir()
+            result = self.run_verb(home)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "no fleet pins found\n")
+
+
 if __name__ == "__main__":
     unittest.main()
