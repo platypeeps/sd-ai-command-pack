@@ -54,7 +54,7 @@ USAGE = """usage: sd-research-kit render|checklinks|review|pins|fleet-pins|
                 build freshness, the one `START HERE -- ` main document across
                 the configured H1s and rendered titles, and this repo's
                 CLAUDE.md against the pack's template. Then prints the checklist
-                for the half no script can do. Exit 1 if a check fails
+                for the half no script can do. Exit 1 if a check fails, 2 outside a research repo
   pins          for every `source` @ `sha` the markdown asserts, say whether
                 upstream has moved past it. The list is read out of the
                 documents each run, never maintained

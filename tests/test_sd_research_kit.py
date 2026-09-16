@@ -219,6 +219,39 @@ class WorkItemCoverageTests(unittest.TestCase):
         self.assertNotIn("docs/work", result.stdout)
 
 
+class NotAResearchRepoTests(unittest.TestCase):
+    """`review` outside a research repo is a refusal, not a pass (sd:947).
+
+    sd:10 requirement 13: no `research.conf.py` exits 2. Until then `check()`
+    printed the refusal and returned 0, `main()` returned that 0, and the kit's
+    `review` verb passed on any directory at all -- a cwd mistake looked like a
+    clean review. 2 is distinct from 1, the mechanical-failure exit, so a caller
+    can tell "this is not a research repo" from "this one has findings".
+    """
+
+    def test_no_research_conf_exits_2_and_says_so(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            result = run("review", cwd=Path(raw))
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn("no research.conf.py", result.stderr)
+        self.assertIn("not a research repo", result.stderr)
+        # The refusal is the whole output: the checklist is for a research
+        # repo, and a mechanical-pass line here would be the bug restated.
+        self.assertNotIn("Mechanical checks pass", result.stdout)
+        self.assertNotIn("The half no script can do", result.stdout)
+
+    def test_a_research_repo_with_nothing_to_check_still_exits_0(self) -> None:
+        """The control: the minimal research repo is still a pass."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            (repo / "research.conf.py").write_text('PROJECT = "probe"\nDOCS = []\n')
+            (repo / "CLAUDE.md").write_text(TEMPLATE.read_text(encoding="utf-8"))
+            result = run("review", cwd=repo)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Mechanical checks pass", result.stdout)
+
+
 class TemplateDriftTests(unittest.TestCase):
     """Nothing looked at `CLAUDE.md`, so three findings sat for six weeks.
 
