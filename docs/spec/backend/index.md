@@ -34,7 +34,7 @@
 
 | Guide | What it records |
 |-------|-----------------|
-| [Manifest And Filesystem](./manifest-and-filesystem.md) | The manifest/installer/plugin-generation/payload-gate/fleet-campaign model. Partly stale: its Trellis-gitignore section still specifies the vestigial `SD-AI-COMMAND-PACK` markers that `CONTRIBUTING.md` keeps `.gitignore` for, and its Machine-Scope Installer section is a design record for files that no longer exist |
+| [Manifest And Filesystem](./manifest-and-filesystem.md) | The manifest/installer/plugin-generation/payload-gate/fleet-campaign model. Partly stale: its Machine-Scope Installer section is a design record for files that no longer exist, and its gitignore-block section is removed, so `.gitignore` carries no markers of that block |
 | [Error Handling](./error-handling.md) | The deleted `install.py` exit-code contract, plus three diagnostic lessons that outlive their subject |
 | [Quality Guidelines](./quality-guidelines.md) | 18 contracts for deleted shipped scripts, the **live** bash 3.2 gate, and "Silent Paths Must Say Why" |
 

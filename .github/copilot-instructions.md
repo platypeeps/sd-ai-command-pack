@@ -9,15 +9,15 @@ of anything to also comment on.
 
 ## There is no vendored payload here any more
 
-Until 2026-08-31 this file carried a long list of copied-in Trellis and pack
+Until 2026-08-31 this file carried a long list of copied-in framework and pack
 payload families to be treated as vendored and reviewed lightly. Every path in
-that list is gone: `.trellis/` went at step 2, the per-platform skill and
+that list is gone: the predecessor's state directory went at step 2, the per-platform skill and
 command trees at step 3a, and the Copilot-facing render — `.github/skills/`,
-`.github/agents/trellis-*`, `.github/copilot/`, `.github/hooks/trellis.json` —
+`.github/agents/`, `.github/copilot/`, `.github/hooks/` —
 at step 5b. Nothing in this repository is a copy of anything.
 
 The practical consequence: **there is no file here you should decline to review
-on ownership grounds.** The handoff-comment protocol for upstream Trellis fixes
+on ownership grounds.** The handoff-comment protocol for upstream framework fixes
 is retired with the payload it protected, and so is the pack-refresh carve-out —
 there is no release train and no version to refresh to.
 

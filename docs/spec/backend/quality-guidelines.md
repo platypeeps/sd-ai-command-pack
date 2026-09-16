@@ -9,8 +9,8 @@
 > bookkeeping-only CI fast lane and the rest. Their subjects went in two waves:
 > the release train at step 0 (2026-08-29, #597) and the whole of
 > `templates/` plus `installer/`, `install.py`, `scripts/` and `manifest.json`
-> at step 3e (2026-08-30, `43170716`, #610). The Trellis task directories,
-> `task.json` files and `.trellis/workspace/` journals that several contracts
+> at step 3e (2026-08-30, `43170716`, #610). The predecessor task directories,
+> `task.json` files and `.predecessor/workspace/` journals that several contracts
 > read were replaced by `docs/work/` at step 2. A mechanical check of the page's
 > citations: of 80 backticked paths, **67 name something that is not in
 > `git ls-files`**.
@@ -33,8 +33,11 @@
 > installer that wrote into other repositories; `bin/sd_install.py` is
 > machine-scope and writes no tracked file anywhere.
 >
-> The text below is unedited. It is the record of what that machinery
-> specified, not guidance for the repository as it stands. The triage that
+> The text below is the record of what that machinery specified, not guidance
+> for the repository as it stands. It is edited in one way only: the name of
+> the framework the pack grew out of is written out of the whole `docs/spec/`
+> tree by sd:10 criterion 18, and `predecessor` stands where it stood, in
+> paths and identifiers as in prose. The triage that
 > produced this notice is recorded under step 7 in
 > `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
 
@@ -278,7 +281,7 @@ may enter housekeeping's merge mutation path.
 ### 3. Contracts
 
 - The evaluator is read-only. It must not merge or approve a PR, push, resolve
-  threads, modify labels or branches, update Trellis state, or write repository
+  threads, modify labels or branches, update the predecessor state, or write repository
   files.
 - Every result after PR discovery binds repository identity, PR number, base
   branch, and initial plus final full PR head OIDs. Re-read the exact PR by its
@@ -334,7 +337,7 @@ may enter housekeeping's merge mutation path.
   evaluator reruns the canonical validator with the receipt's mode, base, and
   head and requires exact JSON equality before collecting remote evidence.
 - `dependency-pr` evaluates a classified PR from a clean default branch and
-  does not fabricate Trellis finish-work evidence. Its PR head is still read
+  does not fabricate predecessor finish-work evidence. Its PR head is still read
   twice and must remain exact.
 - Routed-review receipt validation belongs to the routed-review integration
   contract. Until that schema is final, do not guess it or mint a local
@@ -373,7 +376,7 @@ may enter housekeeping's merge mutation path.
   a successful check exists; all thread pages are readable and resolved; the
   final head is unchanged.
 - Base: a classified dependency PR is evaluated from clean default branch and
-  delegated through housekeeping without a Trellis finish-work requirement.
+  delegated through housekeeping without a predecessor finish-work requirement.
 - Bad: green CI is treated as sufficient without direct review-thread
   evidence, or an earlier head's finish-work/review verdict is reused.
 - Bad: `sd-update-deps` or another skill invokes `gh pr merge` directly or
@@ -436,7 +439,7 @@ delegation.
 ### 3. Contracts
 
 - The builder validates and composes evidence only. It does not run Git/GitHub,
-  collect status, merge, switch, pull, delete, prune, or mutate Trellis.
+  collect status, merge, switch, pull, delete, prune, or mutate the predecessor.
 - Embed the existing eligibility and status documents without reimplementing
   their policies. Eligibility is `null` when no open-PR evaluation applies;
   status is `null` only with a typed status failure.
@@ -508,7 +511,7 @@ that exercise the generic JavaScript review preflight.
 - Command: `node templates/scripts/sd-ai-command-pack-review-preflight.mjs`
 - Reusable API: exported helpers such as `runReviewPreflight()` and parser
   helpers may be imported by Node-based tests.
-- Internal validator: `validateTrellisTaskPriorityProvenance(record)` returns
+- Internal validator: `validatePredecessorTaskPriorityProvenance(record)` returns
   field-relative issue strings and never includes rationale contents.
 
 ### 3. Contracts
@@ -526,7 +529,7 @@ that exercise the generic JavaScript review preflight.
   another.
 - Diff-size review advisories compare the review base with the complete working
   tree and add untracked regular files. The authored-source threshold excludes
-  installed pack/Trellis mirrors, task/workspace records, and known generated
+  installed pack/predecessor mirrors, task/workspace records, and known generated
   reports; canonical `templates/**` sources remain included.
 - The same selected diff compares its complete file count with the positive
   integer `copilotReviewFileLimit`, which defaults to `300`. Equality passes;
@@ -549,14 +552,14 @@ that exercise the generic JavaScript review preflight.
   itself. Preserve explicit parser signals and direct splits of CLI arguments,
   environment values, or file-read results; keep the heuristic conservative
   rather than inferring data flow between assignments.
-- More than one changed Trellis task directory emits a soft scope warning so
+- More than one changed predecessor task directory emits a soft scope warning so
   unrelated outcomes can be split before remote review.
-- Trellis journal sessions present at the review base and older than the newest
+- Predecessor journal sessions present at the review base and older than the newest
   current session are append-only. Compare normalized session blocks against
   the base and fail when an older block changes, disappears, or is renumbered;
   newly appended/current sessions remain editable.
 - Completed journal sessions added or amended after the review base must not
-  pair a positive validation claim in Summary or Main Changes with Trellis'
+  pair a positive validation claim in Summary or Main Changes with the predecessor's
   exact `Validation (was )?not recorded for this session.` Testing fallback.
   Point failures at the fallback line and grandfather byte-equivalent baseline
   sessions so a new guard does not require historical journal rewrites.
@@ -566,21 +569,21 @@ that exercise the generic JavaScript review preflight.
   blocks because their GitHub paths and comment snippets are remote provenance.
   Preserve newlines for accurate diagnostics, and keep surrounding human text
   plus incomplete marker pairs in the normal local-path check.
-- Diff-scoped Trellis task checks inspect every changed `implement.jsonl` and
+- Diff-scoped predecessor task checks inspect every changed `implement.jsonl` and
   `check.jsonl` file regardless of whether its task is planning, in progress,
   completed, or archived. A changed non-planning `task.json` also checks both
   sibling context files. Every non-empty line must parse as one JSON value;
   malformed rows fail with bounded file-and-line diagnostics. Parsed records
   with an own `_example` key fail; rows with a `file` key may reference only
-  `docs/spec/**` or `.trellis/tasks/**/research/**`; empty and grounded
+  `docs/spec/**` or `.predecessor/tasks/**/research/**`; empty and grounded
   context pass. Present
   changed context artifacts outside the active or
   month-bucketed archive layout fail even when the directory entry is a broken symlink;
-  archive task directory names remain unrestricted for legacy Trellis compatibility,
+  archive task directory names remain unrestricted for legacy predecessor compatibility,
   deleted old paths during moves are ignored, and untouched historical and
   symlinked valid-layout context files remain outside the check.
-- Diff-scoped Trellis task metadata checks inspect every added or modified
-  `.trellis/tasks/**/task.json` without migrating untouched history. Records
+- Diff-scoped predecessor task metadata checks inspect every added or modified
+  `.predecessor/tasks/**/task.json` without migrating untouched history. Records
   must use the active or month-bucketed archive layout; keep `id` and `name`
   aligned, and when a directory uses `MM-DD-name`, keep `name` aligned with its
   suffix; require `status` to be `planning`, `in_progress`,
@@ -596,7 +599,7 @@ that exercise the generic JavaScript review preflight.
   non-empty `rationale` of at most 1000 characters. Extra keys are tolerated,
   absence preserves existing behavior, and diagnostics must identify fields
   without echoing rationale text.
-- Diff-scoped Trellis task topology semantics inspect added or modified active
+- Diff-scoped predecessor task topology semantics inspect added or modified active
   `task.json` files and active task directories whose `task.json` or `prd.md`
   changed. A deferred planning child (`status: planning`, `branch: null`, and a
   valid parent) must use either its parent's durable `base_branch` or that
@@ -611,8 +614,8 @@ that exercise the generic JavaScript review preflight.
   the semantic gate. Missing, unreadable, oversized, non-regular, or symlinked
   in-scope PRDs fail closed with path-specific output.
 - A repository-wide bounded scan inspects regular `task.json` files in direct
-  `.trellis/tasks/` children. A record with `status: completed` fails with the
-  Trellis archive command; the `archive/` subtree, non-completed records,
+  `.predecessor/tasks/` children. A record with `status: completed` fails with
+  the predecessor's archive command; the `archive/` subtree, non-completed records,
   nested paths, and symlinks remain outside the scan.
 - Completion-bundle archive identity compares the source record at the base
   against the archived record at head with `status` and `completedAt` removed,
@@ -629,17 +632,17 @@ that exercise the generic JavaScript review preflight.
   message.
 - Symlinked script invocation -> run the same checks and print the normal
   summary.
-- Untracked copied pack/Trellis surface -> report the copied/generated scope
+- Untracked copied pack/predecessor surface -> report the copied/generated scope
   warning just like a staged or branch diff would.
 - Malformed `.sd-ai-command-pack/review-preflight.json` -> fail the preflight
   without wiping the failure during result-buffer reset.
 - Missing `copilotReviewFileLimit` -> use `300`; a positive integer override ->
   apply that boundary; zero, negative, fractional, string, or other invalid
   values -> fail configuration validation without weakening the default check.
-- Older Trellis journal session differs from the review base -> fail with the
+- Older predecessor journal session differs from the review base -> fail with the
   session number and direct the author to restore history and edit the intended
   current session by heading.
-- Review-base Trellis journal session is deleted or renumbered -> fail as a
+- Review-base predecessor journal session is deleted or renumbered -> fail as a
   historical-session removal, including when its journal file or the entire
   current workspace disappears.
 - New or amended completed session claims successful validation while Testing
@@ -668,7 +671,7 @@ that exercise the generic JavaScript review preflight.
   required PRD is missing or unsafe -> fail with the parent PRD and missing
   child IDs; unchanged or archived PRD drift -> remain grandfathered.
 - Completed direct active-root task -> fail with the exact `task.json` path and
-  `task.py archive` remediation; archived, planning, in-progress, and symlinked
+  the predecessor's `archive` remediation; archived, planning, in-progress, and symlinked
   records -> pass.
 - Untouched historical context or symlinked context -> skip without reading
   outside the repository; changed empty or grounded context -> pass.
@@ -1122,32 +1125,32 @@ its template twin, or the `sd-finish-work` flow that calls it.
 
 - Command:
   `python3 templates/scripts/sd-ai-command-pack-record-session.py --title ... --summary ... --change ... --test ...`
-- Trellis dependency: `.trellis/scripts/add_session.py --no-commit`
-- Commit behavior: the pack wrapper, not Trellis, stages
-  `.trellis/workspace/<developer>/journal-*.md` plus sibling `index.md` and
+- Predecessor dependency: `.predecessor/scripts/add_session.py --no-commit`
+- Commit behavior: the pack wrapper, not the predecessor, stages
+  `.predecessor/workspace/<developer>/journal-*.md` plus sibling `index.md` and
   commits them as `chore: record journal` unless `--no-commit` is passed.
 
 ### 3. Contracts
 
-- The wrapper may call Trellis `add_session.py` only when no modified
+- The wrapper may call the predecessor's `add_session.py` only when no modified
   workspace journal already has the requested title as its latest session
   heading.
 - If a previous run appended the session but failed during the pack-owned
   staging or commit step, a retry must patch and commit that pending latest
   session instead of appending another one.
-- Journal discovery must enumerate untracked files inside `.trellis/workspace/`
+- Journal discovery must enumerate untracked files inside `.predecessor/workspace/`
   (for example with `git status --untracked-files=all`) because local-only and
-  fresh workspaces can otherwise collapse to `?? .trellis/workspace/` and hide
+  fresh workspaces can otherwise collapse to `?? .predecessor/workspace/` and hide
   the actual `journal-*.md` file.
 - If more than one modified journal has the requested title as its latest
   session heading, fail closed with a clear error rather than guessing.
 - The patcher anchors on session headings, commit hashes, and section headings;
-  it must not depend on Trellis placeholder wording.
+  it must not depend on the predecessor's placeholder wording.
 
 ### 4. Validation & Error Matrix
 
 - Unknown or duplicate commit hash -> exit `2` before touching the journal.
-- Trellis append succeeds, later `git add` fails -> exit `1`, leave one
+- Predecessor append succeeds, later `git add` fails -> exit `1`, leave one
   pending session, and surface git output.
 - Retry after the pending-session failure -> exit `0`, reuse the pending
   session, and keep a single journal entry.
@@ -1165,11 +1168,11 @@ its template twin, or the `sd-finish-work` flow that calls it.
 
 ### 6. Tests Required
 
-- End-to-end happy path against a Trellis-bootstrapped scratch repo.
+- End-to-end happy path against a predecessor-bootstrapped scratch repo.
 - Fail-fast validation for unknown, duplicate, and option-like commit hashes.
 - Retry after synthetic `git add` failure proves no duplicate session is
   appended.
-- Retry coverage must include both tracked and untracked `.trellis/workspace/`
+- Retry coverage must include both tracked and untracked `.predecessor/workspace/`
   states.
 - Template twin byte identity.
 
@@ -1179,7 +1182,7 @@ its template twin, or the `sd-finish-work` flow that calls it.
 Wrong: rerun add_session.py whenever the previous wrapper command exits nonzero
 Correct: detect a modified latest same-title journal session and patch it
 
-Wrong: rely on default git status output for a fully untracked .trellis/workspace/
+Wrong: rely on default git status output for a fully untracked .predecessor/workspace/
 Correct: enumerate untracked workspace files so journal-*.md remains visible
 
 Wrong: search for "(see git log)" or "(Add test results)" before patching
@@ -1215,7 +1218,7 @@ base-to-head delta therefore contains only the successor journal commit.
 - Resolve every journal commit uniquely. Each commit must be at or before the
   immutable captured base, have exactly one parent, remain within the bounded
   commit/path limits, and change only regular files below active dated
-  Trellis task directories.
+  predecessor task directories.
 - Inspect regular-file modes with one bounded Git tree query per referenced
   commit; never spawn one subprocess per changed path.
 - Reject archives, workspace history, code, specs, configuration, deletion,
@@ -1328,7 +1331,7 @@ and completed journal already exist.
   trusting it.
 - The journal-head-to-final-head range contains at most 50 ordered,
   single-parent commits and 500 changed paths. Reject every change below
-  `.trellis/tasks/`, `.trellis/workspace/`, `.trellis/.runtime/`, or the
+  `.predecessor/tasks/`, `.predecessor/workspace/`, `.predecessor/.runtime/`, or the
   finish-work runtime namespace; code, tests, specs, and generated payloads
   remain allowed because later exact-head CI/review gates own their quality.
 - Evidence contains full commit OIDs, repository-relative paths, SHA-256
@@ -1396,7 +1399,7 @@ and completed journal already exist.
 ### 7. Wrong vs Correct
 
 ```text
-Wrong: write a durable receipt beside Trellis state and trust it on the next run
+Wrong: write a durable receipt beside the predecessor state and trust it on the next run
 Correct: hand off private temporary JSON and replay the canonical validator exactly
 
 Wrong: reject every old repository once first-parent history exceeds the search limit
@@ -1873,7 +1876,7 @@ that affects exact-head CI.
     "evidenceScope": "pull_request:243",
     "validationMode": "completion",
     "commitCount": 2,
-    "changedPaths": [".trellis/tasks/archive/2026-07/example/task.json"],
+    "changedPaths": [".predecessor/tasks/archive/2026-07/example/task.json"],
     "disallowedPaths": []
   }
   ```
@@ -1896,8 +1899,8 @@ that affects exact-head CI.
   unsafe prior classifier selects full CI; do not execute a changed
   checkout-owned helper to decide whether that change is safe.
 - Inspect the full prior-to-current delta with NUL-delimited, no-rename Git
-  output. Bookkeeping paths are limited to `.trellis/tasks/**` and
-  `.trellis/workspace/**`; only regular non-executable file additions,
+  output. Bookkeeping paths are limited to `.predecessor/tasks/**` and
+  `.predecessor/workspace/**`; only regular non-executable file additions,
   modifications, and deletions are eligible. Reject merges, non-ancestors,
   symlinks, gitlinks, executable modes, control characters, path escapes,
   missing objects, mixed paths, and oversized histories.
@@ -1951,7 +1954,7 @@ that affects exact-head CI.
 ### 7. Wrong vs Correct
 
 ```text
-Wrong: paths-ignore: [.trellis/**]
+Wrong: paths-ignore: [.predecessor/**]
 Correct: emit a new exact-head CI Result after bounded bookkeeping validation
 
 Wrong: run the current branch's classifier, then decide the workflow edit was safe

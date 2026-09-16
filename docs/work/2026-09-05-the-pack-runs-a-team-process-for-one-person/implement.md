@@ -1600,7 +1600,7 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   No test asserts either refusal message yet, so criterion 13 stays open for
   that test.) (2026-09-16: closed by the pull request that carries this
   line. `ReadyCase` in `tests/test_sd_ship_remote.py` stubs the adapter's one
-  outbound call and asserts `source:bin/sd_ship_remote.py::GitHub.ready` by
+  outbound call and asserts `source:bin/sd_ship_remote.py::ready` by
   message: a moved head and a moved base each refuse "pull-request head or
   default base moved after local review" with no call made, and a `compare`
   answer whose `behind_by` is not 0 refuses "the reviewed branch is behind
@@ -1627,12 +1627,14 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   suite under `env -u TEST_CHANGED_FILES`, so the full suite is the default;
   `.github/scripts/select-tests.py` picks the modules; `check:` is now at
   `Makefile:201` and `test:` at `:55`.)
-- **18, open.** A grep of the governed tree finds `Trellis` in 14 files,
-  `.trellis` in 11 and `task.py` in 2. (2026-09-14: still open, with two
-  exemptions from decision note 1942. The upstream Trellis pull-request
-  guard at `AGENTS.md:7-10,31` is exempt while sd:241, sd:242 and sd:244 are
-  open. The residue detectors are cut only after the gating fleet check
-  passes, and until then the `.trellis` residue line is exempt.)
+- **18, swept 2026-09-16 in #998**, down to the exemptions and two words in
+  files #995 held; see "Criterion 18 landed" at the end of this page, which
+  names the remainder and the edit that closes it. (Measured 2026-09-14: a grep of the
+  governed tree found `Trellis` in 14 files, `.trellis` in 11 and `task.py`
+  in 2, with two exemptions from decision note 1942. The upstream Trellis
+  pull-request guard at `AGENTS.md:7-10,31` is exempt while sd:241, sd:242
+  and sd:244 are open. The residue detectors are cut only after the gating
+  fleet check passes, and until then the `.trellis` residue line is exempt.)
 - **21, open (the code-path half).** `bin/sd_sweep.py` is tracked, and
   `bin/sd:2969` still defines `"sweep", help="report the planning items the
   45-day rule would park"`. No test asserts a frozen set for `git rm`,
@@ -1995,10 +1997,85 @@ Team-lead decision 2026-09-16, under the standing authorization and
 reversible by the owner: criterion 13's refusal test and criterion 5's
 table-reads clause land as one small pull request before 31(b), and criterion
 16's tick rides along. `ReadyCase` in `tests/test_sd_ship_remote.py` asserts
-the two refusals of `source:bin/sd_ship_remote.py::GitHub.ready` by message.
+the two refusals of `source:bin/sd_ship_remote.py::ready` by message.
 `SkillsThatRunAReview` in `tests/test_workflow_policy.py` enumerates the
 skills that invoke a reviewer and asserts the link, the point and the absence
 of a cap literal. Criterion 16 closed when #938 merged as `a3baf6d9`. Open
 after this and #995 (the entry above): 18, criterion 21's archive-test
 clauses, 31(a)'s `parked` and `archived` field cut, 31(b) and 31(c).
 Followups sd:789 and sd:790 are `done`; sd:788 is still `planning`.
+
+## Criterion 18 landed
+
+2026-09-16, by the criterion 18 lane. At base `2eafa78b` the criterion's own
+grep of the governed tree, `Trellis`, `.trellis` and `task.py` as literals,
+returned 123 lines in 19 files; the new test
+`tests/test_no_trellis_residue.py`, run red before the sweep, counted 113 of
+them outside the ten exempt lines. After the sweep the grep returns the ten
+exempt lines and the two held lines below, and nothing else.
+
+What the sweep did, by kind:
+
+- The five `docs/spec/` record pages keep their bodies and lose the name:
+  where a path, identifier or heading carried it, `predecessor` stands in its
+  place, and each page's stale notice says so. The one section removed
+  outright is the gitignore-block section of
+  `docs/spec/backend/manifest-and-filesystem.md`, which was the stated reason
+  `.gitignore` kept its marker pair; the markers went in the same change, and
+  `CONTRIBUTING.md` and `docs/spec/backend/index.md` say what happened.
+- The planning contract under `.claude/` names a work item under `docs/work/`
+  and the move to `in_progress` where it named the framework's task script.
+- The routing block of `AGENTS.md` names git and GitHub workflows instead;
+  the upstream pull-request guard above it is untouched, as the exemption
+  says.
+- The pull-request template's two checklist lines about copied files and
+  journals are one line about `docs/work/` pages. `.github/copilot-instructions.md`,
+  `dashboard/sessions.py`, `dashboard/work.py`, `bin/sd_setup_github.py`, the
+  template-links test, `WORKFLOW.md`, `.prism/rules.json` and
+  `.gito/config.toml` lose their mentions in prose. `tests/test_sd_agents.py`
+  no longer spells the name itself; the residue test greps `agents/` for it.
+
+The test holds the exemption set as `(path, line text)` rows, the whole
+line stripped: the four guard lines of `AGENTS.md`, the three `RESIDUE` lines
+of `bin/sd-status` and the three lines of `tests/test_sd_status.py` that
+exercise them. Keyed by text, an edit above a row does not move it, and an
+edit to the line itself, a second literal appended to an exempt one say, is
+not covered. A second test fails when a row matches no line or more than
+one, so the set cannot outlive its lines. The test is in the always-run set
+of the changed-files fast path, with the other tree walkers.
+
+A separate `HELD` set, disjoint from the exemptions by a third test, names
+the two lines the sweep could not reach: one word each in `bin/sd` (a
+docstring listing dot-directories) and `skills/sd-plan/SKILL.md` (a list of
+paths the plan skill may not write). Both files were held by #995
+(fix-10-sweep) when the sweep ran, so the lane left them, labelled "held by
+#995; reword in the follow-up"; team-lead hands the two rewords to the
+sd:10 31(b) lane. #995 merged as `486a223b` with both words in place: after
+this branch's rebase onto it the grep of those two files returns
+`bin/sd:1753` and `skills/sd-plan/SKILL.md:169`, and nothing else. The
+reword removes the word and its row. The set is
+bounded above by a frozen copy of the two rows, `HELD_BOUND`, so it may only
+shrink, and the criterion is closed in full when it is empty. Until then the
+tick above is the sweep's, with those two words as the named remainder.
+
+A third set, `ALLOWED_IF_PRESENT`, carries the two lines #995 adds to
+`tests/test_archive_untouched.py`: the `FROZEN_DELETION_SITES` row that
+quotes `sd-status`'s `.trellis` removal command and the comment above it
+that names the framework. Team-lead's ruling: a test that names the residue
+commands must name them, so both are permanent exemptions of the same kind as
+`bin/sd-status:1091-1093`. They are matched by file and content, not by line
+number, and may match zero lines, so the test is green whether #995 merges
+before this branch or after it; a fourth test fails a row that matches two
+lines. Proof, 2026-09-16, on a scratch worktree at this branch with
+`git merge --no-commit --no-ff origin/feat/sd-10-sweep-cut` (`5691b193`)
+applied: the only conflicts were this page and its `.citations.tsv`, both
+outside the governed tree; `governed_rows()` returned 14 rows, the two #995
+lines at `tests/test_archive_untouched.py:202` and `:212` among them; and
+`python -m unittest tests.test_no_trellis_residue` ended `Ran 4 tests`, `OK`.
+Without the merge the same command also ends `OK`. #995 then merged as
+`486a223b`; on this branch rebased onto it, the two lines stand at
+`tests/test_archive_untouched.py:202` and `:212` and the test is green.
+
+Outside the governed tree, `docs/review-learnings.md` keeps its rows marked
+**historical**, which quote review comments by the paths they named at the
+time, and its one curated lesson about journal sessions.

@@ -15,7 +15,7 @@ What counts as a link, and what resolving means:
   files (`.github/copilot-instructions.md` sits inside an HTML comment). A
   token is a path claim when its last segment carries a suffix some tracked
   file carries, or when its first segment is a tracked top-level entry, so
-  `pack/Trellis` and `CI/review` are words and `bin/sd-status` is a path. It
+  `pack/framework` and `CI/review` are words and `bin/sd-status` is a path. It
   resolves against the repository root, the way the prose writes it.
 * An anchor `#name` resolves to a heading, or to an HTML `id`/`name`, in the
   document it points into: the template itself for a bare `#name`, the target
@@ -278,7 +278,7 @@ class WalkerTests(unittest.TestCase):
             "Protocol-relative [host](//example.com/org/repo), the [root](/) "
             "and [up](../).\n"
             "A prose anchor docs/guide.md#setext-title resolves.\n"
-            "Words like pack/Trellis, CI/review and e.g. are not paths.\n"
+            "Words like pack/framework, CI/review and e.g. are not paths.\n"
             "[Claude Code](https://claude.com/claude-code) https://claude.ai/code/session_<id>\n"
             "Pattern docs/work/<YYYY-MM-DD>-<slug>/prd.md is a pattern.\n"
         )

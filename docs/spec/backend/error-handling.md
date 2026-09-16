@@ -4,9 +4,9 @@
 > **Partly stale as of 2026-09-01.**
 > The Overview, Error Types, Error Handling Patterns and Common Mistakes
 > sections specify `install.py` -- its `SystemExit` sites, its `0`/`2`/`3` exit
-> contract, `require_trellis_repo()`, `install_file()`, `run_diff_check()` -- and
+> contract, `require_predecessor_repo()`, `install_file()`, `run_diff_check()` -- and
 > that file was deleted on 2026-08-30 by step 3e (`43170716`, #610). The
-> `.trellis/config.yaml` mention already carries an inline absent marker.
+> `.predecessor/config.yaml` mention already carries an inline absent marker.
 >
 > Three lessons below outlive their subject and are worth keeping: "Don't:
 > treat multiplicity as ambiguity" (its `claude plugin list --json` example is
@@ -15,8 +15,11 @@
 > command' in a diagnostic that gets forwarded". That last one's example names
 > `sd-ai-command-pack-review.py`, which is gone; the rule is not about that file.
 >
-> The text below is unedited. It is the record of what that machinery
-> specified, not guidance for the repository as it stands. The triage that
+> The text below is the record of what that machinery specified, not guidance
+> for the repository as it stands. It is edited in one way only: the name of
+> the framework the pack grew out of is written out of the whole `docs/spec/`
+> tree by sd:10 criterion 18, and `predecessor` stands where it stood, in
+> paths and identifiers as in prose. The triage that
 > produced this notice is recorded under step 7 in
 > `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
 
@@ -32,7 +35,7 @@ expressed through process exit codes and concise terminal output.
 ## Error Types
 
 - Use `SystemExit` for fatal CLI validation failures, as in
-  `require_trellis_repo()` and missing template checks in `install_file()`.
+  `require_predecessor_repo()` and missing template checks in `install_file()`.
 - Use integer return codes from `main()` for expected command outcomes:
   normal install/remove uses `0` for success and `2` for file conflicts;
   inspection uses `0` for a successful current/informational result, `1` for
@@ -46,7 +49,7 @@ expressed through process exit codes and concise terminal output.
 
 ## Error Handling Patterns
 
-- Validate prerequisites before writing files. `require_trellis_repo()` runs
+- Validate prerequisites before writing files. `require_predecessor_repo()` runs
   before selecting and installing templates.
 - Represent non-fatal install outcomes with status strings such as
   `unchanged`, `created`, `updated`, `conflict`, and `overwritten`. `updated`
@@ -209,7 +212,7 @@ failing path or conflict and the user action, such as re-running with
 ## Common Mistakes
 
 - Do not let Python tracebacks leak for expected user errors like a missing
-  `.trellis/config.yaml` [absent: target-repo Trellis path], conflicting target file, or target path occupied by a
+  `.predecessor/config.yaml` [absent: target-repo predecessor path], conflicting target file, or target path occupied by a
   directory or other non-file.
 - Do not collapse conflicts into success. Tests expect conflict handling to
   leave the target file untouched.

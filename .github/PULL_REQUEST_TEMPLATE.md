@@ -22,8 +22,7 @@ path demands, naming both. -->
 - [ ] Failure paths keep state consistent (no mutate-before-success)
 - [ ] Helper errors are caught at entrypoints and reported, not raw tracebacks
 - [ ] Portability checked (macOS/BSD vs GNU tools, CRLF, Windows paths)
-- [ ] Copied pack/Trellis files changed only via the pack installer
-- [ ] Trellis journals and task notes carry real content, no placeholders
+- [ ] Work item pages under `docs/work/` carry real content, no placeholders
 - [ ] Review fixes are batched: address all comments, re-run the gate, push once
 
 <!-- Closing block. Keep this order: attribution paragraph first, trailers

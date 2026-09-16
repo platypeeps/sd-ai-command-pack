@@ -4,16 +4,19 @@
 > **Partly stale as of 2026-09-01.**
 > Everything above "Gotcha: Asymmetric Mechanisms Producing Same Output" is
 > general guidance and stands. From there to the end the page teaches the
-> upstream Trellis CLI's own layout -- `src/templates/trellis/scripts/`,
-> `src/templates/trellis/index.ts`, `getAllScripts()`, `commands/update.ts`,
-> `trellis update`, and an rsync between `.trellis/scripts/` and
-> `packages/cli/src/templates/trellis/scripts/`. None of those paths has ever
-> existed in this repository, and the Trellis integration that made them worth
+> upstream predecessor CLI's own layout -- `src/templates/predecessor/scripts/`,
+> `src/templates/predecessor/index.ts`, `getAllScripts()`, `commands/update.ts`,
+> `predecessor update`, and an rsync between `.predecessor/scripts/` and
+> `packages/cli/src/templates/predecessor/scripts/`. None of those paths has ever
+> existed in this repository, and the predecessor integration that made them worth
 > reading here was removed at steps 2 and 3e. `cli_adapter.py` is not a file
 > here either.
 >
-> The text below is unedited. It is the record of what that machinery
-> specified, not guidance for the repository as it stands. The triage that
+> The text below is the record of what that machinery specified, not guidance
+> for the repository as it stands. It is edited in one way only: the name of
+> the framework the pack grew out of is written out of the whole `docs/spec/`
+> tree by sd:10 criterion 18, and `predecessor` stands where it stood, in
+> paths and identifiers as in prose. The triage that
 > produced this notice is recorded under step 7 in
 > `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
 
@@ -203,38 +206,38 @@ def cli_name(self) -> str:
 - **If asymmetry is unavoidable**: Add a regression test that compares outputs from both mechanisms
 - When migrating directory structures, search for ALL code paths that reference the old structure
 
-**Real example**: `trellis update` had a manual `files.set()` list for 11 scripts that `getAllScripts()` already tracked. Fix: replaced the manual list with a `for..of getAllScripts()` loop. See `update.ts` refactor in v0.4.0-beta.3.
+**Real example**: `predecessor update` had a manual `files.set()` list for 11 scripts that `getAllScripts()` already tracked. Fix: replaced the manual list with a `for..of getAllScripts()` loop. See `update.ts` refactor in v0.4.0-beta.3.
 
 ---
 
-## Template File Registration (Trellis-specific)
+## Template File Registration (predecessor-specific)
 
-When adding new files to `src/templates/trellis/scripts/`:
+When adding new files to `src/templates/predecessor/scripts/`:
 
-**Single registration point**: `src/templates/trellis/index.ts`
+**Single registration point**: `src/templates/predecessor/index.ts`
 
 1. Add `export const xxxScript = readTemplate("scripts/path/file.py");`
 2. Add to `getAllScripts()` Map
 
 That's it. `commands/update.ts` uses `getAllScripts()` directly — no manual sync needed.
 
-**Why this matters**: Without registration in `getAllScripts()`, `trellis update` won't sync the file to user projects. Bug fixes and features won't propagate.
+**Why this matters**: Without registration in `getAllScripts()`, `predecessor update` won't sync the file to user projects. Bug fixes and features won't propagate.
 
-**History**: Before v0.4.0-beta.3, `update.ts` had its own hand-maintained file list that frequently fell out of sync with `getAllScripts()`. This caused 11 Python files to be silently skipped during `trellis update`. The fix was to eliminate the duplicate list and use `getAllScripts()` as the single source of truth.
+**History**: Before v0.4.0-beta.3, `update.ts` had its own hand-maintained file list that frequently fell out of sync with `getAllScripts()`. This caused 11 Python files to be silently skipped during `predecessor update`. The fix was to eliminate the duplicate list and use `getAllScripts()` as the single source of truth.
 
 ### Quick Checklist for New Scripts
 
 ```bash
 # After adding a new .py file, verify it's in getAllScripts():
-grep -l "newFileName" src/templates/trellis/index.ts  # Should match
+grep -l "newFileName" src/templates/predecessor/index.ts  # Should match
 ```
 
 ### Template Sync Convention
 
-`.trellis/scripts/` (dogfooded) and `packages/cli/src/templates/trellis/scripts/` (template) must stay identical. After editing `.trellis/scripts/`, always sync:
+`.predecessor/scripts/` (dogfooded) and `packages/cli/src/templates/predecessor/scripts/` (template) must stay identical. After editing `.predecessor/scripts/`, always sync:
 
 ```bash
-rsync -av --delete --exclude='__pycache__' .trellis/scripts/ packages/cli/src/templates/trellis/scripts/
+rsync -av --delete --exclude='__pycache__' .predecessor/scripts/ packages/cli/src/templates/predecessor/scripts/
 ```
 
-**Gotcha**: Running rsync with wrong source/destination paths can create nested garbage directories (e.g., `.trellis/scripts/packages/cli/...`). Always double-check paths before running.
+**Gotcha**: Running rsync with wrong source/destination paths can create nested garbage directories (e.g., `.predecessor/scripts/packages/cli/...`). Always double-check paths before running.

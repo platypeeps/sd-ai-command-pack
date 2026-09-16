@@ -115,10 +115,10 @@ repository on the machine.
 <!-- SD-AI-COMMAND-PACK:ROUTING:START -->
 ## Canonical Entry Points
 
-The SD AI Command Pack wraps several Trellis workflows. Where a wrapper
+The SD AI Command Pack wraps several git and GitHub workflows. Where a wrapper
 exists, it is the canonical entry point: it carries the pack's own gates,
-review loop, and completion bookkeeping, and the underlying Trellis command
-does not. Reaching past a wrapper to the command it wraps skips those.
+review loop, and completion bookkeeping, and the underlying command does not.
+Reaching past a wrapper to the command it wraps skips those.
 
 Route by intent:
 
@@ -127,8 +127,8 @@ Route by intent:
   separately. It sequences them and owns the stop-points between them.
 - **Reviewing changes locally before publishing** — use the pack's review
   workflow, which runs the deterministic checks the remote review assumes.
-- **Anything with no pack wrapper** — use the Trellis command directly. The
-  pack adds surfaces; it does not replace Trellis.
+- **Anything with no pack wrapper** — use the underlying command directly.
+  The pack adds surfaces; it does not replace the tools it wraps.
 
 To see which wrappers this repository actually has, list the installed skills
 rather than relying on a list written down somewhere: they are the pack's

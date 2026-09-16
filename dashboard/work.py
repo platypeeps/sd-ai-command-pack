@@ -1,9 +1,10 @@
 """Work items across the fleet, read from `docs/work/` at request time.
 
-The system dashboard's Work tab read `.trellis/workspace/journal-*.md`, and
-step 2 replaced that layout with `docs/work/`. Exactly one checkout fleet-wide
-still has a `.trellis/workspace`, so this is a rewrite against the current
-layout rather than the port the parity checklist implies.
+The system dashboard's Work tab read the predecessor framework's
+`workspace/journal-*.md` files, and step 2 replaced that layout with
+`docs/work/`. Exactly one checkout fleet-wide still has that workspace, so this
+is a rewrite against the current layout rather than the port the parity
+checklist implies.
 
 An item is a directory under `docs/work/` -- that alone, not a directory that
 also holds a `prd.md`. Its state is the `status:` line in that file's
