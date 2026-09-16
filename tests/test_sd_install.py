@@ -2766,6 +2766,41 @@ class LinkTests(InstallerHarness):
                     "the expired trial was ended before the refusal",
                 )
 
+    def test_uninstall_removes_the_links_and_nothing_else(self):
+        """Rule 1: `--uninstall` removes the links the receipt names, if still ours.
+
+        A link the receipt does not name is never a candidate; a recorded link
+        that now points elsewhere, or a regular file at a recorded path, is
+        left and reported, the way a hand-edited render is.
+        """
+        checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
+        ctx = self.context_for(checkout)
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        bin_dir = self.home / ".local" / "bin"
+        scratch = self.home / "scratch"
+        scratch.write_text("#!/bin/sh\n", encoding="utf-8")
+        unrecorded = bin_dir / "sd-other"
+        unrecorded.symlink_to(scratch)
+        retargeted = bin_dir / "sd"
+        retargeted.unlink()
+        retargeted.symlink_to(scratch)
+        regular = bin_dir / "sd-handoff"
+        regular.unlink()
+        regular.write_text("#!/bin/sh\n", encoding="utf-8")
+
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_uninstall(ctx, out), 0)
+
+        self.assertFalse((bin_dir / "sd-review").is_symlink(), "our link was left")
+        self.assertTrue(retargeted.is_symlink() and retargeted.resolve() == scratch)
+        self.assertTrue(regular.is_file() and not regular.is_symlink())
+        self.assertTrue(unrecorded.is_symlink(), "an unrecorded link was removed")
+        self.assertTrue(bin_dir.is_dir(), "the link directory was removed")
+        self.assertIn(f"left in place (not our link): {retargeted}", out.getvalue())
+        self.assertIn(f"left in place (not our link): {regular}", out.getvalue())
+        # Three renders (one skill, three platforms) and one link.
+        self.assertIn("removed 4 file(s)", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
