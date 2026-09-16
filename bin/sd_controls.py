@@ -13,7 +13,6 @@ from typing import Any
 import sd_handoff_rows
 from sd_work import WorkRefusal
 
-
 #: What the bulk apply records as the acting program, beside the login name
 #: `getpass.getuser()` gives as the principal and the name the caller states.
 BULK_PROGRAM = "sd reports acknowledge"
