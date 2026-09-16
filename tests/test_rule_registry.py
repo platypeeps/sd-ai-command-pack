@@ -2044,5 +2044,37 @@ fails this control, which is why it exists.
                     self.assertIn("outside the copy", str(caught.exception))
 
 
+class TheSharedCopy(unittest.TestCase):
+    """Leg d copies the tracked tree once per run, not once per row."""
+
+    def test_the_leg_copies_the_tree_once_for_every_row_and_control(self):
+        """The count is measured on a real run, with the copy left real.
+
+        `copy_tracked` is wrapped, never replaced: the leg below runs every
+        live row and both sentinel controls against the tree the wrapper still
+        builds, and has to pass, or a leg that copied nothing would count as
+        one that copied once. Before the copy was shared this read one copy per
+        `exercise` call, three rows and two controls, and the cost was linear
+        in rows with no budget stated (sd:431, owner decision Dec-6).
+        """
+
+        module = sys.modules[__name__]
+        suite = unittest.TestSuite(LegD(name) for name in (
+            "test_every_live_checker_reddens_when_its_rule_is_violated",
+            "test_a_mutation_that_violates_nothing_leaves_the_checker_green",
+            "test_a_child_that_never_ran_the_test_does_not_read_as_enforcement"))
+        result = unittest.TestResult()
+        with mock.patch.object(module, "copy_tracked", wraps=copy_tracked) as copies:
+            suite.run(result)
+        self.assertTrue(result.wasSuccessful(), _lines(
+            trace for _, trace in result.failures + result.errors))
+        self.assertEqual(copies.call_count, 1, f"""
+Leg d copied the tracked tree {copies.call_count} times in one run.
+
+One copy per run is the budget: every row runs clean, mutates, reddens and
+restores in the same tree, and the `diff -rq` proof after each restore is what
+lets the next row start from the bytes this checkout has.""")
+
+
 if __name__ == "__main__":  # pragma: no cover - the suite runs this by module
     unittest.main()
