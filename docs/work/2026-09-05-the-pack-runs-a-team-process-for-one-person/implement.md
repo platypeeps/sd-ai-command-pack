@@ -226,7 +226,7 @@ is the shared `_STRING_LIST_KEYS` tuple, so that one is an edit and not a
 line deletion; an earlier draft cited `:287` and `:1092`, which are a
 `raise PolicyError` and `"scope": args.scope` —
 `bin/sd_setup_github.py:230,267`, `.github/sd-review.schema.json` and
-`.github/sd-review.json:28`; and `Standing rule` in `bin/sd`,
+`.github/sd-review.json`; and `Standing rule` in `bin/sd`,
 `skills/sd-plan/templates/decision.md`, `skills/sd-suggest/SKILL.md` and
 `tests/test_sd_plugin.py`.
 
@@ -943,7 +943,7 @@ body, 8 of glue, 40 of seam, 24 of body variance, 12 of post-report at 5.7%.
 Down from R11-D42's 417, and the difference is two corrections.
 
 `skills/paths.json` exists and has readers only — `bin/sd_install.py:253` and
-`bin/sd_skill.py:117`. **Nothing writes it programmatically.**
+`bin/sd_skill.py`. **Nothing writes it programmatically.**
 
 **R11-D42 priced promotion and demotion as two functions on the
 `install_hook` / `remove_hook` precedent, and R11-D44 does not.** That pair at
@@ -1043,9 +1043,9 @@ this carries 244 of body, a variance reserve it had no line for, and a
 post-report rate a fifth of the size.
 
 **The seam stays 0, and PR 8c is why.** Every boundary here now has a built
-crossing on the other side: `gh api --method POST` at `bin/sd_skill.py:278`,
+crossing on the other side: `gh api --method POST` at `bin/sd_skill.py`,
 the `gh_json` transport at `bin/sd-pr-state:117`, the suffixless import at
-`bin/sd_skill.py:160`, and `sd_db.sync_shadow`.
+`bin/sd_skill.py`, and `sd_db.sync_shadow`.
 
 | span | lines |
 |---|---|

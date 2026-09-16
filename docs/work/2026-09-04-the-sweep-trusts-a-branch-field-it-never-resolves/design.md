@@ -101,7 +101,7 @@ where the answer is missing rather than empty, and both of them the two ways
 `sd_lib._git` (`source:bin/sd_lib.py::_git`) returns `None`.
 
 **`_upstream` becomes `upstream`, and the change is a rename.** It is private
-today and `bin/sd_skill.py:217` already reaches across for it, carrying a
+today and `bin/sd_skill.py` already reaches across for it, carrying a
 `noqa: SLF001` and the comment "the one reader of this fact". This design would
 make a second reader, which falsifies that comment and adds a second `noqa`
 rather than removing the first. Duplicating the remote-selection rule in

@@ -1758,7 +1758,7 @@ from a number the operator types.
 - **2026-09-05** — Tracking surfaces consolidated into a requirement 11 that no
   longer exists; see "What leaves this item". Verifying it found two live
   defects that stand as evidence: `skill-proposal-accept`, which
-  `sd-propose-skills/SKILL.md:126` relies on, is not in the vault's scheduled
+  `sd-propose-skills/SKILL.md` relies on, is not in the vault's scheduled
   tasks, which is why `accepted` holds zero notes; and nine of ten pieces
   disagree with the vault note their `obsidian_source` line names, two of them
   active against notes marked `declined`.
@@ -5120,9 +5120,9 @@ from a number the operator types.
 
   **The seam is 0, as R11-D42 had it, and PR 8c is why it stays 0.** Every
   boundary this criterion touches now has a built crossing on the other side:
-  `gh api --method POST` at `bin/sd_skill.py:278` for filing an issue, the
+  `gh api --method POST` at `bin/sd_skill.py` for filing an issue, the
   `gh_json` transport it goes through at `bin/sd-pr-state:117`, the suffixless
-  import at `bin/sd_skill.py:160`, and `sd_db.sync_shadow` — `sync` at
+  import at `bin/sd_skill.py`, and `sd_db.sync_shadow` — `sync` at
   `shadow_sync.py:391` in the installed library — which is complete and whose
   own docstring settles the split: the module is the collector, the verb lives
   in the pack.
@@ -5138,7 +5138,7 @@ from a number the operator types.
   | `bin/sd_suggest.py` header | 45 | `bin/sd_skill.py:1-46`; `bin/sd-note:1-42` states less |
   | its deferred `sd_db` frame | 18 | `bin/sd_handoff_rows.py` `library` 13 plus `connect` 5 |
   | the row, in every mode | 30 | `bin/sd-note` `cmd_write` at 26, plus 4 to read `bin/sd_lib.py:33` `MODES` |
-  | `publish` | 35 | 4 to refuse without `--to`, 16 for the dedup read `skills/sd-suggest/SKILL.md:36` already requires, 12 for the POST at `bin/sd_skill.py:277-284`, 3 to print |
+  | `publish` | 35 | 4 to refuse without `--to`, 16 for the dedup read `skills/sd-suggest/SKILL.md:36` already requires, 12 for the POST at `bin/sd_skill.py`, 3 to print |
   | `bin/sd_shadow.py` header | 32 | smaller than either analogue: `shadow_sync.py`'s docstring states the split, so this cites it |
   | its deferred `sd_db` frame | 18 | not shared; `sd_restore` and `sd_handoff_rows` each carry their own |
   | the wrapper | 34 | `bin/sd_restore.py` `resume` 36 and `reimport` 47 |

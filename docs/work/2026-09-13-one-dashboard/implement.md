@@ -175,7 +175,7 @@ before starting step 2.
 
       | Function | Step | Why |
       |---|---|---|
-      | `drawPlugins` (in `dashboard/app.js`) | **3** | It polls `/api/plugins`, which this step's `server.py` edit removes. Delete it *with all three of its call sites* — `drawPlugins()` at `dashboard/app.js:780`, `setInterval(drawPlugins, 10000)` at `:784`, and its entry in the redraw list at `:828` — or the page polls a deleted endpoint every ten seconds. |
+      | `drawPlugins` (in `dashboard/app.js`) | **3** | It polls `/api/plugins`, which this step's `server.py` edit removes. Delete it *with all three of its call sites* — the `drawPlugins()` call, `setInterval(drawPlugins, 10000)`, and its entry in the redraw list — or the page polls a deleted endpoint every ten seconds. `drawPlugins` [absent: step 3 shipped and removed it from dashboard/app.js with all three call sites; nothing in the file names the symbol today]. |
       | `panelId` (in `dashboard/app.js`) | **3** | Plugin-only, and its single caller is `drawPlugins` (in `dashboard/app.js`). |
       | `enhance` (in `dashboard/app.js`) | **6**, with `app.js` | **Not plugin-only.** `for (const [, panel] of STATIC) enhance(...)` at `dashboard/app.js:426` runs it over all seven static panels at startup. `drawPlugins` calling it at `:745` is the *second* caller, not the only one. Deleting it in step 3 is an uncaught `ReferenceError` at load, and it silently takes the skills-table filter with it. Step 3 removes the call at `:745` and nothing else. |
       | `addFilter` (`:463`), `addSort` (`:480`) | **6**, with `app.js` | Reached only through `enhance`. Their dispositions are in `design.md`: both dropped, the filter because the system page has one, the sort because no shipped table asks for it. |
