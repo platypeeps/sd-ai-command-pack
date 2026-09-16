@@ -183,14 +183,18 @@ since R11-D48. The pack half is on the order of forty lines in
       `configured`, and the `TRACKERS` export, with tests (a) to (d) and the
       mutations its body records; the library suite ran 996 tests OK.
 
-- [ ] **5. The pin.** `.github/workflows/tests.yml:90` moves from `758dfb48`
+- [x] **5. The pin.** `.github/workflows/tests.yml:90` moves from `758dfb48`
       to the squash SHA of step 4's merge. Its own pull request, because the
       file is sensitive; nothing else in it.
       Verify: CI on that pull request is green with the new pin, and
       `python -c "import sd_db; print(sd_db.TRACKERS)"` in the CI venv prints
       `('github', 'jira')`.
+      *Done by pack #949 (`f9123117`), which moved the pin in
+      `.github/workflows/tests.yml` to `09260ad4`, past step 4's merge; that
+      commit exports `sd_db.TRACKERS == ('github', 'jira')`, and so does
+      every pin after it.*
 
-- [ ] **6. The verb iterates.** `shadow_sync` (`source:bin/sd_shadow.py::shadow_sync`) reads
+- [x] **6. The verb iterates.** `shadow_sync` (`source:bin/sd_shadow.py::shadow_sync`) reads
       `names = getattr(sd_db, "TRACKERS", ("github",))`; when `--since` or
       `--until` is given, `names` is `("github",)` and every other tracker
       prints `shadow sync[<name>]: skipped (recovery window is GitHub's)`.
@@ -200,7 +204,7 @@ since R11-D48. The pack half is on the order of forty lines in
       The lines `_library_lines` (`source:bin/sd_shadow.py::_library_lines`) forwards already
       begin `shadow sync: ` — `Synced.report` at `sd_db/shadow_sync.py:547`
       writes that head on each, and the test double at
-      `tests/test_sd_suggest.py:606-607` reproduces it — so the verb strips
+      `tests/test_sd_suggest.py:742-743` reproduces it — so the verb strips
       that head before adding its own, and never prints
       `shadow sync[jira]: shadow sync: ...`. A forwarded line that does not
       carry the head is prefixed as it is.
@@ -235,6 +239,11 @@ since R11-D48. The pack half is on the order of forty lines in
       `tracker="github"`, and the skipped line is printed for `jira`.
       Mutation: make the unconfigured branch fall through to `cursor held`
       and (b) reddens on the exit code.
+      *Done 2026-09-15 on pack branch
+      `fix/sd-361-step-6-the-verb-iterates-trackers`: `TheShadowSyncOverTrackers`
+      in `tests/test_sd_suggest.py` carries (b) to (d) against a fake `sd_db`,
+      (a) is `TheShadowSync` on the pinned library, and the four mutations the
+      pull request body records each reddened.*
 
 - [ ] **7. `sd-status` shows the row, in its own section.** The issues
       section cannot carry it: `issues_section` (`source:bin/sd-status::issues_section`)
