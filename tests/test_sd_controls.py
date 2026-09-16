@@ -275,6 +275,49 @@ class Controls(unittest.TestCase):
         )
         self.assertEqual((self.status(first), self.status(second)), ("done", "done"))
 
+    def test_the_single_item_flags_are_refused_with_all_clean(self):
+        # `--if-revision` and `--resolve-ingest-followups` belong to the
+        # single-item verb. The bulk verb has no revision to check and never
+        # touches a followup, so with `--all-clean` each is refused before the
+        # store is opened rather than read and ignored (review of #1002).
+        self.clean_reports()
+        before = self.dump()
+        for form in (("--if-revision", "0" * 64), ("--resolve-ingest-followups",)):
+            with self.subTest(form=form):
+                refused = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-10", *form)
+                self.assertEqual(refused.returncode, 1, refused.stdout)
+                self.assertIn(form[0], refused.stderr)
+                self.assertNotIn("Traceback", refused.stderr)
+                self.assertEqual(self.dump(), before)
+
+    def test_the_human_dry_run_names_the_declined_rows_and_a_selection_with_no_plan(self):
+        # One clean report and one with a followup a person wrote: the human
+        # form lists the declined row with the library's reason. A cutoff
+        # before both was filed selects nothing, so the library issues no
+        # plan and the last line says no apply can succeed instead of
+        # printing a command with `None` in it.
+        import sd_db
+        from sd_db.writes import add_note
+
+        first, second = self.clean_reports()
+        with contextlib.closing(sd_db.connect(home=self.home)) as connection:
+            add_note(connection, second, "followup", "look at this", session="sven")
+        human = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-10")
+        self.assertEqual(human.returncode, 0, human.stderr)
+        lines = human.stdout.rstrip("\n").splitlines()
+        self.assertEqual(lines[0], "clean reports before 2026-09-10T00:00:00+00:00: 1 selected, 1 declined")
+        self.assertIn(f"  selected #{first}  {self.FILED}  alpha: run report", lines)
+        self.assertIn(f"  declined #{second}: it has an unresolved followup", lines)
+        self.assertTrue(lines[-1].startswith(
+            f"sd reports acknowledge --all-clean --before {self.CUTOFF} --apply --if-plan "), lines[-1])
+
+        empty = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-01")
+        self.assertEqual(empty.returncode, 0, empty.stderr)
+        lines = empty.stdout.rstrip("\n").splitlines()
+        self.assertEqual(lines[0], "clean reports before 2026-09-01T00:00:00+00:00: 0 selected, 0 declined")
+        self.assertEqual(lines[-1], "no apply: a bulk acknowledge moves between 1 and 1000 reports")
+        self.assertNotIn("None", empty.stdout)
+
     def test_the_bulk_dry_run_opens_the_store_read_only_and_the_apply_writes(self):
         # `run` makes one connection call. The dry run must open the store
         # the way `list` does, `write=False`, so the read runs under SQLite's
