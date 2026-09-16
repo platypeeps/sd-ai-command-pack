@@ -23,7 +23,9 @@ directory exists.
 Usage:  sd-research-kit review        # from inside the research repo
 
 `review` takes no argument: it checks the repository you are standing in
-(R10-D6, the same move `render` made). Exit 1 if any check fails.
+(R10-D6, the same move `render` made). Exit 1 if any check fails; exit 2 when
+there is no `research.conf.py`, in which case nothing here is checked, the work
+items included.
 """
 import datetime
 import difflib
@@ -541,8 +543,9 @@ def check(repo):
     name = os.path.basename(repo)
     docs = load_docs(repo)
     if docs is None:
-        # The refusal goes where `init_main`'s do; the checklist and the
-        # pass/fail line are for a research repo, and `main()` prints neither.
+        # The refusal goes to stderr, where `init_main`'s refusals go. The
+        # checklist and the pass/fail line are for a research repo, and
+        # `main()` prints neither.
         print(f"{name}: no research.conf.py — not a research repo", file=sys.stderr)
         return None
     bad = 0
