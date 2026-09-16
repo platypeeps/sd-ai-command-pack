@@ -158,6 +158,217 @@ class Controls(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["item"]["status"], "done")
         self.assertEqual([row["id"] for row in self.reports()], [state["item"]["id"]])
 
+    #: The cutoff every bulk fixture below is judged at, and the day before it,
+    #: when the two clean reports were filed.
+    CUTOFF = "2026-09-10T00:00:00+00:00"
+    FILED = "2026-09-09T00:00:00+00:00"
+
+    def clean_reports(self):
+        """Two clean planning reports filed before the cutoff, by id.
+
+        Shaped the way `ingest` shapes a clean report's `fields`, filed at a
+        chosen instant through the library rather than the CLI, because
+        `reports ingest` stamps `created_at` with the clock and a clean tick
+        files no report at all (system sd:739).
+        """
+        import sd_db
+        from sd_db.writes import create_item
+
+        with contextlib.closing(sd_db.connect(home=self.home)) as connection:
+            return [create_item(
+                connection, kind="report", title=f"{job}: run report", status="planning",
+                source="cron-report", external_id=f"{job}:run", created_at=self.FILED,
+                fields={"attention": False, "report": {"job": job, "ended": self.FILED}},
+            ) for job in ("alpha", "beta")]
+
+    def dump(self):
+        import sd_db
+
+        with contextlib.closing(sd_db.connect(home=self.home, write=False)) as connection:
+            return tuple(connection.iterdump())
+
+    def status(self, report):
+        shown = self.cli("store", "item", str(report), "--json")
+        self.assertEqual(shown.returncode, 0, shown.stderr)
+        return json.loads(shown.stdout)["item"]["status"]
+
+    def test_the_bulk_acknowledge_previews_refuses_and_applies_by_name(self):
+        # Two clean reports before the cutoff. The dry run takes a bare date,
+        # stamps it to 00:00 UTC, selects both, issues a plan and writes
+        # nothing. A CLI that passed the bare date on would fail at
+        # `writes.stamp` ("carries no timezone") and exit nonzero here.
+        first, second = self.clean_reports()
+        before = self.dump()
+        dry = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-10", "--json")
+        self.assertEqual(dry.returncode, 0, dry.stderr)
+        preview = json.loads(dry.stdout)
+        self.assertEqual(preview["before"], self.CUTOFF)
+        self.assertEqual([row["id"] for row in preview["selected"]], [first, second])
+        self.assertEqual(preview["count"], 2)
+        self.assertEqual(self.dump(), before)
+        plan = preview["plan"]
+        self.assertRegex(plan, r"^[0-9a-f]{64}$")
+
+        # The stamped form is the same cutoff, so it issues the same plan.
+        stamped = self.cli("reports", "acknowledge", "--all-clean", "--before", self.CUTOFF, "--json")
+        self.assertEqual(stamped.returncode, 0, stamped.stderr)
+        self.assertEqual(json.loads(stamped.stdout)["plan"], plan)
+
+        # Without --json the last line is the apply command, with the stamped
+        # cutoff and the plan filled in and `--who NAME` left for the caller.
+        human = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-10")
+        self.assertEqual(human.returncode, 0, human.stderr)
+        self.assertTrue(human.stdout.rstrip("\n").splitlines()[-1].startswith(
+            f"sd reports acknowledge --all-clean --before {self.CUTOFF} --apply --if-plan "), human.stdout)
+        self.assertIn(plan, human.stdout.rstrip("\n").splitlines()[-1])
+
+        # An apply needs both the plan and a stated name (design D4). Each
+        # half alone is refused before the store is opened.
+        for form in (("--apply", "--if-plan", plan), ("--apply", "--who", "tester")):
+            with self.subTest(form=form):
+                refused = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-10", *form)
+                self.assertEqual(refused.returncode, 1, refused.stdout)
+                self.assertNotIn("Traceback", refused.stderr)
+                self.assertEqual(self.dump(), before)
+
+        # The bulk flags with an item id, and the apply-only flags without
+        # --apply: each is refused before the store is opened. A refusal that
+        # fired only under --apply would let `<id> --who tester` through to
+        # the single-item branch, which ignores the flag and acknowledges the
+        # report under the login name -- the defect sd:755 removes.
+        item = str(first)
+        for form in ((item, "--who", "tester"), (item, "--before", "2026-09-10"), (item, "--apply"),
+                     (item, "--if-plan", plan), (item, "--apply", "--if-plan", plan, "--who", "tester"),
+                     ("--all-clean", "--before", "2026-09-10", "--who", "tester"),
+                     ("--all-clean", "--before", "2026-09-10", "--if-plan", plan)):
+            with self.subTest(form=form):
+                refused = self.cli("reports", "acknowledge", *form)
+                self.assertEqual(refused.returncode, 1, refused.stdout)
+                self.assertNotIn("Traceback", refused.stderr)
+                self.assertEqual(self.dump(), before)
+                self.assertEqual(self.status(first), "planning")
+
+        # A cutoff that is not a date, or not the exact stamp, is refused with
+        # the library helper's sentence: `Z` is the same instant spelled so
+        # that it sorts after every `+00:00` row.
+        zulu = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-10T00:00:00Z")
+        self.assertEqual(zulu.returncode, 1, zulu.stdout)
+        self.assertIn("give the cutoff as a date, YYYY-MM-DD, meaning 00:00 UTC", zulu.stderr)
+        self.assertNotIn("Traceback", zulu.stderr)
+        self.assertEqual(self.dump(), before)
+
+        # The apply moves both, and the record names the stated name, the
+        # login the channel authenticated, the program and the session.
+        applied = subprocess.run(
+            [sys.executable, str(ROOT / "bin/sd"), "reports", "acknowledge", "--all-clean", "--before",
+             "2026-09-10", "--apply", "--if-plan", plan, "--who", "tester", "--json"],
+            env={**os.environ, "HOME": str(self.home), "SD_SESSION": "test-session"},
+            capture_output=True, text=True, check=False, timeout=10,
+        )
+        self.assertEqual(applied.returncode, 0, applied.stderr)
+        record = json.loads(applied.stdout)
+        self.assertEqual(record["acknowledged"], [first, second])
+        self.assertEqual(
+            {key: record["actor"][key] for key in ("who", "principal", "program", "session")},
+            {"who": "tester", "principal": getpass.getuser(), "program": "sd reports acknowledge",
+             "session": "test-session"},
+        )
+        self.assertEqual((self.status(first), self.status(second)), ("done", "done"))
+
+    def test_the_single_item_flags_are_refused_with_all_clean(self):
+        # `--if-revision` and `--resolve-ingest-followups` belong to the
+        # single-item verb. The bulk verb has no revision to check and never
+        # touches a followup, so with `--all-clean` each is refused before the
+        # store is opened rather than read and ignored (review of #1002).
+        self.clean_reports()
+        before = self.dump()
+        for form in (("--if-revision", "0" * 64), ("--resolve-ingest-followups",)):
+            with self.subTest(form=form):
+                refused = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-10", *form)
+                self.assertEqual(refused.returncode, 1, refused.stdout)
+                self.assertIn(form[0], refused.stderr)
+                self.assertNotIn("Traceback", refused.stderr)
+                self.assertEqual(self.dump(), before)
+
+    def test_the_human_dry_run_names_the_declined_rows_and_a_selection_with_no_plan(self):
+        # One clean report and one with a followup a person wrote: the human
+        # form lists the declined row with the library's reason. A cutoff
+        # before both was filed selects nothing, so the library issues no
+        # plan and the last line says no apply can succeed instead of
+        # printing a command with `None` in it.
+        import sd_db
+        from sd_db.writes import add_note
+
+        first, second = self.clean_reports()
+        with contextlib.closing(sd_db.connect(home=self.home)) as connection:
+            add_note(connection, second, "followup", "look at this", session="sven")
+        human = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-10")
+        self.assertEqual(human.returncode, 0, human.stderr)
+        lines = human.stdout.rstrip("\n").splitlines()
+        self.assertEqual(lines[0], "clean reports before 2026-09-10T00:00:00+00:00: 1 selected, 1 declined")
+        self.assertIn(f"  selected #{first}  {self.FILED}  alpha: run report", lines)
+        self.assertIn(f"  declined #{second}: it has an unresolved followup", lines)
+        self.assertTrue(lines[-1].startswith(
+            f"sd reports acknowledge --all-clean --before {self.CUTOFF} --apply --if-plan "), lines[-1])
+
+        empty = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-01")
+        self.assertEqual(empty.returncode, 0, empty.stderr)
+        lines = empty.stdout.rstrip("\n").splitlines()
+        self.assertEqual(lines[0], "clean reports before 2026-09-01T00:00:00+00:00: 0 selected, 0 declined")
+        self.assertEqual(lines[-1], "no apply: a bulk acknowledge moves between 1 and 1000 reports")
+        self.assertNotIn("None", empty.stdout)
+
+    def test_the_apply_with_a_wrong_plan_is_refused_by_the_library_and_writes_nothing(self):
+        # A plan token that is well-formed but not the preview's: the store
+        # opens for writing, the library's savepoint refuses (`StaleItem`),
+        # and `run` turns that into the one-line refusal, exit 1, so the
+        # caller sees the library's sentence and no traceback, and the dump
+        # is the one from before the attempt.
+        first, second = self.clean_reports()
+        before = self.dump()
+        wrong = "f" * 64
+        refused = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-10",
+                           "--apply", "--if-plan", wrong, "--who", "tester")
+        self.assertEqual(refused.returncode, 1, refused.stdout)
+        self.assertEqual(refused.stderr.rstrip("\n"),
+                         "sd: the clean-report selection changed since the preview; preview it again")
+        self.assertEqual(refused.stdout, "")
+        self.assertEqual(self.dump(), before)
+        self.assertEqual(self.status(first), "planning")
+        self.assertEqual(self.status(second), "planning")
+
+    def test_the_bulk_dry_run_opens_the_store_read_only_and_the_apply_writes(self):
+        # `run` makes one connection call. The dry run must open the store
+        # the way `list` does, `write=False`, so the read runs under SQLite's
+        # `mode=ro` and `query_only`; the shipped rule
+        # `write=args.control_action != "list"` gives `True` for both forms
+        # and fails here.
+        import sd_handoff_rows
+
+        self.clean_reports()
+        opened = []
+        real = sd_handoff_rows.connect
+
+        def wrapped(sd_db, *, write=False):
+            opened.append(write)
+            return real(sd_db, write=write)
+
+        def bulk(**flags):
+            fields = dict(
+                control_group="reports", control_action="acknowledge", item=None, if_revision=None,
+                resolve_ingest_followups=False, json=True, all_clean=True, before="2026-09-10",
+                apply=False, if_plan=None, who=None,
+            )
+            return argparse.Namespace(**{**fields, **flags})
+
+        out = io.StringIO()
+        with patch.dict(os.environ, {"HOME": str(self.home), "SD_SESSION": "test-session"}), \
+                patch.object(sd_handoff_rows, "connect", wrapped), contextlib.redirect_stdout(out):
+            self.assertEqual(sd_controls.run(bulk()), 0)
+            plan = json.loads(out.getvalue())["plan"]
+            self.assertEqual(sd_controls.run(bulk(apply=True, if_plan=plan, who="tester")), 0)
+        self.assertEqual(opened, [False, True])
+
     def failed_run(self):
         """One failed run as the ingest files it: a report born with the ingest's own followup."""
         failed = self.cli(*self.ingest("failed", 1, "boom\n"))
@@ -231,6 +442,7 @@ class Controls(unittest.TestCase):
         args = argparse.Namespace(
             control_group="reports", control_action="acknowledge", item=int(report),
             if_revision=revision, resolve_ingest_followups=True, json=True,
+            all_clean=False, before=None, apply=False, if_plan=None, who=None,
         )
         from sd_db import reporting
 
