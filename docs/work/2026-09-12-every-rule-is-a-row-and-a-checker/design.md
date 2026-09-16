@@ -313,6 +313,16 @@ apply to the checkers the item aims it at.
   the named test to go green-then-red. Reversed if the copy-and-run cost stops
   being affordable, at which point the leg is scoped rather than dropped — a
   registry whose checkers are unproven is the state this item exists to end.
+  **Budgeted 2026-09-16 (owner decision Dec-6, note 1989): one tracked-file
+  copy per run, shared by every row and both controls.** Measured with one
+  command each: `LegD` took real 6.81 s for 8 tests at load average 39.25
+  before the change and real 2.72 s for 9 tests at load average 32.26 after
+  it, on the same machine under different load, so no ratio is claimed. The
+  copy is 2.16 s for 1306 tracked files and is now paid once; what remains is
+  two child `unittest` runs per row, so the cost is still linear in rows but
+  with the copy out of the slope. Sharing is as strong as copying because the
+  `diff -rq` restore proof runs after every row, and a control in `LegD`
+  leaves a byte in the copy and requires that proof to fail.
 - **2026-09-13 — leg a counts a citation in a section's body, never in its
   heading.** `section_body` drops the heading line, so a row's id has to appear
   in the body text of the section its `teaches` names. `R10-D1` to `R10-D3`
