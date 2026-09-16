@@ -164,8 +164,9 @@ divide.
      was `(("toolbox", …), ("briefs", …), ("vault", …), ("research", …))` — four
      of the six, until step 2 added `queues` — and the `collect` below it, at
      /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:83,
-     spawns `sd_tile.py` by a fixed sibling path with an 18-second wait and a
-     65,537-byte read.
+     spawns `sd_tile.py` by a fixed sibling path under `VIEW_SECONDS`, 5 s per
+     view, and a shared 64 KB read (sd:758) — an 18-second wait and a
+     65,537-byte read when this was written.
    - The `_collect` at
      /Users/sven/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py:32
      loads `collectors.py` by path through `importlib` and calls `collect_ports`

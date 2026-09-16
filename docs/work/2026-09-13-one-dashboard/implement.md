@@ -145,16 +145,16 @@ before starting step 2.
       `import sd_ledger` resolved.
 
 - [x] **2. `queues` becomes a native system view.** System repository only;
-      nothing in the pack changes. `queues` is the one of the six legacy views
-      with no system-side path — the other five already render, four through the
-      `collect` at
+      nothing in the pack changes. When this step was planned, `queues` was the
+      one of the six legacy views with no system-side path — the other five
+      already rendered, four through the `collect` at
       /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:83
       and `ports` in-process through the `_collect` at
       /Users/sven/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py:32.
-      `queues` reads module state in `collectors.py` rather than a `collect_*`
-      function, so it is not a fifth entry in `VIEWS` by construction; the
-      decision of whether it joins that tuple or takes its own screen belongs to
-      the system repository and this document does not make it.
+      The plan left open whether `queues` would join `VIEWS` or take its own
+      screen, because it reads module state in `collectors.py` rather than a
+      `collect_*` function; the system repository decided, and the landed
+      state below is that it joined `VIEWS` as the fifth entry.
 
       Verify: the system suite runs `Ran 307 tests` or more — it prints
       `Ran 306 tests ... OK` today — and one new case asserts the `queues` view
