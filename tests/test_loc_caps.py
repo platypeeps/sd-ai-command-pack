@@ -259,7 +259,7 @@ DASHBOARD_CAP = 4_600
 # for the same line, and 6b-7 was spent deleting rationale to fit a write path
 # -- which is the cap working against the comment convention it was explicitly
 # widened to hold. This one bounds what the other cannot: code.
-DASHBOARD_CODE_CAP = 1_850 # R11-D49's first fall; see the notes below
+DASHBOARD_CODE_CAP = 1_183 # R11-D49's second fall; see the notes below
 
 # The gap between that cap and what `dashboard/` measures, recorded when
 # R11-D41 wrote the rule: 2,300 against 2,271. It is what makes "payable in
@@ -309,6 +309,15 @@ DASHBOARD_CODE_SLACK = 29
 # the cap is that plus the 2 lines of gap it stood at before, not plus the 29
 # of slack: the slack is a bound on what a change may leave unpaid, and a fall
 # is not a place to bank it. R11-D49 made the append legal a change earlier.
+#
+# **2026-09-16, the second fall: 1,850 to 1,183, sd:719 step 4.** The legacy
+# tracker index retired. `dashboard/store.py`, `dashboard/github.py` and
+# `dashboard/jira.py` went, with `refresh_issues` in `collect.py`, the two
+# tracker endpoints, tabs and payload in `server.py`, and the tracker views in
+# `app.js`; the system dashboard serves PRs and Issues from `sd_db.shadow`.
+# The directory measured 1,183 code lines with `code_line_count` in the
+# finished commit, and the cap is that plus the 0 lines of gap it stood at
+# before -- the same form as the first fall, with the gap it happened to have.
 
 
 # Every value each ceiling has held, oldest first: read from this file's own
@@ -366,6 +375,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
         ("2026-09-01", 2_300),
         ("2026-09-07", 2_328),
         ("2026-09-13", 1_850),
+        ("2026-09-16", 1_183),
     ),
 }
 

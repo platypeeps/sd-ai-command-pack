@@ -3,18 +3,6 @@
 // toolchain to maintain for a view that fits on one screen.
 const rows = document.getElementById("rows");
 const sub = document.getElementById("sub");
-const needs = document.getElementById("needs");
-const issueSub = document.getElementById("issue-sub");
-const prNeeds = document.getElementById("pr-needs");
-const prSub = document.getElementById("pr-sub");
-const issueMore = {
-  summary: document.getElementById("issue-more-count"),
-  tbody: document.getElementById("issue-more"),
-};
-const prMore = {
-  summary: document.getElementById("pr-more-count"),
-  tbody: document.getElementById("pr-more"),
-};
 const skillRows = document.getElementById("skill-rows");
 const skillSub = document.getElementById("skill-sub");
 const sessionTrees = document.getElementById("session-trees");
@@ -82,133 +70,6 @@ async function draw() {
 
 draw();
 setInterval(draw, 30000);
-
-// --- issues -------------------------------------------------------------
-// Rendered from the index, never from a live collect: the server does not
-// reach GitHub or Jira on a page load, so what this shows is as fresh as the
-// last `sd-dashboard index` and the page says so rather than implying live.
-
-const link = (text, href) => {
-  const td = document.createElement("td");
-  if (href) {
-    const a = document.createElement("a");
-    a.href = href;
-    a.textContent = text;
-    a.target = "_blank";
-    // `noopener` spelled out: `noreferrer` implies it in current browsers,
-    // but not everywhere, and the new tab must never get a `window.opener`.
-    a.rel = "noopener noreferrer";
-    td.append(a);
-  } else {
-    td.textContent = text;
-  }
-  return td;
-};
-
-const where = (issue) =>
-  // A GitHub row has a number to show; a Jira row's identity is already in its
-  // URL tail, so showing "#null" would be an invented fact. So is its `repo`,
-  // which for Jira is the project: `LOG`, where the ticket is `LOG-23929`.
-  issue.number === null || issue.number === undefined
-    ? issue.url
-      ? issue.url.split("/").pop()
-      : issue.repo || issue.tracker
-    : `${issue.repo}#${issue.number}`;
-
-function fillIssues(tbody, list, emphasise) {
-  tbody.replaceChildren();
-  if (!list.length) {
-    const tr = document.createElement("tr");
-    const td = cell("none");
-    td.colSpan = 4;
-    td.style.opacity = ".6";
-    tr.append(td);
-    tbody.append(tr);
-    return;
-  }
-  for (const issue of list) {
-    const tr = document.createElement("tr");
-    if (emphasise) tr.className = "you";
-    tr.append(
-      link(where(issue), issue.url),
-      cell(issue.title),
-      cell((issue.why || []).join(", ")),
-      cell((issue.updated_at || "").slice(0, 10)),
-    );
-    tbody.append(tr);
-  }
-}
-
-// Issues and PRs are one renderer because they are one table: the search that
-// fills the index does not separate them, and the only thing that differs
-// between the two tabs is which `kind` the route asked for.
-//
-// One table, not two. The second one listed `author:@me` and `mentions:@me`
-// -- everything the account touches rather than everything it owes anybody --
-// and it was the longer of the two by a wide margin, so the tab read as a
-// feed. The index still collects those buckets and `/api/{issues,prs}` still
-// returns them; the count below says how many are being withheld, because a
-// view that quietly drops rows is worse than one that lists too many.
-//
-// That count names the two buckets rather than calling them settled. A first
-// draft read "not yours to answer", which is true of `author:@me` and a guess
-// about `mentions:@me` -- somebody can ask for a decision by naming you, and
-// no label here should decide they did not.
-//
-// Suppressing a bucket from a queue is a ranking decision; making it
-// unreachable is a different and worse one, so the withheld rows keep a
-// closed `<details>` of their own. A draft in between pointed the count at
-// `github.com/{issues,pulls}/{created,mentioned}` instead, which is wrong
-// here for a reason worth recording: `other` is not a GitHub group. `jira.py`
-// files rows into it as `filed`, `watching` and `matched`, and a GitHub link
-// is not a destination for those. The rows already carry their own `url`,
-// whichever tracker produced them, so the disclosure needs no link scheme at
-// all -- which is also why it is a disclosure and not a link.
-async function drawTracker(route, into, more, subLine, noun) {
-  const payload = await payloadFor(route, subLine);
-  if (payload === null) return;
-  if (!payload.available) {
-    subLine.textContent = payload.reason;
-    // The summary too, not just the tables. These redraw on a 30s timer, so
-    // leaving the label alone shows last poll's "17 more ..." above an empty
-    // disclosure while the line beside it says the index cannot be read --
-    // a count with nothing behind it, which is the failure this whole change
-    // is about.
-    more.summary.textContent = `other open ${noun.many}`;
-    fillIssues(into, [], true);
-    fillIssues(more.tbody, [], false);
-    return;
-  }
-  const stamp = payload.indexedAt ? ` \u00b7 last collected ${payload.indexedAt}` : "";
-  const n = payload.needsYou.length;
-  const m = payload.other.length;
-  subLine.textContent =
-    `${n} ${n === 1 ? noun.one : noun.many} ${noun.needs}${stamp}`;
-  more.summary.textContent =
-    `${m} other ${m === 1 ? noun.one : noun.many} involving you: ${WHY}`;
-  fillIssues(into, payload.needsYou, true);
-  fillIssues(more.tbody, payload.other, false);
-}
-
-// Both strings come from here rather than from the renderer, because the two
-// tabs do not mean the same thing by "needs you". `store.NEEDS_YOU` is
-// `assigned` and `review-requested`, and only a pull request can be
-// review-requested -- an Issues tab reading "awaiting your review" is
-// describing a state its rows cannot be in.
-const ISSUE = { one: "issue", many: "issues", needs: "assigned to you" };
-const PULL = {
-  one: "pull request",
-  many: "pull requests",
-  needs: "assigned to you or awaiting your review",
-};
-// Every `why` a collector can file into `other`: `github.py` writes the first
-// two, `jira.py` the last three (`filed`, `watching`, and `matched` for a row
-// its JQL selected for some reason it cannot name). Listing four of five reads
-// as an enumeration and is a claim about what is behind the disclosure.
-const WHY = "authored, mentioned, filed, watching or matched";
-const drawIssues = () =>
-  drawTracker("/api/issues", needs, issueMore, issueSub, ISSUE);
-const drawPrs = () => drawTracker("/api/prs", prNeeds, prMore, prSub, PULL);
 
 // --- work ---------------------------------------------------------------
 // Two tables rather than one, because the second is not a subset of the first:
@@ -389,8 +250,6 @@ async function drawSessions() {
 const STATIC = [
   ["tab-now", "panel-now"],
   ["tab-repos", "panel-repos"],
-  ["tab-prs", "panel-prs"],
-  ["tab-issues", "panel-issues"],
   ["tab-work", "panel-work"],
   ["tab-skills", "panel-skills"],
   ["tab-sessions", "panel-sessions"],
@@ -533,7 +392,6 @@ function band(rank) {
 // not on screen is a disappearance one layer along.
 const BACKBONE_PANELS = {
   repos: "panel-repos",
-  prs: "panel-prs",
   sessions: "panel-sessions",
 };
 
@@ -633,12 +491,6 @@ async function drawNow() {
   paintNow(payload.rows);
 }
 
-drawIssues();
-setInterval(drawIssues, 30000);
-
-drawPrs();
-setInterval(drawPrs, 30000);
-
 drawWork();
 setInterval(drawWork, 30000);
 
@@ -695,8 +547,10 @@ async function press(button, id) {
     runSub.textContent = `${id} could not be sent (${err})`;
   }
   button.disabled = false;
-  // Whatever it did, every view that reads what it wrote is now behind.
-  for (const redraw of [drawIssues, drawPrs, drawNow]) redraw();
+  // Whatever it did, the view that reads what it wrote is now behind. Now is
+  // the one left: the tracker tabs that redrew here went with the index at
+  // sd:719 step 4.
+  drawNow();
 }
 
 async function drawRun() {

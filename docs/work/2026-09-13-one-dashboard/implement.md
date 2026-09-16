@@ -86,9 +86,10 @@ before starting step 2.
       | `subprocess` | 21 | one use, `subprocess.run` at line 134, inside `launchctl` — which this step deletes. |
       | `os` | 20 | one use, `os.getuid()` at line 149, inside `cmd_install`. |
 
-      `collect` and `store` **stay** in the `dashboard` import: `cmd_index`
-      (`source:bin/sd-dashboard::cmd_index`) and `issue_lines` (`source:bin/sd-dashboard::issue_lines`) still
-      use them, and steps 4 and 5 still read the cache the `index` verb fills.
+      `collect` and `store` **stayed** in the `dashboard` import at this step:
+      `cmd_index` and `issue_lines` (both in `bin/sd-dashboard`, retired at
+      sd:719 step 4) still used them, and step 4 still read the cache the
+      `index` verb filled until its own pack commit.
 
       **The module docstring is part of this step, because `--help` prints it.**
       At `e80153ee` it opened "Three verbs now, not the five the design lists"
@@ -305,7 +306,7 @@ before starting step 2.
       filters on `compared` citations under `dashboard/` and would not have
       found them; `prd.md`'s Log lists the three.
 
-- [ ] **4. PRs and Issues are served from `sd_db.shadow`; the legacy index
+- [x] **4. PRs and Issues are served from `sd_db.shadow`; the legacy index
       retires.** System commit: the tracker views read `tracker_items` and
       `tracker_freshness` from `sd_db`, which already take a tracker argument, and
       derive a Jira row's key as `url.rpartition("/")[2]` — the rule sd:361 step
@@ -315,10 +316,11 @@ before starting step 2.
       sd:603 already recorded.
 
       Pack commit: delete `dashboard/store.py`, `dashboard/github.py`,
-      `dashboard/jira.py`, `cmd_index` (`source:bin/sd-dashboard::cmd_index`) and the `index`
-      verb. This is the step that closes the criterion 2 problem outright, because
-      the read and the write `sqlite3.connect` in `connect`
-      (`source:dashboard/store.py::connect`) are the two connections the port could not carry.
+      `dashboard/jira.py`, `cmd_index` (in `bin/sd-dashboard`, retired at this
+      step) and the `index` verb. This is the step that closes the criterion 2
+      problem outright, because the read and the write `sqlite3.connect` in
+      `connect` (in `dashboard/store.py`, retired at this step) are the two
+      connections the port could not carry.
 
       **Four live callers import those modules, and three of them are not the
       dashboard.** Each was found by grepping importers rather than by reading the
@@ -328,7 +330,7 @@ before starting step 2.
       | Caller | Line | What it needs |
       |---|---|---|
       | `dashboard/server.py` | `:43` | imports `collect` and `store`; survives to step 6, so this commit drops both from the import line and the endpoints behind them. |
-      | `bin/sd-dashboard` | `:29` | `from dashboard import collect, store` (step 1 removed `server`) — `store` goes with `issue_lines` (`source:bin/sd-dashboard::issue_lines`) and the `index` verb this step deletes. |
+      | `bin/sd-dashboard` | `:29` | `from dashboard import collect, store` (step 1 removed `server`) — `store` goes with `issue_lines` (in `bin/sd-dashboard`, retired at this step) and the `index` verb this step deletes. |
       | `bin/sd` | `:2729` | `from dashboard.collect import discover_checkouts, repo_root`, inside `sd plugin list --fleet`. **This one is not a dashboard file and nothing in this plan would otherwise touch it.** |
       | `bin/sd-trackers` | `:42` | `from dashboard import github, jira`. The whole tool is built on the two modules this step deletes, so it retires in the same commit or it is a broken entry point. |
 
@@ -367,6 +369,41 @@ before starting step 2.
       `~/.cache/sd-ai-command-pack/index.sqlite` is deleted by hand and both
       dashboards still work, which is what "the index is a cache" has always
       claimed and what nothing has ever checked.
+
+      **Landed as system pull request #411, squash `fe556f4`, then the pin,
+      pack pull request #999 (`c6879551`, `ref: 4b240d28`), then the pack
+      deletion, this pull request.** Operations > Trackers on :8767 was
+      verified by the owner before the deletion (sd:719 note 2579). The pack
+      commit deleted `dashboard/store.py`, `dashboard/github.py`,
+      `dashboard/jira.py`, `bin/sd-trackers` and their two test modules, and
+      left `bin/sd-dashboard` with no verb at all: `sd-dashboard index` exits 2
+      with the parser's usage, and the file itself goes at step 7. The four
+      callers in the table above each went one way: `dashboard/server.py` lost
+      `store` from its import, the `/api/prs` and `/api/issues` routes, the
+      two tabs in `PAGE` and the `app.js` views that polled them; the
+      `/api/now` payload no longer carries pull request rows, so `pr_rows`
+      (`source:dashboard/now.py::pr_rows`) has no caller until step 6 decides
+      Now; `bin/sd` was not touched, because `collect.py` stays; and
+      `dashboard/collect.py` lost `refresh_issues`, the one function that
+      imported the three modules, which the brief's importer grep did not see
+      because the import is relative. `bin/sd-status` lost the `store` import
+      and the fallback in `issues_section` that read the index when no shared
+      database existed; `_database_issues`
+      (`source:bin/sd-status::_database_issues`) is the only reader, and with
+      no database the section says `available: False` and names `sd_db`
+      rather than `sd-dashboard index`. Its section heading and three labels
+      still say "the index" and "dashboard index"; they sit inside a hunk
+      fix-431-d holds, and are residue for that lane or the step 6 sweep.
+      `DASHBOARD_CODE_CAP` fell from 1,850 to 1,183 against 1,183 measured,
+      667 code lines gone under `dashboard/` (`github.py` 190, `jira.py` 202,
+      `store.py` 128, `app.js` 92, `server.py` 30, `collect.py` 25), the
+      second fall `CEILING_HISTORY` records; `DASHBOARD_CAP` did not move.
+      `AMBIGUOUS_CEILING` fell from 142 to 124. `skills/sd-plan/SKILL.md`'s
+      `--from gh:`/`jira:` now resolves against the shadow rows, and a
+      reference the shadow does not hold is pasted by hand. Citations into
+      the deleted files on this item's three pages and on sd:361's pages
+      (still live, not archived) were rewritten in prose; `prd.md`'s Log
+      lists the count.
 
 - [ ] **5. Repos and Sessions.** System commit, then pack commit deleting
       `dashboard/sessions.py`, `dashboard/skills.py` and `dashboard/collect.py` —
@@ -521,7 +558,8 @@ before starting step 2.
         `tests/test_dashboard_actions.py`, `tests/test_dashboard_deliver.py`,
         `tests/test_dashboard_now.py`, `tests/test_dashboard_sessions.py`,
         `tests/test_dashboard_skills.py`, `tests/test_dashboard_work.py`,
-        `tests/test_sd_ledger.py` and `tests/test_sd_trackers.py`. The rest only
+        `tests/test_sd_ledger.py` and `tests/test_sd_trackers.py` (the two
+        index suites went at step 4). The rest only
         mention the path and are edited instead. **Re-run the grep inside the
         commit rather than working from this list**, because steps 3 to 6 will have
         moved some of it.
@@ -616,3 +654,9 @@ before starting step 2.
   symbol still does the thing.
 - That `queues` can be rendered without an asset pipeline. The system package's
   docstring refuses one and this plan takes that as a constraint.
+
+## Log
+
+- 2026-09-16 step 4 landed: system pull request #411 (`fe556f4`), pin #999
+  (`c6879551`), then the pack deletion. Step 4 is ticked with the measurement
+  above; `DASHBOARD_CODE_CAP` reads 1,183.

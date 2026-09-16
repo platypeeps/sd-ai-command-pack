@@ -89,26 +89,32 @@ the first commit leave unrelated work items where they are.
 | `--decision` | Write a `docs/decisions/` record instead of a work item |
 | `--work-dir` | Work root other than `docs/work` |
 | `--worktree` | Create the branch in its own git worktree (one writer per checkout) |
-| `--from gh:owner/repo#123` / `--from jira:KEY-123` | Seed `## References` from a tracker item, resolved by `sd-trackers ref` |
+| `--from gh:owner/repo#123` / `--from jira:KEY-123` | Seed `## References` from a tracker item, resolved against the shadow rows in the shared database |
 | `--from sd:123` | Seed the interview and `## References` from a row in the shared database |
 | `--from-suggestion` | Reserved: seed from a local proposal note; not implemented |
 | `--from-proposal` | Seed from a skill proposal |
 
 ## Seeding from a tracker
 
-`--from` resolves through one command, so the citation is what the tracker
-says rather than what anyone remembered:
+`--from` resolves against the shared database, so the citation is what the
+tracker said when `sd shadow sync` last ran rather than what anyone
+remembered. `sd-trackers ref` did this until it retired with sd:719 step 4;
+the two remote schemes now read `sd_db.progress.tracker_items` and take the
+row whose URL tail is the reference (`42` for `gh:openai/whisper#42`,
+`ABC-45` for `jira:ABC-45`):
 
 ```bash
-sd-trackers ref gh:openai/whisper#42
-sd-trackers ref jira:ABC-45
-sd-trackers ref sd:455
+python -c 'import sd_db, sd_db.progress as p
+c = sd_db.connect(write=False)
+print([r for r in p.tracker_items(c, tracker="github", repo="openai/whisper") if r["url"].endswith("/42")])'
+sd store item 455 --json
 ```
 
-It prints one bullet — the link, the title, the state, and the date the item
-last moved — which goes verbatim under the PRD's `## References` heading, the
-one the template already ships. Under `--decision`, where the template has no
-such heading, add it above the bullet.
+Write one bullet from the row — the link, the title, the state, and the date
+the item was last seen — which goes verbatim under the PRD's `## References`
+heading, the one the template already ships. A reference the shadow does not
+hold is pasted by hand from the tracker page. Under `--decision`, where the
+template has no such heading, add it above the bullet.
 
 ### `sd:<id>` seeds the interview too
 
@@ -191,9 +197,9 @@ the field that saves the most rework — `dont[]`.
 `sd-plan` has no `bin/` half, and is not waiting for one: the templates ship
 and the procedure is carried out by the agent. The one part that would drift if
 it stayed in prose — turning a tracker reference into the `## References`
-block — is already a command, `sd-trackers ref`. `sd-review`, `sd-check`,
-`sd-status`, `sd-handoff`, `sd-trackers` and `sd-docs-lint` are real and
-callable today.
+block — reads the shadow rows above; the command that did it, `sd-trackers
+ref`, retired with sd:719 step 4. `sd-review`, `sd-check`, `sd-status`,
+`sd-handoff` and `sd-docs-lint` are real and callable today.
 
 `sd suggest add` can record a proposal on an existing imported work item, but
 `--from-suggestion` and `--from-proposal` have no resolution path yet. Do not

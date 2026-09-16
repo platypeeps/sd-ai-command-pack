@@ -69,7 +69,7 @@ two facts the two programs already share.
 
 ### The store boundary is the one hard constraint on the port
 
-`connect` (`source:dashboard/store.py::connect`) opens `sqlite3.connect`
+`connect` (in `dashboard/store.py`, retired at sd:719 step 4) opened `sqlite3.connect`
 once for reads and once for writes, against a cache at
 `~/.cache/sd-ai-command-pack/index.sqlite`. The system package opens none, by a
 stated contract in its own package docstring, at
@@ -149,8 +149,8 @@ divide.
    port number and the LaunchAgent label are this item's to decide, and the
    decision is that neither gets a new value. `cmd_serve`
    (line 37 of `bin/sd-dashboard` at `e80153ee`) and `cmd_install` (line 139 of `bin/sd-dashboard` at `e80153ee`) are
-   removed; `cmd_index` (`source:bin/sd-dashboard::cmd_index`) stays until the tracker views
-   move. This is the only step that makes the machine safer rather than only
+   removed; `cmd_index` stayed until the tracker views moved, and retired
+   at step 4, where the parser rejects the `index` verb outright. This is the only step that makes the machine safer rather than only
    tidier, and it is first for that reason.
 
 3. **The six plugin tabs become native system views. The plugin contract's
@@ -273,13 +273,18 @@ once — to nothing — when it retires at step 7. Appending to both would make
 actually moves makes it `(30, 26, 1)`, which is the figure the implementation
 verification expects.
 
-The second assertion is `tests/test_loc_caps.py:598`, and it reads
-`upward == values - len(CEILING_HISTORY)` — every recorded move is a raise,
-because until now every one has been. One downward move makes it arithmetically
-false: 30 values across 3 ceilings leaves 27 moves, of which 26 are up and 1 is
-down. Both assertions and both messages are the decision record's subject. A
-plan that rewrites only the first one lands red on the second, on a message about
-a ceiling repeating a value, which is not what happened.
+The second assertion, in the same test, read
+`upward == values - len(CEILING_HISTORY)` at `a8295266` — every recorded move
+a raise, because until then every one had been. One downward move made it
+arithmetically false. R11-D49 (pull request #922) rewrote it to
+`upward + downward == values - len(CEILING_HISTORY)`, so a fall counts as a
+move and only a row that repeats a value fails it; and it rewrote the first
+into a list of falls on ceilings the record does not name, which is empty
+while only `DASHBOARD_CODE_CAP` comes down. After step 4 `ceiling_moves()`
+returns `(31, 26, 2)`: two falls, both on that ceiling, both legal. Both
+assertions and both messages were the decision record's subject. A plan that
+rewrote only the first one would have landed red on the second, on a message
+about a ceiling repeating a value, which is not what happened.
 
 One more mechanical detail nobody finds by reading prose.
 `test_the_dashboard_stays_under_its_ceiling` (`source:tests/test_loc_caps.py::test_the_dashboard_stays_under_its_ceiling`) and
@@ -381,3 +386,12 @@ decision whose evidence has been deleted cannot be reviewed later.
   had not moved. The acceptance criterion for step 1 names the plist and the
   listener instead of a PID (review-909 N3), and sd:730's followup-path scope
   is step 6a of `implement.md`.
+- 2026-09-16 step 4's pack half landed: the tracker index (`dashboard/store.py`,
+  `dashboard/github.py`, `dashboard/jira.py`, `bin/sd-trackers`, the `index`
+  verb of `bin/sd-dashboard`) is deleted, and `bin/sd-status` reads issues from
+  `sd_db` alone. Two `source:` locators on this page that named `connect` in
+  `store.py` and `cmd_index` now say the file retired at step 4, and the
+  requirement-5 paragraph that described the second assertion of
+  `test_the_recorded_history_is_raises_only` as it read at `a8295266` (#990
+  residue) now describes it as R11-D49 rewrote it, with `ceiling_moves()`
+  measured `(31, 26, 2)` after the step.

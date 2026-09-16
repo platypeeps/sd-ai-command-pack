@@ -15,8 +15,8 @@ tests with the pinned build, not assumed.
 `dashboard/` changes by one expression, step 7b, so the page shows a Jira
 row's key instead of its project. `DASHBOARD_CAP`
 (`source:tests/test_loc_caps.py::DASHBOARD_CAP`) and `DASHBOARD_CODE_CAP`
-(`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`) do not move; `dashboard/jira.py` stays until
-the `index.sqlite` retirement deletes it. The pack's `bin/` has no ceiling
+(`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`) do not move; `dashboard/jira.py` stayed until
+the `index.sqlite` retirement deleted it (sd:719 step 4). The pack's `bin/` has no ceiling
 since R11-D48. The pack half is on the order of forty lines in
 `bin/sd_shadow.py`, thirty in `bin/sd-status`, and their tests.
 
@@ -32,8 +32,8 @@ since R11-D48. The pack half is on the order of forty lines in
       *missing* names and never a value —
       `python3 -c 'import os; print([n for n in ("JIRA_BASE_URL","JIRA_EMAIL","JIRA_API_TOKEN") if not os.environ.get(n, "").strip()])'`
       — prints `[]`. The
-      `.strip()` matches `settings` (`source:dashboard/jira.py::settings`), which strips
-      before `missing` (`source:dashboard/jira.py::missing`) looks; a value of spaces
+      `.strip()` matches `settings` (in `dashboard/jira.py`, retired at sd:719 step 4), which strips
+      before `missing` (in `dashboard/jira.py`, retired at sd:719 step 4) looks; a value of spaces
       would otherwise pass this check and fail step 2.
       Done 2026-09-13: the operator exported both names beside the token, and
       the check prints `[]` where before this step it printed
@@ -41,10 +41,10 @@ since R11-D48. The pack half is on the order of forty lines in
 
 - [x] **2. One proving collect against the loop that exists.** Run
       `bin/sd-dashboard index` from the checkout — the verb at
-      `bin/sd-dashboard:32`, declared at `bin/sd-dashboard:97-103`; the
+      `bin/sd-dashboard` (line 32 as of sd:361, retired at sd:719 step 4), declared at `bin/sd-dashboard` (lines 97-103 as of sd:361, retired at sd:719 step 4); the
       pack links no executable anywhere
       (`AGENTS.md:57-69`) — with the three variables exported. This is the PRD's "one successful collect
-      against the existing `dashboard/collect.py:168` loop proving a row can
+      against the existing `dashboard/collect.py` (line 168 as of sd:361, retired at sd:719 step 4) loop proving a row can
       be produced at all", and it costs no code.
       Verify, in four checks. None of them reads a missing row as a verdict:
       an absent row is ambiguous, because the JQL window excludes issues the
@@ -65,11 +65,11 @@ since R11-D48. The pack half is on the order of forty lines in
       `5e9a44b37bc0680c2ccd38af`, the account that both files and is assigned
       `LOG-23818`, so the token is the operator's own.
       (d) A specific issue key is named only after asserting that its
-      `updated` date falls inside `FIRST_RUN_WINDOW` (`source:dashboard/jira.py::FIRST_RUN_WINDOW`);
+      `updated` date falls inside `FIRST_RUN_WINDOW` (in `dashboard/jira.py`, retired at sd:719 step 4);
       otherwise take the newest key the query itself returned. `LOG-23818`,
       the key the item seeds, does not qualify: it was last updated
       2026-05-05, 131 days before the run, and `DEFAULT_JQL`
-      (`source:dashboard/jira.py::DEFAULT_JQL`) filters `updated >= -{minutes}m`, so the
+      (in `dashboard/jira.py`, retired at sd:719 step 4) filters `updated >= -{minutes}m`, so the
       collector is never asked for it. The run returned `LOG-21895`,
       `LOG-23702`, `LOG-23929`, `RS-8`, `RS-9`, `RS-45`, `RS-47`, `RS-48`,
       `RS-49`, `RS-50` and `RS-51` open, and `RS-54` closed — eleven open and
@@ -80,43 +80,45 @@ since R11-D48. The pack half is on the order of forty lines in
       not start on credentials that do not reach Jira.
 
 - [x] **3. The library module: `sd_db/shadow_jira.py`.** In
-      `platypeeps/system`, lift `dashboard/jira.py` whole — module docstring
+      `platypeeps/system`, lift `dashboard/jira.py` (the pack module as it stood at `2a2dbad6`; retired at sd:719 step 4) whole — module docstring
       with both lists, `settings`, `missing`, `window_start`,
       `window_minutes`, `_request`, `account_id`, `search`, `state_of`,
       `normalize`, `collect` — with four changes and no others. (i) `collect`
       returns `Collected` rather than the pack's dict. (ii) Every use of the
       pack's `github` module goes: `window_start` calls the library's
       `parse_iso` at `sd_db/shadow_sync.py:119`, and the three `github.iso`
-      calls in `collect` (`source:dashboard/jira.py::collect`, on its missing-variable,
+      calls in `collect` (in `dashboard/jira.py`, retired at sd:719 step 4, on its missing-variable,
       failed-`myself` and normal returns) call the library's `iso` at
       `sd_db/shadow_sync.py:114`; `from . import github` appears nowhere in
       the new module, and an import of it is the first thing the ported test
       module would fail on. (iii) `ok` folds truncation in: the pack's
-      `collect` sets `ok` from `not error` alone at `dashboard/jira.py:322`
+      `collect` sets `ok` from `not error` alone at line 322 of `dashboard/jira.py` at `2a2dbad6`
       and reports `truncated` beside it, because `refresh_issues` reads only
       `ok` and the pack never advanced a cursor over a truncated page only
       because `truncated` was reported, not because it was guarded. The
       library's `Collected` is `ok=not errors and not truncated`
       (`sd_db/shadow_sync.py:466`), and the port returns
       `ok=not error and not cut`, so the watermark guard on `ok` in step 4
-      is sound. (iv) `fetch_issue` (`source:dashboard/jira.py::fetch_issue`) does not move,
-      because it belongs to `sd-trackers ref`, which the item says needs no
-      change. `TRACKER =
+      is sound. (iv) `fetch_issue` (in `dashboard/jira.py`) did not move,
+      because it belonged to `sd-trackers ref`, which this item left as it
+      was; both retired at sd:719 step 4 (pack pull request #1005), and the
+      reference path is the shadow-row procedure in `skills/sd-plan/SKILL.md`.
+      `TRACKER =
       "jira"`, `OVERLAP` and `FIRST_RUN_WINDOW` are declared in the module,
-      not shared, for the reason `window_start` (`source:dashboard/jira.py::window_start`)
-      gives. Port `JiraTests` (`source:tests/test_sd_dashboard_index.py::JiraTests`) with
+      not shared, for the reason `window_start` (in `dashboard/jira.py`, retired at sd:719 step 4)
+      gives. Port `JiraTests` (in `tests/test_sd_dashboard_index.py`, retired at sd:719 step 4) with
       its `jira_issue` and `jira_transport` fixtures to
       `local-sd-db/tests/test_shadow_jira.py`, asserting on `Collected`
       fields. The suite is not free of the pack:
       `test_the_window_is_relative_minutes_not_a_timestamp` calls
-      `github.iso(...)` at `tests/test_sd_dashboard_index.py:493` through
+      `github.iso(...)` at line 493 of `tests/test_sd_dashboard_index.py` at `2a2dbad6` through
       the module's `dashboard.github` import, so the port replaces that call
       with the library's `iso` at `sd_db/shadow_sync.py:114` and drops the
       import; a copy that keeps it fails on collection in `local-sd-db`,
       where there is no `dashboard` package.
       Verify: the ported suite passes, and each of the three carried-over
       rules is guarded by a test that goes red under the mutation that
-      breaks it. The rules, as `dashboard/jira.py:254-258` implements them:
+      breaks it. The rules, as lines 254-258 of `dashboard/jira.py` at `2a2dbad6` implements them:
       `myself` is the availability check; account ids are compared when both
       sides have one and email only as the fallback; the JQL window is
       relative minutes. The mutations, each of which must redden its test
@@ -333,7 +335,7 @@ since R11-D48. The pack half is on the order of forty lines in
       row has a URL, and `issue.repo || issue.tracker` only when it does
       not; the comment above it, which says the identity is in the URL
       tail, is already the rationale. The page stays an open worklist
-      (`dashboard/server.py:657`); nothing else in `dashboard/` changes.
+      (`dashboard/server.py` (line 657 as of sd:361, retired at sd:719 step 4)); nothing else in `dashboard/` changes.
       Verify: a test in `tests/test_dashboard_now.py`, source-reading like
       that file's `fillIssues` cases, asserts the null-number branch of
       `where` derives from `issue.url` and not from `issue.repo` first; and
@@ -419,7 +421,7 @@ Steps 1 and 2 are the operator's and gate everything after them. Steps 3 and
   over the pack and the system checkout prints nothing — the pattern is
   assembled from a shell variable because a document that spelled it out
   would match itself; today it prints nothing, and
-  the fixture at `tests/test_sd_dashboard_index.py:426` is the shape a test
+  the fixture at line 426 of `tests/test_sd_dashboard_index.py` at `2a2dbad6` is the shape a test
   value takes — a dict literal with a placeholder, never an assignment.
 - The acceptance lines on the item map to steps: line 1 to step 8, line 2
   to step 6 (b), line 3 to a second sync after a ticket closes — not
