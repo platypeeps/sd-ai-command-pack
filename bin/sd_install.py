@@ -950,7 +950,11 @@ def prune_links(
             skipped.append((raw, "not our link"))
             continue
         if not dry_run:
-            path.unlink()
+            try:
+                path.unlink()
+            except OSError as exc:
+                skipped.append((raw, f"could not remove ({exc.strerror or exc})"))
+                continue
         removed += 1
     return removed, skipped
 
