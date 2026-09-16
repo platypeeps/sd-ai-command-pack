@@ -1506,7 +1506,8 @@ criterion of this item.
 
 **The lane order, from decision note 1942.** Criteria 5, 16 and 22 are being
 implemented now (2026-09-14: 5's vendor clause closed in #935, 22 in #936;
-16 is still open, in #938, and 5's table-reads clause is still open). After
+16 is still open, in #938, and 5's table-reads clause is still open.
+2026-09-16: #938 merged as `a3baf6d9`, so 16 is closed). After
 #932, which merged as `107016fc`, in series:
 
 1. criterion 27's help text (2026-09-14: done, #939 merged as `0feecae9`);
@@ -1517,15 +1518,16 @@ implemented now (2026-09-14: 5's vendor clause closed in #935, 22 in #936;
 4. criterion 31(b);
 5. criterion 31(c), which carries `Delivers: sd:10`.
 
-**Two open clauses this order does not schedule.** Criterion 13's refusal
-test is in the open list above and in the `Delivers:` gate below, and in no
-step of this order. Criterion 5's table-reads clause is now in the same
-position. Decision note 1942 is silent about both, so nothing is invented
-here; the gap is recorded, with the constraint the gate already carries.
-`Delivers: sd:10` waits on every open criterion, so criterion 13 and
-criterion 5's remaining clause must both be closed before 31(c) carries the
-trailer. Which pull request carries them is an owner decision no note has
-made.
+**Two clauses this order did not schedule, now scheduled.** Criterion 13's
+refusal test and criterion 5's table-reads clause were in the open list above
+and in the `Delivers:` gate below, and in no step of this order. Decision
+note 1942 is silent about both. Team-lead decision 2026-09-16, under the
+standing authorization and reversible by the owner: the two land as their
+own small pull request before 31(b), not in 31(c), and the tick of criterion
+16 rides along because it is the same page. That pull request is the one
+that carries this paragraph. `Delivers: sd:10` still waits on every open
+criterion, so 31(c) carries the trailer only after that pull request has
+merged.
 
 **Open on `ef9d3499`, before those decisions: criteria 5, 6, 11, 13, 14,
 15, 16, 18, 21, 22, 27 and 31, and criterion 9 until #931 merges.** The review of #931 named 9, 14,
@@ -1541,7 +1543,17 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   (2026-09-14: the vendor clause closed in #935, `48d1d58e`. Criterion 5 is
   part-closed. The clause at `prd.md:1235-1236`, that every skill which runs
   a review names its point in the table and reads the cap from it, is
-  unasserted and was outside #935's scope, so it stays open.)
+  unasserted and was outside #935's scope, so it stays open.) (2026-09-16:
+  closed by the pull request that carries this line. `SkillsThatRunAReview`
+  in `tests/test_workflow_policy.py` enumerates the skills whose `SKILL.md`
+  invokes a reviewer, `sd-review` with its flags or `sd-research-kit review`,
+  four on this base: `sd-plan`, `sd-research-repo`, `sd-review` and
+  `sd-ship`. Each links `.claude/rules/sd-planning-adversarial-review.md`,
+  names a Point cell read from that table, and carries no cap literal of its
+  own. A mention of the lane is not a run of it: six other skills name
+  `sd-review` as the holder of the verdict and run nothing. Four mutations
+  killed: a `cap of 1 pass` in `sd-ship`, a `2 passes` in `sd-review`, the
+  link dropped from `sd-plan`, the point renamed in `sd-research-repo`.)
 - **6, open (the `minimax` meter clause).** `git grep -l token_plan -- bin
   tests` finds 0 files, so nothing reads `token_plan/remains` and no test
   asserts the two windows. Other clauses have passing tests, among them
@@ -1586,7 +1598,16 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   `tests.test_status_source` (43) pass. (2026-09-14: the clause is rewritten
   to #802's refusal in `bin/sd_ship_remote.py:119-127` by decision note 1942.
   No test asserts either refusal message yet, so criterion 13 stays open for
-  that test.)
+  that test.) (2026-09-16: closed by the pull request that carries this
+  line. `ReadyCase` in `tests/test_sd_ship_remote.py` stubs the adapter's one
+  outbound call and asserts `source:bin/sd_ship_remote.py::GitHub.ready` by
+  message: a moved head and a moved base each refuse "pull-request head or
+  default base moved after local review" with no call made, and a `compare`
+  answer whose `behind_by` is not 0 refuses "the reviewed branch is behind
+  the current default branch" on the one `compare` call. A fourth test pins
+  that `behind_by: 0` passes the guard. Four mutations killed: each message
+  reworded, the `behind_by` guard weakened, the base-ref half of the moved
+  guard dropped.)
 - **14, open.** `Makefile:125-126` `docs-lint:` runs `bin/sd-docs-lint`
   whole. It wires no no-database rule set enumerated from the lint, and no
   test compares a wired set to the lint's set. (2026-09-14: cut by decision
@@ -1599,7 +1620,13 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   decision note 1942, as superseded by #813, sd:430 and sd:719. The floor
   half holds, so nothing of criterion 15 is open.)
 - **16, open.** `Makefile:20` `test:` and `:134` `check: test lint audit
-  docs-lint` take no changed-files argument.
+  docs-lint` take no changed-files argument. (2026-09-16: closed. #938
+  merged as `a3baf6d9`. Re-measured on this base: the `ifeq ($(origin
+  CHANGED),command line)` block in `Makefile` exports `TEST_CHANGED_FILES`
+  only for a `CHANGED` given on the command line and otherwise runs the
+  suite under `env -u TEST_CHANGED_FILES`, so the full suite is the default;
+  `.github/scripts/select-tests.py` picks the modules; `check:` is now at
+  `Makefile:201` and `test:` at `:55`.)
 - **18, open.** A grep of the governed tree finds `Trellis` in 14 files,
   `.trellis` in 11 and `task.py` in 2. (2026-09-14: still open, with two
   exemptions from decision note 1942. The upstream Trellis pull-request
@@ -1732,7 +1759,13 @@ pull request in the lane order above. After that day's merges the list is 5
 (the table-reads clause), 13 (the refusal test), 16, 18, 21 and 31 (a, b and
 c). Criterion 13 and criterion 5's remaining clause have no step in the lane
 order, and this gate is what still holds them: 31(c) cannot carry the
-trailer while either is open.)
+trailer while either is open.) (2026-09-16: 16 closed when #938 merged as
+`a3baf6d9`; 13 and 5 close with the pull request that carries this line,
+by the team-lead decision recorded under "The lane order". The list is 18,
+21 (the archive-test clauses, after #995 cut the sweep), 31(a)'s `parked`
+and `archived` field cut, 31(b) and 31(c). Followups sd:789, criterion 11's demotion note, and
+sd:790, criterion 31's cross-repository regressions, are both `done`, by
+#957 `c43747e4` and system #396 `e2a38474`.)
 
 ### The three landings that are no pull request of this repository's
 
@@ -1845,15 +1878,15 @@ recounted.
 | Criterion | Closed by |
 |---|---|
 | 1, 4, 8, 20 — the policy page, the lane, the conditional obligations | PR 1 |
-| 5 — the review table in exactly two places, and no bare vendor token in a skill | PR 1 (the two table clauses), PR 6 (the vendor clause whole: a converted token names a role, and no role resolves before PR 6's registry reader) (2026-09-14: the vendor clause is open, see "The closure state today"; being implemented now, from decision note 1942). (2026-09-14, superseding that vendor clause only: #935 closed it, `48d1d58e`. Criterion 5 is part-closed. The clause at `prd.md:1235-1236`, that every skill which runs a review names its point in the table and reads the cap from it, is unasserted and was outside #935's scope, so it stays open and no step of the lane order schedules it) |
-| 31 — requirement 13 line by line | PR 2 (2026-09-14: never merged; open, see "The closure state today"). (2026-09-14, superseding the scope this row's heading names, not the criterion's open state, decision note 1942: rescoped, with `R10-D` and `sd-rust-reviewer` dropped, `parked` and `archived` scoped to the `sd_lib` item field and its readers, and the cross-repository bug regression tests moved to followup sd:790. Three pull requests close it: 31(a) with criterion 21, then 31(b), then 31(c), which carries `Delivers: sd:10`). (2026-09-16: 31(a)'s `sd_sweep` symbol is closed by the sweep cut, asserted by `tests/test_cut_symbols.py`; its `parked` and `archived` field cut is deferred to a later lane (team-lead decision 2026-09-16, reversible by the owner) with the reader set frozen by `tests/test_cut_symbols.py::ParkedAndArchivedReaders`, see the 2026-09-16 entry at the end of this page) |
+| 5 — the review table in exactly two places, and no bare vendor token in a skill | PR 1 (the two table clauses), PR 6 (the vendor clause whole: a converted token names a role, and no role resolves before PR 6's registry reader) (2026-09-14: the vendor clause is open, see "The closure state today"; being implemented now, from decision note 1942). (2026-09-14, superseding that vendor clause only: #935 closed it, `48d1d58e`. Criterion 5 is part-closed. The clause at `prd.md:1235-1236`, that every skill which runs a review names its point in the table and reads the cap from it, is unasserted and was outside #935's scope, so it stays open and no step of the lane order schedules it). (2026-09-16: that clause is closed by the pull request that carries this row, `SkillsThatRunAReview` in `tests/test_workflow_policy.py`, under the team-lead decision recorded in "The lane order". Criterion 5 is closed) |
+| 31 — requirement 13 line by line | PR 2 (2026-09-14: never merged; open, see "The closure state today"). (2026-09-14, superseding the scope this row's heading names, not the criterion's open state, decision note 1942: rescoped, with `R10-D` and `sd-rust-reviewer` dropped, `parked` and `archived` scoped to the `sd_lib` item field and its readers, and the cross-repository bug regression tests moved to followup sd:790. Three pull requests close it: 31(a) with criterion 21, then 31(b), then 31(c), which carries `Delivers: sd:10`). (2026-09-16: 31(a)'s `sd_sweep` symbol is closed by the sweep cut, asserted by `tests/test_cut_symbols.py`; its `parked` and `archived` field cut is deferred to a later lane (team-lead decision 2026-09-16, reversible by the owner) with the reader set frozen by `tests/test_cut_symbols.py::ParkedAndArchivedReaders`, see the 2026-09-16 entry at the end of this page). (2026-09-16: followup sd:790 is `done`: system #396 `e2a38474` adds the two cross-repository regression tests in `local-adversarial-gate/tests/test_run.py`, and its decision note files the pack-side gaps as their own followups, sd:947 among them, merged as `77a191df`) |
 | 21 — the archive untouched, and no sweep or park code path remains | PR 2 (the code paths), PR 7 (the archive diff) (2026-09-14: PR 2 never merged; the code-path half is open, see "The closure state today"). (2026-09-14, superseding the PR 2 assignment only, not the code-path half's open state, decision note 1942: one pull request with 31(a), after #932, which merged as `107016fc`, and after the system sweep job and its LaunchAgent are retired). (2026-09-16: the code-path half is closed by the sweep cut, with the frozen deletion-verb set in `tests/test_archive_untouched.py`; see the 2026-09-16 entry at the end of this page) |
-| 14, 15, 16, 17, 30 — the checks | PR 3 (2026-09-14: never merged; 14, 15 and 16 are open, 17 closed by #892 and 30 is CI's, see "The closure state today"). (2026-09-14, superseding that sentence's claim that 14 and 15 are open, and nothing else in it, decision note 1942: 14 is cut and 15's ceilings clause is cut, so 15 is closed on its floor clause; 16 is being implemented now, in #938, and is still open) |
+| 14, 15, 16, 17, 30 — the checks | PR 3 (2026-09-14: never merged; 14, 15 and 16 are open, 17 closed by #892 and 30 is CI's, see "The closure state today"). (2026-09-14, superseding that sentence's claim that 14 and 15 are open, and nothing else in it, decision note 1942: 14 is cut and 15's ceilings clause is cut, so 15 is closed on its floor clause; 16 is being implemented now, in #938, and is still open). (2026-09-16: 16 closed, #938 merged as `a3baf6d9`) |
 | 33 — no document names a `docs/work/` path that does not resolve | PR 7, which adds the rule; wired by criterion 14's enumeration in PR 3, which lands first (2026-09-14: PR 3 never merged and criterion 14 is open, so nothing wires the rule into `make check`; see "The closure state today"). (2026-09-14, superseding the sentence before it: criterion 14 is cut by decision note 1942, and #820 runs the whole lint, rule 7 with it, in `make check`) |
 | 9, 12, 18, 19, 22, 23 — the instruction layers | PR 4; criterion 19 and criterion 23's first half by the operator edit of 2026-09-07; criterion 23's second half, the writing repository's style override, by `sd-writing-pack` #41 (`be76962e`), read on 2026-09-13 and recorded under "Closing the item" (2026-09-14: PR 4 never merged; 18 and 22 are open, and criterion 9's settings clause is removed by decision note 1921, see "The closure state today"). (2026-09-14, superseding that sentence's claim about criterion 9 only, and leaving criteria 19 and 23's recorded landings and 18's open state standing: 9 closed when #931 merged as `0aeb42a1`. By decision note 1942, 22 is being implemented now, and 18 lands after 21 with 31(a), with the `AGENTS.md` upstream Trellis guard and the `.trellis` residue line exempt. Criterion 22 closed later that day: #936 merged as `c3604594`) |
 | 24, 25 — `paths.json`, the union with active trials, `sd skill try` and its row | PR 5 |
-| 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | (2026-09-14: criterion 6's `minimax` meter clause and criterion 11's demotion-note clause are open, see "The closure state today"; decision note 1942 defers 6's open parts to followup sd:788 and 11's to followup sd:789) PR 6, which also carries criterion 5's vendor clause; with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
-| 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1541-1547`, whose files are in its Touches and in no other pull request's claim) (2026-09-14: the moved-default-branch clause is open, see "The closure state today"; decision note 1942 rewrites it to #802's refusal, and the test for the refusal is still to add). (2026-09-14: no step of the lane order schedules that test, and the note is silent on which pull request carries it. `Delivers: sd:10` on 31(c) is what still holds it) |
+| 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | (2026-09-14: criterion 6's `minimax` meter clause and criterion 11's demotion-note clause are open, see "The closure state today"; decision note 1942 defers 6's open parts to followup sd:788 and 11's to followup sd:789) (2026-09-16: sd:789 is `done`, #957 merged as `c43747e4`: `sd-ship` writes the demotion note when the remote lowers the mode; sd:788 is still `planning`) PR 6, which also carries criterion 5's vendor clause; with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
+| 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1541-1547`, whose files are in its Touches and in no other pull request's claim) (2026-09-14: the moved-default-branch clause is open, see "The closure state today"; decision note 1942 rewrites it to #802's refusal, and the test for the refusal is still to add). (2026-09-14: no step of the lane order schedules that test, and the note is silent on which pull request carries it. `Delivers: sd:10` on 31(c) is what still holds it). (2026-09-16: the test is `ReadyCase` in `tests/test_sd_ship_remote.py`, in the pull request that carries this row, under the team-lead decision recorded in "The lane order". The moved-default-branch clause is closed) |
 | 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` and writing-manifest clauses checked by reading on 2026-09-13 and recorded under "Closing the item", not tested (2026-09-14: criterion 27 fails its own words on `main`, see "The closure state today"; decision note 1942 rewrites it to #802's queue design, and its help text is the first fix after #932, which merged as `107016fc`). (2026-09-14: criterion 27 is closed. #939 merged as `0feecae9` and fixed the help text at `bin/sd:3031-3046`) |
 | 7 — no percentage removes the code review point | the grep, which passes (re-run 2026-09-13); the back-scoring of the seven passes is cut (operator, 2026-09-07); the forward ten-pass experiment, its report and its decision are deferred to followup sd:777 (owner decision, 2026-09-13, decision note 1920) |
 
@@ -1955,3 +1988,17 @@ puts a `planning` item under `docs/work/archive/` and runs `sd-status`,
 `sd-plan` and `sd-review --scope planning` against it, and no test ships a
 `done` item and re-runs `sd-plan` and `sd-ship` over it. Both clauses were
 recorded open on 2026-09-14 and are still open.
+
+## Landed 2026-09-16: criteria 13 and 5 close by test, 16 by re-measure
+
+Team-lead decision 2026-09-16, under the standing authorization and
+reversible by the owner: criterion 13's refusal test and criterion 5's
+table-reads clause land as one small pull request before 31(b), and criterion
+16's tick rides along. `ReadyCase` in `tests/test_sd_ship_remote.py` asserts
+the two refusals of `source:bin/sd_ship_remote.py::GitHub.ready` by message.
+`SkillsThatRunAReview` in `tests/test_workflow_policy.py` enumerates the
+skills that invoke a reviewer and asserts the link, the point and the absence
+of a cap literal. Criterion 16 closed when #938 merged as `a3baf6d9`. Open
+after this and #995 (the entry above): 18, criterion 21's archive-test
+clauses, 31(a)'s `parked` and `archived` field cut, 31(b) and 31(c).
+Followups sd:789 and sd:790 are `done`; sd:788 is still `planning`.

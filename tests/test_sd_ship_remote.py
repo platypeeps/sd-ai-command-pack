@@ -20,6 +20,12 @@ single API call the method makes and reads the refusal back. No network, no
 field but the one it is about, so the message it asserts can only come from
 that field's guard. The merge's comparison of its two reads of the document
 needs the rig, and is driven in `tests/test_sd_ship_disposition_guards.py`.
+
+`GitHub.ready` is stubbed the same way for the two refusals sd:10 criterion 13
+names: a pull request whose head or base moved after the local review, and a
+reviewed branch that is behind the default branch. The first is decided on the
+pull-request document alone and makes no call; the second is decided on the
+one `compare` call the method makes before it looks at check runs.
 """
 
 from __future__ import annotations
@@ -233,6 +239,75 @@ class ProtectionCase(unittest.TestCase):
         ):
             with self.subTest(shape=label):
                 self.assertIs(StubbedGitHub(value).protection("main"), value)
+
+
+HEAD = "0123456789abcdef0123456789abcdef01234567"
+
+
+def pull_document(**changes: Any) -> dict:
+    """A pull-request document that passes every guard of `GitHub.ready` up
+    to the `compare` call: open, not a draft, at `HEAD` on `main`, from the
+    stubbed repository, and confirmed mergeable and clean by GitHub."""
+    value: dict[str, Any] = {
+        "merged": False,
+        "state": "open",
+        "draft": False,
+        "head": {"sha": HEAD, "repo": {"full_name": "fixture/repo"}},
+        "base": {"ref": "main"},
+        "mergeable": True,
+        "mergeable_state": "clean",
+    }
+    value.update(changes)
+    return value
+
+
+class ReadyCase(unittest.TestCase):
+    """The moved-default-branch clause of sd:10 criterion 13: a default branch
+    that moves after the review is refused, not integrated, and each refusal
+    is asserted by its message."""
+
+    def assert_ready_refused(self, pull: dict, answer: Any, message: str) -> list[str]:
+        remote = StubbedGitHub(answer)
+        with self.assertRaisesRegex(sd_ship_remote.Refusal, rf"^{re.escape(message)}$"):
+            remote.ready(pull, HEAD, "main", protection_document())
+        return remote.requested
+
+    def test_a_head_that_moved_after_the_local_review_is_refused_by_name(self) -> None:
+        """The pull request's head is no longer the reviewed commit. The
+        refusal is decided on the document, before any further call."""
+        moved = pull_document(head={"sha": "f" * 40, "repo": {"full_name": "fixture/repo"}})
+        requested = self.assert_ready_refused(
+            moved, {"behind_by": 0}, "pull-request head or default base moved after local review")
+        self.assertEqual(requested, [])
+
+    def test_a_base_that_moved_after_the_local_review_is_refused_by_name(self) -> None:
+        """The pull request now targets a branch other than the default the
+        review was made against. Same refusal, same silence on the wire."""
+        moved = pull_document(base={"ref": "release"})
+        requested = self.assert_ready_refused(
+            moved, {"behind_by": 0}, "pull-request head or default base moved after local review")
+        self.assertEqual(requested, [])
+
+    def test_a_reviewed_branch_behind_the_default_branch_is_refused_by_name(self) -> None:
+        """The document is fine, so the method asks GitHub how the reviewed
+        head compares with the default branch. Any answer but `behind_by: 0`
+        refuses: a branch the default has moved past, and a comparison that
+        does not say."""
+        for label, answer in (("behind by three", {"behind_by": 3}), ("no behind_by", {"ahead_by": 1})):
+            with self.subTest(shape=label):
+                requested = self.assert_ready_refused(
+                    pull_document(), answer, "the reviewed branch is behind the current default branch")
+                self.assertEqual(requested, [f"repos/fixture/repo/compare/main...{HEAD}"])
+
+    def test_a_branch_level_with_the_default_passes_the_comparison_guard(self) -> None:
+        """`behind_by: 0` passes, so the next refusal comes from the check-run
+        inventory, which the stub answers with the same non-list document.
+        That pins the guard's order: the comparison is consulted before the
+        check runs, and a level branch is not refused by it."""
+        requested = self.assert_ready_refused(
+            pull_document(), {"behind_by": 0}, "GitHub did not enumerate "
+            f"repos/fixture/repo/commits/{HEAD}/check-runs?filter=latest")
+        self.assertEqual(requested[0], f"repos/fixture/repo/compare/main...{HEAD}")
 
 
 if __name__ == "__main__":

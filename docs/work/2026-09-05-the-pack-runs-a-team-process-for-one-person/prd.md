@@ -1520,11 +1520,11 @@ confirmed by the next `sd-ship` run alone.
     moved after local review" when the pull request's head or base moved,
     and with "the reviewed branch is behind the current default branch"
     when the reviewed branch is behind the default, both in
-    `bin/sd_ship_remote.py:119-127`, and a test asserts each refusal by
+    `source:bin/sd_ship_remote.py::GitHub.ready`, and a test asserts each refusal by
     its message. (Rewritten 2026-09-14 by owner decision note 1942, which
-    accepts #802's refusal instead of an integration update. The test for
-    the refusal is still to add. The original clause is quoted in the
-    log.) A test ships a guest-mode item whose triad sits on the fork's
+    accepts #802's refusal instead of an integration update. The test is
+    `ReadyCase`, `tests/test_sd_ship_remote.py`, 2026-09-16, see the log.
+    The original clause is quoted in the log.) A test ships a guest-mode item whose triad sits on the fork's
     integration branch in two slices, merges the first upstream pull
     request by hand on the fixture, and asserts the row is `in_progress`
     with the squash commit on a note and no mark commit, then ships the
@@ -1567,7 +1567,7 @@ confirmed by the next `sd-ship` run alone.
     four line-count ceilings emit a warning and exit zero when exceeded. A test
     asserts the warning path, not only the passing one.
 16. `make check` accepts a changed-files fast path, and the full suite remains
-    the default when no such argument is given.
+    the default when no such argument is given. (Closed 2026-09-16, #938.)
 17. The `bash32` job, `tests/test_selector_contract_drift.py`,
     `generated/registry-snapshot.json` and the `plugins/sd` stub are absent, and
     the `security` job's steps run inside `lint`.
@@ -5452,3 +5452,41 @@ from a number the operator types.
   and criterion 5's remaining clause must both be closed before 31(c)
   carries the trailer. Which pull request carries them is an owner decision
   that no note has made.
+- **2026-09-16** — **Criteria 13 and 5 close by test, 16 by re-measure, in one
+  pull request before 31(b).** The gap the previous entry recorded is filled
+  by a team-lead decision of 2026-09-16, made under the standing authorization
+  and reversible by the owner: criterion 13's refusal test and criterion 5's
+  table-reads clause land as their own small pull request before 31(b), not
+  in 31(c), and criterion 16's tick rides along because it is the same page.
+
+  **Criterion 16.** #938 merged as `a3baf6d9` on 2026-09-14. Re-measured on
+  pack main `2eafa78b`: `make check CHANGED="<paths>"` runs the modules
+  `.github/scripts/select-tests.py` picks plus an always-run set, only a
+  `CHANGED` given on the command line counts, and a plain `make check` runs
+  the suite with `TEST_CHANGED_FILES` removed from the environment. The full
+  suite is the default. Closed.
+
+  **Criterion 13, the moved-default-branch clause.** `ReadyCase` in
+  `tests/test_sd_ship_remote.py` stubs the adapter's one outbound call and
+  asserts `source:bin/sd_ship_remote.py::GitHub.ready` by message: a moved
+  head and a moved base each refuse "pull-request head or default base moved
+  after local review" before any call, and a `compare` answer whose
+  `behind_by` is not 0 refuses "the reviewed branch is behind the current
+  default branch" on that one call. A fourth test pins that `behind_by: 0`
+  passes the guard. Closed.
+
+  **Criterion 5, the table-reads clause.** `SkillsThatRunAReview` in
+  `tests/test_workflow_policy.py` enumerates the skills whose `SKILL.md`
+  invokes a reviewer, `sd-review` with its flags or `sd-research-kit review`,
+  and asserts each links `.claude/rules/sd-planning-adversarial-review.md`,
+  names a Point cell read from the table there, and carries no cap literal of
+  its own. Four on this base: `sd-plan`, `sd-research-repo`, `sd-review` and
+  `sd-ship`. A mention of the lane is not a run of it: six other skills name
+  `sd-review` as the holder of the verdict and run nothing, and a rule that
+  counted mentions would have failed all six for a link they have no reason
+  to carry. Closed; criterion 5 is closed whole.
+
+  **What this leaves.** Open: 18, 21 and 31 (a, b and c), in the lane order.
+  Followups sd:789 (criterion 11's demotion note) and sd:790 (criterion 31's
+  cross-repository regressions) are `done`, by #957 `c43747e4` and system
+  #396 `e2a38474`; sd:788 (criterion 6) is still `planning`.

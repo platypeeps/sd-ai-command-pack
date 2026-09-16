@@ -1,6 +1,6 @@
 """`WORKFLOW.md` is the policy, and the payload agrees with it.
 
-Five things drift silently and each has a test here.
+Six things drift silently and each has a test here.
 
 **The override keys.** The `CLAUDE.local.md` block the installer writes and the
 Overrides section of `WORKFLOW.md` describe the same set of keys. Neither is
@@ -24,6 +24,10 @@ archive is kept unchanged and holds every name the cuts removed.
 `openai` or `anthropic` as a bare token: a skill names a role or a registry
 entry, and the registry maps it to a vendor. The grep was once zero and nothing
 pinned it, so three tokens came back in `skills/sd-review/SKILL.md` unnoticed.
+
+**The skills that run a review.** Each names its point in the review table and
+reads the cap from the one rule file, and none carries a cap of its own. The
+skills are enumerated from what their pages invoke, not from a list kept here.
 """
 
 from __future__ import annotations
@@ -489,6 +493,124 @@ class BareVendorTokens(unittest.TestCase):
         ):
             with self.subTest(line=line):
                 self.assertEqual(bare_vendor_lines(line), [])
+
+
+#: A page runs a review when it invokes a reviewer, in any of the shapes an
+#: invocation takes on these pages: a backticked `sd-review` with a flag; a
+#: bare backticked `sd-review` that a verb runs, "Run `sd-review`"; a command
+#: line of a code block that begins with `sd-review`; or `sd-research-kit
+#: review`, the front of `bin/sd_research_review.py`. A bare `sd-review` with
+#: no verb before it names the tool or its lane and is not an invocation.
+REVIEW_INVOCATION = re.compile(
+    r"`sd-review --[a-z]"
+    r"|\b(?:run|runs|running|invoke|invokes)\s+`sd-review\b"
+    r"|^\s*(?:\$ )?sd-review\b"
+    r"|`?sd-research-kit review\b",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+#: A cap stated on a skill's own page, as a count of passes or a "cap of N".
+#: Searched over the page with its whitespace collapsed, because the pages
+#: hard-wrap and a literal split across a line break is still a literal.
+CAP_LITERAL = re.compile(r"\b[0-9]+ passes?\b|cap of [0-9]")
+
+#: The sentence of a collapsed page that links the rule file must also say
+#: `cap`: a link beside a point that does not say where the cap comes from is
+#: a pointer, not the reads-from relationship the criterion asks for.
+CAP_WORD = re.compile(r"\bcaps?\b", re.IGNORECASE)
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def collapsed(path: pathlib.Path) -> str:
+    """A page with its whitespace collapsed, so a hard wrap is one space."""
+    return " ".join(path.read_text(encoding="utf-8").split())
+
+
+def skills_that_run_a_review(root: pathlib.Path = REPO_ROOT) -> list[str]:
+    """The `skills/*/SKILL.md` pages that invoke a reviewer, from the index.
+
+    The rule is the invocation and not a mention: six pages name `sd-review`
+    as the lane that holds the verdict, or as what runs `sd-check`, and run
+    nothing. `REVIEW_INVOCATION` states the shapes. The reviewer's own page is
+    in the set by name, so it stays there even if its last example is edited
+    away.
+    """
+    names = [n for n in tracked_files("skills", root) if n.count("/") == 2 and n.endswith("/SKILL.md")]
+    found = {n for n in names if REVIEW_INVOCATION.search((root / n).read_text(encoding="utf-8"))}
+    return sorted(found | ({"skills/sd-review/SKILL.md"} & set(names)))
+
+
+def table_points(path: pathlib.Path = RULE) -> list[str]:
+    """The Point cell of every row of the review table, lower-cased."""
+    return [row.split("|")[2].strip().lower() for row in review_table(path)[2:]]
+
+
+class SkillsThatRunAReview(unittest.TestCase):
+    """sd:10 criterion 5, the table-reads clause: every skill that runs a
+    review names its point in the table and reads the cap from it.
+
+    The set is enumerated by `skills_that_run_a_review`, whose docstring
+    states the rule. A skill in the set links the one rule file that carries
+    the table, names one of that table's Point cells, says in the sentence
+    that links the rule that the cap comes from there, and states no cap of
+    its own, so a cap changes in exactly one place. A page is compared with
+    its whitespace collapsed, because the pages hard-wrap and a point name or
+    a cap literal may span a line break.
+    """
+
+    def test_the_enumeration_finds_the_reviewer_and_the_skills_that_call_it(self):
+        skills = skills_that_run_a_review()
+        self.assertIn("skills/sd-review/SKILL.md", skills)
+        self.assertGreater(len(skills), 1, "no skill invokes the reviewer")
+
+    def test_the_enumeration_takes_every_invocation_shape_and_no_mention(self):
+        """Each shape `REVIEW_INVOCATION` names is one page here, and the
+        mention shapes the six real pages use are two more that stay out."""
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            subprocess.run(  # nosec B603 B607 - fixed argv, a scratch repository
+                ["git", "init", "-q"], cwd=root, check=True)
+            files = {
+                "skills/flag/SKILL.md": "Then `sd-review --scope branch` on the commits.\n",
+                "skills/verb/SKILL.md": "Run `sd-review` and read its report.\n",
+                "skills/block/SKILL.md": "```\nsd-review\n```\n",
+                "skills/kit/SKILL.md": "Run the mechanical half:\n\n   sd-research-kit review\n",
+                "skills/lane/SKILL.md": "The verdict belongs to the sd-review lane.\n",
+                "skills/tool/SKILL.md": "`sd-review` runs it; `sd-review-ack` marks the row.\n",
+                "skills/sd-review/SKILL.md": "# sd-review\n",
+            }
+            for name, text in files.items():
+                (root / name).parent.mkdir(parents=True, exist_ok=True)
+                (root / name).write_text(text)
+            subprocess.run(  # nosec B603 B607 - fixed argv, a scratch repository
+                ["git", "add", "--", "skills"], cwd=root, check=True)
+            self.assertEqual(skills_that_run_a_review(root), [
+                "skills/block/SKILL.md", "skills/flag/SKILL.md", "skills/kit/SKILL.md",
+                "skills/sd-review/SKILL.md", "skills/verb/SKILL.md"])
+
+    def test_every_skill_that_runs_a_review_links_the_rule_and_names_its_point(self):
+        points = table_points()
+        self.assertTrue(points)
+        for name in skills_that_run_a_review():
+            with self.subTest(skill=name):
+                text = collapsed(REPO_ROOT / name)
+                self.assertIn(".claude/rules/sd-planning-adversarial-review.md", text,
+                              f"{name} runs a review and does not link the rule file")
+                self.assertTrue(any(point in text.lower() for point in points),
+                                f"{name} names none of the table's points: {points}")
+                linking = [s for s in SENTENCE_END.split(text)
+                           if ".claude/rules/sd-planning-adversarial-review.md" in s]
+                self.assertTrue(any(CAP_WORD.search(s) for s in linking),
+                                f"{name} links the rule and no linking sentence says the cap "
+                                f"comes from it: {linking}")
+
+    def test_no_skill_that_runs_a_review_carries_a_cap_of_its_own(self):
+        for name in skills_that_run_a_review():
+            with self.subTest(skill=name):
+                text = collapsed(REPO_ROOT / name)
+                rows = [f"{name}: …{text[max(0, m.start() - 30):m.end() + 30]}…"
+                        for m in CAP_LITERAL.finditer(text)]
+                self.assertEqual(rows, [], "a cap stated outside the table:\n" + "\n".join(rows))
 
 
 class StandingAuthorizationInventory(unittest.TestCase):
