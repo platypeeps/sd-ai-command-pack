@@ -2997,10 +2997,10 @@ class LinkEdgeCaseTests(InstallerHarness):
 
     def test_prune_links_skips_a_malformed_row(self):
         """A link row whose path is not a string is nothing to remove, as in `prune_stale`."""
-        removed, skipped = sd_install.prune_links(
+        skipped = sd_install.prune_links(
             [{"path": 7, "kind": "link", "target": "x"}, {"path": "/x", "kind": "hook"}], set()
         )
-        self.assertEqual((removed, skipped), (0, []))
+        self.assertEqual(skipped, [])
 
     def test_command_report_ignores_a_command_in_the_working_directory(self):
         """`PATH=":"` is two empty components, which `which` reads as the working directory."""

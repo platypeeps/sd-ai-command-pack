@@ -923,7 +923,7 @@ def link_commands(plans: list[Link], bin_dir: Path, *, dry_run: bool = False) ->
 
 def prune_links(
     previous: list[dict], keep: set[str], *, dry_run: bool = False
-) -> tuple[int, list[tuple[str, str]]]:
+) -> list[tuple[str, str]]:
     """Remove every recorded link this run did not produce, if it is still ours.
 
     `keep` is the set of link paths this run produced -- under `--uninstall`
@@ -935,9 +935,8 @@ def prune_links(
     file at the path is left and reported. A link the receipt never named is
     never a candidate, and the directory itself stays.
 
-    Returns the count removed and `(path, reason)` for everything left.
+    Returns `(path, reason)` for everything left, as `prune_stale` does.
     """
-    removed = 0
     skipped: list[tuple[str, str]] = []
     for entry in previous:
         raw = entry.get("path")
@@ -954,9 +953,7 @@ def prune_links(
                 path.unlink()
             except OSError as exc:
                 skipped.append((raw, f"could not remove ({exc.strerror or exc})"))
-                continue
-        removed += 1
-    return removed, skipped
+    return skipped
 
 
 # ------------------------------------------------------------- legacy receipt
@@ -1691,10 +1688,7 @@ def cmd_user(ctx: Context, out) -> int:
 
     previous = owned_entries(read_receipt(ctx.receipt))
     skipped = prune_stale(previous, current, dry_run=ctx.dry_run)
-    _, unlinked = prune_links(
-        previous, {row["path"] for row in links}, dry_run=ctx.dry_run
-    )
-    skipped += unlinked
+    skipped += prune_links(previous, {row["path"] for row in links}, dry_run=ctx.dry_run)
 
     specs = hook_specs(ctx.checkout)
     hook_changed = install_hook(ctx.settings, specs, dry_run=ctx.dry_run)
@@ -1947,8 +1941,7 @@ def cmd_uninstall(ctx: Context, out) -> int:
     skipped = prune_stale(previous, set(), dry_run=ctx.dry_run)
     # Every link row is a candidate: this run produced none. A link that is no
     # longer ours joins `skipped` and is subtracted with the modified renders.
-    _, unlinked = prune_links(previous, set(), dry_run=ctx.dry_run)
-    skipped += unlinked
+    skipped += prune_links(previous, set(), dry_run=ctx.dry_run)
     held = [
         entry.get("command") for entry in previous if entry.get("kind") == "hook"
     ]
