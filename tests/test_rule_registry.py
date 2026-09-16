@@ -310,11 +310,23 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 #: the first `REPEALED` row, on 2026-09-16, this set did not move for it.
 #: `R11-D4` and `R11-D20` are still rowless.
 #:
+#: **19 after sd:431 slice D, 2026-09-16.** `R10-D1` is a row. What held it
+#: was not its enforcement -- `bin/sd-status::_age_rows` has flagged
+#: `idle-planning` since the check existed -- but that the tool carried the
+#: id in two strings, one of them the `CLASSES` cell the skill's table
+#: mirrors, so registering it would have reddened the second-list check on
+#: the spot. Owner decision Dec-3 rephrased both strings and moved the id
+#: into the comments beside them, the way `R10-D5` cites itself in
+#: `bin/sd_setup_github.py`; the skill's cell changed with the string, and
+#: the id stays in that section's prose for leg a. Held until sd:10 cut the
+#: age sweep (pack #995), because the threshold lived in the sweep module
+#: until then.
+#:
 #: The rest were each looked at and each has a recorded reason it is not a
 #: row yet, in the backfill section of this item's `implement.md`, rather
 #: than left for the next reader to rediscover.
 STRANDED_RULE_IDS = frozenset({
-    "R10-D1", "R10-D3", "R10-D7",
+    "R10-D3", "R10-D7",
     "R11-D1", "R11-D10", "R11-D13", "R11-D14", "R11-D15",
     "R11-D17", "R11-D18", "R11-D21", "R11-D23",
     "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D30", "R11-D5", "R11-D6",
@@ -612,8 +624,9 @@ def second_list_entries() -> list[tuple[str, int, str]]:
 
     Empty while the table is empty, which is what lets the table land first.
     The first row for a rule some consumer already names in a string fails
-    here on the spot -- and `bin/sd-status` carries `R10-D1` in a `CLASSES`
-    row today, so that is not a hypothetical.
+    here on the spot -- and that was not a hypothetical: `bin/sd-status`
+    carried `R10-D1` in a `CLASSES` row and in a reason string until
+    2026-09-16, and registering it meant rephrasing both first.
     """
 
     registered = registered_rule_ids()

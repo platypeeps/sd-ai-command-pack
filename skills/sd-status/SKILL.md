@@ -102,10 +102,10 @@ this table before running the command.
 | 120 | `source-marker` | `t` | no | `marker scan over the index` | a marker left in tracked source |
 | 125 | `undisclosed-tool` | `k` | no | `skill claims bin/<tool>` | a skill disclosing a tool that is not built |
 
-The `idle-planning` row is rule R10-D1, a registry row. The id is cited here
-and in the comments beside the `CLASSES` row and the reason text in
-`bin/sd-status`, never inside either string, so no string in the tool is a
-second copy of the registry.
+The `idle-planning` row is rule R10-D1, a registry row. `bin/sd-status` cites
+R10-D1 in the comments beside the `CLASSES` row and the reason text, never
+inside either string, so no string in the tool is a second copy of the
+registry.
 
 ### `pr-review-unacknowledged`, and why it sits at 35
 
