@@ -210,6 +210,7 @@ class SharedTree(unittest.TestCase):
             "backends": [],
             "residue": [],
             "issues": {"available": False, "reason": "no index", "needs_you": [], "other": []},
+            "jira": {"available": False, "reason": "no database", "freshness": None, "rows": []},
             "threads": {"available": False, "reason": "no database", "rows": []},
             "contributions": {"available": False, "reason": "no database", "rows": []},
             "pending": [], "actions": [], "next": None,

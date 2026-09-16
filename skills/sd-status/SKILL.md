@@ -20,13 +20,13 @@ single inventory section appears, because those are the questions a reader
 came with; the eight older sections keep their order underneath them so
 nobody's muscle memory breaks.
 
-## The thirteen sections, in output order
+## The fourteen sections, in output order
 
 Above them all sits the banner — two lines, `sd-status: <repo path>` and the
 `pack:` line naming the checkout these tools came from with its branch and
 head. It is a header rather than a section: it names where the report ran and
 what ran it, and nothing under it is a finding. Count it and the report
-opens with fourteen top-level lines; the thirteen below are the sections.
+opens with fifteen top-level lines; the fourteen below are the sections.
 
 | Section | What it shows |
 |---|---|
@@ -39,6 +39,7 @@ opens with fourteen top-level lines; the thirteen below are the sections.
 | `open pull requests` | open pull requests, via the same code path as `sd-pr-state` |
 | `detected setup` | mode (`full`/`minimal`/`guest`) and the detected check entrypoints |
 | `issues (this repo, from the index)` | indexed issues for this repository, split into the ones the index says need you and the rest |
+| `jira (shared database, all repositories)` | the operator's Jira involvement from the shared database, across every repository: one line per ticket, key and state, open rows first, then rows closed within seven days. Not scoped to the checkout |
 | `protection` | branch-protection **enforcement**, gap by gap, plus the two merge-settings flags |
 | `resumable handoffs` | the pending local packet for this directory (**read, never consumed**) and Lane B carrier branches on origin |
 | `backends` | which review backends are installed — names only |

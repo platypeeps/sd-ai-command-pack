@@ -1164,6 +1164,69 @@ def _database_issues(slug: str) -> dict[str, Any] | None:
             "freshness": freshness, "needs_you": [], "other": rows}
 
 
+#: A closed Jira row stops being re-seen once it leaves the collector's JQL
+#: window, so `last_seen` stops moving; past this many days the producer drops
+#: it, because a permanent list of every ticket ever closed is not a worklist
+#: (sd:361, design "Readers"). Open rows are never dropped.
+JIRA_CLOSED_DAYS = 7
+
+
+def jira_section() -> dict[str, Any]:
+    """The operator's Jira involvement, from the shared database, across every repository.
+
+    Not the issues section, and not scoped to the checkout: `issues_section`
+    returns `no GitHub remote` before any database is opened, its heading says
+    `this repo`, and a Jira row's `repo` is a project key that no committed
+    fact ties to a checkout. So this producer takes no root, never asks for
+    the slug, and reads `tracker_items` with no `repo` filter. The gate is
+    `_database_issues`'s: the library, then `default_path()`, then a
+    read-only connection; each absence is a reported reason in the same shape.
+
+    `state=None` because a close must be recorded, not hidden. The seven-day
+    rule on closed rows is applied here and not in the renderer, so the
+    `rows` list `--json` carries is the list the text prints.
+    """
+    imported = sd_lib.import_sd_db()  # the provisioned copy's second try, before the first import (sd:746)
+    try:
+        import sd_db
+        from sd_db.progress import tracker_freshness, tracker_items
+    except ImportError:  # a provisioned copy that will not import is named, not called absent
+        return {"available": False, "reason": imported.problem if imported.provisioned else "shared tracker library is not installed", "freshness": None, "rows": []}
+    if not sd_db.default_path().exists():
+        return {"available": False, "reason": "no shared database yet", "freshness": None, "rows": []}
+    try:
+        connection = sd_db.connect(write=False)
+        try:
+            rows = tracker_items(connection, tracker="jira", state=None)
+            freshness = tracker_freshness(connection, "jira")
+        finally:
+            connection.close()
+    except Exception as error:
+        return {"available": False, "reason": f"shared database unreadable: {error}", "freshness": None, "rows": []}
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=JIRA_CLOSED_DAYS)
+    return {"available": True, "reason": "", "source": "database", "freshness": freshness,
+            "rows": [row for row in rows if _jira_row_is_current(row, cutoff)]}
+
+
+def _jira_row_is_current(row: dict[str, Any], cutoff: datetime.datetime) -> bool:
+    """Open rows always; a closed row only while the collector saw it after `cutoff`.
+
+    A `last_seen` this cannot parse keeps the row: the column is the
+    library's own stamp, and hiding a row over a stamp this reader does not
+    understand would be a silent drop in the one place the cutoff is meant to
+    be visible.
+    """
+    if (row.get("state") or "").lower() != "closed":
+        return True
+    try:
+        seen = datetime.datetime.fromisoformat(str(row.get("last_seen") or ""))
+    except ValueError:
+        return True
+    if seen.tzinfo is None:
+        seen = seen.replace(tzinfo=datetime.timezone.utc)
+    return seen >= cutoff
+
+
 def contributions_section(root: pathlib.Path) -> dict[str, Any]:
     """Read the shared contribution projection without collecting or opening a writer."""
     imported = sd_lib.import_sd_db()  # the provisioned copy's second try, before the first import (sd:746)
@@ -3182,6 +3245,7 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "backends": backends_section(root),
         "residue": residue_section(root),
         "issues": issues_section(root),
+        "jira": jira_section(),
         "contributions": contributions_section(root),
     }
     inventory = actionable_inventory(root, result)
@@ -3515,6 +3579,7 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
         write(f"    {name:<6} {' '.join(argv)}\n")
 
     _render_issues(result["issues"], write)
+    _render_jira(result["jira"], write)
     _render_protection(result["protection"], write)
     _render_handoff(result["handoff"], write)
 
@@ -3582,6 +3647,39 @@ def _render_issues(issues: dict[str, Any], write: Any) -> None:
     for row in needs:
         write(f"    #{row['number']:<6} {', '.join(row['why']):<20} {row['title'][:60]}\n")
     write(f"  other open: {len(other)}\n")
+
+
+def _render_jira(section: dict[str, Any], write: Any) -> None:
+    write("\njira (shared database, all repositories)\n")
+    if not section["available"]:
+        write(f"  ! {section['reason']}\n")
+        return
+    # Keyed on `last_success_at`, not on the state word: `tracker_freshness`
+    # says `degraded`, not `never`, once one failed heartbeat exists, and an
+    # unconfigured Jira writes one every night.
+    freshness = section.get("freshness") or {}
+    if not freshness.get("last_success_at"):
+        reason = freshness.get("reason") or ""
+        write("  never collected" + (f" ({reason})" if reason else "") + "\n")
+    else:
+        write(f"  external context: {freshness['state']}; last successful sync "
+              f"{freshness['last_success_at']}\n")
+    rows = section["rows"]
+    if not rows:
+        write("  none\n")
+        return
+    # Every stored row, whatever the freshness line said: a truncated first
+    # run stored what it saw and the verb reported writing it. Open rows
+    # first; the producer has already limited the closed ones to seven days.
+    ordered = sorted(rows, key=lambda row: (row.get("state") or "").lower() != "open")
+    for row in ordered:
+        # The key is the URL tail and nothing formats `number`, which a Jira
+        # row does not have. The title is external text, quoted for the same
+        # reason `_render_contributions` quotes its rows: a newline or an
+        # escape in a Jira summary would otherwise print as a second heading.
+        key = str(row.get("url") or "").rpartition("/")[2]
+        state = (row.get("state") or "").lower()
+        write(f"  {key}  {state}  " + json.dumps(row.get("title"), ensure_ascii=False) + "\n")
 
 
 def render_parked(work: dict[str, Any], stream: TextIO) -> None:

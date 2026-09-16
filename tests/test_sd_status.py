@@ -1425,6 +1425,162 @@ class IssueSectionTests(StatusFixture):
         self.assertEqual(answer["other"], [])
 
 
+class JiraSectionTests(StatusFixture):
+    """The `jira` section: the operator's Jira involvement, across every repository.
+
+    sd:361 step 7. The issues section is "this repo": `issues_section` returns
+    `no GitHub remote` before any database is opened, and its renderer formats
+    `number`, which a Jira row does not have. So the Jira rows get their own
+    producer, which never looks at the checkout's slug, and their own
+    renderer, which formats the URL tail and never `number`. The fixture
+    database is the library's own, initialised under the temp HOME the
+    subprocess resolves, so no test here reads or writes the live store.
+    """
+
+    HEADING = "jira (shared database, all repositories)"
+
+    def seed(self, rows: list[dict[str, Any]], *, heartbeat: dict[str, Any] | None = None) -> None:
+        """Rows and an optional `tracker-sync:jira` heartbeat, through the library.
+
+        `last_seen` is the collector's clock and `upsert_shadow` stamps it
+        `now`; a row that must look older is aged afterwards with one UPDATE,
+        because no library write takes a stamp and the producer's cutoff is a
+        property of that column alone.
+        """
+        import sd_db
+
+        sd_db.initialise(home=self.home)
+        connection = sd_db.connect(home=self.home)
+        try:
+            for row in rows:
+                age = row.pop("age_days", None)
+                sd_db.writes.upsert_shadow(connection, tracker="jira", **row)
+                if age is not None:
+                    seen = (datetime.datetime.now(datetime.timezone.utc)
+                            - datetime.timedelta(days=age)).isoformat(timespec="seconds")
+                    with connection:
+                        connection.execute("UPDATE shadow SET last_seen = ? WHERE tracker = 'jira' AND url = ?",
+                                           (seen, row["url"]))
+            if heartbeat is not None:
+                sd_db.writes.record_state(connection, "heartbeat", key="tracker-sync:jira", body=heartbeat)
+        finally:
+            connection.close()
+
+    @staticmethod
+    def ticket(key: str, title: str, *, state: str = "open", **extra: Any) -> dict[str, Any]:
+        """A row as `sd_db.shadow_jira` writes it: no number, a browse URL, a project key for repo."""
+        return {"url": f"https://example.atlassian.net/browse/{key}", "repo": key.partition("-")[0],
+                "number": None, "kind": "issue", "title": title, "state": state, "author": "someone", **extra}
+
+    def section(self, text: str) -> str:
+        """The lines under the `jira` heading, up to the blank line before the next one."""
+        self.assertIn(f"\n{self.HEADING}\n", text)
+        return text.split(f"\n{self.HEADING}\n", 1)[1].split("\n\n", 1)[0] + "\n"
+
+    def test_a_row_with_no_number_prints_its_key_in_a_checkout_with_no_remote(self) -> None:
+        """(a) The regression for `#{row['number']:<6}` and for the slug gate.
+
+        No `with_github`: the fixture repo has no origin, so the issues section
+        answers `no GitHub remote` and, before this section existed, nothing
+        read a Jira row anywhere. `number` is NULL, so routing the row through
+        `_render_issues` is a `TypeError`.
+        """
+        self.seed([self.ticket("LOG-23818", "Benchmark harness")])
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertNotIn("Traceback", completed.stderr)
+        self.assertIn('  LOG-23818  open  "Benchmark harness"\n', self.section(completed.stdout))
+
+    def test_an_empty_tracker_says_never_collected_then_none(self) -> None:
+        """(b) No rows and no heartbeat: two lines, both about absence."""
+        self.seed([])
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual("  never collected\n  none\n", self.section(completed.stdout))
+
+    def test_a_partial_collect_shows_its_reason_and_the_rows_it_stored(self) -> None:
+        """(c) A truncated first run stores what it saw, and the reader says so.
+
+        `tracker_freshness` calls this `degraded`, not `never`, because a
+        failed heartbeat exists; the line is keyed on `last_success_at`, which
+        is still absent, so it reads `never collected (<reason>)`. The rows are
+        printed anyway: hiding them would contradict the verb that reported
+        writing them.
+        """
+        self.seed([self.ticket("LOG-1", "First"), self.ticket("LOG-2", "Second")],
+                  heartbeat={"ok": False, "reason": "collection time limit exhausted", "truncated": True})
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        block = self.section(completed.stdout)
+        self.assertTrue(block.startswith("  never collected (collection time limit exhausted)\n"), block)
+        self.assertIn('  LOG-1  open  "First"\n', block)
+        self.assertIn('  LOG-2  open  "Second"\n', block)
+
+    def test_a_closed_row_leaves_the_producer_after_seven_days(self) -> None:
+        """(d) The cutoff is the producer's, so `--json` cannot carry what the text hides."""
+        self.seed([self.ticket("LOG-8", "Eight days gone", state="closed", age_days=8),
+                   self.ticket("LOG-6", "Six days gone", state="closed", age_days=6)])
+        result = self.report()
+        self.assertEqual([row["url"].rpartition("/")[2] for row in result["jira"]["rows"]], ["LOG-6"])
+        completed = self.run_tool(SD_STATUS)
+        block = self.section(completed.stdout)
+        self.assertIn('  LOG-6  closed  "Six days gone"\n', block)
+        self.assertNotIn("LOG-8", completed.stdout)
+
+    def test_open_rows_print_before_closed_ones(self) -> None:
+        self.seed([self.ticket("LOG-3", "Done", state="closed"), self.ticket("LOG-4", "Live")])
+        block = self.section(self.run_tool(SD_STATUS).stdout)
+        self.assertLess(block.index("LOG-4  open"), block.index("LOG-3  closed"))
+
+    def test_a_title_with_terminal_controls_is_one_quoted_line(self) -> None:
+        """(e) The same rule `_render_contributions` is tested against.
+
+        A Jira summary is external text. Unquoted, the newline would print a
+        fifteenth heading and the escape would clear the terminal.
+        """
+        self.seed([self.ticket("LOG-5", "a\x1b[2Jb\nprotection")])
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn('  LOG-5  open  "a\\u001b[2Jb\\nprotection"\n', self.section(completed.stdout))
+        self.assertNotIn("\x1b", completed.stdout)
+        headings = self.headings(completed.stdout)
+        self.assertEqual(headings, ReportSectionTests.ORDER)
+        self.assertEqual(headings.count("protection"), 1)
+
+    def test_the_json_report_carries_the_section_and_its_rows(self) -> None:
+        """(f) Asserted on the parsed object, not on the text."""
+        self.seed([self.ticket("LOG-7", "Seven")])
+        result = self.report()
+        section = result["jira"]
+        self.assertTrue(section["available"])
+        self.assertEqual(section["reason"], "")
+        self.assertEqual(section["freshness"]["tracker"], "jira")
+        self.assertIsNone(section["freshness"]["last_success_at"])
+        [row] = section["rows"]
+        for key in ("url", "state", "title", "last_seen"):
+            self.assertIn(key, row)
+        self.assertEqual((row["url"].rpartition("/")[2], row["state"], row["title"]), ("LOG-7", "open", "Seven"))
+
+    def test_the_issues_section_still_says_no_github_remote(self) -> None:
+        """(g) The control: the fourteenth section changed nothing about the ninth."""
+        self.seed([self.ticket("LOG-9", "Nine")])
+        result = self.report()
+        self.assertEqual(result["issues"], {"available": False, "reason": "no GitHub remote",
+                                            "needs_you": [], "other": []})
+        completed = self.run_tool(SD_STATUS)
+        self.assertIn("\nissues (this repo, from the index)\n  ! no GitHub remote\n", completed.stdout)
+        self.assertIn("LOG-9", self.section(completed.stdout))
+
+    def test_no_shared_database_is_a_reported_gap(self) -> None:
+        """The same gate `_database_issues` uses, in the same shape the other sections report."""
+        completed = self.run_tool(SD_STATUS)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual("  ! no shared database yet\n", self.section(completed.stdout))
+        section = self.report()["jira"]
+        self.assertEqual(section, {"available": False, "reason": "no shared database yet",
+                                   "freshness": None, "rows": []})
+
+
 class ReadOnlyTests(StatusFixture):
     def test_nothing_under_the_temp_root_changes(self) -> None:
         self.with_github(pulls=[])
@@ -3796,6 +3952,8 @@ class ReportSectionTests(InventoryFixture):
             "issues": {"available": False, "reason": "no index",
                        "needs_you": [], "other": []},
             "contributions": {"available": False, "reason": "no shared database", "rows": []},
+            "jira": {"available": False, "reason": "no shared database yet",
+                     "freshness": None, "rows": []},
         }
         stream = io.StringIO()
         status.render(result, stream)
@@ -3812,13 +3970,14 @@ class ReportSectionTests(InventoryFixture):
         "abnormalities", "pending", "next", "open threads", "work items",
         "contributions (this repo, shared database order)",
         "open pull requests", "detected setup",
-        "issues (this repo, from the index)", "protection",
+        "issues (this repo, from the index)",
+        "jira (shared database, all repositories)", "protection",
         "resumable handoffs", "backends", "legacy residue",
     ]
 
     # -- the skeleton -------------------------------------------------------
 
-    def test_thirteen_headings_print_in_order_when_there_is_nothing_to_report(
+    def test_fourteen_headings_print_in_order_when_there_is_nothing_to_report(
         self,
     ) -> None:
         """The skeleton is fixed, so a missing section is a missing section.
@@ -3829,7 +3988,7 @@ class ReportSectionTests(InventoryFixture):
         """
         self.assertEqual(self.ORDER, self.headings(self.report()))
 
-    def test_the_same_thirteen_print_in_the_same_order_with_findings(self) -> None:
+    def test_the_same_fourteen_print_in_the_same_order_with_findings(self) -> None:
         self.item("2026-08-01-alpha", status="in_progress")
         self.assertEqual(self.ORDER, self.headings(self.report()))
 
