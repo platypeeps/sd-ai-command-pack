@@ -1,6 +1,6 @@
 """`WORKFLOW.md` is the policy, and the payload agrees with it.
 
-Five things drift silently and each has a test here.
+Six things drift silently and each has a test here.
 
 **The override keys.** The `CLAUDE.local.md` block the installer writes and the
 Overrides section of `WORKFLOW.md` describe the same set of keys. Neither is
@@ -24,6 +24,10 @@ archive is kept unchanged and holds every name the cuts removed.
 `openai` or `anthropic` as a bare token: a skill names a role or a registry
 entry, and the registry maps it to a vendor. The grep was once zero and nothing
 pinned it, so three tokens came back in `skills/sd-review/SKILL.md` unnoticed.
+
+**The skills that run a review.** Each names its point in the review table and
+reads the cap from the one rule file, and none carries a cap of its own. The
+skills are enumerated from what their pages invoke, not from a list kept here.
 """
 
 from __future__ import annotations
@@ -489,6 +493,69 @@ class BareVendorTokens(unittest.TestCase):
         ):
             with self.subTest(line=line):
                 self.assertEqual(bare_vendor_lines(line), [])
+
+
+#: A page runs a review when it invokes a reviewer: `sd-review` with its flags,
+#: or `sd-research-kit review`, the front of `bin/sd_research_review.py`.
+REVIEW_INVOCATION = re.compile(r"`sd-review --[a-z]|`?sd-research-kit review\b")
+
+#: A cap stated on a skill's own page, as a count of passes or a "cap of N".
+CAP_LITERAL = re.compile(r"\b[0-9]+ passes?\b|cap of [0-9]")
+
+
+def skills_that_run_a_review(root: pathlib.Path = REPO_ROOT) -> list[str]:
+    """The `skills/*/SKILL.md` pages that invoke a reviewer, from the index.
+
+    The rule is the invocation and not a mention: six pages name `sd-review`
+    as the lane that holds the verdict, or as what runs `sd-check`, and run
+    nothing. The reviewer's own page is in the set by name, so it stays there
+    even if its last flagged example is edited away.
+    """
+    names = [n for n in tracked_files("skills", root) if n.count("/") == 2 and n.endswith("/SKILL.md")]
+    found = {n for n in names if REVIEW_INVOCATION.search((root / n).read_text(encoding="utf-8"))}
+    return sorted(found | ({"skills/sd-review/SKILL.md"} & set(names)))
+
+
+def table_points(path: pathlib.Path = RULE) -> list[str]:
+    """The Point cell of every row of the review table, lower-cased."""
+    return [row.split("|")[2].strip().lower() for row in review_table(path)[2:]]
+
+
+class SkillsThatRunAReview(unittest.TestCase):
+    """sd:10 criterion 5, the table-reads clause: every skill that runs a
+    review names its point in the table and reads the cap from it.
+
+    The set is enumerated by `skills_that_run_a_review`, whose docstring
+    states the rule. A skill in the set links the one rule file that carries
+    the table, names one of that table's Point cells, and states no cap of its
+    own, so a cap changes in exactly one place. A page is compared with its
+    whitespace collapsed, because the pages hard-wrap and a point name may
+    span a line break.
+    """
+
+    def test_the_enumeration_finds_the_reviewer_and_the_skills_that_call_it(self):
+        skills = skills_that_run_a_review()
+        self.assertIn("skills/sd-review/SKILL.md", skills)
+        self.assertGreater(len(skills), 1, "no skill invokes the reviewer")
+
+    def test_every_skill_that_runs_a_review_links_the_rule_and_names_its_point(self):
+        points = table_points()
+        self.assertTrue(points)
+        for name in skills_that_run_a_review():
+            with self.subTest(skill=name):
+                text = " ".join((REPO_ROOT / name).read_text(encoding="utf-8").split())
+                self.assertIn(".claude/rules/sd-planning-adversarial-review.md", text,
+                              f"{name} runs a review and does not link the rule file")
+                self.assertTrue(any(point in text.lower() for point in points),
+                                f"{name} names none of the table's points: {points}")
+
+    def test_no_skill_that_runs_a_review_carries_a_cap_of_its_own(self):
+        for name in skills_that_run_a_review():
+            with self.subTest(skill=name):
+                lines = (REPO_ROOT / name).read_text(encoding="utf-8").splitlines()
+                rows = [f"{name}:{n}:{line.strip()}" for n, line in enumerate(lines, start=1)
+                        if CAP_LITERAL.search(line)]
+                self.assertEqual(rows, [], "a cap stated outside the table:\n" + "\n".join(rows))
 
 
 class StandingAuthorizationInventory(unittest.TestCase):
