@@ -1741,12 +1741,19 @@ def copy_tracked(destination: pathlib.Path) -> None:
         shutil.copy2(path, target)
 
 
-def exercise(mutation: Mutation) -> Outcome:
+def exercise(mutation: Mutation, tree: pathlib.Path) -> Outcome:
     """Run one mutation end to end in a private copy of this tree.
 
-    The protocol, in order: copy, run the named test clean, apply the mutation,
-    run it again, put the original text back, and prove the copy is identical to
-    this tree again.
+    The protocol, in order: run the named test clean in the copy, apply the
+    mutation, run it again, put the original text back, and prove the copy is
+    identical to this tree again.
+
+    **The copy is the caller's, made once per run and shared by every row**
+    (sd:431, owner decision Dec-6: per-row copying was linear in rows and
+    budgeted nowhere). Sharing is as strong as copying because the restore is
+    proved, not trusted: the `diff -rq` against this checkout runs after every
+    row, so a row that left a byte behind fails on its own restore instead of
+    handing the next row a tree that is no longer this one.
 
     **In a copy rather than in place, and the runner is the reason.**
     `.github/scripts/run-tests.sh` shards the suite across parallel workers, so
@@ -1759,26 +1766,48 @@ def exercise(mutation: Mutation) -> Outcome:
     remembered string.
     """
 
-    with tempfile.TemporaryDirectory() as scratch:
-        tree = pathlib.Path(scratch) / "tree"
-        copy_tracked(tree)
-        control = run_one_test(tree, mutation.test)
-        applied = edit(tree, mutation, violate=True)
-        violated = run_one_test(tree, mutation.test)
-        reverted = edit(tree, mutation, violate=False)
-        top = pathlib.PurePosixPath(mutation.path).parts[0]
-        identical = subprocess.run(
-            ["diff", "-rq", "-x", "__pycache__", "-x", "*.pyc",
-             str(tree / top), str(REPO_ROOT / top)],
-            capture_output=True, text=True)
-        printed = violated.stdout + violated.stderr
-        return Outcome(applied, reverted, control.returncode,
-                       violated.returncode, identical.returncode,
-                       printed[-2000:] + identical.stdout, printed)
+    control = run_one_test(tree, mutation.test)
+    applied = edit(tree, mutation, violate=True)
+    violated = run_one_test(tree, mutation.test)
+    reverted = edit(tree, mutation, violate=False)
+    top = pathlib.PurePosixPath(mutation.path).parts[0]
+    identical = subprocess.run(
+        ["diff", "-rq", "-x", "__pycache__", "-x", "*.pyc",
+         str(tree / top), str(REPO_ROOT / top)],
+        capture_output=True, text=True)
+    printed = violated.stdout + violated.stderr
+    return Outcome(applied, reverted, control.returncode,
+                   violated.returncode, identical.returncode,
+                   printed[-2000:] + identical.stdout, printed)
+
+
+#: The first control's edit: a docstring phrase in the file `R10-D6` mutates,
+#: run through that row's test. It violates no rule, so the test stays green.
+DOCSTRING_SENTINEL = Mutation(
+    path="bin/sd_work.py",
+    old="Which checkout `--belongs-to` names",
+    new="Which checkout the misfiling flag names",
+    test="tests.test_verb_inventory.InventoryTests"
+         ".test_no_command_accepts_a_repository_path")
 
 
 class LegD(unittest.TestCase):
     """A checker that exists and enforces nothing."""
+
+    tree: pathlib.Path
+
+    @classmethod
+    def setUpClass(cls):
+        """One private copy of the tracked tree for the whole run.
+
+        Under the system's temporary directory, never this checkout, and
+        removed when the class is done. `TheSharedCopy` counts it.
+        """
+
+        scratch = tempfile.mkdtemp(prefix="leg-d-")
+        cls.addClassCleanup(shutil.rmtree, scratch, ignore_errors=True)
+        cls.tree = pathlib.Path(scratch) / "tree"
+        copy_tracked(cls.tree)
 
     def test_every_live_checker_carries_a_mutation(self):
         """The coverage is enumerated from the registry, never from the table.
@@ -1912,7 +1941,7 @@ goes red, or a reader following it runs something else.""")
 
         for location, mutation in sorted(MUTATIONS.items()):
             with self.subTest(checker=location):
-                outcome = exercise(mutation)
+                outcome = exercise(mutation, self.tree)
                 self.assertEqual(outcome.applied, 1, f"""
 The mutation for {location} did not match exactly once in {mutation.path}.
 
@@ -1964,13 +1993,8 @@ The copy did not come back identical after {location}'s mutation.
         the control below is what proves it refuses them.
         """
 
-        sentinel = Mutation(
-            path="bin/sd_work.py",
-            old="Which checkout `--belongs-to` names",
-            new="Which checkout the misfiling flag names",
-            test="tests.test_verb_inventory.InventoryTests"
-                 ".test_no_command_accepts_a_repository_path")
-        outcome = exercise(sentinel)
+        sentinel = DOCSTRING_SENTINEL
+        outcome = exercise(sentinel, self.tree)
         self.assertEqual(outcome.applied, 1, "the sentinel edit did not land")
         self.assertEqual(outcome.control, 0, f"already red: {outcome.report}")
         self.assertEqual(outcome.violated, 0, f"""
@@ -1999,7 +2023,7 @@ until this passes.
 
         guard = MUTATIONS["bin/sd_setup_github.py::setup_github"]
         sentinel = guard._replace(new=f"{guard.old} ((((")
-        outcome = exercise(sentinel)
+        outcome = exercise(sentinel, self.tree)
         self.assertEqual(outcome.applied, 1, "the sentinel edit did not land")
         self.assertEqual(outcome.control, 0, f"already red: {outcome.report}")
         self.assertNotEqual(outcome.violated, 0, f"""
@@ -2022,6 +2046,31 @@ fails this control, which is why it exists.
 {outcome.report}""")
         self.assertEqual(outcome.restored, 0, "the copy did not come back")
 
+    def test_a_byte_left_in_the_shared_copy_fails_the_restore_proof(self):
+        """The third control, and the one that makes sharing the copy safe.
+
+        Every row starts from the tree the row before it restored, so the
+        restore has to be proved after each row. A newline is appended to the
+        sentinel's file -- it still imports, so the control run stays green and
+        only the `diff -rq` can notice -- and `restored` has to be non-zero.
+        The byte is removed again here, so later rows start from this checkout.
+        """
+
+        target = self.tree / DOCSTRING_SENTINEL.path
+        pristine = target.read_bytes()
+        try:
+            target.write_bytes(pristine + b"\n")
+            outcome = exercise(DOCSTRING_SENTINEL, self.tree)
+        finally:
+            target.write_bytes(pristine)
+        self.assertEqual(outcome.control, 0, f"already red: {outcome.report}")
+        self.assertNotEqual(outcome.restored, 0, """
+A byte left in the shared copy passed the restore proof.
+
+The next row would have started from a tree that is not this checkout, and
+nothing would have said so. Sharing one copy across rows is sound only while
+this proof runs after every row.""")
+
     def test_a_mutation_cannot_edit_outside_the_copy(self):
         """`edit` refuses a path that leaves the private tree.
 
@@ -2042,6 +2091,35 @@ fails this control, which is why it exists.
                     with self.assertRaises(ValueError) as caught:
                         edit(tree, escape, violate=True)
                     self.assertIn("outside the copy", str(caught.exception))
+
+
+class TheSharedCopy(unittest.TestCase):
+    """Leg d copies the tracked tree once per run, not once per row."""
+
+    def test_the_leg_copies_the_tree_once_for_every_row_and_control(self):
+        """The count is measured on a real run, with the copy left real.
+
+        `copy_tracked` is wrapped, never replaced, and the leg has to pass, or
+        a leg that copied nothing would count as one that copied once. Before
+        the copy was shared this read five: three rows and two controls.
+        """
+
+        module = sys.modules[__name__]
+        suite = unittest.TestSuite(LegD(name) for name in (
+            "test_every_live_checker_reddens_when_its_rule_is_violated",
+            "test_a_mutation_that_violates_nothing_leaves_the_checker_green",
+            "test_a_child_that_never_ran_the_test_does_not_read_as_enforcement"))
+        result = unittest.TestResult()
+        with mock.patch.object(module, "copy_tracked", wraps=copy_tracked) as copies:
+            suite.run(result)
+        self.assertTrue(result.wasSuccessful(), _lines(
+            trace for _, trace in result.failures + result.errors))
+        self.assertEqual(copies.call_count, 1, f"""
+Leg d copied the tracked tree {copies.call_count} times in one run.
+
+One copy per run is the budget: every row runs clean, mutates, reddens and
+restores in the same tree, and the `diff -rq` proof after each restore is what
+lets the next row start from the bytes this checkout has.""")
 
 
 if __name__ == "__main__":  # pragma: no cover - the suite runs this by module

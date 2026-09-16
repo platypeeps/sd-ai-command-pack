@@ -121,6 +121,13 @@
          budget. Sharing the copy removes most of the cost without weakening
          the leg — each row still runs clean, mutates, reddens and restores —
          and step 7 needs a stated budget in any case.
+         **Landed 2026-09-16, slice C.** `LegD.setUpClass` makes the copy once
+         and `source:tests/test_rule_registry.py::exercise` takes it as an
+         argument; `source:tests/test_rule_registry.py::TheSharedCopy` counts
+         one copy over three rows and two controls, and read five on the base.
+         The restore proof after every row is what keeps sharing as strong as
+         copying, and a third control leaves a byte in the copy and requires
+         that proof to fail. The budget is in `design.md`'s leg d decision.
 
       `R10-D6` is a row on that basis. Its checker is
       `tests/test_verb_inventory.py::test_no_command_accepts_a_repository_path`,
@@ -399,3 +406,10 @@ the rest of it.
 is a live rule or a historical decision is a judgement, not a check. Step 4
 records the decision per id in the registry row; nothing can test that the
 judgement was right.
+
+**Log 2026-09-16, slice C (leg d, Dec-6).** `LegD` timed with one command
+each on this machine, `/usr/bin/time -p .venv/bin/python -m unittest
+tests.test_rule_registry.LegD`: before, on `b4211959`, real 6.81 s for 8 tests
+at load average 39.25; after, real 2.72 s for 9 tests at load average 32.26.
+The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
+1306 tracked files, once per run now instead of once per row or control.
