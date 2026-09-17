@@ -209,7 +209,7 @@ implementations.**
 | Tier | Scope | What runs |
 |---|---|---|
 | authoring | the file being written | the skill consults the registry and names the rule ids in scope |
-| pre-commit | the staged files for Ruff; whole for the two test passes | `.githooks/pre-commit`: Ruff over the staged Python, then `tests.test_code_health` and `tests.test_doc_citations` whole; `bin/sd-docs-lint` not run (step 7, 2026-09-16) |
+| pre-commit | the staged files for Ruff; whole for the two test passes | `hooks/pre-commit`: Ruff over the staged Python, then `tests.test_code_health` and `tests.test_doc_citations` whole; `bin/sd-docs-lint` not run (step 7, 2026-09-16) |
 | CI | the repository | full run with baselines, the backstop |
 
 ### The item has diff-scoping backwards, and the clock says so
@@ -398,8 +398,8 @@ apply to the checkers the item aims it at.
   7.39; `tests.test_doc_citations` real 3.41 / 3.38 / 3.33 s at load 9.91 /
   8.75 / 7.39; `bin/sd-docs-lint` real 20.34 / 21.85 / 21.65 s at load 9.91 /
   8.75 / 7.52, with 2.0 s of user+sys CPU on each run. The assembled hook on a
-  one-file diff, a line appended to a skill page and staged, read real 5.22 /
-  5.15 / 5.30 s at load 9.75 / 9.13 / 8.96. No ratio between runs at
+  one-file diff, a line appended to a skill page and staged, read real 5.26 /
+  5.07 / 5.01 s at load 7.47 / 7.60 / 7.55. No ratio between runs at
   different loads is claimed. The decision, in three parts. (1) **The code
   checkers run whole in the hook, and so does the citation pass.** The 2 s
   reversal trigger above did not fire on these readings: the code pass is
@@ -427,7 +427,21 @@ apply to the checkers the item aims it at.
   load under 10, at which point the slower pass is dropped from the hook and
   left to CI, not diff-scoped, since neither has such a form. The hook is
   Python, not shell: `tests/test_no_shipped_shell.py` allows tracked shell
-  under `.github/scripts/` only.
+  under `.github/scripts/` only. **The layout dodges the pack's own residue
+  detector.** `bin/sd-status` carries a `RESIDUE` row for a `.githooks`
+  directory and a `hooks-path` row for any `core.hooksPath` set, each with a
+  removal command (`git config --unset core.hooksPath; git rm -r
+  --ignore-unmatch .githooks`), because those two were the retired gate
+  stack's signatures in every consumer. A hook installed the conventional way
+  would have matched both rows in this checkout, and the pack's status tool
+  would have told the operator to delete the pack's hook. So the file is
+  tracked as `hooks/pre-commit`, a visible directory the detector does not
+  glob, and `make hooks` installs it as the relative link
+  `.git/hooks/pre-commit -> ../../hooks/pre-commit` in the directory git
+  names, refusing by name to replace anything else at that path;
+  `core.hooksPath` is never set. `tests/test_pre_commit_hook.py` runs
+  `residue_section` from `bin/sd-status` over a checkout laid out this way,
+  after `make hooks`, and requires neither row; the detector is not edited.
 - **2026-09-12 — the meta-check lands before any rule.** A registry with zero
   rows must pass its own tests. This makes step 1 independently landable and
   independently green.

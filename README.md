@@ -239,14 +239,18 @@ or `--pull` without the flag links there again; a link already pointing into
 this checkout is kept as it is, and anything at a link's path that is not such
 a link makes `--user` refuse by name and write nothing.
 
-If you commit to this checkout, `make hooks` arms the pre-commit tier: it sets
-`core.hooksPath` to `.githooks`, whose `pre-commit` runs Ruff over the staged
-Python and the two whole-tree test passes (`tests.test_code_health`,
-`tests.test_doc_citations`) in about five seconds, and prints its own wall time
-against the budget its header states. `SD_SKIP_HOOKS=1 git commit` skips it
-with a notice. This is a setting of the clone, not a render, so `--user` does
-not set it and `--uninstall` does not remove it; `bin/sd_install.py` is
-unchanged, and folding the hook into `--user` is the owner's call.
+If you commit to this checkout, `make hooks` arms the pre-commit tier: it
+links `.git/hooks/pre-commit` to the tracked `hooks/pre-commit`, which runs
+Ruff over the staged Python and the two whole-tree test passes
+(`tests.test_code_health`, `tests.test_doc_citations`) in about five seconds
+and prints its own wall time against the budget its header states.
+`SD_SKIP_HOOKS=1 git commit` skips it with a notice. The link is relative and
+the target refuses to replace anything else already at that path; it never
+sets `core.hooksPath` and the directory is not `.githooks/`, because
+`sd-status` reports both of those as the retired gate stack's residue. This is
+a setting of the clone, not a render, so `--user` does not make it and
+`--uninstall` does not remove it; `bin/sd_install.py` is unchanged, and folding
+the hook into `--user` is the owner's call.
 
 ### What it owns, and what it will not touch
 

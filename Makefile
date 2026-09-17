@@ -11,15 +11,25 @@ setup:
 	"$(VENV_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
 	"$(VENV_PYTHON)" bin/sd_install.py --provision-library
 
-# The pre-commit tier of sd:431. `.githooks/pre-commit` runs Ruff over the
-# staged Python and the two whole-tree test passes that walk the tree, with a
-# wall-time budget in its header; `git config core.hooksPath .githooks` is all
-# the install is, and it is a local setting of this clone, not a render. The
-# installer does not set it; the owner may fold it into `--user` later.
-# `SD_SKIP_HOOKS=1 git commit` skips the hook with a notice.
+# The pre-commit tier of sd:431. `hooks/pre-commit` runs Ruff over the staged
+# Python and the two whole-tree test passes that walk the tree, with a
+# wall-time budget in its header. The install is one relative symlink,
+# .git/hooks/pre-commit -> ../../hooks/pre-commit, in the hooks directory git
+# names (`.git/hooks` here; a worktree shares the main checkout's). Not
+# `.githooks/` and not `core.hooksPath`: those are the retired gate stack's
+# signatures, and bin/sd-status reports each as residue with a removal
+# command, so the pack's own hook must not wear them. A file already at the
+# path that is not this link is refused by name and left alone. This is a
+# setting of the clone, not a render: the installer does not make it, and
+# folding it into `--user` is the owner's call. `SD_SKIP_HOOKS=1 git commit`
+# skips the hook with a notice.
 hooks:
-	git config core.hooksPath .githooks
-	@printf '%s\n' "git hooks: $$(git config --get core.hooksPath)/pre-commit"
+	@dir="$$(git rev-parse --git-path hooks)"; link="$$dir/pre-commit"; target=../../hooks/pre-commit; \
+	if { [ -e "$$link" ] || [ -L "$$link" ]; } && [ "$$(readlink "$$link")" != "$$target" ]; then \
+		printf '%s\n' "error: $$link exists and is not the link to hooks/pre-commit; move it aside first" >&2; \
+		exit 1; \
+	fi; \
+	mkdir -p "$$dir" && ln -sfn "$$target" "$$link" && printf '%s\n' "git hooks: $$link -> $$(readlink "$$link")"
 
 # `generate` and `surface-check` are gone with step 3e. They regenerated the
 # committed per-platform copies under templates/ from .github/command-sources/,

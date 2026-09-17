@@ -145,6 +145,51 @@ class TheHookRun(unittest.TestCase):
         self.assertRegex(output, r"pre-commit: ok in \d+\.\d\d s \(budget \d+ s\)")
         self.assertIn("in this checkout; not run", output)
 
+    def test_a_staged_path_fixed_in_the_working_tree_but_not_restaged_is_refused(self):
+        """The gates read the working tree; the commit holds the index (#1014 review).
+
+        Staging a bad file and then fixing it without `git add` would pass a
+        hook that reads the working tree while the commit still carried the
+        bad blob. The hook refuses the state by name instead.
+        """
+        self.stage("bad.py", "import os\n")
+        (self.root / "bad.py").write_text("x = 1\n", encoding="utf-8")
+        result = self.run_hook()
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("1 staged path(s) differ from the working tree", output)
+        self.assertIn("bad.py", output)
+        self.assertNotIn("F401", output, "Ruff ran on the working-tree copy")
+
+    def stub_passes(self, failing: str | None = None) -> None:
+        """The two whole-tree modules the hook names, as stubs, one failing if asked."""
+        (self.root / "tests").mkdir()
+        for name in ("test_code_health", "test_doc_citations"):
+            verdict = "self.fail('stub red')" if name == failing else "pass"
+            (self.root / "tests" / f"{name}.py").write_text(
+                "import unittest\n\n\nclass Stub(unittest.TestCase):\n"
+                f"    def test_stub(self):\n        {verdict}\n",
+                encoding="utf-8",
+            )
+
+    def test_the_whole_tree_passes_run_when_their_modules_exist(self):
+        self.stub_passes()
+        self.stage("ok.py", "x = 1\n")
+        result = self.run_hook()
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("Ran 2 tests", output)
+        self.assertNotIn("not run", output)
+
+    def test_a_red_whole_tree_pass_fails_the_commit_with_its_status(self):
+        self.stub_passes(failing="test_doc_citations")
+        self.stage("ok.py", "x = 1\n")
+        result = self.run_hook()
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("stub red", output)
+        self.assertIn("pre-commit: failed, status 1", output)
+
 
 def scratch_checkout(prefix: str) -> pathlib.Path:
     """A repository laid out as this one is for hooks: `hooks/pre-commit` tracked."""
@@ -191,7 +236,8 @@ class TheLayout(unittest.TestCase):
         self.assertTrue(link.is_symlink(), f"{link} is not a symlink")
         self.assertEqual(os.readlink(link), LINK_TARGET)
         self.assertTrue(link.resolve().samefile(self.root / "hooks" / "pre-commit"))
-        self.assertIn(f"{link} -> {LINK_TARGET}", result.stdout)
+        # The path is printed as git names it, relative to the checkout.
+        self.assertIn(f"git hooks: .git/hooks/pre-commit -> {LINK_TARGET}", result.stdout)
         again = self.make_hooks()
         self.assertEqual(again.returncode, 0, "a second run over its own link must pass")
 
@@ -201,7 +247,7 @@ class TheLayout(unittest.TestCase):
         link.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         result = self.make_hooks()
         self.assertNotEqual(result.returncode, 0, result.stdout)
-        self.assertIn(str(link), result.stderr)
+        self.assertIn(".git/hooks/pre-commit exists and is not the link", result.stderr)
         self.assertFalse(link.is_symlink(), "the stranger was replaced")
         self.assertEqual(link.read_text(encoding="utf-8"), "#!/bin/sh\nexit 0\n")
 
