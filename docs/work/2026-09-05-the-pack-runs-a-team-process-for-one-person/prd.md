@@ -4685,8 +4685,9 @@ from a number the operator types.
     policy docstring is the analogue for stating what counts as a skill use in
     a transcript and why a nightly does not re-read; 21 for the deferred-`sd_db`
     frame at `bin/sd_restore.py:50-51`, `:54-67` and `:70-74`; 30 for
-    enumerating a directory of state files at `dashboard/sessions.py:45-74`
-    `read_worktrees`; 46 for the per-line JSONL parse with its damaged-line
+    enumerating a directory of state files at lines 45-74 of
+    `dashboard/sessions.py` at `85c4fa1b` `read_worktrees` (the module retired
+    at sd:719 step 5); 46 for the per-line JSONL parse with its damaged-line
     policy at `bin/sd_ledger.py:143-188` `acked`; 54 for deriving fields at
     lines 229-282 of `dashboard/jira.py` at `2a2dbad6` `normalize`, the larger of the two built
     normalisers because recognising an invocation inside a transcript is a

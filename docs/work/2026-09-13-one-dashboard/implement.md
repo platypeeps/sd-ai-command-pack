@@ -405,7 +405,7 @@ before starting step 2.
       (still live, not archived) were rewritten in prose; `prd.md`'s Log
       lists the count.
 
-- [ ] **5. Repos and Sessions.** System commit, then pack commit deleting
+- [x] **5. Repos and Sessions.** System commit, then pack commit deleting
       `dashboard/sessions.py`, `dashboard/skills.py` and `dashboard/collect.py` —
       which is the repository collector, named as a path here because step 4's
       draft also claimed it and two steps cannot delete one file. Cheapest of the
@@ -431,6 +431,56 @@ before starting step 2.
       page listed, compared row for row on one capture taken **before** step 5's
       system commit — a comparison nobody can make afterwards, which is why the
       capture is part of the step and not of its verification.
+
+      **Landed as system pull request #427, squash `051d931a`, then the pack
+      deletion, this pull request.** The capture was taken first: at
+      2026-09-16T22:19:37Z, pack `b4211959`, the s5sys lane called
+      `collect.build_state` and `sessions.collect_sessions` in-process — 81
+      repos (3 dirty, 2 ahead), 14 worktrees across 4 checkouts — and compared
+      the rows against `sd_dashboard/fleet.py` twelve minutes later: 81 rows
+      against 81, 78 identical in all eleven fields and 7 cells on 3 rows
+      changed by commits and fetches git's reflog dates to the gap; 13
+      worktrees against 14, the one missing row a lane whose worktree was
+      removed between the reads. Operations > Repos and Sessions on :8767 is
+      that lane's commit, read as a budgeted child (12 s, 64 KB). The pack
+      commit deleted `dashboard/collect.py`, `dashboard/sessions.py`,
+      `dashboard/skills.py` and their two test modules, the `/api/state`,
+      `/api/sessions` and `/api/skills` routes, the state cache in front of
+      the first, the three tabs in `PAGE` and the three views in `app.js` that
+      polled them. `discover_checkouts` did not go: `dashboard/work.py` imports
+      it as `from .collect import discover_checkouts`, a fourth import shape
+      the step's grep did not name and step 4's `ast` walk read as an import
+      of the *symbol*, so the function moved into `work.py` (its one caller
+      left, with `checkout_of`) and the walk in `tests/test_sd_dashboard.py`
+      now reads `from .<module> import` as naming the module. `/api/now`
+      still answers, with no fleet rows and no worktree rows: `backbone_rows`
+      and `session_rows` (`source:dashboard/now.py::session_rows`) join
+      `pr_rows` uncalled until step 6 decides Now on the system page, and the
+      pack's Now shows the ack filter over an empty merge. `dashboard/actions.py`
+      stays whole: its only mention of `/api/state?refresh=1` is the docstring
+      contrasting this server with the one it replaced, and the `/api/actions`
+      and `/api/run` routes it serves are step 6's. **Two sentences in the
+      step text above were stale when this landed.** `bin/sd` has no
+      `--fleet` and no `dashboard.collect` import — `grep -n
+      'dashboard.collect\|--fleet' bin/sd` at `85c4fa1b` returns only a
+      comment naming `local-project-dashboard/collectors.py` — so `sd plugin
+      list --fleet` lost nothing here, and the four line numbers the step
+      gives into `dashboard/server.py` (43, 490, 495, 502) had already moved
+      by step 4's deletion: at the base the import line stood at line 43 and
+      the three calls at lines 462, 467 and 474. `bin/sd-dashboard` had no verb and no
+      import to lose. `DASHBOARD_CODE_CAP` fell from 1,183 to 866 against
+      866 measured, 317 code lines gone under `dashboard/` (`collect.py` 86,
+      `sessions.py` 66, `skills.py` 50, `app.js` 102, `server.py` 26, less
+      the 13 of `discover_checkouts` that moved into `work.py`), the third fall
+      `CEILING_HISTORY` records; `DASHBOARD_CAP` did not move.
+      `AMBIGUOUS_CEILING` fell from 124 to 121. The one `path:line` into a
+      deleted file in a live document, lines 45-74 of `dashboard/sessions.py`
+      cited on
+      `docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md`,
+      was pinned at `85c4fa1b` in prose; `README.md` and
+      `AGENTS.md` name none of the three views. The :8767 pages after
+      `~/deploy-sd-db.sh` are the owner's to read and were not read by this
+      commit.
 
 - [ ] **6. The Now ranking, last.** System commit, then pack commit deleting
       `dashboard/now.py`, `dashboard/actions.py`, `dashboard/work.py`,
@@ -660,3 +710,6 @@ before starting step 2.
 - 2026-09-16 step 4 landed: system pull request #411 (`fe556f4`), pin #999
   (`c6879551`), then the pack deletion. Step 4 is ticked with the measurement
   above; `DASHBOARD_CODE_CAP` reads 1,183.
+- 2026-09-16 step 5 landed: the capture at pack `b4211959`, system pull
+  request #427 (`051d931a`), then the pack deletion. Step 5 is ticked with the
+  measurement above; `DASHBOARD_CODE_CAP` reads 866.

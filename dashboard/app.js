@@ -1,13 +1,9 @@
 // The whole client. One file, no build step, no framework: the page polls
-// /api/state and redraws a table, and anything more elaborate would be a
-// toolchain to maintain for a view that fits on one screen.
-const rows = document.getElementById("rows");
+// two routes and redraws two tables, and anything more elaborate would be a
+// toolchain to maintain for a view that fits on one screen. The Repos, Skills
+// and Sessions views went at sd:719 step 5 with the routes they polled; the
+// system dashboard's Operations > Repos and Sessions show the fleet now.
 const sub = document.getElementById("sub");
-const skillRows = document.getElementById("skill-rows");
-const skillSub = document.getElementById("skill-sub");
-const sessionTrees = document.getElementById("session-trees");
-const sessionProcs = document.getElementById("session-procs");
-const sessionSub = document.getElementById("session-sub");
 const workMoving = document.getElementById("work-moving");
 const workUnstated = document.getElementById("work-unstated");
 const workSub = document.getElementById("work-sub");
@@ -21,11 +17,6 @@ const cell = (text, cls) => {
   if (cls) td.className = cls;
   return td;
 };
-
-const num = (value, cls) =>
-  // null means "no upstream to compare against", which is not zero. Showing a
-  // dash keeps the page from inventing a divergence the repo never reported.
-  cell(value === null || value === undefined ? "–" : String(value), value ? `n ${cls}` : "n");
 
 // One GET, or the sub-line saying it did not happen. Five views wrote this
 // same seven lines, and the copy is not the cost -- the cost is that a view
@@ -45,31 +36,9 @@ async function payloadFor(route, subLine) {
   }
 }
 
-async function draw() {
-  const state = await payloadFor("/api/state", sub);
-  if (state === null) return;
-  sub.textContent = state.rootExists
-    ? `${state.counts.repos} repos under ${state.root} · ${state.counts.dirty} dirty · ${state.counts.ahead} ahead`
-    : `no such directory: ${state.root} — check SD_REPO_ROOT`;
-  rows.replaceChildren();
-  for (const repo of state.repos) {
-    const tr = document.createElement("tr");
-    tr.append(
-      cell(repo.name),
-      cell(repo.group === "." ? "" : repo.group),
-      cell(repo.branch),
-      num(repo.dirty, "dirty"),
-      num(repo.ahead, "ahead"),
-      num(repo.behind),
-      cell(repo.last),
-      cell(repo.subject),
-    );
-    rows.append(tr);
-  }
-}
-
-draw();
-setInterval(draw, 30000);
+// The sub-line under the title used to carry the fleet counts from
+// /api/state. With that route gone it says what this page still is.
+sub.textContent = "now and work; the fleet is on the system dashboard";
 
 // --- work ---------------------------------------------------------------
 // Two tables rather than one, because the second is not a subset of the first:
@@ -166,93 +135,13 @@ async function drawWork() {
   }
 }
 
-// --- skills --------------------------------------------------------------
-// Two directories and the gap between them. Nothing keeps `skills/` and
-// ~/.claude/skills in step -- installing is a deliberate act -- so the gap is
-// the view, not a fault to hide.
-
-async function drawSkills() {
-  const payload = await payloadFor("/api/skills", skillSub);
-  if (payload === null) return;
-  const seen = payload.counts;
-  skillSub.textContent = payload.installedExists
-    ? `${seen.shipped} ship here \u00b7 ${seen.installed} installed in ` +
-      `${payload.installedAt} \u00b7 ${seen.unadopted} not installed \u00b7 ` +
-      `${seen.foreign} installed from elsewhere`
-    : `${seen.shipped} ship here \u00b7 nothing installed at ${payload.installedAt}`;
-  skillRows.replaceChildren();
-  if (!payload.skills.length) {
-    emptyRow(skillRows, 4, "no skills anywhere");
-    return;
-  }
-  for (const skill of payload.skills) {
-    const tr = document.createElement("tr");
-    // The one row shape worth emphasising: shipped here and not installed
-    // means the agent cannot reach a skill this repository thinks it has.
-    if (skill.shipped && !skill.installed) tr.className = "you";
-    tr.append(
-      cell(skill.name),
-      cell(skill.shipped ? "yes" : ""),
-      cell(skill.installed ? "yes" : ""),
-      cell(skill.description),
-    );
-    skillRows.append(tr);
-  }
-}
-
-// --- sessions ------------------------------------------------------------
-// No ledger replaces `.runtime/sessions`: a worktree is registered in git's
-// own directory and a running command is in the process table, and both are
-// already true without anything having written them down.
-
-async function drawSessions() {
-  const payload = await payloadFor("/api/sessions", sessionSub);
-  if (payload === null) return;
-  sessionSub.textContent =
-    `${payload.counts.worktrees} worktree${payload.counts.worktrees === 1 ? "" : "s"}` +
-    ` \u00b7 ${payload.abandoned} abandoned \u00b7 ` +
-    `${payload.counts.processes} sd-* running`;
-
-  sessionTrees.replaceChildren();
-  if (!payload.worktrees.length) {
-    emptyRow(sessionTrees, 5, "no worktrees registered anywhere in the fleet");
-  } else {
-    for (const tree of payload.worktrees) {
-      const tr = document.createElement("tr");
-      if (!tree.live) tr.className = "you";
-      tr.append(
-        cell(tree.repo),
-        cell(tree.name),
-        cell(tree.branch),
-        cell(tree.live ? "live" : "abandoned"),
-        cell(tree.path),
-      );
-      sessionTrees.append(tr);
-    }
-  }
-
-  sessionProcs.replaceChildren();
-  if (!payload.processes.length) {
-    emptyRow(sessionProcs, 3, "nothing sd-* is running");
-  } else {
-    for (const proc of payload.processes) {
-      const tr = document.createElement("tr");
-      tr.append(cell(proc.pid), cell(proc.elapsed), cell(proc.command));
-      sessionProcs.append(tr);
-    }
-  }
-}
-
 // --- tabs ---------------------------------------------------------------
 // The tabs are fixed. Plugin tabs, which arrived from the registry and were
 // rebuilt on every poll, went with the plugin loader at sd:719 step 3.
 
 const STATIC = [
   ["tab-now", "panel-now"],
-  ["tab-repos", "panel-repos"],
   ["tab-work", "panel-work"],
-  ["tab-skills", "panel-skills"],
-  ["tab-sessions", "panel-sessions"],
 ];
 const tabs = STATIC;
 
@@ -269,9 +158,9 @@ function wire(button) {
 }
 
 for (const [button] of STATIC) wire(button);
-// Skills is 138 rows and asks for the filter by attribute, so the panels go
-// through `enhance` once at startup. Step 6 of sd:719 retires it with this
-// file.
+// Skills was 138 rows and asked for the filter by attribute, so the panels go
+// through `enhance` once at startup; no panel left asks, and step 6 of sd:719
+// retires it with this file.
 for (const [, panel] of STATIC) enhance(document.getElementById(panel));
 select("tab-now");
 
@@ -389,11 +278,9 @@ function band(rank) {
 
 // A row links to the backbone panel its source names, and to nothing else. A
 // source with no panel here renders unlinked: sending a reader to a tab that is
-// not on screen is a disappearance one layer along.
-const BACKBONE_PANELS = {
-  repos: "panel-repos",
-  sessions: "panel-sessions",
-};
+// not on screen is a disappearance one layer along. Repos and Sessions left
+// this page at sd:719 step 5, so nothing links anywhere until step 6.
+const BACKBONE_PANELS = {};
 
 function destination(row) {
   return BACKBONE_PANELS[row.source] || "";
@@ -493,14 +380,6 @@ async function drawNow() {
 
 drawWork();
 setInterval(drawWork, 30000);
-
-drawSkills();
-// Slower than the rest on purpose: two directory listings answer a question
-// whose answer changes when somebody runs an installer, not on a timer.
-setInterval(drawSkills, 120000);
-
-drawSessions();
-setInterval(drawSessions, 30000);
 
 drawNow();
 // Faster than the tables: Now is the view that is watched.

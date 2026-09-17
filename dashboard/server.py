@@ -22,7 +22,11 @@ page.
 The PRs and Issues tabs, and the `/api/issues` and `/api/prs` endpoints that
 read the legacy index for them, retired with sd:719 step 4: the system
 dashboard's Operations > Trackers area serves both from `sd_db.shadow`, and
-nothing here opens a database.
+nothing here opens a database. The Repos, Sessions and Skills tabs, and the
+`/api/state`, `/api/sessions` and `/api/skills` endpoints behind them, retired
+with step 5: Operations > Repos and Sessions on the system dashboard read the
+fleet through `sd_dashboard/fleet.py`, and the collectors here went with their
+routes. What is left is Now and Work, which step 6 takes with this file.
 """
 
 from __future__ import annotations
@@ -40,7 +44,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import actions, collect, now, sessions, skills, work
+from . import actions, now, work
 
 # Per process, in memory, never written down. A restart invalidates it, which
 # is correct: the page fetches it with the page, and a token that outlived the
@@ -83,7 +87,6 @@ DEFAULT_PORT = 8767
 # request this server has a shape for, and reading it would be reading it.
 BODY_BYTES = 4096
 DEFAULT_HOST = "127.0.0.1"
-CACHE_SECONDS = 20
 
 def tailnet_names() -> set[str]:
     """This node's own MagicDNS names, or nothing.
@@ -310,26 +313,14 @@ PAGE = """<!doctype html>
 <nav role="tablist" aria-label="views">
  <button id="tab-now" role="tab" aria-selected="true"
   aria-controls="panel-now">now<span class="badge" id="now-badge"></span></button>
- <button id="tab-repos" role="tab" aria-selected="false"
-  aria-controls="panel-repos">repos</button>
  <button id="tab-work" role="tab" aria-selected="false"
   aria-controls="panel-work">work</button>
- <button id="tab-skills" role="tab" aria-selected="false"
-  aria-controls="panel-skills">skills</button>
- <button id="tab-sessions" role="tab" aria-selected="false"
-  aria-controls="panel-sessions">sessions</button>
 </nav>
 <section id="panel-now" role="tabpanel" aria-labelledby="tab-now">
 <p class="sub" id="now-sub"></p>
 <table><thead><tr>
  <th>how</th><th>what</th><th>detail</th><th>where</th>
 </tr></thead><tbody id="now-rows"></tbody></table>
-</section>
-<section id="panel-repos" role="tabpanel" aria-labelledby="tab-repos" hidden>
-<table><thead><tr>
- <th>repo</th><th>group</th><th>branch</th><th class="n">dirty</th>
- <th class="n">ahead</th><th class="n">behind</th><th>last</th><th>subject</th>
-</tr></thead><tbody id="rows"></tbody></table>
 </section>
 <section id="panel-work" role="tabpanel" aria-labelledby="tab-work" hidden>
 <p class="sub" id="work-sub"></p>
@@ -342,23 +333,6 @@ PAGE = """<!doctype html>
  <th>repo</th><th>item</th><th>missing</th>
 </tr></thead><tbody id="work-unstated"></tbody></table>
 </section>
-<section id="panel-skills" role="tabpanel" aria-labelledby="tab-skills" hidden>
-<p class="sub" id="skill-sub"></p>
-<table data-sd-search="filter skills"><thead><tr>
- <th>skill</th><th>ships here</th><th>installed</th><th>what it does</th>
-</tr></thead><tbody id="skill-rows"></tbody></table>
-</section>
-<section id="panel-sessions" role="tabpanel" aria-labelledby="tab-sessions" hidden>
-<p class="sub" id="session-sub"></p>
-<h2>worktrees</h2>
-<table><thead><tr>
- <th>repo</th><th>worktree</th><th>branch</th><th>state</th><th>path</th>
-</tr></thead><tbody id="session-trees"></tbody></table>
-<h2>running</h2>
-<table><thead><tr>
- <th>pid</th><th>elapsed</th><th>command</th>
-</tr></thead><tbody id="session-procs"></tbody></table>
-</section>
 <h2>run</h2>
 <p class="sub" id="run-sub">every button here is one allow-listed command</p>
 <div id="run-buttons"></div>
@@ -367,28 +341,19 @@ PAGE = """<!doctype html>
 
 
 class Cache:
-    """One collection shared by every request, refreshed on a timer.
+    """The fleet root every request reads, and nothing cached any more.
 
-    Without it a page polling every few seconds re-shells `git` across the whole
-    fleet each time, which is both slow and a good way to make the dashboard the
-    reason the machine feels busy.
+    This held one collection shared by every request and refreshed on a
+    twenty-second timer, so a page polling every few seconds did not re-shell
+    `git` across the whole fleet each time. The collection retired at sd:719
+    step 5 with `dashboard/collect.py` and the `/api/state` route it fed; what
+    the Work tab and the deliver endpoint still need is the root. The name
+    stays so `serve` and the test harness construct the same object, until
+    step 6 deletes the file.
     """
 
-    def __init__(self, root: Path, seconds: float = CACHE_SECONDS) -> None:
+    def __init__(self, root: Path) -> None:
         self.root = root
-        self.seconds = seconds
-        self._lock = threading.Lock()
-        self._state: dict | None = None
-        self._at = 0.0
-
-    def state(self, now: float | None = None) -> dict:
-        stamp = time.monotonic() if now is None else now
-        with self._lock:
-            fresh = self._state is not None and stamp - self._at < self.seconds
-            if not fresh:
-                self._state = collect.build_state(self.root)
-                self._at = stamp
-            return dict(self._state or {}, cachedFor=round(self.seconds))
 
 
 def _drop(kind: str, **fields: object) -> bool:
@@ -438,41 +403,27 @@ def make_handler(cache: Cache, script: str, record=_drop,
                 return self.send_body(
                     script.encode(), "text/javascript; charset=utf-8"
                 )
-            if path == "/api/state":
-                body = json.dumps(cache.state()).encode()
-                return self.send_body(body, "application/json")
             if path == "/api/work":
                 # Its own endpoint: this reads several hundred files across
-                # the fleet, and /api/state is cached against a git fan-out on
-                # a different timer. Neither should be able to hold up the
-                # other.
+                # the fleet, and nothing else should be able to hold it up.
                 body = json.dumps(work.collect_work(cache.root)).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/now":
                 # Merged here rather than in the page: joining the sources
                 # client-side would put the ranking and the row text somewhere
-                # no test can reach. The fleet is already cached for twenty
-                # seconds, so this adds a merge, not a collect. The plugin
-                # loader's rows stopped arriving at sd:719 step 3, and the
-                # pull request rows at step 4 with the index they read.
+                # no test can reach. The plugin loader's rows stopped arriving
+                # at sd:719 step 3, the pull request rows at step 4 with the
+                # index they read, and the fleet and worktree rows at step 5
+                # with `collect.py` and `sessions.py` -- the system dashboard's
+                # Operations > Repos and Sessions carry those facts now, and
+                # step 6 rebuilds the ranking there. What is left is the shape
+                # and the ack filter, so the page and its dismiss control keep
+                # working until that step takes them.
                 dismissed = acked()
                 body = json.dumps({
-                    "rows": [row for row in now.merge(
-                        now.backbone_rows(cache.state()["repos"])
-                        + now.session_rows(sessions.fleet_worktrees(cache.root)),
-                    ) if row.get("id") not in dismissed],
+                    "rows": [row for row in now.merge([])
+                             if row.get("id") not in dismissed],
                 }).encode()
-                return self.send_body(body, "application/json")
-            if path == "/api/sessions":
-                body = json.dumps(sessions.collect_sessions(cache.root)).encode()
-                return self.send_body(body, "application/json")
-            if path == "/api/skills":
-                # The pack's own checkout, not the fleet root: this compares
-                # what this repository ships against what is installed, and
-                # `cache.root` is the directory full of everybody's checkouts.
-                body = json.dumps(
-                    skills.collect_skills(Path(__file__).resolve().parent.parent)
-                ).encode()
                 return self.send_body(body, "application/json")
             if path == "/api/actions":
                 # Ids and labels; the argv never leaves the process.
