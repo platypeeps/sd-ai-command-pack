@@ -23,7 +23,7 @@ at step 7.** The two ceilings behave differently and an earlier draft of this
 paragraph flattened them into one sentence. The code cap is the one with slack of
 29 against a live gap of 2, so a commit deleting more than 27 code lines must
 lower it in the same commit to keep `test_the_code_ceiling_is_paid_for_in_kind`
-(`source:tests/test_loc_caps.py::test_the_code_ceiling_is_paid_for_in_kind`) green — and every deletion here is larger than
+(in `tests/test_loc_caps.py`, retired at sd:719 step 7) green — and every deletion here is larger than
 that. The total cap is 4,600 over a directory that only shrinks, so it is never
 crossed on the way down.
 
@@ -417,10 +417,11 @@ before starting step 2.
       this point.
 
       **`dashboard/server.py` imports all three and survives to step 6, so this
-      commit edits it too.** `sessions` and `skills` arrive on the import line at
-      `dashboard/server.py:43`; the calls are `sessions.fleet_worktrees` at
-      `dashboard/server.py:490`, `sessions.collect_sessions` at `:495` and
-      `skills.collect_skills` at `:502`. The `/api/sessions` and `/api/skills`
+      commit edits it too.** `sessions` and `skills` arrive on the import line of
+      `dashboard/server.py` (a file retired at sd:719 step 6; the line numbers
+      this passage carried were as of `a8295266`); the calls are
+      `sessions.fleet_worktrees`, `sessions.collect_sessions` and
+      `skills.collect_skills` in the same file. The `/api/sessions` and `/api/skills`
       endpoints go with their modules, and `/api/now` loses the session rows it
       merges at `:490`. `bin/sd`'s `from dashboard.collect import ...`
       (`bin/sd:2729`) is the other caller and `sd plugin list --fleet` loses its
@@ -575,12 +576,12 @@ before starting step 2.
       `~/deploy-sd-db.sh` is the owner's to read and was not read by this
       commit.
 
-- [ ] **7. `dashboard/` is deleted, and the ceilings retire in the same commit.**
+- [x] **7. `dashboard/` is deleted, and the ceilings retire in the same commit.**
       **Read this before starting step 2.** Three tests interlock and the
       interaction decides how steps 3 to 6 are written:
 
       (a) `test_the_code_ceiling_is_paid_for_in_kind`
-      (`source:tests/test_loc_caps.py::test_the_code_ceiling_is_paid_for_in_kind`) asserts
+      (in `tests/test_loc_caps.py`, retired at sd:719 step 7) asserts
       `DASHBOARD_CODE_CAP - code_line_count(tracked("dashboard")) <=
       DASHBOARD_CODE_SLACK`, which is 29 against a live gap of 2. **Every pack
       commit here that deletes code must lower `DASHBOARD_CODE_CAP` in the same
@@ -592,7 +593,7 @@ before starting step 2.
       itself, for the reader who applies the rule to a smaller removal elsewhere.
 
       (b) `test_each_ceiling_is_the_last_value_its_history_records`
-      (`source:tests/test_loc_caps.py::test_each_ceiling_is_the_last_value_its_history_records`) requires each new value appended to
+      (in `tests/test_loc_caps.py`, retired at sd:719 step 7) requires each new value appended to
       `CEILING_HISTORY` (`source:tests/test_loc_caps.py::CEILING_HISTORY`) in the same commit.
 
       (c) `test_the_recorded_history_is_raises_only`
@@ -632,13 +633,13 @@ before starting step 2.
 
       Then this step: delete the remaining tracked files under `dashboard/` and
       `bin/sd-dashboard` itself, and in the same commit delete `DASHBOARD_CAP`
-      (`source:tests/test_loc_caps.py::DASHBOARD_CAP`), `DASHBOARD_CODE_CAP`
-      (`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`), `DASHBOARD_CODE_SLACK`
-      (`source:tests/test_loc_caps.py::DASHBOARD_CODE_SLACK`) and the four tests that read them —
+      (in `tests/test_loc_caps.py`, retired at sd:719 step 7), `DASHBOARD_CODE_CAP`
+      (in `tests/test_loc_caps.py`, retired at sd:719 step 7), `DASHBOARD_CODE_SLACK`
+      (in `tests/test_loc_caps.py`, retired at sd:719 step 7) and the four tests that read them —
       `test_the_dashboard_stays_under_its_ceiling`
-      (`source:tests/test_loc_caps.py::test_the_dashboard_stays_under_its_ceiling`),
+      (in `tests/test_loc_caps.py`, retired at sd:719 step 7),
       `test_the_dashboard_code_stays_under_its_own_ceiling`
-      (`source:tests/test_loc_caps.py::test_the_dashboard_code_stays_under_its_own_ceiling`), (a) and (b) — **keeping both
+      (in `tests/test_loc_caps.py`, retired at sd:719 step 7), (a) and (b) — **keeping both
       `CEILING_HISTORY` entries**, in the shape `BIN_CAP` retired at R11-D48 and
       for the reason that entry's own comment gives.
 
@@ -686,6 +687,100 @@ before starting step 2.
       the enumeration assertion, which is the proof the one-commit rule is real
       and not a preference. Revert and `diff -q` reports the tree identical.
 
+      **Landed as the pack deletion, this pull request, 2026-09-16.** One
+      commit deleted `dashboard/__init__.py` (the directory with it),
+      `bin/sd-dashboard` and `tests/test_sd_dashboard.py`, and in the same
+      commit `DASHBOARD_CAP`, `DASHBOARD_CODE_CAP`, `DASHBOARD_CODE_SLACK`,
+      the derivation comments that stood over them (R11-D29, R11-D30,
+      R11-D38, the raise of 2026-09-07 and the four falls) and five tests:
+      the four named above plus
+      `test_no_javascript_under_the_cap_hides_prose_in_a_block_comment`,
+      which iterated `tracked("dashboard")` for `.js` files and had nothing
+      left to iterate. `test_each_ceiling_is_the_last_value_its_history_records`
+      was measured before it went: it read `DASHBOARD_CAP` and
+      `DASHBOARD_CODE_CAP` only, never `BIN_CAP`, so there was nothing to
+      narrow it to. All three `CEILING_HISTORY` entries stay, the two
+      dashboard ones under a `Closed.` comment in the shape `BIN_CAP`'s
+      carries from R11-D48, and the record of the retirement is a comment
+      below `MIGRATE_CAP` in that shape too; `ceiling_moves()` reads
+      `(33, 26, 4)` over three closed ceilings and
+      `test_the_recorded_history_is_raises_only` still passes over them.
+      The module docstring's live-rule paragraphs (downward-only, payable in
+      kind, the report-not-gate consideration) are one dated past-tense
+      paragraph now; the R11-D41 and R11-D49 paragraphs stand as the dated
+      records they were. The `Makefile` lost `dashboard` from
+      `LINT_RUFF_PATHS` and `LINT_MYPY_PATHS` and from the comment that
+      restates them, so `LINT_MYPY_PATHS` is `$(LINT_BIN)` alone;
+      `tests/test_code_health.py` reads `tracked("bin")` alone, its
+      docstrings stop naming `dashboard/` as a corpus tree, it had no
+      `dashboard/` baseline row left to drop (`DYNAMIC` emptied at step 3),
+      and `AMBIGUOUS_CEILING` fell 116 to 114 for `bin/sd-dashboard`'s
+      `build_parser` and `main`, the two shared names the CLI carried.
+      **Twenty test files named `dashboard` at `2da4e973`, counted with
+      `grep -ln dashboard tests/*.py`; seventeen do after this commit, and
+      each names it deliberately.** Deleted: `tests/test_sd_dashboard.py`,
+      whose subject was the verbless parser and the retired-import census;
+      the census needed no new home, because mypy over `bin/` reports
+      `import-not-found` for a package that is not there (measured: a probe
+      importing `dashboard.store` from `bin/` failed the lint on this base
+      with `Module "dashboard" has no attribute` and fails it with
+      `import-not-found` once the package is gone) and a test module
+      importing it fails at collection. Edited, dropping the tree from an
+      enumeration: `tests/test_loc_caps.py` (above; the unmerged-index
+      fixture's throwaway path is `bin/panel.py` now, and the
+      registry-snapshot reader walk lost the pathspec),
+      `tests/test_code_health.py` (above), `tests/test_cut_symbols.py`
+      (`GOVERNED` and the `parked`/`archived` reader grep lost `dashboard`;
+      the frozen reader set did not change, since its last `dashboard/` row
+      left at step 6), `tests/test_no_trellis_residue.py` and
+      `tests/test_workflow_policy.py` (`GOVERNED`), and
+      `tests/test_rule_registry.py` (`consumer_sources` reads
+      `read_corpus("bin")`, and the two docstrings that named the tree say
+      when it went). Untouched, each for a reason:
+      `tests/test_changed_files_fast_path.py` builds a throwaway `dashboard/`
+      tree to exercise `.github/scripts/select-tests.py`, whose
+      `IMPORTING_TREES` still names it; `tests/test_delivery_evidence.py`
+      carries a captured review body naming `tests/test_dashboard_plugins.py`;
+      `tests/test_doc_citations.py`, `tests/test_permission_allowlist.py`,
+      `tests/test_sd_research_pins.py` and this file's own tests name the
+      retired files in dated prose; `tests/test_sd_ledger.py` asserts the
+      ledger's on-disk path,
+      `~/.local/state/sd-ai-command-pack/dashboard/ledger.jsonl`, which is
+      `bin/sd_ledger.py`'s state directory and not the tree;
+      `tests/test_sd_plugin.py` exercises the `dashboard` key of
+      `sd-plugin.json`, which `bin/sd plugin` still validates;
+      `tests/test_sd_status.py` keeps the regression that `sd-dashboard index`
+      is never printed and the copy-of-`bin/`-alone test; and
+      `tests/test_sd_docs_lint.py`, `tests/test_sd_handoff_rows.py`,
+      `tests/test_sd_registry.py`, `tests/test_sd_review.py` and
+      `tests/test_sd_suggest.py` say "dashboard" of the system dashboard, a
+      fixture sentence, or a `docs/work/` directory name. **Installer
+      count:** `bin/sd_install.py --status` from this tree reports
+      `commands: 16 in bin/`, down from 17; no test, `README.md` row or
+      `AGENTS.md` line hard-codes either number, so nothing else moved, and
+      the owner's `~/.local/bin/sd-dashboard` link stays until `--user` runs
+      again and prunes a receipt-named link whose command `bin/` no longer
+      has. **`select-tests.py` on a tree with no `dashboard/`:** measured by
+      running it the way `.github/scripts/run-tests.sh` does, over this
+      diff's paths and over the two deleted paths alone. Both exit 0; the
+      diff resolves to `full` because the `Makefile` is a full-suite path,
+      and the two deleted paths alone select 10 modules, since `importers`
+      guards each tree of `IMPORTING_TREES` with `is_dir()`. No change to
+      the selector is needed; its `dashboard` entry is inert. CI ignores
+      `TEST_CHANGED_FILES` besides. `make check` exits 0 (the gate in the
+      pull request body); `git ls-files dashboard/ bin/sd-dashboard` prints
+      nothing; the `DASHBOARD_*` grep over `tests/` and `bin/` prints the
+      two `CEILING_HISTORY` keys, this file's own test and prose, and one
+      fixture heading in `tests/test_rule_registry.py`. Three tests were
+      committed first and watched fail on `2da4e973`: `DashboardCut` in
+      `tests/test_cut_symbols.py` (the `ls-files` enumeration), the
+      three-keys-and-no-constants test in `tests/test_loc_caps.py`, and
+      `LintPaths` in `tests/test_code_health.py`, which reads the two
+      `Makefile` variables as text and asserts every literal token has a
+      tracked file under it -- green on the base, where `dashboard/` still
+      existed, and red on the mutation that puts the token back after the
+      deletion.
+
 - [ ] **8. The citation sweep, enumerated rather than discovered.** Deleting
       `dashboard/` turns every live anchored citation into it from `compared` to
       `target-missing`, which `test_the_red_buckets_are_empty` fails on. The
@@ -706,6 +801,47 @@ before starting step 2.
       `design.md` records for `app.js` — a citation repointed at a file that no
       longer carries the behaviour passes the gate and lies to the reader, which
       is the one failure this step cannot detect mechanically.
+
+      **Run with step 7, 2026-09-16, and not ticked: the mechanical half is
+      done and the prose sweep has residue in files other lanes hold.** The
+      enumeration command above printed nothing before step 7's commit and
+      nothing after it, at `2da4e973` and on the finished tree: steps 3 to
+      6 had already rewritten every anchored citation into the deleted
+      files. `python -m unittest tests.test_doc_citations` prints
+      `target-missing=0`, and `bin/sd-docs-lint` is clean. What the
+      deletion did turn red was the `source:` form: 28 locators into the
+      seven `tests/test_loc_caps.py` symbols step 7 deleted, in this item's
+      three pages and in sd:361's `design.md` and `implement.md`, each
+      rewritten as prose naming the file, retired at step 7, the shape step
+      6 used for `dashboard/work.py`. The prose count,
+      `grep -rn -E 'dashboard/[a-z_]+\.(py|js)|bin/sd-dashboard'` over live
+      `.md` files, read 219 lines before and 217 after: `CONTRIBUTING.md`
+      and `docs/lane-brief.md` used `dashboard/app.js` as their example of a
+      file with no locator and name the `Makefile` now, and `README.md`'s
+      `lint` row stopped listing `dashboard`. The 217 that stay are this
+      item's three pages (132: the plan text of ticked steps, pinned at
+      `a8295266` where it carries a line number, and their landing
+      paragraphs), sd:361's three pages (62: all but eight pinned
+      `at 2a2dbad6` or marked retired at step 4 by that step's sweep, and
+      those eight name a file in the plan text of a closed item), the
+      2026-09-05 prd and implement (19, PR 7's derivation, with three
+      unanchored `path:line` tokens the gate reports as
+      `no-adjacent-anchor`; those pages are sd:234's and its lanes hold
+      them), the citation-gate design's two dated counts, one line in
+      sd:431's implement, and the review anecdote in
+      `skills/sd-review/SKILL.md`. Residue for the owner or a later sweep,
+      outside what this lane may edit: `skills/sd-status/SKILL.md` and
+      `bin/sd-status`'s `CLASSES` still say `dashboard index` as the source
+      of the two `issue-*` rows (the verb went at step 4; the file is held
+      by #1011 and fix-431-d); `bin/sd_lib.py`, `bin/sd_codex.py`,
+      `bin/sd-status`'s two comments and `bin/sd_install.py`'s comment still
+      say `dashboard/` or `sd-dashboard` in prose; `bin/sd_ledger.py` (with
+      `tests/test_sd_ledger.py`) has had no caller since step 1 and its
+      docstring says so, and whether it goes is step 9's decision; and
+      `.github/scripts/select-tests.py` keeps `dashboard` in
+      `IMPORTING_TREES`, inert (step 7 measured it). `bin/sd_rules.py`'s
+      four `R12-D*` subjects said "`bin/` or `dashboard/`" until the review
+      of this pull request; they say `bin/` now.
 
 - [ ] **9. Close the items.** Note on sd:719 with the measurements re-run; sd:705
       closed as answered by deletion, naming step 1 as the answer to its port and
@@ -766,3 +902,8 @@ before starting step 2.
 - 2026-09-16 step 6 landed: the capture at pack `85c4fa1b`, system pull
   request #428 (`e43444f5`), then the pack deletion. Step 6 is ticked with the
   measurement above; `DASHBOARD_CODE_CAP` reads 0.
+- 2026-09-16 step 7 landed: the pack deletion of `dashboard/`,
+  `bin/sd-dashboard` and the three ceilings, in one commit. Step 7 is ticked
+  with the measurement above; `CEILING_HISTORY` holds three closed records
+  and `ceiling_moves()` reads `(33, 26, 4)`. Step 8's enumeration is 0 before
+  and after; its prose residue is recorded on the step and it stays open.

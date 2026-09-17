@@ -248,7 +248,7 @@ RULES: tuple[Rule, ...] = (
     #: back off that module rather than trusting either copy.
     Rule(
         id="R12-D1",
-        subject="no function in `bin/` or `dashboard/` is branchier than "
+        subject="no function in `bin/` is branchier than "
                 "`COMPLEXITY_CEILING`, 20 on the cyclomatic score, beyond "
                 "the entries `COMPLEX` carries, and that baseline only "
                 "shrinks",
@@ -263,7 +263,7 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         id="R12-D2",
-        subject="no function in `bin/` or `dashboard/` is longer than "
+        subject="no function in `bin/` is longer than "
                 "`LENGTH_CEILING`, 50 statements as `ast.unparse` renders "
                 "them with the docstring left out, beyond the entries `LONG` "
                 "carries, and that baseline only shrinks",
@@ -278,7 +278,7 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         id="R12-D3",
-        subject="no function in `bin/` or `dashboard/` nests deeper than "
+        subject="no function in `bin/` nests deeper than "
                 "`DEPTH_CEILING`, 5 indented blocks with an `elif` ladder "
                 "held at one level, beyond the entries `DEEP` carries, and "
                 "that baseline only shrinks",
@@ -293,7 +293,7 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         id="R12-D4",
-        subject="no two functions in `bin/` or `dashboard/` of at least "
+        subject="no two functions in `bin/` of at least "
                 "`CLONE_FLOOR`, 25 AST nodes each, are the same function "
                 "once locals are renamed and constants blanked, beyond the "
                 "pairs `CLONES` carries, and that baseline only shrinks",

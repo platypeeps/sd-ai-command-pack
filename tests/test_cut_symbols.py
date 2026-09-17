@@ -51,7 +51,6 @@ GOVERNED = (
     "bin",
     "skills",
     "agents",
-    "dashboard",
     "tests",
     ".claude",
     ".github",
@@ -125,14 +124,58 @@ class SweepCut(unittest.TestCase):
             self.assertTrue(callable(getattr(sd_lib, name, None)), f"sd_lib.{name} is missing")
 
 
-#: Every site under `bin` and `dashboard` that reads the `parked` or
-#: `archived` field, as `path` and the line's text. `bin/sd_lib.py` builds the
-#: item; everything else is `bin/sd-status` (the `--parked` flag, the parked
-#: section and the three "live item" filters). The dashboard row that read
-#: the archived count `dashboard/work.py` derived from the field left the set
-#: when sd:719 step 6 retired `dashboard/app.js`; `dashboard/` is still in the
-#: grep so a reader restored there surfaces. The later lane that cuts the
-#: field shrinks this set; nothing before it may grow it.
+#: The pack dashboard, cut at sd:719 step 7, and what went before it. The
+#: package `dashboard/` and its CLI `bin/sd-dashboard` left the tree in one
+#: commit with the ceilings on them; the tracker index and its clients went at
+#: step 4, and their test modules with them. Directories are pathspecs here,
+#: so a file restored anywhere under `dashboard/` surfaces, not only one the
+#: list happens to name. Asserted from the index and the filesystem, never
+#: from a string the author already knew: a file restored on its own is red.
+RETIRED_DASHBOARD = (
+    "dashboard",
+    "bin/sd-dashboard",
+    "bin/sd-trackers",
+    "tests/test_sd_dashboard.py",
+    "tests/test_sd_trackers.py",
+    "tests/test_sd_dashboard_index.py",
+    "tests/test_dashboard_sessions.py",
+    "tests/test_dashboard_skills.py",
+    "tests/test_dashboard_now.py",
+    "tests/test_dashboard_work.py",
+    "tests/test_dashboard_deliver.py",
+    "tests/test_dashboard_actions.py",
+)
+
+
+class DashboardCut(unittest.TestCase):
+    """sd:719 step 7: `dashboard/` and `bin/sd-dashboard` are not in the tree.
+
+    The census `tests/test_sd_dashboard.py` kept until step 7 asserted each
+    retired module by name while the package still stood; with the package
+    gone the pathspec is the directory, and the CLI and the test modules are
+    listed beside it. An importer of the package needs no row here: mypy over
+    `bin/` reports `import-not-found` for a module that is not there, and a
+    test module importing it fails at collection.
+    """
+
+    def test_the_dashboard_and_its_cli_are_not_in_the_tree(self) -> None:
+        listed = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "--deduplicate", "--", *RETIRED_DASHBOARD],
+            capture_output=True, text=True, check=True,
+        ).stdout.split()
+        self.assertEqual(listed, [], f"still tracked: {listed}")
+        present = [path for path in RETIRED_DASHBOARD if (REPO_ROOT / path).exists()]
+        self.assertEqual(present, [], f"still on disk: {present}")
+
+
+#: Every site under `bin` that reads the `parked` or `archived` field, as
+#: `path` and the line's text. `bin/sd_lib.py` builds the item; everything
+#: else is `bin/sd-status` (the `--parked` flag, the parked section and the
+#: three "live item" filters). The dashboard row that read the archived count
+#: the pack dashboard derived from the field left the set when sd:719 step 6
+#: retired the client script, and the grep stopped naming the directory when
+#: step 7 deleted it. The later lane that cuts the field shrinks this set;
+#: nothing before it may grow it.
 FROZEN_FIELD_READERS = frozenset({
     ("bin/sd_lib.py", "archived=report.archived,"),
     ("bin/sd-status", '"archived": item.archived,'),
@@ -155,9 +198,9 @@ FIELD_READ = r'\.(parked|archived)([^A-Za-z_]|$)|\["(parked|archived)"\]'
 
 
 def field_readers() -> list[tuple[str, str]]:
-    """The `(path, text)` of every field read under `bin` and `dashboard`."""
+    """The `(path, text)` of every field read under `bin`."""
     result = subprocess.run(
-        ["git", "grep", "-nIE", FIELD_READ, "--", "bin", "dashboard"],
+        ["git", "grep", "-nIE", FIELD_READ, "--", "bin"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

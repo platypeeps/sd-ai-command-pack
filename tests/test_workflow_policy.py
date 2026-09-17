@@ -54,7 +54,6 @@ GOVERNED = (
     "bin",
     "skills",
     "agents",
-    "dashboard",
     "tests",
     ".claude",
     ".github",

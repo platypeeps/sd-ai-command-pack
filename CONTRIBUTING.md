@@ -255,7 +255,7 @@ verified by the maintainer's local run and the other three by nothing.
   declaration in that file, so inserting unrelated lines does not require a
   documentation edit, and a symbol-anchored `path:line` into any file that is
   not markdown fails the check (sd:525). A claim about a line that is not a
-  declaration, or about a file with no locator such as `dashboard/app.js`, is
+  declaration, or about a file with no locator such as the `Makefile`, is
   written as prose naming the enclosing declaration or the file. Place code
   where it belongs; no citation constrains where a line goes. `path:line`
   remains the form for a line of a markdown page. Keep historical references
