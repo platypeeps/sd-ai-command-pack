@@ -516,3 +516,7 @@ The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
   code-health checkers with no enforcement change; `tests/test_code_health.py`
   is untouched. Leg d's copy carries an index now, because those checkers
   enumerate by `git ls-files`, and the four proofs run under it.
+- 2026-09-16 step 5 residue (sd:971): leg d runs every row's control in
+  one child and one mutated child per row, 20 children → 13 on eight rows
+  and two controls; `LegD` real 14.71 s at load 6.31 → 10.34 s at 6.28,
+  budgeted at 21 s in `design.md`, Dec-6.

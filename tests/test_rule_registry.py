@@ -55,7 +55,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
-from typing import NamedTuple
+from typing import Iterable, NamedTuple
 from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -1652,7 +1652,7 @@ class Outcome(NamedTuple):
 
     applied: int    # how many times the mutated text was found
     reverted: int   # how many times the mutation was found on the way back
-    control: int    # the named test's exit code before the mutation
+    control: int    # 0 when the named test was green before the mutation
     violated: int   # its exit code after it
     restored: int   # `diff -rq` between the restored copy and this tree
     report: str     # the mutated run's output, for a failure message
@@ -1691,6 +1691,34 @@ def unittest_counts(output: str) -> dict[str, int] | None:
     counts.update({name.strip().replace(" ", "_"): int(number)
                    for name, number in VERDICT_COUNT.findall(detail)})
     return counts
+
+
+#: A node's line in a `-v` run: its name, then its id in parentheses. The
+#: verdict follows on that line, or on the docstring line under it.
+NODE_LINE = re.compile(r"^\w+ \(([\w.]+)\)", re.MULTILINE)
+NODE_VERDICT = re.compile(
+    r" \.\.\. (ok|FAIL|ERROR|skipped.*|expected failure|unexpected success)$",
+    re.MULTILINE)
+
+
+def node_verdicts(output: str) -> dict[str, str]:
+    """Each node's verdict word from one `-v` run, keyed by the node's id.
+
+    A node whose line carries no verdict before the next node's line reads
+    `no verdict`; a node the loader could not resolve is listed under
+    `unittest.loader._FailedTest` and so under no id a row names. The first
+    line for an id wins, because the summary that follows repeats the id
+    without a verdict.
+    """
+
+    starts = list(NODE_LINE.finditer(output))
+    ends = [match.start() for match in starts[1:]] + [len(output)]
+    verdicts: dict[str, str] = {}
+    for match, end in zip(starts, ends, strict=True):
+        verdict = NODE_VERDICT.search(output, match.end(), end)
+        verdicts.setdefault(match.group(1),
+                            verdict.group(1) if verdict else "no verdict")
+    return verdicts
 
 
 def enforcement_error(mutation: Mutation, outcome: Outcome) -> str | None:
@@ -1945,6 +1973,26 @@ def run_one_test(tree: pathlib.Path, node: str) -> subprocess.CompletedProcess:
     return run_tests(tree, (node,))
 
 
+def batched_controls(tree: pathlib.Path,
+                     mutations: Iterable[Mutation]) -> dict[str, str]:
+    """Every distinct test the rows name, run clean in one child; id to verdict.
+
+    The control half of every row at once (sd:971). A row's control asked
+    whether its named test is green on the clean copy, and each of the four
+    code-health tests answered by walking `bin/` and `dashboard/` afresh in a
+    child of its own: about 1.2 s a child against 0.1 s for a test that walks
+    nothing, and one child running all four walked once. So the controls run
+    in one child before any mutation, and `exercise` reads a row's answer off
+    that child's `-v` line for the node. It is the same question, because the
+    `diff -rq` proof after every row is what says the copy the mutation lands
+    in is still the copy the control ran on.
+    """
+
+    nodes = tuple(sorted({mutation.test for mutation in mutations}))
+    run = run_tests(tree, nodes)
+    return node_verdicts(run.stdout + run.stderr)
+
+
 def copy_tracked(destination: pathlib.Path) -> None:
     """Every tracked file, copied into a private tree with its mode.
 
@@ -1975,12 +2023,20 @@ def copy_tracked(destination: pathlib.Path) -> None:
                        check=True, capture_output=True)
 
 
-def exercise(mutation: Mutation, tree: pathlib.Path) -> Outcome:
+def exercise(mutation: Mutation, tree: pathlib.Path,
+             controls: dict[str, str] | None = None) -> Outcome:
     """Run one mutation end to end in a private copy of this tree.
 
     The protocol, in order: run the named test clean in the copy, apply the
     mutation, run it again, put the original text back, and prove the copy is
     identical to this tree again.
+
+    **The clean run is a child of its own or a line of `controls`**, the
+    verdicts `batched_controls` read off one child that ran every row's test.
+    A node that child never reported is a red control, named, and never a
+    child run quietly in its place: the budget `TheSharedCopy` holds is one
+    control child for all the rows, and a fallback would spend past it while
+    passing.
 
     **The copy is the caller's, made once per run and shared by every row**
     (sd:431, owner decision Dec-6: per-row copying was linear in rows and
@@ -2000,7 +2056,14 @@ def exercise(mutation: Mutation, tree: pathlib.Path) -> Outcome:
     remembered string.
     """
 
-    control = run_one_test(tree, mutation.test)
+    if controls is None:
+        control = run_one_test(tree, mutation.test)
+        control_code = control.returncode
+        control_text = control.stdout + control.stderr
+    else:
+        verdict = controls.get(mutation.test, "no verdict")
+        control_code = 0 if verdict == "ok" else 1
+        control_text = f"batched control for {mutation.test}: {verdict}\n"
     applied = edit(tree, mutation, violate=True)
     violated = run_one_test(tree, mutation.test)
     reverted = edit(tree, mutation, violate=False)
@@ -2010,9 +2073,10 @@ def exercise(mutation: Mutation, tree: pathlib.Path) -> Outcome:
          str(tree / top), str(REPO_ROOT / top)],
         capture_output=True, text=True)
     printed = violated.stdout + violated.stderr
-    return Outcome(applied, reverted, control.returncode,
+    report = (control_text[-2000:] if control_code else "") + printed[-2000:]
+    return Outcome(applied, reverted, control_code,
                    violated.returncode, identical.returncode,
-                   printed[-2000:] + identical.stdout, printed)
+                   report + identical.stdout, printed)
 
 
 #: The first control's edit: a docstring phrase in the file `R10-D6` mutates,
@@ -2170,12 +2234,14 @@ goes red, or a reader following it runs something else.""")
 
         Four assertions per row, because "it went red" on its own is not
         evidence. The edit has to have landed, the test has to have been green
-        before it, red after it, and the tree has to come back.
+        before it, red after it, and the tree has to come back. The green
+        half is one child for every row, run first; see `batched_controls`.
         """
 
+        controls = batched_controls(self.tree, MUTATIONS.values())
         for location, mutation in sorted(MUTATIONS.items()):
             with self.subTest(checker=location):
-                outcome = exercise(mutation, self.tree)
+                outcome = exercise(mutation, self.tree, controls)
                 self.assertEqual(outcome.applied, 1, f"""
 The mutation for {location} did not match exactly once in {mutation.path}.
 
