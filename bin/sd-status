@@ -1373,7 +1373,10 @@ CLASSES = (
           "a branch on origin with no open pull request carrying it"),
     Class("parked-concern", "c", False, 90, "## Review ledger",
           "a concern parked behind a trigger nobody is watching"),
-    Class("idle-planning", "w", True, 100, "item activity + R10-D1",
+    # R10-D1 is a registry row now, cited here and not in the source cell: an
+    # id in a string reads as a copy of the table, and no check can tell the
+    # two apart. The skill's table mirrors this cell word for word.
+    Class("idle-planning", "w", True, 100, "item activity + idle threshold",
           "an item idle in planning past the 45-day threshold"),
     Class("undated-planning", "w", True, 100, "work item",
           "a planning item with no date to age it by"),
@@ -2029,10 +2032,12 @@ def _age_rows(
     age = _idle_days(entry, when, today, marks)
     if age <= IDLE_DAYS:
         return []
+    # R10-D1's finding. The id is cited here and kept out of the reason text
+    # for the same reason it is out of the `CLASSES` cell above.
     return [_row(
         "idle-planning", item, slug,
         f"{where} has had nothing recorded against it for {age} days, "
-        f"past the {IDLE_DAYS}-day R10-D1 threshold",
+        f"past the {IDLE_DAYS}-day idle threshold",
         f"start {slug}, park it, or archive it",
         age,
     )]

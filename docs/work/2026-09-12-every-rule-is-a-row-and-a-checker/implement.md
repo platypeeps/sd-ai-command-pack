@@ -172,7 +172,7 @@
 
       | Id | Taught in | Why it is not a row yet |
       |---|---|---|
-      | `R10-D1` | `skills/sd-status/SKILL.md` | `bin/sd-status` carries the id in two strings, one of them the `CLASSES` row whose text the skill's table mirrors. The second-list check wants it out of the string; leg a reads the skill table it would have to change. **Decided 2026-09-14 (owner, note 1989):** rewrite the `CLASSES` row and the reason string to drop the literal id and keep the citation in the adjacent comment — the rephrasing the check's own failure text prescribes, and what `R10-D5` did — and only after sd:10 retires the planning-age sweep, because `bin/sd_sweep.py` is where the threshold this rule constrains lives today. |
+      | `R10-D1` | `skills/sd-status/SKILL.md` | `bin/sd-status` carries the id in two strings, one of them the `CLASSES` row whose text the skill's table mirrors. The second-list check wants it out of the string; leg a reads the skill table it would have to change. **Decided 2026-09-14 (owner, note 1989):** rewrite the `CLASSES` row and the reason string to drop the literal id and keep the citation in the adjacent comment — the rephrasing the check's own failure text prescribes, and what `R10-D5` did — and only after sd:10 retires the planning-age sweep, because `bin/sd_sweep.py` owned the threshold this rule constrains at the time (pack #995 has since moved it into `sd_lib`). **Landed 2026-09-16, slice D**, after pack #995 cut the sweep; see the Slice D paragraph below. |
       | `R10-D2` | `skills/sd-handoff/SKILL.md` | The section that teaches it says Lane B is *not implemented*. A live row with a checker would assert an enforcement that does not exist, which is the defect this item is about. **Decided 2026-09-14 (owner, note 1989):** it is repealed in the registry — `state=REPEALED`, no checker. Leg c still resolves the citation; leg a skips a repealed row; and a live false enforcement claim becomes an answered citation. This is the first use of the tombstone state the design says must exist before the first repeal, not after. **Landed 2026-09-16, slice B**, see the paragraph under S2 below. |
       | `R10-D3` | `skills/sd-handoff/SKILL.md` | Its enforcement lives in `bin/sd-handoff-restore`, which has no `.py` suffix. **The import obstacle recorded here is gone** — a `path::symbol` location needs no import and the path needs no suffix. What is left is leg d: the row needs a mutation that reddens a named test, and finding one for a restore path is the work. |
 
@@ -187,7 +187,7 @@
       already settled for it: the citation is in a docstring, which
       `source:tests/test_rule_registry.py::second_list_entries` reads as a
       citation rather than as data, so registering it would not redden the
-      second-list check the way `R10-D5` and `R10-D1` do.
+      second-list check the way `R10-D5` and `R10-D1` did.
 
       **Slice 3, 2026-09-13. `STRANDED_RULE_IDS` 24 → 23.** `R10-D4` is a
       row. Its checker is `bin/sd-review::codex_preflight`, the first checker
@@ -303,6 +303,37 @@
       What no check holds: deleting the row. `R10-D2` is defined live, so it
       would leave no baseline entry behind — the "defined live, no row" gap
       S2 recorded, still an owner question on the item.
+
+      **Slice D, 2026-09-16. `STRANDED_RULE_IDS` 20 → 19.** `R10-D1` is a
+      row, per Dec-3 and after pack #995 moved the threshold out of the sweep
+      module into `source:bin/sd_lib.py::DEFAULT_DAYS`. Re-measured on
+      `74de42b1` first: `bin/sd-status` still carried the id in the `CLASSES`
+      cell (`item activity + R10-D1`) and in the reason string (`past the
+      {IDLE_DAYS}-day R10-D1 threshold`), and `skills/sd-status/SKILL.md:99`
+      mirrored the cell. `second_list_entries` reads Python through `ast`, so
+      a comment is invisible to it and an f-string's constant parts are data;
+      both strings were rephrased to `idle threshold` and the id moved into a
+      comment beside each, the way `R10-D5` cites itself in
+      `bin/sd_setup_github.py`. The skill's cell changed with the string, and
+      a sentence under the table cites `R10-D1` so leg a finds the id in the
+      body of the section the row's `teaches` names, `One table enumerates
+      the checks`. The row's checker is `bin/sd-status::_age_rows`, the
+      producer that classifies `idle-planning`; its proof, run by leg d,
+      replaces the `IDLE_DAYS` comparison with a condition that is never
+      true, so every dated planning item is reported idle and
+      `test_a_planning_item_past_the_threshold_ages_into_a_finding` reddens.
+      Fail-first: the row was committed with the meter untouched, and
+      `test_live_citations_resolving_only_into_the_archive_match_their_baseline`
+      reddened, `FAILED (failures=1)`, the measured set being the baseline
+      minus exactly `R10-D1`; with the id dropped the module passes, 33
+      tests. A first draft of the skill sentence put `bin/sd-status` and
+      `never` on a line with no id, and leg b's uncited-claims ratchet
+      reddened on it; the sentence was rewrapped so the claim line cites the
+      id. Mutations, each on a byte copy and restored by `diff -q`: the
+      literal put back into the reason string reddens the second-list check
+      naming `bin/sd-status` and the line; the sentence deleted from the
+      skill section reddens leg a with `R10-D1: ... does not cite it`; the
+      row's own proof applied by hand reddens the named test.
 
 - [ ] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become
@@ -427,3 +458,7 @@ The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
   stranded ids (2 of 20 on `2eafa78b`, `sd-status` 1, no other skill any;
   on `fa7f870f`, after #993 widened the definition grammar, 1 and 1), names
   the verb in its restore step. Step 4 is untouched here.
+- 2026-09-16 step 4, slice D (R10-D1, Dec-3): `STRANDED_RULE_IDS` 20 → 19.
+  `bin/sd-status` cites `R10-D1` from two comments and carries it in no
+  string; the row's checker is `bin/sd-status::_age_rows` and leg d runs its
+  proof.

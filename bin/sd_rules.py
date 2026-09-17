@@ -195,6 +195,25 @@ RULES: tuple[Rule, ...] = (
         teaches="skills/sd-review/SKILL.md#"
                 "The `codex-json` entry is subscription-only (R10-D4)",
     ),
+    #: Registered once `bin/sd-status` stopped carrying the id in its strings
+    #: (owner decision 2026-09-14, Dec-3): the `CLASSES` cell and the reason
+    #: text cite it from an adjacent comment now, the way `R10-D5` does in
+    #: `bin/sd_setup_github.py`, so the second-list check has nothing to
+    #: report and the skill's table can mirror the cell without naming the id.
+    Rule(
+        id="R10-D1",
+        subject="an item idle in `planning` past the 45-day threshold is "
+                "flagged `idle-planning` at rank 100, and the threshold is "
+                "read from `sd_lib.DEFAULT_DAYS` rather than restated",
+        checker="bin/sd-status::_age_rows",
+        proof="replace the `IDLE_DAYS` comparison in `bin/sd-status` with a "
+              "condition that is never true; every dated planning item is "
+              "then reported idle whatever its age, and "
+              "`test_a_planning_item_past_the_threshold_ages_into_a_finding` "
+              "goes red",
+        scope="code",
+        teaches="skills/sd-status/SKILL.md#One table enumerates the checks",
+    ),
     #: The first repealed row, and the reason it is one rather than a live row
     #: with no checker. The section that teaches it says in its heading that
     #: Lane B is not implemented: `bin/sd-handoff` has no `--push`, so nothing
