@@ -35,6 +35,10 @@ import sd_registry  # noqa: E402
 
 SHIPPED = sd_registry.shipped_path(REPO_ROOT)
 
+#: The line `review` in `bin/sd-review` hands the chain for a bill at its
+#: cap: the month's total, so a refusal names it without a second lookup.
+AT_CAP = "$50.00 of its $50.00 cap for 2026-09 is spent or held"
+
 #: A whole registry in four lines, for the refusal cases. Each test edits one
 #: thing, so the line it changes is the reason it fails.
 MINIMAL = """\
@@ -515,6 +519,93 @@ class TheRefusals(unittest.TestCase):
         )
 
 
+class TheBoundsInputs(unittest.TestCase):
+    """sd:788 slice 3a. A `url` entry on a capped bill is refused at read
+    when the ledger could not compute its bound: `price.in`, `price.out` or
+    `max_tokens` missing, or a value the library cannot price. The predicate
+    is `sd_db.calls`'s -- a price is a finite non-negative number,
+    `max_tokens` a whole number above zero -- and the message is this
+    reader's own, naming the entry, the key and the value."""
+
+    PRICED = 'two: { url: "https://two.example/v1", vendor: beta, bill: paid, roles: [reviewer], max_tokens: 100, price: { in: 1.5, out: 2 } }'
+
+    def registry(self, entry: str, bill: str = "paid: { cost: company, cap_usd_month: 50 }") -> str:
+        return (
+            f"bills:\n  free: {{ cost: local }}\n  {bill}\nproviders:\n"
+            '  one: { url: "http://localhost:1/v1", vendor: alpha, bill: free, roles: [author] }\n'
+            f"  {entry}\nroles:\n  author: [one]\n  reviewer: [two]\n"
+        )
+
+    def refuse(self, entry: str) -> str:
+        with self.assertRaises(sd_registry.RegistryError) as caught:
+            sd_registry.parse(self.registry(entry), "fixture.yaml")
+        return str(caught.exception)
+
+    def test_a_priced_entry_on_a_capped_bill_reads(self) -> None:
+        registry = sd_registry.parse(self.registry(self.PRICED), "fixture.yaml")
+        self.assertEqual(registry.providers["two"].price, {"in": 1.5, "out": 2})
+
+    def test_the_same_entry_on_an_uncapped_bill_needs_no_price(self) -> None:
+        bare = self.PRICED.replace(", max_tokens: 100, price: { in: 1.5, out: 2 }", "")
+        registry = sd_registry.parse(self.registry(bare, "paid: { cost: subscription }"), "fixture.yaml")
+        self.assertEqual(registry.providers["two"].price, {})
+
+    def test_a_missing_key_is_refused_naming_the_entry_the_key_and_the_value(self) -> None:
+        cases = {
+            "price.in": self.PRICED.replace("in: 1.5, ", ""),
+            "price.out": self.PRICED.replace(", out: 2", ""),
+            "max_tokens": self.PRICED.replace("max_tokens: 100, ", ""),
+        }
+        for key, entry in cases.items():
+            with self.subTest(key=key):
+                message = self.refuse(entry)
+                self.assertIn("provider 'two' is a 'url' entry on the capped bill 'paid'", message)
+                self.assertIn(f"{key} is None", message)
+
+    def test_a_value_the_library_cannot_price_is_refused_naming_it(self) -> None:
+        cases = {
+            ("price.in", "'1.5'"): self.PRICED.replace("in: 1.5", 'in: "1.5"'),
+            ("price.out", "nan"): self.PRICED.replace("out: 2", "out: nan"),
+            ("price.out", "inf"): self.PRICED.replace("out: 2", "out: inf"),
+            ("price.in", "-1"): self.PRICED.replace("in: 1.5", "in: -1"),
+            ("price.in", "True"): self.PRICED.replace("in: 1.5", "in: true"),
+            ("max_tokens", "0"): self.PRICED.replace("max_tokens: 100", "max_tokens: 0"),
+            ("max_tokens", "-5"): self.PRICED.replace("max_tokens: 100", "max_tokens: -5"),
+        }
+        for (key, shown), entry in cases.items():
+            with self.subTest(key=key, value=shown):
+                self.assertIn(f"{key} is {shown}", self.refuse(entry))
+
+    def test_a_capped_cost_basis_without_a_number_is_capped_too(self) -> None:
+        """`prepaid` and `plan` are capped bills by basis; the library refuses
+        the unpriced entry on them, so this reader does the same."""
+        for basis in ("prepaid", "plan", "company"):
+            with self.subTest(basis=basis):
+                with self.assertRaises(sd_registry.RegistryError) as caught:
+                    sd_registry.parse(self.registry(self.PRICED.replace("max_tokens: 100, ", ""),
+                                                    f"paid: {{ cost: {basis} }}"), "fixture.yaml")
+                self.assertIn("max_tokens is None", str(caught.exception))
+
+    def test_the_merged_read_refuses_a_cap_the_rows_carry(self) -> None:
+        """`_adapt` builds providers from `sd_db`'s registry, which merges a
+        cap the dashboard set over a bill the file left uncapped, so the same
+        refusal has to fire there or a capped bill reads two ways."""
+        library = sd_registry.library()
+        self.assertIsNotNone(library, "sd_db is not installed; run `make setup`")
+        merged = library.Registry(
+            path=pathlib.Path("merged.yaml"),
+            bills={"paid": library.Bill(name="paid", cost_basis="subscription", cap_usd_month=50.0)},
+            providers={"two": library.Provider(name="two", vendor="beta", bill="paid",
+                                               url="https://two.example/v1", max_tokens=100,
+                                               price={"in": float("nan"), "out": 2.0})},
+        )
+        with self.assertRaises(sd_registry.RegistryError) as caught:
+            sd_registry._adapt(merged)
+        self.assertIn("merged.yaml: provider 'two' is a 'url' entry on the capped bill 'paid' and price.in is nan", str(caught.exception))
+        merged.bills["paid"] = library.Bill(name="paid", cost_basis="subscription")
+        self.assertEqual(sd_registry._adapt(merged).providers["two"].max_tokens, 100)
+
+
 class TheHomeItLivesIn(unittest.TestCase):
     def test_the_registry_sits_beside_the_database(self) -> None:
         path = sd_registry.registry_path("/tmp/somewhere")
@@ -815,19 +906,21 @@ class TheReviewerChain(unittest.TestCase):
         self.assertEqual(self.names(author_vendors=("openai",))[0], "claude")
 
     def test_a_bill_at_its_cap_is_passed_over(self) -> None:
-        self.assertNotIn("baseten", self.names(capped_bills=("baseten",)))
+        self.assertNotIn("baseten", self.names(capped_bills={"baseten": AT_CAP}))
 
     def test_the_chain_reports_every_entry_it_passed_over_and_why(self) -> None:
-        """The interesting sentence is the one about what did not run."""
+        """The interesting sentence is the one about what did not run, and
+        for a capped bill it carries the month's total the caller measured
+        (sd:788 slice 3: `capped_bills` is bill name to exposure line)."""
         chain = sd_registry.reviewer_chain(
             self.registry,
             consent=self.all,
             author_vendors=("openai",),
-            capped_bills=("baseten",),
+            capped_bills={"baseten": AT_CAP},
         )
         skipped = {c.provider.name: c.reason for c in chain if not c.eligible}
         self.assertIn("openai", skipped["codex"])
-        self.assertIn("cap for the month", skipped["baseten"])
+        self.assertEqual(skipped["baseten"], f"baseten is billed to baseten: {AT_CAP}")
         self.assertEqual(len(chain), 5)
 
     def test_consent_bounds_the_chain_absolutely(self) -> None:
@@ -913,12 +1006,12 @@ class ThePick(unittest.TestCase):
         )
         self.assertEqual(picked.name, "kimi")
 
-    def test_a_bill_at_its_cap_refuses_the_direct_pick_too(self) -> None:
+    def test_a_bill_at_its_cap_refuses_the_direct_pick_naming_the_months_total(self) -> None:
         with self.assertRaises(sd_registry.ConsentRefusal) as caught:
             sd_registry.pick(
-                self.registry, "baseten", consent=self.all, capped_bills=("baseten",)
+                self.registry, "baseten", consent=self.all, capped_bills={"baseten": AT_CAP}
             )
-        self.assertIn("cap for the month", str(caught.exception))
+        self.assertEqual(str(caught.exception), f"baseten is billed to baseten: {AT_CAP}")
 
     def test_an_allowed_enabled_entry_is_returned(self) -> None:
         self.assertEqual(
@@ -1314,7 +1407,7 @@ class StandingReviewConsentTests(unittest.TestCase):
         consent, _ = sd_registry.resolve_consent(registry, None, "configured")
         self.assertIn(entry.name, consent)
         self.assertEqual(sd_registry.pick(registry, entry.name, consent=consent), entry)
-        for overrides in ({"author_vendors": (entry.vendor,)}, {"capped_bills": (entry.bill,)}):
+        for overrides in ({"author_vendors": (entry.vendor,)}, {"capped_bills": {entry.bill: AT_CAP}}):
             with self.subTest(overrides=overrides), self.assertRaises(sd_registry.ConsentRefusal):
                 sd_registry.pick(registry, entry.name, consent=consent, **overrides)
         registry.providers[entry.name] = replace(entry, enabled=False)

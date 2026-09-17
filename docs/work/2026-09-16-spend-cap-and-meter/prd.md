@@ -151,3 +151,8 @@ Unasserted halves are named in their rows and are not planned here.
   done by other items; the lifecycle, the estimate's name, the meter's
   pin, credential, selection and order, and the boundary tests are the
   review's additions.
+- 2026-09-16 slice 3 landed: `sd-review` charges every `url` call through
+  `sd_db.calls.call`, a bill at its cap is passed over and refused by name,
+  and a `url` entry on a capped bill without the bound's inputs is refused
+  at read; the two meter tests of 3a move to slice 4, for the reason
+  measured on that step.

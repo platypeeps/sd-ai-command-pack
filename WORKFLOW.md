@@ -339,14 +339,34 @@ review with findings counts; it does not trigger a replacement. Consent, author
 exclusions and spending limits apply to every fallback, and earlier findings remain.
 `vendor` is the
 maker of the model, not the tool; `bill` is whose money. A bill with
-`cap_usd_month` is a recorded ceiling, not an enforced one: the dashboard
-stores it and Today shows the month's spend beside it, and nothing refuses a
-call against it. `reviewer_chain` in `bin/sd_registry.py` carries the
-refusal for a bill at its cap, and no caller supplies it a capped bill, so
-fallthrough never skips one and a direct pick never refuses one. Entries with
-`url` share one OpenAI-compatible client and one reader. This file is
-identity and seed; enabled, order and caps are rows the dashboard edits, and
-the library merges file and rows on every read.
+`cap_usd_month` is held per call, and a `url` entry on a capped bill is
+held to it before its request is sent. Every `url` call `sd-review` makes
+goes through the library's `sd_db.calls.call` (`source:bin/sd-review::charged_call`):
+the call's bound, the prompt's estimated tokens at `price.in` plus
+`max_tokens` at `price.out`, is reserved against the bill's month; the
+request is claimed, sent once, and the row is settled at the usage the
+answer carries or bound at the reservation when it cannot be costed. A
+bound that would pass the cap is refused by the ledger and the fallthrough
+passes the entry over. Before the chain is built, `review` sweeps
+reservations whose process is gone and asks the ledger which capped bills
+are at their cap this month (`source:bin/sd-review::capped_bills`); those
+reach `reviewer_chain` and `pick` in `bin/sd_registry.py` as bill name to
+the month's total, so the fallthrough skips every entry on such a bill and
+`--provider` refuses one by name, saying what the month spent or holds.
+Once the registry read succeeds, a fault at the ledger -- no library to
+reach with no state file beside the registry, a library older than
+`sd_db.calls`, or a reservation the database will not take -- refuses an
+entry on a capped bill naming the fault and dispatches an entry on an
+uncapped bill as before: unknown is not uncapped. A state file that exists
+but cannot be read, or exists while the library cannot be imported, is
+refused at registry read (`source:bin/sd_registry.py::read_runtime`), and
+nothing is dispatched. A `url` entry on a capped bill without a usable
+`price.in`, `price.out` and `max_tokens` is refused at registry read, on
+the file and on the merged rows, since a cap the ledger cannot reserve
+against is not a cap. Entries with `url` share one OpenAI-compatible client
+and one reader. This file is identity and seed; enabled, order and caps
+are rows the dashboard edits, and the library merges file and rows on
+every read.
 
 `sd-review --provider <name>` picks one entry for one run. The dashboard's
 item screen offers the same list, with vendor, cost and reason beside each

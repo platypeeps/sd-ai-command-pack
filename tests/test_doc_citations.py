@@ -1098,7 +1098,7 @@ SYMBOL_ANCHORED_CITATIONS = {
     "docs/work/2026-09-04-the-sweep-trusts-a-branch-field-it-never-resolves/implement.md": 1,
     "docs/work/2026-09-04-the-sweep-trusts-a-branch-field-it-never-resolves/prd.md": 1,
     "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 41,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 64,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 62,
     "docs/work/2026-09-12-a-second-tracker-with-no-rows/design.md": 4,
     "docs/work/2026-09-12-a-second-tracker-with-no-rows/implement.md": 5,
     "docs/work/2026-09-12-the-contribution-tracker-cannot-hold-an-issue/design.md": 3,
