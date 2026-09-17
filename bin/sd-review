@@ -7,8 +7,13 @@ until the requested depth completes or the chain exhausts. Every attempt sees
 the exact routed diff, and adverse evidence survives fallback. Findings are
 dispositioned against the repository's severity floor.
 
-Process calls use the injectable runner; URL requests use the injectable client
-in `sd_registry`. `tests/test_sd_review_boundary.py` checks these boundaries.
+Process calls use the injectable runner. A URL request is charged through the
+library's `sd_db.calls.call` -- reserve at the bound, claim, one POST, settle or
+lose, on the database this run reads its registry from -- and a test's fake
+client is that call's wire; with no ledger to reach, an uncapped bill goes
+through the injectable client in `sd_registry` as before and a capped bill is
+refused naming the fault (sd:788 slice 3). `tests/test_sd_review_boundary.py`
+checks these boundaries.
 No review findings, labels or checks are posted to GitHub. `setup-github` writes
 its workflow through a separate module, identified by `SETUP_GITHUB_SEAM`.
 The repository comes from cwd; no `--repo` can redirect the review (R10-D6).
@@ -942,6 +947,153 @@ def author_vendors(root: pathlib.Path, subject: Subject) -> tuple[str, ...]:
         raise Refusal(str(error)) from None
 
 
+# The ledger: what a `url` call is charged through
+#
+# sd:788 slice 3. The reservation is the library's (`sd_db.ledger`, sd:234
+# slice 8a) and so is the call that takes it (`sd_db.calls.call`, slice 8b):
+# `release_orphans`, `reserve` at the bound, `claim`, exactly one POST, then
+# `settle` at the usage the answer carries or `lose` when it cannot cost the
+# call. This lane writes no `cost` row of its own; what it adds is the road to
+# that function and what happens when the road is closed.
+
+
+class Ledger(NamedTuple):
+    """How this run reaches the reservation ledger, or why it cannot.
+
+    `fault` is the sentence for a machine with no library, a provisioned copy
+    older than `sd_db.calls`, or a database that will not open; `capped` is
+    every bill with a cap, by name. A fault leaves an uncapped bill dispatched
+    as before and a capped one refused naming it: fail-closed where money is
+    capped, unchanged where it is not (`design.md`, the approach).
+    """
+
+    library: Any
+    database: pathlib.Path | None
+    capped: frozenset[str]
+    fault: str
+
+    def writable(self) -> Any:
+        """One writable connection on the run's database, or the fault as a
+        `Refusal`. Opened per use rather than held across the run: `review`
+        returns from a dozen places, and a reservation is one attempt's."""
+        if self.fault:
+            raise Refusal(self.fault)
+        try:
+            return self.library.connect(self.database, write=True)
+        except Exception as error:  # the library's refusals are several classes; the sentence is what matters
+            raise Refusal(f"no database to hold the reservation: {error}") from None
+
+
+def open_ledger(env: Mapping[str, str], database: pathlib.Path | None, registry: sd_registry.Registry) -> Ledger:
+    """The library and the database this run charges, or the fault.
+
+    Through `sd_lib.import_sd_db`, the two tries every entrypoint makes, and
+    not `sd_handoff_rows.connect`: that one resolves the process's `$HOME`,
+    and this run reads its registry and its rows from the `env` it was handed
+    -- the `--database` it was given, else that home's `sd.db`, as
+    `sd_registry.read_runtime` resolves it -- so the reservation lands in the
+    database the chain was read from and never in another operator's.
+    """
+    capped = frozenset(name for name, bill in registry.bills.items() if bill.capped)
+    imported = sd_lib.import_sd_db()
+    if imported.module is None:
+        return Ledger(None, None, capped, f"no library to hold the reservation: {imported.problem}")
+    try:
+        # A provisioned copy older than sd:234's 8b has neither name.
+        from sd_db import calls, ledger  # noqa: F401, PLC0415
+    except ImportError as error:
+        return Ledger(None, None, capped, f"no library to hold the reservation: {error}")
+    target = database if database is not None else imported.module.default_path(env.get("HOME"))
+    return Ledger(imported.module, pathlib.Path(target), capped, "")
+
+
+def capped_bills(registry: sd_registry.Registry, ledger: Ledger) -> dict[str, str]:
+    """Bill name to the line the chain's refusal renders, for every bill at
+    its cap this month -- the month's total, so `--provider` names it.
+
+    `release_orphans` once, before the chain is built, so a process that
+    died holding a reservation holds the cap for one run at most; then the
+    library's `exposure` per capped bill against `cap_usd_month`, compared as
+    the ledger compares money. With no ledger to ask, every capped bill is
+    listed with the fault as its line: unknown is not uncapped.
+    """
+    try:
+        connection = ledger.writable()
+    except Refusal as error:
+        return {name: str(error) for name in sorted(ledger.capped)}
+    rows = ledger.library.ledger
+    with contextlib.closing(connection):
+        rows.release_orphans(connection)
+        month = ledger.library.writes.now()[:7]
+        lines = {}
+        for name, bill in registry.bills.items():
+            if bill.cap_usd_month is None:
+                continue
+            spent = rows.exposure(connection, bill=name, month=month)
+            if spent + rows.MONEY_NOISE >= bill.cap_usd_month:
+                lines[name] = f"${spent:.2f} of its ${bill.cap_usd_month:.2f} cap for {month} is spent or held"
+    return lines
+
+
+def _wire(client: sd_registry.Client, provider: sd_registry.Provider, prompt: str, environ: Mapping[str, str]) -> Any:
+    """A test's fake client as `sd_db.calls.call`'s wire.
+
+    The library builds the request and the fake answers it, so a fake that
+    records what left still sees the provider, the prompt and the
+    environment it saw before, and the library still settles the row from
+    what it answers. A response that never came is the `OSError` the library
+    records as lost.
+    """
+    def send(request: Any, timeout: float) -> tuple[int, bytes]:
+        answer = client(provider, prompt, environ, int(timeout))
+        exit_code, body, stderr, launched = answer[:4]
+        if not launched:
+            raise OSError(stderr or f"{provider.name}: no response")
+        status = answer[4] if len(answer) == 5 and answer[4] is not None else exit_code if 100 <= exit_code <= 599 else 200
+        return status, body.encode("utf-8")
+    return send
+
+
+def charged_call(
+    ledger: Ledger | None, provider: sd_registry.Provider, prompt: str, environ: Mapping[str, str],
+    timeout: int, client: sd_registry.Client | None, root: pathlib.Path,
+) -> tuple[sd_registry.ClientResult, dict[str, Any] | None] | Outcome | None:
+    """The `url` request through `sd_db.calls.call`, or why it did not go.
+
+    None means the seam road: no ledger at all, which is a direct caller, or
+    a fault on an uncapped bill, which dispatches as before. A fault on a
+    capped bill is `REFUSED` naming it. Otherwise the library reserves,
+    claims, sends once and settles or loses (`sd_db.calls`, the module), the
+    library's `CallRefused` and `LedgerRefused` are `REFUSED` outcomes
+    carrying the exposure line, and what comes back is the client's own
+    five-tuple beside the ledger's receipt, so the diagnostic reads one shape
+    on both roads.
+    """
+    if ledger is None:
+        return None
+    try:
+        connection = ledger.writable()
+    except Refusal as error:
+        return _outcome(provider.name, REFUSED, str(error)) if provider.bill in ledger.capped else None
+    calls = ledger.library.calls  # bound on the package by `open_ledger`'s import
+    with contextlib.closing(connection):
+        try:
+            result = calls.call(
+                connection, entry=ledger.library.Provider(**vars(provider)), prompt=prompt, environ=environ,
+                timeout=timeout, role="reviewer", repo=str(root),
+                transport=None if client is None else _wire(client, provider, prompt, environ),
+            )
+        except (calls.CallRefused, ledger.library.LedgerRefused) as error:
+            return _outcome(provider.name, REFUSED, str(error))
+    receipt = {"call_id": result.call_id, "outcome": result.outcome, "bound_usd": result.bound,
+               "usd": result.usd, "reason": result.reason}
+    if result.http_status is None:
+        return (1, "", f"{provider.name}: {result.reason}", False, None), receipt
+    failed = not 200 <= result.http_status < 300
+    return (result.http_status if failed else 0, result.body,
+            f"HTTP {result.http_status} from {provider.name}" if failed else "", True, result.http_status), receipt
+
+
 def run_provider(
     provider: sd_registry.Provider,
     root: pathlib.Path,
@@ -951,7 +1103,8 @@ def run_provider(
     env: Mapping[str, str],
     timeout: int,
     codex_auth_home: pathlib.Path | None = None,
-    client: sd_registry.Client = sd_registry.chat_completion,
+    client: sd_registry.Client | None = None,
+    ledger: Ledger | None = None,
 ) -> Outcome:
     """Run one registry entry on the resolved subject, and report an outcome.
 
@@ -985,7 +1138,11 @@ def run_provider(
         except Refusal as error:
             return _outcome(provider.name, REFUSED, str(error))
         request_prompt = f"{prompt}\nSchema: {json.dumps(CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{material}{URL_OUTPUT_CONTRACT}"
-        response = client(provider, request_prompt, provider_env, timeout)
+        charged = charged_call(ledger, provider, request_prompt, provider_env, timeout, client, root)
+        if isinstance(charged, Outcome):
+            return charged
+        # `None` is the road's own wire: the library's above, this seam's here.
+        response, receipt = charged or ((client or sd_registry.chat_completion)(provider, request_prompt, provider_env, timeout), None)
         result = Completed(*response[:4])
         text, diagnostic = sd_registry.url_response(result.stdout)
         diagnostic["transport_exit_code"] = result.exit_code
@@ -999,6 +1156,7 @@ def run_provider(
         diagnostic["model_matches_requested"] = (model.get("sha256") == hashlib.sha256((provider.model or "").encode()).hexdigest()
                                                   if model.get("type") == "string" else None)
         diagnostic["response_received"] = result.launched
+        diagnostic["ledger"] = receipt
         parsed = oversized_findings() if diagnostic["category"] == "response_limit" else parse_findings(text, diagnostic, allow_json_fence=True)
         if parsed is not None and diagnostic["category"] in ("truncated", "incomplete_finish"):
             parsed = parsed._replace(error="; ".join(filter(None, (parsed.error, "provider reported an incomplete response"))))
@@ -1203,7 +1361,7 @@ def review(
     runner: Runner,
     env: Mapping[str, str],
     codex_auth_home: pathlib.Path | None = None,
-    client: sd_registry.Client = sd_registry.chat_completion,
+    client: sd_registry.Client | None = None,
 ) -> dict[str, Any]:
     """The pipeline. Returns one result object; prints nothing."""
 
@@ -1287,8 +1445,13 @@ def review(
         vendors, authorship_refusal = (), str(error)
     if previous:
         vendors = tuple(sorted(set(vendors) | set(previous["authored_with"])))
+    # The ledger before the chain: the sweep runs once here, and a bill at its
+    # cap is passed over by fallthrough and refused by a pick, both naming the
+    # month's total; a fault names itself the same way on every capped bill.
+    ledger = open_ledger(env, getattr(args, "database", None), registry)
+    capped = capped_bills(registry, ledger)
     chain = sd_registry.reviewer_chain(
-        registry, consent=consent, author_vendors=vendors, readers=READERS
+        registry, consent=consent, author_vendors=vendors, capped_bills=capped, readers=READERS
     )
     if authorship_refusal:
         chain = [sd_registry.Candidate(candidate.provider, False,
@@ -1302,6 +1465,7 @@ def review(
                 args.provider,
                 consent=consent,
                 author_vendors=vendors,
+                capped_bills=capped,
                 readers=READERS,
             )
         ]
@@ -1353,6 +1517,8 @@ def review(
         "authorship_refusal": authorship_refusal,
         "authored_with_report": f"unknown: {authorship_refusal}" if authorship_refusal else _authored_report(args.scope, vendors),
         "chain": [candidate.row for candidate in chain],
+        "capped_bills": capped,
+        "ledger_fault": ledger.fault,
         "codex_preflight": codex_preflight_state(codex_auth_home or codex_home(env)),
         "scrubbed_env_names": list(scrubbed_names(env)),
         "posted": False,
@@ -1366,7 +1532,7 @@ def review(
     }
 
     if preflight:
-        return provider_preflight(result, chosen, root, subject, runner, env, args, client)
+        return provider_preflight(result, chosen, root, subject, runner, env, args, client, ledger)
     expected_timing = getattr(args, "expected_timing", None)
     if expected_timing is not None and expected_timing != hashlib.sha256(json.dumps(timing, sort_keys=True).encode()).hexdigest():
         raise Refusal("review timing inputs changed; explain again before dispatch")
@@ -1437,6 +1603,7 @@ def review(
             args.timeout,
             codex_auth_home,
             client,
+            ledger,
         )
         outcomes.append(outcome)
         if outcome.status in (CLEAN, FINDINGS):
@@ -1471,8 +1638,10 @@ def review(
 
 def provider_preflight(result: dict[str, Any], chosen: Sequence[sd_registry.Provider], root: pathlib.Path,
                        subject: Subject, runner: Runner, env: Mapping[str, str], args: argparse.Namespace,
-                       client: sd_registry.Client) -> dict[str, Any]:
-    """One explicit synthetic URL probe; never a reviewed-branch receipt."""
+                       client: sd_registry.Client | None, ledger: Ledger) -> dict[str, Any]:
+    """One explicit synthetic URL probe; never a reviewed-branch receipt. A
+    billable request with the entry's `max_tokens`, so it is charged through
+    the same road as a review and leaves the same row."""
     if chosen and not chosen[0].url:
         raise UsageError("--preflight supports one URL provider, not a provider CLI")
     result.update(operation="provider_preflight", scope="provider_preflight", requested_reviews=0,
@@ -1486,7 +1655,7 @@ def provider_preflight(result: dict[str, Any], chosen: Sequence[sd_registry.Prov
     prompt = 'Protocol preflight only. No repository is supplied or reviewed. Return exactly {"findings": []}.'
     assert provider is not None
     outcome = (_outcome(provider.name, REFUSED, refusal) if refusal else
-               run_provider(provider, root, subject._replace(paths=(), lines=0), prompt, runner, env, args.timeout, client=client))
+               run_provider(provider, root, subject._replace(paths=(), lines=0), prompt, runner, env, args.timeout, client=client, ledger=ledger))
     result["probe_calls"] = 0 if outcome.status in (REFUSED, NOT_RUN) else 1
     result["outcomes"] = [{"backend": outcome.backend, "status": outcome.status, "detail": outcome.detail,
                            "findings": len(outcome.findings), "diagnostic": outcome.diagnostic}]

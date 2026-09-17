@@ -264,6 +264,13 @@ def _adapt(registry: Any) -> Registry:
     re-exporting means one caller-visible type, so a caller cannot come to
     depend on whichever one the machine happened to produce.
     """
+    # The rows can carry a cap the file does not (`sd_db.registry.merge`), so
+    # the bound's inputs are checked here as well as in `_provider`: a `url`
+    # entry the dashboard capped is refused the same way on the merged read.
+    for provider in registry.providers.values():
+        bill = registry.bills.get(provider.bill)
+        if provider.url and bill is not None and bill.capped:
+            refuse_unbounded(provider.name, provider.bill, provider.max_tokens, dict(provider.price), Path(registry.path))
     return Registry(
         path=Path(registry.path),
         bills={
@@ -570,6 +577,40 @@ def reasoning_controls(body: dict[str, Any], path: Path, name: str) -> dict[str,
     return controls
 
 
+def refuse_unbounded(name: str, bill: str, max_tokens: Any, price: Mapping[str, Any], path: Path) -> None:
+    """A `url` entry on a capped bill whose bound the ledger could not hold.
+
+    The cap is held by reserving the call's bound before the request, the
+    prompt's estimated tokens at `price.in` plus `max_tokens` at `price.out`
+    (sd:788, `design.md`, the bound). The predicate is `sd_db.calls`'s, which
+    refuses the same entry again at the call and treats what it cannot use
+    as missing: a price is a finite non-negative number, `max_tokens` a
+    whole number above zero. Refused here at read, naming the entry, the key
+    and the value, the way a `start` entry on a capped bill is: a registry
+    the cap cannot hold is refused before a call is planned, and the message
+    is this reader's own rather than the library's.
+    """
+    faults = {"max_tokens": max_tokens} if type(max_tokens) is not int or max_tokens <= 0 else {}
+    for side in ("in", "out"):
+        value = price.get(side)
+        try:
+            usable = isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 and abs(float(value)) < float("inf")
+        except OverflowError:  # an int too large for a float, which the library cannot price either
+            usable = False
+        if not usable:
+            faults[f"price.{side}"] = value
+    if faults:
+        named = ", ".join(f"{key} is {value!r}" for key, value in faults.items())
+        raise RegistryError(
+            f"{path}: provider {name!r} is a 'url' entry on the capped bill "
+            f"{bill!r} and {named}. A cap is held by reserving the call's bound "
+            f"before it is sent, which needs price.in and price.out as finite "
+            f"non-negative numbers per million tokens and max_tokens as a "
+            f"whole number above zero. Give the entry those, or move it to an "
+            f"uncapped bill."
+        )
+
+
 def _provider(
     name: str,
     body: dict[str, Any],
@@ -627,6 +668,8 @@ def _provider(
             f"would be a number nothing enforces. Give it a 'url', or move it "
             f"to an uncapped bill."
         )
+    if url and bills[bill_name].capped:
+        refuse_unbounded(name, bill_name, body.get("max_tokens"), body.get("price") or {}, path)
     if start and str(start).strip():
         first = executable(str(start))
         if not first:
@@ -1211,14 +1254,15 @@ def reviewer_chain(
     *,
     consent: dict[str, Allowance],
     author_vendors: tuple[str, ...] = (),
-    # Nothing supplies this yet, and saying so here is the point. A cap is
-    # spend against `cap_usd_month`, which lives in the database's `bill` rows
-    # and not in this file, so the file-only reader cannot know it. The
-    # registry also refuses a `start` entry on a capped bill outright, so the
-    # only entries a cap can reach are `url` entries, which this build now
-    # calls. The branch below is right and unreached, and it stays
-    # tested so that wiring it is a change to one call site.
-    capped_bills: tuple[str, ...] = (),
+    # Bill name to the line the refusal renders, supplied by `review` in
+    # `bin/sd-review` (sd:788 slice 3). A cap is spend against
+    # `cap_usd_month`, which the ledger sums from `cost` rows, so the
+    # file-only reader cannot know it and the caller that holds a connection
+    # says which bills are at theirs, with the month's total in the line, or
+    # names the fault that kept it from finding out. The registry refuses a
+    # `start` entry on a capped bill outright, so the only entries a cap can
+    # reach are `url` entries.
+    capped_bills: Mapping[str, str] | None = None,
     readers: tuple[str, ...] = (),
 ) -> list[Candidate]:
     """Return enabled reviewers in order, including eligibility and reasons.
@@ -1243,11 +1287,8 @@ def reviewer_chain(
                 f"this branch carries {provider.vendor} authorship. The reviewer "
                 f"is a different vendor from the author, always."
             )
-        if refusal is None and provider.bill in capped_bills:
-            refusal = (
-                f"{provider.name} is billed to {provider.bill}, which is at its "
-                f"cap for the month."
-            )
+        if refusal is None and provider.bill in (capped_bills or {}):
+            refusal = f"{provider.name} is billed to {provider.bill}: {(capped_bills or {})[provider.bill]}"
         candidates.append(Candidate(provider, refusal is None, refusal or ""))
     return candidates
 
@@ -1258,7 +1299,7 @@ def pick(
     *,
     consent: dict[str, Allowance],
     author_vendors: tuple[str, ...] = (),
-    capped_bills: tuple[str, ...] = (),
+    capped_bills: Mapping[str, str] | None = None,
     readers: tuple[str, ...] = (),
 ) -> Provider:
     """`--provider <name>`: one entry for one run, or a refusal that says why.

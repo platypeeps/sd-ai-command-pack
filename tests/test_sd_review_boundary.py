@@ -361,11 +361,26 @@ class LineBudgetTests(unittest.TestCase):
         # with the guard refusal moved into it: left inline, the extra branch
         # put `setup_github` one over the complexity ceiling in
         # `tests/test_code_health.py`, and that ceiling does not move.
+        #
+        # 2149 -> 2318 is sd:788 slice 3. Every `url` call the lane makes is
+        # charged through the library's `sd_db.calls.call` -- reserve at the
+        # bound, claim, one POST, settle or lose -- and a bill at its
+        # `cap_usd_month` is passed over by the chain and refused by
+        # `--provider`, naming the month's total. The lane writes no `cost`
+        # row of its own: the 169 lines are the road to that function
+        # (`Ledger`, `open_ledger`, `capped_bills`, `charged_call`), the
+        # fake-client wire that keeps the `client` seam every existing test
+        # dispatches through, and the fail-closed legs when the road is shut:
+        # no library, a library older than `sd_db.calls`, a database that
+        # will not open. Each leg is a test in `test_sd_review_ledger.py`.
+        # The library is reached through `sd_lib.import_sd_db`, which the
+        # lane already called, and not `sd_handoff_rows`, whose 162 lines
+        # would otherwise join the lane for one function.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2149,
+            2318,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
