@@ -833,11 +833,15 @@ before starting step 2.
       outside what this lane may edit: `skills/sd-status/SKILL.md` and
       `bin/sd-status`'s `CLASSES` still say `dashboard index` as the source
       of the two `issue-*` rows (the verb went at step 4; the file is held
-      by #1011 and fix-431-d); `bin/sd_rules.py`'s four `R12-D*` subjects,
-      `bin/sd_lib.py`, `bin/sd_codex.py`, `bin/sd-status`'s two comments and
-      `bin/sd_install.py`'s comment still say `dashboard/` or
-      `sd-dashboard` in prose; and `.github/scripts/select-tests.py` keeps
-      `dashboard` in `IMPORTING_TREES`, inert (step 7 measured it).
+      by #1011 and fix-431-d); `bin/sd_lib.py`, `bin/sd_codex.py`,
+      `bin/sd-status`'s two comments and `bin/sd_install.py`'s comment still
+      say `dashboard/` or `sd-dashboard` in prose; `bin/sd_ledger.py` (with
+      `tests/test_sd_ledger.py`) has had no caller since step 1 and its
+      docstring says so, and whether it goes is step 9's decision; and
+      `.github/scripts/select-tests.py` keeps `dashboard` in
+      `IMPORTING_TREES`, inert (step 7 measured it). `bin/sd_rules.py`'s
+      four `R12-D*` subjects said "`bin/` or `dashboard/`" until the review
+      of this pull request; they say `bin/` now.
 
 - [ ] **9. Close the items.** Note on sd:719 with the measurements re-run; sd:705
       closed as answered by deletion, naming step 1 as the answer to its port and

@@ -240,7 +240,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
     # Closed. sd:719 step 7 retired both dashboard ceilings on 2026-09-16
     # with the directory they bounded, and the constants are gone, so nothing
     # below checks these two entries against a live value. They stay for the
-    # reason `BIN_CAP`'s rows do: the total's six raises and the code cap's
+    # reason `BIN_CAP`'s rows do: the total's five raises and the code cap's
     # one raise and four recorded falls are the measurement the port was
     # argued from, and `ceiling_moves` still counts them.
     "DASHBOARD_CAP": (
