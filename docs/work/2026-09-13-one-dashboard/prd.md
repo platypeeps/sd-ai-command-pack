@@ -27,11 +27,11 @@ over `tracked("dashboard")`:
 | `dashboard/` total lines | 4,510 | 4,600 | 90 |
 | `dashboard/` code lines | **2,326** | **2,328** | **2** |
 
-Two lines. And `DASHBOARD_CODE_CAP` (`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`) rises only
+Two lines. And `DASHBOARD_CODE_CAP` (in `tests/test_loc_caps.py`, retired at sd:719 step 7) rises only
 payable in kind: a raise must remove or factor at least as many code lines as it
 claims, which `test_the_code_ceiling_is_paid_for_in_kind`
-(`source:tests/test_loc_caps.py::test_the_code_ceiling_is_paid_for_in_kind`) enforces against `DASHBOARD_CODE_SLACK`
-(`source:tests/test_loc_caps.py::DASHBOARD_CODE_SLACK`). The system package measures **4,431 lines of
+(in `tests/test_loc_caps.py`, retired at sd:719 step 7) enforces against `DASHBOARD_CODE_SLACK`
+(in `tests/test_loc_caps.py`, retired at sd:719 step 7). The system package measures **4,431 lines of
 Python across 20 modules, plus 1,077 lines of static CSS and JavaScript**, with
 **306 tests** behind it — the suite prints `Ran 306 tests`, where
 `grep -c "def test"` returns 293, because a shared mixin in
@@ -220,9 +220,9 @@ Pull request #898's body says, of retiring `serve` and `install`: *"it removes
 budget rather than spending it."* **That is wrong in the direction that
 matters, and this item cannot be planned around it.**
 
-`test_the_code_ceiling_is_paid_for_in_kind` (`source:tests/test_loc_caps.py::test_the_code_ceiling_is_paid_for_in_kind`)
+`test_the_code_ceiling_is_paid_for_in_kind` (in `tests/test_loc_caps.py`, retired at sd:719 step 7)
 asserts that `DASHBOARD_CODE_CAP` minus what `dashboard/` measures is at most
-`DASHBOARD_CODE_SLACK` (`source:tests/test_loc_caps.py::DASHBOARD_CODE_SLACK`), which is 29. Today that
+`DASHBOARD_CODE_SLACK` (in `tests/test_loc_caps.py`, retired at sd:719 step 7), which is 29. Today that
 gap is 2. **Removing code widens the gap and fails the test.** So a removal does
 not earn budget; it forces the ceiling down.
 
@@ -248,7 +248,7 @@ otherwise be told to move a ceiling no test asks them to move.
 
 And lowering the cap is not a one-line edit either.
 `test_each_ceiling_is_the_last_value_its_history_records`
-(`source:tests/test_loc_caps.py::test_each_ceiling_is_the_last_value_its_history_records`) requires the new value to be appended to
+(in `tests/test_loc_caps.py`, retired at sd:719 step 7) requires the new value to be appended to
 `CEILING_HISTORY` (`source:tests/test_loc_caps.py::CEILING_HISTORY`) in the same commit. That append
 is the first downward move the history has ever recorded — `ceiling_moves`
 (`source:tests/test_loc_caps.py::ceiling_moves`) returns `(29, 26, 0)` in this worktree — and
@@ -287,9 +287,9 @@ rewrote only the first one would have landed red on the second, on a message
 about a ceiling repeating a value, which is not what happened.
 
 One more mechanical detail nobody finds by reading prose.
-`test_the_dashboard_stays_under_its_ceiling` (`source:tests/test_loc_caps.py::test_the_dashboard_stays_under_its_ceiling`) and
+`test_the_dashboard_stays_under_its_ceiling` (in `tests/test_loc_caps.py`, retired at sd:719 step 7) and
 `test_the_dashboard_code_stays_under_its_own_ceiling`
-(`source:tests/test_loc_caps.py::test_the_dashboard_code_stays_under_its_own_ceiling`) both assert the enumeration is non-empty
+(in `tests/test_loc_caps.py`, retired at sd:719 step 7) both assert the enumeration is non-empty
 ("dashboard/ enumeration matched no tracked files"). **The commit that deletes
 the last file under `dashboard/` reddens both of them on the empty
 enumeration.** They retire in that same commit, in the shape `BIN_CAP` retired

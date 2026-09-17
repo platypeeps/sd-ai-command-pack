@@ -51,7 +51,6 @@ GOVERNED = (
     "bin",
     "skills",
     "agents",
-    "dashboard",
     "tests",
     ".claude",
     ".github",
@@ -169,14 +168,14 @@ class DashboardCut(unittest.TestCase):
         self.assertEqual(present, [], f"still on disk: {present}")
 
 
-#: Every site under `bin` and `dashboard` that reads the `parked` or
-#: `archived` field, as `path` and the line's text. `bin/sd_lib.py` builds the
-#: item; everything else is `bin/sd-status` (the `--parked` flag, the parked
-#: section and the three "live item" filters). The dashboard row that read
-#: the archived count `dashboard/work.py` derived from the field left the set
-#: when sd:719 step 6 retired `dashboard/app.js`; `dashboard/` is still in the
-#: grep so a reader restored there surfaces. The later lane that cuts the
-#: field shrinks this set; nothing before it may grow it.
+#: Every site under `bin` that reads the `parked` or `archived` field, as
+#: `path` and the line's text. `bin/sd_lib.py` builds the item; everything
+#: else is `bin/sd-status` (the `--parked` flag, the parked section and the
+#: three "live item" filters). The dashboard row that read the archived count
+#: the pack dashboard derived from the field left the set when sd:719 step 6
+#: retired the client script, and the grep stopped naming the directory when
+#: step 7 deleted it. The later lane that cuts the field shrinks this set;
+#: nothing before it may grow it.
 FROZEN_FIELD_READERS = frozenset({
     ("bin/sd_lib.py", "archived=report.archived,"),
     ("bin/sd-status", '"archived": item.archived,'),
@@ -199,9 +198,9 @@ FIELD_READ = r'\.(parked|archived)([^A-Za-z_]|$)|\["(parked|archived)"\]'
 
 
 def field_readers() -> list[tuple[str, str]]:
-    """The `(path, text)` of every field read under `bin` and `dashboard`."""
+    """The `(path, text)` of every field read under `bin`."""
     result = subprocess.run(
-        ["git", "grep", "-nIE", FIELD_READ, "--", "bin", "dashboard"],
+        ["git", "grep", "-nIE", FIELD_READ, "--", "bin"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

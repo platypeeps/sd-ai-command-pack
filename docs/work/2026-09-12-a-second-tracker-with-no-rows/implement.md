@@ -14,8 +14,8 @@ tests with the pinned build, not assumed.
 
 `dashboard/` changes by one expression, step 7b, so the page shows a Jira
 row's key instead of its project. `DASHBOARD_CAP`
-(`source:tests/test_loc_caps.py::DASHBOARD_CAP`) and `DASHBOARD_CODE_CAP`
-(`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`) do not move; `dashboard/jira.py` stayed until
+(in `tests/test_loc_caps.py`, retired at sd:719 step 7) and `DASHBOARD_CODE_CAP`
+(in `tests/test_loc_caps.py`, retired at sd:719 step 7) do not move; `dashboard/jira.py` stayed until
 the `index.sqlite` retirement deleted it (sd:719 step 4). The pack's `bin/` has no ceiling
 since R11-D48. The pack half is on the order of forty lines in
 `bin/sd_shadow.py`, thirty in `bin/sd-status`, and their tests.
@@ -340,7 +340,7 @@ since R11-D48. The pack half is on the order of forty lines in
       that file's `fillIssues` cases, asserts the null-number branch of
       `where` derives from `issue.url` and not from `issue.repo` first; and
       `python -m unittest tests.test_loc_caps` stays green with
-      `DASHBOARD_CODE_CAP` (`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`) unmoved. Mutation:
+      `DASHBOARD_CODE_CAP` (in `tests/test_loc_caps.py`, retired at sd:719 step 7) unmoved. Mutation:
       restore `issue.repo || issue.tracker` as the first branch and the
       test reddens. Manual check after step 2 has run: the issues tab shows
       `LOG-23929`, linked, where before this step it showed `LOG`. The key is

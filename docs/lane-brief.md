@@ -70,7 +70,7 @@ for the controls a run passes through.
 > <one paragraph: the citation — `path:line` for a line of a markdown page;
 > `source:<path>::<symbol>` for a Python function, class, method or
 > module-level assignment; prose naming the enclosing declaration or the file
-> for anything else, `dashboard/app.js` say; never a line number into code
+> for anything else, the `Makefile` say; never a line number into code
 > ([`CONTRIBUTING.md`](../CONTRIBUTING.md), "Repository Conventions") — the
 > quoted text, the related pull requests and decision notes to read>
 >

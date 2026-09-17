@@ -642,18 +642,19 @@ def registered_rule_ids() -> set[str]:
 
 
 def consumer_sources() -> list[tuple[str, str]]:
-    """Every tracked file under `bin/` and `dashboard/`, Python or not.
+    """Every tracked file under `bin/`, Python or not.
 
     Not "every file that parses as Python", which is what this was and which
-    made `dashboard/app.js` invisible -- until sd:719 step 6 retired it, the
-    one tracked file here that was not Python, and the same file an
-    independent sd:525 pass named as the blind spot of this repository's other
-    AST-only locator. A scope that silently drops the only file it cannot
-    parse is the defect this module exists to end, committed inside the check
-    built to end it; the scope stays whole after the file that taught it went.
+    made the pack dashboard's client script invisible -- until sd:719 step 6
+    retired it, the one tracked file here that was not Python, and the same
+    file an independent sd:525 pass named as the blind spot of this
+    repository's other AST-only locator. A scope that silently drops the only
+    file it cannot parse is the defect this module exists to end, committed
+    inside the check built to end it; the scope stays whole after the file
+    that taught it went, and after step 7 deleted the tree it was in.
     """
 
-    return [(relative, text) for relative, text in read_corpus("bin", "dashboard")
+    return [(relative, text) for relative, text in read_corpus("bin")
             if relative != "bin/sd_rules.py"]
 
 
@@ -1097,10 +1098,11 @@ with its baseline.""")
         that names a rule in a string has taken a copy of the table, and a copy
         is a thing that can disagree.
 
-        **What it reads.** Every tracked file under `bin/` and `dashboard/`,
-        including the ones that are not Python. `dashboard/app.js` was the
+        **What it reads.** Every tracked file under `bin/`, including the
+        ones that are not Python. The pack dashboard's client script was the
         only such file until sd:719 step 6 retired it, and it was invisible
-        until review said so; the scope did not narrow when it went.
+        until review said so; the scope did not narrow when it went, and
+        `dashboard/` left the pathspec when step 7 deleted the tree.
 
         **What it cannot see, which is stated rather than left to be found.**
 
@@ -1770,7 +1772,7 @@ def enforcement_error(mutation: Mutation, outcome: Outcome) -> str | None:
 #: **Keyed by the checker location, not by the rule id.** A rule id written as
 #: data outside `bin/sd_rules.py` is the second list
 #: `test_no_consumer_carries_a_second_list` refuses, and that check reads `bin/`
-#: and `dashboard/` -- it would not see a dictionary here, so the discipline has
+#: -- it would not see a dictionary here, so the discipline has
 #: to be kept rather than relied on. A checker location is the row's own value,
 #: read back off `RULES` by `test_every_live_checker_carries_a_mutation` as an
 #: equality: a row added with no mutation fails, and a mutation outliving the row
@@ -1980,7 +1982,8 @@ def batched_controls(tree: pathlib.Path,
 
     The control half of every row at once (sd:971). A row's control asked
     whether its named test is green on the clean copy, and each of the four
-    code-health tests answered by walking `bin/` and `dashboard/` afresh in a
+    code-health tests answered by walking `bin/` (and `dashboard/`, until
+    sd:719 step 7 deleted it) afresh in a
     child of its own: about 1.2 s a child against 0.1 s for a test that walks
     nothing, and one child running all four walked once. So the controls run
     in one child before any mutation, and `exercise` reads a row's answer off

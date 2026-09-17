@@ -82,8 +82,8 @@ test:
 # Both dedupe internally, so this one is waste rather than a wrong answer --
 # but every `ls-files` in this repository now says what it means (item 481).
 LINT_BIN := $(shell git ls-files --deduplicate -- bin)
-LINT_RUFF_PATHS := dashboard $(LINT_BIN) tests
-LINT_MYPY_PATHS := dashboard $(LINT_BIN)
+LINT_RUFF_PATHS := $(LINT_BIN) tests
+LINT_MYPY_PATHS := $(LINT_BIN)
 
 .PHONY: lint-ruff-paths lint-mypy-paths
 lint-ruff-paths:
@@ -94,8 +94,8 @@ lint-mypy-paths:
 # Pass STRICT=1 to turn missing-tool skips below into hard errors. That is
 # parity with the CI lint job, which always runs the ShellCheck lane and
 # never skips it. Ruff and mypy cover the paths named in LINT_RUFF_PATHS and
-# LINT_MYPY_PATHS above: Ruff over dashboard, the tracked bin/ files and
-# tests/, mypy over dashboard and the tracked bin/ files. The installer
+# LINT_MYPY_PATHS above: Ruff over the tracked bin/ files and tests/, mypy
+# over the tracked bin/ files. The installer
 # package and the shipped payload that step 3e removed are not in either.
 #
 # The bash 3.2 lane survives 3e on a narrower rationale than it had, and the

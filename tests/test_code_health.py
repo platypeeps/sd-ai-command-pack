@@ -1,8 +1,9 @@
-"""What `bin/` and `dashboard/` may not become, measured instead of asserted.
+"""What `bin/` may not become, measured instead of asserted.
 
 This replaces one check, not one file: `BIN_CAP` in `tests/test_loc_caps.py`,
 which capped total lines under `bin/`. That file survives and still enforces
-the `migrate-*` and dashboard ceilings; only the `bin/` total is retired here.
+the `migrate-*` ceiling; the `bin/` total was retired here, and the dashboard
+ceilings went with `dashboard/` at sd:719 step 7.
 
 That cap was raised eighteen times in eleven days and lowered never, while
 `bin/` grew from 8,000 lines to the 20,803 it was retired at -- so it never
@@ -85,7 +86,7 @@ SHEBANG_LIMIT = 4096
 
 #: How many public functions the dead-code check cannot speak for, because
 #: another function in the corpus carries the same name. Downward only.
-AMBIGUOUS_CEILING = 116
+AMBIGUOUS_CEILING = 114  # 116 until sd:719 step 7 deleted bin/sd-dashboard's build_parser and main
 
 
 def tracked(*pathspecs: str, root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:
@@ -123,7 +124,10 @@ def tracked(*pathspecs: str, root: pathlib.Path = REPO_ROOT) -> list[pathlib.Pat
 
 @functools.cache
 def sources() -> tuple[pathlib.Path, ...]:
-    """Every Python file the checks govern: `bin/` and `dashboard/`.
+    """Every Python file the checks govern: `bin/`.
+
+    `dashboard/` was the corpus's other tree until sd:719 step 7 deleted it;
+    the enumeration is the index, so nothing here had to be told.
 
     `migrate-*` is excluded on the same reasoning the old cap used -- those
     tools are deleted rather than kept, and holding deleted code to a standard
@@ -140,7 +144,7 @@ def sources() -> tuple[pathlib.Path, ...]:
     """
 
     return tuple(
-        path for path in tracked("bin", "dashboard")
+        path for path in tracked("bin")
         if path.suffix == ".py" or _is_python_script(path)
         if not _is_migration_tool(path)
     )
@@ -163,7 +167,7 @@ def _is_migration_tool(path: pathlib.Path) -> bool:
 
     The exception is inherited from `MIGRATE_CAP`, which governs `bin/migrate-*`
     alone (`tests/test_loc_caps.py`). Keyed on the basename instead, it would
-    also drop a future `dashboard/migrate-*.py` -- and drop it from `sources()`
+    also drop a future `tests/migrate-*.py` -- and drop it from `sources()`
     and from `expected` at once, so the corpus test would compare two sets that
     agree about a file neither of them holds. That is the fail-open shape this
     module exists to avoid, so the directory is part of the predicate.
@@ -730,11 +734,11 @@ class CodeHealth(unittest.TestCase):
         # Through `_is_migration_tool`, never a second spelling of it. This
         # line read `path.name.startswith("migrate-")` until 2026-09-11, while
         # `sources()` had already been narrowed to `bin/` -- so a future
-        # `dashboard/migrate-*.py` would be in the corpus and absent from the
+        # `migrate-*.py` in a second tree would be in the corpus and absent from the
         # set the corpus is checked against, and this test would fail for a
         # file that belongs. One predicate, one place.
         expected = {
-            path for path in tracked("bin", "dashboard")
+            path for path in tracked("bin")
             if not _is_migration_tool(path)
             if path.suffix == ".py" or _is_python_script(path)
         }
@@ -869,7 +873,7 @@ class CodeHealth(unittest.TestCase):
         limit, and an unstated limit is worse than a small one -- so it is
         measured here and held to a ceiling that may only come down, the same
         rule the baselines follow. Giving a function a name nothing else in
-        `bin/` and `dashboard/` uses is what shrinks it.
+        `bin/` uses is what shrinks it.
         """
 
         blind = sorted(
@@ -950,7 +954,7 @@ def _references() -> collections.Counter:
     me = pathlib.Path(__file__).resolve()
     words = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
     seen: collections.Counter = collections.Counter()
-    for path in tracked("bin", "dashboard", "tests", "skills", "docs",
+    for path in tracked("bin", "tests", "skills", "docs",
                         ".github", ".claude", "*.md"):
         if path == me:
             continue
@@ -1236,7 +1240,7 @@ class Detectors(unittest.TestCase):
     def test_the_migration_exception_is_scoped_to_bin(self):
         self.assertTrue(_is_migration_tool(REPO_ROOT / "bin/migrate-rows"))
         self.assertFalse(
-            _is_migration_tool(REPO_ROOT / "dashboard/migrate-store.py"))
+            _is_migration_tool(REPO_ROOT / "tests/migrate-store.py"))
         self.assertFalse(_is_migration_tool(REPO_ROOT / "bin/sd_lib.py"))
 
     def test_an_overlong_shebang_stays_in_the_corpus(self):
@@ -1352,8 +1356,8 @@ def lint_path_literals() -> dict[str, list[str]]:
     """Each lint variable's literal tokens, read off the `Makefile` as text.
 
     Read rather than run: `make -s lint-ruff-paths` would print the expanded
-    list, which hides the literal `dashboard` behind three hundred tracked
-    `bin/` names, and the question here is what the file says, not what make
+    list, which hides a stale literal behind three hundred tracked `bin/`
+    names, and the question here is what the file says, not what make
     resolves it to on this machine.
     """
 
@@ -1374,13 +1378,14 @@ class LintPaths(unittest.TestCase):
     directory was deleted; a literal left behind fails `make check` on a path
     Ruff cannot open. The module docstring of `tests/test_loc_caps.py` called
     the hand-kept lint list the trap this repository still carries, and this
-    is the check that a name in it is at least a name in the tree.
+    is the check that a name in it is at least a name in the tree. A variable
+    with no literal at all -- `LINT_MYPY_PATHS` is `$(LINT_BIN)` alone now --
+    names nothing that can be absent, and passes.
     """
 
     def test_every_literal_lint_path_is_in_the_tree(self):
         for name, literals in lint_path_literals().items():
             with self.subTest(variable=name):
-                self.assertTrue(literals, f"{name} names no literal path")
                 missing = [token for token in literals if not tracked(token)]
                 self.assertEqual(
                     missing, [],
