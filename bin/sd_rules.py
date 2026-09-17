@@ -94,7 +94,7 @@ LIVE = "live"
 #: A rule that has been withdrawn. Its id stays in the table forever.
 #:
 #: This state existed before the first repeal rather than after it, because a
-#: repealed id must never become reusable: live prose citing `R5-D1` must not
+#: repealed id must never become reusable: live prose citing `R10-D2` must not
 #: quietly start resolving to whatever rule next claims that id. A repealed row
 #: carries no checker and no proof -- there is nothing left to enforce -- and
 #: no skill has to teach it, so leg a skips it. Leg c still resolves it, which

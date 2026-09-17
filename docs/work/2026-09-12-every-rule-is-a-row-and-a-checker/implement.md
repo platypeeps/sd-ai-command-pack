@@ -525,18 +525,27 @@
       this slice the twelve left are `R11-D1`, `R11-D5` and the ten
       dashboard and history ids -- the repeal questions, the audit's slices
       7 and 8, each an owner decision; no lane takes them without one.
-      Residue, no code change here: the `REPEALED` comment in
-      `bin/sd_rules.py` uses `R5-D1` as its example of an id that must not
-      be reused, written when the id was stranded; the sentence stays true
-      of a live id and was left. From the review round on #1021, one
-      suppressed finding, taken: the section's `R5-D1` sentence had named
-      `sd store get` beside `sd store list`, while the row's checker,
-      mutation and named test cover `store_list` only; `store_get` in
-      `bin/sd` is a separate read with no row and no mutation, so a
-      stale-read regression there would leave leg d green, and the sentence
-      now names the listing alone. A `store_get` row is not taken here: it
-      would be a second live row on the same rule id, which the registry
-      does not carry.
+      From the two review rounds on #1021, four suppressed findings, all
+      taken as prose: the section's `R5-D1` sentence had named `sd store
+      get` beside `sd store list`, while the row's checker, mutation and
+      named test cover `store_list` only; `store_get` in `bin/sd` is a
+      separate read with no row and no mutation, so a stale-read regression
+      there would leave leg d green, and the sentence now names the listing
+      alone (a `store_get` row is not taken: it would be a second live row
+      on one id, which the registry does not carry). The `R11-D14` sentence
+      had read as a requirement to declare all eight keys, where
+      `KIND_REQUIRED` in `bin/sd` requires `fields` and `initial-status`
+      and the other six are optional, and now says so. The `R11-D27`
+      sentence had named `sd store add` beside `sd store set`, where
+      `edit_field` has one caller, `store_set`, and `store_add` renders a
+      new note whole from the kind's template; the sentence names `set`
+      alone and says what `add` does. And the `REPEALED` comment in
+      `bin/sd_rules.py` used `R5-D1` as its example of an id that must not
+      be reused, written when the id was stranded; the example is now
+      `R10-D2`, the one repealed row. Left for the owner: the `R11-D27`
+      row's subject still opens with `sd store add` and `sd store set`, the
+      archive definition's own wording, though the checker holds `set`'s
+      path only; the rows were held unchanged in the review fixes.
 
 - [x] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become
