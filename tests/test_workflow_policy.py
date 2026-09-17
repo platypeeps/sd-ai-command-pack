@@ -502,12 +502,14 @@ class BareVendorTokens(unittest.TestCase):
 #: `sd-review` and `sd-research-kit review`, the front of
 #: `bin/sd_research_review.py`, and the same three shapes apply to both: a
 #: bare reviewer with no verb before it names the tool, its lane or its
-#: report and is not an invocation.
+#: report and is not an invocation. The reviewer's name ends at a backtick,
+#: a space or the line: `sd-review-ack` is another tool, and `\b` reads its
+#: hyphen as the end of a word.
 REVIEWER = r"(?:sd-review|sd-research-kit review)"
 REVIEW_INVOCATION = re.compile(
     rf"`{REVIEWER} --[a-z]"
-    rf"|\b(?:run|runs|running|invoke|invokes)\s+`{REVIEWER}\b"
-    rf"|^\s*(?:\$ )?{REVIEWER}\b",
+    rf"|\b(?:run|runs|running|invoke|invokes)\s+`{REVIEWER}`"
+    rf"|^\s*(?:\$ )?{REVIEWER}(?:[ \t]|$)",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -584,6 +586,7 @@ class SkillsThatRunAReview(unittest.TestCase):
                 "skills/kit/SKILL.md": "Run the mechanical half:\n\n   sd-research-kit review\n",
                 "skills/lane/SKILL.md": "The verdict belongs to the sd-review lane.\n",
                 "skills/tool/SKILL.md": "`sd-review` runs it; `sd-review-ack` marks the row.\n",
+                "skills/ack/SKILL.md": "Run `sd-review-ack` on the row.\n\n```\nsd-review-ack --ack 3\n```\n",
                 "skills/kitmention/SKILL.md":
                     "The `sd-research-kit review` report lists where the template moved.\n",
                 "skills/sd-review/SKILL.md": "# sd-review\n",
