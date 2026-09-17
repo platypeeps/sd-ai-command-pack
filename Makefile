@@ -13,9 +13,11 @@ setup:
 
 # The pre-commit tier of sd:431. `hooks/pre-commit` runs Ruff over the staged
 # Python and the two whole-tree test passes that walk the tree, with a
-# wall-time budget in its header. The install is one relative symlink,
-# .git/hooks/pre-commit -> ../../hooks/pre-commit, in the hooks directory git
-# names (`.git/hooks` here; a worktree shares the main checkout's). Not
+# wall-time budget in its header. The install is one symlink,
+# <hooks dir>/pre-commit -> <this checkout>/hooks/pre-commit, in the hooks
+# directory git names: `.git/hooks` in a clone, and the main checkout's
+# `.git/hooks` from a worktree, which is why the target is absolute -- the
+# link then names the copy in the checkout that ran `make hooks`. Not
 # `.githooks/` and not `core.hooksPath`: those are the retired gate stack's
 # signatures, and bin/sd-status reports each as residue with a removal
 # command, so the pack's own hook must not wear them. A file already at the
@@ -24,7 +26,7 @@ setup:
 # folding it into `--user` is the owner's call. `SD_SKIP_HOOKS=1 git commit`
 # skips the hook with a notice.
 hooks:
-	@dir="$$(git rev-parse --git-path hooks)"; link="$$dir/pre-commit"; target=../../hooks/pre-commit; \
+	@dir="$$(git rev-parse --git-path hooks)"; link="$$dir/pre-commit"; target="$$(pwd -P)/hooks/pre-commit"; \
 	if { [ -e "$$link" ] || [ -L "$$link" ]; } && [ "$$(readlink "$$link")" != "$$target" ]; then \
 		printf '%s\n' "error: $$link exists and is not the link to hooks/pre-commit; move it aside first" >&2; \
 		exit 1; \

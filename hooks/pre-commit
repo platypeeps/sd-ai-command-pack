@@ -39,7 +39,7 @@
 # the person who paid it. Python rather than POSIX sh because
 # tests/test_no_shipped_shell.py allows tracked shell under
 # .github/scripts/ only. Tracked as hooks/pre-commit and installed by
-# `make hooks` as the link .git/hooks/pre-commit -> ../../hooks/pre-commit,
+# `make hooks` as the link .git/hooks/pre-commit -> <checkout>/hooks/pre-commit,
 # never as .githooks/ and never through core.hooksPath: those two are the
 # retired gate stack's signatures, and bin/sd-status reports each as residue
 # with a removal command, which must not name the pack's own hook.

@@ -244,8 +244,10 @@ links `.git/hooks/pre-commit` to the tracked `hooks/pre-commit`, which runs
 Ruff over the staged Python and the two whole-tree test passes
 (`tests.test_code_health`, `tests.test_doc_citations`) in about five seconds
 and prints its own wall time against the budget its header states.
-`SD_SKIP_HOOKS=1 git commit` skips it with a notice. The link is relative and
-the target refuses to replace anything else already at that path; it never
+`SD_SKIP_HOOKS=1 git commit` skips it with a notice. The link's target is the
+absolute path of this checkout's copy (from a worktree, git's hooks directory
+is the main checkout's, and the link then names the worktree's copy), and the
+target refuses to replace anything else already at that path; it never
 sets `core.hooksPath` and the directory is not `.githooks/`, because
 `sd-status` reports both of those as the retired gate stack's residue. This is
 a setting of the clone, not a render, so `--user` does not make it and

@@ -454,8 +454,9 @@
       `ALWAYS_RUN` and neither has a diff-scoped form; `bin/sd-docs-lint` is
       not in the hook, since `--changed` needs `--pr-body` and scopes rule 8
       only and the tool's wall time is network; Ruff is file-scoped by nature.
-      `make hooks` installs it as the relative link `.git/hooks/pre-commit
-      -> ../../hooks/pre-commit` in the directory git names, prints the path,
+      `make hooks` installs it as the link `.git/hooks/pre-commit ->
+      <checkout>/hooks/pre-commit` in the directory git names (absolute, so
+      a worktree's link names the worktree's copy), prints the path,
       refuses by name to replace anything else there, and never sets
       `core.hooksPath`: the directory is `hooks/`, not `.githooks/`, because
       `bin/sd-status` reports `.githooks` and a set `core.hooksPath` as the
@@ -474,8 +475,10 @@
       not run; with the two modules present as stubs the hook runs them
       (`Ran 2 tests`) and a red stub fails the commit with status 1;
       `make hooks` over a
-      copy of the `Makefile` makes the relative link and passes again over
-      its own link, refuses a stranger file and leaves it, and afterwards
+      copy of the `Makefile` makes the absolute link and passes again over
+      its own link, refuses a stranger file and leaves it, a `git commit` of
+      a staged `import os` fails through the link with no commit landing,
+      and afterwards
       `residue_section` from `bin/sd-status` reports neither `githooks` nor
       `hooks-path`. Mutations, each restored from a byte copy: the Ruff step
       removed reddens the Ruff case; the skip branch removed reddens the
@@ -484,7 +487,9 @@
       unexpectedly found`; the refusal removed reddens the stranger case;
       the `unittest` call replaced by `status = 0` reddens both stub cases;
       the divergence guard emptied reddens the not-restaged case with
-      `0 == 0 : All checks passed!`.
+      `0 == 0 : All checks passed!`; the link target misspelt reddens the
+      commit case with `the commit went through` and the link case with
+      `FileNotFoundError`.
 
 - [ ] **8. The authoring tier.** Skills consult the registry and name the rule
       ids in scope. Filed last, because it depends on the registry carrying
