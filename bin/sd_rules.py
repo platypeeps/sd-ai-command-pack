@@ -361,6 +361,32 @@ RULES: tuple[Rule, ...] = (
         scope="code",
         teaches="skills/sd-help/SKILL.md#The store and plugin contract",
     ),
+    #: `R5-D1` is the oldest id in the table and the property the store was
+    #: rebuilt for: the vault is the system-of-record, and a query reads it
+    #: at the moment of asking rather than an index of it. The checker is
+    #: `store_list`, which lists the kind's directory on every call and
+    #: consults nothing else; the test writes a note by hand between two
+    #: queries and requires the second to see it. The mutation is a stale
+    #: index, not an empty listing, so what leg d proves is the violation the
+    #: id names.
+    Rule(
+        id="R5-D1",
+        subject="the vault is the system-of-record: an `sd store` query "
+                "lists the kind's notes from the vault directory at the "
+                "moment of asking, in `store_list` of `bin/sd`, with no index "
+                "consulted and nothing held between invocations, so a note "
+                "written by hand or by Obsidian is visible to the next query "
+                "with no sync step",
+        checker="bin/sd::store_list",
+        proof="make `store_list` in `bin/sd` write the kind's listing to an "
+              "index file on its first query and read that file instead of "
+              "the vault on every query after; a note written by hand between "
+              "two queries is then invisible to the second, and "
+              "`test_a_note_written_directly_into_the_vault_is_visible_to_the_next_query` "
+              "in `tests/test_sd_store.py` goes red",
+        scope="code",
+        teaches="skills/sd-help/SKILL.md#The store and plugin contract",
+    ),
     #: The code rules, registered against sd:430's checkers and nothing new
     #: (owner decision 2026-09-14, Dec-1 and Dec-2): a new round for rules the
     #: registry is native to, taught from one section of the skill `R10-D6`
