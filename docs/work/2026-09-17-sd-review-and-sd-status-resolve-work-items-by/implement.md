@@ -2,7 +2,7 @@
 
 ## Step checklist
 
-- [ ] **1. `registered_base` and `Rows`.** Add `registered_base(root,
+- [x] **1. `registered_base` and `Rows`.** Add `registered_base(root,
       sd_db, connection)` to `bin/sd_lib.py` as `design.md` sketches it;
       in `Rows.__init__`, after `connect` succeeds, set `self.base` from
       it. Tests in `tests/test_status_source.py`, class `TheRowDecides`:
@@ -15,11 +15,11 @@
       with no `origin` does the same. The linked-worktree test is
       untouched and stays green. Green on its own: `python -m unittest
       tests.test_status_source` passes.
-- [ ] **2. `sd-status` from a clone.** In the same test module, render
+- [x] **2. `sd-status` from a clone.** In the same test module, render
       `work_section(clone)` and assert no `status-unreadable` row names
       `ITEM`; assert one does for the foreign-origin clone. Green on its
       own: the module passes with the two new assertions.
-- [ ] **3. `sd_handoff_rows.item_for`.** Replace the `main_worktree_root`
+- [x] **3. `sd_handoff_rows.item_for`.** Replace the `main_worktree_root`
       call with `registered_base`. Test in `tests/test_sd_handoff_rows.py`:
       `item_for` from a clone of the registered remote returns the row
       the original registered. Green on its own: `python -m unittest
@@ -32,7 +32,7 @@
       `prd.md`'s Log with the commit. Expected: 7, and an explanation
       naming this item. Then `sd task status <work row> ready` if the
       registry lane runs clean, which is the promotion this plan withheld.
-- [ ] **5. Gate.** `make check` rc 0; `bin/sd-docs-lint` clean; `git diff
+- [x] **5. Gate.** `make check` rc 0; `bin/sd-docs-lint` clean; `git diff
       --stat main -- bin/sd-review` empty. Ship as one slice; the diff is
       well under the review's large-change line.
 
@@ -59,3 +59,14 @@ for this one; a runner configured to clone over https from an
 ssh-registered repository would resolve to itself, and `same_remote`'s
 strictness is the library's decision. That case is named in `design.md`'s
 risks and is not asserted by any test in this item.
+
+## Log
+
+- 2026-09-17 steps 1, 2, 3 and 5 done on `feat/sd-981-registered-base`
+  over pack `10164281`: `registered_base` in `bin/sd_lib.py`, `Rows` and
+  `item_for` call it; the clone tests ran red first against unchanged
+  `bin/sd_lib.py` (the key carried the clone's path, `sd-status` emitted a
+  `status-unreadable` row, `item_for` returned None), then `OK`; `make
+  check` rc 0, `sd-docs-lint: clean`, `git diff --stat origin/main --
+  bin/sd-review` empty. Step 4, the live measurement from the runner
+  clone, is the owner's and is NOT VERIFIED here; no row was promoted.

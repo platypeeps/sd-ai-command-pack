@@ -181,3 +181,11 @@ once the registry lane has run.
   six, and this folder exists only on the branch, so the registered
   checkout's 7 is unchanged. `sd-review --scope planning` from the clone
   refused with the sentence quoted under Review, exit 2.
+- 2026-09-17 implemented on `feat/sd-981-registered-base` over pack
+  `10164281`: the five unit-test criteria above hold in
+  `tests/test_status_source.py` and `tests/test_sd_handoff_rows.py`, and
+  `bin/sd-review` is not on the diff. The two live criteria, `sd-status`
+  and `sd-review --scope planning --explain` from the runner clone, wait
+  for the owner's step 4; the counts written there stay unmeasured on this
+  branch. The citations of these pages were moved to anchor form first,
+  which took `tests.test_doc_citations` from `FAILED (failures=5)` to `OK`.
