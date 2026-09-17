@@ -262,6 +262,34 @@ RULES: tuple[Rule, ...] = (
         scope="code",
         teaches="skills/sd-handoff/SKILL.md#The restore side",
     ),
+    #: The local block reaches the prompt. `R10-D7` is the design's partial
+    #: fallback for a provider with no untracked-file import: in the lanes the
+    #: pack itself invokes, the `CLAUDE.local.md` block is carried into the
+    #: prompt by hand. What holds it is `local_conventions` in `bin/sd-review`,
+    #: called once, on the dispatch path of `review` after the preflight has
+    #: returned -- so every review the tool dispatches gets the block and the
+    #: preflight, which sends a fixed synthetic probe, gets none. The lanes
+    #: the design listed beyond `sd-review` -- a planning review, a backlog
+    #: ship with a codex agent -- either run through this call or no longer
+    #: exist, so the subject names the one caller (sd:431 step 8, slice 2,
+    #: 2026-09-17).
+    Rule(
+        id="R10-D7",
+        subject="every review `bin/sd-review` dispatches -- any scope, every "
+                "entry the chain runs -- has this checkout's `CLAUDE.local.md` "
+                "block prepended to its prompt, rendered by "
+                "`local_conventions` from the one caller in `review`; a "
+                "checkout with no block sends none, and the receipt's "
+                "`local_block_prepended` says which happened",
+        checker="bin/sd-review::local_conventions",
+        proof="replace the empty-block guard `if not block:` in "
+              "`local_conventions` of `bin/sd-review` with a condition that "
+              "is always true, so the block is dropped whether or not one "
+              "exists; `test_the_local_block_reaches_the_prompt` in "
+              "`tests/test_sd_review.py` goes red",
+        scope="code",
+        teaches="skills/sd-review/SKILL.md#Local conventions reach the prompt",
+    ),
     #: The code rules, registered against sd:430's checkers and nothing new
     #: (owner decision 2026-09-14, Dec-1 and Dec-2): a new round for rules the
     #: registry is native to, taught from one section of the skill `R10-D6`
