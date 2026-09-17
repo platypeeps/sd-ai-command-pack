@@ -18,10 +18,12 @@ live somewhere the operator controls, and it lives in `.git/`, outside the
 tree, because an acknowledgement committed to the branch would change the very
 head whose findings it acknowledges.
 
-WHAT A DISPOSITION MAY BE. Two, and no third:
+WHAT A DISPOSITION MAY BE. Three:
 
   `fixed <commit>`   the finding is real and this commit answers it
   `dismissed <why>`  the finding is wrong, stale or out of scope, and here is why
+  `carried <item>`   the finding is real, no commit in this pull request answers
+                     it, and the item named holds it
 
 `fixed` is the interesting one. A lane that reads its review, agrees, fixes
 it and replies with the SHA has done everything right and can *still* ship the
@@ -53,6 +55,33 @@ is an ancestor of a commit the finding was stated against reads
 `fix-restated`, keeps the gate red, and is left on file for a person to
 move, because a record somebody wrote is not something a verdict deletes.
 
+A CARRIED FINDING BORROWS ITS SATISFACTION AND CAN LOSE IT. `fixed` and
+`dismissed` both settle at write time -- one names a commit, the other a
+reason, and neither changes afterwards without somebody editing it. `carried`
+settles nowhere: the record holds an item id and the verdict is read from that
+row every time anybody asks. A row somebody could still work reads `carried`
+and satisfies the gate; a cancelled row reads `carry-dropped` and reopens the
+finding; a row that is gone reads `carry-missing`. That is the whole reason the
+word is not a synonym for `dismissed` with better manners. A finding parked on
+an item somebody later cancels does not stay parked, and nobody has to remember
+to come back for it.
+
+"Cancelled" is asked of the row and not of one column, because this database
+has no `cancelled` status: the six it admits are `planning`, `ready`,
+`in_progress`, `ready_to_send`, `blocked` and `done`, and a cancellation is a
+`done` row carrying `fields.completion.outcome = "cancelled"`. `cancelled_row`
+below reads both that mark and the status word, so a delivered `done` row and a
+cancelled one are not the same answer here even though they are the same
+status.
+
+The direction when the row cannot be read at all is the same direction the rest
+of this file takes. `id_verdict` is handed a repository root and nothing that
+reaches a database, so resolving a carried item means opening one -- and on an
+installation with no `sd_db`, or no store to open, there is no status to read.
+That is `carry-unreadable`, and it is UNSATISFIED. The alternative fails open: a
+machine missing the library would report every carried finding as answered,
+which is this file's own defect reintroduced by an import error.
+
 WHO WRITES THE RECORD. `--ack` writes one, and so does `bin/sd-ship`, from the
 push it has just made. A gate whose store nothing ever fills is a gate that
 only ever says no, and `sd-status` grew a row from this store before anything
@@ -63,7 +92,11 @@ bound to a commit that did not exist when the reviewer read the file, that
 changes the file the finding names, and that is reachable from the head being
 pushed, so the record it writes is a measurement rather than a claim. A
 `dismissed` record needs a reason, a reason is a sentence somebody means, and
-neither disposition has a bulk form here.
+none of the three has a bulk form here. `carried` least of all, though it is
+the one that looks like it wants one: its satisfaction is borrowed from a row
+that can be cancelled, so it reverses by itself, and a bulk form would make a
+reversible claim as cheap to write as an irreversible one and hide the
+difference between them.
 
 THE GATE CAN FAIL, WHICH IS THE POINT. `--check` exits 1 while any finding is
 unread, dismissed without a reason, or fixed by a commit that did not land.
@@ -233,10 +266,15 @@ LABEL_START = re.compile(r"[.|]")
 #: re-rendering the same finding.
 PLURAL_MARKER = re.compile(r"\beach\b|\d+\s*(?:votes?)?\s*(?:,|and)\s*\d+", re.IGNORECASE)
 
-DISPOSITIONS = ("fixed", "dismissed")
+DISPOSITIONS = ("fixed", "dismissed", "carried")
 
 #: A verdict in this set means the finding is answered and the gate may pass.
-SATISFIED = ("landed", "dismissed")
+#:
+#: `carried` is in it and the other three carry verdicts are not, deliberately.
+#: A carried finding is answered only while the row it was carried to is still
+#: a row somebody could work; every way that stops being true -- cancelled,
+#: deleted, or unreadable from here -- is unsatisfied and reopens the finding.
+SATISFIED = ("landed", "dismissed", "carried")
 
 VERDICT_HELP = {
     "unread": "nobody has recorded reading this finding",
@@ -247,6 +285,12 @@ VERDICT_HELP = {
                      "it stated this finding"),
     "fix-missing": "acknowledged as fixed by a commit this repository does not have",
     "dismissed": "read and dismissed, with a reason on the record",
+    "carried": "carried to an item, and that item is still a row somebody could work",
+    "carry-dropped": ("carried to an item that has since been cancelled, so nothing holds "
+                      "this finding any more"),
+    "carry-missing": "carried to an item id that names no row",
+    "carry-unreadable": ("carried to an item this installation cannot read, so this record "
+                         "decides nothing"),
     "unknown-disposition": "the record carries a disposition this version does not define",
 }
 
@@ -697,10 +741,42 @@ def _row(found: dict, disposition: str, detail: str, commit: str) -> dict:
         "commit": commit or None,
         "cited": detail if disposition == "fixed" else "",
         "reason": detail if disposition == "dismissed" else "",
+        "item": int(detail) if disposition == "carried" else None,
         "path": found["path"],
         "line": found["line"],
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
+
+
+#: What each disposition needs, said in the terms of the flag that carries it.
+MISSING_DETAIL = {
+    "fixed": "--fixed needs the commit that answers the finding",
+    "dismissed": "--dismiss needs the reason, which is the whole value of dismissing",
+    "carried": "--carried needs the item that holds the finding",
+}
+
+
+def _carried_item(detail: str) -> int:
+    """The item id `--carried` names, or a refusal. Never a row that is not one."""
+    try:
+        number = int(detail)
+    except ValueError:
+        number = 0
+    if number <= 0 or number > sd_lib.ROW_ID_CEILING:
+        raise UsageError(
+            f"--carried {detail!r} names no item; acknowledge a positive item id"
+        )
+    row = carried_row(number)
+    if row is not None and row["kind"] == "work":
+        # `sd_lib.named_row` refuses a work row for the sibling reason: it is
+        # found by its path rather than named. Here the reason is the verdict
+        # -- a work row closes on a delivery, so its status would make "is
+        # this finding still held" a question about a delivery instead.
+        raise UsageError(
+            f"--carried {number} names a work row, and a work row closes on a "
+            f"delivery; carry the finding to a task or followup row"
+        )
+    return number
 
 
 def acknowledge(root: pathlib.Path, found: dict, disposition: str, detail: str) -> dict:
@@ -708,11 +784,11 @@ def acknowledge(root: pathlib.Path, found: dict, disposition: str, detail: str) 
     if disposition not in DISPOSITIONS:
         raise UsageError(f"a disposition is {' or '.join(DISPOSITIONS)}, not {disposition!r}")
     if not detail.strip():
-        raise UsageError(
-            "--fixed needs the commit that answers the finding"
-            if disposition == "fixed" else
-            "--dismiss needs the reason, which is the whole value of dismissing"
-        )
+        raise UsageError(MISSING_DETAIL[disposition])
+    if disposition == "carried":
+        # Validated here and stored as the integer it validated, so the
+        # verdict never has to re-parse a string somebody typed.
+        detail = str(_carried_item(detail.strip()))
     commit = ""
     if disposition == "fixed":
         # Resolved here and stored resolved. `--fixed main` would otherwise
@@ -835,6 +911,179 @@ def record_answers(root: pathlib.Path, rows: Iterable[dict], head: str) -> tuple
 
 
 # --------------------------------------------------------------------------
+# Is the item that carried it still standing
+# --------------------------------------------------------------------------
+
+#: The resolver's state, for this process and no longer. One connection and
+#: one status read per item id, because `id_verdict` is called once per
+#: FINDING: the sweep this disposition comes from read 1299 findings held by
+#: five items, and a resolver that opened a connection per finding would open
+#: 1299 of them to answer five questions.
+#:
+#: `"reader"` is `None` once the library or the store has been found
+#: unreachable, so that failure is diagnosed once too, and a tuple of
+#: `(connection, item_by_id)` once it has been found reachable. The unset
+#: state is the key being absent.
+_CARRY: dict[str, Any] = {"verdicts": {}}
+
+
+def _forget_carried_rows() -> None:
+    """Drop the cached connection and every status read through it.
+
+    Private, and named so, because nothing in the command path calls it: one
+    run of this tool asks each item once and exits. A process that reads a
+    round, watches an item change status and reads the round again needs it --
+    the tests, which is where the reversal `carry-dropped` exists for is
+    actually demonstrated.
+    """
+    reader = _CARRY.pop("reader", None)
+    if reader is not None:
+        with contextlib.suppress(Exception):
+            reader[0].close()
+    _CARRY["verdicts"] = {}
+
+
+def _carry_reader() -> tuple[Any, Any] | None:
+    """`(connection, item_by_id)` for this process, or None if there is none.
+
+    Opened at most once. Every fault on the way -- no `sd_db` at all, an
+    `sd_db` too old to carry the reader, a store that will not open -- is the
+    same answer here and `carry-unreadable` above: this installation cannot
+    read the row, so it may not decide the finding has been answered.
+    """
+    if "reader" in _CARRY:
+        return _CARRY["reader"]
+    _CARRY["reader"] = _open_carry_reader()
+    return _CARRY["reader"]
+
+
+def _open_carry_reader() -> tuple[Any, Any] | None:
+    # The import shape is `sd_handoff_rows.item_for`'s, for its reasons. The
+    # library is reached through `sd_lib.import_sd_db` because no `python3` a
+    # person invokes carries `sd_db` on its path and the helper makes the
+    # second try against the copy `make setup` provisioned. It may or may not
+    # be resolvable at type-check time, so `pyproject.toml` carries the
+    # override rather than an inline ignore here, which `warn_unused_ignores`
+    # would turn into a failure on every machine that has run `make setup`.
+    # And `item_by_id` is imported behind `try` because a library without it
+    # is a supported state, read as no answer rather than as a traceback.
+    module = sd_lib.import_sd_db().module
+    if module is None:
+        return None
+    try:
+        from sd_db.reads import item_by_id  # noqa: PLC0415 - absent is a state
+    except ImportError:
+        return None
+    else:
+        read = item_by_id
+    try:
+        connection = module.connect(write=False)
+    except Exception:
+        # Every way a store refuses to open, including the ordinary one: a
+        # machine that has the library and has never run `sd`. Fail closed.
+        return None
+    return connection, read
+
+
+def cancelled_row(row: Any) -> bool:
+    """Whether this row has been cancelled, asked both ways the store says it.
+
+    THE STATUS WORD, WHICH THIS DATABASE DOES NOT HAVE YET. The obvious read
+    is `status == "cancelled"`, and it is first below, but the schema's
+    `CHECK` on `item.status` admits six words and that is not one of them:
+    `planning`, `ready`, `in_progress`, `ready_to_send`, `blocked`, `done`.
+    The check stays because the vocabulary belongs to the schema rather than
+    to this file -- a database that gains the word starts reopening findings
+    with nothing here to edit -- and because the alternative, enumerating the
+    six open ones, silently unsatisfies every finding the day a seventh
+    arrives.
+
+    THE MARK THE LIBRARY ACTUALLY WRITES. `sd_db.progress.cancel_work` does
+    not invent a status. It writes `fields.completion.outcome = "cancelled"`
+    and transitions the row to `done`, so a cancelled row and a delivered row
+    both read `done` and only the completion record tells them apart. Reading
+    the status alone would call a cancelled item satisfied, which is the exact
+    failure this disposition exists to prevent.
+
+    Neither read is trusted to be present: a row from an older library has no
+    `fields` column, and a `fields` somebody edited by hand is not JSON. Both
+    are read as "not cancelled", because the row is still there and still
+    holds the finding; a row that is gone is `carry-missing` above, which is a
+    different answer.
+    """
+    try:
+        if str(row["status"]) == "cancelled":
+            return True
+        raw = row["fields"]
+    except (IndexError, KeyError):
+        return False
+    try:
+        fields = json.loads(raw) if raw else {}
+    except ValueError:
+        return False
+    completion = fields.get("completion") if isinstance(fields, dict) else None
+    return isinstance(completion, dict) and completion.get("outcome") == "cancelled"
+
+
+def carry_verdict(item: Any) -> str:
+    """What the item a carried record names is worth, read from its row.
+
+    Three ways to stop holding a finding and one way to keep holding it. The
+    kept way is the default, so a status this file never heard of leaves the
+    finding held rather than reopening it on a schema change; `cancelled_row`
+    owns the ways it stops.
+    """
+    try:
+        number = int(item)
+    except (TypeError, ValueError):
+        # A store written by hand, or by a version that spelled the field
+        # differently. There is no row to read, and guessing one would be the
+        # defect this disposition exists to prevent.
+        return "carry-missing"
+    if number <= 0 or number > sd_lib.ROW_ID_CEILING:
+        # `sqlite3` raises `OverflowError` past its integer range rather than
+        # returning no row, so the bound is checked before the value is bound.
+        return "carry-missing"
+    if number in _CARRY["verdicts"]:
+        return str(_CARRY["verdicts"][number])
+    reader = _carry_reader()
+    if reader is None:
+        return "carry-unreadable"
+    connection, read = reader
+    try:
+        row = read(connection, number)
+    except Exception:
+        # A connection that has gone bad mid-run reads no status, and no
+        # status is not a satisfied finding. Not cached: the next id gets its
+        # own try rather than inheriting this one's bad luck.
+        return "carry-unreadable"
+    if row is None:
+        answer = "carry-missing"
+    else:
+        answer = "carry-dropped" if cancelled_row(row) else "carried"
+    _CARRY["verdicts"][number] = answer
+    return answer
+
+
+def carried_row(number: int) -> Any:
+    """The row `--carried` names, or None when this installation cannot say.
+
+    Only `acknowledge` wants the row itself rather than a verdict, and only to
+    refuse a `work` row before it is written. None covers both "no such row"
+    and "cannot read here": neither is a work row, and neither is a reason to
+    refuse an acknowledgement whose verdict will say so at read time.
+    """
+    reader = _carry_reader()
+    if reader is None:
+        return None
+    connection, read = reader
+    try:
+        return read(connection, number)
+    except Exception:
+        return None
+
+
+# --------------------------------------------------------------------------
 # Did the fix land
 # --------------------------------------------------------------------------
 
@@ -926,6 +1175,12 @@ def id_verdict(root: pathlib.Path, found_id: str, rows: dict[str, dict], ref: st
         # Neither is an acknowledgement this version can honour, and guessing
         # would be the whole defect in miniature.
         return "unknown-disposition"
+    if disposition == "carried":
+        # Not frozen at write time, unlike the other two. The row this names
+        # can be cancelled or deleted after the record was written, and when
+        # it is, this reads `carry-dropped` or `carry-missing` and the finding
+        # reopens by itself.
+        return carry_verdict(record.get("item"))
     if disposition == "dismissed":
         return "dismissed" if str(record.get("reason") or "").strip() else "unread"
     commit = str(record.get("commit") or "")
@@ -1119,7 +1374,8 @@ def render_findings(result: dict, stream: TextIO, indent: str = "  ") -> None:
     if result["unsatisfied"] and result.get("store_error"):
         write(f"{indent}repair or move the record first; --ack refuses while it is unreadable\n")
     elif result["unsatisfied"]:
-        write(f"{indent}acknowledge each: sd-review-ack --ack ID --fixed SHA | --dismiss 'why'\n")
+        write(f"{indent}acknowledge each: sd-review-ack --ack ID "
+              f"--fixed SHA | --dismiss 'why' | --carried ITEM\n")
 
 
 def ack_parser() -> argparse.ArgumentParser:
@@ -1140,6 +1396,8 @@ def ack_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ack", metavar="ID", help="acknowledge one finding by its id")
     parser.add_argument("--fixed", metavar="COMMIT", help="with --ack: the commit that answers it")
     parser.add_argument("--dismiss", metavar="REASON", help="with --ack: why it needs no change")
+    parser.add_argument("--carried", metavar="ITEM",
+                        help="with --ack: the item that holds it, whose status decides the verdict")
     parser.add_argument("--landed-in", metavar="REF", dest="landed_in",
                         help="the ref a fix must reach (default: origin/HEAD, else origin/main)")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT, metavar="N",
@@ -1151,12 +1409,17 @@ def _refuse_bad_arguments(args: argparse.Namespace) -> None:
     """Every way the flags contradict each other, before anything is read."""
     if args.limit <= 0:
         raise UsageError("--limit takes a positive number of pull requests")
-    if args.ack and not (args.fixed or args.dismiss):
-        raise UsageError("--ack needs either --fixed COMMIT or --dismiss REASON")
-    if args.fixed and args.dismiss:
-        raise UsageError("a finding is fixed or dismissed, not both")
-    if (args.fixed or args.dismiss) and not args.ack:
-        raise UsageError("--fixed and --dismiss say what to do with --ack ID")
+    chosen = [name for name, value in (("--fixed", args.fixed), ("--dismiss", args.dismiss),
+                                       ("--carried", args.carried)) if value]
+    if args.ack and not chosen:
+        raise UsageError("--ack needs one of --fixed COMMIT, --dismiss REASON or --carried ITEM")
+    if len(chosen) > 1:
+        raise UsageError(
+            "a finding is fixed, dismissed or carried, and exactly one of --fixed, "
+            f"--dismiss and --carried says which, not {' and '.join(chosen)}"
+        )
+    if chosen and not args.ack:
+        raise UsageError("--fixed, --dismiss and --carried say what to do with --ack ID")
 
 
 def _chosen_round(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict[int, dict], str]:
@@ -1185,7 +1448,8 @@ def _record_one(args: argparse.Namespace, root: pathlib.Path, rounds: dict[int, 
               if row["id"] == args.ack]
     if not wanted:
         raise UsageError(f"no finding here has the id {args.ack!r}; run without --ack to list them")
-    acknowledge(root, wanted[0], "fixed" if args.fixed else "dismissed", args.fixed or args.dismiss)
+    disposition = "fixed" if args.fixed else "carried" if args.carried else "dismissed"
+    acknowledge(root, wanted[0], disposition, args.fixed or args.carried or args.dismiss)
 
 
 def review_report(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict, int]:
