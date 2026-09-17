@@ -163,10 +163,6 @@ class WriteTests(HandoffFixture):
         self.run_handoff("--summary", "s")
         self.assertEqual(self.packet()["files"], [])
 
-    def test_stash_ref_is_recorded_outside_refs_heads(self) -> None:
-        self.run_handoff("--summary", "s", "--stash-ref", "refs/sd-handoff/abc123")
-        self.assertEqual(self.packet()["stash_ref"], "refs/sd-handoff/abc123")
-
     def test_remote_is_recorded_and_canonicalized(self) -> None:
         git(self.repo, "remote", "add", "origin", "git@github.com:o/r.git")
         self.run_handoff("--summary", "s")

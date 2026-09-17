@@ -34,7 +34,12 @@ create a PRD just to record routine progress or work already merged.
    the answer. In an authorized unattended run, record routine choices on the
    item and continue under `WORKFLOW.md`'s stop conditions.
 2. **Write from the templates** in `skills/sd-plan/templates/` (`prd.md`,
-   `design.md`, `implement.md`, `decision.md`, `work-README.md`). Create
+   `design.md`, `implement.md`, `decision.md`, `work-README.md`). Before
+   writing each page, run `bin/sd-rules --for <work>/<item>/<page>.md` (the
+   selected work root, `docs/work` unless `--work-dir` chose another; or
+   `--for docs/decisions/<record>.md` under `--decision`) from the
+   repository root and cite the rule ids it prints in the page rather than
+   restating the rules. Create
    `<work>/README.md` from the template if the directory is new. Add
    `design.md` or `implement.md` only when explicitly requested. Adapt the
    templates to the selected work root's `.status-source` marker, including
@@ -172,8 +177,9 @@ interview, and leave its prose where it will still be current next month.
 - **Keep writes within the authorized scope.** Files belong under the selected
   work root (plus `docs/decisions/` under `--decision`); database progress and
   decision writes belong only to the current item and go through `sd_db`.
-  No unrelated rows, `.claude/`, `.trellis/`, hooks, labels, managed gitignore
-  blocks, bookkeeping commits, or `AGENTS.md` edits are authorized here.
+  No unrelated rows, `.claude/`, other tools' state directories, hooks,
+  labels, managed gitignore blocks, bookkeeping commits, or `AGENTS.md` edits
+  are authorized here.
 - **Never promote past an open `BLOCKING` line**, and never claim approval from
   a review lane that was skipped or that failed.
 - **In `mode: guest`, never write artifacts into the upstream tree** — the

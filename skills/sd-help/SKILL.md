@@ -60,6 +60,25 @@ editing** — which is the property that makes the enumeration worth having.
 - **Never claim a plugin is registered because it exists on disk.**
   Registration happens only through `sd plugin add`; there is no disk scanning.
 
+## The store and plugin contract
+
+`sd plugin add` and `sd store` are the two verbs a plugin author meets, and
+the registry holds three rules about what they accept and what they read.
+Write a kind with keys only from `KIND_KEYS` in `bin/sd` (eight), with
+`fields` and `initial-status` required and the other six optional; a ninth key
+is a decision record before it is a commit, and `validate_kind` turns a
+manifest carrying one away by name (R11-D14). Change a field with
+`sd store set` and expect the note back byte-identical apart from the one
+line `edit_field` writes; do not parse a note and render it back (R11-D27).
+`sd store add` is the other write, and it renders a new note whole from the
+kind's template, so the line guarantee is `set`'s alone. Read with
+`sd store list` knowing that every listing reads the vault directory at the
+moment of asking, in `store_list`, so a note written by hand or by Obsidian is
+visible to the next listing with no sync step (R5-D1). The rows in
+`bin/sd_rules.py` state each rule; none is restated here.
+`bin/sd-rules --for <path>` prints the rows in scope for the file being
+written.
+
 ## State of the tooling
 
 `sd-help` has no `bin/` half, and is not waiting for one — this file already

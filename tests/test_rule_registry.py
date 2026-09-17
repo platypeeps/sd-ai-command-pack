@@ -55,7 +55,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
-from typing import NamedTuple
+from typing import Iterable, NamedTuple
 from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -345,7 +345,17 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 #: which is not what this set measures. `R10-D2` in particular no longer had
 #: a meter entry for the repeal Dec-4 decided, so when that repeal landed as
 #: the first `REPEALED` row, on 2026-09-16, this set did not move for it.
-#: `R11-D4` and `R11-D20` are still rowless.
+#: `R11-D4` and `R11-D20` are still rowless, and `R11-D20` came back in at
+#: sd:719 step 6: `dashboard/now.py`, the one live file that defined it,
+#: retired, so its definition is archive-only again while this file's own
+#: prose still cites it.
+#:
+#: **18 after sd:719 step 6, 2026-09-16.** One in, `R11-D20`, as above. Two
+#: went the way step 3's three did: step 6's module deletions under
+#: `dashboard/` (the package marker stays until step 7) took the only live
+#: files that cited them, and nothing was registered for them. They are named
+#: in that commit's message and not here, for the reason step 3's paragraph
+#: gives.
 #:
 #: **19 after sd:431 slice D, 2026-09-16.** `R10-D1` is a row. What held it
 #: was not its enforcement -- `bin/sd-status::_age_rows` has flagged
@@ -362,25 +372,60 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 #: The rest were each looked at and each has a recorded reason it is not a
 #: row yet, in the backfill section of this item's `implement.md`, rather
 #: than left for the next reader to rediscover.
-STRANDED_RULE_IDS = frozenset({
-    "R10-D3", "R10-D7",
-    "R11-D1", "R11-D10", "R11-D13", "R11-D14", "R11-D15",
-    "R11-D17", "R11-D18", "R11-D21", "R11-D23",
-    "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D30", "R11-D5", "R11-D6",
-    "R5-D1",
-})
+#: **17 after sd:431 step 8, slice 1, 2026-09-16.** `R10-D3` is a row, in
+#: the narrowed form the audit of that step recorded: the design split
+#: handoff into two lanes, Lane B is the repeal `R10-D2`, and what Lane A
+#: holds as a rule is the restore hook's registration on `startup` and
+#: `clear` and never on `compact`. Its checker is the hook table
+#: `bin/sd_install.py::HOOK_SPECS`, pinned whole by
+#: `tests/test_sd_install.py`, and the section that teaches it is the one
+#: that states the matchers, `The restore side` in
+#: `skills/sd-handoff/SKILL.md`, rather than the Lane B section that cited
+#: the id already and teaches only what is not built.
+#: **16 after sd:431 step 8, slice 2, 2026-09-17.** `R10-D7` is a row: the
+#: local block reaching the prompt, held by `bin/sd-review::local_conventions`
+#: and taught from a section of `skills/sd-review/SKILL.md` written for it,
+#: `Local conventions reach the prompt`. The audit of that step found the id
+#: cited by that function's docstring and by nothing under `skills/`.
+#: **15 after sd:431 step 8, slice 3, 2026-09-17.** `R11-D6` is a row in
+#: the form the audit restated it: the CI job it deleted is history, and the
+#: rule that made the deletion defensible -- no shell outside
+#: `.github/scripts/` -- is held by `tests/test_no_shipped_shell.py`, the
+#: test that stood in for the job. Taught under `Code health` in
+#: `skills/sd-check/SKILL.md` with the `R12` rows, per Dec-2.
+#: **12 after sd:431 step 8, slice 4, 2026-09-17.** `R11-D14`, `R11-D27` and
+#: `R5-D1` are rows, the store and plugin contract: the closed kind
+#: vocabulary held by `bin/sd::validate_kind`, the line edit held by
+#: `bin/sd::edit_field`, and the vault as system-of-record held by
+#: `bin/sd::store_list`. Taught from one section of `skills/sd-help/SKILL.md`,
+#: `The store and plugin contract`, the skill that names `sd plugin`; no
+#: skill taught either verb before it. The twelve left are `R11-D1`,
+#: `R11-D5` and the ten dashboard and history ids, each an owner decision on
+#: a repeal (the audit of that step, slices 7 and 8).
+#: **0 after sd:431 step 4, slice H, 2026-09-17.** The twelve are repealed
+#: rows, under one family decision team-lead took on 2026-09-17 (Dec-9,
+#: recommended on note 2665, reversible by the owner): `R11-D1` and `R11-D5`
+#: in the Dec-4 shape, because the enforcement each claims was never built
+#: or is gone, and the ten dashboard and history ids because sd:719 is done
+#: with `dashboard/` and `bin/sd_ledger.py` deleted (#1013, #1017), so what
+#: each of them ruled on no longer exists to be enforced. The set is empty
+#: and stays a set: a live document newly citing an archived ruling is
+#: reported by name on the day it is written, and the closed baseline is
+#: the same shape `DANGLING_RULE_IDS` has held since slice S2.
+STRANDED_RULE_IDS: frozenset[str] = frozenset()
 
 #: Tool-behaviour claims in skills that cite no rule id, per document.
 #: Measured on `cddd3b98`, and unchanged on `239ff624`, by `uncited_skill_claims`
 #: below -- which is to say by `claims_in`, and by nothing else. `CLAIM_SCOPE`
 #: says what that predicate is and which properties of it are load-bearing;
-#: this is only where its answer is written down.
+#: this is only where its answer is written down. `skills/sd-handoff/SKILL.md`
+#: left the table when sd:10's 31(b1) cut the `stash_ref` field whose
+#: "never pushed" line was its one claim.
 #:
 #: Per document rather than as one total, so a new uncited claim in `sd-ship`
 #: fails even in a change that cleaned two out of `sd-plan`. One number for the
 #: whole tree would net them off and say nothing.
 UNCITED_SKILL_CLAIMS = {
-    "skills/sd-handoff/SKILL.md": 1,
     "skills/sd-plan/SKILL.md": 2,
     "skills/sd-research-repo/templates/CLAUDE.md": 1,
     "skills/sd-ship/SKILL.md": 3,
@@ -631,17 +676,19 @@ def registered_rule_ids() -> set[str]:
 
 
 def consumer_sources() -> list[tuple[str, str]]:
-    """Every tracked file under `bin/` and `dashboard/`, Python or not.
+    """Every tracked file under `bin/`, Python or not.
 
     Not "every file that parses as Python", which is what this was and which
-    made `dashboard/app.js` invisible -- the one tracked file here that is not
-    Python, and the same file an independent sd:525 pass named as the blind
-    spot of this repository's other AST-only locator. A scope that silently
-    drops the only file it cannot parse is the defect this module exists to
-    end, committed inside the check built to end it.
+    made the pack dashboard's client script invisible -- until sd:719 step 6
+    retired it, the one tracked file here that was not Python, and the same
+    file an independent sd:525 pass named as the blind spot of this
+    repository's other AST-only locator. A scope that silently drops the only
+    file it cannot parse is the defect this module exists to end, committed
+    inside the check built to end it; the scope stays whole after the file
+    that taught it went, and after step 7 deleted the tree it was in.
     """
 
-    return [(relative, text) for relative, text in read_corpus("bin", "dashboard")
+    return [(relative, text) for relative, text in read_corpus("bin")
             if relative != "bin/sd_rules.py"]
 
 
@@ -656,8 +703,9 @@ def second_list_entries() -> list[tuple[str, int, str]]:
     Two readers, because the corpus has two kinds of file. Python goes through
     `ast`, which tells a docstring from a string constant exactly. Everything
     else has no parser here and goes through `QUOTED`, which reads quoted runs
-    only -- so `// see R11-D20` in `dashboard/app.js` stays a citation while
-    `["R11-D20"]` does not. What neither reader sees is stated on the test.
+    only -- so `// see R11-D20` in a JavaScript file stays a citation while
+    `["R11-D20"]` does not (`dashboard/app.js` was that file until sd:719
+    step 6). What neither reader sees is stated on the test.
 
     Empty while the table is empty, which is what lets the table land first.
     The first row for a rule some consumer already names in a string fails
@@ -849,6 +897,34 @@ def tombstone_errors(rule: sd_rules.Rule) -> list[str]:
             if getattr(rule, field) is not None]
 
 
+def missing_field_errors(rule: sd_rules.Rule) -> list[str]:
+    """Every field a consumer reads that this row leaves empty or misspelt.
+
+    `teaches` is required of a live row and optional on a repealed one. Leg a
+    reads `teaches` from live rows only, so on a repealed row the value is
+    read by nothing, and a never-taught rule repealed under a decision has
+    no section to name: `R11-D1` was taught by no skill when it was repealed,
+    and a `teaches` invented for it would have pointed a reader at a section
+    that says nothing about it. `R10-D2` keeps its section, because that
+    section is where the reason it was repealed is written, and
+    `tests/test_cut_symbols.py` holds that link. Separate from the test so a
+    fixture row can be asked the question directly, as `tombstone_errors` is.
+    """
+
+    wrong = []
+    if not rule.subject.strip():
+        wrong.append(f"{rule.id}: no subject -- say what it checks")
+    if rule.state == sd_rules.LIVE and not (rule.teaches or "").strip():
+        wrong.append(f"{rule.id}: no teaches -- say where it is taught")
+    if rule.scope not in sd_rules.SCOPES:
+        wrong.append(f"{rule.id}: scope={rule.scope!r} is not one of "
+                     f"{sd_rules.SCOPES}")
+    if rule.state not in sd_rules.STATES:
+        wrong.append(f"{rule.id}: state={rule.state!r} is not one of "
+                     f"{sd_rules.STATES}")
+    return wrong
+
+
 def _lines(rows) -> str:
     return "\n".join(f"  {row}" for row in rows)
 
@@ -1011,22 +1087,44 @@ can execute, and `MUTATIONS` below has to carry it as code.""")
         on the table this one is modelled on.
         """
 
-        wrong = []
-        for rule in sd_rules.RULES:
-            if not rule.subject.strip():
-                wrong.append(f"{rule.id}: no subject -- say what it checks")
-            if not rule.teaches.strip():
-                wrong.append(f"{rule.id}: no teaches -- say where it is taught")
-            if rule.scope not in sd_rules.SCOPES:
-                wrong.append(f"{rule.id}: scope={rule.scope!r} is not one of "
-                             f"{sd_rules.SCOPES}")
-            if rule.state not in sd_rules.STATES:
-                wrong.append(f"{rule.id}: state={rule.state!r} is not one of "
-                             f"{sd_rules.STATES}")
+        wrong = [error for rule in sd_rules.RULES
+                 for error in missing_field_errors(rule)]
         self.assertEqual(wrong, [], f"""
 A registry row is missing a field a consumer reads.
 
 {_lines(wrong)}""")
+
+    def test_teaches_is_required_of_a_live_row_and_optional_on_a_repealed_one(self):
+        """The one field whose requirement depends on the row's state.
+
+        Fixture rows rather than the table, for the reason
+        `test_a_repealed_row_holding_a_checker_or_a_proof_is_reported_by_field`
+        gives: the live table carries no row that leaves the field empty, so
+        a check read off the table alone never reaches the branch that
+        reports one. The live row is the control that relaxing the field for
+        `repealed` did not relax it for everything.
+        """
+
+        def row(**fields) -> sd_rules.Rule:
+            return sd_rules.Rule(
+                id="R0-D0", subject="a fixture", checker="bin/sd::store_list",
+                proof="a proof", scope="code",
+                teaches="skills/sd-check/SKILL.md#Never")._replace(**fields)
+
+        self.assertEqual(missing_field_errors(row()), [])
+        self.assertEqual(
+            missing_field_errors(row(teaches=None)),
+            ["R0-D0: no teaches -- say where it is taught"])
+        self.assertEqual(
+            missing_field_errors(row(teaches="   ")),
+            ["R0-D0: no teaches -- say where it is taught"])
+        repealed = row(checker=None, proof=None, state=sd_rules.REPEALED)
+        self.assertEqual(missing_field_errors(repealed), [])
+        self.assertEqual(missing_field_errors(repealed._replace(teaches=None)), [])
+        self.assertEqual(
+            missing_field_errors(repealed._replace(subject="")),
+            ["R0-D0: no subject -- say what it checks"],
+            "a repealed row still has to say what it checked")
 
     def test_a_code_health_subject_states_the_current_ceiling(self):
         """The number in a subject is a copy of a constant, and it is held to it.
@@ -1084,9 +1182,11 @@ with its baseline.""")
         that names a rule in a string has taken a copy of the table, and a copy
         is a thing that can disagree.
 
-        **What it reads.** Every tracked file under `bin/` and `dashboard/`,
-        including the ones that are not Python. `dashboard/app.js` is the only
-        such file today and it was invisible until review said so.
+        **What it reads.** Every tracked file under `bin/`, including the
+        ones that are not Python. The pack dashboard's client script was the
+        only such file until sd:719 step 6 retired it, and it was invisible
+        until review said so; the scope did not narrow when it went, and
+        `dashboard/` left the pathspec when step 7 deleted the tree.
 
         **What it cannot see, which is stated rather than left to be found.**
 
@@ -1095,9 +1195,9 @@ with its baseline.""")
            concatenation -- `"R11-" + "D20"` -- reads as neither.
         2. In Python, a string constant holding embedded CSS or JavaScript
            reads as data throughout, including where the id sits in that
-           embedded language's own comment. `dashboard/server.py` carries
-           `R11-D20` exactly that way today, so registering `R11-D20` would
-           report it.
+           embedded language's own comment. `dashboard/server.py` carried
+           `R11-D20` exactly that way until sd:719 step 6 retired it, and
+           registering `R11-D20` would have reported it.
 
         Both are over-reports rather than misses, which is the safe direction
         for this check: the failure names a line, and a reader can see at once
@@ -1639,7 +1739,7 @@ class Outcome(NamedTuple):
 
     applied: int    # how many times the mutated text was found
     reverted: int   # how many times the mutation was found on the way back
-    control: int    # the named test's exit code before the mutation
+    control: int    # 0 when the named test was green before the mutation
     violated: int   # its exit code after it
     restored: int   # `diff -rq` between the restored copy and this tree
     report: str     # the mutated run's output, for a failure message
@@ -1678,6 +1778,34 @@ def unittest_counts(output: str) -> dict[str, int] | None:
     counts.update({name.strip().replace(" ", "_"): int(number)
                    for name, number in VERDICT_COUNT.findall(detail)})
     return counts
+
+
+#: A node's line in a `-v` run: its name, then its id in parentheses. The
+#: verdict follows on that line, or on the docstring line under it.
+NODE_LINE = re.compile(r"^\w+ \(([\w.]+)\)", re.MULTILINE)
+NODE_VERDICT = re.compile(
+    r" \.\.\. (ok|FAIL|ERROR|skipped.*|expected failure|unexpected success)$",
+    re.MULTILINE)
+
+
+def node_verdicts(output: str) -> dict[str, str]:
+    """Each node's verdict word from one `-v` run, keyed by the node's id.
+
+    A node whose line carries no verdict before the next node's line reads
+    `no verdict`; a node the loader could not resolve is listed under
+    `unittest.loader._FailedTest` and so under no id a row names. The first
+    line for an id wins, because the summary that follows repeats the id
+    without a verdict.
+    """
+
+    starts = list(NODE_LINE.finditer(output))
+    ends = [match.start() for match in starts[1:]] + [len(output)]
+    verdicts: dict[str, str] = {}
+    for match, end in zip(starts, ends, strict=True):
+        verdict = NODE_VERDICT.search(output, match.end(), end)
+        verdicts.setdefault(match.group(1),
+                            verdict.group(1) if verdict else "no verdict")
+    return verdicts
 
 
 def enforcement_error(mutation: Mutation, outcome: Outcome) -> str | None:
@@ -1728,7 +1856,7 @@ def enforcement_error(mutation: Mutation, outcome: Outcome) -> str | None:
 #: **Keyed by the checker location, not by the rule id.** A rule id written as
 #: data outside `bin/sd_rules.py` is the second list
 #: `test_no_consumer_carries_a_second_list` refuses, and that check reads `bin/`
-#: and `dashboard/` -- it would not see a dictionary here, so the discipline has
+#: -- it would not see a dictionary here, so the discipline has
 #: to be kept rather than relied on. A checker location is the row's own value,
 #: read back off `RULES` by `test_every_live_checker_carries_a_mutation` as an
 #: equality: a row added with no mutation fails, and a mutation outliving the row
@@ -1795,6 +1923,33 @@ CLONE_BODY = a_body_past_the_clone_floor()
 TWO_OF_A_KIND = (a_function("_leg_d_clone_a", CLONE_BODY),
                  a_function("_leg_d_clone_b", CLONE_BODY))
 
+#: Where the three prose mutations write their violation: the section of
+#: `skills/sd-check/SKILL.md` that teaches the `R13-D*` rows, one sentence of
+#: it per row, so the page that cites a rule is the page that proves it.
+PROSE_RULES_PAGE = "skills/sd-check/SKILL.md"
+
+
+def a_line_inside(path: str, symbol: str) -> int:
+    """The first body line of `symbol` in `path`, read off the tree at import.
+
+    The `R13-D1` mutation cites a line inside a function, and the number is
+    derived rather than written down for the reason the code-health mutations
+    are built from their ceilings: a line number typed here is stale the day
+    the file above it grows, and the mutation would then violate nothing.
+    """
+
+    tree = ast.parse((REPO_ROOT / path).read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == symbol:
+            return node.body[0].lineno
+    raise LookupError(f"{path} declares no function {symbol}")
+
+
+#: A `path:line` into the body of `schema_version`, the anchor the code-health
+#: mutations already lean on, in the file `tests/test_code_health.py` governs.
+INSIDE_A_SYMBOL = (f"bin/sd_library_guard.py:"
+                   f"{a_line_inside('bin/sd_library_guard.py', 'schema_version')}")
+
 MUTATIONS: dict[str, Mutation] = {
     "bin/sd_setup_github.py::setup_github": Mutation(
         path="bin/sd_setup_github.py",
@@ -1817,6 +1972,21 @@ MUTATIONS: dict[str, Mutation] = {
         new="    if False:  # leg d: the auth_mode guard, defeated",
         test="tests.test_sd_review_codex.PreflightTests"
              ".test_a_non_chatgpt_auth_mode_refuses",
+    ),
+    "bin/sd-review::local_conventions": Mutation(
+        path="bin/sd-review",
+        old='    if not block:\n        return ""',
+        new='    if True:  # leg d: the empty-block guard, defeated\n        return ""',
+        test="tests.test_sd_review.PipelineTests"
+             ".test_the_local_block_reaches_the_prompt",
+    ),
+    "bin/sd_install.py::HOOK_SPECS": Mutation(
+        path="bin/sd_install.py",
+        old='    ("bin/sd-handoff-restore", "SessionStart", ("startup", "clear")),',
+        new='    ("bin/sd-handoff-restore", "SessionStart", '
+            '("startup", "clear", "compact")),',
+        test="tests.test_sd_install.IdempotencyTests"
+             ".test_the_hook_table_is_exactly_these_three_registrations",
     ),
     "bin/sd-status::_age_rows": Mutation(
         path="bin/sd-status",
@@ -1857,6 +2027,74 @@ MUTATIONS: dict[str, Mutation] = {
             test="tests.test_code_health.CodeHealth"
                  ".test_no_two_functions_are_the_same_function",
         ),
+    "tests/test_no_shipped_shell.py::"
+    "test_shell_lives_only_in_this_repository_s_own_tooling": Mutation(
+        path="bin/sd-rules",
+        old='#!/usr/bin/env python3\n"""Print the live registry rows',
+        new='#!/usr/bin/env bash\n"""Print the live registry rows',
+        test="tests.test_no_shipped_shell.NoShippedShellTests"
+             ".test_shell_lives_only_in_this_repository_s_own_tooling",
+    ),
+    "bin/sd::validate_kind": Mutation(
+        path="bin/sd",
+        old="    unknown = sorted(set(kind) - KIND_KEYS)\n    if unknown:",
+        new="    unknown = sorted(set(kind) - KIND_KEYS)\n"
+            "    if False:  # leg d: the closed-vocabulary guard, defeated",
+        test="tests.test_sd_plugin.KindTests.test_a_ninth_key_refuses",
+    ),
+    "bin/sd::edit_field": Mutation(
+        path="bin/sd",
+        old='        lines[hits[0]] = f"{key}: {render_value(value)}{ending}"',
+        new='        lines = [f"{key}: {render_value(value)}{ending}"]'
+            "  # leg d: the note rebuilt from the one line",
+        test="tests.test_sd_store.WriteTests"
+             ".test_a_set_leaves_every_line_it_did_not_edit_byte_identical",
+    ),
+    #: A stale index rather than an empty query. The audit's mutation emptied
+    #: the listing, which reddens the named test but is not the violation
+    #: `R5-D1` names; this one writes the kind's listing to a file on the
+    #: first query and reads that file instead of the vault on every query
+    #: after, so the note the test drops in by hand between two queries is
+    #: what the second one cannot see. The file takes a `.json` suffix, so
+    #: `note_paths` would not list it even on the first query.
+    "bin/sd::store_list": Mutation(
+        path="bin/sd",
+        old="    for path in note_paths(kind_base(store, name)):",
+        new='    index = kind_base(store, name) / ".index.json"'
+            "  # leg d: an index consulted instead of the vault\n"
+            "    if not index.exists():\n"
+            "        index.write_text(json.dumps("
+            "[str(p) for p in note_paths(kind_base(store, name))]))\n"
+            "    for path in map(pathlib.Path, json.loads(index.read_text())):",
+        test="tests.test_sd_store.FreshnessTests"
+             ".test_a_note_written_directly_into_the_vault_is_visible_to_the_next_query",
+    ),
+    "tests/test_doc_citations.py::"
+    "test_line_citations_into_a_symbol_match_their_baseline": Mutation(
+        path=PROSE_RULES_PAGE,
+        old="where the line it would name sits inside one.",
+        new=f"where the line it would name sits inside one (the line "
+            f"`{INSIDE_A_SYMBOL}` does).",
+        test="tests.test_doc_citations.TheSymbolPreference"
+             ".test_line_citations_into_a_symbol_match_their_baseline",
+    ),
+    "tests/test_prose_counts.py::"
+    "test_present_tense_counts_match_their_baseline": Mutation(
+        path=PROSE_RULES_PAGE,
+        old="page being written.",
+        new="page being written. The pack ships 16 tools.",
+        test="tests.test_prose_counts.ProseCounts"
+             ".test_present_tense_counts_match_their_baseline",
+    ),
+    "tests/test_rule_registry.py::"
+    "test_uncited_tool_behaviour_claims_match_their_baseline": Mutation(
+        path=PROSE_RULES_PAGE,
+        old="The rows in `bin/sd_rules.py` state what each rule exempts;",
+        new="`sd-check` refuses a tree it did not measure.\n"
+            "The rows in `bin/sd_rules.py` state what each rule exempts;",
+        test="tests.test_rule_registry.LegB"
+             ".test_uncited_tool_behaviour_claims_match_their_baseline",
+    ),
 }
 
 
@@ -1912,12 +2150,45 @@ def edit(tree: pathlib.Path, mutation: Mutation, *, violate: bool) -> int:
     return found
 
 
+def run_tests(tree: pathlib.Path, nodes: tuple[str, ...]) -> subprocess.CompletedProcess:
+    """The named unittest nodes in one child, verbose, the copy as its cwd.
+
+    The one place leg d spawns a child, so that `TheSharedCopy` can count
+    children by wrapping it. Verbose, because a child running more than one
+    node reports per node only on its `-v` lines; `unittest_counts` reads the
+    same `Ran` and verdict lines either way.
+    """
+
+    return subprocess.run([sys.executable, "-m", "unittest", "-v", *nodes],
+                          cwd=tree, env=child_environment(),
+                          capture_output=True, text=True)
+
+
 def run_one_test(tree: pathlib.Path, node: str) -> subprocess.CompletedProcess:
     """The named unittest node, run with the copy as the working directory."""
 
-    return subprocess.run([sys.executable, "-m", "unittest", node],
-                          cwd=tree, env=child_environment(),
-                          capture_output=True, text=True)
+    return run_tests(tree, (node,))
+
+
+def batched_controls(tree: pathlib.Path,
+                     mutations: Iterable[Mutation]) -> dict[str, str]:
+    """Every distinct test the rows name, run clean in one child; id to verdict.
+
+    The control half of every row at once (sd:971). A row's control asked
+    whether its named test is green on the clean copy, and each of the four
+    code-health tests answered by walking `bin/` (and `dashboard/`, until
+    sd:719 step 7 deleted it) afresh in a
+    child of its own: about 1.2 s a child against 0.1 s for a test that walks
+    nothing, and one child running all four walked once. So the controls run
+    in one child before any mutation, and `exercise` reads a row's answer off
+    that child's `-v` line for the node. It is the same question, because the
+    `diff -rq` proof after every row is what says the copy the mutation lands
+    in is still the copy the control ran on.
+    """
+
+    nodes = tuple(sorted({mutation.test for mutation in mutations}))
+    run = run_tests(tree, nodes)
+    return node_verdicts(run.stdout + run.stderr)
 
 
 def copy_tracked(destination: pathlib.Path) -> None:
@@ -1950,12 +2221,20 @@ def copy_tracked(destination: pathlib.Path) -> None:
                        check=True, capture_output=True)
 
 
-def exercise(mutation: Mutation, tree: pathlib.Path) -> Outcome:
+def exercise(mutation: Mutation, tree: pathlib.Path,
+             controls: dict[str, str] | None = None) -> Outcome:
     """Run one mutation end to end in a private copy of this tree.
 
     The protocol, in order: run the named test clean in the copy, apply the
     mutation, run it again, put the original text back, and prove the copy is
     identical to this tree again.
+
+    **The clean run is a child of its own or a line of `controls`**, the
+    verdicts `batched_controls` read off one child that ran every row's test.
+    A node that child never reported is a red control, named, and never a
+    child run quietly in its place: the budget `TheSharedCopy` holds is one
+    control child for all the rows, and a fallback would spend past it while
+    passing.
 
     **The copy is the caller's, made once per run and shared by every row**
     (sd:431, owner decision Dec-6: per-row copying was linear in rows and
@@ -1975,7 +2254,14 @@ def exercise(mutation: Mutation, tree: pathlib.Path) -> Outcome:
     remembered string.
     """
 
-    control = run_one_test(tree, mutation.test)
+    if controls is None:
+        control = run_one_test(tree, mutation.test)
+        control_code = control.returncode
+        control_text = control.stdout + control.stderr
+    else:
+        verdict = controls.get(mutation.test, "no verdict")
+        control_code = 0 if verdict == "ok" else 1
+        control_text = f"batched control for {mutation.test}: {verdict}\n"
     applied = edit(tree, mutation, violate=True)
     violated = run_one_test(tree, mutation.test)
     reverted = edit(tree, mutation, violate=False)
@@ -1985,9 +2271,10 @@ def exercise(mutation: Mutation, tree: pathlib.Path) -> Outcome:
          str(tree / top), str(REPO_ROOT / top)],
         capture_output=True, text=True)
     printed = violated.stdout + violated.stderr
-    return Outcome(applied, reverted, control.returncode,
+    report = (control_text[-2000:] if control_code else "") + printed[-2000:]
+    return Outcome(applied, reverted, control_code,
                    violated.returncode, identical.returncode,
-                   printed[-2000:] + identical.stdout, printed)
+                   report + identical.stdout, printed)
 
 
 #: The first control's edit: a docstring phrase in the file `R10-D6` mutates,
@@ -2145,12 +2432,14 @@ goes red, or a reader following it runs something else.""")
 
         Four assertions per row, because "it went red" on its own is not
         evidence. The edit has to have landed, the test has to have been green
-        before it, red after it, and the tree has to come back.
+        before it, red after it, and the tree has to come back. The green
+        half is one child for every row, run first; see `batched_controls`.
         """
 
+        controls = batched_controls(self.tree, MUTATIONS.values())
         for location, mutation in sorted(MUTATIONS.items()):
             with self.subTest(checker=location):
-                outcome = exercise(mutation, self.tree)
+                outcome = exercise(mutation, self.tree, controls)
                 self.assertEqual(outcome.applied, 1, f"""
 The mutation for {location} did not match exactly once in {mutation.path}.
 
@@ -2303,14 +2592,21 @@ this proof runs after every row.""")
 
 
 class TheSharedCopy(unittest.TestCase):
-    """Leg d copies the tracked tree once per run, not once per row."""
+    """Leg d copies the tracked tree once per run, and spawns a budgeted few children."""
 
-    def test_the_leg_copies_the_tree_once_for_every_row_and_control(self):
-        """The count is measured on a real run, with the copy left real.
+    copies: int
+    children: int
+    result: unittest.TestResult
 
-        `copy_tracked` is wrapped, never replaced, and the leg has to pass, or
-        a leg that copied nothing would count as one that copied once. Before
-        the copy was shared this read five: three rows and two controls.
+    @classmethod
+    def setUpClass(cls):
+        """One real leg d pass, counted by wrapping and never by replacing.
+
+        `copy_tracked` and `run_tests` are wrapped, so the copy stays real
+        and every child still runs; the pass has to succeed, or a leg that
+        copied nothing and ran nothing would count as one that stayed in
+        budget. The three tests are the rows and the two controls that
+        exercise a mutation.
         """
 
         module = sys.modules[__name__]
@@ -2318,17 +2614,47 @@ class TheSharedCopy(unittest.TestCase):
             "test_every_live_checker_reddens_when_its_rule_is_violated",
             "test_a_mutation_that_violates_nothing_leaves_the_checker_green",
             "test_a_child_that_never_ran_the_test_does_not_read_as_enforcement"))
-        result = unittest.TestResult()
-        with mock.patch.object(module, "copy_tracked", wraps=copy_tracked) as copies:
-            suite.run(result)
-        self.assertTrue(result.wasSuccessful(), _lines(
-            trace for _, trace in result.failures + result.errors))
-        self.assertEqual(copies.call_count, 1, f"""
-Leg d copied the tracked tree {copies.call_count} times in one run.
+        cls.result = unittest.TestResult()
+        with mock.patch.object(module, "copy_tracked", wraps=copy_tracked) as copies, \
+                mock.patch.object(module, "run_tests", wraps=run_tests) as children:
+            suite.run(cls.result)
+        cls.copies = copies.call_count
+        cls.children = children.call_count
+
+    def setUp(self):
+        self.assertTrue(self.result.wasSuccessful(), _lines(
+            trace for _, trace in self.result.failures + self.result.errors))
+
+    def test_the_leg_copies_the_tree_once_for_every_row_and_control(self):
+        """Before the copy was shared this read five: three rows and two controls."""
+
+        self.assertEqual(self.copies, 1, f"""
+Leg d copied the tracked tree {self.copies} times in one run.
 
 One copy per run is the budget: every row runs clean, mutates, reddens and
 restores in the same tree, and the `diff -rq` proof after each restore is what
 lets the next row start from the bytes this checkout has.""")
+
+    def test_the_leg_spawns_one_child_per_row_and_one_for_every_control(self):
+        """The child budget: `rows + 1 + 2 * controls` (sd:971).
+
+        One child runs every row's named test clean, before any mutation --
+        the controls, batched, read per node off its `-v` lines -- then one
+        child per row runs the mutated copy. The two sentinel controls each
+        keep a control child and a violated child of their own. Before the
+        batching this read `2 * rows + 2 * controls`: the four code-health
+        rows each walked the corpus twice, about 1.2 s a child.
+        """
+
+        rows, controls = len(MUTATIONS), 2
+        budget = rows + 1 + 2 * controls
+        self.assertLessEqual(self.children, budget, f"""
+Leg d spawned {self.children} unittest children in one run; the budget is
+rows + 1 + 2 * controls = {rows} + 1 + 2 * {controls} = {budget}.
+
+One batched control child for every row, one mutated child per row, and two
+children per sentinel control. A row's proof runs in a shared child, never
+dropped; a shape past this budget is a control run again per row.""")
 
 
 if __name__ == "__main__":  # pragma: no cover - the suite runs this by module

@@ -212,8 +212,12 @@ class TheExpiry(TrialCase):
         self.assertEqual(sd_install.cmd_user(self.context(), out), 0)
         report = out.getvalue()
 
-        # No warning: the library imported and the database was there.
-        self.assertNotIn("warning:", report)
+        # No library warning: the library imported and the database was there.
+        # Named by their text rather than by the `warning:` prefix, which the
+        # link step also uses when the scratch home's `.local/bin` is not on
+        # PATH -- and in this context it never is.
+        self.assertNotIn("trials unavailable", report)
+        self.assertNotIn("no database at", report)
         self.assertIn("sd-coherence-audit", report)
         self.assertIn("no use", report)
 

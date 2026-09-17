@@ -16,9 +16,9 @@ rather than assumed.
 | Fact | Value | Where |
 |---|---|---|
 | `dashboard/` total / code | 4,510 / **2,326** | `line_count` and `code_line_count` over `tracked("dashboard")` |
-| `DASHBOARD_CAP` / `DASHBOARD_CODE_CAP` | 4,600 / **2,328** | `DASHBOARD_CAP` (`source:tests/test_loc_caps.py::DASHBOARD_CAP`), `DASHBOARD_CODE_CAP` (`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`); the code cap reads 1,183 since step 4 |
-| `DASHBOARD_CODE_SLACK` | 29, against a live gap of **2** | `DASHBOARD_CODE_SLACK` (`source:tests/test_loc_caps.py::DASHBOARD_CODE_SLACK`) |
-| `ceiling_moves()` | `(29, 26, 0)` — 29 values, 26 up, **0 down** | `ceiling_moves` (`source:tests/test_loc_caps.py::ceiling_moves`); two falls recorded since, at steps 3 and 4 |
+| `DASHBOARD_CAP` / `DASHBOARD_CODE_CAP` | 4,600 / **2,328** | `DASHBOARD_CAP` (in `tests/test_loc_caps.py`, retired at sd:719 step 7), `DASHBOARD_CODE_CAP` (in `tests/test_loc_caps.py`, retired at sd:719 step 7); the code cap read 1,183 after step 4 and 0 after step 6, and both retired with the directory at step 7 |
+| `DASHBOARD_CODE_SLACK` | 29, against a live gap of **2** | `DASHBOARD_CODE_SLACK` (in `tests/test_loc_caps.py`, retired at sd:719 step 7) |
+| `ceiling_moves()` | `(29, 26, 0)` — 29 values, 26 up, **0 down** | `ceiling_moves` (`source:tests/test_loc_caps.py::ceiling_moves`); four falls recorded since, at steps 3 to 6, and `(33, 26, 4)` at step 7 with every ceiling closed |
 | System package | 4,431 lines of Python, 20 modules; 1,077 of static | `sd_dashboard/**/*.py`, `sd_dashboard/static/` |
 | System suite | **306** tests, `OK` | `grep -c "def test"` returns 293; a mixin in `tests/test_direct_access.py` is inherited twice |
 | `sd_db/shadow_jira.py` | **343 lines, on system `main`** | system pull request #312, squash `b05d684a` |
@@ -34,9 +34,9 @@ current program, it is a different one. `dashboard/server.py`'s docstring makes
 the write path a decision rather than an accident: "6b-7 gave the handler a POST,
 because the queue tabs exist to be decided in and a read-only port of them is a
 list of questions nobody can answer." So the read-only variant deletes
-`RUN_ALLOWLIST` (`source:dashboard/actions.py::RUN_ALLOWLIST`), `run`
-(`source:dashboard/actions.py::run`), the ack store, and `deliver`
-(`source:dashboard/work.py::deliver`) — which is one of only two facts the two dashboards
+`RUN_ALLOWLIST` (in `dashboard/actions.py`, retired at sd:719 step 6), `run`
+(in `dashboard/actions.py`, retired at sd:719 step 6), the ack store, and `deliver`
+(in `dashboard/work.py`, retired at sd:719 step 6) — which is one of only two facts the two dashboards
 share on disk. What is left is 4,510 lines under a ceiling with two lines of code
 headroom, needing a second port and a second LaunchAgent, showing views the
 surviving dashboard also shows. The recurring cost is the more interesting half:
@@ -51,7 +51,7 @@ three things that are *not* in `dashboard/` and have to be dealt with: the
 citation in live prose that points into `dashboard/`.
 
 **Why deletion wins.** Not the line count — the front door. The pack's dashboard
-cannot bind `DEFAULT_PORT` (`source:dashboard/server.py::DEFAULT_PORT`) while PID 37095 holds 8767,
+cannot bind `DEFAULT_PORT` (in `dashboard/server.py`, retired at sd:719 step 6) while PID 37095 holds 8767,
 neither README tells anyone to start it, and the pack's own README says at lines
 198 to 200 that the current dashboard lives in `system/local-project-dashboard`. A
 program that is documented as historical, cannot start on its default, and costs
@@ -166,7 +166,7 @@ properties, which is why the list above missed it.
 **Both are deleted. Neither is ported. Six behaviours are carried out of them by
 name first.**
 
-`PAGE` (`source:dashboard/server.py::PAGE`) is an HTML literal whose nav declared seven
+`PAGE` (in `dashboard/server.py`, retired at sd:719 step 6) is an HTML literal whose nav declared seven
 tabs (lines 290-306 of `dashboard/server.py` at `a8295266`) and whose plugin
 mount point was a div (line 371 at that commit; step 3 removed it, and step 4
 removed the `prs` and `issues` tabs, so the nav declares five today). The
@@ -203,7 +203,7 @@ and the numbers.
 
 ### A removal earns 27 code lines, and its size does not change that
 
-`test_the_code_ceiling_is_paid_for_in_kind` (`source:tests/test_loc_caps.py::test_the_code_ceiling_is_paid_for_in_kind`)
+`test_the_code_ceiling_is_paid_for_in_kind` (in `tests/test_loc_caps.py`, retired at sd:719 step 7)
 computes `DASHBOARD_CODE_CAP - code_line_count(tracked("dashboard"))` and asserts
 it is at most `DASHBOARD_CODE_SLACK`, 29. Remove *N* code lines and the highest
 cap that still passes is `(2,326 − N) + 29`; headroom after the change is 29 for
@@ -232,7 +232,7 @@ forces the ceiling down, and forcing the ceiling down is the expensive part.
 Three tests interlock, and a change that moves one without the others is red:
 
 1. `test_each_ceiling_is_the_last_value_its_history_records`
-   (`source:tests/test_loc_caps.py::test_each_ceiling_is_the_last_value_its_history_records`) requires the new value appended to
+   (in `tests/test_loc_caps.py`, retired at sd:719 step 7) requires the new value appended to
    `CEILING_HISTORY` (`source:tests/test_loc_caps.py::CEILING_HISTORY`) in the same commit.
 2. `test_the_recorded_history_is_raises_only`
    (`source:tests/test_loc_caps.py::test_the_recorded_history_is_raises_only`) asserts the downward count across every
@@ -262,9 +262,9 @@ history, not one to each.
 
 ### And the last deletion reddens both dashboard cap tests
 
-`test_the_dashboard_stays_under_its_ceiling` (`source:tests/test_loc_caps.py::test_the_dashboard_stays_under_its_ceiling`) and
+`test_the_dashboard_stays_under_its_ceiling` (in `tests/test_loc_caps.py`, retired at sd:719 step 7) and
 `test_the_dashboard_code_stays_under_its_own_ceiling`
-(`source:tests/test_loc_caps.py::test_the_dashboard_code_stays_under_its_own_ceiling`) each open with
+(in `tests/test_loc_caps.py`, retired at sd:719 step 7) each open with
 `self.assertTrue(paths, "dashboard/ enumeration matched no tracked files")`.
 **The commit that removes the last tracked file under `dashboard/` fails both on
 the empty enumeration**, whatever the caps say. Nobody finds that by reading the
@@ -322,7 +322,7 @@ this document does not dress it up as a gate.
 
 **sd:705 keeps the two stale comments and nothing else.**
 
-- `DEFAULT_PORT` (`source:dashboard/server.py::DEFAULT_PORT`) carried a comment above it
+- `DEFAULT_PORT` (in `dashboard/server.py`, retired at sd:719 step 6) carried a comment above it
   (lines 54-56 of `dashboard/server.py` at `a8295266`) saying the system dashboard "landed on 8768 at P3
   so the two could run side by side" and that taking the port "is what makes the
   swap a swap". The swap reversed.

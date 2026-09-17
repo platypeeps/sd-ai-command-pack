@@ -38,15 +38,7 @@ providers:
              model: deepseek-ai/DeepSeek-V4-Pro-0813, vendor: deepseek,
              bill: baseten, roles: [reviewer], max_tokens: 16384,
              price: { in: 1.32, out: 3.96 }, env: [BASETEN_API_KEY] }
-  # Shipped disabled: the local model is not pinned, and R11-D1 requires a
-  # name checked against /v1/models before a call. A disabled entry never
-  # resolves, so criterion 6's "adding an entry needs no code change" test
-  # writes its own enabled entry into a fixture registry rather than
-  # enabling this one.
-  exo:     { url: "http://localhost:52415/v1", model: "<pinned>", vendor: local,
-             bill: local, roles: [author, reviewer], enabled: false,
-             reason: "model not pinned", env: [] }
 
 roles:
   author:   [claude, codex]
-  reviewer: [codex, claude, minimax, kimi, baseten, exo]
+  reviewer: [codex, claude, minimax, kimi, baseten]

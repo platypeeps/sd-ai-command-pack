@@ -41,6 +41,10 @@ say. A skill in `contrib/` is one command away, and use is what moves it.
 - `~/.codex/skills/sd-*/SKILL.md`
 - `~/.config/opencode/commands/sd-*.md`
 - `~/.claude/agents/sd-*.md`
+- `~/.local/bin/sd` and `~/.local/bin/sd-*` — one symlink per executable in
+  `bin/`, so the commands resolve from any directory; `--bin-dir DIR` puts them
+  elsewhere. The installer never edits `PATH`: `--user` warns when the link
+  directory is not on it, and `--status` says how many commands resolve.
 - three hook entries in `~/.claude/settings.json` — `SessionStart` for
   `sd-handoff-restore`, and `PreToolUse` and `UserPromptSubmit` for
   `sd-skill-use`. `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
@@ -220,36 +224,62 @@ off `main` or over uncommitted changes.
 
 | Command | What it does |
 |---|---|
-| `bin/sd_install.py --user` | Render every `sd-*` surface into this machine's platform homes |
+| `bin/sd_install.py --user` | Render every `sd-*` surface into this machine's platform homes, and link the `bin/` commands into `~/.local/bin` (`--bin-dir DIR` for another directory) |
 | `bin/sd_install.py --status` | What is installed, what has drifted, what legacy residue remains |
 | `bin/sd_install.py --pull` | Fast-forward the serving checkout (clean, on `main`) and re-render |
-| `bin/sd_install.py --uninstall` | Remove exactly what the receipt records having written |
+| `bin/sd_install.py --uninstall` | Remove exactly what the receipt records: the renders it wrote, the hook entries, and the command links it recorded (a link that already pointed here is recorded without being rewritten, and goes with the rest) |
 | `bin/sd_install.py --adopt-legacy` | Delete the pre-3e fleet installer's successor-less renders |
 | `bin/sd_install.py --repo [PATH]` | Write the marked block into `PATH/CLAUDE.local.md` |
 
 `--dry-run` prints what any of them would do and writes nothing. `--home DIR`
 installs into a scratch directory instead of `$HOME`, which is how the tests
-drive it.
+drive it. `--bin-dir DIR` links the commands somewhere other than
+`~/.local/bin`, and the receipt remembers the directory, so a later `--user`
+or `--pull` without the flag links there again; a link already pointing into
+this checkout is kept as it is, and anything at a link's path that is not such
+a link makes `--user` refuse by name and write nothing.
+
+If you commit to this checkout, `make hooks` arms the pre-commit tier: it
+links `.git/hooks/pre-commit` to the tracked `hooks/pre-commit`, which runs
+Ruff over the staged Python and the two whole-tree test passes
+(`tests.test_code_health`, `tests.test_doc_citations`) in about five seconds
+and prints its own wall time against the budget its header states.
+`SD_SKIP_HOOKS=1 git commit` skips it with a notice. The hook is one per
+clone: the link sits in the clone's common `.git/hooks`, its target is the
+relative `../../hooks/pre-commit`, so it reads the main checkout's tracked
+file and every linked worktree shares it, whichever worktree ran `make
+hooks`; the target refuses to replace anything else already at that path; it never
+sets `core.hooksPath` and refuses to run while one is set, since git would
+then place the link under that directory, and the directory is not
+`.githooks/`, because `sd-status` reports both of those as the retired gate
+stack's residue. This is
+a setting of the clone, not a render, so `--user` does not make it and
+`--uninstall` does not remove it; `bin/sd_install.py` is unchanged, and folding
+the hook into `--user` is the owner's call.
 
 ### What it owns, and what it will not touch
 
 The receipt at `~/.local/state/sd-ai-command-pack/installed.json` records every
-path the installer wrote together with the digest of what it wrote. That single
-fact is what makes the rest safe:
+path the installer owns: written by it, or an existing link to this checkout it
+adopted. A render row carries the digest of what it wrote, and a link row the
+target the link points at. That single fact is what makes the
+rest safe:
 
 - A surface you rename or retire in `skills/` — or move to `contrib/` —
   disappears from every platform on the next `--user`, because the receipt
   knows the old path was ours.
 - A rendered file you have since edited by hand is **kept** and reported, never
   silently deleted.
-- `--uninstall` removes those paths and nothing else. The global excludes line
-  and any `CLAUDE.local.md` blocks are left alone; they are yours.
+- `--uninstall` removes those paths and nothing else. A recorded link that no
+  longer points into this checkout is left and reported, a link the receipt
+  never named is never touched, and the link directory stays. The global
+  excludes line and any `CLAUDE.local.md` blocks are left alone; they are yours.
 - If the receipt will not parse, it grants no delete authority at all — the
   installer converges forward and removes nothing it cannot account for.
 
 ## Commands
 
-The twelve named surfaces — eleven commands plus `sd-help`, which the taxonomy
+The eleven named surfaces — ten commands plus `sd-help`, which the taxonomy
 makes a skill because a catalog authorizes nothing — rendered identically to
 every platform. Each is documented in its own `skills/sd-*/SKILL.md`, which is
 the file that gets installed, so the documentation and the artifact are the
@@ -261,18 +291,18 @@ relevant rather than invoked. They are not listed here: `sd-help` reads the
 installed tree at runtime, and `sd skill list` reads both roots, which are the
 only two inventories that cannot go stale.
 
-Three of the twelve named surfaces — `sd-deps`, `sd-map` and `sd-skill-adopt` —
+Two of the eleven named surfaces — `sd-map` and `sd-skill-adopt` —
 are in `contrib/` rather than on a path. They are still commands, and the table
 below still describes them; they install with `sd skill try` rather than by
 default. A command is a thing that authorizes side effects, which is a claim
 about the frontmatter, not a claim that everyone needs it installed. The one structural
 difference is in the frontmatter, and it is what the taxonomy means: each of
-the eleven commands sets `disable-model-invocation`, so invoking it is a
+the ten commands sets `disable-model-invocation`, so invoking it is a
 deliberate act; every other surface, `sd-help` included, does not.
 
 **Runs as** says whether there is something to execute. `bin/` is a shipped
 entrypoint you can run; **prose** is a sequence an agent follows, with no
-runner behind it — the skill is the implementation. Six of the twelve are
+runner behind it — the skill is the implementation. Five of the eleven are
 prose today, each saying so in its own "State of the tooling" section, and
 `tests/test_skill_frontmatter.py` fails if one of them ever names a `bin/`
 command without that sentence, or keeps the sentence after the command
@@ -286,7 +316,6 @@ arrives.
 | `sd-ship` | `bin/` | Review committed work, prepare its PR, verify merge authority, and reconcile delivery |
 | `sd-spec` | prose | Update `docs/spec/**` on the PR branch |
 | `sd-status` | `bin/` | Read-only: derived status, open PRs, branch-protection gaps and the states this repo accepts (`.github/sd-status.json`) |
-| `sd-deps` | prose | Batch-triage dependabot and renovate PRs |
 | `sd-help` | prose | Runtime catalog of installed `sd-*` surfaces |
 | `sd-suggest` | prose | Record framework friction as a local proposal; publish only when asked |
 | `sd-skill-adopt` | `bin/` | Safety pre-screen, lint, and canonical transform for an incoming skill |
@@ -309,7 +338,7 @@ advisory `route` job in `sd-review-route.yml`:
 | Context | What it runs |
 |---|---|
 | `unittest (ubuntu-latest, 3.13)` | The suite on Ubuntu, Python 3.13, plus the installer coverage gate |
-| `lint` | Ruff over `dashboard`, `bin/` and `tests/` and mypy over `dashboard` and `bin/` (the path lists are `LINT_RUFF_PATHS` and `LINT_MYPY_PATHS` in the `Makefile`, read rather than restated), `sd-docs-lint` over this checkout's `docs/`, then Bandit over `bin/`, zizmor over the workflows, and ShellCheck over the tracked shell |
+| `lint` | Ruff over `bin/` and `tests/` and mypy over `bin/` (the path lists are `LINT_RUFF_PATHS` and `LINT_MYPY_PATHS` in the `Makefile`, read rather than restated), `sd-docs-lint` over this checkout's `docs/`, then Bandit over `bin/`, zizmor over the workflows, and ShellCheck over the tracked shell |
 
 `sd-status` compares the live protection object with the contexts the
 workflow files produce, not with this table, so a row here can go stale

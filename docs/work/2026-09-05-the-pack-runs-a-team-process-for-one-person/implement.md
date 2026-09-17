@@ -1629,7 +1629,11 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   `Makefile:201` and `test:` at `:55`.)
 - **18, swept 2026-09-16 in #998**, down to the exemptions and two words in
   files #995 held; see "Criterion 18 landed" at the end of this page, which
-  names the remainder and the edit that closes it. (Measured 2026-09-14: a grep of the
+  names the remainder and the edit that closes it. (2026-09-16, 31(b1): both
+  words are reworded, `HELD` in `tests/test_no_trellis_residue.py` is empty
+  and `HELD_BOUND` keeps the two rows as its ceiling; the grep of the
+  governed tree outside that test returns 12 lines, all in the exemption
+  sets. See "Criterion 31(b1) landed" at the end of this page.) (Measured 2026-09-14: a grep of the
   governed tree found `Trellis` in 14 files, `.trellis` in 11 and `task.py`
   in 2, with two exemptions from decision note 1942. The upstream Trellis
   pull-request guard at `AGENTS.md:7-10,31` is exempt while sd:241, sd:242
@@ -1685,7 +1689,20 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   0 governed-tree files, so 31(a) is closed for `sd_sweep`. The `parked`
   and `archived` field cut is deferred to a later lane, team-lead decision
   2026-09-16, reversible by the owner; the reader set is frozen meanwhile.
-  See the entry at the end of this page.)
+  See the entry at the end of this page.) (2026-09-16, 31(b1) landed: the
+  prose symbols and flags. `record_load`, `carrier_branches`, `--stash-ref`,
+  `--push`, `--park`, `argument-vocabulary`, `Standing rule`, `five gates`,
+  `cron-jobs.sh`, `Active item:` and `sd-deps` each find 0 governed-tree
+  files outside the gate that freezes them, `PROSE_SYMBOLS`
+  (`source:tests/test_cut_symbols.py::PROSE_SYMBOLS`). BLOCKED-in-part:
+  `_protection_gaps` and `load_acknowledgements` are the live protection
+  section of `bin/sd-status`, which applies the accepted gaps in
+  `.github/sd-status.json`, and the cut is requirement 13's rewrite to one
+  `protected: yes/no` line, the owner's change; `HELD_SYMBOLS_BOUND`
+  (`source:tests/test_cut_symbols.py::HELD_SYMBOLS_BOUND`) holds them in
+  `bin/sd-status` and `tests/test_sd_status.py` and nowhere else. Left for
+  (b2): the `authors` policy key. See "Criterion 31(b1) landed" at the end
+  of this page.)
 
 **Closed, by the criterion's own check:**
 
@@ -2011,8 +2028,9 @@ Followups sd:789 and sd:790 are `done`; sd:788 is still `planning`.
 grep of the governed tree, `Trellis`, `.trellis` and `task.py` as literals,
 returned 123 lines in 19 files; the new test
 `tests/test_no_trellis_residue.py`, run red before the sweep, counted 113 of
-them outside the ten exempt lines. After the sweep the grep returns the ten
-exempt lines and the two held lines below, and nothing else.
+them outside the ten exempt lines. After the sweep the grep returns nothing
+outside the fourteen rows the test names: the ten exempt lines, the two held
+lines below, and the two `ALLOWED_IF_PRESENT` lines that arrive with #995.
 
 What the sweep did, by kind:
 
@@ -2057,6 +2075,8 @@ reword removes the word and its row. The set is
 bounded above by a frozen copy of the two rows, `HELD_BOUND`, so it may only
 shrink, and the criterion is closed in full when it is empty. Until then the
 tick above is the sweep's, with those two words as the named remainder.
+(2026-09-16, 31(b1): both words are reworded and `HELD` is empty; see
+"Criterion 31(b1) landed" below.)
 
 A third set, `ALLOWED_IF_PRESENT`, carries the two lines #995 adds to
 `tests/test_archive_untouched.py`: the `FROZEN_DELETION_SITES` row that
@@ -2079,3 +2099,101 @@ Without the merge the same command also ends `OK`. #995 then merged as
 Outside the governed tree, `docs/review-learnings.md` keeps its rows marked
 **historical**, which quote review comments by the paths they named at the
 time, and its one curated lesson about journal sessions.
+
+## Criterion 31(b1) landed
+
+2026-09-16, by the 31(b1) lane, at base `29de1970`. The criterion's grep of
+the governed tree, with the test's own file and the captured review rounds
+excluded, found the thirteen symbols of this slice on these line and file
+counts: `record_load` 5 in 2, `carrier_branches` 4 in 1, `_protection_gaps`
+11 in 2, `load_acknowledgements` 7 in 2, `--stash-ref` 3 in 3, `--push` 7 in
+3, `--park` as a bare flag 3 in 2, `argument-vocabulary` 21 in 21, `Standing
+rule` in either case 13 in 7, `five gates` 1 in 1, `cron-jobs.sh` 0,
+`Active item:` 8 in 8, `sd-deps` 6 in 4. After the sweep every count but two
+is 0. `_protection_gaps` finds 14 lines and `load_acknowledgements` 10, all
+in `bin/sd-status` and `tests/test_sd_status.py`, and the gate holds them
+there.
+
+The gate is `ProseSymbolsAndFlags` in `tests/test_cut_symbols.py`, run red
+before the sweep on ten of its eleven symbols, `cron-jobs.sh` already at 0,
+and on the `R10-D2` teaching check below. `PROSE_SYMBOLS`
+(`source:tests/test_cut_symbols.py::PROSE_SYMBOLS`) is the frozen tuple of
+name and pattern; one test greps the governed tree for each and names the
+file and line of every hit. `--park` is bounded so `--parked`, the
+`sd-status` flag over the `parked` field whose cut 31(a) deferred, does not
+match, and a control test proves the bound still finds the bare flag.
+`Standing rule` is matched in either case, since `standing rule 2` in a
+comment cites the same undefined rule as `Standing rule 2` in a docstring.
+`HELD_SYMBOLS` (`source:tests/test_cut_symbols.py::HELD_SYMBOLS`) names the
+two held symbols and the files that may carry them; a test fails a hit
+outside those files, and `HELD_SYMBOLS_BOUND`
+(`source:tests/test_cut_symbols.py::HELD_SYMBOLS_BOUND`) is the frozen
+ceiling, so the held set may only shrink. `TheRepealedRowStillTeaches` reads
+the `R10-D2` row of `RULES` (`source:bin/sd_rules.py::RULES`) and asserts
+its `teaches` names one heading of `skills/sd-handoff/SKILL.md` whose body
+cites the rule id; leg a of `tests/test_rule_registry.py` skips repealed
+rows, so without this test the teaching sentence could go with nothing
+noticing.
+
+What the sweep did, by kind:
+
+- Cut from code, each with no consumer outside its file and its own tests:
+  `record_load` and `load_age_seconds` from `bin/sd-handoff-restore`, with
+  the lock-retry constants and the consumed-packet load log, so the restore
+  step now stamps `consumed` and moves on; 180 deleted lines of code and
+  418 of tests, `LoadLogTests` and `TornRecordTests`. `carrier_branches` from
+  `bin/sd-status`, with its renderer loop, the `carriers` key of the handoff
+  section and the one test that derived carriers from origin refs.
+  `--stash-ref` from `bin/sd-handoff`, with the packet field, the `--show`
+  line and the test that recorded it.
+- Reworded, the symbol gone and the sentence kept: `Standing rule 1` and
+  `Standing rule 2` are inlined at their thirteen sites in `bin/sd`, the
+  plan decision template, `sd-spec`, `sd-suggest` and `tests/test_sd_plugin.py`,
+  each saying what the rule said. The `R10-D2` row of `RULES` and the Lane B
+  section of `skills/sd-handoff/SKILL.md` lose `--push` and `--park`
+  together: the section is now `## Lane B is not implemented`, the row's
+  `teaches` points at it, and the section body still cites `R10-D2`. `five
+  gates` in `tests/test_skill_frontmatter.py` is the count it stood for. The
+  seven `Active item prefix` bullets in skills and `contrib/` are deleted,
+  and the five agents' opening-context paragraphs say what the dispatch
+  prompt carries today, since nothing in `bin/` or `skills/` emits an
+  `Active item:` line.
+- Deleted: `skills/_shared/references/argument-vocabulary.md` and the line
+  citing it in 57 skill pages, 21 of them governed; `contrib/sd-deps/` and
+  its README row, so `sd-deps` leaves the command roster of
+  `tests/test_skill_frontmatter.py` and `bin/sd-skill-adopt`, and the eleven
+  named surfaces are ten commands plus `sd-help`. `README.md` changed on
+  four lines outside the two `sd-deps` lines the lane was given, because
+  `tests/test_skill_frontmatter.py` reads the README's count sentence and
+  asserts the table's row count against it; none of the four is in a hunk of
+  #1006.
+- Criterion 18's two held words are reworded: the dot-directory list in
+  `bin/sd` and the paths list of `skills/sd-plan/SKILL.md` name the
+  directories and tools without the framework's name. `HELD`
+  (`source:tests/test_no_trellis_residue.py::HELD`) is empty, `HELD_BOUND`
+  is unchanged, and the module docstring names all three sets. `named_by`,
+  which nothing called, is gone.
+- Residue from #994 and #998: `tests/test_workflow_policy.py` gains a floor
+  on the set of skills that run a review, the `sd-research-kit review`
+  invocation shape in one alternation with `sd-review`, a mention fixture
+  that must not count as an invocation, and a check that the linking
+  sentence says the cap is the one on the row, with three negative
+  fixtures. `docs/spec/guides/cross-layer-thinking-guide.md` names the
+  upstream package instead of its scoped name. The #998 note above now
+  counts fourteen rows.
+- `tests/test_rule_registry.py`, held by the sd:431 lane: one baseline row
+  removed from `UNCITED_SKILL_CLAIMS`, since the cut `stash_ref` sentence
+  was the `sd-handoff` page's only uncited claim. `prd.md`'s requirement 13
+  list marks `record_load` and `carrier_branches` cut, because their
+  `source:` locators no longer resolve.
+
+Not cut, and why: `_protection_gaps` and `load_acknowledgements` are the
+live protection section of `bin/sd-status`. It applies the accepted gaps
+recorded in `.github/sd-status.json`, a sensitive path under
+`.github/sd-review.json`, and `README.md`, `CONTRIBUTING.md` and the
+`sd-status` skill describe it. Requirement 13's cut is a rewrite of that
+section to one `protected: yes/no` line, which changes what the owner sees
+and what the acceptance file means; that is the owner's change, and the
+gate holds the two symbols to their two files until it lands. The `authors`
+policy key is 31(b2). The two kept 31(a) deferrals, `parked` and `archived`,
+are untouched.

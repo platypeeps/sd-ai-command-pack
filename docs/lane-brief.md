@@ -53,10 +53,11 @@ for the controls a run passes through.
 > projection instead: one written from the schema you remember drops the fields
 > you were not thinking about, and `repo` is the one that matters most.
 >
-> Invoke it by checkout-relative path, `bin/sd`, never as a bare `sd`. That is
-> the only calling convention this repository supports
-> ([`AGENTS.md`](../AGENTS.md), "Calling Convention"), and a bare name resolves
-> against whatever `PATH` happens to hold. The store is machine-wide, so a
+> Invoke it by checkout-relative path, `bin/sd`, never as a bare `sd`. The
+> installer links the commands onto `PATH` ([`AGENTS.md`](../AGENTS.md),
+> "Calling Convention"), but a lane reads the store from the checkout it was
+> given, and a bare name resolves against whatever `PATH` happens to hold, so
+> by-path is the rule here on purpose. The store is machine-wide, so a
 > `system` lane uses the pack checkout's `bin/sd` to read its own item; the
 > rows are the same rows.
 >
@@ -69,7 +70,7 @@ for the controls a run passes through.
 > <one paragraph: the citation — `path:line` for a line of a markdown page;
 > `source:<path>::<symbol>` for a Python function, class, method or
 > module-level assignment; prose naming the enclosing declaration or the file
-> for anything else, `dashboard/app.js` say; never a line number into code
+> for anything else (the `Makefile`, say); never a line number into code
 > ([`CONTRIBUTING.md`](../CONTRIBUTING.md), "Repository Conventions") — the
 > quoted text, the related pull requests and decision notes to read>
 >

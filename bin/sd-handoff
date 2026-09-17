@@ -204,8 +204,6 @@ def build_packet(args: argparse.Namespace, environ: dict[str, str]) -> dict:
         "questions": list(args.question or [])[:MAX_QUESTIONS],
         "files": changed_files(root),
     }
-    if args.stash_ref:
-        packet["stash_ref"] = args.stash_ref
     return packet
 
 
@@ -349,8 +347,6 @@ def human(packet: dict) -> str:
             lines.append(f"  {label}: {entry}")
     for entry in packet.get("files") or []:
         lines.append(f"  file: {entry}")
-    if packet.get("stash_ref"):
-        lines.append(f"  stash_ref: {packet['stash_ref']}")
     return "\n".join(lines)
 
 
@@ -421,7 +417,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"an open question (<= {MAX_QUESTIONS})",
     )
     parser.add_argument("--item", help="work-item directory; omit when there is none")
-    parser.add_argument("--stash-ref", dest="stash_ref", help="ref under refs/sd-handoff/")
     parser.add_argument("--cwd", help="resolve the packet for this directory")
     parser.add_argument(
         "--show",

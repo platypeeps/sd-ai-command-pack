@@ -4,12 +4,42 @@ VENV ?= .venv
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
 
-.PHONY: setup test lint audit docs-lint check
+.PHONY: setup hooks test lint audit docs-lint check
 
 setup:
 	"$(PYTHON)" -m venv "$(VENV)"
 	"$(VENV_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
 	"$(VENV_PYTHON)" bin/sd_install.py --provision-library
+
+# The pre-commit tier of sd:431. `hooks/pre-commit` runs Ruff over the staged
+# Python and the two whole-tree test passes that walk the tree, with a
+# wall-time budget in its header. The install is one relative symlink,
+# <common .git>/hooks/pre-commit -> ../../hooks/pre-commit, in the clone's
+# common git directory: one hook per clone, read from the main checkout's
+# tracked file, shared by every linked worktree, whichever worktree ran
+# `make hooks` (a worktree's own copy is never linked, so no worktree's
+# branch becomes every other worktree's policy). Not
+# `.githooks/` and not `core.hooksPath`: those are the retired gate stack's
+# signatures, and bin/sd-status reports each as residue with a removal
+# command, so the pack's own hook must not wear them. A clone that still
+# carries `core.hooksPath` is refused first, since `git rev-parse --git-path
+# hooks` would honour it and place the link under the retired directory. A
+# file already at the path that is not this link is refused by name and left
+# alone. This is a
+# setting of the clone, not a render: the installer does not make it, and
+# folding it into `--user` is the owner's call. `SD_SKIP_HOOKS=1 git commit`
+# skips the hook with a notice.
+hooks:
+	@if set="$$(git config --get core.hooksPath)"; then \
+		printf '%s\n' "error: core.hooksPath is set to $$set; the pack's hook lives in .git/hooks -- run 'git config --unset core.hooksPath' (bin/sd-status names it as residue) and retry" >&2; \
+		exit 1; \
+	fi; \
+	dir="$$(git rev-parse --path-format=absolute --git-common-dir)/hooks"; link="$$dir/pre-commit"; target=../../hooks/pre-commit; \
+	if { [ -e "$$link" ] || [ -L "$$link" ]; } && [ "$$(readlink "$$link")" != "$$target" ]; then \
+		printf '%s\n' "error: $$link exists and is not the link to hooks/pre-commit; move it aside first" >&2; \
+		exit 1; \
+	fi; \
+	mkdir -p "$$dir" && ln -sfn "$$target" "$$link" && printf '%s\n' "git hooks: $$link -> $$(readlink "$$link")"
 
 # `generate` and `surface-check` are gone with step 3e. They regenerated the
 # committed per-platform copies under templates/ from .github/command-sources/,
@@ -82,8 +112,8 @@ test:
 # Both dedupe internally, so this one is waste rather than a wrong answer --
 # but every `ls-files` in this repository now says what it means (item 481).
 LINT_BIN := $(shell git ls-files --deduplicate -- bin)
-LINT_RUFF_PATHS := dashboard $(LINT_BIN) tests
-LINT_MYPY_PATHS := dashboard $(LINT_BIN)
+LINT_RUFF_PATHS := $(LINT_BIN) tests
+LINT_MYPY_PATHS := $(LINT_BIN)
 
 .PHONY: lint-ruff-paths lint-mypy-paths
 lint-ruff-paths:
@@ -94,8 +124,8 @@ lint-mypy-paths:
 # Pass STRICT=1 to turn missing-tool skips below into hard errors. That is
 # parity with the CI lint job, which always runs the ShellCheck lane and
 # never skips it. Ruff and mypy cover the paths named in LINT_RUFF_PATHS and
-# LINT_MYPY_PATHS above: Ruff over dashboard, the tracked bin/ files and
-# tests/, mypy over dashboard and the tracked bin/ files. The installer
+# LINT_MYPY_PATHS above: Ruff over the tracked bin/ files and tests/, mypy
+# over the tracked bin/ files. The installer
 # package and the shipped payload that step 3e removed are not in either.
 #
 # The bash 3.2 lane survives 3e on a narrower rationale than it had, and the

@@ -209,7 +209,7 @@ implementations.**
 | Tier | Scope | What runs |
 |---|---|---|
 | authoring | the file being written | the skill consults the registry and names the rule ids in scope |
-| pre-commit | whole, except the one slow checker | the code checkers whole; `bin/sd-docs-lint` diff-scoped |
+| pre-commit | the staged files for Ruff; whole for the two test passes | `hooks/pre-commit`: Ruff over the staged Python, then `tests.test_code_health` and `tests.test_doc_citations` whole; `bin/sd-docs-lint` not run (step 7, 2026-09-16) |
 | CI | the repository | full run with baselines, the backstop |
 
 ### The item has diff-scoping backwards, and the clock says so
@@ -220,6 +220,9 @@ The backbone item justifies diff-scoping like this:
 > per commit, and a slow hook gets bypassed.
 
 The premise is false. Timed on `e6c2cb20`, on the machine of the day:
+
+**Superseded 2026-09-16 by step 7's readings**, recorded under the decision
+"the code checkers are not diff-scoped" below; the table stays as the record.
 
 | Whole-repository pass | Wall time, `e6c2cb20` — **expired, see below** |
 |---|---|
@@ -330,6 +333,24 @@ apply to the checkers the item aims it at.
   average 7.90 before the four rows and real 14.47 s at 15.85 after, on the
   same machine under different load, so no ratio is claimed. The slope is
   the code-health walk, about 1.2 s a child run, two runs a row.
+  **Budgeted 2026-09-16 (sd:971): `LegD` is 21 s of wall time, and the
+  controls run in one child.** The rule is twice the measured wall time,
+  rounded up to the second, so a busier machine passes and a doubled leg
+  does not. Measured with one command, `uptime; /usr/bin/time -p python -m
+  unittest tests.test_rule_registry.LegD`, on the pack venv: real 14.71 s
+  for 9 tests at load average 6.31 before the change and real 10.34 s at
+  6.28 after it; the module real 31.87 s at 11.87 before and real 23.56 s
+  at 6.09 after, so no ratio is claimed for the module. A code-health
+  control child read 1.28 s and a child that walks nothing 0.10 s; one
+  child running all four code-health nodes read 1.28 s, and all eight
+  nodes 1.95 s, so the walk is per child, not per node, and the cut is
+  one control child that runs every row's test (`source:tests/test_rule_registry.py::batched_controls`),
+  then one mutated child per row. The shape is held by
+  `source:tests/test_rule_registry.py::TheSharedCopy`: children at most
+  `rows + 1 + 2 * controls`. When a row pushes `LegD` past 21 s the leg
+  is scoped, never dropped: the row's control still runs in the shared
+  child and its mutation in its own, and the budget is re-measured with
+  the same command and restated here with the load average.
 - **2026-09-13 — leg a counts a citation in a section's body, never in its
   heading.** `section_body` drops the heading line, so a row's id has to appear
   in the body text of the section its `teaches` names. `R10-D1` to `R10-D3`
@@ -341,7 +362,8 @@ apply to the checkers the item aims it at.
   to fix outright. **Superseded 2026-09-12 by the correction above (sd:622):
   263 has no predicate behind it and neither do its proposed replacements. The
   baseline is whatever `claims_in` returns, recorded per document in
-  `UNCITED_SKILL_CLAIMS`.**
+  `UNCITED_SKILL_CLAIMS`.** Landed as `R13-D3` on 2026-09-16 (step 6), a
+  row registering leg b as it stands and enforcing nothing new.
 - **2026-09-12 (sd:622) — leg b's predicate has one recorded definition, and
   the rejected readings are kept as code rather than as numbers.** The scope is
   the line, the verbs are matched as written, and the subject is enumerated;
@@ -355,10 +377,15 @@ apply to the checkers the item aims it at.
 - **2026-09-12 — prose rule 2 gains an exemption for counts reported against a
   commit.** Without it the rule reddens its own design document. Reversed if a
   cheaper discriminator than "carries a commit or a date" is found.
+  Landed as `R13-D2` on 2026-09-16 (step 6), in `tests/test_prose_counts.py`,
+  with a `#<n>` number read as a third mark beside the commit and the date.
 - **2026-09-12 — prose rule 1 is narrowed from a prohibition to a preference
   conditioned on a symbol existing.** Reversed by sd:525 deciding the broader
   question against line anchors, which would then be that item's call to make,
-  not this one's.
+  not this one's. Landed as `R13-D1` on 2026-09-16 (step 6), over the
+  unanchored citations only: sd:525 had by then made the anchored ones red,
+  so the `compared` rows this rule was first planned over hold no live
+  citation into code.
 - **2026-09-12 — the code checkers are not diff-scoped; only
   `bin/sd-docs-lint` is.** Measured, not assumed. Reversed if the whole-tree
   code pass passes two seconds, at which point the timing is re-run and the
@@ -370,6 +397,62 @@ apply to the checkers the item aims it at.
   step 7's own pull request, per the owner decision of 2026-09-14 (note 1989);
   nothing in this document should be read as a live diff-scoping decision until
   that lands.
+  **Re-made 2026-09-16 in step 7's pull request, on readings taken at
+  `ef7c0c7b` with the one-minute load average stated, three runs each,
+  `/usr/bin/time -p`, the pack's `.venv/bin/python`:**
+  `tests.test_code_health` real 1.79 / 1.71 / 1.74 s at load 9.90 / 8.73 /
+  7.39; `tests.test_doc_citations` real 3.41 / 3.38 / 3.33 s at load 9.91 /
+  8.75 / 7.39; `bin/sd-docs-lint` real 20.34 / 21.85 / 21.65 s at load 9.91 /
+  8.75 / 7.52, with 2.0 s of user+sys CPU on each run. The assembled hook on a
+  one-file diff, a line appended to a skill page and staged, read real 5.26 /
+  5.07 / 5.01 s at load 7.47 / 7.60 / 7.55. No ratio between runs at
+  different loads is claimed. The decision, in three parts. (1) **The code
+  checkers run whole in the hook, and so does the citation pass.** The 2 s
+  reversal trigger above did not fire on these readings: the code pass is
+  under it on all three. Neither pass has a diff-scoped form to choose:
+  `.github/scripts/select-tests.py` puts both in `ALWAYS_RUN`, because they
+  walk the tree rather than name a file, so the pack's own fast path runs
+  them whole on every change, and the hook does the same. Together they read
+  5.04 to 5.20 s. (2) **`bin/sd-docs-lint` is not in the hook, whole or
+  scoped.** Its `--changed` flag needs `--pr-body` and scopes rule 8 only;
+  rules 1 to 4, 6 and 7 read the whole corpus whatever is passed, so there is
+  no file-scoped run to time. And its cost is now attributed: a `cProfile`
+  run at the same commit puts 20.7 of 21.2 s inside `sd_lib.delivered`,
+  called from rule 2's `check_ready`, which runs `git fetch` and
+  `git ls-remote` seventy times in all. That is network, not work. A commit
+  hook that reaches the network is slow when the link is slow and fails when
+  it is absent, which is the bypassed-hook failure this section is about, so
+  the tool stays in `make check` and CI, where the 2026-09-14 attribution
+  prerequisite is now met for whoever scopes around it. (3) **Ruff runs on
+  the staged Python only**, which is the one gate here that is file-scoped by
+  nature. The hook is **budgeted at 8 s** wall on a one-file diff; the number
+  is in its header and in `BUDGET_SECONDS`, `tests/test_pre_commit_hook.py`
+  holds the three copies equal, and the hook prints its own wall time on
+  every exit so a reading over the budget is seen by the person who paid it.
+  Reversed if a hook reading on a one-file diff passes the budget at a stated
+  load under 10, at which point the slower pass is dropped from the hook and
+  left to CI, not diff-scoped, since neither has such a form. The hook is
+  Python, not shell: `tests/test_no_shipped_shell.py` allows tracked shell
+  under `.github/scripts/` only. **The layout dodges the pack's own residue
+  detector.** `bin/sd-status` carries a `RESIDUE` row for a `.githooks`
+  directory and a `hooks-path` row for any `core.hooksPath` set, each with a
+  removal command (`git config --unset core.hooksPath; git rm -r
+  --ignore-unmatch .githooks`), because those two were the retired gate
+  stack's signatures in every consumer. A hook installed the conventional way
+  would have matched both rows in this checkout, and the pack's status tool
+  would have told the operator to delete the pack's hook. So the file is
+  tracked as `hooks/pre-commit`, a visible directory the detector does not
+  glob, and `make hooks` installs it as the relative link
+  `<common .git>/hooks/pre-commit -> ../../hooks/pre-commit` in the clone's
+  common git directory: one hook per clone, read from the main checkout's
+  tracked file and shared by every linked worktree, whichever worktree ran
+  the target, so no worktree's branch becomes every other worktree's
+  policy; it refuses by name to replace anything else at that path;
+  `core.hooksPath` is never set, and a clone that still carries one is
+  refused before the directory is resolved, because `--git-path hooks`
+  honours the setting and would place the link under the retired directory. `tests/test_pre_commit_hook.py` runs
+  `residue_section` from `bin/sd-status` over a checkout laid out this way,
+  after `make hooks`, and requires neither row; the detector is not edited.
 - **2026-09-12 — the meta-check lands before any rule.** A registry with zero
   rows must pass its own tests. This makes step 1 independently landable and
   independently green.
@@ -456,4 +539,10 @@ heading at `skills/sd-handoff/SKILL.md:118` reads "Lane B (`--push`,
 rule names does not exist. A live row would have asserted an enforcement nothing performs;
 the repealed row answers the citation and asserts nothing. The row's
 `teaches` still names that section, so a reader following it lands on the
-sentence that says why there is nothing to run.
+sentence that says why there is nothing to run. Since 2026-09-17, slice H,
+`teaches` is optional on a `repealed` row and required on a live one
+(`source:tests/test_rule_registry.py::missing_field_errors`), because a rule
+no skill taught when it was withdrawn has no section to name and a section
+invented for it would send a reader to a heading that says nothing about it;
+the twelve rows team-lead repealed that day under Dec-9 (note 2665) carry
+`None` there, and `R10-D2` keeps its section.

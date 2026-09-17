@@ -1,8 +1,9 @@
-"""What `bin/` and `dashboard/` may not become, measured instead of asserted.
+"""What `bin/` may not become, measured instead of asserted.
 
 This replaces one check, not one file: `BIN_CAP` in `tests/test_loc_caps.py`,
 which capped total lines under `bin/`. That file survives and still enforces
-the `migrate-*` and dashboard ceilings; only the `bin/` total is retired here.
+the `migrate-*` ceiling; the `bin/` total was retired here, and the dashboard
+ceilings went with `dashboard/` at sd:719 step 7.
 
 That cap was raised eighteen times in eleven days and lowered never, while
 `bin/` grew from 8,000 lines to the 20,803 it was retired at -- so it never
@@ -10,10 +11,14 @@ once said no. It could not: every capability adds lines, and refusing the lines
 means refusing the capability. A number that must be raised to let work proceed
 is a record of growth wearing the costume of a limit.
 
-Worse, it charged for prose. `bin/` measures 20,832 lines today -- already 29
-past the figure it was retired at, from work that landed in the days between,
-and nothing counts them now. Of those, 13,144 carry code and 7,688 are
-docstring, comment or blank. House style puts
+Worse, it charged for prose. When this module landed (2026-09-11, #811)
+`bin/` measured 20,832 lines -- already 29 past the figure it was retired at,
+from work that landed in the days between, and nothing counted them. Of those,
+13,144 carried code and 7,688 were docstring, comment or blank. Re-measured at
+sd:719 step 7 (#1013, 2026-09-17, after `bin/sd-dashboard`'s 39 lines left),
+`sources()` holds 44 files and 27,510 lines, 15,497 carrying code and 12,013
+docstring, comment or blank, by the same tokeniser; the share of prose has
+grown, and still nothing counts it. House style puts
 design reasoning in docstrings, so under a line cap explaining costs exactly
 what implementing costs, and the one time the cap actually bound, what got
 deleted was an explanation (`dashboard/` at 3,999 of 4,000, prose trimmed to
@@ -85,7 +90,7 @@ SHEBANG_LIMIT = 4096
 
 #: How many public functions the dead-code check cannot speak for, because
 #: another function in the corpus carries the same name. Downward only.
-AMBIGUOUS_CEILING = 121
+AMBIGUOUS_CEILING = 114  # 116 until sd:719 step 7 deleted bin/sd-dashboard's build_parser and main
 
 
 def tracked(*pathspecs: str, root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:
@@ -123,7 +128,10 @@ def tracked(*pathspecs: str, root: pathlib.Path = REPO_ROOT) -> list[pathlib.Pat
 
 @functools.cache
 def sources() -> tuple[pathlib.Path, ...]:
-    """Every Python file the checks govern: `bin/` and `dashboard/`.
+    """Every Python file the checks govern: `bin/`.
+
+    `dashboard/` was the corpus's other tree until sd:719 step 7 deleted it;
+    the enumeration is the index, so nothing here had to be told.
 
     `migrate-*` is excluded on the same reasoning the old cap used -- those
     tools are deleted rather than kept, and holding deleted code to a standard
@@ -140,7 +148,7 @@ def sources() -> tuple[pathlib.Path, ...]:
     """
 
     return tuple(
-        path for path in tracked("bin", "dashboard")
+        path for path in tracked("bin")
         if path.suffix == ".py" or _is_python_script(path)
         if not _is_migration_tool(path)
     )
@@ -162,11 +170,15 @@ def _is_migration_tool(path: pathlib.Path) -> bool:
     """`bin/migrate-*`, and only there, because that is what still has a cap.
 
     The exception is inherited from `MIGRATE_CAP`, which governs `bin/migrate-*`
-    alone (`tests/test_loc_caps.py`). Keyed on the basename instead, it would
-    also drop a future `dashboard/migrate-*.py` -- and drop it from `sources()`
-    and from `expected` at once, so the corpus test would compare two sets that
-    agree about a file neither of them holds. That is the fail-open shape this
-    module exists to avoid, so the directory is part of the predicate.
+    alone (`tests/test_loc_caps.py`). The corpus has been `bin/` alone since
+    sd:719 step 7, so `sources()` and `expected` never see a `migrate-*` file
+    from another tree; the directory stays part of the predicate because it
+    states the cap's own scope rather than borrowing the caller's. Keyed on
+    the basename, a second tree added to the corpus later would widen the
+    exception the day it landed, dropping that tree's `migrate-*` files from
+    `sources()` and from `expected` at once, so the corpus test would compare
+    two sets that agree about a file neither of them holds. That is the
+    fail-open shape this module exists to avoid.
     """
 
     return path.parent.name == "bin" and path.name.startswith("migrate-")
@@ -644,8 +656,6 @@ COMPLEX = frozenset({
     "bin/sd_work.py::run",  # 29
     "bin/sd_writing.py::register",  # 22
     "bin/sd_writing.py::run",  # 37
-    "dashboard/actions.py::bounded_run",  # 23
-    "dashboard/server.py::make_handler.Handler.do_POST",  # 26
 })
 
 LONG = frozenset({
@@ -662,7 +672,6 @@ LONG = frozenset({
     "bin/sd_work.py::register",  # 58
     "bin/sd_writing.py::register",  # 57
     "bin/sd_writing.py::run",  # 83
-    "dashboard/actions.py::bounded_run",  # 67
 })
 
 DEEP: frozenset[str] = frozenset()
@@ -733,11 +742,11 @@ class CodeHealth(unittest.TestCase):
         # Through `_is_migration_tool`, never a second spelling of it. This
         # line read `path.name.startswith("migrate-")` until 2026-09-11, while
         # `sources()` had already been narrowed to `bin/` -- so a future
-        # `dashboard/migrate-*.py` would be in the corpus and absent from the
+        # `migrate-*.py` in a second tree would be in the corpus and absent from the
         # set the corpus is checked against, and this test would fail for a
         # file that belongs. One predicate, one place.
         expected = {
-            path for path in tracked("bin", "dashboard")
+            path for path in tracked("bin")
             if not _is_migration_tool(path)
             if path.suffix == ".py" or _is_python_script(path)
         }
@@ -872,7 +881,7 @@ class CodeHealth(unittest.TestCase):
         limit, and an unstated limit is worse than a small one -- so it is
         measured here and held to a ceiling that may only come down, the same
         rule the baselines follow. Giving a function a name nothing else in
-        `bin/` and `dashboard/` uses is what shrinks it.
+        `bin/` uses is what shrinks it.
         """
 
         blind = sorted(
@@ -953,7 +962,7 @@ def _references() -> collections.Counter:
     me = pathlib.Path(__file__).resolve()
     words = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
     seen: collections.Counter = collections.Counter()
-    for path in tracked("bin", "dashboard", "tests", "skills", "docs",
+    for path in tracked("bin", "tests", "skills", "docs",
                         ".github", ".claude", "*.md"):
         if path == me:
             continue
@@ -1239,7 +1248,7 @@ class Detectors(unittest.TestCase):
     def test_the_migration_exception_is_scoped_to_bin(self):
         self.assertTrue(_is_migration_tool(REPO_ROOT / "bin/migrate-rows"))
         self.assertFalse(
-            _is_migration_tool(REPO_ROOT / "dashboard/migrate-store.py"))
+            _is_migration_tool(REPO_ROOT / "tests/migrate-store.py"))
         self.assertFalse(_is_migration_tool(REPO_ROOT / "bin/sd_lib.py"))
 
     def test_an_overlong_shebang_stays_in_the_corpus(self):
@@ -1342,6 +1351,55 @@ class Enumeration(unittest.TestCase):
             _conflicted_repo(root)
             self.assertEqual(tracked(root=root), [root / "f.txt"])
             self.assertNotIn(root / "f.txt", tracked("bin"))
+
+
+#: The two `Makefile` variables that name what Ruff and mypy read, as the
+#: text of their assignment lines. `$(LINT_BIN)` expands to `git ls-files`
+#: and enumerates itself; every other token is a literal path that has to be
+#: in the tree, or the linters are pointed at nothing and fail on the path.
+LINT_PATH_VARIABLES = ("LINT_RUFF_PATHS", "LINT_MYPY_PATHS")
+
+
+def lint_path_literals() -> dict[str, list[str]]:
+    """Each lint variable's literal tokens, read off the `Makefile` as text.
+
+    Read rather than run: `make -s lint-ruff-paths` would print the expanded
+    list, which hides a stale literal behind three hundred tracked `bin/`
+    names, and the question here is what the file says, not what make
+    resolves it to on this machine.
+    """
+
+    text = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    found = {}
+    for name in LINT_PATH_VARIABLES:
+        match = re.search(rf"^{name}\s*:=\s*(.*)$", text, re.M)
+        assert match, f"Makefile has no {name} line"
+        found[name] = [token for token in match.group(1).split()
+                       if not token.startswith("$(")]
+    return found
+
+
+class LintPaths(unittest.TestCase):
+    """The `Makefile`'s lint paths name trees that exist (sd:719 step 7).
+
+    `LINT_RUFF_PATHS` and `LINT_MYPY_PATHS` named `dashboard` until the
+    directory was deleted; a literal left behind fails `make check` on a path
+    Ruff cannot open. The module docstring of `tests/test_loc_caps.py` called
+    the hand-kept lint list the trap this repository still carries, and this
+    is the check that a name in it is at least a name in the tree. A variable
+    with no literal at all -- `LINT_MYPY_PATHS` is `$(LINT_BIN)` alone now --
+    names nothing that can be absent, and passes.
+    """
+
+    def test_every_literal_lint_path_is_in_the_tree(self):
+        for name, literals in lint_path_literals().items():
+            with self.subTest(variable=name):
+                missing = [token for token in literals if not tracked(token)]
+                self.assertEqual(
+                    missing, [],
+                    f"{name} names a path with no tracked file under it: "
+                    f"{missing}. Ruff and mypy are handed that path by `make "
+                    f"check` and by the lint job; drop it from the Makefile.")
 
 
 if __name__ == "__main__":  # pragma: no cover

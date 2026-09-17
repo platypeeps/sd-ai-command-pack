@@ -1137,7 +1137,7 @@ log, not here.
   `:271-282`, `:302-303`, `:350`) and every reader (`bin/sd-status:183,190,
   1122-1129,1234-1242,1254-1287`), so
   `work_item_dirs` is one `iterdir` that skips `archive` by name; `bin/sd_ledger.py` moves to B with the
-  database; `record_load` (`source:bin/sd-handoff-restore::record_load`); the six helpers
+  database; `record_load` (cut 2026-09-16, 31(b1)); the six helpers
   copied from `bin/sd-handoff` (`bin/sd-handoff-restore:72-140,356-370`) are
   imported the way `bin/sd-status:96` does; the `authors` policy key
   (`bin/sd-review:276`, `:283`, `:1098`, `bin/sd_setup_github.py:230,267`, the schema,
@@ -1148,7 +1148,7 @@ log, not here.
   (`bin/sd-status:903`), derived from the registry instead; the residue
   detectors (`bin/sd-status:946-1004`) after one clean run across the fleet;
   the history comments in `Makefile`; `--stash-ref` (`bin/sd-handoff:374`) and
-  `carrier_branches` (`source:bin/sd-status::carrier_branches`); `sd-status`'s `_git` is taken --
+  `carrier_branches` (both cut 2026-09-16, 31(b1)); `sd-status`'s `_git` is taken --
   it now calls `sd_lib.git_output`, which already carried the timeout.
   `bin/sd-pr-state` remains; `bin/sd-handoff` and `bin/sd-handoff-restore` are
   not cuts, both pinned self-contained by their own suites; `bin/sd-docs-lint:52,72-82,148` imports the vocabulary, the
@@ -4270,7 +4270,7 @@ from a number the operator types.
     has exactly that problem in a sharper form.
   - the hand-merge reconciliation display — **28**, at `whereCell`
     (in `dashboard/app.js`, 18), the built cell that renders a derived
-    state with its reason, and `split_status` (`source:dashboard/work.py::split_status`,
+    state with its reason, and `split_status` (in `dashboard/work.py`, retired at sd:719 step 6,
     10), where the two new states have to be spelled: a row `in_progress` with
     the squash commit on a note, and a row `done` but unmarked.
 

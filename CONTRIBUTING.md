@@ -221,10 +221,11 @@ this removal falsifiable, and "when the rollout is done" is not a date. This
 paragraph is the record instead, and it has no expiry -- it stands, in the
 present tense, until a macOS job actually reports.
 
-No CI job invokes `check-bash32-syntax.sh`. One did between R11-D5 and sd:10
-criterion 17: the `bash32` job built bash 3.2 from source and ran the gate
-under `STRICT=1`, to cover bash 3.2 *syntax* on Linux runners while no macOS
-leg ran. It was cut because its subject had shrunk to this repository's own
+No CI job invokes `check-bash32-syntax.sh`, and R11-D5, which put one there,
+is a repealed row in `bin/sd_rules.py` since sd:431 slice H (2026-09-17). One
+did between R11-D5 and sd:10 criterion 17: the `bash32` job built bash 3.2
+from source and ran the gate under `STRICT=1`, to cover bash 3.2 *syntax* on
+Linux runners while no macOS leg ran. It was cut because its subject had shrunk to this repository's own
 three scripts under `.github/scripts/`, which the local `make check` already
 executes under the real `/bin/bash` 3.2. So bash 3.2 syntax, macOS-only Python
 behaviour, filesystem case-insensitivity, and platform path handling are all
@@ -255,7 +256,7 @@ verified by the maintainer's local run and the other three by nothing.
   declaration in that file, so inserting unrelated lines does not require a
   documentation edit, and a symbol-anchored `path:line` into any file that is
   not markdown fails the check (sd:525). A claim about a line that is not a
-  declaration, or about a file with no locator such as `dashboard/app.js`, is
+  declaration, or about a file with no locator such as the `Makefile`, is
   written as prose naming the enclosing declaration or the file. Place code
   where it belongs; no citation constrains where a line goes. `path:line`
   remains the form for a line of a markdown page. Keep historical references

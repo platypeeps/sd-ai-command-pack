@@ -1,12 +1,15 @@
 """A grep of the governed tree for the retired framework's name returns nothing
-outside a named exemption set (sd:10, criterion 18).
+outside three named sets (sd:10, criterion 18): the exemptions of decision
+note 1942 (`EXEMPT`), the lines another lane's pull request held when the
+sweep ran (`HELD`, empty since the 31(b1) reword), and the lines a test must
+quote to name the residue commands (`ALLOWED_IF_PRESENT`).
 
 The three literals are the criterion's own: the framework's name with its
 capital, its dot-directory, and its task script. The grep is case-sensitive
 for the same reason: an identifier that carries the name in lower case is not
 a claim that the framework is still here, and the criterion does not count it.
 
-The exemptions are the lines decision note 1942 on sd:10 named, and nothing
+`EXEMPT` holds the lines decision note 1942 on sd:10 named, and nothing
 else: the upstream pull-request guard in `AGENTS.md`, exempt while sd:241,
 sd:242 and sd:244 are open, and the `.trellis` residue row of `sd-status` with
 the test that exercises it, exempt until the gating fleet check passes and the
@@ -20,9 +23,10 @@ so neither set can outlive the lines it names or quietly widen.
 `HELD` is a second, separate set: lines the sweep could not reach because
 another lane's open pull request held the file. They are not the criterion's
 exemptions and the comment on the set says which pull request held them.
-The criterion is closed when `HELD` is empty; until then
-`test_the_held_set_is_named_and_shrinking` says what is left, and
-`HELD_BOUND` is the frozen ceiling it cannot grow past.
+The criterion is closed when `HELD` is empty, which it has been since the
+sd:10 31(b1) lane reworded both lines; `HELD_BOUND` keeps the two rows as
+the frozen ceiling, so `test_the_held_set_is_named_and_shrinking` fails a
+row added back.
 
 `ALLOWED_IF_PRESENT` is a third set, for lines another open pull request
 adds: a test that names the residue commands must quote them, so #995's
@@ -50,7 +54,6 @@ GOVERNED = (
     "bin",
     "skills",
     "agents",
-    "dashboard",
     "tests",
     ".claude",
     ".github",
@@ -87,17 +90,12 @@ EXEMPT = frozenset({
     ("tests/test_sd_status.py", 'self.assertIn("rm -rf .trellis", found["trellis"]["remove"])'),
 })
 
-#: Held by #995 (fix-10-sweep); reword in the follow-up. Lines the sweep of
-#: 2026-09-16 could not reach because #995 held both files when it ran; #995
-#: merged as 486a223b with both words in place. Neither is a decision-note
-#: exemption; each is one word in a list of dot-directories. The reword
-#: removes the word and the row here with it, and the criterion is closed
-#: when this set is empty.
-HELD = frozenset({
-    ("bin/sd", "`.makemd`, `.trellis`), so the rule is the generalisation rather than the"),
-    ("skills/sd-plan/SKILL.md",
-     "No unrelated rows, `.claude/`, `.trellis/`, hooks, labels, managed gitignore"),
-})
+#: Empty. It held two lines the sweep of 2026-09-16 could not reach because
+#: #995 (fix-10-sweep) held both files when it ran, one word each in a list
+#: of dot-directories; #995 merged as 486a223b with both words in place, and
+#: the sd:10 31(b1) lane reworded both. Neither was a decision-note
+#: exemption. The type is kept so a row can be held again, under the bound.
+HELD: frozenset[tuple[str, str]] = frozenset()
 
 #: The ceiling on `HELD`, frozen at the two rows of 2026-09-16. `HELD` may
 #: lose rows; a row added to it fails `test_the_held_set_is_named_and_shrinking`
@@ -140,11 +138,6 @@ def governed_rows() -> list[tuple[str, int, str]]:
         path, number, text = line.split(":", 2)
         rows.append((path, int(number), text.strip()))
     return rows
-
-
-def named_by(rows: list[tuple[str, int, str]], entries: frozenset[tuple[str, str]]) -> list[int]:
-    """The line numbers of the rows an entry set names, one entry per row."""
-    return [number for path, number, text in rows if (path, text) in entries]
 
 
 class NoResidue(unittest.TestCase):

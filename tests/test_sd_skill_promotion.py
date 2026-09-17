@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import connect, initialise, upsert_repo
+from sd_db import connect, initialise, skills_catalog, upsert_repo
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bin"))
@@ -106,6 +106,25 @@ def _stated_endpoint(text: str) -> str | None:
     return named[0] if len(named) == 1 else None
 
 
+#: The registry the system library's own `test_controls.py` seeds: two
+#: `start` providers and one `url` provider, two of them independent of the
+#: fixture commit's `Authored-with: codex/openai`, so a review has a reviewer
+#: to order. The library reads it beside the connection's database
+#: (`registry.beside`), never under `$HOME`.
+_REGISTRY = """bills:
+  a: {cost: subscription}
+  b: {cost: subscription}
+  c: {cost: plan}
+providers:
+  claude: {start: "claude -p", vendor: anthropic, bill: a, roles: [author, reviewer], reader: claude-json}
+  codex: {start: "codex exec", vendor: openai, bill: b, roles: [author, reviewer], reader: codex-json}
+  minimax: {url: "https://example.invalid/v1", model: fixture, vendor: minimax, bill: c, roles: [reviewer]}
+roles:
+  author: [claude, codex]
+  reviewer: [codex, claude, minimax]
+"""
+
+
 class SkillFixture(unittest.TestCase):
     """A pack checkout, a database, and the two skills the verbs act on."""
 
@@ -133,6 +152,7 @@ class SkillFixture(unittest.TestCase):
         self.git("commit", "-m", "Fixture\n\nAuthored-with: codex/openai")
         self.dbpath = self.root / "sd.db"
         initialise(self.dbpath)
+        (self.root / "providers.yaml").write_text(_REGISTRY)
         self.db = connect(self.dbpath)
         self.addCleanup(self.db.close)
         upsert_repo(self.db, str(self.repo), remote="https://example.invalid/pack.git")
@@ -155,15 +175,46 @@ class SkillFixture(unittest.TestCase):
             text=True,
         ).stdout.strip()
 
-    def request(self, verb, name, path=None):
+    def request(self, verb, name=None, path=None, **extra):
         with contextlib.redirect_stdout(io.StringIO()) as output:
             rc = sd_skill.run(
                 argparse.Namespace(
-                    verb=verb, name=name, path=path, if_revision=None, json=True
+                    verb=verb, name=name, path=path, if_revision=None, json=True,
+                    **extra,
                 )
             )
         self.assertEqual(rc, 0)
         return json.loads(output.getvalue())
+
+    def reviewed(self, name="sd-kept"):
+        """A review whose reviewer recorded two proposals and finished.
+
+        The reviewer half is the runner's, so it is faked the way the
+        library's own test fakes it: the assignment is marked running under
+        `claude`, and the result document goes through
+        `record_review_proposals`. Returns the review item and its two
+        proposal note ids.
+        """
+        state = self.request("review", name)
+        item, assignment = state["item"]["id"], state["assignments"][0]["id"]
+        source = json.loads(state["item"]["fields"])["skill_review"]
+        self.db.execute(
+            "UPDATE assignment SET status='running', provider='claude' WHERE id=?",
+            (assignment,),
+        )
+        path = f"skills/{name}/SKILL.md"
+        document = {
+            "version": 1, "item": item, "source_sha256": source["source_sha256"],
+            "proposals": [
+                {"path": path, "line_start": 2, "line_end": 2, "body": "Say when."},
+                {"path": path, "line_start": 4, "line_end": 4, "body": "Bound it."},
+            ],
+        }
+        state = skills_catalog.record_review_proposals(
+            self.db, item, assignment, "claude", document)
+        self.db.execute(
+            "UPDATE assignment SET status='done' WHERE id=?", (assignment,))
+        return item, [n["id"] for n in state["notes"] if n["kind"] == "proposal"]
 
 
 class SkillRequests(SkillFixture):
@@ -190,6 +241,46 @@ class SkillRequests(SkillFixture):
         self.assertEqual(
             self.db.execute("SELECT count(*) FROM assignment").fetchone()[0], 1
         )
+
+    def test_review_queues_one_reviewer_and_the_dashboard_writes_the_same_row(self):
+        head = self.git("rev-parse", "HEAD")
+        first = self.request("review", "sd-kept")
+        self.assertEqual(first["item"]["kind"], "skill-review")
+        self.assertEqual(first["item"]["source"], "skill-request")
+        self.assertEqual(first["item"]["source_commit"], head)
+        self.assertEqual(len(first["assignments"]), 1)
+        self.assertEqual(first["assignments"][0]["scope"], "skill-review")
+        self.assertEqual(first["assignments"][0]["role"], "reviewer")
+        second = self.request("review", "sd-kept")
+        self.assertEqual(first["item"]["id"], second["item"]["id"])
+        # Criterion 19: the Skills screen's review is this same library call
+        # with `who="dashboard"`, and `who` is outside the item's identity,
+        # so the screen's request resolves to the row the CLI wrote.
+        screen = skills_catalog.request(
+            self.db, "sd-kept", "review", root=self.repo, home=self.root,
+            who="dashboard")
+        self.assertEqual(screen["item"]["id"], first["item"]["id"])
+        self.assertEqual(
+            self.db.execute("SELECT count(*) FROM item").fetchone()[0], 1)
+        self.assertEqual(
+            self.db.execute("SELECT count(*) FROM assignment").fetchone()[0], 1)
+
+    def test_apply_after_a_reviewer_result_queues_one_isolated_change(self):
+        item, notes = self.reviewed()
+        applied = self.request("apply", item=item, notes=notes)
+        self.assertEqual(len(applied["assignments"]), 1)
+        self.assertEqual(applied["assignments"][0]["scope"], "skill-apply")
+        self.assertEqual(applied["assignments"][0]["role"], "author")
+        self.assertNotEqual(applied["item"]["id"], item)
+        self.assertIn("sd-ship skill", applied["item"]["body"])
+        brief = json.loads(applied["item"]["body"])["text"]
+        accepted = json.loads(brief.split("\n\n", 1)[1])
+        self.assertEqual([entry["note"] for entry in accepted], notes)
+        self.assertEqual(
+            [entry["body"] for entry in accepted], ["Say when.", "Bound it."])
+        self.assertEqual(
+            self.db.execute("SELECT count(*) FROM assignment").fetchone()[0], 2)
+        self.assertEqual(self.git("branch", "--format=%(refname:short)"), "main")
 
     def test_invalid_path_and_changed_source_do_not_queue(self):
         with self.assertRaises(sd_skill.SkillRefusal):
@@ -276,7 +367,7 @@ class SkillHelpText(SkillFixture):
 
         source = (ROOT / "bin/sd").read_text()
         start = source.index("trying = skill.add_subparsers")
-        end = source.index("sd_skill.register_extra(trying)")
+        end = source.index("scanner = trying.add_parser(")
         self.assertLess(start, end, "the `sd skill` block's anchors inverted")
         return " ".join(
             line.strip().lstrip("#").strip()
@@ -285,9 +376,13 @@ class SkillHelpText(SkillFixture):
         )
 
     def test_help_matches_what_each_verb_really_queues(self) -> None:
+        item, notes = self.reviewed()
         observed = {
             "promote": self.queued_move("promote", "sd-candidate", "development"),
             "demote": self.queued_move("demote", "sd-kept"),
+            # Neither moves a directory, so the brief names no endpoint.
+            "review": (len(self.request("review", "sd-candidate")["assignments"]), None),
+            "apply": (len(self.request("apply", item=item, notes=notes)["assignments"]), None),
         }
         verbs = self.skill_verbs()
         for verb, (count, endpoint) in observed.items():

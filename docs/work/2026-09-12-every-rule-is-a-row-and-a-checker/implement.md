@@ -67,11 +67,17 @@
       same 4 ids, and the stranded set is 20, down from the 26 this step first
       reported.
 
-- [ ] **4. The R-id backfill.** Move live rule definitions out of archived
+- [x] **4. The R-id backfill.** Move live rule definitions out of archived
       planning documents into registry rows, one at a time, deciding for each
       whether it is a live rule or a historical decision. This is the expensive
       step. It lands in slices; each slice reduces the leg c baseline and the
       baseline test proves it fell.
+      **Ticked 2026-09-17, slice H.** `STRANDED_RULE_IDS` in
+      `tests/test_rule_registry.py` is `frozenset()`, down from the 26 ids
+      measured on `cddd3b98`: every one is a registry row, live or repealed,
+      or had its prose repointed, and the last twelve are repealed rows under
+      Dec-9, the decision team-lead took on 2026-09-17 (note 2665); see the
+      Slice H paragraph below.
 
       **Slice 1, 2026-09-12. `STRANDED_RULE_IDS` 26 → 25.** `R10-D5` is a
       row. It was already taught by a skill section that cites the id, and its
@@ -174,7 +180,7 @@
       |---|---|---|
       | `R10-D1` | `skills/sd-status/SKILL.md` | `bin/sd-status` carries the id in two strings, one of them the `CLASSES` row whose text the skill's table mirrors. The second-list check wants it out of the string; leg a reads the skill table it would have to change. **Decided 2026-09-14 (owner, note 1989):** rewrite the `CLASSES` row and the reason string to drop the literal id and keep the citation in the adjacent comment — the rephrasing the check's own failure text prescribes, and what `R10-D5` did — and only after sd:10 retires the planning-age sweep, because `bin/sd_sweep.py` owned the threshold this rule constrains at the time (pack #995 has since moved it into `sd_lib`). **Landed 2026-09-16, slice D**, after pack #995 cut the sweep; see the Slice D paragraph below. |
       | `R10-D2` | `skills/sd-handoff/SKILL.md` | The section that teaches it says Lane B is *not implemented*. A live row with a checker would assert an enforcement that does not exist, which is the defect this item is about. **Decided 2026-09-14 (owner, note 1989):** it is repealed in the registry — `state=REPEALED`, no checker. Leg c still resolves the citation; leg a skips a repealed row; and a live false enforcement claim becomes an answered citation. This is the first use of the tombstone state the design says must exist before the first repeal, not after. **Landed 2026-09-16, slice B**, see the paragraph under S2 below. |
-      | `R10-D3` | `skills/sd-handoff/SKILL.md` | Its enforcement lives in `bin/sd-handoff-restore`, which has no `.py` suffix. **The import obstacle recorded here is gone** — a `path::symbol` location needs no import and the path needs no suffix. What is left is leg d: the row needs a mutation that reddens a named test, and finding one for a restore path is the work. |
+      | `R10-D3` | `skills/sd-handoff/SKILL.md` | Its enforcement lives in `bin/sd-handoff-restore`, which has no `.py` suffix. **The import obstacle recorded here is gone** — a `path::symbol` location needs no import and the path needs no suffix. What was left was leg d: the row needed a mutation that reddens a named test, and finding one for a restore path was the work. **Landed 2026-09-16, slice E**, with the checker in the installer's hook table rather than the restore path -- the table is pinned whole, so one mutation holds both omissions; see the Slice E paragraph below. |
 
       **A stranded id no earlier revision of this document names: `R10-D7`.**
       It is in `STRANDED_RULE_IDS` and was not in the table above, so the claim
@@ -335,6 +341,272 @@
       skill section reddens leg a with `R10-D1: ... does not cite it`; the
       row's own proof applied by hand reddens the named test.
 
+      **Slice E, 2026-09-16. `STRANDED_RULE_IDS` 18 → 17.** `R10-D3` is a
+      row, the first of step 8's teaching-section slices (note 2568) and
+      narrowed to the lane that exists. Re-measured on `8548d512` first:
+      the definition is the bold run at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:341`,
+      "Two handoff lanes, split by what they actually solve"; Lane B is the
+      repeal `R10-D2` above, and Lane A's rule is the restore hook's
+      registration -- `SessionStart` on `startup` and `clear`, never
+      `compact` -- held by `source:bin/sd_install.py::HOOK_SPECS`, the one
+      occurrence of that row in the tree, and pinned whole by
+      `test_the_hook_table_is_exactly_these_three_registrations` in
+      `source:tests/test_sd_install.py::IdempotencyTests`, whose docstring
+      already cited the id. The alternative checker the audit named,
+      `bin/sd-handoff-restore`'s `claim`, was not taken: the row's subject is
+      the registration, and the table is where a registration is declared.
+      The teaching section is `The restore side` in
+      `skills/sd-handoff/SKILL.md`, the section that states the matchers and
+      already carried the `bin/sd-rules --for <path>` pointer from step 8's
+      first slice; one sentence there cites the id, and the rule is not
+      restated. The Lane B section had cited the id since before the
+      registry and would have passed leg a with no edit, but it teaches
+      what is not built. Fail-first: the row was committed with the meter,
+      the skill and `MUTATIONS` untouched, and three legs reddened at once,
+      `FAILED (failures=3)` -- leg a with `R10-D3:
+      skills/sd-handoff/SKILL.md#The restore side does not cite it`, leg c's
+      archive baseline with the measured set being the baseline minus
+      exactly `R10-D3`, and leg d's coverage check with
+      `bin/sd_install.py::HOOK_SPECS` in the registry and not in
+      `MUTATIONS`; with the sentence, the entry dropped and the mutation
+      added the module passes, 35 tests. The proof adds `compact` to the
+      row's matchers, and leg d's own run of it reports `applied 1, control
+      0, violated 1, reverted 1, restored 0` -- green before, red after,
+      the copy byte-identical again. `LegD` real 9.50 s at load 5.19 to
+      5.37, under Dec-6's 21 s. Mutations, each on a byte copy and restored
+      by `diff -q`: the citation sentence deleted from the skill section
+      reddens leg a with the same `does not cite it` line; the proof applied
+      by hand reddens the named test with `Tuples differ`, the first element
+      carrying `compact`; the id put back into `STRANDED_RULE_IDS` reddens
+      leg c. Slice 0 rode in the same change, the residue #1015 recorded:
+      the module docstring of `tests/test_sd_rules_for.py` said the live
+      table carried only `code` rows, false since `R13-D1`, and now says
+      when that was true and what the fixture is still for; and `tracked` in
+      `tests/test_prose_counts.py` passes its list through `contained` from
+      `tests/test_doc_citations.py`, so a tracked symlink out of the
+      repository is dropped rather than read -- fail-first on the old body,
+      `test_a_tracked_symlink_out_of_the_repository_is_never_read` reddened
+      with the link listed beside the real page. The walk control gained a
+      depth half, on the live tree and on a fixture repository: a page two
+      levels under `.claude/rules/` is reached and a `docs/work` page is not.
+      What the fixture found: a `*` in a git pathspec crosses `/` unless
+      `:(glob)` is asked for, so `docs/spec/*.md` lists the same pages
+      `docs/spec/**` does and dropping the `**` reddens nothing; the control
+      holds the walk, and a walk cut one level down reddens both halves.
+
+      **Slice F, 2026-09-17. `STRANDED_RULE_IDS` 17 → 15.** `R10-D7` and
+      `R11-D6` are rows, the audit's slices 2 and 3 in one change, each
+      committed alone first. Re-measured on `58739c79`: `R10-D7`'s
+      definition is the bold run at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:168`,
+      "Partial fallback", the id on the line after, and what holds it is
+      `source:bin/sd-review::local_conventions`, whose docstring cites the id
+      and whose one caller is the dispatch path of `review`, after the
+      preflight has returned -- so the subject names every review the tool
+      dispatches and the section says the preflight sends none, which is
+      what its own section already said. The other two lanes the design
+      listed either run through that call or no longer exist: `bin/sd-ship`
+      has no backlog mode. The test is
+      `test_the_local_block_reaches_the_prompt` in
+      `source:tests/test_sd_review.py::PipelineTests`. `R11-D6`'s
+      definition is the bold run at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:1640`,
+      the deletion of the `Shell coverage` job; the rule that survives it is
+      the one `tests/test_no_shipped_shell.py` states in its module
+      docstring, no shell outside `.github/scripts/`, so the checker is that
+      test's `test_shell_lives_only_in_this_repository_s_own_tooling`, named
+      as a `tests/` symbol the way the `R12` and `R13` rows are. Teaching:
+      a new section of `skills/sd-review/SKILL.md`, `Local conventions reach
+      the prompt`, which tells the reviewer to read a finding against the
+      receipt's `local_block_prepended` and cites the id; and, per Dec-2, a
+      bullet under `Code health` in `skills/sd-check/SKILL.md`, whose intro
+      said the code rules were enforced by `tests/test_code_health.py` and
+      now says they are enforced by the tests their rows name, with the four
+      `R12` rows still attributed to that file. A section of its own was not
+      taken: the rule is one an author of code meets from the same
+      entrypoint as the `R12` rows, which is what Dec-2 put that section
+      there for. Both sections carry the `bin/sd-rules --for <path>`
+      pointer. Fail-first, each row alone with the skill, the meter and
+      `MUTATIONS` untouched: `R10-D7` reddened four tests, `FAILED
+      (failures=4)` -- both leg a checks, `carries no heading 'Local
+      conventions reach the prompt'` and `does not cite it`, leg c's archive
+      baseline with the measured set being the baseline minus `R10-D7`, and
+      leg d's coverage with `bin/sd-review::local_conventions` in the
+      registry and not in `MUTATIONS`; `R11-D6` reddened three, `FAILED
+      (failures=3)`, the heading existing already. Each went to `Ran 35
+      tests ... OK` with its section, its meter line and its mutation. Leg
+      d on both rows in a fresh copy: `applied 1 reverted 1 control 0
+      violated 1 restored 0`, `enforcement_error` `None`, the named tests
+      red with `False is not true` on `prompt.startswith("Repository-local
+      conventions")` and `Lists differ: ['bin/sd-rules'] != []`; the copy
+      has an index of its own from `copy_tracked`'s `git init` and `git
+      add -A -f`, which is what lets `tracked_files` in the shell test see
+      the mutated file. `LegD` whole: `Ran 9 tests in 9.935s`, `real
+      9.996s`, load 4.11 before and 5.04 after, under Dec-6's 21 s.
+      Mutations on byte copies, each restored by `diff -q` rc 0: the
+      citation dropped from either section reddens leg a with that
+      section's `does not cite it`; both ids put back into
+      `STRANDED_RULE_IDS` reddens leg c; each proof applied by hand reddens
+      its named test with the line leg d quoted. Residue from the review
+      round on #1020, no code change here: the `R10-D7` subject and section
+      say what `test_the_local_block_reaches_the_prompt` holds, the block
+      on the review prompt, and the two halves it does not hold -- that
+      every provider in a multi-provider chain receives that same prompt,
+      and that `local_block_prepended` is false on a repository without a
+      block -- belong in `tests/test_sd_review.py`, held by #1012 (sd:788)
+      at the time; and `looks_like_shell` in
+      `tests/test_no_shipped_shell.py`, pre-existing code, reads `bash`,
+      `/sh` and ` sh` from a shebang and would pass a `zsh` or `dash`
+      shebang with no suffix, which narrows what the `R11-D6` checker
+      holds to the shebangs it names.
+
+      **Slice G, 2026-09-17. `STRANDED_RULE_IDS` 15 → 12.** `R11-D14`,
+      `R11-D27` and `R5-D1` are rows, the audit's slice 4, the store and
+      plugin contract, each committed alone first. The host skill was the
+      one owner decision the audit left on this slice, and team-lead took it
+      on 2026-09-17 under the standing "use your recommendation"
+      authorization, reversible by the owner: `skills/sd-help/SKILL.md`
+      hosts the section, because it is the only skill that names `sd
+      plugin` (lines 20 and 61 on `9832c193`, unchanged since `8548d512`) and
+      Dec-2 (note 1989) declined a new skill for the code rules, and the
+      same reasoning applies here. Re-measured on `9832c193`, none of the
+      cited files changed since `8548d512`: `R11-D14`'s definition is the
+      bold run at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:271`,
+      "The eight keys, written down", held by `source:bin/sd::validate_kind`
+      over `source:bin/sd::KIND_KEYS`, whose comment cites the id, and
+      pinned by `test_a_ninth_key_refuses` in
+      `source:tests/test_sd_plugin.py::KindTests`; the subject names the
+      constant and the count, not the keys, because that class already
+      holds a copy. `R11-D27`'s is the bold run at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:2358`,
+      the line edit, held by `source:bin/sd::edit_field` and
+      read back as bytes by
+      `test_a_set_leaves_every_line_it_did_not_edit_byte_identical` in
+      `source:tests/test_sd_store.py::WriteTests`. `R5-D1`'s is the table
+      cell at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:206`,
+      "Obsidian vault stays system-of-record", held
+      by `source:bin/sd::store_list`, whose docstring cites the id, and by
+      `test_a_note_written_directly_into_the_vault_is_visible_to_the_next_query`
+      in `source:tests/test_sd_store.py::FreshnessTests`, the direct write
+      that module's docstring calls its load-bearing case. All three ids
+      were cited by no file under `skills/`. Teaching: one new section of
+      `skills/sd-help/SKILL.md`, `The store and plugin contract`, placed
+      between `Never`, whose last bullet names `sd plugin add`, and `State
+      of the tooling`, which names `sd plugin list`, so the two verbs the
+      section is about bracket it; three sentences, one per id, written as
+      instructions to the author with no enforcement verb, so leg b's
+      baseline did not move and `UNCITED_SKILL_CLAIMS` is untouched; it
+      carries the `bin/sd-rules --for <path>` pointer. Fail-first, each row
+      alone with the section, the meter and `MUTATIONS` as they stood:
+      `R11-D14` reddened four tests, `FAILED (failures=4)` -- both leg a
+      checks, `carries no heading 'The store and plugin contract'` and
+      `does not cite it`, leg c's archive baseline with the measured set
+      being the baseline minus `R11-D14`, and leg d's coverage with
+      `bin/sd::validate_kind` in the registry and not in `MUTATIONS`;
+      `R11-D27` and `R5-D1` each reddened two, `FAILED (failures=2)`, leg c
+      and leg d's coverage, the section citing them already. Each went to
+      `Ran 35 tests ... OK` with its meter line and its mutation. The
+      `R5-D1` mutation is not the audit's: the audit emptied the query,
+      which reddens the test but is not the violation the id names, and the
+      brief asked for a stale index if one fit the budget. This one writes
+      the kind's listing to a `.json` file in the kind's directory on the
+      first query and reads that file instead of the vault on every query
+      after, so the note the test writes by hand between two queries is
+      what the second cannot see -- red at the second read with `Lists
+      differ: [] != [{'title': 'Ship it', ...}]`, the first read green. Leg
+      d on all three in a fresh copy: `applied 1 control 0 violated 1
+      reverted 1 restored 0`, `enforcement_error` `None`, the named tests
+      red with `0 != 1 : registered pp` on the ninth key, `'status:
+      approved\n' != '---\nstatus: approved\nscore: 7\naliases:...'` on the
+      rebuilt note, and the `Lists differ` above. `LegD` whole: `Ran 9
+      tests in 11.278s`, `real 11.333s`, load 3.99 before and 4.00 after,
+      under Dec-6's 21 s. Mutations on byte copies, each restored by `diff
+      -q` rc 0: the three citations dropped from the section reddens leg a
+      with three `does not cite it` lines; the three ids put back into
+      `STRANDED_RULE_IDS` reddens leg c; each proof applied by hand in a
+      scratch copy reddens its named test with the line leg d quoted. After
+      this slice the twelve left are `R11-D1`, `R11-D5` and the ten
+      dashboard and history ids -- the repeal questions, the audit's slices
+      7 and 8, each an owner decision; no lane takes them without one.
+      From the two review rounds on #1021, four suppressed findings, all
+      taken as prose: the section's `R5-D1` sentence had named `sd store
+      get` beside `sd store list`, while the row's checker, mutation and
+      named test cover `store_list` only; `store_get` in `bin/sd` is a
+      separate read with no row and no mutation, so a stale-read regression
+      there would leave leg d green, and the sentence now names the listing
+      alone (a `store_get` row is not taken: it would be a second live row
+      on one id, which the registry does not carry). The `R11-D14` sentence
+      had read as a requirement to declare all eight keys, where
+      `KIND_REQUIRED` in `bin/sd` requires `fields` and `initial-status`
+      and the other six are optional, and now says so. The `R11-D27`
+      sentence had named `sd store add` beside `sd store set`, where
+      `edit_field` has one caller, `store_set`, and `store_add` renders a
+      new note whole from the kind's template; the sentence names `set`
+      alone and says what `add` does. And the `REPEALED` comment in
+      `bin/sd_rules.py` used `R5-D1` as its example of an id that must not
+      be reused, written when the id was stranded; the example is now
+      `R10-D2`, the one repealed row. Left for the owner: the `R11-D27`
+      row's subject still opens with `sd store add` and `sd store set`, the
+      archive definition's own wording, though the checker holds `set`'s
+      path only; the rows were held unchanged in the review fixes.
+
+      **Slice H, 2026-09-17. `STRANDED_RULE_IDS` 12 -> 0.** The twelve
+      repeal questions slice G left are answered by one family decision,
+      Dec-9, which team-lead took on 2026-09-17 on the standing "use your
+      recommendation" authorization and the owner's "start all planning
+      items" of that morning, recorded on the item as note 2665's
+      recommendation and reversible by the owner by deleting the rows'
+      `REPEALED` state. Two groups. `R11-D1` and `R11-D5` are repealed in
+      the Dec-4 shape, because the enforcement each claims was never built
+      or is gone: `R11-D1`'s `/v1/models` preflight is read by nothing under
+      `bin/` or `tests/` (`git grep -n 'v1/models' ea32e76a -- bin tests`
+      finds nothing) and the exo entry in `providers.yaml` ships `enabled:
+      false`; `R11-D5`'s CI job is gone, as `CONTRIBUTING.md` already
+      recorded. The ten dashboard and history ids -- `R11-D10`, `R11-D13`,
+      `R11-D15`, `R11-D17`, `R11-D20`, `R11-D21`, `R11-D24`, `R11-D25`,
+      `R11-D29`, `R11-D30` -- are repealed because sd:719 is `done` with
+      `dashboard/` and `bin/sd_ledger.py` deleted (#1013, #1017), so what
+      each of them ruled on no longer exists to be enforced; their live
+      citations are sd:719's own pages, the 2026-09-05 item's pages and the
+      history paragraphs of `tests/test_loc_caps.py`, records rather than
+      consumers. Re-measured on `ea32e76a`: every defining sentence the
+      audit cited stands at the line it named (lines 251, 1582, 1454, 1247,
+      1168, 1719, 1994, 2046, 2185, 2257 and 2483 of
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md`,
+      and the heading at
+      `docs/work/archive/2026-09/2026-09-04-host-parsing-refuses-what-it-cannot-parse/implement.md:12`),
+      and each row's `subject` is that sentence's clause. The audit's slice 7
+      came first, as the prerequisite: `teaches` is `str | None` on
+      `source:bin/sd_rules.py::Rule`, required of a live row and optional on
+      a repealed one, held by `source:tests/test_rule_registry.py::missing_field_errors`
+      and a fixture-driven test with the live row as its control. Fail-first
+      on the base, a repealed fixture row with `teaches=None` appended to
+      `RULES` errored `test_every_row_is_completely_filled_in` with
+      `AttributeError: 'NoneType' object has no attribute 'strip'`; after the
+      relaxation the same row is `OK`, and a live row with `teaches=None`
+      still reddens it with `R13-D3: no teaches -- say where it is taught`.
+      Then the meter: `STRANDED_RULE_IDS` emptied before the rows existed
+      reddened leg c with `{'R11-D1', 'R11-D20', 'R11-D10', 'R11-D29[84
+      chars]D30'} != frozenset()`, and the twelve rows took it to `Ran 36
+      tests ... OK`. The closed baseline is the shape `DANGLING_RULE_IDS`
+      has held since slice S2, `frozenset[str] = frozenset()`; no assertion
+      refuses an empty set. Leg d is untouched: its coverage is `{rule.checker
+      for rule in sd_rules.RULES if rule.state == sd_rules.LIVE and
+      rule.checker}`, so a repealed row owes no mutation and `MUTATIONS` did
+      not move. Each row carries `checker=None`, `proof=None`, `teaches=None`
+      and `state=REPEALED`, and the reason sits in one comment per group
+      above the rows, cited to note 2665 and this slice. Two prose sites
+      moved with the ids: the `providers.yaml` comment over the exo entry
+      no longer says `R11-D1` "requires" a check, it says the preflight was
+      asked for, never built, and the id is a repealed row, with the entry
+      still `enabled: false`; and the `CONTRIBUTING.md` paragraph that
+      records no CI job invoking `check-bash32-syntax.sh` cites the repeal
+      of `R11-D5` in one clause. `R10-D2` keeps the `teaches` it had, which
+      still resolves and which `tests/test_cut_symbols.py` holds.
+
 - [x] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become
       registry rows pointing at the existing checkers — no new enforcement, only
@@ -404,11 +676,88 @@
       holds, and the whole module went from 9.70 s for 33 tests to 38.88 s
       for 34, because `TheSharedCopy` runs the leg a second time in-process.
 
-- [ ] **6. Prose rules, in their narrowed forms.** Rule 2 as filed. Rules 1 and
+- [x] **6. Prose rules, in their narrowed forms.** Rule 2 as filed. Rules 1 and
       3 as narrowed in `design.md`, each with its baseline. Verify: each rule
       reddens under mutation; no rule's first run reddens the existing corpus.
+      **Step 6, 2026-09-16. `R13-D1` to `R13-D3` are rows on a round of
+      their own, each a per-document baseline that only falls; both leg c
+      baselines unchanged; nothing in the corpus was swept.** All three
+      teach from one new section, `Prose rules` in `skills/sd-check/SKILL.md`,
+      beside the code rules, and all three proofs edit that page in leg d's
+      copy. Re-measured on `ef7c0c7b` first, and one premise did not hold:
+      the plan had rule 1's checker reading the `compared` rows, on the
+      strength of the census table in `design.md` (54 on `e6c2cb20`), but
+      since sd:525 a live anchored `path:line` into code is
+      `anchored-line-into-code`, red and empty, so `compared` held one row
+      and it was archived. The population the narrowed rule is about is the
+      *unanchored* citation -- `no-adjacent-anchor`, `separator-not-adjacent`,
+      `anchor-not-a-symbol` -- which the gate opens only to check the line is
+      in range. `R13-D1`'s checker is
+      `test_line_citations_into_a_symbol_match_their_baseline` in
+      `tests/test_doc_citations.py`, over
+      `source:tests/test_doc_citations.py::symbol_anchored_citations`: the
+      rows of `classify` whose document is live, whose target is a Python
+      file inside the checkout, and whose line
+      `source:tests/test_doc_citations.py::enclosing_declaration` places
+      inside a `def` or a `class` at the two levels the `source:` form can
+      name. The baseline is `SYMBOL_ANCHORED_CITATIONS`, 145 rows in 17
+      documents on `ef7c0c7b`, 107 of them in one item's `prd.md` and
+      `implement.md`. Exempt: a line outside every symbol, a `quoted` row, a
+      markdown target, a target outside the checkout (one, in an absolute
+      path a dashboard page cites) and a file that does not parse. `R13-D2`'s
+      checker is `test_present_tense_counts_match_their_baseline` in the new
+      `tests/test_prose_counts.py`, over
+      `source:tests/test_prose_counts.py::present_tense_counts`; a module
+      rather than a `bin/sd-docs-lint` rule, because measured on `ef7c0c7b`
+      the linter's tree rules read `docs/work` only and rule 7 opens the
+      rest of the markdown for `docs/work/` references alone, so no page
+      the rule is about was read for its prose there. The corpus is every
+      markdown file under `skills/`, `README.md`, `AGENTS.md`, `docs/spec`
+      and `.claude/rules`, 54 files; the predicate is `<number> <noun>` on
+      one line with the noun from `ENUMERABLE`, outside a fence or a code
+      span, and the line carrying no commit, `#<n>` number or `YYYY-MM-DD`
+      date. Population on `ef7c0c7b`: 2 lines, both violations, held in
+      `PRESENT_TENSE_COUNTS` -- one a test's coverage points in a spec
+      page, one `surfaces` read as a verb in `sd-status`'s skill -- so the
+      rule's first run reddened nothing and the design's exemption for a
+      measurement is what keeps every other count out. A wider noun set was
+      measured and left: `lines`, `rows` and `scripts` name thresholds and
+      measurements in this corpus and nothing enumerable. `R13-D3` registers
+      leg b as it stands: the checker is
+      `test_uncited_tool_behaviour_claims_match_their_baseline`, the
+      predicate `source:tests/test_rule_registry.py::claims_in`, the baseline
+      `UNCITED_SKILL_CLAIMS`, and the row's comment says nothing new is
+      enforced. Fail-first: the rows and their `MUTATIONS` entries were
+      committed first and the module reddened `FAILED (failures=8)` -- leg a
+      on the missing section, the checker-resolution test on three checkers
+      that did not exist, leg d on three mutations that edited nothing; with
+      the checkers and the section the module passes, 35 tests. Mutations,
+      each on a byte copy and restored by `diff -q`: each baseline raised by
+      one reddens its own test; each row's proof applied by hand reddens the
+      test its row names; `R13-D2`'s bullet deleted from the section reddens
+      leg a with `R13-D2: ... does not cite it`;
+      `enclosing_declaration` made to answer `None` reddens four tests in
+      `TheSymbolPreference`; the measurement exemption dropped reddens the
+      predicate test on all four marks. Leg d's child budget rose by three
+      rows and `LegD` read real 9.82 s for 9 tests at load average 6.14,
+      under the 21 s Dec-6 budgets. Review of #1015, 2026-09-17, three
+      findings fixed in one push: `R13-D1` counts a line only where
+      `declared_at` finds its symbol once, the test
+      `source_declaration_error` applies, so no counted citation lacks a
+      symbolic form (re-measured, 0 of the 145 rows dropped, baseline
+      unchanged); `MEASURED_AGAINST`'s commit mark requires a hex letter, so
+      `1234567 tools` is a claim; the corpus control requires the
+      `.claude/rules` subtree. One finding is an owner action: `ALWAYS_RUN`
+      in `.github/scripts/select-tests.py` does not name
+      `tests.test_prose_counts`, so `make check CHANGED=<a skill>` skips
+      `R13-D2`; the full suite and CI run it. That set and its expectation in
+      `tests/test_changed_files_fast_path.py` are owner-authored, so the
+      entry is left for the owner to add. Rebased onto `693ed526` before the
+      last push: #1017 deleted `bin/sd_ledger.py` and two citations in the
+      2026-09-05 prd lost their target, so that entry fell 66 -> 64, the
+      first time the ratchet moved; no other entry moved.
 
-- [ ] **7. The pre-commit tier.** **Every timing this step used to state has
+- [x] **7. The pre-commit tier.** **Every timing this step used to state has
       expired, and the shape of the step is now open rather than settled.** It
       read that the code checkers run whole at 1.71 s, that only
       `bin/sd-docs-lint` at 19.87 s is diff-scoped, and that the two whole-tree
@@ -427,8 +776,88 @@
       record the number, and set the budget from that result in the same pull
       request; re-run the three whole-tree timings there too, on a machine
       whose load is stated, and write them down beside their commit.
+      **Landed 2026-09-16.** The nine readings, at `ef7c0c7b`, three runs
+      each, `/usr/bin/time -p` real seconds with the one-minute load average
+      beside each, before any hook existed: `tests.test_code_health` 1.79 /
+      1.71 / 1.74 at load 9.90 / 8.73 / 7.39; `tests.test_doc_citations`
+      3.41 / 3.38 / 3.33 at 9.91 / 8.75 / 7.39; `bin/sd-docs-lint` 20.34 /
+      21.85 / 21.65 at 9.91 / 8.75 / 7.52, of which 2.0 s is CPU and the rest
+      is seventy `git fetch` and `git ls-remote` children under
+      `sd_lib.delivered` in rule 2, so the tool's wall time is git
+      subprocess calls reaching the network, not its own reading of the
+      corpus. The hook is `hooks/pre-commit`,
+      Python (a tracked shell file outside `.github/scripts/` reddens
+      `tests/test_no_shipped_shell.py`), run on the staged files: `SD_SKIP_HOOKS=1`
+      skips it with a one-line notice; otherwise a refusal by name of any
+      staged path whose working-tree copy differs from the index, since both
+      gates read the working tree and the commit holds the index (the first
+      review round's finding: a bad file staged and then fixed without
+      restaging passed while the commit still carried the bad blob), then
+      Ruff over the staged Python, then `tests.test_code_health` and
+      `tests.test_doc_citations` whole, the first red exiting with that
+      tool's output and status, and its own wall time printed on exit
+      against the budget. The assembled hook on a
+      one-file diff read 5.26 / 5.07 / 5.01 s at load 7.47 / 7.60 / 7.55. The
+      budget is 8 s, in the header and in `BUDGET_SECONDS`. The decision:
+      both test passes run whole, since `select-tests.py` puts both in
+      `ALWAYS_RUN` and neither has a diff-scoped form; `bin/sd-docs-lint` is
+      not in the hook, since `--changed` needs `--pr-body` and scopes rule 8
+      only and the tool's wall time is network; Ruff is file-scoped by nature.
+      `make hooks` installs it as the relative link `<common .git>/hooks/
+      pre-commit -> ../../hooks/pre-commit`, one per clone, read from the
+      main checkout and shared by every linked worktree, prints the path,
+      refuses by name to replace anything else there, refuses to run while
+      a `core.hooksPath` is set (`--git-path hooks` would honour it), and
+      never sets one: the directory is `hooks/`, not `.githooks/`, because
+      `bin/sd-status` reports `.githooks` and a set `core.hooksPath` as the
+      retired gate stack's residue with a removal command, and the pack's own
+      hook must not match its own detector (`design.md`, the re-made
+      decision). `bin/sd_install.py` is not edited, and folding the hook into
+      `--user` is the owner's call. `tests/test_pre_commit_hook.py`,
+      fail-first (`FAILED (failures=5)` with no hook, then `OK`; the layout
+      cases `FAILED (failures=8)` before the move, then `OK`): the file is
+      tracked at `hooks/pre-commit`, executable and states the budget once,
+      equal to `BUDGET_SECONDS` and to `design.md`; both named passes exist
+      in this checkout; in a throwaway repository a staged `import os` exits
+      non-zero naming `bad.py`, `SD_SKIP_HOOKS=1` exits 0 with the notice,
+      and a clean file exits 0 printing the wall time; a staged file fixed
+      in the working tree but not restaged is refused naming it, with Ruff
+      not run; with the two modules present as stubs the hook runs them
+      (`Ran 2 tests`), a red stub fails the commit with status 1, and a
+      staged `git rm` of one stub is refused naming the module (a deletion
+      is not a staged path, so only the module check sees it); a python
+      shebang past 128 bytes and a capped unterminated one are both sent to
+      Ruff while a long shell shebang is not, the bound being code health's
+      4096; without `.venv` and with a `python3` shim first on `PATH`, Ruff
+      and the passes both run;
+      `make hooks` over a
+      copy of the `Makefile` makes the relative link and passes again over
+      its own link, refuses a stranger file and leaves it, refuses while
+      `core.hooksPath` is set and makes no link, a `git commit` of
+      a staged `import os` fails through the link with no commit landing,
+      and from a linked worktree the link lands in the main `.git/hooks`
+      with the same relative target and reads the main checkout's file,
+      and afterwards
+      `residue_section` from `bin/sd-status` reports neither `githooks` nor
+      `hooks-path`. Mutations, each restored from a byte copy: the Ruff step
+      removed reddens the Ruff case; the skip branch removed reddens the
+      escape-hatch case; `chmod -x` reddens the file case; the recipe also
+      setting `core.hooksPath` reddens the residue case with `'hooks-path'
+      unexpectedly found`; the refusal removed reddens the stranger case;
+      the `unittest` call replaced by `status = 0` reddens both stub cases;
+      the divergence guard emptied reddens the not-restaged case with
+      `0 == 0 : All checks passed!`; the link target misspelt reddens the
+      commit case with `the commit went through` and the link case with
+      `FileNotFoundError`; the common dir replaced by `--git-dir` reddens
+      the worktree case; the absent-pass failure downgraded to a notice
+      reddens the deletion case; `SHEBANG_LIMIT` at 128 reddens the shell
+      case with `EXE001`; the fail-closed return removed reddens the capped
+      case; the fallback renamed reddens the `python3` case with
+      `FileNotFoundError`; the budget header duplicated reddens the file
+      case with `2 != 1`; the `core.hooksPath` refusal removed reddens its
+      case with `git hooks: .githooks/pre-commit -> ...`.
 
-- [ ] **8. The authoring tier.** Skills consult the registry and name the rule
+- [x] **8. The authoring tier.** Skills consult the registry and name the rule
       ids in scope. Filed last, because it depends on the registry carrying
       rules.
       **Decided 2026-09-14 (owner, note 1989): it runs next, ahead of the rest
@@ -438,12 +867,35 @@
       teach it, and the alternative — backfilling only the 3 taught ids —
       exhausts in a single slice. Step 8 is the constraint on step 4, not its
       consequence.
+      **2026-09-16, three parts (note 2568), two of them done.** (i) The
+      verb, `bin/sd-rules --for <path>`, landed at #997. (ii) The writer
+      skills call it in their setup step: on `8548d512` the audit read six
+      skills as writers of this tree, and each now carries one sentence that
+      runs the verb for the file it is about to write and cites the ids it
+      prints -- `sd-handoff` since #997 in its restore step, `sd-plan`,
+      `sd-spec`, `sd-debug`, `sd-humanizer` and `sd-technical-editor` here.
+      `tests/test_writer_skills_consult_the_registry.py` holds the link:
+      `WRITER_SKILLS` is what a write-verb predicate answers over every
+      tracked `skills/*/SKILL.md`, less a `NOT_WRITERS` set that names the
+      three residue skills the predicate also matches and why, so a seventh
+      writer lands in neither and reddens it. `sd-review`'s `setup-github`
+      is left out until the `.github/`-is-code residue is settled. (iii) One
+      teaching section per live-row id, each naming the verb, is in progress
+      in step 4's slices; the step stays open until they land.
+      **Ticked 2026-09-17, slice H.** Part (iii) landed as slices E to G
+      (#1019, #1020, #1021), one teaching section per live-row id, each
+      naming the verb; the twelve ids left after them are repealed rows under
+      Dec-9, the decision team-lead took on 2026-09-17 (note 2665), and the
+      twelve rows slice H adds are taught by nothing (leg a skips a repealed
+      row; `R10-D2` keeps the section it had), so no section is owed and
+      nothing is left for the step to wait on.
 
 Steps 1 to 3 are the deliverable, and all three are done: `bb379027` (#882)
-landed them and `d745474b` (#889) corrected leg b's baseline. Steps 4 to 8 are
-payload and may be batched into fewer pull requests to reduce CI churn; step 4
-is partially delivered, in three slices recorded above, and step 8 now precedes
-the rest of it.
+landed them and `d745474b` (#889) corrected leg b's baseline. Steps 4 to 8 were
+payload, and every one is ticked above with the date and the evidence: step 4
+in slices 1 to H, the last on 2026-09-17, and step 8 in three parts, the
+verb, the writer skills' setup step and the teaching sections, done with it.
+The checklist is the record; this paragraph only points at it.
 
 ## Verification
 
@@ -516,3 +968,61 @@ The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
   code-health checkers with no enforcement change; `tests/test_code_health.py`
   is untouched. Leg d's copy carries an index now, because those checkers
   enumerate by `git ls-files`, and the four proofs run under it.
+- 2026-09-16 step 5 residue (sd:971): leg d runs every row's control in
+  one child and one mutated child per row, 20 children → 13 on eight rows
+  and two controls; `LegD` real 14.71 s at load 6.31 → 10.34 s at 6.28,
+  budgeted at 21 s in `design.md`, Dec-6.
+- 2026-09-16 step 6: `R13-D1` to `R13-D3` register the three prose rules in
+  their narrowed forms, each a per-document baseline that only falls --
+  `SYMBOL_ANCHORED_CITATIONS` in `tests/test_doc_citations.py`,
+  `PRESENT_TENSE_COUNTS` in the new `tests/test_prose_counts.py`, and leg
+  b's `UNCITED_SKILL_CLAIMS` as it stood -- taught from `Prose rules` in
+  `skills/sd-check/SKILL.md`; `LegD` real 9.82 s at load 6.14.
+- 2026-09-16 step 7 (Dec-7): `hooks/pre-commit` runs Ruff on the staged
+  Python and the two whole-tree test passes, read 5.01–5.26 s on a one-file
+  diff at load 7.47–7.60, budgeted at 8 s; `bin/sd-docs-lint` stays out of
+  the hook, its 20 s being seventy git network children; `make hooks` links
+  it from `.git/hooks`, not `.githooks/` and not `core.hooksPath`, which
+  `bin/sd-status` reports as residue. The diff-scoping decision is re-made
+  in `design.md` on those readings.
+- 2026-09-16 step 8, second slice (part (ii)): five writer skills gain the
+  setup-step sentence that runs `bin/sd-rules --for <path>` and cites the
+  ids it prints; `tests/test_writer_skills_consult_the_registry.py` derives
+  the six-skill list from a write-verb predicate over the tracked skill
+  pages, red on the five before the sentences and red again on a seventh
+  writer-shaped skill added to a clone. Part (iii) stays open in step 4.
+- 2026-09-16 step 4, slice E, and step 8's first teaching-section slice:
+  `STRANDED_RULE_IDS` 18 → 17. `R10-D3` is a row narrowed to Lane A, the
+  restore hook's `SessionStart` registration on `startup` and `clear` only;
+  checker `bin/sd_install.py::HOOK_SPECS`, taught from `The restore side`
+  in `skills/sd-handoff/SKILL.md`, which names the verb. `LegD` real 9.50 s
+  at load 5.19. Slice 0, #1015's residue, rode along: `tests/test_sd_rules_for.py`'s
+  docstring and `tracked`'s containment in `tests/test_prose_counts.py`.
+- 2026-09-17 step 4, slice F, and step 8's second and third teaching-section
+  slices: `STRANDED_RULE_IDS` 17 → 15. `R10-D7` is a row, the local block
+  prepended to every review `bin/sd-review` dispatches, checker
+  `bin/sd-review::local_conventions`, taught from a new `Local conventions
+  reach the prompt` in `skills/sd-review/SKILL.md`. `R11-D6` is a row, no
+  shell outside `.github/scripts/`, checker
+  `tests/test_no_shipped_shell.py::test_shell_lives_only_in_this_repository_s_own_tooling`,
+  taught under `Code health` in `skills/sd-check/SKILL.md`, whose intro now
+  names the tests the rows name. Both sections name the verb. `LegD` real
+  9.996 s at load 4.11.
+- 2026-09-17 step 4, slice G, and step 8's fourth teaching-section slice:
+  `STRANDED_RULE_IDS` 15 → 12. `R11-D14`, `R11-D27` and `R5-D1` are rows,
+  the store and plugin contract -- the closed kind vocabulary, checker
+  `bin/sd::validate_kind`; the frontmatter line edit, checker
+  `bin/sd::edit_field`; the vault as system-of-record, checker
+  `bin/sd::store_list`, proved by a stale index rather than an empty query
+  -- taught from a new `The store and plugin contract` in
+  `skills/sd-help/SKILL.md`, the host team-lead chose. The section names
+  the verb. `LegD` real 11.333 s at load 3.99. The twelve left are the
+  repeal questions, owner decisions.
+- 2026-09-17 step 4, slice H, and steps 4 and 8 ticked: `STRANDED_RULE_IDS`
+  12 -> 0. The twelve are repealed rows under Dec-9, the family decision
+  team-lead took on 2026-09-17 (note 2665): `R11-D1` and `R11-D5` in the
+  Dec-4 shape, the ten dashboard and history ids because sd:719 is done
+  with `dashboard/` and `bin/sd_ledger.py` deleted. `teaches` is optional
+  on a repealed row first, the audit's slice 7. `providers.yaml` and
+  `CONTRIBUTING.md` cite the two Dec-4-shape repeals; `MUTATIONS` did not
+  move.

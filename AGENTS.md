@@ -56,21 +56,24 @@ Shared contributors do not revoke user permission, but existing ownership gates 
 
 ## Calling Convention
 
-The pack's executables live in `bin/` and are invoked by path, relative to the
-checkout: `bin/sd`, `bin/sd-status`, `bin/sd-review`. That is how the
-installed hooks invoke them, and it is the only convention the repository
-supports.
+The pack's executables live in `bin/`. `bin/sd_install.py --user` links each
+of them into `~/.local/bin` (`--bin-dir DIR` for another directory) and records
+every link in `installed.json`, so once `--user` has run on a machine a bare
+`sd`, `sd-status` or `sd-review` resolves from any directory, provided that
+directory is on `PATH`; the installer never edits the shell.
 
-The installer renders surfaces -- skills, agents, companions, hooks -- and links
-no executable anywhere. So `installed.json` is a receipt for those surfaces, not
-evidence that any command resolves in a shell, and an absent binary in it is not
-a partial install. Where `sd` or `sd-research-kit` do resolve on a machine, a
-hand-made symlink under `~/bin/common` points back into a checkout; the install
-did not put it there and does not know about it.
+Invoking by path, relative to the checkout -- `bin/sd`, `bin/sd-status`,
+`bin/sd-review` -- still works and is what the installed hooks and the lane
+brief use: a hook names the checkout it was installed from, and a lane reads
+the store from the checkout it was given, where a bare name resolves against
+whatever `PATH` holds.
 
-To see what holds on the machine in front of you, run the installer's status
-command rather than reading a list: its `commands:` line enumerates `bin/` and
-`PATH` at runtime, and says whether a command resolves elsewhere.
+The receipt is evidence of the links, not of what resolves: a link in a
+directory that is not on `PATH` resolves nowhere. To see what holds on the
+machine in front of you, run the installer's status command rather than
+reading a list: its `commands:` line enumerates `bin/` and `PATH` at runtime,
+counts the commands that resolve from this checkout, names the missing ones,
+and says whether a command resolves elsewhere.
 
 ## What a Document Owns
 

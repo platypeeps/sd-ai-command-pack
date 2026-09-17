@@ -353,7 +353,7 @@ back to `issue.repo || issue.tracker` only when there is no URL. That is
 one expression in one function, guarded by a source-reading test in
 `tests/test_dashboard_now.py` of the kind that file already applies to
 `fillIssues`, and it stays under `DASHBOARD_CODE_CAP`
-(`source:tests/test_loc_caps.py::DASHBOARD_CODE_CAP`) without moving it. **The state** is not a
+(in `tests/test_loc_caps.py`, retired at sd:719 step 7) without moving it. **The state** is not a
 dashboard fact: the page shows an open ticket while it is open and drops
 it when it closes, because that is what an open worklist is, and the
 recorded state — the item's third acceptance line — is what the
@@ -381,7 +381,7 @@ acceptance line is a grep.
   `dashboard/jira.py` until `index.sqlite` retires.** Two copies of the Jira
   rules for a while, both under test. Reversed the day the dashboard read
   `shadow`: sd:719 step 4 (pack pull request #1005) deleted the pack copy and 363 lines of `DASHBOARD_CAP`
-  (`source:tests/test_loc_caps.py::DASHBOARD_CAP`) with it.
+  (in `tests/test_loc_caps.py`, retired at sd:719 step 7) with it.
 - **2026-09-12 — the verb iterates; `sync` stays one tracker per call.**
   Reversed if a third tracker arrives with GitHub's shape (details, budget
   split, protection) rather than Jira's, at which point the per-tracker stage

@@ -52,6 +52,23 @@ roles:
   reviewer: [two]
 """
 
+#: A valid registry with a disabled reviewer on loopback: the pack no longer
+#: ships a disabled entry, so the cases that need one bring their own.
+WITH_DISABLED = """\
+bills:
+  free: { cost: local }
+providers:
+  one: { url: "http://localhost:1/v1", model: m, vendor: alpha, bill: free,
+         roles: [author], env: [] }
+  two: { url: "http://localhost:2/v1", model: m, vendor: beta, bill: free,
+         roles: [reviewer], env: [] }
+  three: { url: "http://localhost:3/v1", model: m, vendor: gamma, bill: free,
+           roles: [reviewer], enabled: false, reason: "model not pinned", env: [] }
+roles:
+  author: [one]
+  reviewer: [two, three]
+"""
+
 
 def written(text: str) -> pathlib.Path:
     handle = tempfile.NamedTemporaryFile(
@@ -94,18 +111,23 @@ class TheShippedRegistry(unittest.TestCase):
                     self.assertEqual(provider.kind, "url")
 
     def test_a_disabled_entry_carries_its_reason_and_never_resolves(self) -> None:
+        fixture = sd_registry.read_file(written(WITH_DISABLED))
+        self.assertFalse(fixture.providers["three"].enabled, "the fixture lost its disabled entry")
+        for registry in (self.registry, fixture):
+            self.assert_disabled_entries_never_resolve(registry)
+
+    def assert_disabled_entries_never_resolve(self, registry: sd_registry.Registry) -> None:
         disabled = [
-            provider for provider in self.registry.providers.values()
+            provider for provider in registry.providers.values()
             if not provider.enabled
         ]
-        self.assertTrue(disabled, "the shipped registry has no disabled entry")
         for provider in disabled:
             with self.subTest(provider=provider.name):
                 self.assertTrue(provider.reason, "disabled with no reason")
         resolved = {
             provider.name
             for role in sd_registry.ROLES
-            for provider in self.registry.order(role)
+            for provider in registry.order(role)
         }
         self.assertEqual(resolved & {provider.name for provider in disabled}, set())
 
@@ -938,8 +960,12 @@ class ThePick(unittest.TestCase):
         self.assertIn("only list of providers", str(caught.exception))
 
     def test_a_disabled_entry_is_refused_by_its_reason(self) -> None:
+        registry = sd_registry.read_file(written(WITH_DISABLED))
+        consent = sd_registry.parse_consent(
+            " ".join(str(sd_registry.recipient(p)) for p in registry.providers.values())
+        )
         with self.assertRaises(sd_registry.RegistryError) as caught:
-            sd_registry.pick(self.registry, "exo", consent=self.all)
+            sd_registry.pick(registry, "three", consent=consent)
         self.assertIn("model not pinned", str(caught.exception))
 
     def test_an_entry_that_does_not_hold_the_role(self) -> None:
@@ -1351,12 +1377,10 @@ class TheSchemeIsAConsentQuestion(unittest.TestCase):
             sd_registry.recipient(self.entry("http://api.example.test/v1")).recipient,
         )
 
-    def test_the_shipped_registry_still_resolves_exo_over_http(self) -> None:
-        # `exo` ships on `http://localhost:52415/v1`, which is what the
-        # loopback exception is for. If this fails, the exception is wrong.
-        registry = sd_registry.read_file(SHIPPED)
-        exo = registry.providers["exo"]
-        self.assertIsNone(sd_registry.refuse_allowance(exo, sd_registry.recipient(exo)))
+    def test_a_loopback_entry_still_resolves_over_http(self) -> None:
+        # A local server on `http://localhost:<port>/v1` is what the loopback
+        # exception is for. If this fails, the exception is wrong.
+        self.assertIsNone(self.allowance("http://localhost:52415/v1"))
 
 
 class StandingReviewConsentTests(unittest.TestCase):

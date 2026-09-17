@@ -33,9 +33,9 @@ import unittest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SD = REPO_ROOT / "bin" / "sd"
 
-# The eight keys, written here as a literal on purpose. Standing rule 2 fixes
-# the plugin-kind vocabulary at eight and makes a change to it a decision
-# record; a test that read the set out of `bin/sd` would agree with whatever
+# The eight keys, written here as a literal on purpose. The plugin-kind
+# vocabulary is fixed at eight and a change to it is a decision record; a
+# test that read the set out of `bin/sd` would agree with whatever
 # the source said and pin nothing. This is the assertion that a ninth key
 # cannot arrive quietly -- `RefusalTests.test_every_key_in_the_vocabulary_is_
 # validated` is the one that reads the source, and it enumerates from there so
@@ -347,7 +347,7 @@ class KindTests(PluginFixture):
         self.assertIn(because, result.stderr)
 
     def test_the_vocabulary_is_eight_keys(self) -> None:
-        """Standing rule 2, as an assertion rather than a sentence.
+        """The eight-key vocabulary, as an assertion rather than a sentence.
 
         The count and the names both, because the rule fixes both: a rename
         that kept the count at eight would still be a vocabulary change, and

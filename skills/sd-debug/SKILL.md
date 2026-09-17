@@ -39,8 +39,6 @@ handoffs; report an unavailable sibling rather than implying it ran.
 
 ## Arguments
 
-Argument names and value sets follow the shared vocabulary in `references/argument-vocabulary.md`; reuse a canonical name and its value set before coining a new one.
-
 Arguments arrive as free text with `key=value` pairs and bare flags. Unknown
 argument names are an error — stop and report them before running anything.
 
@@ -103,7 +101,11 @@ fix.
 7. **Change one variable per experiment.** Two edits and a green run leave you
    unable to say which one mattered, and the honest report of that experiment is
    that it produced no evidence. Revert between experiments rather than
-   accumulating them.
+   accumulating them. Before the first edit to a file, run
+   `bin/sd-rules --for <path>` from the repository root and cite the rule ids
+   it prints in the report's **Edits in the tree** entry for that file rather
+   than restating the rules; a test path draws the `bin/` rows too, because
+   the verb classes every non-markdown path as code.
 8. **Classify every piece of evidence** with exactly one primary class:
    - **observed** — seen in output, a log, a debugger, or a file that was read;
    - **inferred** — derived from something observed, with the derivation stated;

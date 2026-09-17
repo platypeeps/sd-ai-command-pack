@@ -9,6 +9,9 @@ disable-model-invocation: true
 `sd-spec` updates `docs/spec/**` on the current PR branch, in the same commit
 range as the change that made it stale. Invocation is explicit approval to
 write under `docs/spec/` (and, with `--retro`, to append review learnings).
+Before writing each page, run `bin/sd-rules --for docs/spec/<page>.md` from
+the repository root and cite the rule ids it prints in the page rather than
+restating the rules.
 
 ## When to use
 
@@ -31,7 +34,7 @@ write under `docs/spec/` (and, with `--retro`, to append review learnings).
 ## Never
 
 - **Never generate a spec page from the diff alone.** A page nobody would read
-  is footprint, not knowledge; the five gates count spec pages, not words.
+  is footprint, not knowledge, and footprint is counted in pages, not words.
 - **Never commit derived state.** Anything that can be recomputed at run time
   is recomputed at run time — committed derived state is permanent staleness.
 - **Never write outside `docs/spec/`** (plus the learnings page under

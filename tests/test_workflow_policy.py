@@ -54,7 +54,6 @@ GOVERNED = (
     "bin",
     "skills",
     "agents",
-    "dashboard",
     "tests",
     ".claude",
     ".github",
@@ -496,16 +495,20 @@ class BareVendorTokens(unittest.TestCase):
 
 
 #: A page runs a review when it invokes a reviewer, in any of the shapes an
-#: invocation takes on these pages: a backticked `sd-review` with a flag; a
-#: bare backticked `sd-review` that a verb runs, "Run `sd-review`"; a command
-#: line of a code block that begins with `sd-review`; or `sd-research-kit
-#: review`, the front of `bin/sd_research_review.py`. A bare `sd-review` with
-#: no verb before it names the tool or its lane and is not an invocation.
+#: invocation takes on these pages: a backticked reviewer with a flag; a
+#: bare backticked reviewer that a verb runs, "Run `sd-review`"; or a command
+#: line of a code block that begins with the reviewer. The reviewers are
+#: `sd-review` and `sd-research-kit review`, the front of
+#: `bin/sd_research_review.py`, and the same three shapes apply to both: a
+#: bare reviewer with no verb before it names the tool, its lane or its
+#: report and is not an invocation. The reviewer's name ends at a backtick,
+#: a space or the line: `sd-review-ack` is another tool, and `\b` reads its
+#: hyphen as the end of a word.
+REVIEWER = r"(?:sd-review|sd-research-kit review)"
 REVIEW_INVOCATION = re.compile(
-    r"`sd-review --[a-z]"
-    r"|\b(?:run|runs|running|invoke|invokes)\s+`sd-review\b"
-    r"|^\s*(?:\$ )?sd-review\b"
-    r"|`?sd-research-kit review\b",
+    rf"`{REVIEWER} --[a-z]"
+    rf"|\b(?:run|runs|running|invoke|invokes)\s+`{REVIEWER}`"
+    rf"|^\s*(?:\$ )?{REVIEWER}(?:[ \t]|$)",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -514,10 +517,11 @@ REVIEW_INVOCATION = re.compile(
 #: hard-wrap and a literal split across a line break is still a literal.
 CAP_LITERAL = re.compile(r"\b[0-9]+ passes?\b|cap of [0-9]")
 
-#: The sentence of a collapsed page that links the rule file must also say
-#: `cap`: a link beside a point that does not say where the cap comes from is
-#: a pointer, not the reads-from relationship the criterion asks for.
-CAP_WORD = re.compile(r"\bcaps?\b", re.IGNORECASE)
+#: The sentence of a collapsed page that links the rule file must say that
+#: the cap is the one on that row of the table: a link beside a point that
+#: only mentions a cap is a pointer, not the reads-from relationship the
+#: criterion asks for.
+CAP_WORD = re.compile(r"\bcaps?\b.*\bon (?:that|those) rows?\b", re.IGNORECASE)
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -559,9 +563,13 @@ class SkillsThatRunAReview(unittest.TestCase):
     """
 
     def test_the_enumeration_finds_the_reviewer_and_the_skills_that_call_it(self):
+        """A floor, not the set: the four pages that run a review today must
+        stay in, so an invocation edited into a mention shape is a failure
+        here and not a page that quietly stops being checked."""
         skills = skills_that_run_a_review()
-        self.assertIn("skills/sd-review/SKILL.md", skills)
-        self.assertGreater(len(skills), 1, "no skill invokes the reviewer")
+        self.assertLessEqual({"skills/sd-plan/SKILL.md", "skills/sd-research-repo/SKILL.md",
+                              "skills/sd-review/SKILL.md", "skills/sd-ship/SKILL.md"},
+                             set(skills), "a page that runs a review left the enumeration")
 
     def test_the_enumeration_takes_every_invocation_shape_and_no_mention(self):
         """Each shape `REVIEW_INVOCATION` names is one page here, and the
@@ -577,6 +585,9 @@ class SkillsThatRunAReview(unittest.TestCase):
                 "skills/kit/SKILL.md": "Run the mechanical half:\n\n   sd-research-kit review\n",
                 "skills/lane/SKILL.md": "The verdict belongs to the sd-review lane.\n",
                 "skills/tool/SKILL.md": "`sd-review` runs it; `sd-review-ack` marks the row.\n",
+                "skills/ack/SKILL.md": "Run `sd-review-ack` on the row.\n\n```\nsd-review-ack --ack 3\n```\n",
+                "skills/kitmention/SKILL.md":
+                    "The `sd-research-kit review` report lists where the template moved.\n",
                 "skills/sd-review/SKILL.md": "# sd-review\n",
             }
             for name, text in files.items():
@@ -603,6 +614,25 @@ class SkillsThatRunAReview(unittest.TestCase):
                 self.assertTrue(any(CAP_WORD.search(s) for s in linking),
                                 f"{name} links the rule and no linking sentence says the cap "
                                 f"comes from it: {linking}")
+
+    def test_the_linking_sentence_must_say_the_cap_is_the_one_on_the_row(self):
+        """The reads-from relationship, not the word. `CAP_WORD` used to
+        accept any sentence carrying `cap` beside the link, so a pointer --
+        "see the cap in the rule file" -- passed as if the page read its cap
+        from the table. The four pages say the cap is the one on that row."""
+        for sentence in (
+            "The review table in `.claude/rules/sd-planning-adversarial-review.md` "
+            "gives the cap on that row.",
+            "Their caps are the ones on those rows in the checkout's "
+            "`.claude/rules/sd-planning-adversarial-review.md`, and this tool states neither.",
+        ):
+            self.assertIsNotNone(CAP_WORD.search(sentence), sentence)
+        for sentence in (
+            "See the cap in `.claude/rules/sd-planning-adversarial-review.md`.",
+            "The cap is capped by `.claude/rules/sd-planning-adversarial-review.md`.",
+            "Read `.claude/rules/sd-planning-adversarial-review.md` before the pass.",
+        ):
+            self.assertIsNone(CAP_WORD.search(sentence), sentence)
 
     def test_no_skill_that_runs_a_review_carries_a_cap_of_its_own(self):
         for name in skills_that_run_a_review():
