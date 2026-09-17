@@ -3073,12 +3073,18 @@ class LinkEdgeCaseTests(InstallerHarness):
             [
                 {"path": 7, "kind": "link", "target": "x"},
                 {"path": "/y", "kind": "link", "target": 3},
+                {"kind": "link", "target": "/z"},
                 {"path": "/x", "kind": "hook"},
             ],
             set(),
         )
         self.assertEqual(
-            skipped, [("7", "malformed link row"), ("/y", "malformed link row")]
+            skipped,
+            [
+                ("7", "malformed link row"),
+                ("/y", "malformed link row"),
+                ('{"kind": "link", "target": "/z"}', "malformed link row"),
+            ],
         )
 
     def test_command_report_ignores_a_command_in_the_working_directory(self):
@@ -3093,11 +3099,107 @@ class LinkEdgeCaseTests(InstallerHarness):
         previous = os.getcwd()
         self.addCleanup(os.chdir, previous)
         os.chdir(cwd)
-        for path in (os.pathsep, ".", f".{os.pathsep}{os.pathsep}"):
+        for path in (os.pathsep, ".", f".{os.pathsep}{os.pathsep}", f"{os.pathsep}."):
             with self.subTest(PATH=path):
                 report = sd_install.command_report(checkout, {"PATH": path})
                 self.assertIn("not on PATH", report)
                 self.assertNotIn("shadowed", report)
+
+    def test_a_receipt_bin_dir_outside_the_home_is_refused_like_the_flag(self):
+        """A flagless run links where the receipt's `binDir` says (C-30), and
+        `main` checks only the flag: a receipt naming a directory outside
+        `--home` was written to. Review finding 2: the receipt value gets the
+        flag's containment test, refused by name with rc 2 before a render
+        or a pull, and the receipt is left as it was.
+        """
+        outside = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(outside.rmdir)
+        receipt_path = self.home / ".local" / "state" / "sd-ai-command-pack" / "installed.json"
+        receipt_path.parent.mkdir(parents=True)
+        receipt_path.write_text(
+            json.dumps({"schema": 1, "binDir": str(outside), "owned": []}), encoding="utf-8"
+        )
+        recorded = receipt_path.read_bytes()
+        before = sd_install.git_context(REPO_ROOT)["commit"]
+        real = subprocess.run
+
+        def guard(args, **kwargs):
+            self.assertNotIn("pull", args, "the checkout was pulled before the refusal")
+            return real(args, **kwargs)
+
+        for mode in ("--user", "--pull"):
+            with self.subTest(mode=mode):
+                with unittest.mock.patch("subprocess.run", side_effect=guard):
+                    rc, output = self.run_cli(mode)
+                self.assertEqual(rc, 2, output)
+                self.assertIn(
+                    f"the receipt's binDir {outside} is outside --home {self.home}", output
+                )
+                self.assertIn("pass --bin-dir", output)
+                self.assertEqual(sorted(outside.iterdir()), [])
+                self.assertEqual(receipt_path.read_bytes(), recorded)
+                self.assertEqual([entry.name for entry in self.home.iterdir()], [".local"])
+                self.assertEqual([entry.name for entry in (self.home / ".local").iterdir()], ["state"])
+        self.assertEqual(sd_install.git_context(REPO_ROOT)["commit"], before)
+        # The flag still wins over the receipt, and inside the home it links.
+        rc, output = self.run_cli("--user", "--bin-dir", str(self.home / "bin"))
+        self.assertEqual(rc, 0, output)
+        self.assertEqual(self.receipt["binDir"], str(self.home / "bin"))
+
+    def test_a_link_row_without_a_path_is_reported_and_left(self):
+        """Review finding 4: a `kind: link` row with no `path` is a malformed
+        row, reported under `--uninstall` like one whose path is not a string
+        (C-33), not dropped on the floor by `owned_entries`.
+        """
+        checkout = self.checkout_with_commands("sd", "sd-handoff")
+        ctx = self.context_for(checkout)
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        receipt_path = self.home / ".local" / "state" / "sd-ai-command-pack" / "installed.json"
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        row = {"kind": "link", "target": str(checkout / "bin" / "sd")}
+        receipt["owned"].append(row)
+        receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_uninstall(ctx, out), 0)
+        self.assertIn(
+            f"left in place (malformed link row): {json.dumps(row, sort_keys=True)}",
+            out.getvalue(),
+        )
+        # Three renders and the two links; the malformed row is not counted.
+        self.assertIn("removed 5 file(s)", out.getvalue())
+        self.assertTrue((checkout / "bin" / "sd").is_file())
+        self.assertFalse((self.home / ".local" / "bin" / "sd").is_symlink())
+
+    def test_a_symlink_loop_at_a_target_is_foreign_and_a_recorded_one_is_left(self):
+        """Review finding 3, measured rather than guarded: on the interpreter
+        the pack requires (`requires-python = ">=3.13"`), `Path.exists` on
+        `a -> a` is False and non-strict `Path.resolve` returns the loop
+        itself, so `_resolves_to` is False without an exception. `link_plan`
+        calls the loop foreign and `prune_links` leaves it; neither is a
+        traceback. This test pins that so an interpreter change surfaces here.
+        """
+        checkout = self.checkout_with_commands("sd", "sd-loop")
+        bin_dir = self.home / ".local" / "bin"
+        bin_dir.mkdir(parents=True)
+        loop = bin_dir / "sd-loop"
+        loop.symlink_to("sd-loop")
+        ctx = self.context_for(checkout)
+
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(ctx, out), 1)
+        self.assertIn(f"error: {loop} exists and is not a link to", out.getvalue())
+        self.assertFalse((bin_dir / "sd").is_symlink(), "a link was made before the refusal")
+
+        loop.unlink()
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        loop.unlink()
+        loop.symlink_to("sd-loop")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_uninstall(ctx, out), 0)
+        self.assertTrue(loop.is_symlink(), "the loop was removed")
+        self.assertIn(f"left in place (not our link): {loop}", out.getvalue())
+        self.assertFalse((bin_dir / "sd").is_symlink(), "our link was left")
 
 
 if __name__ == "__main__":
