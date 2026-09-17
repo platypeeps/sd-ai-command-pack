@@ -123,6 +123,21 @@ Local fixtures do not satisfy that live acceptance. No provider call is permitte
 Until live acceptance passes, an authorized exact-head `--scope branch --provider <name>` review, naming the registry entry whose `reader` is `claude-json`, is the temporary mitigation.
 That single-provider result does not waive the shipping workflow's required depth or review gates.
 
+## Local conventions reach the prompt
+
+Read a provider's findings knowing what the provider was shown. Every review
+this tool dispatches -- any scope, every entry the chain runs -- has this
+checkout's `CLAUDE.local.md` block prepended to its prompt by
+`local_conventions` in `bin/sd-review`, whose one caller is the dispatch path
+of `review` (R10-D7). The provider preflight above returns before that call
+and sends no local block, as its section says. The receipt's
+`local_block_prepended` says whether a block reached the prompt; a checkout
+with no block sends none, so read a finding that ignores a local convention
+against that flag before reading it against the provider. The row in
+`bin/sd_rules.py` states the rule; it is not restated here.
+`bin/sd-rules --for <path>` prints the rows in scope for the file being
+written.
+
 ## The `codex-json` entry is subscription-only (R10-D4)
 
 Every entry whose `reader` is `codex-json` is preceded by `codex_preflight`

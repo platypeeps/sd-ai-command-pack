@@ -382,8 +382,12 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 #: that states the matchers, `The restore side` in
 #: `skills/sd-handoff/SKILL.md`, rather than the Lane B section that cited
 #: the id already and teaches only what is not built.
+#: **16 after sd:431 step 8, slice 2, 2026-09-17.** `R10-D7` is a row: the
+#: local block reaching the prompt, held by `bin/sd-review::local_conventions`
+#: and taught from a section of `skills/sd-review/SKILL.md` written for it,
+#: `Local conventions reach the prompt`. The audit of that step found the id
+#: cited by that function's docstring and by nothing under `skills/`.
 STRANDED_RULE_IDS = frozenset({
-    "R10-D7",
     "R11-D1", "R11-D10", "R11-D13", "R11-D14", "R11-D15",
     "R11-D17", "R11-D20", "R11-D21",
     "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D30", "R11-D5", "R11-D6",
@@ -1898,6 +1902,13 @@ MUTATIONS: dict[str, Mutation] = {
         new="    if False:  # leg d: the auth_mode guard, defeated",
         test="tests.test_sd_review_codex.PreflightTests"
              ".test_a_non_chatgpt_auth_mode_refuses",
+    ),
+    "bin/sd-review::local_conventions": Mutation(
+        path="bin/sd-review",
+        old='    if not block:\n        return ""',
+        new='    if True:  # leg d: the empty-block guard, defeated\n        return ""',
+        test="tests.test_sd_review.PipelineTests"
+             ".test_the_local_block_reaches_the_prompt",
     ),
     "bin/sd_install.py::HOOK_SPECS": Mutation(
         path="bin/sd_install.py",
