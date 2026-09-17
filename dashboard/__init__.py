@@ -1,11 +1,9 @@
-"""The pack's own dashboard: a view over the checkout fleet, and one way to act.
+"""What is left of the pack's own dashboard: the package marker, and nothing else.
 
-Deliberately small. The system dashboard it will eventually replace is 1,728
-lines and collects from a dozen sources; this one starts with the facts the
-backbone itself owns and grows a tab at a time under the 3c-to-6b parity
-checklist. It was read-only until 6b-7, and the rule that replaced that one is
-narrower and load-bearing: **no GET has a side effect**, writing is a
-token-gated POST, and every mutation resolves to an id in `actions.py`'s
-`RUN_ALLOWLIST`. Drift cannot turn a view into an actor without going through
-that map.
+The views this package served -- the fleet, the tracker index, the Now
+ranking, the action runner and the `deliver` write -- moved to the system
+dashboard one sd:719 step at a time, and the modules went with them; step 6
+took the last five. The one write, `deliver`, is `sd work deliver` now. This
+file stays so the tree under `dashboard/` is a package until step 7 deletes
+the directory, `bin/sd-dashboard` and the ceilings on it in one commit.
 """
