@@ -69,20 +69,23 @@ configuration was wrong (one sentence on stderr, never a traceback).
 
 ## Code health
 
-The registry's code rules are enforced by `tests/test_code_health.py`, not by
+The registry's code rules are enforced by the tests their rows name, not by
 sd-check; sd-check meets them as one more red result from the repository's
 own `test` entrypoint. They are cited here because this is the skill an author
-has open when that result arrives. Three are per-function ceilings and the
-fourth is a rule over pairs; each has a baseline that may shrink and may not
-grow:
+has open when that result arrives. Four are `tests/test_code_health.py`'s —
+three per-function ceilings and a rule over pairs, each with a baseline that
+may shrink and may not grow — and one is about where a file may live:
 
 - R12-D1 — complexity, `COMPLEXITY_CEILING`, on the cyclomatic score.
 - R12-D2 — length, `LENGTH_CEILING`, in unparsed statements.
 - R12-D3 — depth, `DEPTH_CEILING`, in indented blocks.
 - R12-D4 — duplication: two functions of one shape, once each is at least
   `CLONE_FLOOR` AST nodes.
+- R11-D6 — shell placement: where a file with a shell suffix or shebang may
+  live, held by `tests/test_no_shipped_shell.py`.
 
-The row in `bin/sd_rules.py` states each number; it is not restated here.
+The rows in `bin/sd_rules.py` state each number and the one directory; none
+is restated here.
 `bin/sd-rules --for <path>` prints the rows in scope for the file being
 written.
 
