@@ -544,7 +544,7 @@ RULES: tuple[Rule, ...] = (
     #: id claims was never built or is gone. `R11-D1` pinned the local exo
     #: model by name and had the preflight refuse a name absent from
     #: `/v1/models`; nothing under `bin/` or `tests/` reads `/v1/models`,
-    #: and the `providers.yaml` entry it shaped ships `enabled: false`.
+    #: and the `providers.yaml` entry it shaped is gone (exo uninstalled).
     #: `R11-D5` put the bash 3.2 gate in CI; no CI job invokes
     #: `check-bash32-syntax.sh`, as `CONTRIBUTING.md` records, and the local
     #: `make check` lane that survives is `R11-D6`'s subject, not this one.
