@@ -570,11 +570,47 @@ RULES: tuple[Rule, ...] = (
     ),
     #: The ten dashboard and history ids, repealed as one family by the same
     #: decision: sd:719 is `done` with `dashboard/` and `bin/sd_ledger.py`
-    #: deleted (#1013, #1017), so the dashboard, its caps, its tabs, its
-    #: ledger and its plugin loader that each of these ruled on no longer
-    #: exist to be enforced, and what still cites them is sd:719's own pages
-    #: and the history paragraphs of `tests/test_loc_caps.py`, records of
-    #: what was decided rather than consumers of a rule.
+    #: deleted (#1013, #1017), so what each of them ruled on no longer
+    #: exists to be enforced. Per id, what that was, what took it, and what
+    #: still cites it -- every citation a record of what was decided, none a
+    #: consumer of a rule:
+    #:
+    #: - `R11-D10`: the phone's writes and the dashboard's GET-only
+    #:   assertion; `dashboard/` deleted; cited by sd:719's own pages.
+    #: - `R11-D13`: a sequencing decision, plugin registration ahead of
+    #:   step 6b, and a dashboard cap re-derived from the split; the cap
+    #:   left with `dashboard/`; cited by a `tests/test_sd_plugin.py`
+    #:   docstring as the point at which `kinds` was "never enforced". The
+    #:   enforcement that docstring says arrived later is the closed kind
+    #:   vocabulary, and that is `R11-D14`'s live row above, not this id's.
+    #: - `R11-D15`: the `bin/` cap at 14,000; retired by `R11-D48` on
+    #:   2026-09-11 (`tests/test_loc_caps.py`); cited by the 2026-09-05
+    #:   item's pages and a `tests/test_sd_review_boundary.py` comment.
+    #: - `R11-D17`: the plugin table contract, the loader's markup filter
+    #:   and `dashboard/` at 4,000; loader and directory deleted; cited by
+    #:   `tests/test_loc_caps.py`'s history.
+    #: - `R11-D20`: `kind` as a category and one alert per id;
+    #:   `dashboard/now.py` deleted; cited by sd:719's own pages.
+    #: - `R11-D21`: Queues as a plugin tab and a declared action in the
+    #:   manifest. The tab is deleted. `validate_actions` in `bin/sd`
+    #:   survives and refuses a malformed `dashboard.actions` block, but
+    #:   it validates the shape of a key no dashboard reads any more
+    #:   (sd:719 recorded the actions as staying in the manifest and
+    #:   leaving every dashboard), and no test names it, so a live row on
+    #:   it would carry a checker leg d cannot prove; cited by that
+    #:   function's docstring.
+    #: - `R11-D24`: the dashboard cap at 4,300 split into a total and a
+    #:   code-only ceiling; the three dashboard constants deleted at sd:719
+    #:   step 7. Its clause "a cap is never raised in the pull request that
+    #:   busts it" survives as prose in `tests/test_loc_caps.py` and
+    #:   `docs/workflow-control-capacity.md` with no checker; cited there,
+    #:   by the 2026-09-05 item's pages and by sd:719's.
+    #: - `R11-D25`: the read-only Queues tab; deleted; cited by the
+    #:   2026-09-05 item's prd.
+    #: - `R11-D29` and `R11-D30`: the dashboard total re-derived at 4,350
+    #:   and `DASHBOARD_CAP` re-derived under `dashboard/`; the constants
+    #:   deleted; cited by `tests/test_loc_caps.py`'s history, the
+    #:   2026-09-05 item's prd and sd:719's pages.
     Rule(
         id="R11-D10",
         subject="the phone keeps its writes, and the dashboard's GET-only "

@@ -890,10 +890,11 @@
       left for the step to wait on.
 
 Steps 1 to 3 are the deliverable, and all three are done: `bb379027` (#882)
-landed them and `d745474b` (#889) corrected leg b's baseline. Steps 4 to 8 are
-payload and may be batched into fewer pull requests to reduce CI churn; step 4
-is partially delivered, in three slices recorded above, and step 8 now precedes
-the rest of it.
+landed them and `d745474b` (#889) corrected leg b's baseline. Steps 4 to 8 were
+payload, and every one is ticked above with the date and the evidence: step 4
+in slices 1 to H, the last on 2026-09-17, and step 8 in three parts, the
+verb, the writer skills' setup step and the teaching sections, done with it.
+The checklist is the record; this paragraph only points at it.
 
 ## Verification
 
