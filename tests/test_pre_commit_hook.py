@@ -338,6 +338,52 @@ class TheLayout(unittest.TestCase):
         self.assertEqual(git("log", "--oneline", "--all", cwd=self.root), "", "a commit landed")
         self.assertFalse((self.root / ".githooks").exists())
 
+    def test_a_commit_from_a_linked_worktree_leaves_the_main_repository_a_work_tree(self):
+        """sd:993. Git runs a linked worktree's hook with `GIT_DIR` and
+        `GIT_INDEX_FILE` exported, and a whole-tree pass whose fixture runs
+        `git init .` in a temporary directory then re-initialises the repository
+        at `GIT_DIR`, which git guesses bare for a path not named `.git`
+        (measured 2026-09-17 18:28Z on the pack checkout: `core.bare = true`,
+        `sd-status` "not inside a git repository").
+        The hook hands the passes an environment without git's per-invocation
+        variables, so a fixture's git acts on the fixture."""
+        self.assertEqual(self.make_hooks().returncode, 0)
+        (self.root / ".venv").symlink_to(pathlib.Path(sys.prefix))
+        (self.root / "tests").mkdir()
+        (self.root / "tests" / "test_doc_citations.py").write_text(
+            "import unittest\n\n\nclass Stub(unittest.TestCase):\n"
+            "    def test_stub(self):\n        pass\n",
+            encoding="utf-8",
+        )
+        (self.root / "tests" / "test_code_health.py").write_text(
+            "import subprocess\nimport tempfile\nimport unittest\n\n\n"
+            "class Fixture(unittest.TestCase):\n"
+            "    def test_a_fixture_repository(self):\n"
+            "        subprocess.run(['git', 'init', '-q', '-b', 'main', '.'], cwd=tempfile.mkdtemp(), check=True)\n",
+            encoding="utf-8",
+        )
+        git("add", "--", "tests", cwd=self.root)
+        git("commit", "-q", "-m", "layout", cwd=self.root)
+        worktree = self.root.parent / (self.root.name + "-wt")
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(worktree)], check=False)
+        git("worktree", "add", "-q", "-b", "wt", str(worktree), cwd=self.root)
+        (worktree / ".venv").symlink_to(pathlib.Path(sys.prefix))
+        (worktree / "ok.py").write_text("x = 1\n", encoding="utf-8")
+        git("add", "--", "ok.py", cwd=worktree)
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith("GIT_") and key != SKIP_VARIABLE}
+        result = subprocess.run(
+            ["git", "commit", "-q", "-m", "from the worktree"], cwd=worktree, env=env,
+            capture_output=True, text=True, check=False,
+        )
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("Ran 2 tests", output)
+        self.assertEqual(git("config", "--get", "core.bare", cwd=self.root).strip(), "false",
+                         "the pass's fixture re-initialised the main repository as bare")
+        self.assertEqual(git("rev-parse", "--is-inside-work-tree", cwd=self.root).strip(), "true")
+        self.assertEqual(git("log", "--oneline", "wt", cwd=self.root).count("\n"), 2)
+
     def test_make_hooks_refuses_to_replace_a_file_that_is_not_its_link(self):
         link = self.root / ".git" / "hooks" / "pre-commit"
         link.parent.mkdir(parents=True, exist_ok=True)
