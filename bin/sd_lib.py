@@ -621,6 +621,33 @@ def external_id(root: pathlib.Path | str, item_dir: pathlib.Path) -> str:
             f"{WORK_DIR}/{item_dir.name}/prd.md")
 
 
+def registered_base(root: pathlib.Path | str, sd_db: Any, connection: Any) -> str:
+    """The registered checkout this one is, spelled as the `repo` table spells it.
+
+    Rows are keyed by the registered path, and a runner clone is never at
+    that path: it carries the same files under `/Volumes/sd-work/...` with
+    the same `origin`. `sd work register` already resolves such a checkout
+    to the registered repository through `sd_db.repos.registered_for` --
+    the path when the path is itself registered, else the origin, else the
+    checkout itself -- so a clone could register a folder and then not read
+    the row it made (sd:981). This is the one resolver the readers share;
+    the rule stays the library's, and the pack does not restate it.
+
+    The main worktree root first, the library second: a linked worktree of
+    the registered checkout resolves at one indexed lookup with the origin
+    read but unused, as before. A library without `registered_for` keeps
+    the path-keyed answer rather than raising; that is an older machine,
+    not a second path anybody runs on purpose.
+    """
+    here = pathlib.Path(root).resolve()
+    base = str(main_worktree_root(here))
+    registered_for = getattr(getattr(sd_db, "repos", None), "registered_for", None)
+    if registered_for is None:
+        return base
+    origin = git_output(["remote", "get-url", "origin"], here)
+    return str(registered_for(connection, base, origin or None))
+
+
 def _provisioned_library_paths() -> list[str]:
     """Where `make setup` put `sd_db`, for an interpreter that did not find it.
 
@@ -801,6 +828,11 @@ class Rows:
         except Exception as error:  # no file, or a schema this cannot read
             self.problem = f"sd_db could not open the database: {error}"
             return
+        # Only now, with a database to ask: the path-keyed base above is the
+        # answer for a machine with nothing to read, and this is the one the
+        # rows were written under -- for a runner clone, the registered
+        # checkout it is a clone of, not the path it stands at (sd:981).
+        self.base = registered_base(root, sd_db, self._connection)
         self._read = sd_db.writes.item_by_external
         try:
             from sd_db.progress import completion_record, item_for_artifact

@@ -551,6 +551,49 @@ class TheWriter(RowCase):
         self.assertEqual(self.read(), [])
 
 
+class TheRowIsFoundFromAClone(RowCase):
+    """sd:981. `item_for` keyed the row by the checkout it ran in.
+
+    `sd work register` resolves a checkout to the registered repository by
+    its origin, so a runner clone can register a folder; `item_for` keyed by
+    `main_worktree_root` and could not read the row that clone had made.
+    Both now go through `sd_lib.registered_base`.
+    """
+
+    def git(self, root: Path, *args: str) -> None:
+        subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+
+    def test_item_for_from_a_clone_returns_the_row_the_original_registered(self):
+        bare = self.home / "origin.git"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)],
+                       check=True, capture_output=True)
+        self.git(self.root, "remote", "add", "origin", str(bare))
+        self.git(self.root, "push", "-q", "origin", "HEAD:main")
+        sd_db.writes.upsert_repo(self.connection, str(self.root), remote=str(bare))
+        row = self.item()
+        clone = self.home / "clone"
+        subprocess.run(["git", "clone", "-q", str(bare), str(clone)],
+                       check=True, capture_output=True)
+        found = sd_handoff_rows.item_for(
+            self.connection, sd_db, clone, clone / sd_lib.WORK_DIR / "an-item")
+        self.assertIsNotNone(found, "the clone read no row")
+        self.assertEqual(found["id"], row)
+        self.assertEqual(found["external_id"], sd_lib.external_id(self.root, self.root / sd_lib.WORK_DIR / "an-item"))
+
+    def test_item_for_from_a_clone_of_another_remote_reads_nothing(self):
+        other = self.home / "other.git"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(other)],
+                       check=True, capture_output=True)
+        self.git(self.root, "remote", "add", "other", str(other))
+        self.git(self.root, "push", "-q", "other", "HEAD:main")
+        self.item()
+        clone = self.home / "foreign"
+        subprocess.run(["git", "clone", "-q", str(other), str(clone)],
+                       check=True, capture_output=True)
+        self.assertIsNone(sd_handoff_rows.item_for(
+            self.connection, sd_db, clone, clone / sd_lib.WORK_DIR / "an-item"))
+
+
 class TheLister(RowCase):
     """`sd-note list <item>`: one item's whole history, through `sd_db.item_notes`."""
 

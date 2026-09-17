@@ -30,6 +30,7 @@ written through `sd_db` with the same calls the migration uses.
 
 from __future__ import annotations
 
+import datetime
 import importlib.machinery
 import importlib.util
 import io
@@ -162,18 +163,56 @@ class Fixture(unittest.TestCase):
         )
         return connection
 
-    def only(self) -> sd_lib.WorkItem:
-        found = [i for i in sd_lib.work_items(self.root) if i.slug == "a-thing"]
+    def only(self, root: pathlib.Path | None = None) -> sd_lib.WorkItem:
+        found = [i for i in sd_lib.work_items(root or self.root) if i.slug == "a-thing"]
         self.assertEqual(len(found), 1, "the fixture holds exactly one item")
         return found[0]
 
-    def picked(self) -> list[str]:
+    def picked(self, root: pathlib.Path | None = None) -> list[str]:
         """What `bin/sd-review:417` picks, spelled the way that line spells it."""
         return [
             i.path.name
-            for i in sd_lib.work_items(self.root)
+            for i in sd_lib.work_items(root or self.root)
             if i.status in ("planning", "in_progress")
         ]
+
+    def remote(self, name: str = "origin.git") -> pathlib.Path:
+        """A bare repository the original pushes `main` to, as `origin`.
+
+        The URL is the bare path itself, so `git remote get-url origin` in a
+        clone answers with exactly the string the `repo` row will carry.
+        """
+        bare = self.tmp / name
+        subprocess.run(
+            ["git", "init", "-q", "--bare", "-b", "main", str(bare)],
+            check=True, capture_output=True,
+        )
+        self.git("remote", "add", name.removesuffix(".git"), str(bare))
+        self.git("push", "-q", name.removesuffix(".git"), "main")
+        return bare
+
+    def clone(self, origin: pathlib.Path, name: str = "clone") -> pathlib.Path:
+        """A checkout of `origin` at a path nothing ever registered."""
+        where = self.tmp / name
+        subprocess.run(
+            ["git", "clone", "-q", str(origin), str(where)],
+            check=True, capture_output=True,
+        )
+        return where
+
+    def unreadable(self, root: pathlib.Path) -> list[dict[str, Any]]:
+        """`sd-status`'s `status-unreadable` rows for `root`, GitHub unread."""
+        sections = {
+            "work": status_tool.work_section(root),
+            "pull_requests": {"repo": "acme/widget", "pull_requests": []},
+            "merged_pull_requests": {"repo": "acme/widget", "pull_requests": []},
+            "protection": {"default_branch": "main", "gaps": [], "detail": {},
+                           "available": False, "reason": "gh is not installed"},
+            "issues": {"available": False, "needs_you": [], "other": []},
+        }
+        inventory = status_tool.actionable_inventory(
+            root, sections, datetime.date(2026, 9, 17))
+        return [row for row in inventory.rows if row["check"] == "status-unreadable"]
 
     def rendered(self) -> str:
         stream = io.StringIO()
@@ -329,6 +368,80 @@ class TheRowDecides(Fixture):
         self.addCleanup(rows.close)
         self.assertEqual(
             rows.external_id(kept / "docs" / "work" / ITEM), self.identity()
+        )
+
+    def registered_with_a_clone(self, status: str = "planning") -> pathlib.Path:
+        """The original, registered with its `origin`, and a clone of that origin.
+
+        The marker is committed before the push so the clone carries it: a
+        clone without one is the `file` path and never builds `Rows` at all.
+        """
+        self.marker("row")
+        self.commit("chore: the marker")
+        bare = self.remote()
+        connection = self.seed(status)
+        sd_db.upsert_repo(connection, str(self.root), remote=str(bare))
+        return self.clone(bare)
+
+    def test_a_clone_of_the_registered_remote_reads_the_registered_row(self) -> None:
+        """sd:981. The row was written under the registered path; a runner
+        clone at another path has the same origin, and `sd work register`
+        already resolves a checkout by that origin. The readers key by the
+        path of the checkout they run in, build a key nothing ever wrote,
+        and report the item `unknown` -- which is how an unattended run's
+        pages go to the send box unreviewed."""
+        clone = self.registered_with_a_clone("planning")
+        rows = sd_lib.Rows(clone)
+        self.addCleanup(rows.close)
+        self.assertEqual(
+            rows.external_id(clone / "docs" / "work" / ITEM), self.identity()
+        )
+        self.assertEqual(self.only(clone).status, "planning")
+        self.assertEqual(self.picked(clone), [ITEM])
+
+    def test_sd_status_from_a_clone_reports_the_item_readable(self) -> None:
+        clone = self.registered_with_a_clone("planning")
+        self.assertEqual(self.unreadable(clone), [])
+
+    def test_a_clone_of_a_remote_nobody_registered_keys_by_its_own_path(self) -> None:
+        """Requirement 3: the fix widens what a clone of the registered
+        remote can read; a checkout of some other remote still speaks for
+        nobody but itself, and says so with its own path in the key."""
+        self.registered_with_a_clone("planning")
+        other = self.remote("other.git")
+        clone = self.clone(other, "foreign")
+        rows = sd_lib.Rows(clone)
+        self.addCleanup(rows.close)
+        own = f"{clone}::docs/work/{ITEM}/prd.md"
+        self.assertEqual(rows.external_id(clone / "docs" / "work" / ITEM), own)
+        item = self.only(clone)
+        self.assertEqual(item.status, "unknown")
+        self.assertTrue(
+            any(f"holds no docs/work row for {own}" in problem
+                for problem in item.inconsistencies),
+            item.inconsistencies,
+        )
+        self.assertEqual(self.picked(clone), [])
+        found = self.unreadable(clone)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn(own, found[0]["detail"])
+
+    def test_a_checkout_with_no_origin_keys_by_its_own_path(self) -> None:
+        clone = self.registered_with_a_clone("planning")
+        subprocess.run(
+            ["git", "-C", str(clone), "remote", "remove", "origin"],
+            check=True, capture_output=True,
+        )
+        rows = sd_lib.Rows(clone)
+        self.addCleanup(rows.close)
+        own = f"{clone}::docs/work/{ITEM}/prd.md"
+        self.assertEqual(rows.external_id(clone / "docs" / "work" / ITEM), own)
+        item = self.only(clone)
+        self.assertEqual(item.status, "unknown")
+        self.assertTrue(
+            any(f"holds no docs/work row for {own}" in problem
+                for problem in item.inconsistencies),
+            item.inconsistencies,
         )
 
     def test_a_database_with_no_row_for_the_item_is_unknown_and_not_open(self) -> None:
