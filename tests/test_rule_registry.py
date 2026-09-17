@@ -71,6 +71,13 @@ import sd_rules  # noqa: E402 - the table under test, imported for its own sake
 # the defect this module exists to end.
 from tests.test_doc_citations import source_declaration_error  # noqa: E402
 
+# The module the code rules' checkers live in, imported for its constants and
+# nothing else: the `R12-D*` subjects state a ceiling by value, and the value
+# is read back off this module rather than trusted. The four mutations leg d
+# runs against those checkers are built from the same constants, so a raised
+# ceiling moves the violation with it instead of leaving a fixture green.
+from tests import test_code_health as code_health  # noqa: E402
+
 #: Where the historical record lives. Archived planning documents are read for
 #: *definitions*, because a rule defined there still answers a live citation,
 #: but their own citations are not held to leg c: the ruling everywhere else in
@@ -82,6 +89,18 @@ SELF = "tests/test_rule_registry.py"
 
 #: Where the skills live, and the only scope leg b reads.
 SKILLS = "skills/"
+
+#: The module the code rules' checkers are declared in, as the index names
+#: it. `test_a_code_health_subject_states_the_current_ceiling` selects rows by
+#: this prefix rather than by a list of ids, so a fifth code-health row is
+#: held to the same agreement the day it lands.
+CODE_HEALTH = "tests/test_code_health.py"
+
+#: How a subject states a ceiling: the constant's name in a code span, then
+#: its value, `` `LENGTH_CEILING`, 50 ``. Both halves are required, because
+#: a name alone leaves the reader to go and look, and a number alone is a
+#: number nothing can check.
+STATED_CEILING = re.compile(r"`([A-Z][A-Z_]*)`, (\d+)\b")
 
 #: Where the suites live. A checker declared under here *is* the enforcement,
 #: rather than the code an enforcement reads, and leg d binds the two shapes to
@@ -990,6 +1009,45 @@ can execute, and `MUTATIONS` below has to carry it as code.""")
 A registry row is missing a field a consumer reads.
 
 {_lines(wrong)}""")
+
+    def test_a_code_health_subject_states_the_current_ceiling(self):
+        """The number in a subject is a copy of a constant, and it is held to it.
+
+        A code-health row names its ceiling twice: by the constant's name,
+        which a reader can follow, and by its value, which the reader needs
+        beside the row and which nothing resolves for them. Two copies of one
+        number is the drift this item exists to end, and `bin/sd_rules.py`
+        cannot import the test module the constant lives in. So the value is
+        read back off `tests/test_code_health.py` here: every `` `NAME`, N ``
+        pair in the subject of a row whose checker is in that file names one
+        of its integer constants and states its current value, and a
+        code-health row that states no ceiling at all fails too.
+        """
+
+        wrong = []
+        for rule in sd_rules.RULES:
+            if not (rule.checker or "").startswith(f"{CODE_HEALTH}::"):
+                continue
+            pairs = STATED_CEILING.findall(rule.subject)
+            if not pairs:
+                wrong.append(f"{rule.id}: the subject states no ceiling")
+            for name, stated in pairs:
+                current = getattr(code_health, name, None)
+                if not isinstance(current, int):
+                    wrong.append(f"{rule.id}: `{name}` is not an integer "
+                                 f"constant of {CODE_HEALTH}")
+                elif int(stated) != current:
+                    wrong.append(f"{rule.id}: the subject states `{name}` "
+                                 f"as {stated}, and {CODE_HEALTH} has "
+                                 f"{current}")
+        self.assertEqual(wrong, [], f"""
+A code-health row's subject disagrees with the ceiling it names.
+
+{_lines(wrong)}
+
+The subject carries the number so a reader at the row has it; the constant in
+`{CODE_HEALTH}` is the one that enforces. Change the subject, never the
+constant: a ceiling moves in its own change, with its baseline.""")
 
     def test_no_consumer_carries_a_second_list(self):
         """A rule id written as data outside the registry is a second list.
