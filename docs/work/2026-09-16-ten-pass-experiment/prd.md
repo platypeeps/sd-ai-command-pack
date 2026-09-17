@@ -97,8 +97,9 @@ over the ten.
   `claude-json` is the temporary mitigation. `claude-json` is a reader, not a
   reviewer entry: the entry is `claude` (`providers.yaml`, the `providers`
   map), and that is the name a note's `reviewer entry` field would take.
-  Whether such a review is a pass of this experiment is the open owner
-  question in `design.md`; when Claude authored the pull request it is not.
+  Such a review is not a pass of this experiment: the owner named Codex the
+  other vendor on 2026-09-17 (`design.md`, Decisions), so only a `codex`
+  review counts.
 
 ## Log
 
@@ -125,3 +126,6 @@ over the ten.
   the `estimate` form, and the Problem's row count is dated. Verification
   round at c012a736, one finding folded: the re-record rule names the
   counted set, current notes only, a superseded note excluded by id.
+- 2026-09-17 owner: the other vendor is Codex. `design.md` records it as a
+  decision and drops the risk that summed Codex with a recovered vendor;
+  implement step 2's note on sd:777 is still to be written.
