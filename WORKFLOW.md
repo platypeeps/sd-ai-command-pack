@@ -273,13 +273,9 @@ minimum of one review. Tier selection still follows repository policy.
                  roles: [reviewer], max_tokens: 16384, price: { in: 0, out: 0 } }
       baseten: { url: "https://inference.baseten.co/v1", model: deepseek-ai/DeepSeek-V4-Pro-0813, vendor: deepseek,
                  bill: baseten, roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 } }
-      exo:     { url: "http://localhost:52415/v1", model: "<pinned>", vendor: local, bill: local,
-                 roles: [author, reviewer], enabled: false, reason: "model not pinned" }
-      # Shipped disabled: the local model is not pinned. A disabled entry
-      # never resolves.
     roles:
       author:   [claude, codex]
-      reviewer: [codex, claude, minimax, kimi, baseten, exo]
+      reviewer: [codex, claude, minimax, kimi, baseten]
 
 A capped bill takes `url` entries only, because the library makes those
 calls and can refuse one before it is sent; a `start` entry on a capped
