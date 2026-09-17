@@ -1341,5 +1341,53 @@ class Enumeration(unittest.TestCase):
             self.assertNotIn(root / "f.txt", tracked("bin"))
 
 
+#: The two `Makefile` variables that name what Ruff and mypy read, as the
+#: text of their assignment lines. `$(LINT_BIN)` expands to `git ls-files`
+#: and enumerates itself; every other token is a literal path that has to be
+#: in the tree, or the linters are pointed at nothing and fail on the path.
+LINT_PATH_VARIABLES = ("LINT_RUFF_PATHS", "LINT_MYPY_PATHS")
+
+
+def lint_path_literals() -> dict[str, list[str]]:
+    """Each lint variable's literal tokens, read off the `Makefile` as text.
+
+    Read rather than run: `make -s lint-ruff-paths` would print the expanded
+    list, which hides the literal `dashboard` behind three hundred tracked
+    `bin/` names, and the question here is what the file says, not what make
+    resolves it to on this machine.
+    """
+
+    text = (REPO_ROOT / "Makefile").read_text(encoding="utf-8")
+    found = {}
+    for name in LINT_PATH_VARIABLES:
+        match = re.search(rf"^{name}\s*:=\s*(.*)$", text, re.M)
+        assert match, f"Makefile has no {name} line"
+        found[name] = [token for token in match.group(1).split()
+                       if not token.startswith("$(")]
+    return found
+
+
+class LintPaths(unittest.TestCase):
+    """The `Makefile`'s lint paths name trees that exist (sd:719 step 7).
+
+    `LINT_RUFF_PATHS` and `LINT_MYPY_PATHS` named `dashboard` until the
+    directory was deleted; a literal left behind fails `make check` on a path
+    Ruff cannot open. The module docstring of `tests/test_loc_caps.py` called
+    the hand-kept lint list the trap this repository still carries, and this
+    is the check that a name in it is at least a name in the tree.
+    """
+
+    def test_every_literal_lint_path_is_in_the_tree(self):
+        for name, literals in lint_path_literals().items():
+            with self.subTest(variable=name):
+                self.assertTrue(literals, f"{name} names no literal path")
+                missing = [token for token in literals if not tracked(token)]
+                self.assertEqual(
+                    missing, [],
+                    f"{name} names a path with no tracked file under it: "
+                    f"{missing}. Ruff and mypy are handed that path by `make "
+                    f"check` and by the lint job; drop it from the Makefile.")
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

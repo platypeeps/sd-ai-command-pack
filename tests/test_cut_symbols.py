@@ -125,6 +125,50 @@ class SweepCut(unittest.TestCase):
             self.assertTrue(callable(getattr(sd_lib, name, None)), f"sd_lib.{name} is missing")
 
 
+#: The pack dashboard, cut at sd:719 step 7, and what went before it. The
+#: package `dashboard/` and its CLI `bin/sd-dashboard` left the tree in one
+#: commit with the ceilings on them; the tracker index and its clients went at
+#: step 4, and their test modules with them. Directories are pathspecs here,
+#: so a file restored anywhere under `dashboard/` surfaces, not only one the
+#: list happens to name. Asserted from the index and the filesystem, never
+#: from a string the author already knew: a file restored on its own is red.
+RETIRED_DASHBOARD = (
+    "dashboard",
+    "bin/sd-dashboard",
+    "bin/sd-trackers",
+    "tests/test_sd_dashboard.py",
+    "tests/test_sd_trackers.py",
+    "tests/test_sd_dashboard_index.py",
+    "tests/test_dashboard_sessions.py",
+    "tests/test_dashboard_skills.py",
+    "tests/test_dashboard_now.py",
+    "tests/test_dashboard_work.py",
+    "tests/test_dashboard_deliver.py",
+    "tests/test_dashboard_actions.py",
+)
+
+
+class DashboardCut(unittest.TestCase):
+    """sd:719 step 7: `dashboard/` and `bin/sd-dashboard` are not in the tree.
+
+    The census `tests/test_sd_dashboard.py` kept until step 7 asserted each
+    retired module by name while the package still stood; with the package
+    gone the pathspec is the directory, and the CLI and the test modules are
+    listed beside it. An importer of the package needs no row here: mypy over
+    `bin/` reports `import-not-found` for a module that is not there, and a
+    test module importing it fails at collection.
+    """
+
+    def test_the_dashboard_and_its_cli_are_not_in_the_tree(self) -> None:
+        listed = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "--deduplicate", "--", *RETIRED_DASHBOARD],
+            capture_output=True, text=True, check=True,
+        ).stdout.split()
+        self.assertEqual(listed, [], f"still tracked: {listed}")
+        present = [path for path in RETIRED_DASHBOARD if (REPO_ROOT / path).exists()]
+        self.assertEqual(present, [], f"still on disk: {present}")
+
+
 #: Every site under `bin` and `dashboard` that reads the `parked` or
 #: `archived` field, as `path` and the line's text. `bin/sd_lib.py` builds the
 #: item; everything else is `bin/sd-status` (the `--parked` flag, the parked

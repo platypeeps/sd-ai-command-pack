@@ -134,6 +134,7 @@ import io
 import pathlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import tokenize
 import unittest
@@ -697,6 +698,28 @@ class LineCountCaps(unittest.TestCase):
             f"{upward + downward} of them changed the number ({upward} up, "
             f"{downward} down). A row that moves nothing is a move nobody made.",
         )
+
+    def test_the_three_retired_ceilings_are_history_and_not_constants(self) -> None:
+        """sd:719 step 7: the dashboard ceilings retired the way `BIN_CAP` did.
+
+        `CEILING_HISTORY` holds exactly the three closed records -- `BIN_CAP`
+        from R11-D48, `DASHBOARD_CAP` and `DASHBOARD_CODE_CAP` from step 7 --
+        and none of the three names, nor `DASHBOARD_CODE_SLACK`, is a
+        module-level constant any more. Read off this module rather than
+        recited, so a constant restored beside its history is red here, and
+        a history row dropped with its constant is red too: the history is
+        the evidence each retirement was argued from.
+        """
+
+        self.assertEqual(
+            sorted(CEILING_HISTORY), ["BIN_CAP", "DASHBOARD_CAP", "DASHBOARD_CODE_CAP"])
+        module = sys.modules[__name__]
+        live = [name for name in ("BIN_CAP", "DASHBOARD_CAP", "DASHBOARD_CODE_CAP",
+                                  "DASHBOARD_CODE_SLACK") if hasattr(module, name)]
+        self.assertEqual(
+            live, [],
+            f"a retired ceiling is a constant again: {live}. Its history stays in "
+            f"CEILING_HISTORY as a closed record; the constant does not come back.")
 
     def test_the_code_measure_does_not_count_prose_as_code(self) -> None:
         """The measure is the cap, so a measure that drifts is a cap that lies.
