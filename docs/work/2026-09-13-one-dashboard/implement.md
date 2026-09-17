@@ -497,14 +497,15 @@ before starting step 2.
       offered "or the operator uses `sd work deliver` from the CLI" as the fallback
       — **and there is no `work` verb in `bin/sd`.** Measured: `bin/sd` names
       `deliver` nowhere outside a docstring at `bin/sd:6`, so that fallback was a
-      verb this plan invented. The successor is therefore the system page's own
-      control, built in this step's **system** commit, and the pack commit does not
-      start until it exists. Acceptance is mechanical and it is listed in the
-      verification below: a delivery made through the successor writes a
-      `status_change` note naming `DELIVERED_BY` (in `dashboard/work.py`, retired at sd:719 step 6). If the
-      decision is instead to build a CLI verb, that verb is a prerequisite item and
-      this step waits on it; what it may not be is undecided at the moment
-      `work.py` is deleted.
+      verb this plan invented -- until #802 landed it (see the landing paragraph
+      below). The successor is that CLI verb, `sd work deliver <item> <full-sha>`
+      (`source:bin/sd_work.py`), and the pack commit does not start until it
+      exists. Acceptance is mechanical and it is listed in the verification
+      below: a delivery made through the successor writes a `status_change`
+      note reading `delivered at <commit> on <ref>` through
+      `sd_db.progress.deliver_work`, whose `who=` names the deliverer; the
+      system commit builds no page control, and `DELIVERED_BY` (in
+      `dashboard/work.py`, retired at sd:719 step 6) retires with the file.
 
       **6a. The capture form's followup path, in this step's system commit.**
       sd:730 closed on 2026-09-16 (its note 2527), and its owner decision (note
@@ -521,9 +522,9 @@ before starting step 2.
       Verify: `band` (in `dashboard/app.js`)'s severity mapping is reproduced on
       the system page, asserted against the same rank numbers; a fixture
       collector that exits non-zero produces a visible row in the merged view;
-      and `deliver`'s chosen successor — the system control this step's system
-      commit builds, per the prerequisite above — still records a `status_change`
-      note naming `DELIVERED_BY` (in `dashboard/work.py`, retired at sd:719 step 6).
+      and `deliver`'s chosen successor -- the CLI verb `sd work deliver`, per the
+      prerequisite above -- still records a `status_change` note reading
+      `delivered at <commit> on <ref>`.
 
       **Landed as system pull request #428, squash `e43444f5`, then the pack
       deletion, this pull request.** The capture was taken
