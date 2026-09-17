@@ -1355,6 +1355,110 @@ def review_depth(plan: sd_route.Plan, challenge: bool, scope: str) -> int:
     return plan.depth
 
 
+#: The vendor's two windows, in the minutes `sd_db.meter.sample` keys a row
+#: by, each with the name the refusal renders. The first is also how old the
+#: newest reading may be before the bill is capped as stale.
+METER_WINDOWS = ((300, "five-hour"), (10080, "weekly"))
+METER_TIMEOUT_SECONDS = 30
+
+
+def _meter_refusal(registry: sd_registry.Registry, name: str, bill: sd_registry.Bill, environ: Mapping[str, str]) -> str | None:
+    """Why no request leaves for this bill: the pin, the field, the value."""
+    refusal = sd_registry.refuse_meter(bill)
+    if refusal is None and not bill.meter_env:
+        refusal = (f"bill {name!r} carries meter: and no meter_env:, so no variable names the key "
+                   f"the reading sends; add meter_env beside meter in {registry.path}")
+    if refusal is None and not environ.get(str(bill.meter_env), ""):
+        refusal = f"bill {name!r} has no value for {bill.meter_env} in this environment"
+    return refusal
+
+
+def _meter_fetch(registry: sd_registry.Registry, name: str, bill: sd_registry.Bill, environ: Mapping[str, str],
+                 reader: sd_registry.Meter, connection: Any, meter: Any) -> tuple[str | None, str | None]:
+    """The GET, and a good answer written as two rows per enabled entry on
+    the bill. Returns the line that caps the bill, or the fault that wrote
+    nothing; one at most, and neither for an answer that was written."""
+    try:
+        code, body, detail, launched = reader(bill, environ, METER_TIMEOUT_SECONDS)[:4]
+    except OSError as error:
+        code, body, detail, launched = 1, "", str(error), False
+    if code != 0 or not launched:
+        return None, f"the meter reading for {name} failed and nothing was written: {detail}"
+    percents = sd_registry.meter_percents(body)
+    if isinstance(percents, str):
+        return f"{name}'s meter answer was not written: {percents}", None
+    try:
+        for provider in registry.providers.values():
+            if provider.enabled and provider.bill == name:
+                for (window, _), remaining in zip(METER_WINDOWS, percents, strict=True):
+                    meter.sample(connection, provider=provider.name, window_minutes=window, used_percent=100 - remaining)
+    except Exception as error:  # the library's refusals are several classes; the rows there decide
+        return None, f"the meter rows for {name} were not written: {error}"
+    return None, None
+
+
+def _meter_line(connection: Any, meter: Any, name: str, now: str) -> str | None:
+    """The newest row per window: none, stale, or at zero caps the bill."""
+    for window, label in METER_WINDOWS:
+        row = meter.latest(connection, bill=name, window_minutes=window)
+        if row is None:
+            return f"no meter reading for {name}"
+        # Whole minutes, by the same clock and in the same shape the row was written.
+        age = int(connection.execute("SELECT CAST((julianday(?) - julianday(?)) * 1440 AS INTEGER)",
+                                     (now, row["timestamp"])).fetchone()[0])
+        if age > METER_WINDOWS[0][0]:
+            return f"{name}'s newest reading is {age} minutes old, older than its five-hour window"
+        if row["used_percent"] >= 100:
+            return f"{name}'s {label} window reads 0 percent remaining (read at {row['timestamp']})"
+    return None
+
+
+def metered_bills(
+    registry: sd_registry.Registry, ledger: Ledger, environ: Mapping[str, str],
+    reader: sd_registry.Meter, *, live: bool,
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Bill name to line for every bill with a `meter:` whose reading caps
+    it, and bill name to the sentence for a reading that failed.
+
+    Per bill, in order (sd:788 slice 4, `design.md`, the meter): the pin and
+    the key, refused before any request; when `live`, the GET, and a good
+    answer written as two `meter` rows per enabled entry on the bill before
+    anything is read back, so a run never classifies on the reading before
+    its own refresh; then the newest row per window. A window at zero, no
+    row, or a newest row older than the five-hour window caps the bill
+    naming which. A GET that fails writes nothing and names itself in the
+    second map, and the rows already there decide. `--explain` and
+    `--dry-run` are not `live`: they classify on the stored rows alone. With
+    no ledger to ask, every metered bill is listed with the fault as its
+    line, as `capped_bills` lists every capped one: unknown is not uncapped.
+    """
+    lines: dict[str, str] = {}
+    faults: dict[str, str] = {}
+    metered = {name: bill for name, bill in sorted(registry.bills.items()) if bill.meter is not None}
+    if not metered:
+        return lines, faults
+    try:
+        connection = ledger.writable()
+    except Refusal as error:
+        return {name: str(error) for name in metered}, faults
+    meter = ledger.library.meter
+    if not hasattr(meter, "latest"):
+        # A provisioned copy older than sd:788's 4a can write a row and not read one back.
+        return {name: "the provisioned sd_db has no meter.latest; provision the updated library" for name in metered}, faults
+    with contextlib.closing(connection):
+        for name, bill in metered.items():
+            line = _meter_refusal(registry, name, bill, environ)
+            if line is None and live:
+                line, fault = _meter_fetch(registry, name, bill, environ, reader, connection, meter)
+                if fault is not None:
+                    faults[name] = fault
+            if line is None:
+                line = _meter_line(connection, meter, name, ledger.library.writes.now())
+            if line is not None:
+                lines[name] = line
+    return lines, faults
+
+
 def review(
     root: pathlib.Path,
     args: argparse.Namespace,
@@ -1362,6 +1466,7 @@ def review(
     env: Mapping[str, str],
     codex_auth_home: pathlib.Path | None = None,
     client: sd_registry.Client | None = None,
+    meter: sd_registry.Meter | None = None,
 ) -> dict[str, Any]:
     """The pipeline. Returns one result object; prints nothing."""
 
@@ -1450,6 +1555,12 @@ def review(
     # month's total; a fault names itself the same way on every capped bill.
     ledger = open_ledger(env, getattr(args, "database", None), registry)
     capped = capped_bills(registry, ledger)
+    # The meter beside the cap, into the same map, so the chain and the pick
+    # refuse a metered bill by name exactly as they refuse a capped one.
+    metered, meter_faults = metered_bills(registry, ledger, env, meter or sd_registry.meter_reading,
+                                          live=not (args.explain or args.dry_run))
+    for name, line in metered.items():
+        capped.setdefault(name, line)
     chain = sd_registry.reviewer_chain(
         registry, consent=consent, author_vendors=vendors, capped_bills=capped, readers=READERS
     )
@@ -1519,6 +1630,7 @@ def review(
         "chain": [candidate.row for candidate in chain],
         "capped_bills": capped,
         "ledger_fault": ledger.fault,
+        "meter_faults": meter_faults,
         "codex_preflight": codex_preflight_state(codex_auth_home or codex_home(env)),
         "scrubbed_env_names": list(scrubbed_names(env)),
         "posted": False,

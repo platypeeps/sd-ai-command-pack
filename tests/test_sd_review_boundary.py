@@ -376,11 +376,18 @@ class LineBudgetTests(unittest.TestCase):
         # The library is reached through `sd_lib.import_sd_db`, which the
         # lane already called, and not `sd_handoff_rows`, whose 162 lines
         # would otherwise join the lane for one function.
+        #
+        # 2318 -> 2430 is sd:788 slice 4. `metered_bills` reads the minimax
+        # meter at review start -- the pinned GET, two `meter` rows per
+        # enabled entry, the newest row per window -- and a zero, missing or
+        # stale window joins the same map as the capped bills, so the chain
+        # and the pick refuse it unchanged; `--explain` and `--dry-run` read
+        # the rows and send nothing.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2318,
+            2430,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

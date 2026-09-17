@@ -79,7 +79,7 @@ Four slices, in this order. Slice 1 is not this repository's.
       `TheCostRows`. The review lane ratchet in
       `tests/test_sd_review_boundary.py` moves 2149 to 2318 with the reason
       beside the number.
-- [ ] 4. OWNER ONLY, the fixture half done: one live
+- [x] 4. OWNER ONLY, the fixture half done: one live
       `GET https://www.minimax.io/v1/token_plan/remains` with the operator's
       key, recorded as `tests/fixtures/minimax/token_plan_remains.json` in
       #1001 (`f39f120a`).
@@ -110,6 +110,40 @@ Four slices, in this order. Slice 1 is not this repository's.
       reservation whose pid is dead is swept by `release_orphans` at the
       next `review` start, asserted by writing the row with a pid that does
       not exist and reading `exposure` before and after.
+      The reader half landed 2026-09-17 on `feat/sd-788-slice4-minimax-meter`
+      from `e60a476c`, after the system's `sd_db.meter.latest` (4a, system
+      `f6761300`, pinned by #1027). `Bill.meter_env` is read as one variable
+      name; `METER_PIN`, `refuse_meter`, `meter_reading` and `meter_percents`
+      in `bin/sd_registry.py`; `metered_bills` in `bin/sd-review` beside
+      `capped_bills`, merged into the one map the chain and the pick already
+      refuse from, so `reviewer_chain`, `pick`, `capped_bills` and
+      `charged_call` are unchanged. `grep -c token_plan bin/sd_registry.py`
+      is 0 at `e60a476c` and 2 after. Three owner decisions (note 2694,
+      2026-09-17) shape it, each a deviation from the step or `design.md`
+      as written and measured: (1) a bill row with `meter:` and no
+      `meter_env:` reads without refusal and the meter step caps the bill
+      naming the missing field, not the read-time refusal `design.md`
+      named, because a reinstall never rewrites the operator's
+      `providers.yaml` (`providers.yaml` says so in its header) and a
+      read-time refusal would refuse every review after an upgrade until
+      the file was hand-edited; (2) `--explain` and `--dry-run` send no
+      `GET` and classify on the stored rows, `latest` per window; (3) the
+      rows name every enabled registry entry billed to the metered bill,
+      through `sample` per entry, one today. Two further deviations,
+      measured: the library's `sd_db.registry.Bill` at `f6761300` still
+      does not carry `meter_env` (`Bill.__dataclass_fields__` names four
+      fields), so `read` in `bin/sd_registry.py` fills it from the file when
+      the library's bill lacks the attribute, and the existing
+      both-readers equality test covers the fill; and `metered_bills`
+      returns two maps, the lines and the faults, since the step's one map
+      has no place for a `GET` that failed, which the result carries as
+      `meter_faults` beside `ledger_fault`. The stale rule is the five-hour
+      window's 300 minutes, measured from the library's clock. The tests
+      are `tests/test_sd_review_meter.py` (17) and `TheMeterPin`,
+      `TheMeterAnswer` and `TheMeterEnvField` in `tests/test_sd_registry.py`;
+      red on the base was `FAILED (errors=18)` and `FAILED (errors=15)`,
+      then `OK`. The review lane ratchet in `tests/test_sd_review_boundary.py`
+      moves 2318 to 2430 with the reason beside the number.
 - [x] 3a. Beside slice 3: a `url` entry on a capped bill without `price.in`,
       `price.out` or `max_tokens`, or with a value that is not a finite
       non-negative number (a string, NaN, a negative), is refused at registry
@@ -119,7 +153,10 @@ Four slices, in this order. Slice 1 is not this repository's.
       path is refused naming the value and the pinned four, and the reader
       sends no request, with the same-host `http://` value as one of the
       cases; and a `meter_env` test: a bill with `meter:` and no
-      `meter_env:` is refused at registry read naming the bill.
+      `meter_env:` reads, and the meter step caps the bill naming the
+      missing field and sends nothing (owner decision 2026-09-17, note
+      2694, landed in step 4; the read-time refusal this step first
+      asked for is superseded).
       Landed 2026-09-16 for the bound's inputs: `refuse_unbounded` in
       `bin/sd_registry.py`, called from `_provider` on the file and from
       `_adapt` on the merged rows, with `TheBoundsInputs` in
@@ -152,7 +189,9 @@ Four slices, in this order. Slice 1 is not this repository's.
   fail on the unwired code and pass on the wired one. Measured 2026-09-16
   on the slice: 5, 5 and 1.
 - Slice 4, before the work: `git grep -l token_plan -- bin tests` lists no
-  file; after, it lists the reader and its test.
+  file; after, it lists the reader and its test. Measured 2026-09-17: none
+  at `e60a476c`; on the slice, `bin/sd_registry.py`,
+  `tests/test_sd_registry.py` and `tests/test_sd_review_meter.py`.
 - Every slice: `make check` rc 0 with 0 `FAILED`/`ERROR`, and `bin/sd-docs-lint`
   ends `sd-docs-lint: clean`.
 - Not verifiable here: the live meter call (slice 4, owner only) and the

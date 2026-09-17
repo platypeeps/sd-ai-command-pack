@@ -114,7 +114,9 @@ missing, not a number (a string, a boolean, NaN, an infinity) or outside 0
 to 100, and the bill is capped naming the field and the value, and no row
 is written for that answer; one edited copy of the recorded fixture per
 case is the test. A good answer is written as two `meter` rows, one per
-window, and fallthrough treats a zero window as a capped bill. `meter:` is
+window, for every enabled entry billed to the bill (owner decision
+2026-09-17, note 2694; `sample` keys a row by provider), and fallthrough
+treats a zero window as a capped bill. `meter:` is
 a field of the bill row (`Bill.meter` in `bin/sd_registry.py`,
 `bills.minimax` in `providers.yaml`), not of a provider entry, so the
 lookup is keyed through the provider's bill. The value is today an
@@ -131,7 +133,10 @@ redirect. The credential is the bill's, not a provider's: a metered bill
 names the environment variable holding its key in a `meter_env:` field
 beside `meter:` on the bill row (`bills.minimax.meter_env: MINIMAX_API_KEY`),
 validated as one name the way an entry's `env` is, and a bill with `meter:`
-and no `meter_env:` is refused at registry read naming the bill. On the
+and no `meter_env:` reads, and is capped at the meter step naming the
+missing field (owner decision 2026-09-17, note 2694: a reinstall never
+rewrites the operator's `providers.yaml`, so a read-time refusal would
+refuse every review after an upgrade until the file was hand-edited). On the
 bill row rather than "the `url` entry billed to it" because the registry
 lets several entries share one bill, an entry can be disabled or repointed,
 and a credential chosen by registry order is a credential chosen by
@@ -143,7 +148,9 @@ written as the two rows before any window is read, and the classification
 reads the rows just written, so a run never classifies on the reading
 before its own refresh. A `GET` that fails writes nothing, says so in the
 run's output, and the classification reads the newest prior rows, under
-the rule below. The fixture is one recorded answer, taken by the owner
+the rule below. `--explain` and `--dry-run` send no `GET` and classify on the
+stored rows alone (owner decision 2026-09-17, note 2694). The fixture is
+one recorded answer, taken by the owner
 with the operator's key, landed as
 `tests/fixtures/minimax/token_plan_remains.json` in #1001; no test calls
 the endpoint. A metered bill with no row, or whose newest row is older
@@ -172,6 +179,10 @@ window, naming the missing or stale reading: unknown is not uncapped.
   text model under another `model_name`.
 - 2026-09-16, this plan: the `SD_AUTHOR` clauses are cut, the `slice_base` and
   session `authors` clauses stay open. Reversed by an owner note.
+- 2026-09-17, owner, note 2694: `meter:` without `meter_env:` reads and is
+  capped at the meter step, not refused at read; `--explain` and `--dry-run`
+  send no `GET` and read the stored rows; the rows name every enabled entry
+  on the metered bill. Reversed by an owner note.
 
 ## Risks
 

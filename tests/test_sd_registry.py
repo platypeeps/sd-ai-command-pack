@@ -1421,5 +1421,128 @@ class StandingReviewConsentTests(unittest.TestCase):
                 sd_registry.pick(registry, entry.name, consent=consent, readers=("codex-json",))
 
 
+# sd:788 slice 4: the meter, pinned to one destination and read fail-closed
+
+RECORDED_METER = REPO_ROOT / "tests" / "fixtures" / "minimax" / "token_plan_remains.json"
+PINNED_METER = "https://www.minimax.io/v1/token_plan/remains"
+
+
+def metered_bill(meter: str = PINNED_METER, meter_env: str | None = "METER_KEY") -> sd_registry.Bill:
+    return sd_registry.Bill(name="minimax", cost_basis="plan", meter=meter, meter_env=meter_env)
+
+
+class TheMeterPin(Wire):
+    """`meter_reading` sends the bill's key to the pinned destination and to
+    nothing else; the recorder is where a request would have left from."""
+
+    def test_the_pinned_value_is_one_get_with_the_bills_key(self) -> None:
+        self.answer = _Answer(RECORDED_METER.read_text(encoding="utf-8"))
+        code, body, stderr, launched, _ = sd_registry.meter_reading(metered_bill(), {"METER_KEY": "secret"}, 30)
+        self.assertEqual((code, stderr, launched), (0, "", True))
+        self.assertIn("model_remains", body)
+        request = self.sent[0]
+        self.assertEqual((request.full_url, request.get_method()), (PINNED_METER, "GET"))
+        self.assertEqual(request.get_header("Authorization"), "Bearer secret")
+        self.assertIsNone(sd_registry.refuse_meter(metered_bill()))
+
+    def test_any_other_scheme_host_port_or_path_is_refused_naming_the_value_and_the_four(self) -> None:
+        for value, part in (
+            ("https://other.example.test/v1/token_plan/remains", "host"),
+            ("http://www.minimax.io/v1/token_plan/remains", "scheme"),
+            ("https://www.minimax.io:8443/v1/token_plan/remains", "port"),
+            ("https://www.minimax.io/v1/other", "path"),
+            ("https://www.minimax.io/v1/token_plan/remains?to=elsewhere", "path"),
+        ):
+            with self.subTest(value=value):
+                code, _, stderr, launched, _ = sd_registry.meter_reading(metered_bill(value), {"METER_KEY": "secret"}, 30)
+                self.assertEqual((code, launched), (1, False))
+                self.assertEqual(stderr, sd_registry.refuse_meter(metered_bill(value)))
+                self.assertIn(value, stderr)
+                self.assertIn(f"whose {part} is not", stderr)
+                for pinned in ("'https'", "'www.minimax.io'", "no explicit port", "'/v1/token_plan/remains'"):
+                    self.assertIn(pinned, stderr)
+                self.assertEqual(self.sent, [], "a meter off the pin sends nothing")
+
+    def test_no_meter_env_or_no_value_sends_nothing(self) -> None:
+        for bill, environ, named in ((metered_bill(meter_env=None), {"METER_KEY": "secret"}, "no meter_env:"),
+                                     (metered_bill(), {}, "no value for METER_KEY")):
+            with self.subTest(named=named):
+                code, _, stderr, launched, _ = sd_registry.meter_reading(bill, environ, 30)
+                self.assertEqual((code, launched), (1, False))
+                self.assertIn(named, stderr)
+                self.assertEqual(self.sent, [])
+
+    def test_a_connection_failure_is_not_an_answer(self) -> None:
+        self.answer = urllib.error.URLError("connection refused")
+        code, body, stderr, launched, status = sd_registry.meter_reading(metered_bill(), {"METER_KEY": "secret"}, 30)
+        self.assertEqual((code, body, launched, status), (1, "", False, None))
+        self.assertIn("connection refused", stderr)
+
+
+class TheMeterAnswer(unittest.TestCase):
+    """`meter_percents` over the one recording, edited in memory per case:
+    the fixture directory stays one file, and each case names what it broke."""
+
+    def setUp(self) -> None:
+        self.recorded = RECORDED_METER.read_text(encoding="utf-8")
+
+    def edited(self, **changes: Any) -> str:
+        """The recording with `general`'s fields changed; `absent=<field>` drops one."""
+        answer = json.loads(self.recorded)
+        general = next(entry for entry in answer["model_remains"] if entry["model_name"] == "general")
+        for key, value in changes.items():
+            if key == "absent":
+                del general[value]
+            else:
+                general[key] = value
+        return json.dumps(answer)
+
+    def test_the_recording_reads_as_both_percents_of_the_general_entry(self) -> None:
+        self.assertEqual(sd_registry.meter_percents(self.recorded), (100.0, 100.0))
+        self.assertEqual(sd_registry.meter_percents(self.edited(current_interval_remaining_percent=0)), (0.0, 100.0))
+
+    def test_no_general_entry_or_two_caps_naming_the_count(self) -> None:
+        self.assertEqual(sd_registry.meter_percents(self.edited(model_name="video")),
+                         "model_remains carries 0 'general' entries, not one")
+        answer = json.loads(self.recorded)
+        answer["model_remains"].append(dict(answer["model_remains"][0]))
+        self.assertEqual(sd_registry.meter_percents(json.dumps(answer)),
+                         "model_remains carries 2 'general' entries, not one")
+
+    def test_each_field_is_validated_naming_the_field_and_the_value(self) -> None:
+        for field in sd_registry.METER_FIELDS:
+            with self.subTest(field=field, value="missing"):
+                self.assertEqual(sd_registry.meter_percents(self.edited(absent=field)), f"{field} is missing")
+            for value in ("50", True, float("nan"), float("inf"), -1, 101):
+                with self.subTest(field=field, value=value):
+                    sentence = sd_registry.meter_percents(self.edited(**{field: value}))
+                    self.assertEqual(sentence, f"{field} is {value!r}, not a number from 0 to 100")
+
+    def test_an_answer_that_is_not_the_shape_is_one_sentence(self) -> None:
+        self.assertEqual(sd_registry.meter_percents("not json"), "the answer is not JSON")
+        self.assertEqual(sd_registry.meter_percents('{"base_resp": {}}'), "the answer carries no model_remains list")
+
+
+class TheMeterEnvField(unittest.TestCase):
+    """`meter_env` on the bill row, read as one variable name by both readers,
+    and a `meter:` without it read without refusal (sd:788 note 2694)."""
+
+    def test_the_shipped_minimax_bill_names_its_key_through_both_readers(self) -> None:
+        for prefer_library in (False, True):
+            with self.subTest(prefer_library=prefer_library):
+                bill = sd_registry.read(SHIPPED, prefer_library=prefer_library).bills["minimax"]
+                self.assertEqual((bill.meter, bill.meter_env), (PINNED_METER, "MINIMAX_API_KEY"))
+
+    def test_a_meter_without_meter_env_reads_and_a_list_is_refused(self) -> None:
+        def registry(tail: str) -> str:
+            return WITH_DISABLED.replace("free: { cost: local }", f'free: {{ cost: local }}\n  plan: {{ cost: plan, meter: "{PINNED_METER}"{tail} }}')
+
+        self.assertIsNone(sd_registry.parse(registry("")).bills["plan"].meter_env)
+        self.assertEqual(sd_registry.parse(registry(", meter_env: PLAN_KEY")).bills["plan"].meter_env, "PLAN_KEY")
+        with self.assertRaises(sd_registry.RegistryError) as caught:
+            sd_registry.parse(registry(", meter_env: [A, B]"))
+        self.assertIn("'meter_env' of bill 'plan' is ['A', 'B'], which is not a variable name", str(caught.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

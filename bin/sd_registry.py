@@ -83,6 +83,7 @@ class Bill:
     cost_basis: str
     cap_usd_month: float | None = None
     meter: str | None = None
+    meter_env: str | None = None  # the variable holding the meter's key (sd:788)
 
     @property
     def capped(self) -> bool:
@@ -206,7 +207,13 @@ def read(
         if any(not hasattr(provider, key) for provider in registry.providers.values() for key in ("thinking", "reasoning_effort")):
             if any(provider.thinking or provider.reasoning_effort for provider in read_file(target).providers.values()):
                 raise RegistryError("installed sd_db cannot preserve reasoning controls; provision the updated library")
-        return _adapt(registry)
+        # `meter_env` is the file's alone: no row carries it, and a library
+        # whose `Bill` does not name it drops the key, so the meter step would
+        # cap every metered bill for a field the operator wrote (sd:788).
+        meter_envs = None
+        if any(bill.meter is not None and not hasattr(bill, "meter_env") for bill in registry.bills.values()):
+            meter_envs = _file_meter_envs(target)
+        return _adapt(registry, meter_envs)
     except module.RegistryError as error:  # one refusal vocabulary, not two
         raise RegistryError(str(error)) from None
 
@@ -257,12 +264,14 @@ def read_runtime(target: Path, *, home: Path | str | None = None, database_path:
         raise RegistryError(f"cannot read provider state at {database_path}: {error}") from None
 
 
-def _adapt(registry: Any) -> Registry:
+def _adapt(registry: Any, meter_envs: Mapping[str, str | None] | None = None) -> Registry:
     """`sd_db`'s registry in this module's shapes.
 
     The two carry the same fields by construction; converting rather than
     re-exporting means one caller-visible type, so a caller cannot come to
-    depend on whichever one the machine happened to produce.
+    depend on whichever one the machine happened to produce. `meter_envs`
+    is the file's `meter_env` per bill, handed in by `read` when the
+    library's `Bill` does not carry the field.
     """
     # The rows can carry a cap the file does not (`sd_db.registry.merge`), so
     # the bound's inputs are checked here as well as in `_provider`: a `url`
@@ -279,6 +288,7 @@ def _adapt(registry: Any) -> Registry:
                 cost_basis=bill.cost_basis,
                 cap_usd_month=bill.cap_usd_month,
                 meter=bill.meter,
+                meter_env=getattr(bill, "meter_env", None) if meter_envs is None else meter_envs.get(name),
             )
             for name, bill in registry.bills.items()
         },
@@ -304,6 +314,26 @@ def _adapt(registry: Any) -> Registry:
             for name, provider in registry.providers.items()
         },
     )
+
+
+def _file_meter_envs(target: Path) -> dict[str, str | None]:
+    """`meter_env` per bill, from the file's bills section alone.
+
+    Not `read_file`: that runs every provider check of this reader over a
+    file the library has already accepted, and the two readers do not refuse
+    the same things. The field is typed here as `parse` types it.
+    """
+    try:
+        bills = _document(target.read_text(encoding="utf-8"), target).get("bills", {})
+    except (OSError, RegistryError):
+        return {}
+    found: dict[str, str | None] = {}
+    for name, body in bills.items():
+        value = body.get("meter_env") if isinstance(body, dict) else None
+        if value is not None:
+            _typed(value, str, f"'meter_env' of bill {name!r}", "a variable name", target)
+        found[name] = value
+    return found
 
 
 def read_file(path: Path | str) -> Registry:
@@ -489,15 +519,21 @@ def parse(text: str, path: Path | str = REGISTRY_NAME) -> Registry:
         for key, kind, form in (
             ("cost", str, "a cost basis"),
             ("meter", str, "a meter name"),
+            ("meter_env", str, "a variable name"),
             ("cap_usd_month", (int, float), "an amount"),
         ):
             if body.get(key) is not None:
                 _typed(body[key], kind, f"{key!r} of bill {name!r}", form, path)
+        # `meter:` without `meter_env:` reads: the meter step caps the bill
+        # naming the missing field (owner decision, sd:788 note 2694), since a
+        # reinstall never rewrites the operator's file and a read-time refusal
+        # would refuse every review after an upgrade until it was hand-edited.
         bills[name] = Bill(
             name=name,
             cost_basis=str(body["cost"]),
             cap_usd_month=body.get("cap_usd_month"),
             meter=body.get("meter"),
+            meter_env=body.get("meter_env"),
         )
 
     role_lists: dict[str, list[str]] = {}
@@ -1133,6 +1169,112 @@ def chat_completion(
         # `URLError` and a timeout are both `OSError`; neither is an answer, so
         # neither may read as a quota stop however the message is worded.
         return (1, "", f"{provider.name}: {error}", False, None)
+
+
+# The meter: one pinned GET per metered bill at review start (sd:788 slice 4)
+
+#: The one destination a `meter:` may name: scheme, host, port and path. The
+#: value is a shipped string a live GET would send the bill's key to, so an
+#: edited registry pointing it elsewhere is refused before any request. The
+#: key is named on the bill (`Bill.meter_env`) and not on an entry: several
+#: entries can share one bill, and a credential chosen by registry order is
+#: chosen by accident.
+METER_PIN = ("https", "www.minimax.io", None, "/v1/token_plan/remains")
+#: The `model_remains` entry the text model draws from, and the two fields
+#: read off it: each a remaining percent, and the row stores the share used.
+METER_PLAN = "general"
+METER_FIELDS = ("current_interval_remaining_percent", "current_weekly_remaining_percent")
+
+#: The third seam `bin/sd-review` injects: the reader of the meter, handed a
+#: bill and answering as `chat_completion` does, so a test records what left.
+Meter = Callable[[Bill, Mapping[str, str], int], ClientResult]
+
+
+def refuse_meter(bill: Bill) -> str | None:
+    """A `meter:` that is not the pin, naming the value and the pinned four.
+
+    Compared part by part rather than as one string, so the same-host
+    `http://` value is refused the way `refuse_cleartext` refuses a `url`
+    entry, and a port or a path edit is named as what it is.
+    """
+    if bill.meter is None:
+        return None
+    parts = urlsplit(bill.meter)
+    try:
+        port = parts.port
+    except ValueError:
+        port = -1
+    # A query or a fragment rides on the path: the pin names none.
+    tail = (f"?{parts.query}" if parts.query else "") + (f"#{parts.fragment}" if parts.fragment else "")
+    found = (parts.scheme.lower(), (parts.hostname or "").lower(), port, parts.path + tail)
+    if found == METER_PIN:
+        return None
+    what = ("scheme", "host", "port", "path")[[a != b for a, b in zip(found, METER_PIN, strict=True)].index(True)]
+    return (
+        f"bill {bill.name!r} names meter {bill.meter!r}, whose {what} is not "
+        f"the pinned meter's: scheme 'https', host 'www.minimax.io', no explicit "
+        f"port, path '/v1/token_plan/remains'. No request was sent."
+    )
+
+
+def meter_reading(bill: Bill, environ: Mapping[str, str], timeout: int) -> tuple[int, str, str, bool, int | None]:
+    """GET the pinned meter with the bill's key, in `chat_completion`'s shape.
+
+    Refused before any request when the value is not the pin or no key is
+    named or set. An `OSError` is not an answer: `launched` is False and the
+    caller classifies on the rows it already holds.
+    """
+    refusal = refuse_meter(bill)
+    if refusal is None and not bill.meter_env:
+        refusal = f"bill {bill.name!r} carries meter: and no meter_env:, so no variable names the key the reading sends"
+    if refusal is not None:
+        return (1, "", refusal, False, None)
+    key = environ.get(str(bill.meter_env), "")
+    if not key:
+        return (1, "", f"bill {bill.name!r} has no value for {bill.meter_env}", False, None)
+    request = urllib.request.Request(str(bill.meter), headers={"Authorization": f"{AUTH_SCHEME} {key}"}, method="GET")
+    try:
+        with _OPENER.open(request, timeout=timeout) as answer:
+            status = getattr(answer, "status", None)
+            status = status if type(status) is int and 100 <= status <= 599 else None
+            body = answer.read(MAX_RESPONSE_BYTES + 1)
+            if len(body) > MAX_RESPONSE_BYTES:
+                return (1, body.decode("utf-8", "replace"), "response exceeds the declared byte limit", True, status)
+            return (0, body.decode("utf-8", "replace"), "", True, status)
+    except urllib.error.HTTPError as error:
+        with error:
+            body = error.read(MAX_RESPONSE_BYTES + 1).decode("utf-8", "replace")
+        return (error.code, body, f"HTTP {error.code} from the meter of bill {bill.name!r}", True, error.code)
+    except OSError as error:
+        return (1, "", f"the meter of bill {bill.name!r}: {error}", False, None)
+
+
+def meter_percents(body: str) -> tuple[float, float] | str:
+    """The two remaining percents of the one `general` entry, or the sentence
+    that says why the answer is not one. Fails closed on the count and on
+    each field: missing, a string, a boolean, NaN, an infinity or outside
+    0 to 100 is named with its value, and the caller writes no row.
+    """
+    try:
+        answer = json.loads(body)
+    except ValueError:
+        return "the answer is not JSON"
+    remains = answer.get("model_remains") if isinstance(answer, dict) else None
+    if not isinstance(remains, list):
+        return "the answer carries no model_remains list"
+    plans = [entry for entry in remains if isinstance(entry, dict) and entry.get("model_name") == METER_PLAN]
+    if len(plans) != 1:
+        return f"model_remains carries {len(plans)} {METER_PLAN!r} entries, not one"
+    percents = []
+    for name in METER_FIELDS:
+        if name not in plans[0]:
+            return f"{name} is missing"
+        value = plans[0][name]
+        # `0 <= nan` is False, so NaN falls with the infinities and the range.
+        if type(value) not in (int, float) or not 0 <= value <= 100:
+            return f"{name} is {value!r}, not a number from 0 to 100"
+        percents.append(float(value))
+    return (percents[0], percents[1])
 
 
 # Inline thinking: strip every block, case-insensitively, allowing opening

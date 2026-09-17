@@ -130,8 +130,9 @@ Unasserted halves are named in their rows and are not planned here.
 - [ ] A pinned-meter test: `meter:` naming another scheme (the same-host
       `http://` value among the cases), host, port or path is refused naming
       the value and the pinned four, and no request is sent; a bill with
-      `meter:` and no `meter_env:` is refused at registry read naming the
-      bill.
+      `meter:` and no `meter_env:` reads, and the meter step caps the bill
+      naming the missing field and sends nothing (owner decision 2026-09-17,
+      note 2694; it was a read-time refusal until slice 4).
 - [ ] `grep -rn token_plan bin tests` counts more than 0 after slice 4.
 - [ ] `make check` rc 0, and `bin/sd-docs-lint` ends `sd-docs-lint: clean`.
 
@@ -156,3 +157,9 @@ Unasserted halves are named in their rows and are not planned here.
   and a `url` entry on a capped bill without the bound's inputs is refused
   at read; the two meter tests of 3a move to slice 4, for the reason
   measured on that step.
+- 2026-09-17 slice 4 landed: `sd-review` reads the minimax meter at every
+  start through the pinned `GET`, writes the two percents as `meter` rows
+  per enabled entry on the bill, and a bill whose window reads zero, whose
+  reading is missing or stale, or whose answer is unusable is passed over
+  and refused by name; the owner's three decisions (note 2694) are recorded
+  on step 4 and in `design.md`.
