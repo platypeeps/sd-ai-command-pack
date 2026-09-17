@@ -190,7 +190,7 @@ before starting step 2.
 
       Pack commit: delete `dashboard/plugins.py` (719 lines, 357 code), the
       `plugin-tabs` span and the `plugin-panels` div in `PAGE`
-      (`source:dashboard/server.py::PAGE`), and the loader's rows from the Now merge in
+      (in `dashboard/server.py`, retired at sd:719 step 6), and the loader's rows from the Now merge in
       `dashboard/now.py`.
 
       **The plugin half of `app.js` is `drawPlugins` and `panelId`. It is not
@@ -246,7 +246,7 @@ before starting step 2.
       dashboard's run strip. Step 1 had already stopped serving that page, so
       they were unseen from then; this step removed them from its catalog too,
       which leaves them reachable from no dashboard. The pack commit reduced
-      `catalog` (`source:dashboard/actions.py::catalog`) to `RUN_ALLOWLIST`, so
+      `catalog` (in `dashboard/actions.py`, retired at sd:719 step 6) to `RUN_ALLOWLIST`, so
       `/api/actions` offers `index` alone and a POST naming `sys/queue-blog` is
       a 404. Nothing replaced them, for two reasons: the pack dashboard is not
       served, because step 1 removed `serve`, and no module of the system
@@ -382,7 +382,7 @@ before starting step 2.
       `store` from its import, the `/api/prs` and `/api/issues` routes, the
       two tabs in `PAGE` and the `app.js` views that polled them; the
       `/api/now` payload no longer carries pull request rows, so `pr_rows`
-      (`source:dashboard/now.py::pr_rows`) has no caller until step 6 decides
+      (in `dashboard/now.py`, retired at sd:719 step 6) has no caller until step 6 decides
       Now; `bin/sd` was not touched, because `collect.py` stays; and
       `dashboard/collect.py` lost `refresh_issues`, the one function that
       imported the three modules, which the brief's importer grep did not see
@@ -454,7 +454,7 @@ before starting step 2.
       left, with `checkout_of`) and the walk in `tests/test_sd_dashboard.py`
       now reads `from .<module> import` as naming the module. `/api/now`
       still answers, with no fleet rows and no worktree rows: `backbone_rows`
-      and `session_rows` (`source:dashboard/now.py::session_rows`) join
+      and `session_rows` (in `dashboard/now.py`, retired at sd:719 step 6) join
       `pr_rows` uncalled until step 6 decides Now on the system page, and the
       pack's Now shows the ack filter over an empty merge. `dashboard/actions.py`
       stays whole: its only mention of `/api/state?refresh=1` is the docstring
@@ -482,7 +482,7 @@ before starting step 2.
       `~/deploy-sd-db.sh` are the owner's to read and were not read by this
       commit.
 
-- [ ] **6. The Now ranking, last.** System commit, then pack commit deleting
+- [x] **6. The Now ranking, last.** System commit, then pack commit deleting
       `dashboard/now.py`, `dashboard/actions.py`, `dashboard/work.py`,
       `dashboard/server.py` and `dashboard/app.js`. Last because Now is the merge
       of every source above and cannot be correct until each is in place, and
@@ -491,7 +491,7 @@ before starting step 2.
       never honoured.
 
       **`deliver`'s successor is a prerequisite of this step, not a question left
-      inside it.** `deliver` (`source:dashboard/work.py::deliver`) is one of the two facts the
+      inside it.** `deliver` (in `dashboard/work.py`, retired at sd:719 step 6) is one of the two facts the
       two dashboards share on disk, and it is a **write**; a write path deleted
       without a successor is a capability lost by accident. The earlier draft
       offered "or the operator uses `sd work deliver` from the CLI" as the fallback
@@ -501,7 +501,7 @@ before starting step 2.
       control, built in this step's **system** commit, and the pack commit does not
       start until it exists. Acceptance is mechanical and it is listed in the
       verification below: a delivery made through the successor writes a
-      `status_change` note naming `DELIVERED_BY` (`source:dashboard/work.py::DELIVERED_BY`). If the
+      `status_change` note naming `DELIVERED_BY` (in `dashboard/work.py`, retired at sd:719 step 6). If the
       decision is instead to build a CLI verb, that verb is a prerequisite item and
       this step waits on it; what it may not be is undecided at the moment
       `work.py` is deleted.
@@ -523,7 +523,56 @@ before starting step 2.
       collector that exits non-zero produces a visible row in the merged view;
       and `deliver`'s chosen successor — the system control this step's system
       commit builds, per the prerequisite above — still records a `status_change`
-      note naming `DELIVERED_BY` (`source:dashboard/work.py::DELIVERED_BY`).
+      note naming `DELIVERED_BY` (in `dashboard/work.py`, retired at sd:719 step 6).
+
+      **Landed as system pull request #428, squash `e43444f5`, then the pack
+      deletion, this pull request.** The capture was taken
+      first: at 2026-09-17T00:27:40Z, pack `85c4fa1b`, the s6sys lane called
+      `dashboard.now` in-process over the live fleet and the live shadow
+      table, read-only -- 5 rows (two `ahead` at rank 3, three `dirty` at
+      rank 4), 0 pull request rows, 0 abandoned -- and compared them against
+      `sd_dashboard/now_screen.py` at system `d3a0255` twenty minutes later:
+      the same 5 ids at the same ranks, one `dirty` count moved by a commit
+      the checkout's reflog dates to the gap. Today on :8767 opens with a Now
+      section, rows from `/api/now` painted by the system's `dashboard.js`,
+      `band` in Python and asserted over ranks 0..5, a rank-0 row per dark
+      collector, and 6a's `Followup item` path on the capture form; that is
+      the s6sys lane's commit and its report holds the comparison. The pack
+      commit deleted `dashboard/now.py`, `dashboard/actions.py`,
+      `dashboard/work.py`, `dashboard/server.py`, `dashboard/app.js` and
+      their four test modules, `tests/test_dashboard_now.py`,
+      `tests/test_dashboard_work.py`, `tests/test_dashboard_deliver.py` and
+      `tests/test_dashboard_actions.py`; no test in them exercised a
+      survivor, so nothing moved. `tests/test_sd_ledger.py` lost the four
+      classes that drove `dashboard/server.py` -- an importer the step's grep
+      did not name, because `git grep -E` on this platform has no `\b` and
+      `dashboard.server` was matched by nothing. `dashboard/__init__.py`
+      stays for step 7, and so does `bin/sd-dashboard`, which imports nothing
+      from the package and still answers `--help` with the system dashboard's
+      address. **Two sentences in the step text above were stale when this
+      landed.** "There is no `work` verb in `bin/sd`" was measured before
+      #802 landed one: `bin/sd_work.py` registers `deliver` under `work`
+      (`working.add_parser("deliver", ...)`), and `sd work deliver <item>
+      <full-sha>` writes the `status_change` note `delivered at <commit> on
+      <ref>` through `sd_db.progress.deliver_work`, whose `who=` names the
+      deliverer. So the successor is the CLI verb and not a page control; the
+      system commit built none, and `DELIVERED_BY = "dashboard"` in
+      `dashboard/work.py` retired with the file rather than being reproduced.
+      The two `source:` locators into `dashboard/work.py` in the step text,
+      and eighteen more across this item's three pages and the
+      2026-09-05 prd, were rewritten as prose naming the file because the
+      citation gate refuses a locator into a file that is gone; the plan
+      text itself stands. `DASHBOARD_CODE_CAP` fell from 866 to 0 against 0
+      measured, every code line under `dashboard/` gone (`now.py` 79,
+      `actions.py` 138, `work.py` 127, `server.py` 213, `app.js` 309), the
+      fourth fall `CEILING_HISTORY` records; `DASHBOARD_CAP` did not move.
+      `AMBIGUOUS_CEILING` fell from 121 to 116. `R11-D20` lost its one live
+      definition, the module docstring of `dashboard/now.py`, and is back in
+      `STRANDED_RULE_IDS`; two ids cited by nothing live any more left it.
+      `README.md`, `AGENTS.md` and the skills name none of the Now view,
+      `/api/now`, `/api/ack` or `/api/deliver`. The :8767 Today page after
+      `~/deploy-sd-db.sh` is the owner's to read and was not read by this
+      commit.
 
 - [ ] **7. `dashboard/` is deleted, and the ceilings retire in the same commit.**
       **Read this before starting step 2.** Three tests interlock and the
@@ -713,3 +762,6 @@ before starting step 2.
 - 2026-09-16 step 5 landed: the capture at pack `b4211959`, system pull
   request #427 (`051d931a`), then the pack deletion. Step 5 is ticked with the
   measurement above; `DASHBOARD_CODE_CAP` reads 866.
+- 2026-09-16 step 6 landed: the capture at pack `85c4fa1b`, system pull
+  request #428 (`e43444f5`), then the pack deletion. Step 6 is ticked with the
+  measurement above; `DASHBOARD_CODE_CAP` reads 0.

@@ -120,10 +120,11 @@ class SweepCut(unittest.TestCase):
 #: Every site under `bin` and `dashboard` that reads the `parked` or
 #: `archived` field, as `path` and the line's text. `bin/sd_lib.py` builds the
 #: item; everything else is `bin/sd-status` (the `--parked` flag, the parked
-#: section and the three "live item" filters). The dashboard row reads the
-#: archived count `dashboard/work.py` derives from the field, kept in the set
-#: so a new reader there surfaces too. The later lane that cuts the field
-#: shrinks this set; nothing before it may grow it.
+#: section and the three "live item" filters). The dashboard row that read
+#: the archived count `dashboard/work.py` derived from the field left the set
+#: when sd:719 step 6 retired `dashboard/app.js`; `dashboard/` is still in the
+#: grep so a reader restored there surfaces. The later lane that cuts the
+#: field shrinks this set; nothing before it may grow it.
 FROZEN_FIELD_READERS = frozenset({
     ("bin/sd_lib.py", "archived=report.archived,"),
     ("bin/sd-status", '"archived": item.archived,'),
@@ -138,7 +139,6 @@ FROZEN_FIELD_READERS = frozenset({
     ("bin/sd-status", 'parked = work["parked"]'),
     ("bin/sd-status", "if args.parked:"),
     ("bin/sd-status", '"parked": work["parked"]},'),
-    ("dashboard/app.js", "` \\u00b7 ${payload.archived} archived`;"),
 })
 
 #: An attribute or key read of either field. `git grep -E` on this platform

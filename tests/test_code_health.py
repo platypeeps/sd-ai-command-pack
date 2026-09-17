@@ -85,7 +85,7 @@ SHEBANG_LIMIT = 4096
 
 #: How many public functions the dead-code check cannot speak for, because
 #: another function in the corpus carries the same name. Downward only.
-AMBIGUOUS_CEILING = 121
+AMBIGUOUS_CEILING = 116
 
 
 def tracked(*pathspecs: str, root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:
@@ -644,8 +644,6 @@ COMPLEX = frozenset({
     "bin/sd_work.py::run",  # 29
     "bin/sd_writing.py::register",  # 22
     "bin/sd_writing.py::run",  # 37
-    "dashboard/actions.py::bounded_run",  # 23
-    "dashboard/server.py::make_handler.Handler.do_POST",  # 26
 })
 
 LONG = frozenset({
@@ -662,7 +660,6 @@ LONG = frozenset({
     "bin/sd_work.py::register",  # 58
     "bin/sd_writing.py::register",  # 57
     "bin/sd_writing.py::run",  # 83
-    "dashboard/actions.py::bounded_run",  # 67
 })
 
 DEEP: frozenset[str] = frozenset()

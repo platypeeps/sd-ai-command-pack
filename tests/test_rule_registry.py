@@ -345,7 +345,16 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 #: which is not what this set measures. `R10-D2` in particular no longer had
 #: a meter entry for the repeal Dec-4 decided, so when that repeal landed as
 #: the first `REPEALED` row, on 2026-09-16, this set did not move for it.
-#: `R11-D4` and `R11-D20` are still rowless.
+#: `R11-D4` and `R11-D20` are still rowless, and `R11-D20` came back in at
+#: sd:719 step 6: `dashboard/now.py`, the one live file that defined it,
+#: retired, so its definition is archive-only again while this file's own
+#: prose still cites it.
+#:
+#: **18 after sd:719 step 6, 2026-09-16.** One in, `R11-D20`, as above. Two
+#: went the way step 3's three did: the deletion of `dashboard/` at step 6
+#: took the only live files that cited them, and nothing was registered for
+#: them. They are named in that commit's message and not here, for the reason
+#: step 3's paragraph gives.
 #:
 #: **19 after sd:431 slice D, 2026-09-16.** `R10-D1` is a row. What held it
 #: was not its enforcement -- `bin/sd-status::_age_rows` has flagged
@@ -365,7 +374,7 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 STRANDED_RULE_IDS = frozenset({
     "R10-D3", "R10-D7",
     "R11-D1", "R11-D10", "R11-D13", "R11-D14", "R11-D15",
-    "R11-D17", "R11-D18", "R11-D21", "R11-D23",
+    "R11-D17", "R11-D20", "R11-D21",
     "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D30", "R11-D5", "R11-D6",
     "R5-D1",
 })
