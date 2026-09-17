@@ -59,9 +59,11 @@ COUNT = re.compile(
     r"(?<![\w.,:/-])(\d[\d,]*)\s+(" + "|".join(ENUMERABLE) + r")\b")
 
 #: The marks that turn a claim into a measurement: a commit of seven or more
-#: hex digits, a `#<n>` pull request or note number, a `YYYY-MM-DD` date.
+#: hex digits with at least one letter among them, so a seven-digit count is
+#: not read as its own commit; a `#<n>` pull request or note number; a
+#: `YYYY-MM-DD` date.
 MEASURED_AGAINST = re.compile(
-    r"\b[0-9a-f]{7,40}\b|(?<!\w)#\d+\b|\b\d{4}-\d{2}-\d{2}\b")
+    r"\b(?=[0-9]*[a-f])[0-9a-f]{7,40}\b|(?<!\w)#\d+\b|\b\d{4}-\d{2}-\d{2}\b")
 
 FENCE = re.compile(r"^\s*(?:```|~~~)")
 CODE_SPAN = re.compile(r"`[^`\n]*`")
@@ -146,6 +148,11 @@ class TheCountPredicate(unittest.TestCase):
     def test_a_noun_outside_the_set_is_not_read(self) -> None:
         self.assertEqual(self.claims("768 lines, 45 commits, 3 people\n"), [])
 
+    def test_a_run_of_digits_alone_is_not_a_commit(self) -> None:
+        """A seven-digit count is not its own measurement (#1015 review)."""
+        self.assertEqual(self.claims("The pack ships 1234567 tools.\n"), [1])
+        self.assertEqual(self.claims("16 tools on 1234567a\n"), [])
+
     def test_a_number_inside_a_path_a_version_or_a_decimal_is_not_a_count(self) -> None:
         self.assertEqual(self.claims("v1.2 tools, 3.5 files, a/7 skills, 10:30 tests\n"),
                          [])
@@ -175,8 +182,11 @@ at, on the same line. A count that fell is a cleanup: lower the entry in
     def test_the_walk_reaches_the_corpus(self) -> None:
         """The control: a pathspec that matched nothing would pass the ratchet."""
 
-        seen = {path.relative_to(REPO_ROOT).parts[0] for path in tracked()}
-        self.assertLessEqual({"skills", "README.md", "AGENTS.md", "docs"}, seen)
+        seen = {path.relative_to(REPO_ROOT).parts[:2] for path in tracked()}
+        self.assertLessEqual({"skills", "README.md", "AGENTS.md", "docs", ".claude"},
+                             {parts[0] for parts in seen})
+        self.assertIn((".claude", "rules"), seen,
+                      "the rules subtree is a corpus root and the walk missed it")
 
     def test_every_baseline_entry_is_a_tracked_page(self) -> None:
         listed = {path.relative_to(REPO_ROOT).as_posix() for path in tracked()}

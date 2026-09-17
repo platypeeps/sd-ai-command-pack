@@ -321,7 +321,8 @@ RULES: tuple[Rule, ...] = (
                 "symbol instead, as `source:<path>::<symbol>`, beyond the "
                 "entries `SYMBOL_ANCHORED_CITATIONS` carries per document, "
                 "and that baseline only shrinks; a line outside every "
-                "symbol, a `[quoted: ...]` reason and a markdown target keep "
+                "symbol, a line inside a name the file declares more than "
+                "once, a `[quoted: ...]` reason and a markdown target keep "
                 "their line anchor, because the symbolic form cannot say them",
         checker="tests/test_doc_citations.py::"
                 "test_line_citations_into_a_symbol_match_their_baseline",

@@ -1138,10 +1138,13 @@ def symbol_anchored_citations(
     Over `classify`'s rows, so the population is the one the gate already
     reads and no second tokeniser exists. A row is counted when its document
     is live, its target is a Python file inside the checkout, and
-    `enclosing_declaration` names something at its line; a `quoted` row is
-    exempt by the design, and a markdown target or an unparseable file has no
-    symbol to prefer. The file is read through `file_lines`, so `ast`'s
-    numbering and this module's agree on which line the citation names.
+    `enclosing_declaration` names something at its line that `declared_at`
+    finds exactly once, because that is the test `source_declaration_error`
+    applies and a name declared twice has no symbolic form to prefer; a
+    `quoted` row is exempt by the design, and a markdown target or an
+    unparseable file has no symbol to prefer. The file is read through
+    `file_lines`, so `ast`'s numbering and this module's agree on which line
+    the citation names.
     """
     import ast
 
@@ -1161,7 +1164,8 @@ def symbol_anchored_citations(
             except (SyntaxError, ValueError):
                 trees[row.path] = None
         tree = trees[row.path]
-        if tree is None or enclosing_declaration(tree, row.start) is None:
+        symbol = None if tree is None else enclosing_declaration(tree, row.start)
+        if symbol is None or len(declared_at(tree, symbol)) != 1:
             continue
         counts[row.doc.relative_to(REPO_ROOT).as_posix()] += 1
     return dict(counts)
@@ -1367,6 +1371,19 @@ entry in `SYMBOL_ANCHORED_CITATIONS` in the same change, and delete it at zero."
             "    def open(self):\n"           # 9
             "        return self.KIND\n",     # 10: inside `open`
             encoding="utf-8")
+        # One name declared twice, which `source:<path>::<symbol>` refuses.
+        (self.root / "bin" / "twins.py").write_text(
+            "class Disk:\n"                   # 1
+            "    def open(self):\n"           # 2
+            "        return 'disk'\n"         # 3: inside `Disk.open`
+            "\n"
+            "class Net:\n"                    # 5
+            "    def open(self):\n"           # 6
+            "        return 'net'\n"          # 7: inside `Net.open`
+            "\n"
+            "def solo():\n"                   # 9
+            "    return Disk()\n",            # 10: inside `solo`, declared once
+            encoding="utf-8")
         (self.root / "docs").mkdir()
         # A page cited by line, and the source a `[quoted: ...]` reason names.
         (self.root / "docs" / "notes.md").write_text(
@@ -1394,6 +1411,18 @@ entry in `SYMBOL_ANCHORED_CITATIONS` in the same change, and delete it at zero."
                          " below exempts nothing")
         self.assertEqual(self.measured(
             "`bin/tool.py:4` [quoted: docs/notes.md:2]\nand `docs/notes.md:1`\n"), {})
+
+    def test_a_name_declared_twice_is_not_one_the_form_can_name(self) -> None:
+        """CONTROL: the rule asks for a citation the resolver accepts (#1015 review).
+
+        `source:bin/twins.py::open` is refused by `source_declaration_error`
+        as two declarations, so a line inside either `open` has no symbolic
+        form to prefer and is not counted; the line inside `solo` is.
+        """
+        self.assertEqual(self.measured("see `bin/twins.py:3` and `bin/twins.py:7`\n"), {})
+        self.assertEqual(self.measured("see `bin/twins.py:10`\n"), {"docs/page.md": 1})
+        self.assertIsNotNone(source_declaration_error(self.root, "bin/twins.py", "open"))
+        self.assertIsNone(source_declaration_error(self.root, "bin/twins.py", "solo"))
 
     def test_the_enclosing_declaration_is_the_one_the_locator_can_name(self) -> None:
         import ast

@@ -468,7 +468,19 @@
       `TheSymbolPreference`; the measurement exemption dropped reddens the
       predicate test on all four marks. Leg d's child budget rose by three
       rows and `LegD` read real 9.82 s for 9 tests at load average 6.14,
-      under the 21 s Dec-6 budgets.
+      under the 21 s Dec-6 budgets. Review of #1015, 2026-09-17, three
+      findings fixed in one push: `R13-D1` counts a line only where
+      `declared_at` finds its symbol once, the test
+      `source_declaration_error` applies, so no counted citation lacks a
+      symbolic form (re-measured, 0 of the 145 rows dropped, baseline
+      unchanged); `MEASURED_AGAINST`'s commit mark requires a hex letter, so
+      `1234567 tools` is a claim; the corpus control requires the
+      `.claude/rules` subtree. One finding is an owner action: `ALWAYS_RUN`
+      in `.github/scripts/select-tests.py` does not name
+      `tests.test_prose_counts`, so `make check CHANGED=<a skill>` skips
+      `R13-D2`; the full suite and CI run it. That set and its expectation in
+      `tests/test_changed_files_fast_path.py` are owner-authored, so the
+      entry is left for the owner to add.
 
 - [x] **7. The pre-commit tier.** **Every timing this step used to state has
       expired, and the shape of the step is now open rather than settled.** It
