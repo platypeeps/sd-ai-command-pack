@@ -1,6 +1,7 @@
 ---
 title: Shadowing Jira is a migration question, not the construction sd:361 describes
 created: 2026-09-12
+item: sd:361
 ---
 
 # PRD — a-second-tracker-with-no-rows

@@ -1,6 +1,7 @@
 ---
 title: One dashboard, and the pack's is the one that gives up surface
 created: 2026-09-13
+item: sd:719
 ---
 
 # PRD — one dashboard

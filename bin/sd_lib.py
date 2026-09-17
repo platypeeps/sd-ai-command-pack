@@ -817,6 +817,7 @@ class Rows:
         self._artifact_read: Any = None
         self._completion_read: Any = None
         self._notes_read: Any = None
+        self._id_read: Any = None
         imported = import_sd_db()
         self.problem = imported.problem
         if imported.module is None:
@@ -849,6 +850,12 @@ class Rows:
             pass  # An installation without it reports row activity alone.
         else:
             self._notes_read = item_notes
+        try:
+            from sd_db.reads import item_by_id  # noqa: PLC0415
+        except ImportError:
+            pass  # A folder keyed `item: sd:<id>` then reads as before the key.
+        else:
+            self._id_read = item_by_id
         self.opened = True
 
     def external_id(self, item_dir: pathlib.Path) -> str:
@@ -865,7 +872,8 @@ class Rows:
         except Exception as error:
             return "", f"the row for {identity} could not be read: {error}"
         if row is None:
-            return "", f"the database holds no {ITEM_ROW_SOURCE} row for {identity}"
+            _, trouble = named_row(item_dir, self._connection, self._id_read)
+            return "", trouble or f"the database holds no {ITEM_ROW_SOURCE} row for {identity}"
         said = str(row["status"] or "").strip()
         if said not in ROW_STATUSES:
             return "", (f"the row for {identity} says status {said!r}, which is not "
@@ -873,11 +881,15 @@ class Rows:
         return said, ""
 
     def item(self, item_dir: pathlib.Path) -> Any:
-        """Resolve a current artifact link without changing the row's identity."""
+        """The row for one folder: by its path, else the one its `item:` key names."""
         if self._artifact_read is not None:
             relative = (item_dir / "prd.md").relative_to(_root_of(item_dir)).as_posix()
-            return self._artifact_read(self._connection, self.base, relative)
-        return self._read(self._connection, ITEM_ROW_SOURCE, self.external_id(item_dir))
+            row = self._artifact_read(self._connection, self.base, relative)
+        else:
+            row = self._read(self._connection, ITEM_ROW_SOURCE, self.external_id(item_dir))
+        if row is not None:
+            return row
+        return named_row(item_dir, self._connection, self._id_read)[0]
 
     def activity(self, item_dir: pathlib.Path) -> str:
         """The latest stamp this item's row or any of its notes carries.
@@ -1355,6 +1367,69 @@ def _stamp(text: str) -> datetime.date | None:
         return datetime.date.fromisoformat((text or "")[:10])
     except ValueError:
         return None
+
+
+# --------------------------------------------------------------------------
+# The row a folder names: a task or followup row, keyed by its frontmatter
+# --------------------------------------------------------------------------
+#
+# Seven pack folders were written for rows `sd task add` made (sd:994). Such
+# a row's `kind` is `task` or `followup` and its `source`, `external_id` and
+# `path` are NULL, so no path lookup reaches it and `sd-status` reported each
+# folder `status-unreadable`. Registering a second, `work` row per folder
+# would split the notes and the decisions from the status; the folder names
+# its row instead. The key is read only once the path finds nothing, and it
+# never reaches a `work` row: a work row is found by its path, and a folder
+# that could borrow another item's row through this key would report that
+# item's status as its own.
+
+#: The frontmatter key, and the shape of its value: `sd:` then digits.
+ITEM_KEY = "item"
+ITEM_KEY_RE = re.compile(r"sd:(\d+)\Z")
+
+
+def named_item(item_dir: pathlib.Path) -> tuple[int | None, str]:
+    """`(id, "")` for the row `<item_dir>/prd.md` names as `item: sd:<id>`.
+
+    `(None, "")` when the frontmatter carries no key, or the file cannot be
+    read as one; `(None, problem)` when the key is there and is not `sd:`
+    followed by digits, with the problem naming the key and its value.
+    `sd-docs-lint` fails the same shape where the file is, by `ITEM_KEY_RE`.
+    """
+    try:
+        fields = parse_frontmatter((item_dir / "prd.md").read_text(encoding="utf-8"))
+    except OSError:
+        return None, ""
+    if fields is None or ITEM_KEY not in fields:
+        return None, ""
+    value = fields[ITEM_KEY].strip()
+    match = ITEM_KEY_RE.match(value)
+    if match is None:
+        return None, (f"the frontmatter key {ITEM_KEY}: {value} is not sd: followed "
+                      f"by digits")
+    return int(match.group(1)), ""
+
+
+def named_row(item_dir: pathlib.Path, connection: Any, read: Any) -> tuple[Any, str]:
+    """The row the folder's `item:` key names through `read`, else `(None, why)`.
+
+    `read` is `sd_db.reads.item_by_id`, or None on an installation without
+    it, which keeps the answer the path gave: `(None, "")`. A key that names
+    no row, or names a `work` row, is `(None, problem)` with the key and its
+    value in the text, so `Rows.status` can say which line to fix. The one
+    read `Rows` and `sd_handoff_rows.item_for` both take, so the dashboard
+    and `sd-status` name one row for one folder.
+    """
+    number, problem = named_item(item_dir)
+    if problem or number is None or read is None:
+        return None, problem
+    row = read(connection, number)
+    if row is None:
+        return None, f"the frontmatter key {ITEM_KEY}: sd:{number} names no row"
+    if row["kind"] == "work":
+        return None, (f"the frontmatter key {ITEM_KEY}: sd:{number} names a work row, "
+                      f"and a work row is found by its path, not by this key")
+    return row, ""
 
 
 # --------------------------------------------------------------------------

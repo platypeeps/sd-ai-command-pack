@@ -714,10 +714,6 @@ class TheModuleLoader(unittest.TestCase):
         self.assertTrue(callable(fresh.parse_frontmatter))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TheRowIsFoundFromItsKey(RowCase):
     """sd:994. `item_for` takes the `item: sd:<id>` fallback `sd_lib.Rows` takes.
 
@@ -764,3 +760,7 @@ class TheRowIsFoundFromItsKey(RowCase):
         item_dir = self.prd(f"sd:{other}")
         found = sd_handoff_rows.item_for(self.connection, sd_db, self.root, item_dir)
         self.assertEqual(found["id"], number)
+
+
+if __name__ == "__main__":
+    unittest.main()

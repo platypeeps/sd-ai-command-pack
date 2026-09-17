@@ -1,6 +1,7 @@
 ---
 title: The registry enforces the spend cap and reads the minimax meter
 created: 2026-09-16
+item: sd:788
 ---
 
 # PRD — spend cap and meter

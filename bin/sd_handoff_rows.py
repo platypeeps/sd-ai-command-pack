@@ -112,20 +112,32 @@ def item_for(connection, sd_db, root, item_dir):
     The `item_by_external` fallback below is for a library without
     `item_for_artifact`; one that old has no `registered_for` either, and
     stays path-keyed on purpose.
+
+    A folder the path does not reach may name its task or followup row as
+    `item: sd:<id>` in its frontmatter (sd:994). That read is `sd_lib`'s
+    too, `named_row`, so this reader and `sd_lib.Rows` name one row for one
+    folder; a library without `item_by_id` reads the key as nothing.
     """
     import sd_lib
 
     try:
         from sd_db.progress import item_for_artifact
     except ImportError:
-        pass
+        identity = sd_lib.external_id(root, item_dir)
+        row = sd_db.writes.item_by_external(connection, sd_lib.ITEM_ROW_SOURCE, identity)
     else:
         base = sd_lib.registered_base(root, sd_db, connection)
         relative = (item_dir / "prd.md").relative_to(root).as_posix()
         row = item_for_artifact(connection, base, relative)
-        return None if row is None else dict(row)
-    identity = sd_lib.external_id(root, item_dir)
-    row = sd_db.writes.item_by_external(connection, sd_lib.ITEM_ROW_SOURCE, identity)
+    if row is None:
+        read = None
+        try:
+            from sd_db.reads import item_by_id
+        except ImportError:
+            pass  # A library without it reads the key as nothing, as `Rows` does.
+        else:
+            read = item_by_id
+        row, _ = sd_lib.named_row(item_dir, connection, read)
     return None if row is None else dict(row)
 
 

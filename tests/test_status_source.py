@@ -989,14 +989,14 @@ class ATaskKeyedFolder(Fixture):
         self.assertEqual(item.status, "planning")
         self.assertEqual(item.inconsistencies, ())
         self.assertEqual(self.picked(), [ITEM])
-        self.assertEqual(self.unreadable(), [])
+        self.assertEqual(self.unreadable(self.root), [])
 
     def test_a_folder_naming_a_task_row_reads_its_status(self) -> None:
         self.marker("row")
         number = self.row("task", "in_progress")
         self.named(f"sd:{number}")
         self.assertEqual(self.only().status, "in_progress")
-        self.assertEqual(self.unreadable(), [])
+        self.assertEqual(self.unreadable(self.root), [])
 
     def test_the_named_row_supplies_the_activity_stamp(self) -> None:
         self.marker("row")
@@ -1017,7 +1017,7 @@ class ATaskKeyedFolder(Fixture):
             item.inconsistencies,
         )
         self.assertEqual(self.picked(), [])
-        found = self.unreadable()
+        found = self.unreadable(self.root)
         self.assertEqual(len(found), 1, found)
         self.assertIn("item: sd:424242", found[0]["detail"])
 
