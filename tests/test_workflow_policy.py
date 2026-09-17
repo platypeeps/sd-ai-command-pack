@@ -559,9 +559,13 @@ class SkillsThatRunAReview(unittest.TestCase):
     """
 
     def test_the_enumeration_finds_the_reviewer_and_the_skills_that_call_it(self):
+        """A floor, not the set: the four pages that run a review today must
+        stay in, so an invocation edited into a mention shape is a failure
+        here and not a page that quietly stops being checked."""
         skills = skills_that_run_a_review()
-        self.assertIn("skills/sd-review/SKILL.md", skills)
-        self.assertGreater(len(skills), 1, "no skill invokes the reviewer")
+        self.assertLessEqual({"skills/sd-plan/SKILL.md", "skills/sd-research-repo/SKILL.md",
+                              "skills/sd-review/SKILL.md", "skills/sd-ship/SKILL.md"},
+                             set(skills), "a page that runs a review left the enumeration")
 
     def test_the_enumeration_takes_every_invocation_shape_and_no_mention(self):
         """Each shape `REVIEW_INVOCATION` names is one page here, and the
@@ -577,6 +581,8 @@ class SkillsThatRunAReview(unittest.TestCase):
                 "skills/kit/SKILL.md": "Run the mechanical half:\n\n   sd-research-kit review\n",
                 "skills/lane/SKILL.md": "The verdict belongs to the sd-review lane.\n",
                 "skills/tool/SKILL.md": "`sd-review` runs it; `sd-review-ack` marks the row.\n",
+                "skills/kitmention/SKILL.md":
+                    "The `sd-research-kit review` report lists where the template moved.\n",
                 "skills/sd-review/SKILL.md": "# sd-review\n",
             }
             for name, text in files.items():
@@ -603,6 +609,25 @@ class SkillsThatRunAReview(unittest.TestCase):
                 self.assertTrue(any(CAP_WORD.search(s) for s in linking),
                                 f"{name} links the rule and no linking sentence says the cap "
                                 f"comes from it: {linking}")
+
+    def test_the_linking_sentence_must_say_the_cap_is_the_one_on_the_row(self):
+        """The reads-from relationship, not the word. `CAP_WORD` used to
+        accept any sentence carrying `cap` beside the link, so a pointer --
+        "see the cap in the rule file" -- passed as if the page read its cap
+        from the table. The four pages say the cap is the one on that row."""
+        for sentence in (
+            "The review table in `.claude/rules/sd-planning-adversarial-review.md` "
+            "gives the cap on that row.",
+            "Their caps are the ones on those rows in the checkout's "
+            "`.claude/rules/sd-planning-adversarial-review.md`, and this tool states neither.",
+        ):
+            self.assertIsNotNone(CAP_WORD.search(sentence), sentence)
+        for sentence in (
+            "See the cap in `.claude/rules/sd-planning-adversarial-review.md`.",
+            "The cap is capped by `.claude/rules/sd-planning-adversarial-review.md`.",
+            "Read `.claude/rules/sd-planning-adversarial-review.md` before the pass.",
+        ):
+            self.assertIsNone(CAP_WORD.search(sentence), sentence)
 
     def test_no_skill_that_runs_a_review_carries_a_cap_of_its_own(self):
         for name in skills_that_run_a_review():
