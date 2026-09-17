@@ -239,18 +239,20 @@ RULES: tuple[Rule, ...] = (
     #: The other half of the handoff design, narrowed to the lane that exists.
     #: `R10-D3` split handoff into two lanes; Lane B is the repeal above, and
     #: what Lane A holds as a rule is the restore hook's registration --
-    #: `SessionStart` on `startup` and `clear` and never on `compact`, because
-    #: a compact matcher would consume the packet into the dying session and
-    #: the `/clear` that follows would find nothing. The checker is the hook
-    #: table itself, pinned whole by its test, so the subject is exactly the
-    #: row of that table (sd:431 step 8, slice 1, 2026-09-16).
+    #: `SessionStart` on `startup` and `clear` and on nothing else: never
+    #: `compact`, because a compact matcher would consume the packet into the
+    #: dying session and the `/clear` that follows would find nothing, and
+    #: never `resume`, which brings old context back and has no use for a
+    #: packet. The checker is the hook table itself, pinned whole by its
+    #: test, so both omissions are held by one row of that table and the
+    #: subject names both (sd:431 step 8, slice 1, 2026-09-16).
     Rule(
         id="R10-D3",
         subject="`bin/sd-handoff-restore` is registered on `SessionStart` "
-                "for the `startup` and `clear` matchers and never for "
-                "`compact`, so a packet is restored into the session that "
-                "follows a `/clear` and is not consumed by the one being "
-                "compacted",
+                "for the `startup` and `clear` matchers only -- never "
+                "`compact`, so a packet is not consumed by the session being "
+                "compacted and is restored into the one that follows the "
+                "`/clear`, and never `resume`, which needs no packet",
         checker="bin/sd_install.py::HOOK_SPECS",
         proof="add `compact` to the `SessionStart` matchers of the "
               "`bin/sd-handoff-restore` row of `HOOK_SPECS` in "
