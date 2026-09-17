@@ -454,9 +454,9 @@
       `ALWAYS_RUN` and neither has a diff-scoped form; `bin/sd-docs-lint` is
       not in the hook, since `--changed` needs `--pr-body` and scopes rule 8
       only and the tool's wall time is network; Ruff is file-scoped by nature.
-      `make hooks` installs it as the link `.git/hooks/pre-commit ->
-      <checkout>/hooks/pre-commit` in the directory git names (absolute, so
-      a worktree's link names the worktree's copy), prints the path,
+      `make hooks` installs it as the relative link `<common .git>/hooks/
+      pre-commit -> ../../hooks/pre-commit`, one per clone, read from the
+      main checkout and shared by every linked worktree, prints the path,
       refuses by name to replace anything else there, refuses to run while
       a `core.hooksPath` is set (`--git-path hooks` would honour it), and
       never sets one: the directory is `hooks/`, not `.githooks/`, because
@@ -474,12 +474,20 @@
       and a clean file exits 0 printing the wall time; a staged file fixed
       in the working tree but not restaged is refused naming it, with Ruff
       not run; with the two modules present as stubs the hook runs them
-      (`Ran 2 tests`) and a red stub fails the commit with status 1;
+      (`Ran 2 tests`), a red stub fails the commit with status 1, and a
+      staged `git rm` of one stub is refused naming the module (a deletion
+      is not a staged path, so only the module check sees it); a python
+      shebang past 128 bytes and a capped unterminated one are both sent to
+      Ruff while a long shell shebang is not, the bound being code health's
+      4096; without `.venv` and with a `python3` shim first on `PATH`, Ruff
+      and the passes both run;
       `make hooks` over a
-      copy of the `Makefile` makes the absolute link and passes again over
+      copy of the `Makefile` makes the relative link and passes again over
       its own link, refuses a stranger file and leaves it, refuses while
       `core.hooksPath` is set and makes no link, a `git commit` of
       a staged `import os` fails through the link with no commit landing,
+      and from a linked worktree the link lands in the main `.git/hooks`
+      with the same relative target and reads the main checkout's file,
       and afterwards
       `residue_section` from `bin/sd-status` reports neither `githooks` nor
       `hooks-path`. Mutations, each restored from a byte copy: the Ruff step
@@ -491,6 +499,11 @@
       the divergence guard emptied reddens the not-restaged case with
       `0 == 0 : All checks passed!`; the link target misspelt reddens the
       commit case with `the commit went through` and the link case with
+      `FileNotFoundError`; the common dir replaced by `--git-dir` reddens
+      the worktree case; the absent-pass failure downgraded to a notice
+      reddens the deletion case; `SHEBANG_LIMIT` at 128 reddens the shell
+      case with `EXE001`; the fail-closed return removed reddens the capped
+      case; the fallback renamed reddens the `python3` case with
       `FileNotFoundError`; the budget header duplicated reddens the file
       case with `2 != 1`; the `core.hooksPath` refusal removed reddens its
       case with `git hooks: .githooks/pre-commit -> ...`.

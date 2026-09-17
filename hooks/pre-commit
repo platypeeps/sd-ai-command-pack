@@ -39,8 +39,9 @@
 # the person who paid it. Python rather than POSIX sh because
 # tests/test_no_shipped_shell.py allows tracked shell under
 # .github/scripts/ only. Tracked as hooks/pre-commit and installed by
-# `make hooks` as the link .git/hooks/pre-commit -> <checkout>/hooks/pre-commit,
-# never as .githooks/ and never through core.hooksPath: those two are the
+# `make hooks` as the link <common .git>/hooks/pre-commit -> ../../hooks/pre-commit,
+# one per clone, read from the main checkout and shared by every linked
+# worktree; never as .githooks/ and never through core.hooksPath: those two are the
 # retired gate stack's signatures, and bin/sd-status reports each as residue
 # with a removal command, which must not name the pack's own hook.
 """The pre-commit hook: Ruff on the staged Python, then two whole-tree passes."""
@@ -56,6 +57,9 @@ import time
 BUDGET_SECONDS = 8
 SKIP_VARIABLE = "SD_SKIP_HOOKS"
 WHOLE_TREE_PASSES = ("tests.test_code_health", "tests.test_doc_citations")
+# The bound tests/test_code_health.py reads a shebang with: the whole first
+# line, capped so a binary is not read to its end.
+SHEBANG_LIMIT = 4096
 
 
 def repo_root() -> pathlib.Path:
@@ -101,17 +105,26 @@ def diverged(paths: list[str]) -> list[str]:
 
 
 def is_python(path: pathlib.Path) -> bool:
-    """`.py`, or a suffix-less file whose shebang names python, as `bin/` commands do."""
+    """`.py`, or a suffix-less file whose shebang names python, as `bin/` commands do.
+
+    The same rule as `_is_python_script` in tests/test_code_health.py: the whole
+    first line up to SHEBANG_LIMIT, and a line that hit the cap with no newline
+    is a prefix, not an answer, so it counts as Python rather than slipping past.
+    """
     if path.suffix == ".py":
         return True
     if path.suffix:
         return False
     try:
         with path.open("rb") as handle:
-            head = handle.readline(128)
+            head = handle.readline(SHEBANG_LIMIT)
     except OSError:
         return False
-    return head.startswith(b"#!") and b"python" in head
+    if not head.startswith(b"#!"):
+        return False
+    if b"python" in head:
+        return True
+    return len(head) == SHEBANG_LIMIT and not head.endswith(b"\n")
 
 
 def run(command: list[str], root: pathlib.Path) -> int:
@@ -143,13 +156,17 @@ def main() -> int:
                   f"if the line above says no module named ruff, {python} lacks "
                   f"the dev requirements (make setup)")
     if status == 0:
-        modules = [name for name in WHOLE_TREE_PASSES
-                   if (root / (name.replace(".", "/") + ".py")).is_file()]
-        absent = sorted(set(WHOLE_TREE_PASSES) - set(modules))
+        # A deletion is not a staged path, so a commit that removes or renames
+        # a pass reaches here with the module gone; that is a failure, not a
+        # notice, or the gate could be removed by the commit it should gate.
+        absent = [name for name in WHOLE_TREE_PASSES
+                  if not (root / (name.replace(".", "/") + ".py")).is_file()]
         if absent:
-            print(f"pre-commit: no {', '.join(absent)} in this checkout; not run")
-        if modules:
-            status = run([python, "-m", "unittest", *modules], root)
+            status = 1
+            print(f"pre-commit: {', '.join(absent)} missing from this checkout; "
+                  f"a commit that deletes or renames a whole-tree pass is refused")
+        else:
+            status = run([python, "-m", "unittest", *WHOLE_TREE_PASSES], root)
     elapsed = time.monotonic() - started
     verdict = "ok" if status == 0 else f"failed, status {status}"
     print(f"pre-commit: {verdict} in {elapsed:.2f} s (budget {BUDGET_SECONDS} s)")

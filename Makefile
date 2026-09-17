@@ -13,11 +13,12 @@ setup:
 
 # The pre-commit tier of sd:431. `hooks/pre-commit` runs Ruff over the staged
 # Python and the two whole-tree test passes that walk the tree, with a
-# wall-time budget in its header. The install is one symlink,
-# <hooks dir>/pre-commit -> <this checkout>/hooks/pre-commit, in the hooks
-# directory git names: `.git/hooks` in a clone, and the main checkout's
-# `.git/hooks` from a worktree, which is why the target is absolute -- the
-# link then names the copy in the checkout that ran `make hooks`. Not
+# wall-time budget in its header. The install is one relative symlink,
+# <common .git>/hooks/pre-commit -> ../../hooks/pre-commit, in the clone's
+# common git directory: one hook per clone, read from the main checkout's
+# tracked file, shared by every linked worktree, whichever worktree ran
+# `make hooks` (a worktree's own copy is never linked, so no worktree's
+# branch becomes every other worktree's policy). Not
 # `.githooks/` and not `core.hooksPath`: those are the retired gate stack's
 # signatures, and bin/sd-status reports each as residue with a removal
 # command, so the pack's own hook must not wear them. A clone that still
@@ -33,7 +34,7 @@ hooks:
 		printf '%s\n' "error: core.hooksPath is set to $$set; the pack's hook lives in .git/hooks -- run 'git config --unset core.hooksPath' (bin/sd-status names it as residue) and retry" >&2; \
 		exit 1; \
 	fi; \
-	dir="$$(git rev-parse --git-path hooks)"; link="$$dir/pre-commit"; target="$$(pwd -P)/hooks/pre-commit"; \
+	dir="$$(git rev-parse --path-format=absolute --git-common-dir)/hooks"; link="$$dir/pre-commit"; target=../../hooks/pre-commit; \
 	if { [ -e "$$link" ] || [ -L "$$link" ]; } && [ "$$(readlink "$$link")" != "$$target" ]; then \
 		printf '%s\n' "error: $$link exists and is not the link to hooks/pre-commit; move it aside first" >&2; \
 		exit 1; \

@@ -436,11 +436,12 @@ apply to the checkers the item aims it at.
   would have matched both rows in this checkout, and the pack's status tool
   would have told the operator to delete the pack's hook. So the file is
   tracked as `hooks/pre-commit`, a visible directory the detector does not
-  glob, and `make hooks` installs it as the link
-  `.git/hooks/pre-commit -> <checkout>/hooks/pre-commit` in the directory
-  git names, with an absolute target because from a worktree that directory
-  is the main checkout's and the link must name the worktree's copy; it
-  refuses by name to replace anything else at that path;
+  glob, and `make hooks` installs it as the relative link
+  `<common .git>/hooks/pre-commit -> ../../hooks/pre-commit` in the clone's
+  common git directory: one hook per clone, read from the main checkout's
+  tracked file and shared by every linked worktree, whichever worktree ran
+  the target, so no worktree's branch becomes every other worktree's
+  policy; it refuses by name to replace anything else at that path;
   `core.hooksPath` is never set, and a clone that still carries one is
   refused before the directory is resolved, because `--git-path hooks`
   honours the setting and would place the link under the retired directory. `tests/test_pre_commit_hook.py` runs

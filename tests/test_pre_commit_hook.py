@@ -206,6 +206,14 @@ class TheHookRun(unittest.TestCase):
         self.assertIn("F401", output)
         self.assertIn("tool", output)
 
+    def test_a_long_shell_shebang_within_the_bound_is_not_sent_to_ruff(self):
+        """A 128-byte window would cap this line and, failing closed, lint shell as Python."""
+        self.stage("tool", "#!/bin/sh -" + " " * 200 + "\necho hi\n")
+        result = self.run_hook()
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertNotIn("tool", output, "the shell script was handed to Ruff")
+
     def test_a_capped_unterminated_shebang_is_treated_as_python(self):
         """4096 bytes with no newline is a prefix, not the line; fail closed as code health does."""
         self.stage("tool", "#!/usr/bin/env -S " + "x" * 5000 + "\nimport os\n")
