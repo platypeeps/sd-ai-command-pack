@@ -1,9 +1,12 @@
-"""The ledger, and the three write sites that feed it.
+"""The ledger, with the write sites that fed it gone.
 
 The point of these tests is not that records get written -- that is the easy
 half. It is that a record is *never* a precondition for serving (D-6), and that
 the three states the criterion distinguishes stay distinguishable: an absent
-ledger, a ledger with starts and no demand, and a ledger with demand.
+ledger, a ledger with starts and no demand, and a ledger with demand. The
+classes that drove `dashboard/server.py` -- the bounded tailnet reprobe, the
+mutation-row guard in `do_POST`, the Host parser and the ack endpoint's 503 --
+retired with that file at sd:719 step 6; what is left reads the ledger alone.
 """
 
 from __future__ import annotations
@@ -156,131 +159,6 @@ class TheCriterionHasThreeStates(unittest.TestCase):
         self.assertLess(record["bound"], record["requested"])
 
 
-class BoundedReprobe(unittest.TestCase):
-    """Step 4 / D-4: retry, *then* latch. Latching first was the defect."""
-
-    def setUp(self) -> None:
-        from dashboard import server
-        self.server = server
-        self.addCleanup(setattr, server, "_ADDRS", server._ADDRS)
-        server._ADDRS = None
-        # The probe is replaced on the module, so it has to be put back. Left
-        # out, every later test in the process that reaches `bound_addrs` sees
-        # this class's stub and the leak is invisible until the ordering
-        # changes. Found in review.
-        self.addCleanup(setattr, server, "tailnet_addrs", server.tailnet_addrs)
-
-    def probe(self, *answers):
-        calls = []
-
-        def fake():
-            calls.append(1)
-            return answers[min(len(calls) - 1, len(answers) - 1)]
-
-        return fake, calls
-
-    def test_an_address_arriving_on_the_third_probe_is_used(self) -> None:
-        """The boot race this exists for: `tailscaled` comes up late."""
-        fake, calls = self.probe([], [], ["100.1.2.3"])
-        self.server.tailnet_addrs = fake
-        self.assertEqual(self.server.bound_addrs(sleep=lambda _: None), ["100.1.2.3"])
-        self.assertEqual(len(calls), 3)
-
-    def test_a_permanently_empty_probe_gives_up_after_exactly_three(self) -> None:
-        """Bounded, because an unbounded retry is the crashloop
-        `ThrottleInterval` was added to stop."""
-        fake, calls = self.probe([])
-        self.server.tailnet_addrs = fake
-        self.assertEqual(self.server.bound_addrs(sleep=lambda _: None), [])
-        self.assertEqual(len(calls), self.server.PROBES)
-
-    def test_the_answer_is_still_latched_once_taken(self) -> None:
-        """The cache's original reason survives: one answer feeds both the
-        allow-list and the bind, so they cannot disagree."""
-        fake, calls = self.probe(["100.1.2.3"])
-        self.server.tailnet_addrs = fake
-        self.server.bound_addrs(sleep=lambda _: None)
-        self.server.bound_addrs(sleep=lambda _: None)
-        self.assertEqual(len(calls), 1)
-
-
-class MutationSiteMutationTests(unittest.TestCase):
-    """`implement.md` asks for the gates to be run against broken code first.
-
-    The first version of this class asserted properties of hand-written
-    stand-ins that resembled `do_POST`. Review was right that this proves
-    nothing about `do_POST`: the stand-ins could stay correct while the handler
-    rotted. These drive the real handler and then break the real handler, so a
-    gate that has never failed is not being claimed to work.
-    """
-
-    def run_outcome(self, status: int) -> list:
-        """The recording rule as `do_POST` applies it, driven by status."""
-        from dashboard import server
-
-        rows: list = []
-
-        def record(kind, **fields):
-            rows.append((kind, fields))
-
-        # The rule under test, read out of the handler rather than restated:
-        # a mutation row is written only for a served action.
-        if 200 <= status < 300:
-            record("mutation", action="index",
-                   tailnet_host=server.host_name("localhost:8767")
-                   not in server.LOOPBACK_NAMES)
-        return rows
-
-    def test_a_failed_action_records_nothing(self) -> None:
-        self.assertEqual(self.run_outcome(500), [])
-        self.assertEqual(self.run_outcome(404), [])
-
-    def test_a_served_action_records_exactly_one_row(self) -> None:
-        rows = self.run_outcome(200)
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0][0], "mutation")
-
-    def test_the_guard_is_the_one_the_handler_contains(self) -> None:
-        """The mutation test proper: break the handler, and this must fail.
-
-        Read from source rather than asserted from memory, so deleting the
-        status guard in `do_POST` fails here instead of silently widening what
-        gets counted.
-        """
-        from dashboard import server
-
-        source = pathlib.Path(server.__file__).read_text(encoding="utf-8")
-        self.assertIn("if 200 <= status < 300:", source,
-                      "do_POST must record a mutation only for a served action")
-        head = source.index("if 200 <= status < 300:")
-        self.assertLess(head, source.index('record("mutation"'),
-                        "the guard must come before the record, not after")
-
-
-class HostClassification(unittest.TestCase):
-    """The IPv6 loopback, which `split(\":\")` got wrong in both directions."""
-
-    def test_bracketed_loopback_is_not_tailnet_demand(self) -> None:
-        from dashboard import server
-        self.assertEqual(server.host_name("[::1]:8767"), "[::1]")
-        self.assertIn(server.host_name("[::1]:8767"), server.LOOPBACK_NAMES)
-
-    def test_the_naive_split_is_the_bug_this_replaced(self) -> None:
-        self.assertEqual("[::1]:8767".split(":")[0], "[")
-
-    def test_a_tailnet_name_is_still_demand(self) -> None:
-        from dashboard import server
-        self.assertNotIn(server.host_name("mac.tail1234.ts.net:8767"),
-                         server.LOOPBACK_NAMES)
-
-    def test_one_parser_serves_both_callers(self) -> None:
-        """`host_ok` and the mutation record must not disagree again."""
-        from dashboard import server
-        source = pathlib.Path(server.__file__).read_text(encoding="utf-8")
-        self.assertEqual(source.count('.split(":")[0]'), 0,
-                         "the Host is parsed by host_name, nowhere by split")
-
-
 class AcksExpireWithTheDay(unittest.TestCase):
     """D-2 reversed: an ack holds for its day, because count ids recur.
 
@@ -375,36 +253,6 @@ class AppendReportsWhatHappened(unittest.TestCase):
 
     def test_a_landed_record_returns_true(self) -> None:
         self.assertIs(ledger.append("ack", target=self.target(), id="a"), True)
-
-
-class TheAckEndpointTellsTheTruth(unittest.TestCase):
-    """The rule `do_POST` applies, read out of the file rather than restated.
-
-    A mutation row may be dropped -- it is telemetry. An ack may not: it is a
-    command, and the page removes the row optimistically on the strength of the
-    answer.
-    """
-
-    def source(self) -> str:
-        from dashboard import server
-        return pathlib.Path(server.__file__).read_text(encoding="utf-8")
-
-    def test_a_failed_ack_write_is_not_a_200(self) -> None:
-        self.assertIn('if not record("ack", id=identifier):', self.source())
-        self.assertIn('return self.send_error(503, "the ack was not stored")',
-                      self.source())
-
-    def test_the_default_sink_still_succeeds(self) -> None:
-        """A server nobody handed a ledger to must not 503 its own button."""
-        from dashboard import server
-        self.assertIs(server._drop("ack", id="a"), True)
-
-    def test_the_mutation_row_is_not_gated_on_its_own_success(self) -> None:
-        """Telemetry that can fail the request it measures is worse than none."""
-        source = self.source()
-        head = source.index('record("mutation"')
-        tail = source.index("self.send_body(json.dumps(body)", head)
-        self.assertNotIn("if not record", source[head:tail])
 
 
 if __name__ == "__main__":

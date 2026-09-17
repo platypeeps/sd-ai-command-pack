@@ -222,17 +222,18 @@ MIGRATE_CAP = 1_500        # temporary tools, deleted at steps 7 and 11
 # 4,366 measured + 98 reserved + 119 reserved + 12 reserved + 5 unclaimed =
 # 4,600. Nine lines of headroom did not hold a new control on the item screen.
 #
-# The 98 is four spans at four built analogues: the `/api/deliver` branch of
-# `do_POST` at the `/api/ack` branch it copies (`dashboard/server.py:548-564`,
-# 17, plus its line in the path tuple at `:530`), the row write behind it at
-# `store.set_watermark` (`dashboard/store.py:198-218`, 21), the control itself
-# at `dismissCell` with the comment head house style requires of a control
-# whose failure mode has to be explained (`dashboard/app.js:594-624`, 31), and
-# the hand-merge reconciliation display at `whereCell`
-# (`dashboard/app.js:549-566`, 18) with `work.split_status`
-# (`dashboard/work.py:86-95`, 10), which is where the two new states -- a row
+# The 98 is four spans at four built analogues, every one in a file retired
+# at sd:719 step 6 (the store's at step 4) and measured as it stood on
+# 2026-09-06: the `/api/deliver` branch of `do_POST` at the `/api/ack` branch
+# it copied in `dashboard/server.py` (17, plus its line in the path tuple),
+# the row write behind it at `store.set_watermark` in `dashboard/store.py`
+# (21), the control itself at `dismissCell` with the comment head house style
+# requires of a control whose failure mode has to be explained, in
+# `dashboard/app.js` (31), and the hand-merge reconciliation display at
+# `whereCell` in `dashboard/app.js` (18) with `work.split_status` in
+# `dashboard/work.py` (10), which is where the two new states -- a row
 # `in_progress` with the squash commit on a note, and `done` but unmarked --
-# have to be spelled.
+# had to be spelled.
 #
 # The 119 is the second unrepaired seam PR 7 crosses, and it is a different
 # one from `bin/`'s. `deliver` is the first control to carry an item's
@@ -259,7 +260,7 @@ DASHBOARD_CAP = 4_600
 # for the same line, and 6b-7 was spent deleting rationale to fit a write path
 # -- which is the cap working against the comment convention it was explicitly
 # widened to hold. This one bounds what the other cannot: code.
-DASHBOARD_CODE_CAP = 866 # R11-D49's third fall; see the notes below
+DASHBOARD_CODE_CAP = 0 # R11-D49's fourth fall; see the notes below
 
 # The gap between that cap and what `dashboard/` measures, recorded when
 # R11-D41 wrote the rule: 2,300 against 2,271. It is what makes "payable in
@@ -329,6 +330,18 @@ DASHBOARD_CODE_SLACK = 29
 # The system dashboard's Operations > Repos and Sessions read the fleet from
 # `sd_dashboard/fleet.py`. Measured 866 with `code_line_count` in the
 # finished commit, and the cap is that plus the 0 lines of gap, as before.
+#
+# **2026-09-16, the fourth fall: 866 to 0, sd:719 step 6.** The Now ranking,
+# the action runner, the work collector, the server and the client script
+# retired: `dashboard/now.py` (79), `dashboard/actions.py` (138),
+# `dashboard/work.py` (127), `dashboard/server.py` (213) and
+# `dashboard/app.js` (309) went, every code line the directory had. Today on
+# the system dashboard opens with Now, served from `sd_dashboard/now_screen.py`
+# (system pull request #428), and `sd work deliver` is the write `deliver`
+# made. `dashboard/__init__.py` is what is tracked, a docstring and nothing
+# else, so the directory measured 0 with `code_line_count` in the finished
+# commit, and the cap is that plus the 0 lines of gap, as before. Step 7
+# deletes the directory and retires this ceiling with it.
 
 
 # Every value each ceiling has held, oldest first: read from this file's own
@@ -388,6 +401,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
         ("2026-09-13", 1_850),
         ("2026-09-16", 1_183),
         ("2026-09-16", 866),
+        ("2026-09-16", 0),
     ),
 }
 
@@ -474,8 +488,9 @@ def code_line_count(paths: list[pathlib.Path]) -> int:
     JavaScript has no tokeniser in the standard library, so it is measured by
     the crude rule -- a non-blank line that does not open with `//`. That is
     **conservative on purpose**: it counts a `/* */` block as code, so the
-    error can only tighten this cap, never loosen it. `dashboard/app.js` holds
-    no block comment today and the measure is checked, not assumed.
+    error can only tighten this cap, never loosen it. `dashboard/app.js` held
+    no block comment while it was in the tree (retired at sd:719 step 6), and
+    the measure was checked, not assumed.
 
     Every other suffix carries no code and is not counted. The rule is stated
     by extension rather than as "not Python", because a `README.md` measured

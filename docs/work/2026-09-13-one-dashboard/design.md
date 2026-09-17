@@ -34,9 +34,9 @@ current program, it is a different one. `dashboard/server.py`'s docstring makes
 the write path a decision rather than an accident: "6b-7 gave the handler a POST,
 because the queue tabs exist to be decided in and a read-only port of them is a
 list of questions nobody can answer." So the read-only variant deletes
-`RUN_ALLOWLIST` (`source:dashboard/actions.py::RUN_ALLOWLIST`), `run`
-(`source:dashboard/actions.py::run`), the ack store, and `deliver`
-(`source:dashboard/work.py::deliver`) — which is one of only two facts the two dashboards
+`RUN_ALLOWLIST` (in `dashboard/actions.py`, retired at sd:719 step 6), `run`
+(in `dashboard/actions.py`, retired at sd:719 step 6), the ack store, and `deliver`
+(in `dashboard/work.py`, retired at sd:719 step 6) — which is one of only two facts the two dashboards
 share on disk. What is left is 4,510 lines under a ceiling with two lines of code
 headroom, needing a second port and a second LaunchAgent, showing views the
 surviving dashboard also shows. The recurring cost is the more interesting half:
@@ -51,7 +51,7 @@ three things that are *not* in `dashboard/` and have to be dealt with: the
 citation in live prose that points into `dashboard/`.
 
 **Why deletion wins.** Not the line count — the front door. The pack's dashboard
-cannot bind `DEFAULT_PORT` (`source:dashboard/server.py::DEFAULT_PORT`) while PID 37095 holds 8767,
+cannot bind `DEFAULT_PORT` (in `dashboard/server.py`, retired at sd:719 step 6) while PID 37095 holds 8767,
 neither README tells anyone to start it, and the pack's own README says at lines
 198 to 200 that the current dashboard lives in `system/local-project-dashboard`. A
 program that is documented as historical, cannot start on its default, and costs
@@ -166,7 +166,7 @@ properties, which is why the list above missed it.
 **Both are deleted. Neither is ported. Six behaviours are carried out of them by
 name first.**
 
-`PAGE` (`source:dashboard/server.py::PAGE`) is an HTML literal whose nav declared seven
+`PAGE` (in `dashboard/server.py`, retired at sd:719 step 6) is an HTML literal whose nav declared seven
 tabs (lines 290-306 of `dashboard/server.py` at `a8295266`) and whose plugin
 mount point was a div (line 371 at that commit; step 3 removed it, and step 4
 removed the `prs` and `issues` tabs, so the nav declares five today). The
@@ -322,7 +322,7 @@ this document does not dress it up as a gate.
 
 **sd:705 keeps the two stale comments and nothing else.**
 
-- `DEFAULT_PORT` (`source:dashboard/server.py::DEFAULT_PORT`) carried a comment above it
+- `DEFAULT_PORT` (in `dashboard/server.py`, retired at sd:719 step 6) carried a comment above it
   (lines 54-56 of `dashboard/server.py` at `a8295266`) saying the system dashboard "landed on 8768 at P3
   so the two could run side by side" and that taking the port "is what makes the
   swap a swap". The swap reversed.

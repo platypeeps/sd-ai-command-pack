@@ -345,7 +345,17 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 #: which is not what this set measures. `R10-D2` in particular no longer had
 #: a meter entry for the repeal Dec-4 decided, so when that repeal landed as
 #: the first `REPEALED` row, on 2026-09-16, this set did not move for it.
-#: `R11-D4` and `R11-D20` are still rowless.
+#: `R11-D4` and `R11-D20` are still rowless, and `R11-D20` came back in at
+#: sd:719 step 6: `dashboard/now.py`, the one live file that defined it,
+#: retired, so its definition is archive-only again while this file's own
+#: prose still cites it.
+#:
+#: **18 after sd:719 step 6, 2026-09-16.** One in, `R11-D20`, as above. Two
+#: went the way step 3's three did: step 6's module deletions under
+#: `dashboard/` (the package marker stays until step 7) took the only live
+#: files that cited them, and nothing was registered for them. They are named
+#: in that commit's message and not here, for the reason step 3's paragraph
+#: gives.
 #:
 #: **19 after sd:431 slice D, 2026-09-16.** `R10-D1` is a row. What held it
 #: was not its enforcement -- `bin/sd-status::_age_rows` has flagged
@@ -365,7 +375,7 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 STRANDED_RULE_IDS = frozenset({
     "R10-D3", "R10-D7",
     "R11-D1", "R11-D10", "R11-D13", "R11-D14", "R11-D15",
-    "R11-D17", "R11-D18", "R11-D21", "R11-D23",
+    "R11-D17", "R11-D20", "R11-D21",
     "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D30", "R11-D5", "R11-D6",
     "R5-D1",
 })
@@ -634,11 +644,12 @@ def consumer_sources() -> list[tuple[str, str]]:
     """Every tracked file under `bin/` and `dashboard/`, Python or not.
 
     Not "every file that parses as Python", which is what this was and which
-    made `dashboard/app.js` invisible -- the one tracked file here that is not
-    Python, and the same file an independent sd:525 pass named as the blind
-    spot of this repository's other AST-only locator. A scope that silently
-    drops the only file it cannot parse is the defect this module exists to
-    end, committed inside the check built to end it.
+    made `dashboard/app.js` invisible -- until sd:719 step 6 retired it, the
+    one tracked file here that was not Python, and the same file an
+    independent sd:525 pass named as the blind spot of this repository's other
+    AST-only locator. A scope that silently drops the only file it cannot
+    parse is the defect this module exists to end, committed inside the check
+    built to end it; the scope stays whole after the file that taught it went.
     """
 
     return [(relative, text) for relative, text in read_corpus("bin", "dashboard")
@@ -656,8 +667,9 @@ def second_list_entries() -> list[tuple[str, int, str]]:
     Two readers, because the corpus has two kinds of file. Python goes through
     `ast`, which tells a docstring from a string constant exactly. Everything
     else has no parser here and goes through `QUOTED`, which reads quoted runs
-    only -- so `// see R11-D20` in `dashboard/app.js` stays a citation while
-    `["R11-D20"]` does not. What neither reader sees is stated on the test.
+    only -- so `// see R11-D20` in a JavaScript file stays a citation while
+    `["R11-D20"]` does not (`dashboard/app.js` was that file until sd:719
+    step 6). What neither reader sees is stated on the test.
 
     Empty while the table is empty, which is what lets the table land first.
     The first row for a rule some consumer already names in a string fails
@@ -1085,8 +1097,9 @@ with its baseline.""")
         is a thing that can disagree.
 
         **What it reads.** Every tracked file under `bin/` and `dashboard/`,
-        including the ones that are not Python. `dashboard/app.js` is the only
-        such file today and it was invisible until review said so.
+        including the ones that are not Python. `dashboard/app.js` was the
+        only such file until sd:719 step 6 retired it, and it was invisible
+        until review said so; the scope did not narrow when it went.
 
         **What it cannot see, which is stated rather than left to be found.**
 
@@ -1095,9 +1108,9 @@ with its baseline.""")
            concatenation -- `"R11-" + "D20"` -- reads as neither.
         2. In Python, a string constant holding embedded CSS or JavaScript
            reads as data throughout, including where the id sits in that
-           embedded language's own comment. `dashboard/server.py` carries
-           `R11-D20` exactly that way today, so registering `R11-D20` would
-           report it.
+           embedded language's own comment. `dashboard/server.py` carried
+           `R11-D20` exactly that way until sd:719 step 6 retired it, and
+           registering `R11-D20` would have reported it.
 
         Both are over-reports rather than misses, which is the safe direction
         for this check: the failure names a line, and a reader can see at once

@@ -1,16 +1,15 @@
-"""Behaviour tests for the dashboard's fleet discovery, its CLI, and what retired.
+"""Behaviour tests for what is left of the pack dashboard, and what retired.
 
-Real git repositories in a scratch root, because discovery reads the
-filesystem and a mocked one would only prove the mock agrees with itself. The
-properties worth pinning are the ones a future tab could break without
-noticing: that discovery enumerates rather than recites, and that the server's
-verb surface stays two (`tests/test_dashboard_actions.py` holds what the write
-path is allowed to do). The CLI has no verb left since sd:719 step 4 retired
-`index`, and the tests on it assert that. The repository collector itself --
-`git_facts`, `collect_repos`, `build_state` and the cache in front of them --
-retired with `dashboard/collect.py` at sd:719 step 5, and the tests that read
-git facts went with it; `discover_checkouts` moved to `dashboard/work.py`, the
-one caller left.
+Two things survive to be tested: `bin/sd-dashboard`, a parser with no verb
+that answers usage and points at the system dashboard, and the tree under
+`dashboard/`, which since sd:719 step 6 holds `dashboard/__init__.py` alone.
+Everything else went in order: the tracker index and its clients at step 4,
+the fleet collectors at step 5, and at step 6 the Now ranking, the action
+runner, the work collector, the server and the client script, whose views
+are served by the system dashboard (system pull request #428). Step 7
+deletes the directory, the CLI and this module's tracked-files test with it.
+Asserted from the filesystem and the tree, never from a string the author
+already knew: a file restored on its own is red here.
 """
 
 from __future__ import annotations
@@ -28,8 +27,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
-
-from dashboard import server, work  # noqa: E402 - after the path insert
 
 
 def load_cli():
@@ -76,22 +73,6 @@ class FleetHarness(unittest.TestCase):
         return path
 
 
-class DiscoveryTests(FleetHarness):
-    def test_both_grouped_and_top_level_checkouts_are_found(self):
-        self.make_repo("platypeeps/alpha")
-        self.make_repo("platypeeps/beta")
-        self.make_repo("standalone")
-        (self.root / "not-a-repo").mkdir()
-        found = work.discover_checkouts(self.root)
-        self.assertEqual(
-            sorted((group, path.name) for group, path in found),
-            [(".", "standalone"), ("platypeeps", "alpha"), ("platypeeps", "beta")],
-        )
-
-    def test_a_missing_root_is_empty_rather_than_an_error(self):
-        self.assertEqual(work.discover_checkouts(self.root / "nope"), [])
-
-
 class CommandLineTests(FleetHarness):
     def run_cli(self, *argv: str) -> tuple[int, str]:
         out = io.StringIO()
@@ -116,7 +97,7 @@ class CommandLineTests(FleetHarness):
 
 
 class RetiredTrackerIndexTests(FleetHarness):
-    """sd:719 steps 4 and 5: the tracker index and the fleet collectors are gone.
+    """sd:719 steps 4, 5 and 6: the index, the fleet collectors and the views are gone.
 
     Step 4: the system dashboard serves PRs and Issues from `sd_db.shadow`
     (system pull request #411), so the pack's own index -- `dashboard/store.py`,
@@ -125,8 +106,13 @@ class RetiredTrackerIndexTests(FleetHarness):
     (system pull request #427) read the fleet through `sd_dashboard/fleet.py`,
     so `dashboard/collect.py`, `dashboard/sessions.py` and `dashboard/skills.py`
     retired with the `/api/state`, `/api/sessions` and `/api/skills` routes.
-    Asserted from the filesystem and the tree, never from a string the author
-    already knew: a file restored on its own is red here.
+    Step 6: Today on the system dashboard opens with the Now ranking, served
+    from `sd_dashboard/now_screen.py` through `/api/now` (system pull request
+    #428), and `sd work deliver` is the write `deliver` used to make, so
+    `dashboard/now.py`, `dashboard/actions.py`, `dashboard/work.py`,
+    `dashboard/server.py` and `dashboard/app.js` retired with their four test
+    modules. Asserted from the filesystem and the tree, never from a string the
+    author already knew: a file restored on its own is red here.
     """
 
     RETIRED = (
@@ -141,8 +127,20 @@ class RetiredTrackerIndexTests(FleetHarness):
         "dashboard/skills.py",
         "tests/test_dashboard_sessions.py",
         "tests/test_dashboard_skills.py",
+        "dashboard/now.py",
+        "dashboard/actions.py",
+        "dashboard/work.py",
+        "dashboard/server.py",
+        "dashboard/app.js",
+        "tests/test_dashboard_now.py",
+        "tests/test_dashboard_work.py",
+        "tests/test_dashboard_deliver.py",
+        "tests/test_dashboard_actions.py",
     )
-    RETIRED_MODULES = frozenset({"store", "github", "jira", "collect", "sessions", "skills"})
+    RETIRED_MODULES = frozenset({
+        "store", "github", "jira", "collect", "sessions", "skills",
+        "now", "actions", "work", "server",
+    })
 
     @classmethod
     def retired_imports(cls, text: str, relative: str) -> list[str]:
@@ -231,12 +229,13 @@ class RetiredTrackerIndexTests(FleetHarness):
     def test_a_parenthesised_import_is_seen(self):
         """The shape a line-anchored regex missed (review-1005), plus the other two."""
         multiline = "from dashboard import (\n    work,\n    store,\n)\n"
-        self.assertEqual(self.retired_imports(multiline, "bin/x"), ["dashboard.store"])
+        self.assertEqual(
+            self.retired_imports(multiline, "bin/x"), ["dashboard.work", "dashboard.store"])
         self.assertEqual(
             self.retired_imports("import dashboard.jira as j\n", "bin/x"), ["dashboard.jira"])
         self.assertEqual(
             self.retired_imports("from . import work, github\n", "dashboard/y.py"),
-            ["dashboard.github"])
+            ["dashboard.work", "dashboard.github"])
         # The fourth shape, `from .collect import discover_checkouts`: step 5's
         # importer grep missed it the way step 4's missed `from . import`, and
         # `dashboard/work.py` carried exactly that line.
@@ -244,24 +243,41 @@ class RetiredTrackerIndexTests(FleetHarness):
             self.retired_imports("from .collect import discover_checkouts\n", "dashboard/w.py"),
             ["dashboard.collect"])
         self.assertEqual(self.retired_imports("from . import x\n", "tests/z.py"), [])
-        self.assertEqual(self.retired_imports("from dashboard import work\n", "bin/x"), [])
+        # `work` was the survivor this line named until step 6 retired it too;
+        # the package itself is the one name left that is not retired.
+        self.assertEqual(
+            self.retired_imports("from dashboard import work\n", "bin/x"), ["dashboard.work"])
+        self.assertEqual(self.retired_imports("import dashboard\n", "bin/x"), [])
         self.assertEqual(self.retired_imports("#!/bin/sh\necho store\n", "bin/sh"), [])
 
 
-class ServerRouteTests(FleetHarness):
-    def test_the_handler_reads_and_writes_by_one_verb_each(self):
-        """This test used to assert there was no `do_POST` at all.
+class StepSixEndState(FleetHarness):
+    """What the tree and the CLI look like between step 6 and step 7.
 
-        6b-7 gave the handler one, and the guarantee moved rather than went:
-        writing is POST, POST is Host-allowlisted and token-gated, and no GET
-        has a side effect. `tests/test_dashboard_actions.py` is where that is
-        pinned; what is left here is the verb surface, which is still two.
-        """
-        handler = server.make_handler(server.Cache(self.root), "// script")
-        self.assertTrue(hasattr(handler, "do_GET"))
-        self.assertTrue(hasattr(handler, "do_POST"))
-        self.assertFalse(hasattr(handler, "do_PUT"))
-        self.assertFalse(hasattr(handler, "do_DELETE"))
+    Step 7 deletes `dashboard/`, `bin/sd-dashboard` and the three ceilings in
+    one commit, and this class goes with them: a test that the directory
+    holds one file cannot outlive the directory. Until then it is the end
+    state step 6 claims, read from the tree rather than from the deletion
+    list above.
+    """
 
-    def test_the_client_script_is_readable_from_the_package(self):
-        self.assertIn("api/now", server.script_source())
+    def test_the_package_marker_is_the_only_tracked_file_under_dashboard(self):
+        listed = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "ls-files", "--deduplicate", "--", "dashboard"],
+            capture_output=True, text=True, check=True,
+        ).stdout.split()
+        self.assertEqual(listed, ["dashboard/__init__.py"], f"tracked under dashboard/: {listed}")
+
+    def test_help_still_exits_zero_and_names_the_system_dashboard(self):
+        """The CLI outlives its verbs by one step, and its usage says where to go."""
+        completed = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "bin" / "sd-dashboard"), "--help"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("usage: sd-dashboard", completed.stdout)
+        self.assertIn("system dashboard", completed.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

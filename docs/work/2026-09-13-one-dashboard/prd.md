@@ -44,7 +44,7 @@ reverse direction has no ceiling at all, because the system package has none.
 
 They share exactly two facts on disk. One is `collect_ports`, which the system's
 Ports area and the pack's `sys.ports` plugin tab both reach. The other is one
-`sd_db` write: `deliver` (`source:dashboard/work.py::deliver`), which resolves a row by
+`sd_db` write: `deliver` (in `dashboard/work.py`, retired at sd:719 step 6), which resolves a row by
 external id and calls `deliver_work`. Four tab names match — now/today,
 work/backlog, skills/skills, ports — and three of the four read different
 sources, so the names overstate the overlap rather than evidencing it.
@@ -100,7 +100,7 @@ same shape. sd:361 is therefore step zero of this item and not a side quest.
 The fear this plan has to answer is a broken front door mid-port. It does not
 arise, and the reason is worth stating before the ordering section leans on it.
 
-`DEFAULT_PORT` (`source:dashboard/server.py::DEFAULT_PORT`) is 8767. The process listening on 8767
+`DEFAULT_PORT` (in `dashboard/server.py`, retired at sd:719 step 6) is 8767. The process listening on 8767
 is PID 37095, which `launchctl` runs under the label `com.sven.sd-dashboard`,
 and whose `ProgramArguments[0]` is the system repository's
 `local-project-dashboard/dashboard.sh`. Measured by sd:705's followup note #1331,
@@ -139,8 +139,8 @@ divide.
    like: `dashboard/server.py`'s own docstring says the POST path is deliberate
    ("6b-7 gave the handler a POST, because the queue tabs exist to be decided
    in"), so a read-only variant means deleting `RUN_ALLOWLIST`
-   (`source:dashboard/actions.py::RUN_ALLOWLIST`), `run` (`source:dashboard/actions.py::run`), the ack
-   store and `deliver` (`source:dashboard/work.py::deliver`) — which is most of what
+   (in `dashboard/actions.py`, retired at sd:719 step 6), `run` (in `dashboard/actions.py`, retired at sd:719 step 6), the ack
+   store and `deliver` (in `dashboard/work.py`, retired at sd:719 step 6) — which is most of what
    distinguishes the program from a report. What would remain is 4,510 lines
    under a cap with two lines of code headroom, a second port, and a second
    LaunchAgent, serving views the surviving dashboard also serves.
@@ -188,7 +188,7 @@ divide.
 
 4. **The 7-tab page and `app.js` are deleted, not ported — and five behaviours
    are ported out of them by name before they go.** `PAGE`
-   (`source:dashboard/server.py::PAGE`) is an HTML literal and the system package already
+   (in `dashboard/server.py`, retired at sd:719 step 6) is an HTML literal and the system package already
    has its own page and `static/`; two page shells cannot merge. `app.js` is 855
    lines, 569 of them code. A plan that says "deleted" without naming what has
    to survive is a plan that loses it silently, so `design.md` names five

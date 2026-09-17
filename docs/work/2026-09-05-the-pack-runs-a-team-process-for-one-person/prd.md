@@ -4270,7 +4270,7 @@ from a number the operator types.
     has exactly that problem in a sharper form.
   - the hand-merge reconciliation display — **28**, at `whereCell`
     (in `dashboard/app.js`, 18), the built cell that renders a derived
-    state with its reason, and `split_status` (`source:dashboard/work.py::split_status`,
+    state with its reason, and `split_status` (in `dashboard/work.py`, retired at sd:719 step 6,
     10), where the two new states have to be spelled: a row `in_progress` with
     the squash commit on a note, and a row `done` but unmarked.
 

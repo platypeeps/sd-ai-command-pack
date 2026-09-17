@@ -132,8 +132,9 @@ Each reason, with why it exists:
   past-end citations the rule was built over sat on an enumerated, checked
   list as `line-past-end-carried` from 2026-09-14 until each was settled on
   its own page -- every one dropped the number and kept the file name, and
-  one, `drawPlugins` in `dashboard/app.js`, also says in prose, with an
-  `[absent: ...]` note beside the symbol, that it is gone on purpose. A
+  one, `drawPlugins` in `dashboard/app.js` (a file retired at sd:719 step
+  6), also says in prose, with an `[absent: ...]` note beside the symbol,
+  that it is gone on purpose. A
   tenth the rule cannot see, a unique-suffix path, was fixed by hand on the
   same pass. The list, its liveness test and its ceiling went with the last
   row, and so did the marker's power to stand this check down: `absent`
@@ -256,8 +257,9 @@ lane that inserts is not the lane that wrote it. The stable spelling is
 `source:<path>::<symbol>`, which `source_declaration_error` resolves by
 declaration and which no insertion can break. A claim about a line that is not
 a declaration is written as prose naming the enclosing declaration; losing
-that line number was accepted. `dashboard/app.js` has no locator, being the
-only non-Python file under `bin/` and `dashboard/`, so its citations are prose.
+that line number was accepted. `dashboard/app.js` had no locator, being the
+only non-Python file under `bin/` and `dashboard/` until sd:719 step 6
+retired it, so its citations were prose.
 
 Markdown targets keep `path:line`: a line in a page is `bin/sd-docs-lint` rule
 6's subject and the repointer's, not this rule's. Archives are records and keep
