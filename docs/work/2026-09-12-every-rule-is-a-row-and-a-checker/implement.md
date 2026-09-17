@@ -335,7 +335,7 @@
       skill section reddens leg a with `R10-D1: ... does not cite it`; the
       row's own proof applied by hand reddens the named test.
 
-- [ ] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
+- [x] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become
       registry rows pointing at the existing checkers — no new enforcement, only
       registration. Verify: the ceilings in `tests/test_code_health.py` are
@@ -353,6 +353,55 @@
       `R10-D6` already teaches from, rather than a new skill or a widening of
       leg a to reach `CONTRIBUTING.md`. Widening leg a would have been a change
       to its measurement, which is not what this step is.
+      **Step 5, 2026-09-16. `R12-D1` to `R12-D4` are rows; both leg c
+      baselines unchanged; `tests/test_code_health.py` untouched.**
+      Re-measured on `29de1970` first: the four ceilings stand at
+      `source:tests/test_code_health.py::COMPLEXITY_CEILING` 20,
+      `source:tests/test_code_health.py::LENGTH_CEILING` 50,
+      `source:tests/test_code_health.py::DEPTH_CEILING` 5 and
+      `source:tests/test_code_health.py::CLONE_FLOOR` 25, with `COMPLEX` at
+      30 entries, `LONG` at 14, `DEEP` empty and `CLONES` at 5 pairs, and
+      the registry held five rows. Each row is in the `R10-D6` shape, a test as
+      checker, and its subject states the ceiling by name and by value —
+      a reader at the row needs the number, and `bin/sd_rules.py` cannot
+      import the module it lives in — so
+      `test_a_code_health_subject_states_the_current_ceiling` in
+      `source:tests/test_rule_registry.py::Registry` reads every
+      `` `NAME`, N `` pair back off that module and refuses a code-health
+      row that states no ceiling; it selects rows by the checker's file, not
+      by id. The skill section is `Code health` in
+      `skills/sd-check/SKILL.md`, four bullets each opening with an id, the
+      number stated nowhere in it. The proofs violate the rule in a tracked
+      file rather than lowering a ceiling, which would prove only that the
+      test reads its constant: each replaces the first `def` line of
+      `bin/sd_library_guard.py`, the smallest module in the corpus, with a
+      violating function and then that line again, and the violation is
+      built from the constant — `COMPLEXITY_CEILING` `if` statements score
+      one over, `LENGTH_CEILING + 1` statements, `DEPTH_CEILING + 1` nested
+      `if`s, two functions of one body past `CLONE_FLOOR` — so a raised
+      ceiling moves the violation with it. What the re-measurement found
+      that the plan had not: the code-health checkers enumerate their corpus
+      with `git ls-files`, and leg d's copy carried no index, so the named
+      test raised `CalledProcessError` and ran nothing — which
+      `enforcement_error` refused, correctly, as evidence of anything. The
+      copy now gets `git init` and one `git add` of what was copied
+      (`source:tests/test_rule_registry.py::copy_tracked`); the index lists
+      paths, so a mutated file stays in the corpus. Fail-first: the rows
+      were committed with no `MUTATIONS` entries and
+      `test_every_live_checker_carries_a_mutation` reddened, `FAILED
+      (failures=1)`, naming all four checker locations; with the entries the
+      module passes, 34 tests. Mutations, each on a byte copy and restored
+      by `diff -q`: the length proof applied by hand reddens
+      `test_no_function_is_longer_than_the_ceiling` with
+      `bin/sd_library_guard.py::_leg_d_too_long: 51`; `R12-D2` deleted from
+      the skill section reddens leg a with `R12-D2: ... does not cite it`;
+      the complexity subject's 20 changed to 21 reddens the agreement test,
+      which reports the subject stating `COMPLEXITY_CEILING` as 21 where
+      `tests/test_code_health.py` has 20; one entry's `old` changed to text
+      the file does not hold reddens leg d with `Found 0 occurrences`.
+      Timing is in `design.md`'s leg d decision: one copy per run still
+      holds, and the whole module went from 9.70 s for 33 tests to 38.88 s
+      for 34, because `TheSharedCopy` runs the leg a second time in-process.
 
 - [ ] **6. Prose rules, in their narrowed forms.** Rule 2 as filed. Rules 1 and
       3 as narrowed in `design.md`, each with its baseline. Verify: each rule
@@ -462,3 +511,7 @@ The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
   `bin/sd-status` cites `R10-D1` from two comments and carries it in no
   string; the row's checker is `bin/sd-status::_age_rows` and leg d runs its
   proof.
+- 2026-09-16 step 5 (Dec-1, Dec-2): `R12-D1` to `R12-D4` register the four
+  code-health checkers with no enforcement change; `tests/test_code_health.py`
+  is untouched. Leg d's copy carries an index now, because those checkers
+  enumerate by `git ls-files`, and the four proofs run under it.

@@ -53,6 +53,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from typing import NamedTuple
 from unittest import mock
@@ -63,6 +64,13 @@ if str(REPO_ROOT / "bin") not in sys.path:
 
 import sd_rules  # noqa: E402 - the table under test, imported for its own sake
 
+# The module the code rules' checkers live in, imported for its constants and
+# nothing else: the `R12-D*` subjects state a ceiling by value, and the value
+# is read back off this module rather than trusted. The four mutations leg d
+# runs against those checkers are built from the same constants, so a raised
+# ceiling moves the violation with it instead of leaving a fixture green.
+from tests import test_code_health as code_health  # noqa: E402
+
 # The resolver for a `path::symbol` location, borrowed rather than rebuilt. It is
 # the same function that resolves the `source:path::symbol` citations in this
 # pack's documentation, which is the whole reason `Rule.checker` could stop being
@@ -70,13 +78,6 @@ import sd_rules  # noqa: E402 - the table under test, imported for its own sake
 # source of truth about which declarations exist. A second AST walk here would be
 # the defect this module exists to end.
 from tests.test_doc_citations import source_declaration_error  # noqa: E402
-
-# The module the code rules' checkers live in, imported for its constants and
-# nothing else: the `R12-D*` subjects state a ceiling by value, and the value
-# is read back off this module rather than trusted. The four mutations leg d
-# runs against those checkers are built from the same constants, so a raised
-# ceiling moves the violation with it instead of leaving a fixture green.
-from tests import test_code_health as code_health  # noqa: E402
 
 #: Where the historical record lives. Archived planning documents are read for
 #: *definitions*, because a rule defined there still answers a live citation,
@@ -97,9 +98,8 @@ SKILLS = "skills/"
 CODE_HEALTH = "tests/test_code_health.py"
 
 #: How a subject states a ceiling: the constant's name in a code span, then
-#: its value, `` `LENGTH_CEILING`, 50 ``. Both halves are required, because
-#: a name alone leaves the reader to go and look, and a number alone is a
-#: number nothing can check.
+#: its value, `` `LENGTH_CEILING`, 50 ``. A name alone sends the reader to
+#: look; a number alone is a number nothing can check.
 STATED_CEILING = re.compile(r"`([A-Z][A-Z_]*)`, (\d+)\b")
 
 #: Where the suites live. A checker declared under here *is* the enforcement,
@@ -1706,6 +1706,58 @@ def enforcement_error(mutation: Mutation, outcome: Outcome) -> str | None:
 #: read back off `RULES` by `test_every_live_checker_carries_a_mutation` as an
 #: equality: a row added with no mutation fails, and a mutation outliving the row
 #: that needed it fails too.
+#: Where the four code-health mutations write their violation: the first
+#: `def` line of `bin/sd_library_guard.py`, the smallest module in the corpus
+#: `tests/test_code_health.py` governs, replaced by the violation and then the
+#: same line again. The anchor stays, so the file still parses and
+#: `schema_version` is still measured under its own name; the violation is a
+#: new function ahead of it, which no baseline exempts. A lowered ceiling
+#: would prove only that the test reads its constant.
+CODE_HEALTH_ANCHOR = "def schema_version(source: str) -> int | None:"
+
+
+def ahead_of_the_anchor(*definitions: str) -> str:
+    """`definitions` written above `CODE_HEALTH_ANCHOR`, as a mutation's `new`."""
+
+    return "\n\n\n".join((*definitions, CODE_HEALTH_ANCHOR))
+
+
+def a_function(name: str, body: str) -> str:
+    """One `def` taking `flag`, with `body` indented under it."""
+
+    return f"def {name}(flag):\n{textwrap.indent(body, '    ')}"
+
+
+#: One decision point past `COMPLEXITY_CEILING`: `complexity` starts at one
+#: and charges one per `if`, so `COMPLEXITY_CEILING` of them score one over.
+TOO_BRANCHY = a_function("_leg_d_too_branchy", "".join(
+    f"if flag == {n}:\n    return {n}\n"
+    for n in range(code_health.COMPLEXITY_CEILING)) + "return None\n")
+
+#: One statement past `LENGTH_CEILING`, as `ast.unparse` renders them.
+TOO_LONG = a_function("_leg_d_too_long", "".join(
+    f"step_{n} = {n}\n" for n in range(code_health.LENGTH_CEILING + 1)))
+
+#: One block past `DEPTH_CEILING`: nested `if`s, never an `elif` ladder,
+#: which `depth` holds at one level.
+TOO_DEEP = a_function("_leg_d_too_deep", "".join(
+    "    " * n + "if flag:\n" for n in range(code_health.DEPTH_CEILING + 1))
+    + "    " * (code_health.DEPTH_CEILING + 1) + "return flag\n")
+
+#: Two functions of one body under two names, each past `CLONE_FLOOR` in AST
+#: nodes. Renaming the locals would not part them either: the digest renames
+#: locals and blanks constants before it compares.
+CLONE_BODY = (
+    "total = 0\n"
+    "for item in flag:\n"
+    "    if item:\n"
+    "        total += item * 2\n"
+    "    else:\n"
+    "        total -= 1\n"
+    "return total\n")
+TWO_OF_A_KIND = (a_function("_leg_d_clone_a", CLONE_BODY),
+                 a_function("_leg_d_clone_b", CLONE_BODY))
+
 MUTATIONS: dict[str, Mutation] = {
     "bin/sd_setup_github.py::setup_github": Mutation(
         path="bin/sd_setup_github.py",
@@ -1736,6 +1788,38 @@ MUTATIONS: dict[str, Mutation] = {
         test="tests.test_sd_status.WorkItemInventoryTests"
              ".test_a_planning_item_past_the_threshold_ages_into_a_finding",
     ),
+    "tests/test_code_health.py::test_no_function_is_branchier_than_the_ceiling":
+        Mutation(
+            path="bin/sd_library_guard.py",
+            old=CODE_HEALTH_ANCHOR,
+            new=ahead_of_the_anchor(TOO_BRANCHY),
+            test="tests.test_code_health.CodeHealth"
+                 ".test_no_function_is_branchier_than_the_ceiling",
+        ),
+    "tests/test_code_health.py::test_no_function_is_longer_than_the_ceiling":
+        Mutation(
+            path="bin/sd_library_guard.py",
+            old=CODE_HEALTH_ANCHOR,
+            new=ahead_of_the_anchor(TOO_LONG),
+            test="tests.test_code_health.CodeHealth"
+                 ".test_no_function_is_longer_than_the_ceiling",
+        ),
+    "tests/test_code_health.py::test_no_function_nests_deeper_than_the_ceiling":
+        Mutation(
+            path="bin/sd_library_guard.py",
+            old=CODE_HEALTH_ANCHOR,
+            new=ahead_of_the_anchor(TOO_DEEP),
+            test="tests.test_code_health.CodeHealth"
+                 ".test_no_function_nests_deeper_than_the_ceiling",
+        ),
+    "tests/test_code_health.py::test_no_two_functions_are_the_same_function":
+        Mutation(
+            path="bin/sd_library_guard.py",
+            old=CODE_HEALTH_ANCHOR,
+            new=ahead_of_the_anchor(*TWO_OF_A_KIND),
+            test="tests.test_code_health.CodeHealth"
+                 ".test_no_two_functions_are_the_same_function",
+        ),
 }
 
 
@@ -1808,15 +1892,24 @@ def copy_tracked(destination: pathlib.Path) -> None:
     mid-walk, a failure in the copy rather than in anything being tested. And it
     is the enumeration every other population in this module already comes from.
 
-    `.git` is left behind with them. No test leg d runs reads the index, and in
-    a worktree `.git` is a pointer to a gitdir this copy has no business
-    writing to.
+    `.git` is left behind with them: in a worktree it is a pointer to a gitdir
+    this copy has no business writing to. The copy then gets an index of its
+    own, `git init` and one `git add` of everything copied, because the
+    code-health checkers enumerate their corpus with `git ls-files` -- by the
+    index and not the directory, which is that module's own reasoning -- and
+    ran no test at all in an index-less copy: `CalledProcessError`, exit 128,
+    `Ran 0 tests`, which `enforcement_error` rightly refuses as evidence.
+    `-f` because the copy holds tracked files only, and a global excludes file
+    must not thin them; the index lists paths, so a mutated file stays listed.
     """
 
     for path in tracked_paths():
         target = destination / path.relative_to(REPO_ROOT)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
+    for command in (["git", "init", "-q"], ["git", "add", "-A", "-f", "--", "."]):
+        subprocess.run(command, cwd=destination, env=child_environment(),
+                       check=True, capture_output=True)
 
 
 def exercise(mutation: Mutation, tree: pathlib.Path) -> Outcome:
