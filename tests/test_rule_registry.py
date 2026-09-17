@@ -402,11 +402,17 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 #: skill taught either verb before it. The twelve left are `R11-D1`,
 #: `R11-D5` and the ten dashboard and history ids, each an owner decision on
 #: a repeal (the audit of that step, slices 7 and 8).
-STRANDED_RULE_IDS = frozenset({
-    "R11-D1", "R11-D10", "R11-D13", "R11-D15",
-    "R11-D17", "R11-D20", "R11-D21",
-    "R11-D24", "R11-D25", "R11-D29", "R11-D30", "R11-D5",
-})
+#: **0 after sd:431 step 4, slice H, 2026-09-17.** The twelve are repealed
+#: rows, under one family decision team-lead took on 2026-09-17 (Dec-9,
+#: recommended on note 2665, reversible by the owner): `R11-D1` and `R11-D5`
+#: in the Dec-4 shape, because the enforcement each claims was never built
+#: or is gone, and the ten dashboard and history ids because sd:719 is done
+#: with `dashboard/` and `bin/sd_ledger.py` deleted (#1013, #1017), so what
+#: each of them ruled on no longer exists to be enforced. The set is empty
+#: and stays a set: a live document newly citing an archived ruling is
+#: reported by name on the day it is written, and the closed baseline is
+#: the same shape `DANGLING_RULE_IDS` has held since slice S2.
+STRANDED_RULE_IDS: frozenset[str] = frozenset()
 
 #: Tool-behaviour claims in skills that cite no rule id, per document.
 #: Measured on `cddd3b98`, and unchanged on `239ff624`, by `uncited_skill_claims`
@@ -891,6 +897,34 @@ def tombstone_errors(rule: sd_rules.Rule) -> list[str]:
             if getattr(rule, field) is not None]
 
 
+def missing_field_errors(rule: sd_rules.Rule) -> list[str]:
+    """Every field a consumer reads that this row leaves empty or misspelt.
+
+    `teaches` is required of a live row and optional on a repealed one. Leg a
+    reads `teaches` from live rows only, so on a repealed row the value is
+    read by nothing, and a never-taught rule repealed under a decision has
+    no section to name: `R11-D1` was taught by no skill when it was repealed,
+    and a `teaches` invented for it would have pointed a reader at a section
+    that says nothing about it. `R10-D2` keeps its section, because that
+    section is where the reason it was repealed is written, and
+    `tests/test_cut_symbols.py` holds that link. Separate from the test so a
+    fixture row can be asked the question directly, as `tombstone_errors` is.
+    """
+
+    wrong = []
+    if not rule.subject.strip():
+        wrong.append(f"{rule.id}: no subject -- say what it checks")
+    if rule.state == sd_rules.LIVE and not (rule.teaches or "").strip():
+        wrong.append(f"{rule.id}: no teaches -- say where it is taught")
+    if rule.scope not in sd_rules.SCOPES:
+        wrong.append(f"{rule.id}: scope={rule.scope!r} is not one of "
+                     f"{sd_rules.SCOPES}")
+    if rule.state not in sd_rules.STATES:
+        wrong.append(f"{rule.id}: state={rule.state!r} is not one of "
+                     f"{sd_rules.STATES}")
+    return wrong
+
+
 def _lines(rows) -> str:
     return "\n".join(f"  {row}" for row in rows)
 
@@ -1053,22 +1087,44 @@ can execute, and `MUTATIONS` below has to carry it as code.""")
         on the table this one is modelled on.
         """
 
-        wrong = []
-        for rule in sd_rules.RULES:
-            if not rule.subject.strip():
-                wrong.append(f"{rule.id}: no subject -- say what it checks")
-            if not rule.teaches.strip():
-                wrong.append(f"{rule.id}: no teaches -- say where it is taught")
-            if rule.scope not in sd_rules.SCOPES:
-                wrong.append(f"{rule.id}: scope={rule.scope!r} is not one of "
-                             f"{sd_rules.SCOPES}")
-            if rule.state not in sd_rules.STATES:
-                wrong.append(f"{rule.id}: state={rule.state!r} is not one of "
-                             f"{sd_rules.STATES}")
+        wrong = [error for rule in sd_rules.RULES
+                 for error in missing_field_errors(rule)]
         self.assertEqual(wrong, [], f"""
 A registry row is missing a field a consumer reads.
 
 {_lines(wrong)}""")
+
+    def test_teaches_is_required_of_a_live_row_and_optional_on_a_repealed_one(self):
+        """The one field whose requirement depends on the row's state.
+
+        Fixture rows rather than the table, for the reason
+        `test_a_repealed_row_holding_a_checker_or_a_proof_is_reported_by_field`
+        gives: the live table carries no row that leaves the field empty, so
+        a check read off the table alone never reaches the branch that
+        reports one. The live row is the control that relaxing the field for
+        `repealed` did not relax it for everything.
+        """
+
+        def row(**fields) -> sd_rules.Rule:
+            return sd_rules.Rule(
+                id="R0-D0", subject="a fixture", checker="bin/sd::store_list",
+                proof="a proof", scope="code",
+                teaches="skills/sd-check/SKILL.md#Never")._replace(**fields)
+
+        self.assertEqual(missing_field_errors(row()), [])
+        self.assertEqual(
+            missing_field_errors(row(teaches=None)),
+            ["R0-D0: no teaches -- say where it is taught"])
+        self.assertEqual(
+            missing_field_errors(row(teaches="   ")),
+            ["R0-D0: no teaches -- say where it is taught"])
+        repealed = row(checker=None, proof=None, state=sd_rules.REPEALED)
+        self.assertEqual(missing_field_errors(repealed), [])
+        self.assertEqual(missing_field_errors(repealed._replace(teaches=None)), [])
+        self.assertEqual(
+            missing_field_errors(repealed._replace(subject="")),
+            ["R0-D0: no subject -- say what it checks"],
+            "a repealed row still has to say what it checked")
 
     def test_a_code_health_subject_states_the_current_ceiling(self):
         """The number in a subject is a copy of a constant, and it is held to it.

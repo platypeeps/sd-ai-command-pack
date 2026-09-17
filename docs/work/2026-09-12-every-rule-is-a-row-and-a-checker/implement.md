@@ -67,11 +67,17 @@
       same 4 ids, and the stranded set is 20, down from the 26 this step first
       reported.
 
-- [ ] **4. The R-id backfill.** Move live rule definitions out of archived
+- [x] **4. The R-id backfill.** Move live rule definitions out of archived
       planning documents into registry rows, one at a time, deciding for each
       whether it is a live rule or a historical decision. This is the expensive
       step. It lands in slices; each slice reduces the leg c baseline and the
       baseline test proves it fell.
+      **Ticked 2026-09-17, slice H.** `STRANDED_RULE_IDS` in
+      `tests/test_rule_registry.py` is `frozenset()`, down from the 26 ids
+      measured on `cddd3b98`: every one is a registry row, live or repealed,
+      or had its prose repointed, and the last twelve are repealed rows under
+      Dec-9, the decision team-lead took on 2026-09-17 (note 2665); see the
+      Slice H paragraph below.
 
       **Slice 1, 2026-09-12. `STRANDED_RULE_IDS` 26 → 25.** `R10-D5` is a
       row. It was already taught by a skill section that cites the id, and its
@@ -547,6 +553,60 @@
       archive definition's own wording, though the checker holds `set`'s
       path only; the rows were held unchanged in the review fixes.
 
+      **Slice H, 2026-09-17. `STRANDED_RULE_IDS` 12 -> 0.** The twelve
+      repeal questions slice G left are answered by one family decision,
+      Dec-9, which team-lead took on 2026-09-17 on the standing "use your
+      recommendation" authorization and the owner's "start all planning
+      items" of that morning, recorded on the item as note 2665's
+      recommendation and reversible by the owner by deleting the rows'
+      `REPEALED` state. Two groups. `R11-D1` and `R11-D5` are repealed in
+      the Dec-4 shape, because the enforcement each claims was never built
+      or is gone: `R11-D1`'s `/v1/models` preflight is read by nothing under
+      `bin/` or `tests/` (`git grep -n 'v1/models' ea32e76a -- bin tests`
+      finds nothing) and the exo entry in `providers.yaml` ships `enabled:
+      false`; `R11-D5`'s CI job is gone, as `CONTRIBUTING.md` already
+      recorded. The ten dashboard and history ids -- `R11-D10`, `R11-D13`,
+      `R11-D15`, `R11-D17`, `R11-D20`, `R11-D21`, `R11-D24`, `R11-D25`,
+      `R11-D29`, `R11-D30` -- are repealed because sd:719 is `done` with
+      `dashboard/` and `bin/sd_ledger.py` deleted (#1013, #1017), so what
+      each of them ruled on no longer exists to be enforced; their live
+      citations are sd:719's own pages, the 2026-09-05 item's pages and the
+      history paragraphs of `tests/test_loc_caps.py`, records rather than
+      consumers. Re-measured on `ea32e76a`: every defining sentence the
+      audit cited stands at the line it named (lines 251, 1582, 1454, 1247,
+      1168, 1719, 1994, 2046, 2185, 2257 and 2483 of
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md`,
+      and the heading at
+      `docs/work/archive/2026-09/2026-09-04-host-parsing-refuses-what-it-cannot-parse/implement.md:12`),
+      and each row's `subject` is that sentence's clause. The audit's slice 7
+      came first, as the prerequisite: `teaches` is `str | None` on
+      `source:bin/sd_rules.py::Rule`, required of a live row and optional on
+      a repealed one, held by `source:tests/test_rule_registry.py::missing_field_errors`
+      and a fixture-driven test with the live row as its control. Fail-first
+      on the base, a repealed fixture row with `teaches=None` appended to
+      `RULES` errored `test_every_row_is_completely_filled_in` with
+      `AttributeError: 'NoneType' object has no attribute 'strip'`; after the
+      relaxation the same row is `OK`, and a live row with `teaches=None`
+      still reddens it with `R13-D3: no teaches -- say where it is taught`.
+      Then the meter: `STRANDED_RULE_IDS` emptied before the rows existed
+      reddened leg c with `{'R11-D1', 'R11-D20', 'R11-D10', 'R11-D29[84
+      chars]D30'} != frozenset()`, and the twelve rows took it to `Ran 36
+      tests ... OK`. The closed baseline is the shape `DANGLING_RULE_IDS`
+      has held since slice S2, `frozenset[str] = frozenset()`; no assertion
+      refuses an empty set. Leg d is untouched: its coverage is `{rule.checker
+      for rule in sd_rules.RULES if rule.state == sd_rules.LIVE and
+      rule.checker}`, so a repealed row owes no mutation and `MUTATIONS` did
+      not move. Each row carries `checker=None`, `proof=None`, `teaches=None`
+      and `state=REPEALED`, and the reason sits in one comment per group
+      above the rows, cited to note 2665 and this slice. Two prose sites
+      moved with the ids: the `providers.yaml` comment over the exo entry
+      no longer says `R11-D1` "requires" a check, it says the preflight was
+      asked for, never built, and the id is a repealed row, with the entry
+      still `enabled: false`; and the `CONTRIBUTING.md` paragraph that
+      records no CI job invoking `check-bash32-syntax.sh` cites the repeal
+      of `R11-D5` in one clause. `R10-D2` keeps the `teaches` it had, which
+      still resolves and which `tests/test_cut_symbols.py` holds.
+
 - [x] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become
       registry rows pointing at the existing checkers — no new enforcement, only
@@ -797,7 +857,7 @@
       case with `2 != 1`; the `core.hooksPath` refusal removed reddens its
       case with `git hooks: .githooks/pre-commit -> ...`.
 
-- [ ] **8. The authoring tier.** Skills consult the registry and name the rule
+- [x] **8. The authoring tier.** Skills consult the registry and name the rule
       ids in scope. Filed last, because it depends on the registry carrying
       rules.
       **Decided 2026-09-14 (owner, note 1989): it runs next, ahead of the rest
@@ -822,6 +882,12 @@
       is left out until the `.github/`-is-code residue is settled. (iii) One
       teaching section per live-row id, each naming the verb, is in progress
       in step 4's slices; the step stays open until they land.
+      **Ticked 2026-09-17, slice H.** Part (iii) landed as slices E to G
+      (#1019, #1020, #1021), one teaching section per live-row id, each
+      naming the verb; the twelve ids left after them are repealed rows under
+      Dec-9, the decision team-lead took on 2026-09-17 (note 2665), and a
+      repealed row is taught by nothing, so no section is owed and nothing is
+      left for the step to wait on.
 
 Steps 1 to 3 are the deliverable, and all three are done: `bb379027` (#882)
 landed them and `d745474b` (#889) corrected leg b's baseline. Steps 4 to 8 are
@@ -950,3 +1016,11 @@ The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
   `skills/sd-help/SKILL.md`, the host team-lead chose. The section names
   the verb. `LegD` real 11.333 s at load 3.99. The twelve left are the
   repeal questions, owner decisions.
+- 2026-09-17 step 4, slice H, and steps 4 and 8 ticked: `STRANDED_RULE_IDS`
+  12 -> 0. The twelve are repealed rows under Dec-9, the family decision
+  team-lead took on 2026-09-17 (note 2665): `R11-D1` and `R11-D5` in the
+  Dec-4 shape, the ten dashboard and history ids because sd:719 is done
+  with `dashboard/` and `bin/sd_ledger.py` deleted. `teaches` is optional
+  on a repealed row first, the audit's slice 7. `providers.yaml` and
+  `CONTRIBUTING.md` cite the two Dec-4-shape repeals; `MUTATIONS` did not
+  move.

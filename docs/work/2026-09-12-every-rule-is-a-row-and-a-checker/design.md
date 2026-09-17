@@ -539,4 +539,10 @@ heading at `skills/sd-handoff/SKILL.md:118` reads "Lane B (`--push`,
 rule names does not exist. A live row would have asserted an enforcement nothing performs;
 the repealed row answers the citation and asserts nothing. The row's
 `teaches` still names that section, so a reader following it lands on the
-sentence that says why there is nothing to run.
+sentence that says why there is nothing to run. Since 2026-09-17, slice H,
+`teaches` is optional on a `repealed` row and required on a live one
+(`source:tests/test_rule_registry.py::missing_field_errors`), because a rule
+no skill taught when it was withdrawn has no section to name and a section
+invented for it would send a reader to a heading that says nothing about it;
+the twelve rows team-lead repealed that day under Dec-9 (note 2665) carry
+`None` there, and `R10-D2` keeps its section.
