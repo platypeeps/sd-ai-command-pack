@@ -480,7 +480,10 @@
       `tests.test_prose_counts`, so `make check CHANGED=<a skill>` skips
       `R13-D2`; the full suite and CI run it. That set and its expectation in
       `tests/test_changed_files_fast_path.py` are owner-authored, so the
-      entry is left for the owner to add.
+      entry is left for the owner to add. Rebased onto `693ed526` before the
+      last push: #1017 deleted `bin/sd_ledger.py` and two citations in the
+      2026-09-05 prd lost their target, so that entry fell 66 -> 64, the
+      first time the ratchet moved; no other entry moved.
 
 - [x] **7. The pre-commit tier.** **Every timing this step used to state has
       expired, and the shape of the step is now open rather than settled.** It
