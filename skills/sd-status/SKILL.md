@@ -43,7 +43,7 @@ opens with fifteen top-level lines; the fourteen below are the sections.
 | `issues (this repo, from the index)` | indexed issues for this repository, split into the ones the index says need you and the rest |
 | `jira (shared database, all repositories)` | the operator's Jira involvement from the shared database, across every repository: one line per ticket, key and state, open rows first, then rows closed within seven days. Not scoped to the checkout |
 | `protection` | branch-protection **enforcement**, gap by gap, plus the two merge-settings flags |
-| `resumable handoffs` | the pending local packet for this directory (**read, never consumed**) and Lane B carrier branches on origin |
+| `resumable handoffs` | the pending local packet for this directory (**read, never consumed**) |
 | `backends` | which review backends are installed — names only |
 | `legacy residue` | legacy leftovers, each with the exact command that removes it |
 

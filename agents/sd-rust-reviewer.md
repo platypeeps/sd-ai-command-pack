@@ -18,12 +18,10 @@ lane retains review verdict authority.
 
 ## Opening context
 
-Your dispatch prompt carries an explicit context line — on platforms without
-hook injection it is the only task context you receive, so read it and do not
-assume any ambient project or task state. When the parent is working an item the
-line reads `Active item: <item path>`; when none is active the prompt hands
-you the diff or its scope directly. Never infer context that was not passed
-to you.
+Your dispatch prompt is the only task context you receive: it carries the diff
+or its scope, and nothing about the parent's project or work item beyond what it
+states. Read it and do not assume any ambient project or task state. Never infer
+context that was not passed to you.
 
 ## Stage contract
 

@@ -38,9 +38,9 @@ preference with no incident behind it.
 
 - **Never publish without an explicit request and destination**, or without
   the dedup read. The list API call must actually succeed.
-- **Never file a suggestion with no incident behind it.** Standing rule 1: a
-  new gate, ledger, hook or rule needs a linked incident *and* a deletion
-  criterion. A suggestion that proposes machinery states both.
+- **Never file a suggestion with no incident behind it.** A new gate,
+  ledger, hook or rule needs a linked incident *and* a deletion criterion. A
+  suggestion that proposes machinery states both.
 - **Never turn capture into a tracker dependency.** A local proposal is a
   durable record even if no issue is ever filed.
 - **Never infer publication consent from repository mode** or a configured

@@ -28,8 +28,6 @@ and scheduling remain owned by `sd-monitor` or the host.
 
 ## Arguments
 
-Argument names and value sets follow the shared vocabulary in `references/argument-vocabulary.md`; reuse a canonical name and its value set before coining a new one.
-
 Arguments arrive as free text. Unknown argument names are an error — stop and
 identify them before reading sources, state, or profile data.
 

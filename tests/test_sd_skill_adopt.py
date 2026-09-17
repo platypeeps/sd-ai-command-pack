@@ -313,7 +313,7 @@ class AdoptRunTests(unittest.TestCase):
     def test_a_candidate_carrying_the_command_marker_is_refused(self) -> None:
         """Adoption may not hand an incoming file standing authority to act.
 
-        The marker is legitimate -- eleven surfaces in this pack carry it -- so
+        The marker is legitimate -- ten surfaces in this pack carry it -- so
         this is a stage-3 policy and not a shape error. Granting it to something
         that arrived from outside is a decision record, not a flag.
         """

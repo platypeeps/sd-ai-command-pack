@@ -27,8 +27,6 @@ downstream handoffs and never implicit steps.
 
 ## Arguments
 
-Argument names and value sets follow the shared vocabulary in `references/argument-vocabulary.md`; reuse a canonical name and its value set before coining a new one.
-
 Arguments arrive as free text. Unknown argument names are an error — stop and
 identify them before retrieving video metadata, captions, or transcripts.
 
@@ -168,11 +166,6 @@ scope, the coverage-fidelity bar, or the `## Final report` contract.
   a dispatched sub-agent. When it is already running as a dispatched sub-agent,
   run the units inline in its own context rather than dispatching further — do
   not spawn another layer.
-- **Active item prefix.** When a work item is active, open each dispatch
-  prompt with `Active item: <item directory>` before the role-specific
-  instructions, so platforms that do not hook-inject context still receive it.
-  When no item is active, omit the prefix and hand the worker its video input
-  directly.
 
 ## Safety rules
 

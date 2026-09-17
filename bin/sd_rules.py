@@ -216,7 +216,7 @@ RULES: tuple[Rule, ...] = (
     ),
     #: The first repealed row, and the reason it is one rather than a live row
     #: with no checker. The section that teaches it says in its heading that
-    #: Lane B is not implemented: `bin/sd-handoff` has no `--push`, so nothing
+    #: Lane B is not implemented: `bin/sd-handoff` has no push flag, so nothing
     #: converts a pull request to draft and nothing suppresses a re-request. A
     #: live row here would assert an enforcement nothing performs, which is
     #: the defect the registry exists to end. The id stays so that the
@@ -226,15 +226,14 @@ RULES: tuple[Rule, ...] = (
     #: 2026-09-14, Dec-4).
     Rule(
         id="R10-D2",
-        subject="`sd-handoff --push`, on finding an open pull request for "
+        subject="`sd-handoff`'s push lane, on finding an open pull request for "
                 "the carrier branch, converts it to draft before pushing "
                 "and suppresses the Copilot re-request, so the once-per-head "
                 "rule does not fire on the moved head",
         checker=None,
         proof=None,
         scope="code",
-        teaches="skills/sd-handoff/SKILL.md#"
-                "Lane B (`--push`, `--park`) is not implemented",
+        teaches="skills/sd-handoff/SKILL.md#Lane B is not implemented",
         state=REPEALED,
     ),
     #: The code rules, registered against sd:430's checkers and nothing new

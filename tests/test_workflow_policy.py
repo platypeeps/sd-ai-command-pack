@@ -496,16 +496,18 @@ class BareVendorTokens(unittest.TestCase):
 
 
 #: A page runs a review when it invokes a reviewer, in any of the shapes an
-#: invocation takes on these pages: a backticked `sd-review` with a flag; a
-#: bare backticked `sd-review` that a verb runs, "Run `sd-review`"; a command
-#: line of a code block that begins with `sd-review`; or `sd-research-kit
-#: review`, the front of `bin/sd_research_review.py`. A bare `sd-review` with
-#: no verb before it names the tool or its lane and is not an invocation.
+#: invocation takes on these pages: a backticked reviewer with a flag; a
+#: bare backticked reviewer that a verb runs, "Run `sd-review`"; or a command
+#: line of a code block that begins with the reviewer. The reviewers are
+#: `sd-review` and `sd-research-kit review`, the front of
+#: `bin/sd_research_review.py`, and the same three shapes apply to both: a
+#: bare reviewer with no verb before it names the tool, its lane or its
+#: report and is not an invocation.
+REVIEWER = r"(?:sd-review|sd-research-kit review)"
 REVIEW_INVOCATION = re.compile(
-    r"`sd-review --[a-z]"
-    r"|\b(?:run|runs|running|invoke|invokes)\s+`sd-review\b"
-    r"|^\s*(?:\$ )?sd-review\b"
-    r"|`?sd-research-kit review\b",
+    rf"`{REVIEWER} --[a-z]"
+    rf"|\b(?:run|runs|running|invoke|invokes)\s+`{REVIEWER}\b"
+    rf"|^\s*(?:\$ )?{REVIEWER}\b",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -514,10 +516,11 @@ REVIEW_INVOCATION = re.compile(
 #: hard-wrap and a literal split across a line break is still a literal.
 CAP_LITERAL = re.compile(r"\b[0-9]+ passes?\b|cap of [0-9]")
 
-#: The sentence of a collapsed page that links the rule file must also say
-#: `cap`: a link beside a point that does not say where the cap comes from is
-#: a pointer, not the reads-from relationship the criterion asks for.
-CAP_WORD = re.compile(r"\bcaps?\b", re.IGNORECASE)
+#: The sentence of a collapsed page that links the rule file must say that
+#: the cap is the one on that row of the table: a link beside a point that
+#: only mentions a cap is a pointer, not the reads-from relationship the
+#: criterion asks for.
+CAP_WORD = re.compile(r"\bcaps?\b.*\bon (?:that|those) rows?\b", re.IGNORECASE)
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 

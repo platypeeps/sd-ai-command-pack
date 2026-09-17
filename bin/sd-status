@@ -18,7 +18,7 @@ Fourteen sections, in output order, under the `pack` banner naming the checkout 
   issues         indexed issues for this repository
   jira           the operator's Jira rows from the shared database, every repository
   protection     actual enforcement gaps and both r7 merge-settings flags
-  handoff        this directory's pending packet, never consumed, and origin Lane B carriers
+  handoff        this directory's pending packet, never consumed
   backends       installed review backend names only
   residue        legacy leftovers with exact removal commands
 
@@ -998,33 +998,7 @@ def handoff_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, An
                     "`sd-handoff --show`, or /clear and the SessionStart hook takes it"
                 ),
             )
-    return {"packet": packet, "carriers": carrier_branches(root)}
-
-
-def carrier_branches(root: pathlib.Path) -> list[dict[str, str]]:
-    """Lane B carriers on origin: remote branches whose tip is a `wip:` commit.
-
-    Derived from origin's refs as this checkout currently knows them -- run
-    `git fetch` first if you want them newer. There is no list of carrier
-    branches anywhere, and there must not be: the commit subject is the record.
-    """
-    listing = sd_lib.git_output(
-        [
-            "for-each-ref",
-            "--format=%(refname:short)%09%(objectname:short)%09%(committerdate:relative)%09%(contents:subject)",
-            "refs/remotes/origin",
-        ],
-        root,
-    )
-    carriers = []
-    for line in (listing or "").split("\n"):
-        parts = line.split("\t")
-        if len(parts) != 4 or not parts[3].startswith("wip:"):
-            continue
-        carriers.append(
-            {"branch": parts[0], "head": parts[1], "age": parts[2], "subject": parts[3]}
-        )
-    return carriers
+    return {"packet": packet}
 
 
 # --------------------------------------------------------------------------
@@ -1726,8 +1700,8 @@ def _branch_names(root: pathlib.Path) -> set[str] | None:
     cannot answer, which its criterion 4 keeps distinct from an empty answer:
     an unresolvable branch is a finding, a git that refused is not.
 
-    Local refs only, as `carrier_branches` above reads them and for the same
-    reason: asking the remote would put a network call in every run.
+    Local refs only, as this checkout last heard them: asking the remote would
+    put a network call in every run.
     """
     listing = sd_lib.git_output(
         ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"], root
@@ -2965,7 +2939,7 @@ def _branch_rows(
 ) -> list[dict[str, Any]]:
     """Branches on origin that no open pull request is carrying.
 
-    Shaped on `carrier_branches` above, without its `wip:` filter, because a
+    Every branch on origin, with no filter on the commit subject, because a
     finished branch nobody opened a pull request for is exactly the thread this
     class is for and it does not announce itself in a subject line.
 
@@ -3079,9 +3053,9 @@ def skill_surfaces(root: pathlib.Path) -> list[pathlib.Path]:
     place, that a check reads rather than restates. `_tool_rows` used to carry
     its own `(root / "skills").glob("*/SKILL.md")`, which made the enumeration
     an implementation detail of one check -- and the detail was wrong. It never
-    opened `contrib/`, so two live disclosures in `contrib/sd-deps` and
-    `contrib/sd-map` were invisible while the class reported health over a
-    directory it had not read. That is the same failure the banner refuses when
+    opened `contrib/`, so the live disclosure in `contrib/sd-map` (and a
+    second one sd:10 has since cut) was invisible while the class reported
+    health over a directory it had not read. That is the same failure the banner refuses when
     it will not print `clear` over an unchecked class.
 
     Direction matters. `tests/test_skill_frontmatter.py` already enumerated
@@ -3167,9 +3141,9 @@ def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
     move it is rather than as a finding that closed and a new one that opened.
 
     Which files count is `skill_surfaces`, not a glob written here. Reading
-    both roots deliberately *adds* findings -- `contrib/sd-deps` and
-    `contrib/sd-map` each disclose a `bin/` command that is not built, and both
-    were invisible while this loop read one root. Surfacing them is the point;
+    both roots deliberately *adds* findings -- `contrib/sd-map` discloses a
+    `bin/` command that is not built, and it was invisible while this loop
+    read one root. Surfacing them is the point;
     the roadmap they name is a decision for a person, and a check that hid the
     question to keep its own count at zero was answering a different one.
     """
@@ -3350,11 +3324,6 @@ def _render_handoff(section: dict[str, Any], write: Any) -> None:
         write(f"    {packet['detail']}\n")
     else:
         write(f"  packet: {packet['detail']}\n")
-    for carrier in section["carriers"]:
-        write(f"  carrier: {carrier['branch']} @ {carrier['head']} "
-              f"({carrier['age']}) {carrier['subject']}\n")
-    if not section["carriers"]:
-        write("  carrier: no `wip:` branches on origin\n")
 
 
 #: `pending` is capped so a hundred-row backlog does not bury the nine

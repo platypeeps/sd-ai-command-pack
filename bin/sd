@@ -30,8 +30,8 @@ What `add` validates was deliberately narrow at 6b-1 -- `prefix` and
 `kinds`, `issues` and `vendor`, in this reader rather than in a second one.
 Enforcement is **generic**: the backbone checks that a kind is well formed and
 internally consistent, and never learns what a `score` or a `tip` is. The
-closed 8-key vocabulary is `KIND_KEYS` below, and standing rule 2 makes any
-change to it a decision record.
+closed 8-key vocabulary is `KIND_KEYS` below, and any change to it is a
+decision record, never a quiet commit.
 
 `sd plugin lock` writes the `sd-plugin.lock` the layout has always named and
 nothing has ever produced. It pins two things: the manifest's own bytes, and
@@ -93,11 +93,11 @@ MANIFEST_NAME = "sd-plugin.json"
 LOCK_NAME = "sd-plugin.lock"
 
 # The closed vocabulary a plugin may use to describe one kind (R11-D14). Eight
-# keys, and standing rule 2 says a ninth is a decision record rather than a
-# commit. The invariant is enforced here, once: a kind carrying a key that is
-# not in this set is refused by name, because the failure it prevents is a
-# typo -- `protected_fields` for `protected-fields` -- that would otherwise
-# read as a kind with no protected fields at all and pass every other check.
+# keys, and a ninth is a decision record rather than a commit. The invariant
+# is enforced here, once: a kind carrying a key that is not in this set is
+# refused by name, because the failure it prevents is a typo --
+# `protected_fields` for `protected-fields` -- that would otherwise read as a
+# kind with no protected fields at all and pass every other check.
 KIND_KEYS = frozenset({
     "fields", "initial-status", "protected-fields", "transitions",
     "human-only", "unique-fields", "floor", "sections",
@@ -138,7 +138,7 @@ REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 # describe the *shape* of a kind -- what fields it has, what statuses it moves
 # between, what a person may not overwrite -- and none of that changes when the
 # same kind is kept somewhere else. Where it is kept is a driver's business, so
-# it lives in the driver's block, standing rule 2's count of eight is untouched,
+# it lives in the driver's block, the count of eight keys is untouched,
 # and step 11's vault reorganisation rewrites `bases` and nothing else.
 STORE_KEYS = frozenset({"driver", "root", "bases"})
 # One driver, spelled as a closed set rather than an `if`. A manifest that says
@@ -1749,8 +1749,8 @@ def refuse_title_taken(root: pathlib.Path, path: pathlib.Path) -> None:
     retarget would otherwise have dropped on the floor.
 
     Dot-directories are skipped. `pack.py` names seven of them and every one
-    starts with a dot (`.obsidian`, `.trash`, `.git`, `.smart-env`, `.space`,
-    `.makemd`, `.trellis`), so the rule is the generalisation rather than the
+    starts with a dot (`.obsidian`, `.trash`, `.git`, `.smart-env`, `.space`
+    and `.makemd` among them), so the rule is the generalisation rather than the
     list: a copy Obsidian keeps in `.trash` is not a note anybody links to, and
     a new plugin's cache directory should not need a code change here.
 
@@ -2043,8 +2043,8 @@ def parse_assignments(
     typo. Accumulating every duplicate `=` into a list instead would have made
     `--field score=7 --field score=8` a two-item list rather than the mistake
     it plainly is, and no manifest key can tell those apart -- which is the
-    reason this is a CLI spelling and not a ninth `kinds.*` key. Standing rule
-    2 stays where it is.
+    reason this is a CLI spelling and not a ninth `kinds.*` key. The count of
+    eight keys stays where it is.
 
     `+=` is unambiguous against a value that contains one: the field name is
     matched before the separator, and `[A-Za-z0-9_-]+` cannot hold a `+`, so

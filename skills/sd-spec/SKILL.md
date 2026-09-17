@@ -31,7 +31,7 @@ write under `docs/spec/` (and, with `--retro`, to append review learnings).
 ## Never
 
 - **Never generate a spec page from the diff alone.** A page nobody would read
-  is footprint, not knowledge; the five gates count spec pages, not words.
+  is footprint, not knowledge, and footprint is counted in pages, not words.
 - **Never commit derived state.** Anything that can be recomputed at run time
   is recomputed at run time — committed derived state is permanent staleness.
 - **Never write outside `docs/spec/`** (plus the learnings page under

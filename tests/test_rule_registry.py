@@ -384,13 +384,14 @@ STRANDED_RULE_IDS = frozenset({
 #: Measured on `cddd3b98`, and unchanged on `239ff624`, by `uncited_skill_claims`
 #: below -- which is to say by `claims_in`, and by nothing else. `CLAIM_SCOPE`
 #: says what that predicate is and which properties of it are load-bearing;
-#: this is only where its answer is written down.
+#: this is only where its answer is written down. `skills/sd-handoff/SKILL.md`
+#: left the table when sd:10's 31(b1) cut the `stash_ref` field whose
+#: "never pushed" line was its one claim.
 #:
 #: Per document rather than as one total, so a new uncited claim in `sd-ship`
 #: fails even in a change that cleaned two out of `sd-plan`. One number for the
 #: whole tree would net them off and say nothing.
 UNCITED_SKILL_CLAIMS = {
-    "skills/sd-handoff/SKILL.md": 1,
     "skills/sd-plan/SKILL.md": 2,
     "skills/sd-research-repo/templates/CLAUDE.md": 1,
     "skills/sd-ship/SKILL.md": 3,
