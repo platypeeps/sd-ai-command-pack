@@ -28,10 +28,10 @@ is the ledger; sd:10's other criteria settled there too.
   note's first line names the note id it supersedes, a note so named is not
   counted, and a note made between the reversal and the re-recording is
   not a pass.
-- OPEN, owner: which vendor is "the other vendor" when Claude authors. The
-  reviewer chain at `WORKFLOW.md:282` is `[codex, claude, minimax, kimi,
-  baseten, exo]`, so Codex is first; MiniMax and Kimi are under recovery.
-  Until the owner answers, no pass is a pass of this experiment.
+- 2026-09-17, owner: the other vendor is Codex (OpenAI), the `codex` entry,
+  first in the reviewer chain at `WORKFLOW.md:278`. All ten passes are Codex
+  passes, so the ratio the report gives is one reviewer's: a pass whose
+  `reviewer entry` names any other entry is not a pass of this experiment.
 
 ## Risks
 
@@ -43,6 +43,6 @@ is the ledger; sd:10's other criteria settled there too.
   carries no combined total over the ten.
 - The Copilot round on a pull request is advisory and outside every cap; it
   is not the other-vendor pass and must not be logged as one.
-- Ten code PRs may take longer than the recovery of MiniMax and Kimi. A pass
-  made with Codex and one made with a recovered vendor are then summed
-  together; the reviewer entry field is what keeps them apart in the report.
+- Codex can be unavailable for a pull request, and the chain would then fall
+  through to another entry. That review is not a pass; the pull request is
+  not one of the ten, and the next code pull request takes its place.
