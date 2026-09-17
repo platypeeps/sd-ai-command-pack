@@ -389,6 +389,61 @@
       `docs/spec/**` does and dropping the `**` reddens nothing; the control
       holds the walk, and a walk cut one level down reddens both halves.
 
+      **Slice F, 2026-09-17. `STRANDED_RULE_IDS` 17 → 15.** `R10-D7` and
+      `R11-D6` are rows, the audit's slices 2 and 3 in one change, each
+      committed alone first. Re-measured on `58739c79`: `R10-D7`'s
+      definition is the bold run at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:168`,
+      "Partial fallback", the id on the line after, and what holds it is
+      `source:bin/sd-review::local_conventions`, whose docstring cites the id
+      and whose one caller is the dispatch path of `review`, after the
+      preflight has returned -- so the subject names every review the tool
+      dispatches and the section says the preflight sends none, which is
+      what its own section already said. The other two lanes the design
+      listed either run through that call or no longer exist: `bin/sd-ship`
+      has no backlog mode. The test is
+      `test_the_local_block_reaches_the_prompt` in
+      `source:tests/test_sd_review.py::PipelineTests`. `R11-D6`'s
+      definition is the bold run at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:1640`,
+      the deletion of the `Shell coverage` job; the rule that survives it is
+      the one `tests/test_no_shipped_shell.py` states in its module
+      docstring, no shell outside `.github/scripts/`, so the checker is that
+      test's `test_shell_lives_only_in_this_repository_s_own_tooling`, named
+      as a `tests/` symbol the way the `R12` and `R13` rows are. Teaching:
+      a new section of `skills/sd-review/SKILL.md`, `Local conventions reach
+      the prompt`, which tells the reviewer to read a finding against the
+      receipt's `local_block_prepended` and cites the id; and, per Dec-2, a
+      bullet under `Code health` in `skills/sd-check/SKILL.md`, whose intro
+      said the code rules were enforced by `tests/test_code_health.py` and
+      now says they are enforced by the tests their rows name, with the four
+      `R12` rows still attributed to that file. A section of its own was not
+      taken: the rule is one an author of code meets from the same
+      entrypoint as the `R12` rows, which is what Dec-2 put that section
+      there for. Both sections carry the `bin/sd-rules --for <path>`
+      pointer. Fail-first, each row alone with the skill, the meter and
+      `MUTATIONS` untouched: `R10-D7` reddened four tests, `FAILED
+      (failures=4)` -- both leg a checks, `carries no heading 'Local
+      conventions reach the prompt'` and `does not cite it`, leg c's archive
+      baseline with the measured set being the baseline minus `R10-D7`, and
+      leg d's coverage with `bin/sd-review::local_conventions` in the
+      registry and not in `MUTATIONS`; `R11-D6` reddened three, `FAILED
+      (failures=3)`, the heading existing already. Each went to `Ran 35
+      tests ... OK` with its section, its meter line and its mutation. Leg
+      d on both rows in a fresh copy: `applied 1 reverted 1 control 0
+      violated 1 restored 0`, `enforcement_error` `None`, the named tests
+      red with `False is not true` on `prompt.startswith("Repository-local
+      conventions")` and `Lists differ: ['bin/sd-rules'] != []`; the copy
+      has an index of its own from `copy_tracked`'s `git init` and `git
+      add -A -f`, which is what lets `tracked_files` in the shell test see
+      the mutated file. `LegD` whole: `Ran 9 tests in 9.935s`, `real
+      9.996s`, load 4.11 before and 5.04 after, under Dec-6's 21 s.
+      Mutations on byte copies, each restored by `diff -q` rc 0: the
+      citation dropped from either section reddens leg a with that
+      section's `does not cite it`; both ids put back into
+      `STRANDED_RULE_IDS` reddens leg c; each proof applied by hand reddens
+      its named test with the line leg d quoted.
+
 - [x] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become
       registry rows pointing at the existing checkers — no new enforcement, only
@@ -772,3 +827,13 @@ The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
   in `skills/sd-handoff/SKILL.md`, which names the verb. `LegD` real 9.50 s
   at load 5.19. Slice 0, #1015's residue, rode along: `tests/test_sd_rules_for.py`'s
   docstring and `tracked`'s containment in `tests/test_prose_counts.py`.
+- 2026-09-17 step 4, slice F, and step 8's second and third teaching-section
+  slices: `STRANDED_RULE_IDS` 17 → 15. `R10-D7` is a row, the local block
+  prepended to every review `bin/sd-review` dispatches, checker
+  `bin/sd-review::local_conventions`, taught from a new `Local conventions
+  reach the prompt` in `skills/sd-review/SKILL.md`. `R11-D6` is a row, no
+  shell outside `.github/scripts/`, checker
+  `tests/test_no_shipped_shell.py::test_shell_lives_only_in_this_repository_s_own_tooling`,
+  taught under `Code health` in `skills/sd-check/SKILL.md`, whose intro now
+  names the tests the rows name. Both sections name the verb. `LegD` real
+  9.996 s at load 4.11.
