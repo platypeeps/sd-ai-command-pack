@@ -330,6 +330,24 @@ apply to the checkers the item aims it at.
   average 7.90 before the four rows and real 14.47 s at 15.85 after, on the
   same machine under different load, so no ratio is claimed. The slope is
   the code-health walk, about 1.2 s a child run, two runs a row.
+  **Budgeted 2026-09-16 (sd:971): `LegD` is 21 s of wall time, and the
+  controls run in one child.** The rule is twice the measured wall time,
+  rounded up to the second, so a busier machine passes and a doubled leg
+  does not. Measured with one command, `uptime; /usr/bin/time -p python -m
+  unittest tests.test_rule_registry.LegD`, on the pack venv: real 14.71 s
+  for 9 tests at load average 6.31 before the change and real 10.34 s at
+  6.28 after it; the module real 31.87 s at 11.87 before and real 23.56 s
+  at 6.09 after, so no ratio is claimed for the module. A code-health
+  control child read 1.28 s and a child that walks nothing 0.10 s; one
+  child running all four code-health nodes read 1.28 s, and all eight
+  nodes 1.95 s, so the walk is per child, not per node, and the cut is
+  one control child that runs every row's test (`source:tests/test_rule_registry.py::batched_controls`),
+  then one mutated child per row. The shape is held by
+  `source:tests/test_rule_registry.py::TheSharedCopy`: children at most
+  `rows + 1 + 2 * controls`. When a row pushes `LegD` past 21 s the leg
+  is scoped, never dropped: the row's control still runs in the shared
+  child and its mutation in its own, and the budget is re-measured with
+  the same command and restated here with the load average.
 - **2026-09-13 — leg a counts a citation in a section's body, never in its
   heading.** `section_body` drops the heading line, so a row's id has to appear
   in the body text of the section its `teaches` names. `R10-D1` to `R10-D3`
