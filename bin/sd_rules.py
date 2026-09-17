@@ -338,6 +338,29 @@ RULES: tuple[Rule, ...] = (
         scope="code",
         teaches="skills/sd-help/SKILL.md#The store and plugin contract",
     ),
+    #: `R11-D27` is the line edit: a field write replaces or inserts one line
+    #: of the frontmatter and reads nothing else in, because a note parsed
+    #: and rendered back loses what the parser did not keep -- list items,
+    #: quoting, key order, blank lines -- and `sd`'s own reader is the one
+    #: reader that cannot see the loss. The checker is `edit_field`, the one
+    #: function every field write goes through, and the test reads the file
+    #: back as bytes rather than through `sd`.
+    Rule(
+        id="R11-D27",
+        subject="`sd store add` and `sd store set` write a frontmatter field "
+                "by replacing or inserting one line through `edit_field` in "
+                "`bin/sd`, so the note comes back byte-identical apart from "
+                "that line and is at no point parsed and rendered back",
+        checker="bin/sd::edit_field",
+        proof="replace the one-line assignment `lines[hits[0]] = ...` in "
+              "`edit_field` of `bin/sd` with one that rebuilds the list from "
+              "the rendered line alone, so every other line of the note is "
+              "dropped; "
+              "`test_a_set_leaves_every_line_it_did_not_edit_byte_identical` "
+              "in `tests/test_sd_store.py` goes red",
+        scope="code",
+        teaches="skills/sd-help/SKILL.md#The store and plugin contract",
+    ),
     #: The code rules, registered against sd:430's checkers and nothing new
     #: (owner decision 2026-09-14, Dec-1 and Dec-2): a new round for rules the
     #: registry is native to, taught from one section of the skill `R10-D6`
