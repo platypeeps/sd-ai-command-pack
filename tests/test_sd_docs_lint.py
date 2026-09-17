@@ -186,6 +186,29 @@ class Rule1ShapeTests(LintFixture):
         (self.work / "archive" / "july").mkdir(parents=True)
         self.assert_fails("archive buckets are named YYYY-MM")
 
+    def test_green_item_key_names_a_row(self) -> None:
+        """sd:994. A folder written for a task or followup row names it as
+        `item: sd:<id>`; the key is optional and its form is `sd:` then digits."""
+        self.write_item(
+            "2026-08-29-a-keyed-item",
+            GOOD_PRD.replace("created: 2026-08-29\n", "created: 2026-08-29\nitem: sd:361\n"),
+        )
+        self.assert_clean()
+
+    def test_red_item_key_is_not_sd_then_digits(self) -> None:
+        for value in ("361", "sd:x", "sd:", "SD:361"):
+            with self.subTest(value=value):
+                self.write_item(
+                    "2026-08-29-a-keyed-item",
+                    GOOD_PRD.replace(
+                        "created: 2026-08-29\n", f"created: 2026-08-29\nitem: {value}\n"),
+                )
+                failures = self.assert_fails("is not sd: followed by digits")
+                self.assertTrue(
+                    any(f"item {value!r}" in f and "a-keyed-item/prd.md" in f for f in failures),
+                    failures,
+                )
+
 
 class Rule1StatusSourceTests(LintFixture):
     """The sign of rule 1's status check inverts on `docs/work/.status-source`.
