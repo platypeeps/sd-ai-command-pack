@@ -1077,6 +1077,24 @@ class ATaskKeyedFolder(Fixture):
         )
         self.assertEqual(self.picked(), [])
 
+    def test_a_key_of_thousands_of_digits_is_refused_before_int(self) -> None:
+        """`int()` raises `ValueError` past `sys.get_int_max_str_digits()`.
+
+        The ceiling in `named_row` is reached through `int()`, so a value long
+        enough never got there. The refusal is on the digits, before the
+        conversion, and `named_item` is where the key becomes a number.
+        """
+        self.marker("row")
+        self.database()
+        self.named("sd:" + "9" * 5000)
+        item = self.only()
+        self.assertEqual(item.status, "unknown")
+        self.assertTrue(
+            any("row id" in problem for problem in item.inconsistencies),
+            item.inconsistencies,
+        )
+        self.assertEqual(self.picked(), [])
+
     def test_a_prd_that_is_not_utf_8_is_unreadable_and_names_the_file(self) -> None:
         """`read_text` raises `UnicodeDecodeError`, which is not an `OSError`."""
         self.marker("row")

@@ -1391,6 +1391,12 @@ ITEM_KEY_RE = re.compile(r"sd:(\d+)\Z")
 #: reporting no row, and the key's value comes from a file, not from a row.
 ROW_ID_CEILING = 2**63 - 1
 
+#: How many digits are converted at all. Far above `ROW_ID_CEILING`, which has
+#: nineteen, and far below the limit `int()` itself raises at, so an oversized
+#: id is still refused by its value, with that value in the sentence, and only
+#: an absurd one is refused by its length.
+ROW_ID_DIGITS = 64
+
 
 def named_item(item_dir: pathlib.Path) -> tuple[int | None, str]:
     """`(id, "")` for the row `<item_dir>/prd.md` names as `item: sd:<id>`.
@@ -1417,7 +1423,15 @@ def named_item(item_dir: pathlib.Path) -> tuple[int | None, str]:
     if match is None:
         return None, (f"the frontmatter key {ITEM_KEY}: {value} is not sd: followed "
                       f"by digits")
-    return int(match.group(1)), ""
+    digits = match.group(1)
+    # Before `int()`, not after: past `sys.get_int_max_str_digits()` the
+    # conversion itself raises `ValueError`, so a long enough value never
+    # reached the ceiling `named_row` checks. The digits are a file's line,
+    # and no row id is ever this long.
+    if len(digits) > ROW_ID_DIGITS:
+        return None, (f"the frontmatter key {ITEM_KEY}: sd:<{len(digits)} digits> is "
+                      f"longer than any row id")
+    return int(digits), ""
 
 
 def named_row(item_dir: pathlib.Path, connection: Any, read: Any) -> tuple[Any, str]:
