@@ -410,16 +410,17 @@ CONTEXTUAL_ASSERTIONS = frozenset({
 COMPARING_ASSERTIONS = TESTCASE_ASSERTIONS - CONTEXTUAL_ASSERTIONS
 
 #: Tests whose only claim is that the call under them did not raise. That is a
-#: real claim and these two are making it deliberately -- an installer that
-#: survives a missing `git`, a ledger write that stays silent when its
-#: destination is unwritable -- so this is a register, not a debt list. It
+#: real claim and this one is making it deliberately -- an installer that
+#: survives a missing `git` -- so this is a register, not a debt list. It
 #: earns its place by making the claim explicit: a test arrives here by a
 #: change that says in its commit message why it asserts nothing, and
 #: `test_every_registered_silent_test_is_still_silent` deletes the entry's
-#: cover the moment somebody gives the test a real assertion.
+#: cover the moment somebody gives the test a real assertion, or the test
+#: goes: the second entry, a ledger write that stayed silent when its
+#: destination was unwritable, left with `tests/test_sd_ledger.py` at sd:719
+#: step 9 (2026-09-16).
 ASSERTS_ONLY_THAT_IT_RAN = frozenset({
     "test_sd_install.py::ExcludesTests::test_a_missing_git_binary_is_survivable",
-    "test_sd_ledger.py::LedgerAppend::test_an_unwritable_destination_is_silent",
 })
 
 

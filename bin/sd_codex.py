@@ -195,11 +195,12 @@ def uses_in(
 ) -> tuple[str, dict[tuple[str, str], str]]:
     """One transcript's working directory, and its `(skill, mode)` first stamps.
 
-    Unparseable lines are skipped rather than fatal, the trade
-    `bin/sd_ledger.py:143-188` makes: a torn record costs one measurement, and
-    a crash here costs the nightly. `errors="replace"` for the same reason it
-    is there -- a damaged byte raises `UnicodeDecodeError`, which is a
-    `ValueError` and would escape an `OSError` guard.
+    Unparseable lines are skipped rather than fatal, the trade the dashboard
+    ledger made before sd:719 step 9 retired it (2026-09-16): a torn record
+    costs one measurement, and a crash here costs the nightly.
+    `errors="replace"` for the same reason it was there -- a damaged byte
+    raises `UnicodeDecodeError`, which is a `ValueError` and would escape an
+    `OSError` guard.
 
     Read line by line and not with `read_text`: a rollout is the whole history
     of a session and some are tens of megabytes.

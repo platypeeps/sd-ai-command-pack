@@ -645,12 +645,13 @@ def locked(root: pathlib.Path) -> Iterator[bool]:
     ordinary case on this repository rather than a rare one: two agents, two
     worktrees, two pushes, one file.
 
-    BLOCKING, UNLIKE THE TWO OTHER LOCKS IN THIS TREE. `bin/sd_ledger.py` and
-    `bin/sd-handoff-restore` both take `LOCK_NB` with a short retry and give the
-    write up, because both run inside something a wait would stall -- an HTTP
-    handler and a `SessionStart` hook -- and both would rather lose one
-    measurement than delay a session. Neither trade applies here. This runs on
-    a push that is already talking to GitHub, the row is an acknowledgement
+    BLOCKING, UNLIKE THE ONE OTHER LOCK IN THIS TREE. `bin/sd-handoff-restore`
+    takes `LOCK_NB` with a short retry and gives the write up, because it runs
+    inside something a wait would stall -- a `SessionStart` hook -- and would
+    rather lose one measurement than delay a session. The dashboard ledger's
+    lock made the same trade for an HTTP handler until sd:719 step 9 retired
+    it (2026-09-16). Neither trade applies here. This runs on a push that is
+    already talking to GitHub, the row is an acknowledgement
     somebody will be gated on, and losing it is the defect. A wait is also
     bounded by the kernel rather than by trust: `flock` is released when the
     holder's file descriptor closes, which includes the holder dying, so there
