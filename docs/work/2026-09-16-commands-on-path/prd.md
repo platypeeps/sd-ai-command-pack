@@ -1,6 +1,7 @@
 ---
 title: The installer links the pack commands onto PATH, and --status counts them
 created: 2026-09-16
+item: sd:969
 ---
 
 # PRD — commands on PATH

@@ -952,3 +952,170 @@ class RuleTwoReadsTheRow(Fixture):
         self.assertTrue(
             any("states acceptance criteria" in f for f in self.lint()), self.lint()
         )
+
+
+class ATaskKeyedFolder(Fixture):
+    """sd:994. A folder written for a task or followup row names it.
+
+    Seven pack folders were written for rows `sd task add` created, whose
+    `kind` is `task` or `followup` and whose `source`, `external_id` and
+    `path` are NULL. `item_for_artifact` selects `kind = 'work'` alone, so
+    each read as "no row" and `sd-status` reported all seven
+    `status-unreadable`. The frontmatter line `item: sd:<id>` names the row
+    instead, and only when the path finds none: a work row is found by its
+    path, and the key does not reach it.
+    """
+
+    def named(self, value: str, status: str | None = None) -> None:
+        """`prd.md` with `item: <value>` after `created:`, the way the pages carry it."""
+        text = prd(status).replace(
+            "created: 2026-09-05\n", f"created: 2026-09-05\nitem: {value}\n"
+        )
+        self.write(text)
+
+    def row(self, kind: str = "followup", status: str = "planning") -> int:
+        connection = getattr(self, "_connection", None) or self.database()
+        self._connection = connection
+        return sd_db.writes.create_item(
+            connection, kind=kind, title="A thing, as a row", status=status,
+            repo=str(self.root),
+        )
+
+    def test_a_folder_naming_a_followup_row_reads_its_status(self) -> None:
+        self.marker("row")
+        number = self.row("followup", "planning")
+        self.named(f"sd:{number}")
+        item = self.only()
+        self.assertEqual(item.status, "planning")
+        self.assertEqual(item.inconsistencies, ())
+        self.assertEqual(self.picked(), [ITEM])
+        self.assertEqual(self.unreadable(self.root), [])
+
+    def test_a_folder_naming_a_task_row_reads_its_status(self) -> None:
+        self.marker("row")
+        number = self.row("task", "in_progress")
+        self.named(f"sd:{number}")
+        self.assertEqual(self.only().status, "in_progress")
+        self.assertEqual(self.unreadable(self.root), [])
+
+    def test_the_named_row_supplies_the_activity_stamp(self) -> None:
+        self.marker("row")
+        number = self.row("followup", "planning")
+        self.named(f"sd:{number}")
+        rows = sd_lib.Rows(self.root)
+        self.addCleanup(rows.close)
+        self.assertTrue(rows.activity(self.item), "the named row's stamps were not read")
+
+    def test_a_named_row_that_does_not_exist_is_unreadable_and_names_the_key(self) -> None:
+        self.marker("row")
+        self.database()
+        self.named("sd:424242")
+        item = self.only()
+        self.assertEqual(item.status, "unknown")
+        self.assertTrue(
+            any("item: sd:424242" in problem for problem in item.inconsistencies),
+            item.inconsistencies,
+        )
+        self.assertEqual(self.picked(), [])
+        found = self.unreadable(self.root)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("item: sd:424242", found[0]["detail"])
+
+    def test_a_malformed_key_is_unreadable_and_names_its_value(self) -> None:
+        self.marker("row")
+        number = self.row("followup", "planning")
+        for value in (str(number), "sd:x", "sd:"):
+            with self.subTest(value=value):
+                self.named(value)
+                item = self.only()
+                self.assertEqual(item.status, "unknown")
+                self.assertTrue(
+                    any(f"item: {value}" in problem for problem in item.inconsistencies),
+                    item.inconsistencies,
+                )
+
+    def test_a_named_work_row_is_refused_and_the_key_is_named(self) -> None:
+        """A work row is found by its path. Reaching one through the key would
+        let a folder borrow another item's status, so the key refuses it."""
+        self.marker("row")
+        self.seed("in_progress", OTHER)
+        other = sd_db.writes.item_by_external(
+            self._connection, sd_lib.ITEM_ROW_SOURCE, self.identity(OTHER))
+        self.named(f"sd:{other['id']}")
+        item = self.only()
+        self.assertEqual(item.status, "unknown")
+        self.assertTrue(
+            any(f"item: sd:{other['id']}" in problem and "work" in problem
+                for problem in item.inconsistencies),
+            item.inconsistencies,
+        )
+        self.assertEqual(self.picked(), [])
+
+    def test_the_row_found_by_path_wins_over_the_key(self) -> None:
+        self.marker("row")
+        self.seed("in_progress")
+        number = self.row("followup", "planning")
+        self.named(f"sd:{number}")
+        self.assertEqual(self.only().status, "in_progress")
+
+    def test_a_key_too_large_for_a_row_id_is_unreadable_and_never_binds(self) -> None:
+        """A value the database cannot bind is refused before it is bound.
+
+        `sqlite3` raises `OverflowError` on an integer past 2**63-1, and the
+        readers that take this key are not all inside a `try`: the dashboard's
+        is not, so an unbounded id read as a traceback rather than a finding.
+        """
+        self.marker("row")
+        self.database()
+        self.named("sd:99999999999999999999999999")
+        item = self.only()
+        self.assertEqual(item.status, "unknown")
+        self.assertTrue(
+            any("99999999999999999999999999" in problem and "row id" in problem
+                for problem in item.inconsistencies),
+            item.inconsistencies,
+        )
+        self.assertEqual(self.picked(), [])
+
+    def test_a_key_of_thousands_of_digits_is_refused_before_int(self) -> None:
+        """`int()` raises `ValueError` past `sys.get_int_max_str_digits()`.
+
+        The ceiling in `named_row` is reached through `int()`, so a value long
+        enough never got there. The refusal is on the digits, before the
+        conversion, and `named_item` is where the key becomes a number.
+        """
+        self.marker("row")
+        self.database()
+        self.named("sd:" + "9" * 5000)
+        item = self.only()
+        self.assertEqual(item.status, "unknown")
+        self.assertTrue(
+            any("row id" in problem for problem in item.inconsistencies),
+            item.inconsistencies,
+        )
+        self.assertEqual(self.picked(), [])
+
+    def test_a_prd_that_is_not_utf_8_is_unreadable_and_names_the_file(self) -> None:
+        """`read_text` raises `UnicodeDecodeError`, which is not an `OSError`."""
+        self.marker("row")
+        self.database()
+        (self.item / "prd.md").write_bytes(b"---\ntitle: A thing\nitem: sd:1\n---\n\xca\xfe\n")
+        rows = sd_lib.Rows(self.root)
+        self.addCleanup(rows.close)
+        said, trouble = rows.status(self.item)
+        self.assertEqual(said, "")
+        self.assertIn("prd.md", trouble)
+        self.assertIn("UTF-8", trouble)
+
+    def test_an_installation_without_the_reader_keeps_the_old_answer(self) -> None:
+        """`item_by_id` is optional, like the other reads: a library without
+        it says what it said before the key existed."""
+        self.marker("row")
+        number = self.row("followup", "planning")
+        self.named(f"sd:{number}")
+        rows = sd_lib.Rows(self.root)
+        self.addCleanup(rows.close)
+        rows._id_read = None
+        said, trouble = rows.status(self.item)
+        self.assertEqual(said, "")
+        self.assertIn(f"holds no docs/work row for {self.identity()}", trouble)

@@ -1,6 +1,7 @@
 ---
 title: The contribution row holds a pull request or a branch, and an upstream issue fits neither
 created: 2026-09-12
+item: sd:360
 ---
 
 # PRD — the-contribution-tracker-cannot-hold-an-issue

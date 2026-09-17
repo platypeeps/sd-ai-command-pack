@@ -1,6 +1,7 @@
 ---
 title: every quality rule is a registry row and a checker, and the skills cite it
 created: 2026-09-12
+item: sd:431
 branch: main
 ---
 

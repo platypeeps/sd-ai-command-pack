@@ -714,5 +714,53 @@ class TheModuleLoader(unittest.TestCase):
         self.assertTrue(callable(fresh.parse_frontmatter))
 
 
+class TheRowIsFoundFromItsKey(RowCase):
+    """sd:994. `item_for` takes the `item: sd:<id>` fallback `sd_lib.Rows` takes.
+
+    The dashboard and `sd-status` read the same folder; a fallback in one
+    reader and not the other would have them disagree on which row it is.
+    """
+
+    def prd(self, value: str, name: str = "an-item") -> Path:
+        item_dir = self.root / sd_lib.WORK_DIR / name
+        item_dir.mkdir(parents=True, exist_ok=True)
+        (item_dir / "prd.md").write_text(
+            f"---\ntitle: {name}\ncreated: 2026-09-12\nitem: {value}\n---\n\n# {name}\n",
+            encoding="utf-8",
+        )
+        return item_dir
+
+    def row(self, kind: str = "followup") -> int:
+        return sd_db.writes.create_item(
+            self.connection, kind=kind, title="a row", status="planning",
+            repo=str(self.root),
+        )
+
+    def test_item_for_reads_the_followup_row_the_frontmatter_names(self):
+        number = self.row("followup")
+        item_dir = self.prd(f"sd:{number}")
+        found = sd_handoff_rows.item_for(self.connection, sd_db, self.root, item_dir)
+        self.assertIsNotNone(found, "the key read no row")
+        self.assertEqual(found["id"], number)
+
+    def test_item_for_refuses_a_work_row_through_the_key(self):
+        number = self.item("another-item")
+        item_dir = self.prd(f"sd:{number}")
+        self.assertIsNone(
+            sd_handoff_rows.item_for(self.connection, sd_db, self.root, item_dir))
+
+    def test_item_for_reads_nothing_for_a_row_that_is_not_there(self):
+        item_dir = self.prd("sd:424242")
+        self.assertIsNone(
+            sd_handoff_rows.item_for(self.connection, sd_db, self.root, item_dir))
+
+    def test_the_path_row_wins_over_the_key(self):
+        number = self.item("an-item")
+        other = self.row("followup")
+        item_dir = self.prd(f"sd:{other}")
+        found = sd_handoff_rows.item_for(self.connection, sd_db, self.root, item_dir)
+        self.assertEqual(found["id"], number)
+
+
 if __name__ == "__main__":
     unittest.main()

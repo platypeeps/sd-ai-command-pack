@@ -140,6 +140,7 @@ def check_shape(
             continue
         if not fields.get("title"):
             report.fail(str(prd), "frontmatter needs a non-empty title")
+        check_item_key(prd, fields, report)
         # The sign inverts outside the archive and holds inside it. Once the
         # marker says `row`, an active item's status lives in the database
         # and a `status:` line left in the file is a second answer that will
@@ -159,6 +160,21 @@ def check_shape(
             report.fail(str(prd), f"created {created!r} is not a YYYY-MM-DD date")
         elif created != match.group("date"):
             report.fail(str(prd), f"created {created} disagrees with the directory date")
+
+
+def check_item_key(prd: pathlib.Path, fields: dict[str, str], report: Report) -> None:
+    """Rule 1's `item:` key: optional, and `sd:` then digits when present.
+
+    The key names the task or followup row a folder was written for
+    (sd:994), and `sd_lib.Rows` reads it by the same pattern, so a value the
+    reader would refuse is failed here, where the file is, rather than on
+    every status read.
+    """
+    if sd_lib.ITEM_KEY not in fields:
+        return
+    value = fields[sd_lib.ITEM_KEY].strip()
+    if not sd_lib.ITEM_KEY_RE.match(value):
+        report.fail(str(prd), f"{sd_lib.ITEM_KEY} {value!r} is not sd: followed by digits")
 
 
 def check_ready(
