@@ -15,18 +15,19 @@ stack's signatures, and `bin/sd-status` reports both as residue with a
 removal command. A pack whose own hook matched its own residue detector would
 be telling the operator to delete it. The residue case below runs that
 detector over a checkout laid out this way and requires silence from both
-rows; the install cases run `make hooks` there and require an absolute
-link (so a worktree's link names that worktree's copy, not the main
-checkout's), a refusal when something else already holds the path, and a
+rows; the install cases run `make hooks` there and require the relative
+link `../../hooks/pre-commit` under the clone's common hooks directory (one
+hook per clone, read from the main checkout, shared by every linked
+worktree), a refusal when something else already holds the path, and a
 `git commit` that fails through the link.
 
 The behavioural cases run the hook by path inside a throwaway repository, not
 in this checkout: staging a file here would edit the index the developer is
 working in, and the hook's two whole-tree test passes take five seconds each
-run. The throwaway repository carries no `tests/`, so the hook reports those
-passes as not run and the case asserts that line, which is the only place the
-notice is exercised -- in this checkout both modules exist, and the first case
-below pins that.
+run. The throwaway repository carries the two passes as one-test stubs, so
+the hook runs them in milliseconds; a named pass that is absent is a
+failure, because a commit that deletes or renames one would otherwise pass
+in silence, and the deletion case holds that.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 HOOK = REPO_ROOT / "hooks" / "pre-commit"
+LINK_TARGET = "../../hooks/pre-commit"
 DESIGN = REPO_ROOT / "docs/work/2026-09-12-every-rule-is-a-row-and-a-checker/design.md"
 BUDGET_LINE = re.compile(r"^# Budget: (\d+) s wall on a one-file diff\.$", re.MULTILINE)
 CONSTANT_LINE = re.compile(r"^BUDGET_SECONDS = (\d+)$", re.MULTILINE)
@@ -105,6 +107,7 @@ class TheHookRun(unittest.TestCase):
         # The hook prefers `.venv/bin/python`; point it at the interpreter
         # running this suite, which is the one that has Ruff installed.
         (self.root / ".venv").symlink_to(pathlib.Path(sys.prefix))
+        self.stub_passes()
 
     def _remove(self):
         subprocess.run(["rm", "-rf", str(self.root)], check=False)
@@ -117,6 +120,7 @@ class TheHookRun(unittest.TestCase):
         env = {key: value for key, value in os.environ.items()
                if not key.startswith("GIT_") and key != SKIP_VARIABLE}
         env.update(extra_env)
+        env.setdefault("PATH", "")
         return subprocess.run(
             [str(HOOK)], cwd=self.root, env=env, capture_output=True, text=True, check=False
         )
@@ -142,7 +146,7 @@ class TheHookRun(unittest.TestCase):
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertRegex(output, r"pre-commit: ok in \d+\.\d\d s \(budget \d+ s\)")
-        self.assertIn("in this checkout; not run", output)
+        self.assertIn("Ran 2 tests", output)
 
     def test_a_staged_path_fixed_in_the_working_tree_but_not_restaged_is_refused(self):
         """The gates read the working tree; the commit holds the index (#1014 review).
@@ -162,7 +166,7 @@ class TheHookRun(unittest.TestCase):
 
     def stub_passes(self, failing: str | None = None) -> None:
         """The two whole-tree modules the hook names, as stubs, one failing if asked."""
-        (self.root / "tests").mkdir()
+        (self.root / "tests").mkdir(exist_ok=True)
         for name in ("test_code_health", "test_doc_citations"):
             verdict = "self.fail('stub red')" if name == failing else "pass"
             (self.root / "tests" / f"{name}.py").write_text(
@@ -172,16 +176,66 @@ class TheHookRun(unittest.TestCase):
             )
 
     def test_the_whole_tree_passes_run_when_their_modules_exist(self):
-        self.stub_passes()
         self.stage("ok.py", "x = 1\n")
         result = self.run_hook()
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("Ran 2 tests", output)
-        self.assertNotIn("not run", output)
+        self.assertNotIn("missing", output)
+
+    def test_a_commit_that_deletes_a_whole_tree_pass_is_refused_by_name(self):
+        """Deleted paths are not in `staged_paths()`, so only the module check sees this."""
+        git("add", "--", "tests", cwd=self.root)
+        git("commit", "-q", "-m", "stubs", cwd=self.root)
+        git("rm", "-q", "--", "tests/test_doc_citations.py", cwd=self.root)
+        result = self.run_hook()
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("tests.test_doc_citations", output)
+        self.assertIn("missing", output)
+        self.assertNotIn("Ran ", output, "a pass ran with one of the two missing")
+        self.assertIn("pre-commit: failed, status 1", output)
+
+    def test_a_python_shebang_past_128_bytes_still_names_python(self):
+        """The same bound as `tests/test_code_health.py`: the whole first line, up to 4096."""
+        shebang = "#!/usr/bin/env -S " + " " * 200 + "python3\n"
+        self.stage("tool", shebang + "import os\n")
+        result = self.run_hook()
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("F401", output)
+        self.assertIn("tool", output)
+
+    def test_a_capped_unterminated_shebang_is_treated_as_python(self):
+        """4096 bytes with no newline is a prefix, not the line; fail closed as code health does."""
+        self.stage("tool", "#!/usr/bin/env -S " + "x" * 5000 + "\nimport os\n")
+        result = self.run_hook()
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("tool", output)
+
+    def test_without_a_venv_the_hook_runs_ruff_and_the_passes_under_python3(self):
+        """`interpreter()`'s fallback: `python3` first on PATH, a shim that execs this suite's."""
+        (self.root / ".venv").unlink()
+        shims = self.root / "shims"
+        shims.mkdir()
+        shim = shims / "python3"
+        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+        shim.chmod(0o755)
+        path = f"{shims}{os.pathsep}{os.environ.get('PATH', '')}"
+        self.stage("bad.py", "import os\n")
+        result = self.run_hook(PATH=path)
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("F401", output, "Ruff did not run under the python3 fallback")
+        self.stage("bad.py", "x = 1\n")
+        result = self.run_hook(PATH=path)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertIn("Ran 2 tests", output, "the passes did not run under the python3 fallback")
 
     def test_a_red_whole_tree_pass_fails_the_commit_with_its_status(self):
-        self.stub_passes(failing="test_doc_citations")
+        self.stub_passes(failing="test_doc_citations")  # overwrites setUp's green stubs
         self.stage("ok.py", "x = 1\n")
         result = self.run_hook()
         output = result.stdout + result.stderr
@@ -228,18 +282,35 @@ class TheLayout(unittest.TestCase):
             ["make", "hooks"], cwd=self.root, capture_output=True, text=True, check=False
         )
 
-    def test_make_hooks_links_the_tracked_hook_absolutely_and_says_where(self):
+    def test_make_hooks_links_the_tracked_hook_relatively_and_says_where(self):
         result = self.make_hooks()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         link = self.root / ".git" / "hooks" / "pre-commit"
         self.assertTrue(link.is_symlink(), f"{link} is not a symlink")
-        target = os.readlink(link)
-        self.assertTrue(os.path.isabs(target), f"not an absolute link: {target}")
-        self.assertTrue(os.path.samefile(target, self.root / "hooks" / "pre-commit"))
-        # The link path is printed as git names it, relative to the checkout.
-        self.assertIn(f"git hooks: .git/hooks/pre-commit -> {target}", result.stdout)
+        self.assertEqual(os.readlink(link), LINK_TARGET)
+        self.assertTrue(link.resolve().samefile(self.root / "hooks" / "pre-commit"))
+        self.assertIn(f"pre-commit -> {LINK_TARGET}", result.stdout)
         again = self.make_hooks()
         self.assertEqual(again.returncode, 0, "a second run over its own link must pass")
+
+    def test_make_hooks_from_a_linked_worktree_installs_the_clone_wide_link(self):
+        """One hook per clone: the link sits in the common `.git/hooks` and reads the main checkout's file."""
+        git("add", "--", "Makefile", cwd=self.root)
+        git("commit", "-q", "-m", "layout", cwd=self.root)
+        worktree = self.root.parent / (self.root.name + "-wt")
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(worktree)], check=False)
+        git("worktree", "add", "-q", "-b", "wt", str(worktree), cwd=self.root)
+        result = subprocess.run(
+            ["make", "hooks"], cwd=worktree, capture_output=True, text=True, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        link = self.root / ".git" / "hooks" / "pre-commit"
+        self.assertTrue(link.is_symlink(), f"{link} is not under the main .git/hooks")
+        self.assertEqual(os.readlink(link), LINK_TARGET)
+        self.assertTrue(link.resolve().samefile(self.root / "hooks" / "pre-commit"),
+                        "the link does not read the main checkout's hook")
+        self.assertFalse((self.root / ".git" / "worktrees" / worktree.name / "hooks").exists(),
+                         "a per-worktree hooks dir appeared")
 
     def test_a_commit_runs_the_hook_through_the_link(self):
         self.assertEqual(self.make_hooks().returncode, 0)
