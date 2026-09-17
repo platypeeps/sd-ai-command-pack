@@ -408,7 +408,7 @@
       3 as narrowed in `design.md`, each with its baseline. Verify: each rule
       reddens under mutation; no rule's first run reddens the existing corpus.
 
-- [ ] **7. The pre-commit tier.** **Every timing this step used to state has
+- [x] **7. The pre-commit tier.** **Every timing this step used to state has
       expired, and the shape of the step is now open rather than settled.** It
       read that the code checkers run whole at 1.71 s, that only
       `bin/sd-docs-lint` at 19.87 s is diff-scoped, and that the two whole-tree
@@ -427,6 +427,86 @@
       record the number, and set the budget from that result in the same pull
       request; re-run the three whole-tree timings there too, on a machine
       whose load is stated, and write them down beside their commit.
+      **Landed 2026-09-16.** The nine readings, at `ef7c0c7b`, three runs
+      each, `/usr/bin/time -p` real seconds with the one-minute load average
+      beside each, before any hook existed: `tests.test_code_health` 1.79 /
+      1.71 / 1.74 at load 9.90 / 8.73 / 7.39; `tests.test_doc_citations`
+      3.41 / 3.38 / 3.33 at 9.91 / 8.75 / 7.39; `bin/sd-docs-lint` 20.34 /
+      21.85 / 21.65 at 9.91 / 8.75 / 7.52, of which 2.0 s is CPU and the rest
+      is seventy `git fetch` and `git ls-remote` children under
+      `sd_lib.delivered` in rule 2, so the tool's wall time is git
+      subprocess calls reaching the network, not its own reading of the
+      corpus. The hook is `hooks/pre-commit`,
+      Python (a tracked shell file outside `.github/scripts/` reddens
+      `tests/test_no_shipped_shell.py`), run on the staged files: `SD_SKIP_HOOKS=1`
+      skips it with a one-line notice; otherwise a refusal by name of any
+      staged path whose working-tree copy differs from the index, since both
+      gates read the working tree and the commit holds the index (the first
+      review round's finding: a bad file staged and then fixed without
+      restaging passed while the commit still carried the bad blob), then
+      Ruff over the staged Python, then `tests.test_code_health` and
+      `tests.test_doc_citations` whole, the first red exiting with that
+      tool's output and status, and its own wall time printed on exit
+      against the budget. The assembled hook on a
+      one-file diff read 5.26 / 5.07 / 5.01 s at load 7.47 / 7.60 / 7.55. The
+      budget is 8 s, in the header and in `BUDGET_SECONDS`. The decision:
+      both test passes run whole, since `select-tests.py` puts both in
+      `ALWAYS_RUN` and neither has a diff-scoped form; `bin/sd-docs-lint` is
+      not in the hook, since `--changed` needs `--pr-body` and scopes rule 8
+      only and the tool's wall time is network; Ruff is file-scoped by nature.
+      `make hooks` installs it as the relative link `<common .git>/hooks/
+      pre-commit -> ../../hooks/pre-commit`, one per clone, read from the
+      main checkout and shared by every linked worktree, prints the path,
+      refuses by name to replace anything else there, refuses to run while
+      a `core.hooksPath` is set (`--git-path hooks` would honour it), and
+      never sets one: the directory is `hooks/`, not `.githooks/`, because
+      `bin/sd-status` reports `.githooks` and a set `core.hooksPath` as the
+      retired gate stack's residue with a removal command, and the pack's own
+      hook must not match its own detector (`design.md`, the re-made
+      decision). `bin/sd_install.py` is not edited, and folding the hook into
+      `--user` is the owner's call. `tests/test_pre_commit_hook.py`,
+      fail-first (`FAILED (failures=5)` with no hook, then `OK`; the layout
+      cases `FAILED (failures=8)` before the move, then `OK`): the file is
+      tracked at `hooks/pre-commit`, executable and states the budget once,
+      equal to `BUDGET_SECONDS` and to `design.md`; both named passes exist
+      in this checkout; in a throwaway repository a staged `import os` exits
+      non-zero naming `bad.py`, `SD_SKIP_HOOKS=1` exits 0 with the notice,
+      and a clean file exits 0 printing the wall time; a staged file fixed
+      in the working tree but not restaged is refused naming it, with Ruff
+      not run; with the two modules present as stubs the hook runs them
+      (`Ran 2 tests`), a red stub fails the commit with status 1, and a
+      staged `git rm` of one stub is refused naming the module (a deletion
+      is not a staged path, so only the module check sees it); a python
+      shebang past 128 bytes and a capped unterminated one are both sent to
+      Ruff while a long shell shebang is not, the bound being code health's
+      4096; without `.venv` and with a `python3` shim first on `PATH`, Ruff
+      and the passes both run;
+      `make hooks` over a
+      copy of the `Makefile` makes the relative link and passes again over
+      its own link, refuses a stranger file and leaves it, refuses while
+      `core.hooksPath` is set and makes no link, a `git commit` of
+      a staged `import os` fails through the link with no commit landing,
+      and from a linked worktree the link lands in the main `.git/hooks`
+      with the same relative target and reads the main checkout's file,
+      and afterwards
+      `residue_section` from `bin/sd-status` reports neither `githooks` nor
+      `hooks-path`. Mutations, each restored from a byte copy: the Ruff step
+      removed reddens the Ruff case; the skip branch removed reddens the
+      escape-hatch case; `chmod -x` reddens the file case; the recipe also
+      setting `core.hooksPath` reddens the residue case with `'hooks-path'
+      unexpectedly found`; the refusal removed reddens the stranger case;
+      the `unittest` call replaced by `status = 0` reddens both stub cases;
+      the divergence guard emptied reddens the not-restaged case with
+      `0 == 0 : All checks passed!`; the link target misspelt reddens the
+      commit case with `the commit went through` and the link case with
+      `FileNotFoundError`; the common dir replaced by `--git-dir` reddens
+      the worktree case; the absent-pass failure downgraded to a notice
+      reddens the deletion case; `SHEBANG_LIMIT` at 128 reddens the shell
+      case with `EXE001`; the fail-closed return removed reddens the capped
+      case; the fallback renamed reddens the `python3` case with
+      `FileNotFoundError`; the budget header duplicated reddens the file
+      case with `2 != 1`; the `core.hooksPath` refusal removed reddens its
+      case with `git hooks: .githooks/pre-commit -> ...`.
 
 - [ ] **8. The authoring tier.** Skills consult the registry and name the rule
       ids in scope. Filed last, because it depends on the registry carrying
@@ -520,3 +600,10 @@ The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
   one child and one mutated child per row, 20 children → 13 on eight rows
   and two controls; `LegD` real 14.71 s at load 6.31 → 10.34 s at 6.28,
   budgeted at 21 s in `design.md`, Dec-6.
+- 2026-09-16 step 7 (Dec-7): `hooks/pre-commit` runs Ruff on the staged
+  Python and the two whole-tree test passes, read 5.01–5.26 s on a one-file
+  diff at load 7.47–7.60, budgeted at 8 s; `bin/sd-docs-lint` stays out of
+  the hook, its 20 s being seventy git network children; `make hooks` links
+  it from `.git/hooks`, not `.githooks/` and not `core.hooksPath`, which
+  `bin/sd-status` reports as residue. The diff-scoping decision is re-made
+  in `design.md` on those readings.
