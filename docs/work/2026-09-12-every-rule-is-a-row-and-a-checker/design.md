@@ -441,7 +441,9 @@ apply to the checkers the item aims it at.
   git names, with an absolute target because from a worktree that directory
   is the main checkout's and the link must name the worktree's copy; it
   refuses by name to replace anything else at that path;
-  `core.hooksPath` is never set. `tests/test_pre_commit_hook.py` runs
+  `core.hooksPath` is never set, and a clone that still carries one is
+  refused before the directory is resolved, because `--git-path hooks`
+  honours the setting and would place the link under the retired directory. `tests/test_pre_commit_hook.py` runs
   `residue_section` from `bin/sd-status` over a checkout laid out this way,
   after `make hooks`, and requires neither row; the detector is not edited.
 - **2026-09-12 — the meta-check lands before any rule.** A registry with zero

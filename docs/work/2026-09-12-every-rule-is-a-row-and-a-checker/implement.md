@@ -457,8 +457,9 @@
       `make hooks` installs it as the link `.git/hooks/pre-commit ->
       <checkout>/hooks/pre-commit` in the directory git names (absolute, so
       a worktree's link names the worktree's copy), prints the path,
-      refuses by name to replace anything else there, and never sets
-      `core.hooksPath`: the directory is `hooks/`, not `.githooks/`, because
+      refuses by name to replace anything else there, refuses to run while
+      a `core.hooksPath` is set (`--git-path hooks` would honour it), and
+      never sets one: the directory is `hooks/`, not `.githooks/`, because
       `bin/sd-status` reports `.githooks` and a set `core.hooksPath` as the
       retired gate stack's residue with a removal command, and the pack's own
       hook must not match its own detector (`design.md`, the re-made
@@ -476,7 +477,8 @@
       (`Ran 2 tests`) and a red stub fails the commit with status 1;
       `make hooks` over a
       copy of the `Makefile` makes the absolute link and passes again over
-      its own link, refuses a stranger file and leaves it, a `git commit` of
+      its own link, refuses a stranger file and leaves it, refuses while
+      `core.hooksPath` is set and makes no link, a `git commit` of
       a staged `import os` fails through the link with no commit landing,
       and afterwards
       `residue_section` from `bin/sd-status` reports neither `githooks` nor
@@ -489,7 +491,9 @@
       the divergence guard emptied reddens the not-restaged case with
       `0 == 0 : All checks passed!`; the link target misspelt reddens the
       commit case with `the commit went through` and the link case with
-      `FileNotFoundError`.
+      `FileNotFoundError`; the budget header duplicated reddens the file
+      case with `2 != 1`; the `core.hooksPath` refusal removed reddens its
+      case with `git hooks: .githooks/pre-commit -> ...`.
 
 - [ ] **8. The authoring tier.** Skills consult the registry and name the rule
       ids in scope. Filed last, because it depends on the registry carrying

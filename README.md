@@ -248,8 +248,10 @@ and prints its own wall time against the budget its header states.
 absolute path of this checkout's copy (from a worktree, git's hooks directory
 is the main checkout's, and the link then names the worktree's copy), and the
 target refuses to replace anything else already at that path; it never
-sets `core.hooksPath` and the directory is not `.githooks/`, because
-`sd-status` reports both of those as the retired gate stack's residue. This is
+sets `core.hooksPath` and refuses to run while one is set, since git would
+then place the link under that directory, and the directory is not
+`.githooks/`, because `sd-status` reports both of those as the retired gate
+stack's residue. This is
 a setting of the clone, not a render, so `--user` does not make it and
 `--uninstall` does not remove it; `bin/sd_install.py` is unchanged, and folding
 the hook into `--user` is the owner's call.

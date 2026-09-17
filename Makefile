@@ -20,13 +20,20 @@ setup:
 # link then names the copy in the checkout that ran `make hooks`. Not
 # `.githooks/` and not `core.hooksPath`: those are the retired gate stack's
 # signatures, and bin/sd-status reports each as residue with a removal
-# command, so the pack's own hook must not wear them. A file already at the
-# path that is not this link is refused by name and left alone. This is a
+# command, so the pack's own hook must not wear them. A clone that still
+# carries `core.hooksPath` is refused first, since `git rev-parse --git-path
+# hooks` would honour it and place the link under the retired directory. A
+# file already at the path that is not this link is refused by name and left
+# alone. This is a
 # setting of the clone, not a render: the installer does not make it, and
 # folding it into `--user` is the owner's call. `SD_SKIP_HOOKS=1 git commit`
 # skips the hook with a notice.
 hooks:
-	@dir="$$(git rev-parse --git-path hooks)"; link="$$dir/pre-commit"; target="$$(pwd -P)/hooks/pre-commit"; \
+	@if set="$$(git config --get core.hooksPath)"; then \
+		printf '%s\n' "error: core.hooksPath is set to $$set; the pack's hook lives in .git/hooks -- run 'git config --unset core.hooksPath' (bin/sd-status names it as residue) and retry" >&2; \
+		exit 1; \
+	fi; \
+	dir="$$(git rev-parse --git-path hooks)"; link="$$dir/pre-commit"; target="$$(pwd -P)/hooks/pre-commit"; \
 	if { [ -e "$$link" ] || [ -L "$$link" ]; } && [ "$$(readlink "$$link")" != "$$target" ]; then \
 		printf '%s\n' "error: $$link exists and is not the link to hooks/pre-commit; move it aside first" >&2; \
 		exit 1; \
