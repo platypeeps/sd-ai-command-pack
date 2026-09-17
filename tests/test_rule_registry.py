@@ -405,7 +405,7 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 STRANDED_RULE_IDS = frozenset({
     "R11-D1", "R11-D10", "R11-D13", "R11-D15",
     "R11-D17", "R11-D20", "R11-D21",
-    "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D30", "R11-D5",
+    "R11-D24", "R11-D25", "R11-D29", "R11-D30", "R11-D5",
     "R5-D1",
 })
 
@@ -1986,6 +1986,14 @@ MUTATIONS: dict[str, Mutation] = {
         new="    unknown = sorted(set(kind) - KIND_KEYS)\n"
             "    if False:  # leg d: the closed-vocabulary guard, defeated",
         test="tests.test_sd_plugin.KindTests.test_a_ninth_key_refuses",
+    ),
+    "bin/sd::edit_field": Mutation(
+        path="bin/sd",
+        old='        lines[hits[0]] = f"{key}: {render_value(value)}{ending}"',
+        new='        lines = [f"{key}: {render_value(value)}{ending}"]'
+            "  # leg d: the note rebuilt from the one line",
+        test="tests.test_sd_store.WriteTests"
+             ".test_a_set_leaves_every_line_it_did_not_edit_byte_identical",
     ),
     "tests/test_doc_citations.py::"
     "test_line_citations_into_a_symbol_match_their_baseline": Mutation(
