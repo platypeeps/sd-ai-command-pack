@@ -9,7 +9,8 @@
       vendor" when Claude authors, as a note on sd:777.
 - [ ] 3. OWNER-ONLY: passes 1 to 10. The other vendor reviews the next ten
       code pull requests; after each, one note on sd:777 in the template in
-      `prd.md`, cost copied from the query there. A reversal of the shape
+      `prd.md`, cost copied from the query there, or in the `estimate` form
+      when the query has no row for the pass. A reversal of the shape
       follows the re-record rule in `design.md`.
 - [ ] 4. OWNER-ONLY: the report, one note on sd:777 with the accepted /
       rejected ratio over ten, the highest severity accepted, and the cost

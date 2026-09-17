@@ -15,8 +15,9 @@ accepted against rejected findings with severities and cost, and a recorded
 decision keeps or removes the point. `WORKFLOW.md:139-141` still describes
 the experiment. No pass log, no report and no decision exist, and nothing
 says what one pass note looks like. Ten passes written ten ways cannot be
-summed. The `cost` table that would supply each pass's cost holds 0 rows
-today, so the cost field needs a query that is agreed before the first pass.
+summed. The `cost` table that would supply each pass's cost held 0 rows on
+2026-09-16, and 0 `run` rows on 2026-09-17, so the cost field needs a query
+that is agreed before the first pass.
 
 ## Requirements
 
@@ -120,3 +121,5 @@ over the ten.
   three `meter` rows and no `run` row. Planning review, host lane once: one
   blocking finding, the accepted-severities sub-list had no value at zero
   accepted, fixed on the template line; ten non-blocking, all addressed.
+  Copilot round on #1023 at dcc6a954, two findings folded: step 3 names
+  the `estimate` form, and the Problem's row count is dated.
