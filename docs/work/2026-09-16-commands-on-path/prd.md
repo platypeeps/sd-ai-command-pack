@@ -68,20 +68,25 @@ The four rules of the item body, numbered as it numbers them.
 
 ## Decisions for the owner
 
-- **Default link directory.** Recommend `~/.local/bin`. On sol `~/.zshrc`
-  prepends it (`path=("$HOME/.local/bin" $path)`) and appends `~/bin/common`;
-  `~/.local/bin` exists and holds no `sd*` today; `~/.config/shell/env.sh`
-  sets neither. The second machine is not measurable from this lane; the item
-  states `~/.local/bin` is on PATH there, and if it is not,
-  `--bin-dir ~/bin/common` reuses the directory `~/.zshrc` already appends.
-- **Link by default, or only under `--bin-dir`.** Recommend by default. A
-  flag remembered per machine is the hand loop under another name.
-- **What `--pull` does to links.** Recommend nothing new: `--pull` re-runs
-  `--user`, which keeps a link that points here, adds one for a new command,
-  and prunes a receipt-named link whose command `bin/` no longer has.
-- **The 17 hand links in `~/bin/common`.** The receipt does not name them, so
-  the installer leaves them; `~/.local/bin` precedes them on PATH, so they
-  are neither counted nor shadows. The owner deletes them by hand or not.
+Decided 2026-09-16, note #2616: the four recommendations were accepted as
+written.
+
+- **Default link directory.** `~/.local/bin`, with `--bin-dir DIR` as the
+  override. On sol `~/.zshrc` prepends it (`path=("$HOME/.local/bin" $path)`)
+  and appends `~/bin/common`; `~/.local/bin` existed and held no `sd*`;
+  `~/.config/shell/env.sh` sets neither. The second machine was not
+  measurable from the planning lane; the item states `~/.local/bin` is on
+  PATH there, and if it is not, `--bin-dir ~/bin/common` reuses the directory
+  `~/.zshrc` already appends.
+- **Link by default, or only under `--bin-dir`.** By default under `--user`.
+  A flag remembered per machine is the hand loop under another name.
+- **What `--pull` does to links.** Nothing new: `--pull` re-runs `--user`,
+  which keeps a link that points here, adds one for a new command, and prunes
+  a receipt-named link whose command `bin/` no longer has.
+- **The 17 hand links in `~/bin/common`.** Left in place. The receipt does not
+  name them, so the installer leaves them; `~/.local/bin` precedes them on
+  PATH, so they are neither counted nor shadows. The owner deletes them by
+  hand or not.
 
 ## References
 

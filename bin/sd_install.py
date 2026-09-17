@@ -8,10 +8,14 @@ re-render after a payload edit.
 
 Two rules constrain every write here, and both are load-bearing:
 
-  * **It owns only names it renders.** `installed.json` records each written
-    path with the digest of what was written. `--uninstall` removes exactly
-    those, and refuses a path whose digest no longer matches unless forced, so
-    a file someone edited by hand is never silently deleted.
+  * **It owns only names it renders or links.** `installed.json` records each
+    written path with the digest of what was written, and each command link as
+    `{"path", "kind": "link", "target"}` with no digest, since a link has no
+    bytes of its own. `--uninstall` removes exactly those: a render whose
+    digest no longer matches is refused unless forced, and a link is removed
+    only while it is still a symlink resolving to its recorded target, so a
+    file someone edited or a link someone retargeted by hand is never silently
+    deleted.
   * **It never edits a tracked repository file.** The single exception outside
     a platform home is the one SessionStart stanza in `~/.claude/settings.json`
     for `sd-handoff-restore`, which is recorded in `owned` like any other write
@@ -438,10 +442,20 @@ def read_receipt(path: Path) -> dict:
 
 
 def owned_entries(receipt: dict) -> list[dict]:
+    """The rows `--uninstall` and the prune steps may act on.
+
+    A row without a `path` names nothing to remove and is dropped -- except a
+    `kind: link` row, which `prune_links` reports as malformed rather than
+    letting it vanish from the account without a word (C-33, review 1).
+    """
     entries = receipt.get("owned")
     if not isinstance(entries, list):
         return []
-    return [item for item in entries if isinstance(item, dict) and "path" in item]
+    return [
+        item
+        for item in entries
+        if isinstance(item, dict) and ("path" in item or item.get("kind") == "link")
+    ]
 
 
 def write_receipt(path: Path, payload: dict) -> None:
@@ -791,7 +805,10 @@ def prune_stale(
         raw = entry.get("path")
         if not isinstance(raw, str) or raw in current:
             continue
-        if entry.get("kind") == "hook":
+        if entry.get("kind") in ("hook", "link"):
+            # A hook row is a stanza in settings.json; a link row has no digest
+            # and `prune_links` owns it. Digesting through a link would read
+            # the script it points at and never match.
             continue
         target = Path(raw)
         if not target.exists():
@@ -829,6 +846,142 @@ def prune_empty_dirs(start: Path) -> None:
         except OSError:
             return
         current = current.parent
+
+
+# ------------------------------------------------------------- command links
+
+
+def bin_commands(checkout: Path) -> list[str]:
+    """The extensionless executables in `bin/`: `sd` and the `sd-*` commands.
+
+    Enumerated from the directory, never from a list here. The `sd_*.py` beside
+    them are modules and are excluded by their suffix.
+    """
+    return sorted(
+        entry.name
+        for entry in (checkout / "bin").glob("sd*")
+        if entry.suffix == "" and entry.is_file() and os.access(entry, os.X_OK)
+    )
+
+
+@dataclass(frozen=True)
+class Link:
+    """One command's link: where it goes, what it points at, what is there now."""
+
+    name: str
+    path: Path
+    target: Path
+    state: str  # "absent", "ours" or "foreign"
+
+
+class LinkFailed(Exception):
+    """A link could not be made; whatever this run linked has been unlinked."""
+
+
+def link_plan(checkout: Path, bin_dir: Path) -> list[Link]:
+    """Classify `bin_dir/<name>` for every command, before anything is written.
+
+    "Ours" is a symlink, absolute or relative, that resolves to this checkout's
+    copy; it is kept as it is, inode and all. Anything else at the path -- a
+    regular file, a dangling link, a link into another checkout -- is foreign,
+    and one foreign entry refuses the whole run. The plan runs first thing in
+    `cmd_user`, before the library is opened, because `expire_trials` writes
+    to the shared database and a refusal must leave nothing changed.
+    """
+    plans: list[Link] = []
+    for name in bin_commands(checkout):
+        path = bin_dir / name
+        target = checkout / "bin" / name
+        if not path.is_symlink() and not path.exists():
+            state = "absent"
+        elif path.is_symlink() and _resolves_to(path, target):
+            state = "ours"
+        else:
+            state = "foreign"
+        plans.append(Link(name, path, target, state))
+    return plans
+
+
+def link_commands(plans: list[Link], bin_dir: Path, *, dry_run: bool = False) -> list[dict]:
+    """Make the absent links and return one receipt row per command.
+
+    A row carries the link's `path` and its `target` and no digest: a link has
+    no bytes of its own, and a digest read through it would be the script's.
+    An `OSError` on any link unlinks every link this call made and raises
+    `LinkFailed`, so no link exists that no receipt names; the renders made
+    before this stand, and the next `--user` converges them. A checkout with
+    no commands links nothing and makes no directory.
+    """
+    rows = [
+        {"path": str(plan.path), "kind": "link", "target": str(plan.target)}
+        for plan in plans
+    ]
+    if dry_run or not plans:
+        return rows
+    made: list[Path] = []
+    for plan in plans:
+        if plan.state == "ours":
+            continue
+        # The directory is made inside the handler with the link: an
+        # unwritable parent is the same failure as an unwritable link, one
+        # line and rc 1, not a traceback (C-31).
+        try:
+            bin_dir.mkdir(parents=True, exist_ok=True)
+            os.symlink(plan.target, plan.path)
+        except OSError as exc:
+            for path in made:
+                path.unlink()
+            raise LinkFailed(
+                f"could not link {plan.path} ({exc.strerror or exc})"
+            ) from exc
+        made.append(plan.path)
+    return rows
+
+
+def prune_links(
+    previous: list[dict], keep: set[str], *, dry_run: bool = False
+) -> list[tuple[str, str]]:
+    """Remove every recorded link this run did not produce, if it is still ours.
+
+    `keep` is the set of link paths this run produced -- under `--uninstall`
+    it is empty, so every row is a candidate; under `--user` only a retired
+    command's is. Not `cmd_user`'s `current`, which holds rendered paths and
+    would retire every link on every run. A row is removed only while its
+    path is still a symlink that resolves to its recorded target, the same
+    test `link_plan` uses to call a link ours; a retargeted link or a regular
+    file at the path is left and reported. A link the receipt never named is
+    never a candidate, and the directory itself stays.
+
+    Returns `(path, reason)` for everything left, as `prune_stale` does.
+    """
+    skipped: list[tuple[str, str]] = []
+    for entry in previous:
+        if entry.get("kind") != "link":
+            continue
+        raw = entry.get("path")
+        target = entry.get("target")
+        if not isinstance(raw, str) or not isinstance(target, str):
+            # `owned_entries` admits any dict with a `path`, and a link row
+            # without one. A row this function cannot read is nothing it may
+            # remove, and it says so rather than aborting the run (C-33); a
+            # row with no path is shown whole, there being no path to name.
+            shown = str(raw) if raw is not None else json.dumps(entry, sort_keys=True)
+            skipped.append((shown, "malformed link row"))
+            continue
+        if raw in keep:
+            continue
+        path = Path(raw)
+        if not path.is_symlink() and not path.exists():
+            continue
+        if not (path.is_symlink() and _resolves_to(path, Path(target))):
+            skipped.append((raw, "not our link"))
+            continue
+        if not dry_run:
+            try:
+                path.unlink()
+            except OSError as exc:
+                skipped.append((raw, f"could not remove ({exc.strerror or exc})"))
+    return skipped
 
 
 # ------------------------------------------------------------- legacy receipt
@@ -1410,6 +1563,8 @@ class Context:
     home: Path
     environ: dict[str, str]
     dry_run: bool = False
+    # `--bin-dir`, when given. `link_directory` is what the link step reads.
+    bin_dir: Path | None = None
 
     @property
     def sandboxed(self) -> bool:
@@ -1444,6 +1599,24 @@ class Context:
         return self.home / ".claude" / "settings.json"
 
 
+def link_directory(ctx: Context, receipt: dict) -> Path:
+    """Where `--user` links the `bin/` commands.
+
+    `--bin-dir` when given; else the directory the last run linked into, which
+    the receipt records as `binDir`; else `~/.local/bin`. Reading the receipt
+    is what makes a plain `--user` after `--user --bin-dir X` keep X's links
+    rather than retire them and re-link into the default (C-30). A different
+    flag relocates in one run: the new rows go to the new directory and
+    `prune_links` retires the old ones.
+    """
+    if ctx.bin_dir is not None:
+        return ctx.bin_dir
+    recorded = receipt.get("binDir")
+    if isinstance(recorded, str) and recorded:
+        return Path(recorded)
+    return ctx.home / ".local" / "bin"
+
+
 def cmd_user(ctx: Context, out) -> int:
     """Render what the paths name plus what is on trial, and converge.
 
@@ -1458,6 +1631,19 @@ def cmd_user(ctx: Context, out) -> int:
     told so and gets its skills; `make setup` is the remedy, and the path to
     the source is still spelled in this file only.
     """
+    # Before the library: `expire_trials` writes, and a refusal writes nothing.
+    recorded = read_receipt(ctx.receipt)
+    bin_dir = link_directory(ctx, recorded)
+    plans = link_plan(ctx.checkout, bin_dir)
+    for plan in plans:
+        if plan.state == "foreign":
+            print(
+                f"error: {plan.path} exists and is not a link to {plan.target}; "
+                "move it or pass --bin-dir",
+                file=out,
+            )
+            return 1
+
     connection, reason = open_library(ctx)
     if reason:
         print(f"warning: {reason}", file=out)
@@ -1531,8 +1717,17 @@ def cmd_user(ctx: Context, out) -> int:
     written += render(agents, ctx.agents, kind="agent", dry_run=ctx.dry_run)
     current = {str(item.path) for item in written}
 
-    previous = owned_entries(read_receipt(ctx.receipt))
+    # After the renders and before the receipt: a failure here leaves the
+    # renders standing for the next run and no link the receipt does not name.
+    try:
+        links = link_commands(plans, bin_dir, dry_run=ctx.dry_run)
+    except LinkFailed as problem:
+        print(f"error: {problem}", file=out)
+        return 1
+
+    previous = owned_entries(recorded)
     skipped = prune_stale(previous, current, dry_run=ctx.dry_run)
+    skipped += prune_links(previous, {row["path"] for row in links}, dry_run=ctx.dry_run)
 
     specs = hook_specs(ctx.checkout)
     hook_changed = install_hook(ctx.settings, specs, dry_run=ctx.dry_run)
@@ -1552,6 +1747,7 @@ def cmd_user(ctx: Context, out) -> int:
         {"path": str(item.path), "sha256": item.sha256, "kind": item.kind}
         for item in written
     ]
+    owned += links
     # One receipt entry per command and not per spec: two events share
     # `bin/sd-skill-use`, and an uninstall that saw it twice would report a
     # file count one higher than the number of files it touched.
@@ -1569,6 +1765,7 @@ def cmd_user(ctx: Context, out) -> int:
         "checkout": str(ctx.checkout),
         **git_context(ctx.checkout),
         "platformHomes": {home.key: str(home.root) for home in ctx.homes},
+        "binDir": str(bin_dir),
         "owned": owned,
     }
     if not ctx.dry_run:
@@ -1586,6 +1783,17 @@ def cmd_user(ctx: Context, out) -> int:
         print(f"{prefix} {len(agents)} agents", file=out)
         for home in ctx.agents:
             print(f"  {home.key}: {home.root}", file=out)
+    if links:
+        kept = sum(1 for plan in plans if plan.state == "ours")
+        print(
+            f"{'would link' if ctx.dry_run else 'linked'} {len(links)} commands "
+            f"into {bin_dir}"
+            + (f" ({kept} already linked)" if kept else ""),
+            file=out,
+        )
+        entries = [Path(part) for part in ctx.environ.get("PATH", "").split(os.pathsep) if part]
+        if not any(_resolves_to(entry, bin_dir) for entry in entries):
+            print(f"  warning: {bin_dir} is not on PATH in this shell", file=out)
     if hook_changed:
         events = sorted({event for _, event, _ in specs})
         print(f"  hooks registered: {', '.join(events)}", file=out)
@@ -1606,44 +1814,61 @@ def cmd_user(ctx: Context, out) -> int:
 def command_report(checkout: Path, environ: dict[str, str]) -> str:
     """One line on how this checkout's commands, `bin/sd` and `bin/sd-*`, are reached.
 
-    The installer renders surfaces -- skills, agents, companions, hooks -- and
-    links no executable anywhere. A receipt is therefore not evidence that
-    `sd-handoff` resolves, and it never was: `bin/` is invoked by path, the way
-    the two installed hooks invoke it. Leaving that to be inferred from an
-    absence reads as a partial install, and has been read that way.
+    `--user` links every executable in `bin/` into one directory, `~/.local/bin`
+    unless `--bin-dir` names another, and records each link in the receipt.
+    Whether those links resolve is the shell's PATH, which the installer never
+    edits, so the receipt is not evidence that `sd-handoff` resolves and this
+    line is: it asks PATH for each command by name and says how many of them
+    reach this checkout. A checkout that was never `--user` installed is told
+    to invoke by path, the way the installed hooks do.
 
+    Counted per command and not per directory, because a link in `~/.local/bin`
+    is how the commands are reached and no PATH entry ever resolves to `bin/`
+    for it; the same per-name test decides whether a name is ours or a shadow.
     Enumerated at runtime from `bin/` (its extensionless executables; the
     `sd_*.py` beside them are modules) and from `PATH`, never from a list here.
     """
-    binaries = sorted(
-        entry.name
-        for entry in (checkout / "bin").glob("sd*")
-        if entry.suffix == "" and entry.is_file() and os.access(entry, os.X_OK)
-    )
+    binaries = bin_commands(checkout)
     if not binaries:
         return "commands: none in bin/"
 
     own = (checkout / "bin").resolve()
-    entries = [Path(part) for part in environ.get("PATH", "").split(os.pathsep) if part]
-    on_path = any(_resolves_to(entry, own) for entry in entries)
+    # The absolute components only, for both tests. `shutil.which` reads an
+    # empty component, and a relative one such as `.`, as the working
+    # directory, and a command sitting there is nobody's install; the
+    # directory test never counted it, and the shadow test used to.
+    search = os.pathsep.join(
+        part for part in environ.get("PATH", "").split(os.pathsep) if os.path.isabs(part)
+    )
 
     # A command that resolves somewhere else is worse than one that does not
     # resolve at all: it runs, and it runs another checkout's code.
     #
-    # Resolve the executable, not the directory holding it. A hand-made symlink
-    # in some other `bin` pointing back into this checkout is this checkout's
-    # command reached by another name, not a competing install -- and its
-    # parent directory resolves to that other `bin`, so testing the directory
-    # calls it a shadow when it is not.
-    elsewhere = sorted(
-        name
-        for name in binaries
-        if (found := shutil.which(name, path=environ.get("PATH", "")))
-        and not _resolves_to(Path(found), own / name)
-    )
+    # Resolve the executable, not the directory holding it. A symlink in some
+    # other `bin` pointing back into this checkout is this checkout's command
+    # reached by another name, not a competing install -- and its parent
+    # directory resolves to that other `bin`, so testing the directory calls
+    # it a shadow when it is not.
+    ours: list[str] = []
+    elsewhere: list[str] = []
+    for name in binaries:
+        found = shutil.which(name, path=search)
+        if found is None:
+            continue
+        (ours if _resolves_to(Path(found), own / name) else elsewhere).append(name)
 
-    if on_path:
-        report = f"commands: {len(binaries)} in bin/, on PATH from this checkout"
+    if len(ours) == len(binaries):
+        report = (
+            f"commands: {len(binaries)} in bin/, {len(ours)} resolve on PATH "
+            "from this checkout"
+        )
+    elif ours:
+        missing = [name for name in binaries if name not in ours and name not in elsewhere]
+        report = (
+            f"commands: {len(binaries)} in bin/, {len(ours)} of {len(binaries)} "
+            "resolve on PATH from this checkout"
+            + (f" (missing: {', '.join(missing)})" if missing else "")
+        )
     else:
         report = (
             f"commands: {len(binaries)} in bin/, not on PATH -- "
@@ -1746,12 +1971,19 @@ def cmd_pull(ctx: Context, out) -> int:
 
 
 def cmd_uninstall(ctx: Context, out) -> int:
-    """Remove exactly what the receipt says we wrote, and nothing else."""
+    """Remove exactly what the receipt says we wrote, and nothing else.
+
+    That is the renders, the hook stanzas and the command links; the link
+    directory and any link the receipt never named stay.
+    """
     previous = owned_entries(read_receipt(ctx.receipt))
     if not previous:
         print(f"nothing to remove (no receipt at {ctx.receipt})", file=out)
         return 0
     skipped = prune_stale(previous, set(), dry_run=ctx.dry_run)
+    # Every link row is a candidate: this run produced none. A link that is no
+    # longer ours joins `skipped` and is subtracted with the modified renders.
+    skipped += prune_links(previous, set(), dry_run=ctx.dry_run)
     held = [
         entry.get("command") for entry in previous if entry.get("kind") == "hook"
     ]
@@ -1849,9 +2081,10 @@ def cmd_repo(ctx: Context, repo: Path, out, reviewers: str | None = None) -> int
 
 USAGE = """\
 usage: install.py (--user | --status | --pull | --uninstall | --adopt-legacy
-                   | --repo [PATH]) [--dry-run] [--home DIR]
+                   | --repo [PATH]) [--dry-run] [--home DIR] [--bin-dir DIR]
 
   --user           render every sd-* surface into this machine's platform homes
+                   and link the bin/ commands into the link directory
   --status         report what is installed, what drifted, what legacy remains
   --pull           fast-forward the serving checkout (main, clean) and re-render
   --uninstall      remove exactly what the receipt records having written
@@ -1866,6 +2099,9 @@ usage: install.py (--user | --status | --pull | --uninstall | --adopt-legacy
 
   --dry-run        print what would happen; write nothing
   --home DIR       treat DIR as the home directory (tests and scratch installs)
+  --bin-dir DIR    with --user or --pull, link the bin/ commands into DIR
+                   (default: the directory the last run linked into, else
+                   ~/.local/bin); the installer never edits PATH
 """
 
 MODES = ("user", "status", "pull", "uninstall", "adopt-legacy", "repo",
@@ -1881,6 +2117,7 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     reviewers = None
     dry_run = False
     home_arg = None
+    bin_dir_arg = None
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -1901,6 +2138,12 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
                 print("error: --home needs a directory", file=out)
                 return 2
             home_arg = argv[index]
+        elif token == "--bin-dir":
+            index += 1
+            if index >= len(argv):
+                print("error: --bin-dir needs a directory", file=out)
+                return 2
+            bin_dir_arg = argv[index]
         elif token == "--reviewers":
             # Taken positionally: an empty string is a real answer, nobody.
             index += 1
@@ -1934,7 +2177,33 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
         environ["HOME"] = str(home)
 
     checkout = Path(__file__).resolve().parent.parent
-    ctx = Context(checkout=checkout, home=home, environ=environ, dry_run=dry_run)
+    bin_dir = Path(bin_dir_arg).expanduser().resolve() if bin_dir_arg else None
+    ctx = Context(
+        checkout=checkout, home=home, environ=environ, dry_run=dry_run, bin_dir=bin_dir
+    )
+    # Checked here, before any mode runs: `--pull` fast-forwards the serving
+    # checkout before it calls `cmd_user`, so a check inside the link step
+    # would pull first and refuse second. On the resolved path, not the
+    # lexical one: `<home>/alias/bin` with `alias -> /outside` is inside by
+    # parts and writes outside. A typed flag is an intent, so it is refused
+    # rather than quietly redirected the way `xdg_root` treats an inherited
+    # variable. Outside a sandbox any directory is honoured.
+    if bin_dir is not None and ctx.sandboxed and not _is_within(bin_dir, home.resolve()):
+        print(f"error: --bin-dir {bin_dir} is outside --home {home}", file=out)
+        return 2
+    # The same test for the directory a flagless run reads from the receipt
+    # (C-30): a receipt is a file anyone can edit, and a stale or tampered
+    # `binDir` would otherwise be written to unchecked. Refused by name, and
+    # `--bin-dir` is the way past it (review 1, finding 2).
+    if bin_dir is None and mode in ("user", "pull") and ctx.sandboxed:
+        recorded_dir = link_directory(ctx, read_receipt(ctx.receipt))
+        if not _is_within(recorded_dir.resolve(), home.resolve()):
+            print(
+                f"error: the receipt's binDir {recorded_dir} is outside --home {home}; "
+                "pass --bin-dir",
+                file=out,
+            )
+            return 2
 
     if mode == "provision-library":
         # `make setup` calls this so the test suite can import `sd_db` without
