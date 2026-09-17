@@ -404,9 +404,71 @@
       holds, and the whole module went from 9.70 s for 33 tests to 38.88 s
       for 34, because `TheSharedCopy` runs the leg a second time in-process.
 
-- [ ] **6. Prose rules, in their narrowed forms.** Rule 2 as filed. Rules 1 and
+- [x] **6. Prose rules, in their narrowed forms.** Rule 2 as filed. Rules 1 and
       3 as narrowed in `design.md`, each with its baseline. Verify: each rule
       reddens under mutation; no rule's first run reddens the existing corpus.
+      **Step 6, 2026-09-16. `R13-D1` to `R13-D3` are rows on a round of
+      their own, each a per-document baseline that only falls; both leg c
+      baselines unchanged; nothing in the corpus was swept.** All three
+      teach from one new section, `Prose rules` in `skills/sd-check/SKILL.md`,
+      beside the code rules, and all three proofs edit that page in leg d's
+      copy. Re-measured on `ef7c0c7b` first, and one premise did not hold:
+      the plan had rule 1's checker reading the `compared` rows, on the
+      strength of the census table in `design.md` (54 on `e6c2cb20`), but
+      since sd:525 a live anchored `path:line` into code is
+      `anchored-line-into-code`, red and empty, so `compared` held one row
+      and it was archived. The population the narrowed rule is about is the
+      *unanchored* citation -- `no-adjacent-anchor`, `separator-not-adjacent`,
+      `anchor-not-a-symbol` -- which the gate opens only to check the line is
+      in range. `R13-D1`'s checker is
+      `test_line_citations_into_a_symbol_match_their_baseline` in
+      `tests/test_doc_citations.py`, over
+      `source:tests/test_doc_citations.py::symbol_anchored_citations`: the
+      rows of `classify` whose document is live, whose target is a Python
+      file inside the checkout, and whose line
+      `source:tests/test_doc_citations.py::enclosing_declaration` places
+      inside a `def` or a `class` at the two levels the `source:` form can
+      name. The baseline is `SYMBOL_ANCHORED_CITATIONS`, 145 rows in 17
+      documents on `ef7c0c7b`, 107 of them in one item's `prd.md` and
+      `implement.md`. Exempt: a line outside every symbol, a `quoted` row, a
+      markdown target, a target outside the checkout (one, in an absolute
+      path a dashboard page cites) and a file that does not parse. `R13-D2`'s
+      checker is `test_present_tense_counts_match_their_baseline` in the new
+      `tests/test_prose_counts.py`, over
+      `source:tests/test_prose_counts.py::present_tense_counts`; a module
+      rather than a `bin/sd-docs-lint` rule, because measured on `ef7c0c7b`
+      the linter's tree rules read `docs/work` only and rule 7 opens the
+      rest of the markdown for `docs/work/` references alone, so no page
+      the rule is about was read for its prose there. The corpus is every
+      markdown file under `skills/`, `README.md`, `AGENTS.md`, `docs/spec`
+      and `.claude/rules`, 54 files; the predicate is `<number> <noun>` on
+      one line with the noun from `ENUMERABLE`, outside a fence or a code
+      span, and the line carrying no commit, `#<n>` number or `YYYY-MM-DD`
+      date. Population on `ef7c0c7b`: 2 lines, both violations, held in
+      `PRESENT_TENSE_COUNTS` -- one a test's coverage points in a spec
+      page, one `surfaces` read as a verb in `sd-status`'s skill -- so the
+      rule's first run reddened nothing and the design's exemption for a
+      measurement is what keeps every other count out. A wider noun set was
+      measured and left: `lines`, `rows` and `scripts` name thresholds and
+      measurements in this corpus and nothing enumerable. `R13-D3` registers
+      leg b as it stands: the checker is
+      `test_uncited_tool_behaviour_claims_match_their_baseline`, the
+      predicate `source:tests/test_rule_registry.py::claims_in`, the baseline
+      `UNCITED_SKILL_CLAIMS`, and the row's comment says nothing new is
+      enforced. Fail-first: the rows and their `MUTATIONS` entries were
+      committed first and the module reddened `FAILED (failures=8)` -- leg a
+      on the missing section, the checker-resolution test on three checkers
+      that did not exist, leg d on three mutations that edited nothing; with
+      the checkers and the section the module passes, 35 tests. Mutations,
+      each on a byte copy and restored by `diff -q`: each baseline raised by
+      one reddens its own test; each row's proof applied by hand reddens the
+      test its row names; `R13-D2`'s bullet deleted from the section reddens
+      leg a with `R13-D2: ... does not cite it`;
+      `enclosing_declaration` made to answer `None` reddens four tests in
+      `TheSymbolPreference`; the measurement exemption dropped reddens the
+      predicate test on all four marks. Leg d's child budget rose by three
+      rows and `LegD` read real 9.82 s for 9 tests at load average 6.14,
+      under the 21 s Dec-6 budgets.
 
 - [x] **7. The pre-commit tier.** **Every timing this step used to state has
       expired, and the shape of the step is now open rather than settled.** It
@@ -600,6 +662,12 @@ The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
   one child and one mutated child per row, 20 children → 13 on eight rows
   and two controls; `LegD` real 14.71 s at load 6.31 → 10.34 s at 6.28,
   budgeted at 21 s in `design.md`, Dec-6.
+- 2026-09-16 step 6: `R13-D1` to `R13-D3` register the three prose rules in
+  their narrowed forms, each a per-document baseline that only falls --
+  `SYMBOL_ANCHORED_CITATIONS` in `tests/test_doc_citations.py`,
+  `PRESENT_TENSE_COUNTS` in the new `tests/test_prose_counts.py`, and leg
+  b's `UNCITED_SKILL_CLAIMS` as it stood -- taught from `Prose rules` in
+  `skills/sd-check/SKILL.md`; `LegD` real 9.82 s at load 6.14.
 - 2026-09-16 step 7 (Dec-7): `hooks/pre-commit` runs Ruff on the staged
   Python and the two whole-tree test passes, read 5.01–5.26 s on a one-file
   diff at load 7.47–7.60, budgeted at 8 s; `bin/sd-docs-lint` stays out of

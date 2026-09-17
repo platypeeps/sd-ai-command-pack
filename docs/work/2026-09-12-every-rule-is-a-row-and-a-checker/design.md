@@ -362,7 +362,8 @@ apply to the checkers the item aims it at.
   to fix outright. **Superseded 2026-09-12 by the correction above (sd:622):
   263 has no predicate behind it and neither do its proposed replacements. The
   baseline is whatever `claims_in` returns, recorded per document in
-  `UNCITED_SKILL_CLAIMS`.**
+  `UNCITED_SKILL_CLAIMS`.** Landed as `R13-D3` on 2026-09-16 (step 6), a
+  row registering leg b as it stands and enforcing nothing new.
 - **2026-09-12 (sd:622) — leg b's predicate has one recorded definition, and
   the rejected readings are kept as code rather than as numbers.** The scope is
   the line, the verbs are matched as written, and the subject is enumerated;
@@ -376,10 +377,15 @@ apply to the checkers the item aims it at.
 - **2026-09-12 — prose rule 2 gains an exemption for counts reported against a
   commit.** Without it the rule reddens its own design document. Reversed if a
   cheaper discriminator than "carries a commit or a date" is found.
+  Landed as `R13-D2` on 2026-09-16 (step 6), in `tests/test_prose_counts.py`,
+  with a `#<n>` number read as a third mark beside the commit and the date.
 - **2026-09-12 — prose rule 1 is narrowed from a prohibition to a preference
   conditioned on a symbol existing.** Reversed by sd:525 deciding the broader
   question against line anchors, which would then be that item's call to make,
-  not this one's.
+  not this one's. Landed as `R13-D1` on 2026-09-16 (step 6), over the
+  unanchored citations only: sd:525 had by then made the anchored ones red,
+  so the `compared` rows this rule was first planned over hold no live
+  citation into code.
 - **2026-09-12 — the code checkers are not diff-scoped; only
   `bin/sd-docs-lint` is.** Measured, not assumed. Reversed if the whole-tree
   code pass passes two seconds, at which point the timing is re-run and the
