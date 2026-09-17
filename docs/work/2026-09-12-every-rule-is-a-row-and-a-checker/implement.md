@@ -367,9 +367,10 @@
       import the module it lives in — so
       `test_a_code_health_subject_states_the_current_ceiling` in
       `source:tests/test_rule_registry.py::Registry` reads every
-      `` `NAME`, N `` pair back off that module and refuses a code-health
-      row that states no ceiling; it selects rows by the checker's file, not
-      by id. The skill section is `Code health` in
+      `` `NAME`, N `` pair back off that module, and reads which names the
+      subject may state off the checker's own body, so a true sentence
+      about the wrong ceiling fails (Copilot's finding on #1008); it
+      selects rows by the checker's file, not by id. The skill section is `Code health` in
       `skills/sd-check/SKILL.md`, four bullets each opening with an id, the
       number stated nowhere in it. The proofs violate the rule in a tracked
       file rather than lowering a ceiling, which would prove only that the

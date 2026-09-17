@@ -102,6 +102,24 @@ CODE_HEALTH = "tests/test_code_health.py"
 #: look; a number alone is a number nothing can check.
 STATED_CEILING = re.compile(r"`([A-Z][A-Z_]*)`, (\d+)\b")
 
+
+def ceilings_read_by(checker: str) -> set[str]:
+    """The integer constants of `tests/test_code_health.py` that `checker` reads.
+
+    Off the checker's own body, so a subject is bound to the threshold its
+    checker enforces rather than to any threshold that happens to exist. A
+    name counts when the module holds an integer under it: `COMPLEX`, the
+    baseline set the complexity test also reads, is not one.
+    """
+
+    tree = ast.parse((REPO_ROOT / CODE_HEALTH).read_text(encoding="utf-8"))
+    bodies = [node for node in ast.walk(tree)
+              if isinstance(node, ast.FunctionDef) and node.name == checker]
+    return {node.id for body in bodies for node in ast.walk(body)
+            if isinstance(node, ast.Name)
+            and isinstance(getattr(code_health, node.id, None), int)
+            and not isinstance(getattr(code_health, node.id), bool)}
+
 #: Where the suites live. A checker declared under here *is* the enforcement,
 #: rather than the code an enforcement reads, and leg d binds the two shapes to
 #: their mutation differently. See
@@ -1019,35 +1037,44 @@ A registry row is missing a field a consumer reads.
         number is the drift this item exists to end, and `bin/sd_rules.py`
         cannot import the test module the constant lives in. So the value is
         read back off `tests/test_code_health.py` here: every `` `NAME`, N ``
-        pair in the subject of a row whose checker is in that file names one
-        of its integer constants and states its current value, and a
-        code-health row that states no ceiling at all fails too.
+        pair in the subject of a row whose checker is in that file states
+        that constant's current value.
+
+        **Which constant is read off the checker, not off the subject.** The
+        first form of this checked each pair on its own, so the complexity
+        row could have stated `` `LENGTH_CEILING`, 50 `` -- a true sentence
+        about the wrong ceiling -- and passed (Copilot, #1008). The names the
+        subject states have to be exactly the ceilings the checker's own body
+        reads, enumerated from its AST by `ceilings_read_by`; a row that
+        states none, or a different one, or one too many, fails.
         """
 
         wrong = []
         for rule in sd_rules.RULES:
             if not (rule.checker or "").startswith(f"{CODE_HEALTH}::"):
                 continue
+            checker = rule.checker.split("::", 1)[1]
+            enforced = ceilings_read_by(checker)
             pairs = STATED_CEILING.findall(rule.subject)
-            if not pairs:
-                wrong.append(f"{rule.id}: the subject states no ceiling")
-            for name, stated in pairs:
-                current = getattr(code_health, name, None)
-                if not isinstance(current, int):
-                    wrong.append(f"{rule.id}: `{name}` is not an integer "
-                                 f"constant of {CODE_HEALTH}")
-                elif int(stated) != current:
+            stated = {name for name, _ in pairs}
+            if stated != enforced:
+                wrong.append(f"{rule.id}: the subject states "
+                             f"{sorted(stated) or 'no ceiling'}, and "
+                             f"{checker} reads {sorted(enforced)}")
+            for name, value in pairs:
+                if name in enforced and int(value) != getattr(code_health, name):
                     wrong.append(f"{rule.id}: the subject states `{name}` "
-                                 f"as {stated}, and {CODE_HEALTH} has "
-                                 f"{current}")
+                                 f"as {value}, and {CODE_HEALTH} has "
+                                 f"{getattr(code_health, name)}")
         self.assertEqual(wrong, [], f"""
-A code-health row's subject disagrees with the ceiling it names.
+A code-health row's subject disagrees with the ceiling its checker reads.
 
 {_lines(wrong)}
 
 The subject carries the number so a reader at the row has it; the constant in
-`{CODE_HEALTH}` is the one that enforces. Change the subject, never the
-constant: a ceiling moves in its own change, with its baseline.""")
+`{CODE_HEALTH}` is the one that enforces, and the checker's body says which.
+Change the subject, never the constant: a ceiling moves in its own change,
+with its baseline.""")
 
     def test_no_consumer_carries_a_second_list(self):
         """A rule id written as data outside the registry is a second list.
@@ -1744,17 +1771,27 @@ TOO_DEEP = a_function("_leg_d_too_deep", "".join(
     "    " * n + "if flag:\n" for n in range(code_health.DEPTH_CEILING + 1))
     + "    " * (code_health.DEPTH_CEILING + 1) + "return flag\n")
 
+
+
+def a_body_past_the_clone_floor() -> str:
+    """Statements added until their AST nodes reach `CLONE_FLOOR`, then a return.
+
+    Counted the way `tests/test_code_health.py` counts a function's `nodes`,
+    one `ast.walk` per statement, so a raised floor grows this body with it
+    instead of leaving both clones under it and the checker green.
+    """
+
+    lines = ["total = 0"]
+    while sum(1 for statement in ast.parse("\n".join(lines)).body
+              for _ in ast.walk(statement)) < code_health.CLONE_FLOOR:
+        lines.append(f"total += flag[{len(lines)}]")
+    return "\n".join((*lines, "return total")) + "\n"
+
+
 #: Two functions of one body under two names, each past `CLONE_FLOOR` in AST
 #: nodes. Renaming the locals would not part them either: the digest renames
 #: locals and blanks constants before it compares.
-CLONE_BODY = (
-    "total = 0\n"
-    "for item in flag:\n"
-    "    if item:\n"
-    "        total += item * 2\n"
-    "    else:\n"
-    "        total -= 1\n"
-    "return total\n")
+CLONE_BODY = a_body_past_the_clone_floor()
 TWO_OF_A_KIND = (a_function("_leg_d_clone_a", CLONE_BODY),
                  a_function("_leg_d_clone_b", CLONE_BODY))
 
@@ -1848,8 +1885,9 @@ def edit(tree: pathlib.Path, mutation: Mutation, *, violate: bool) -> int:
 
     Returns how many times the text it looked for occurred, so the caller
     asserts it was exactly one in both directions. Restoration is a replacement
-    like the mutation, never a checkout: this tree has no index of its own, and
-    a leg that restored with git would be proving something about git.
+    like the mutation, never a checkout: the copy's index exists for the
+    checkers that enumerate by it, not for restoring, and a leg that restored
+    with git would be proving something about git.
 
     **The target is held inside the copy.** `MUTATIONS` is a literal in this
     module, so no mutation today can escape and this is hardening rather than a

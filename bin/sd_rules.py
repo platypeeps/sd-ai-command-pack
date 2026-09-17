@@ -250,8 +250,9 @@ RULES: tuple[Rule, ...] = (
     Rule(
         id="R12-D1",
         subject="no function in `bin/` or `dashboard/` is branchier than "
-                "`COMPLEXITY_CEILING`, 20 decision points, beyond the "
-                "entries `COMPLEX` carries, and that baseline only shrinks",
+                "`COMPLEXITY_CEILING`, 20 on the cyclomatic score, beyond "
+                "the entries `COMPLEX` carries, and that baseline only "
+                "shrinks",
         checker="tests/test_code_health.py::"
                 "test_no_function_is_branchier_than_the_ceiling",
         proof="insert a function with one decision point more than the "
