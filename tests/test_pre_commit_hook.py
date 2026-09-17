@@ -15,8 +15,10 @@ stack's signatures, and `bin/sd-status` reports both as residue with a
 removal command. A pack whose own hook matched its own residue detector would
 be telling the operator to delete it. The residue case below runs that
 detector over a checkout laid out this way and requires silence from both
-rows; the install case runs `make hooks` there and requires the relative
-link, and a refusal when something else already holds the path.
+rows; the install cases run `make hooks` there and require an absolute
+link (so a worktree's link names that worktree's copy, not the main
+checkout's), a refusal when something else already holds the path, and a
+`git commit` that fails through the link.
 
 The behavioural cases run the hook by path inside a throwaway repository, not
 in this checkout: staging a file here would edit the index the developer is
@@ -42,7 +44,6 @@ import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 HOOK = REPO_ROOT / "hooks" / "pre-commit"
-LINK_TARGET = "../../hooks/pre-commit"
 DESIGN = REPO_ROOT / "docs/work/2026-09-12-every-rule-is-a-row-and-a-checker/design.md"
 BUDGET_LINE = re.compile(r"^# Budget: (\d+) s wall on a one-file diff\.$", re.MULTILINE)
 CONSTANT_LINE = re.compile(r"^BUDGET_SECONDS = (\d+)$", re.MULTILINE)
@@ -229,17 +230,36 @@ class TheLayout(unittest.TestCase):
             ["make", "hooks"], cwd=self.root, capture_output=True, text=True, check=False
         )
 
-    def test_make_hooks_links_the_tracked_hook_relatively_and_says_where(self):
+    def test_make_hooks_links_the_tracked_hook_absolutely_and_says_where(self):
         result = self.make_hooks()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         link = self.root / ".git" / "hooks" / "pre-commit"
         self.assertTrue(link.is_symlink(), f"{link} is not a symlink")
-        self.assertEqual(os.readlink(link), LINK_TARGET)
-        self.assertTrue(link.resolve().samefile(self.root / "hooks" / "pre-commit"))
-        # The path is printed as git names it, relative to the checkout.
-        self.assertIn(f"git hooks: .git/hooks/pre-commit -> {LINK_TARGET}", result.stdout)
+        target = os.readlink(link)
+        self.assertTrue(os.path.isabs(target), f"not an absolute link: {target}")
+        self.assertTrue(os.path.samefile(target, self.root / "hooks" / "pre-commit"))
+        # The link path is printed as git names it, relative to the checkout.
+        self.assertIn(f"git hooks: .git/hooks/pre-commit -> {target}", result.stdout)
         again = self.make_hooks()
         self.assertEqual(again.returncode, 0, "a second run over its own link must pass")
+
+    def test_a_commit_runs_the_hook_through_the_link(self):
+        self.assertEqual(self.make_hooks().returncode, 0)
+        (self.root / ".venv").symlink_to(pathlib.Path(sys.prefix))
+        (self.root / "bad.py").write_text("import os\n", encoding="utf-8")
+        git("add", "--", "bad.py", cwd=self.root)
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith("GIT_") and key != SKIP_VARIABLE}
+        result = subprocess.run(
+            ["git", "commit", "-q", "-m", "x"], cwd=self.root, env=env,
+            capture_output=True, text=True, check=False,
+        )
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, "the commit went through: " + output)
+        self.assertIn("bad.py", output)
+        self.assertIn("F401", output)
+        self.assertEqual(git("log", "--oneline", "--all", cwd=self.root), "", "a commit landed")
+        self.assertFalse((self.root / ".githooks").exists())
 
     def test_make_hooks_refuses_to_replace_a_file_that_is_not_its_link(self):
         link = self.root / ".git" / "hooks" / "pre-commit"
