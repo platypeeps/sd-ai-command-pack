@@ -528,7 +528,15 @@
       Residue, no code change here: the `REPEALED` comment in
       `bin/sd_rules.py` uses `R5-D1` as its example of an id that must not
       be reused, written when the id was stranded; the sentence stays true
-      of a live id and was left.
+      of a live id and was left. From the review round on #1021, one
+      suppressed finding, taken: the section's `R5-D1` sentence had named
+      `sd store get` beside `sd store list`, while the row's checker,
+      mutation and named test cover `store_list` only; `store_get` in
+      `bin/sd` is a separate read with no row and no mutation, so a
+      stale-read regression there would leave leg d green, and the sentence
+      now names the listing alone. A `store_get` row is not taken here: it
+      would be a second live row on the same rule id, which the registry
+      does not carry.
 
 - [x] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become

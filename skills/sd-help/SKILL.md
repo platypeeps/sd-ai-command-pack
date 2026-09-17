@@ -69,9 +69,9 @@ ninth key is a decision record before it is a commit, and `validate_kind`
 turns a manifest carrying one away by name (R11-D14). Change a field with
 `sd store add` or `sd store set` and expect the note back byte-identical
 apart from the one line `edit_field` writes; do not parse a note and render it
-back (R11-D27). Read with `sd store list` or `sd store get` knowing that every
-query lists the vault directory at the moment of asking, in `store_list`, so a
-note written by hand or by Obsidian is visible to the next query with no sync
+back (R11-D27). Read with `sd store list` knowing that every listing reads
+the vault directory at the moment of asking, in `store_list`, so a note
+written by hand or by Obsidian is visible to the next listing with no sync
 step (R5-D1). The rows in `bin/sd_rules.py` state each rule; none is restated
 here. `bin/sd-rules --for <path>` prints the rows in scope for the file being
 written.
