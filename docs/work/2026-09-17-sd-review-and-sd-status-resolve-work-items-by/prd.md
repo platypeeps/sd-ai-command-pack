@@ -11,21 +11,21 @@ The readers that pick a work item key its row by the path of the checkout
 they run in, and a runner clone is never at that path.
 
 `sd-review --scope planning` picks the active item through
-`sd_lib.work_items` (`bin/sd-review:402`) and refuses with "no planning or
-in_progress work item under docs/work" when the list is empty
-(`bin/sd-review:404`). `sd-status` enumerates the same way
-(`bin/sd-status:132`). Both reach `source:bin/sd_lib.py::Rows`, whose base
-is the checkout's own main worktree root (`bin/sd_lib.py:778`), so every
+`source:bin/sd_lib.py::work_items` in `source:bin/sd-review::resolve_subject`
+and refuses with "no planning or in_progress work item under docs/work" when
+the list is empty, in the same function. `sd-status` enumerates the same way
+(`source:bin/sd-status::work_section`). Both reach
+`source:bin/sd_lib.py::Rows`, whose base is the checkout's own main worktree
+root (`Rows.__init__` sets `self.base` from `main_worktree_root`), so every
 row key it builds is `<this checkout>::docs/work/<item>/prd.md`
-(`source:bin/sd_lib.py::external_id`). The rows were written under the
-registered path. A clone at another path builds keys nothing ever wrote, is
+(`Rows.external_id`). The rows were written under the registered path. A clone at another path builds keys nothing ever wrote, is
 told "the database holds no docs/work row" for every item, and reports each
 one `unknown`.
 
 The writer does not have this defect. `sd work register` resolves the
 checkout it stands in to the registered repository by its origin URL
-(`bin/sd_work.py:399-400`, `sd_db.repos.registered_for`), so a clone can
-register a folder; it cannot then read the row it made.
+(`source:bin/sd_work.py::_register` calls `sd_db.repos.registered_for`), so a
+clone can register a folder; it cannot then read the row it made.
 
 Measured 2026-09-17 at pack `22183d3c`, with sd:981's own planning run,
 which the dashboard dispatched into a clone at
@@ -77,7 +77,8 @@ and that is the library's rule to widen, not this item's.
 
 Out of scope, named so nobody reads their absence as an oversight:
 `sd task add --here` and `sd task edit --belongs-to`
-(`bin/sd_work.py:154`, `bin/sd_work.py:192`) still key by path; they are
+(`source:bin/sd_work.py::_task_repo`, `source:bin/sd_work.py::_belongs_to`)
+still key by path; they are
 writers of other rows and R10-D6 was answered for them separately.
 `source:bin/sd_handoff_rows.py::brief_for` keys `note_brief` by path and
 briefs nothing in a clone; a follow-up note on sd:981 records both.
@@ -135,8 +136,9 @@ Host review, round 1, against pack `22183d3c`:
   unregistered checkout to itself, so a foreign clone cannot adopt the
   pack's rows. Verified by reading `registered_for` in the installed
   library (`same_remote` on a `NULL` remote is false).
-- The first draft named `external_id` (`bin/sd_lib.py:618`) as a place to
-  change. Rebutted: its only caller is the no-`item_for_artifact` fallback
+- The first draft named the module-level
+  `def external_id(root: pathlib.Path | str, item_dir: pathlib.Path)` in
+  `bin/sd_lib.py` as a place to change. Rebutted: its only caller is the no-`item_for_artifact` fallback
   in `sd_handoff_rows`, it takes no connection and cannot ask the `repo`
   table; the fix lives where the connection is (`Rows`, `item_for`).
 - Whether the row's `repo` column matters for `Rows.item`: it does.
@@ -144,7 +146,8 @@ Host review, round 1, against pack `22183d3c`:
   resolved base must be the registered path exactly as the `repo` table
   spells it, which is what `registered_for` returns.
 - The `no marker asks git nothing` guarantee
-  (`tests/test_status_source.py:196`) is unaffected: `Rows` is not built
+  (`source:tests/test_status_source.py::test_no_marker_asks_git_nothing`) is
+  unaffected: `Rows` is not built
   without a `row` marker, and the one `git remote get-url origin` call
   this adds runs once per enumeration inside `Rows.__init__`.
 - Not on a sensitive path: the changed set is `bin/sd_lib.py`,

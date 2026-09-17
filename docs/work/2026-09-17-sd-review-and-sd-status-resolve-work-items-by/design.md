@@ -17,7 +17,7 @@ def registered_base(root, sd_db, connection) -> str:
 ```
 
 `source:bin/sd_lib.py::Rows` sets `self.base` from `main_worktree_root`
-before it opens anything (`bin/sd_lib.py:778`), and that stays the value
+before it opens anything, in `Rows.__init__`, and that stays the value
 for the no-database and no-library cases: a machine with nothing to read
 keeps the key it has today, and `opened` stays the distinction it is. Once
 `connect` succeeds and before `opened` is set, `__init__` reassigns
@@ -30,8 +30,7 @@ receives the registered base and a relative path, the pair the row was
 written with.
 
 `source:bin/sd_handoff_rows.py::item_for` replaces its
-`sd_lib.main_worktree_root(root)` (`bin/sd_handoff_rows.py:118`) with the
-same call; it already holds `connection` and `sd_db`. Its
+`sd_lib.main_worktree_root(root)` call with the same call; it already holds `connection` and `sd_db`. Its
 `item_by_external` fallback, for a library without `item_for_artifact`,
 keeps `sd_lib.external_id`, which is path-keyed: a library that old has
 no `registered_for` either, and requirement 5 says that machine keeps
@@ -56,7 +55,8 @@ registers every clone leaves a row per assignment behind.
 
 **Rejected: `sd-review` resolves the item itself.** It is the sensitive,
 owner-merged file (`.github/sd-review.json`, `sensitive`), and the pick is
-three lines that call `sd_lib.work_items` (`bin/sd-review:402`). A fix
+three lines in `source:bin/sd-review::resolve_subject` that call
+`source:bin/sd_lib.py::work_items`. A fix
 there would leave `sd-status` and `sd-note` with the defect and put the
 sensitive file on the diff for a change that belongs one layer down.
 
