@@ -236,11 +236,20 @@ jobs:
       # nightly backup checks that rows point at rows that exist (sd:744,
       # `84cb4ea`), and `sd_db.shadow_jira` is new (`b05d684`). The rest are
       # dashboard and documentation commits that do not touch `sd_db`.
+      #
+      # `717b8e32` is migration-free (`SCHEMA_VERSION` 9 at both pins). Of
+      # the twelve `sd_db` commits in `4b240d28..717b8e32`, the pack reaches
+      # `sd_db.calls` (sd:234, `1d889eb`): `bin/sd-review` charges every url
+      # call through `calls.call` (sd:788 slice 3), and
+      # `tests/test_sd_review_ledger.py` imports it. The rest are the ledger's
+      # exact-fill check (sd:965), `set_cap` and the capped usage reads
+      # (sd:234), `budget_usd` refused on a start author (sd:235), and the
+      # remove verbs (sd:754), none of which a pack test constructs.
       - name: Check out the system checkout, for sd_db
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          ref: 4b240d284c1ce9d2168ff7688113def45e0a8a2e
+          ref: 717b8e32b4922d7396e1f7521ad8908d7ba880d2
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false
