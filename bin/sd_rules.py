@@ -315,6 +315,29 @@ RULES: tuple[Rule, ...] = (
         scope="code",
         teaches="skills/sd-check/SKILL.md#Code health",
     ),
+    #: The store and plugin contract, three rows taught from one section of
+    #: `skills/sd-help/SKILL.md` -- the one skill that names `sd plugin`, and
+    #: the host team-lead chose on 2026-09-17 for the reason Dec-2 declined a
+    #: new skill for the code rules. `R11-D14` closed the kind vocabulary at
+    #: the eight keys `KIND_KEYS` holds and made a ninth a decision record;
+    #: what enforces it is `validate_kind`, once, by name, and the subject
+    #: names the constant and the count rather than the keys, because the
+    #: test that pins them already holds a copy and a third would drift
+    #: (sd:431 step 8, slice 4, 2026-09-17).
+    Rule(
+        id="R11-D14",
+        subject="a plugin kind is described with the eight keys `KIND_KEYS` "
+                "in `bin/sd` holds and no other; `validate_kind` refuses a "
+                "manifest carrying any further key by name, so a ninth key "
+                "is a decision record and not a commit",
+        checker="bin/sd::validate_kind",
+        proof="replace the unknown-key guard `if unknown:` in `validate_kind` "
+              "of `bin/sd` with a condition that is never true, so a manifest "
+              "carrying a ninth key registers; `test_a_ninth_key_refuses` in "
+              "`tests/test_sd_plugin.py` goes red",
+        scope="code",
+        teaches="skills/sd-help/SKILL.md#The store and plugin contract",
+    ),
     #: The code rules, registered against sd:430's checkers and nothing new
     #: (owner decision 2026-09-14, Dec-1 and Dec-2): a new round for rules the
     #: registry is native to, taught from one section of the skill `R10-D6`
