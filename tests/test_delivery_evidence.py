@@ -470,8 +470,8 @@ class TaskDeliveryCLITests(unittest.TestCase):
         and a hint telling the caller to do what that build refuses would be
         the same wrong direction in a new place. CI carried such a build until
         sd:809 moved the pin: the symbol is absent at `dc03956e` and present at
-        `workflow.py:83` in today's `09260ad4`, so CI now takes the closing
-        branch that a developer venv already took. The test reads `hasattr`
+        `workflow.py:83` in `09260ad4`, the pin sd:809 set, so CI has taken
+        the closing branch since, as a developer venv already did. The test reads `hasattr`
         rather than the pin, so both branches stay live: where the build closes
         them the hint is asserted and the close is carried out; where it does
         not, the hint is asserted absent."""

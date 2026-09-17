@@ -17,11 +17,12 @@ true of `940c045a`, which really was the pin -- until #886 moved it to
 `758dfb48` on 2026-09-12, the move made so that CI would carry this very
 work's library half. This file arrived after that move, in #888, so the reason
 was already one move out of date the day it was written.
-`.github/workflows/tests.yml` has pinned nine commits in its life:
+By sd:809, `.github/workflows/tests.yml` had pinned nine commits:
 `89dcd866`, `4c9ebff4`, `3c4c723a` and `940c045a` have neither symbol;
-`758dfb48`, `fb57ae56`, `fd07ea9c`, `dc03956e` and today's `09260ad4` have
-both, `f18295d` (#308) being an ancestor of each. So no pin this file has ever
-run against lacked them. The reason was wrong; the design it defends is not
+`758dfb48`, `fb57ae56`, `fd07ea9c`, `dc03956e` and `09260ad4`, the pin sd:809
+set, have both, `f18295d` (#308) being an ancestor of each. Every pin since
+descends from `09260ad4`. So no pin this file has ever run against lacked
+them. The reason was wrong; the design it defends is not
 (sd:809).
 
 What the stubs still cannot prove is that the library projects these keys. That
