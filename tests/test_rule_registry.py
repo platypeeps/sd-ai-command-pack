@@ -273,7 +273,7 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 #: one was newly stranded in the same change -- two baselines in one file
 #: keeping two different standards, which review caught.
 #:
-#: **20 on this branch, down from the 26 measured on `cddd3b98`.** `R10-D5`,
+#: **20 before slice D and 19 since, down from the 26 measured on `cddd3b98`.** `R10-D5`,
 #: `R10-D6` and `R10-D4` are rows in `bin/sd_rules.py` now. Three more went the
 #: other way out: sd:719 step 3 deleted the only live files that cited them --
 #: `dashboard/plugins.py`, `dashboard/markup.py` and
