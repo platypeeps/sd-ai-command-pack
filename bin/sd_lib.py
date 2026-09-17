@@ -1387,6 +1387,10 @@ def _stamp(text: str) -> datetime.date | None:
 ITEM_KEY = "item"
 ITEM_KEY_RE = re.compile(r"sd:(\d+)\Z")
 
+#: The largest row id `sqlite3` binds; past it the driver raises rather than
+#: reporting no row, and the key's value comes from a file, not from a row.
+ROW_ID_CEILING = 2**63 - 1
+
 
 def named_item(item_dir: pathlib.Path) -> tuple[int | None, str]:
     """`(id, "")` for the row `<item_dir>/prd.md` names as `item: sd:<id>`.
@@ -1396,10 +1400,16 @@ def named_item(item_dir: pathlib.Path) -> tuple[int | None, str]:
     followed by digits, with the problem naming the key and its value.
     `sd-docs-lint` fails the same shape where the file is, by `ITEM_KEY_RE`.
     """
+    prd = item_dir / "prd.md"
     try:
-        fields = parse_frontmatter((item_dir / "prd.md").read_text(encoding="utf-8"))
+        fields = parse_frontmatter(prd.read_text(encoding="utf-8"))
     except OSError:
         return None, ""
+    except UnicodeDecodeError:
+        # Not an `OSError`, and the readers that take this key are not all
+        # inside a `try`: the dashboard's is not, so a file that is not UTF-8
+        # read as a traceback rather than as a finding naming the file.
+        return None, f"{prd} is not valid UTF-8 and its frontmatter cannot be read"
     if fields is None or ITEM_KEY not in fields:
         return None, ""
     value = fields[ITEM_KEY].strip()
@@ -1423,6 +1433,12 @@ def named_row(item_dir: pathlib.Path, connection: Any, read: Any) -> tuple[Any, 
     number, problem = named_item(item_dir)
     if problem or number is None or read is None:
         return None, problem
+    if number > ROW_ID_CEILING:
+        # `sqlite3` raises `OverflowError` rather than returning no row for an
+        # integer past its range, and this value is a line in a file anybody
+        # can edit. Refused before it is bound, so the answer is a finding.
+        return None, (f"the frontmatter key {ITEM_KEY}: sd:{number} is past the largest "
+                      f"row id a database can hold")
     row = read(connection, number)
     if row is None:
         return None, f"the frontmatter key {ITEM_KEY}: sd:{number} names no row"

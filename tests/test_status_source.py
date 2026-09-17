@@ -1058,6 +1058,37 @@ class ATaskKeyedFolder(Fixture):
         self.named(f"sd:{number}")
         self.assertEqual(self.only().status, "in_progress")
 
+    def test_a_key_too_large_for_a_row_id_is_unreadable_and_never_binds(self) -> None:
+        """A value the database cannot bind is refused before it is bound.
+
+        `sqlite3` raises `OverflowError` on an integer past 2**63-1, and the
+        readers that take this key are not all inside a `try`: the dashboard's
+        is not, so an unbounded id read as a traceback rather than a finding.
+        """
+        self.marker("row")
+        self.database()
+        self.named("sd:99999999999999999999999999")
+        item = self.only()
+        self.assertEqual(item.status, "unknown")
+        self.assertTrue(
+            any("99999999999999999999999999" in problem and "row id" in problem
+                for problem in item.inconsistencies),
+            item.inconsistencies,
+        )
+        self.assertEqual(self.picked(), [])
+
+    def test_a_prd_that_is_not_utf_8_is_unreadable_and_names_the_file(self) -> None:
+        """`read_text` raises `UnicodeDecodeError`, which is not an `OSError`."""
+        self.marker("row")
+        self.database()
+        (self.item / "prd.md").write_bytes(b"---\ntitle: A thing\nitem: sd:1\n---\n\xca\xfe\n")
+        rows = sd_lib.Rows(self.root)
+        self.addCleanup(rows.close)
+        said, trouble = rows.status(self.item)
+        self.assertEqual(said, "")
+        self.assertIn("prd.md", trouble)
+        self.assertIn("UTF-8", trouble)
+
     def test_an_installation_without_the_reader_keeps_the_old_answer(self) -> None:
         """`item_by_id` is optional, like the other reads: a library without
         it says what it said before the key existed."""
