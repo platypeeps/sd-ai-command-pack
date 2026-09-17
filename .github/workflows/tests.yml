@@ -238,10 +238,13 @@ jobs:
       # dashboard and documentation commits that do not touch `sd_db`.
       #
       # `717b8e32` is migration-free (`SCHEMA_VERSION` 9 at both pins). Of
-      # the twelve `sd_db` commits in `4b240d28..717b8e32`, the pack reaches
-      # `sd_db.calls` (sd:234, `1d889eb`): `bin/sd-review` charges every url
-      # call through `calls.call` (sd:788 slice 3), and
-      # `tests/test_sd_review_ledger.py` imports it. The rest are the ledger's
+      # the twelve `sd_db` commits in `4b240d28..717b8e32`, the one the pack
+      # is about to reach is `sd_db.calls` (sd:234, `1d889eb`): pull request
+      # #1012 (sd:788 slice 3, open when this pin moved) has `bin/sd-review`
+      # charge every url call through `calls.call`, and its
+      # `tests/test_sd_review_ledger.py` imports the module; at the old pin
+      # that leg was red. Nothing on main at this commit imports `calls`, so
+      # this bump changes no result here. The rest are the ledger's
       # exact-fill check (sd:965), `set_cap` and the capped usage reads
       # (sd:234), `budget_usd` refused on a start author (sd:235), and the
       # remove verbs (sd:754), none of which a pack test constructs.
