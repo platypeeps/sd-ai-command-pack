@@ -393,8 +393,17 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 #: `.github/scripts/` -- is held by `tests/test_no_shipped_shell.py`, the
 #: test that stood in for the job. Taught under `Code health` in
 #: `skills/sd-check/SKILL.md` with the `R12` rows, per Dec-2.
+#: **12 after sd:431 step 8, slice 4, 2026-09-17.** `R11-D14`, `R11-D27` and
+#: `R5-D1` are rows, the store and plugin contract: the closed kind
+#: vocabulary held by `bin/sd::validate_kind`, the line edit held by
+#: `bin/sd::edit_field`, and the vault as system-of-record held by
+#: `bin/sd::store_list`. Taught from one section of `skills/sd-help/SKILL.md`,
+#: `The store and plugin contract`, the skill that names `sd plugin`; no
+#: skill taught either verb before it. The twelve left are `R11-D1`,
+#: `R11-D5` and the ten dashboard and history ids, each an owner decision on
+#: a repeal (the audit of that step, slices 7 and 8).
 STRANDED_RULE_IDS = frozenset({
-    "R11-D1", "R11-D10", "R11-D13", "R11-D14", "R11-D15",
+    "R11-D1", "R11-D10", "R11-D13", "R11-D15",
     "R11-D17", "R11-D20", "R11-D21",
     "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D30", "R11-D5",
     "R5-D1",
@@ -1970,6 +1979,13 @@ MUTATIONS: dict[str, Mutation] = {
         new='#!/usr/bin/env bash\n"""Print the live registry rows',
         test="tests.test_no_shipped_shell.NoShippedShellTests"
              ".test_shell_lives_only_in_this_repository_s_own_tooling",
+    ),
+    "bin/sd::validate_kind": Mutation(
+        path="bin/sd",
+        old="    unknown = sorted(set(kind) - KIND_KEYS)\n    if unknown:",
+        new="    unknown = sorted(set(kind) - KIND_KEYS)\n"
+            "    if False:  # leg d: the closed-vocabulary guard, defeated",
+        test="tests.test_sd_plugin.KindTests.test_a_ninth_key_refuses",
     ),
     "tests/test_doc_citations.py::"
     "test_line_citations_into_a_symbol_match_their_baseline": Mutation(
