@@ -209,7 +209,7 @@ implementations.**
 | Tier | Scope | What runs |
 |---|---|---|
 | authoring | the file being written | the skill consults the registry and names the rule ids in scope |
-| pre-commit | whole, except the one slow checker | the code checkers whole; `bin/sd-docs-lint` diff-scoped |
+| pre-commit | the staged files for Ruff; whole for the two test passes | `.githooks/pre-commit`: Ruff over the staged Python, then `tests.test_code_health` and `tests.test_doc_citations` whole; `bin/sd-docs-lint` not run (step 7, 2026-09-16) |
 | CI | the repository | full run with baselines, the backstop |
 
 ### The item has diff-scoping backwards, and the clock says so
@@ -220,6 +220,9 @@ The backbone item justifies diff-scoping like this:
 > per commit, and a slow hook gets bypassed.
 
 The premise is false. Timed on `e6c2cb20`, on the machine of the day:
+
+**Superseded 2026-09-16 by step 7's readings**, recorded under the decision
+"the code checkers are not diff-scoped" below; the table stays as the record.
 
 | Whole-repository pass | Wall time, `e6c2cb20` — **expired, see below** |
 |---|---|
@@ -388,6 +391,43 @@ apply to the checkers the item aims it at.
   step 7's own pull request, per the owner decision of 2026-09-14 (note 1989);
   nothing in this document should be read as a live diff-scoping decision until
   that lands.
+  **Re-made 2026-09-16 in step 7's pull request, on readings taken at
+  `ef7c0c7b` with the one-minute load average stated, three runs each,
+  `/usr/bin/time -p`, the pack's `.venv/bin/python`:**
+  `tests.test_code_health` real 1.79 / 1.71 / 1.74 s at load 9.90 / 8.73 /
+  7.39; `tests.test_doc_citations` real 3.41 / 3.38 / 3.33 s at load 9.91 /
+  8.75 / 7.39; `bin/sd-docs-lint` real 20.34 / 21.85 / 21.65 s at load 9.91 /
+  8.75 / 7.52, with 2.0 s of user+sys CPU on each run. The assembled hook on a
+  one-file diff, a line appended to a skill page and staged, read real 5.22 /
+  5.15 / 5.30 s at load 9.75 / 9.13 / 8.96. No ratio between runs at
+  different loads is claimed. The decision, in three parts. (1) **The code
+  checkers run whole in the hook, and so does the citation pass.** The 2 s
+  reversal trigger above did not fire on these readings: the code pass is
+  under it on all three. Neither pass has a diff-scoped form to choose:
+  `.github/scripts/select-tests.py` puts both in `ALWAYS_RUN`, because they
+  walk the tree rather than name a file, so the pack's own fast path runs
+  them whole on every change, and the hook does the same. Together they read
+  5.04 to 5.20 s. (2) **`bin/sd-docs-lint` is not in the hook, whole or
+  scoped.** Its `--changed` flag needs `--pr-body` and scopes rule 8 only;
+  rules 1 to 4, 6 and 7 read the whole corpus whatever is passed, so there is
+  no file-scoped run to time. And its cost is now attributed: a `cProfile`
+  run at the same commit puts 20.7 of 21.2 s inside `sd_lib.delivered`,
+  called from rule 2's `check_ready`, which runs `git fetch` and
+  `git ls-remote` seventy times in all. That is network, not work. A commit
+  hook that reaches the network is slow when the link is slow and fails when
+  it is absent, which is the bypassed-hook failure this section is about, so
+  the tool stays in `make check` and CI, where the 2026-09-14 attribution
+  prerequisite is now met for whoever scopes around it. (3) **Ruff runs on
+  the staged Python only**, which is the one gate here that is file-scoped by
+  nature. The hook is **budgeted at 8 s** wall on a one-file diff; the number
+  is in its header and in `BUDGET_SECONDS`, `tests/test_pre_commit_hook.py`
+  holds the three copies equal, and the hook prints its own wall time on
+  every exit so a reading over the budget is seen by the person who paid it.
+  Reversed if a hook reading on a one-file diff passes the budget at a stated
+  load under 10, at which point the slower pass is dropped from the hook and
+  left to CI, not diff-scoped, since neither has such a form. The hook is
+  Python, not shell: `tests/test_no_shipped_shell.py` allows tracked shell
+  under `.github/scripts/` only.
 - **2026-09-12 — the meta-check lands before any rule.** A registry with zero
   rows must pass its own tests. This makes step 1 independently landable and
   independently green.

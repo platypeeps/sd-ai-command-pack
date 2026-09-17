@@ -4,12 +4,22 @@ VENV ?= .venv
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
 
-.PHONY: setup test lint audit docs-lint check
+.PHONY: setup hooks test lint audit docs-lint check
 
 setup:
 	"$(PYTHON)" -m venv "$(VENV)"
 	"$(VENV_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
 	"$(VENV_PYTHON)" bin/sd_install.py --provision-library
+
+# The pre-commit tier of sd:431. `.githooks/pre-commit` runs Ruff over the
+# staged Python and the two whole-tree test passes that walk the tree, with a
+# wall-time budget in its header; `git config core.hooksPath .githooks` is all
+# the install is, and it is a local setting of this clone, not a render. The
+# installer does not set it; the owner may fold it into `--user` later.
+# `SD_SKIP_HOOKS=1 git commit` skips the hook with a notice.
+hooks:
+	git config core.hooksPath .githooks
+	@printf '%s\n' "git hooks: $$(git config --get core.hooksPath)/pre-commit"
 
 # `generate` and `surface-check` are gone with step 3e. They regenerated the
 # committed per-platform copies under templates/ from .github/command-sources/,

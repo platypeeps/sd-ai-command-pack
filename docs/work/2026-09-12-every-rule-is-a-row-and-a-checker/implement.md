@@ -408,7 +408,7 @@
       3 as narrowed in `design.md`, each with its baseline. Verify: each rule
       reddens under mutation; no rule's first run reddens the existing corpus.
 
-- [ ] **7. The pre-commit tier.** **Every timing this step used to state has
+- [x] **7. The pre-commit tier.** **Every timing this step used to state has
       expired, and the shape of the step is now open rather than settled.** It
       read that the code checkers run whole at 1.71 s, that only
       `bin/sd-docs-lint` at 19.87 s is diff-scoped, and that the two whole-tree
@@ -427,6 +427,37 @@
       record the number, and set the budget from that result in the same pull
       request; re-run the three whole-tree timings there too, on a machine
       whose load is stated, and write them down beside their commit.
+      **Landed 2026-09-16.** The nine readings, at `ef7c0c7b`, three runs
+      each, `/usr/bin/time -p` real seconds with the one-minute load average
+      beside each, before any hook existed: `tests.test_code_health` 1.79 /
+      1.71 / 1.74 at load 9.90 / 8.73 / 7.39; `tests.test_doc_citations`
+      3.41 / 3.38 / 3.33 at 9.91 / 8.75 / 7.39; `bin/sd-docs-lint` 20.34 /
+      21.85 / 21.65 at 9.91 / 8.75 / 7.52, of which 2.0 s is CPU and the rest
+      is seventy `git fetch` and `git ls-remote` children under
+      `sd_lib.delivered` in rule 2. The hook is `.githooks/pre-commit`,
+      Python (a tracked shell file outside `.github/scripts/` reddens
+      `tests/test_no_shipped_shell.py`), run on the staged files: `SD_SKIP_HOOKS=1`
+      skips it with a one-line notice; otherwise Ruff over the staged Python,
+      then `tests.test_code_health` and `tests.test_doc_citations` whole, the
+      first red exiting with that tool's output and status, and its own wall
+      time printed on exit against the budget. The assembled hook on a
+      one-file diff read 5.22 / 5.15 / 5.30 s at load 9.75 / 9.13 / 8.96. The
+      budget is 8 s, in the header and in `BUDGET_SECONDS`. The decision:
+      both test passes run whole, since `select-tests.py` puts both in
+      `ALWAYS_RUN` and neither has a diff-scoped form; `bin/sd-docs-lint` is
+      not in the hook, since `--changed` needs `--pr-body` and scopes rule 8
+      only and the tool's wall time is network; Ruff is file-scoped by nature.
+      `make hooks` sets `core.hooksPath` to `.githooks` and prints the path;
+      `bin/sd_install.py` is not edited, and folding the hook into `--user`
+      is the owner's call. `tests/test_pre_commit_hook.py`, fail-first
+      (`FAILED (failures=5)` with no hook, then `OK`): the file is tracked,
+      executable and states the budget once, equal to `BUDGET_SECONDS` and to
+      `design.md`; both named passes exist in this checkout; in a throwaway
+      repository a staged `import os` exits non-zero naming `bad.py`,
+      `SD_SKIP_HOOKS=1` exits 0 with the notice, and a clean file exits 0
+      printing the wall time. Mutations, each restored from a byte copy: the
+      Ruff step removed reddens the Ruff case; the skip branch removed
+      reddens the escape-hatch case; `chmod -x` reddens the file case.
 
 - [ ] **8. The authoring tier.** Skills consult the registry and name the rule
       ids in scope. Filed last, because it depends on the registry carrying
@@ -520,3 +551,8 @@ The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
   one child and one mutated child per row, 20 children → 13 on eight rows
   and two controls; `LegD` real 14.71 s at load 6.31 → 10.34 s at 6.28,
   budgeted at 21 s in `design.md`, Dec-6.
+- 2026-09-16 step 7 (Dec-7): `.githooks/pre-commit` runs Ruff on the staged
+  Python and the two whole-tree test passes, read 5.15–5.30 s on a one-file
+  diff at load 8.96–9.75, budgeted at 8 s; `bin/sd-docs-lint` stays out of
+  the hook, its 20 s being seventy git network children; `make hooks` arms
+  it. The diff-scoping decision is re-made in `design.md` on those readings.

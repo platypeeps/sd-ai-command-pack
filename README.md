@@ -239,6 +239,15 @@ or `--pull` without the flag links there again; a link already pointing into
 this checkout is kept as it is, and anything at a link's path that is not such
 a link makes `--user` refuse by name and write nothing.
 
+If you commit to this checkout, `make hooks` arms the pre-commit tier: it sets
+`core.hooksPath` to `.githooks`, whose `pre-commit` runs Ruff over the staged
+Python and the two whole-tree test passes (`tests.test_code_health`,
+`tests.test_doc_citations`) in about five seconds, and prints its own wall time
+against the budget its header states. `SD_SKIP_HOOKS=1 git commit` skips it
+with a notice. This is a setting of the clone, not a render, so `--user` does
+not set it and `--uninstall` does not remove it; `bin/sd_install.py` is
+unchanged, and folding the hook into `--user` is the owner's call.
+
 ### What it owns, and what it will not touch
 
 The receipt at `~/.local/state/sd-ai-command-pack/installed.json` records every
