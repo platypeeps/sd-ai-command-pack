@@ -125,16 +125,16 @@ That single-provider result does not waive the shipping workflow's required dept
 
 ## Local conventions reach the prompt
 
-Read a provider's findings knowing what the provider was shown. Every review
-this tool dispatches -- any scope, every entry the chain runs -- has this
-checkout's `CLAUDE.local.md` block prepended to its prompt by
-`local_conventions` in `bin/sd-review`, whose one caller is the dispatch path
-of `review` (R10-D7). The provider preflight above returns before that call
-and sends no local block, as its section says. The receipt's
-`local_block_prepended` says whether a block reached the prompt; a checkout
-with no block sends none, so read a finding that ignores a local convention
-against that flag before reading it against the provider. The row in
-`bin/sd_rules.py` states the rule; it is not restated here.
+Read a provider's findings knowing what the provider was shown. The review
+prompt this tool dispatches opens with this checkout's `CLAUDE.local.md`
+block, rendered by `local_conventions` in `bin/sd-review` on the dispatch
+path of `review` and asserted on that prompt by
+`test_the_local_block_reaches_the_prompt` in `tests/test_sd_review.py`
+(R10-D7). The provider preflight above returns before that call and sends no
+local block, as its section says. So read a finding that ignores a local
+convention as a finding about the block's wording before reading it as one
+about the provider. The row in `bin/sd_rules.py` states the rule; it is not
+restated here.
 `bin/sd-rules --for <path>` prints the rows in scope for the file being
 written.
 

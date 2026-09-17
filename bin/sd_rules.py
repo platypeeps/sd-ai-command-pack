@@ -267,20 +267,18 @@ RULES: tuple[Rule, ...] = (
     #: pack itself invokes, the `CLAUDE.local.md` block is carried into the
     #: prompt by hand. What holds it is `local_conventions` in `bin/sd-review`,
     #: called once, on the dispatch path of `review` after the preflight has
-    #: returned -- so every review the tool dispatches gets the block and the
-    #: preflight, which sends a fixed synthetic probe, gets none. The lanes
+    #: returned -- so the review prompt carries the block and the preflight,
+    #: which sends a fixed synthetic probe, does not. The lanes
     #: the design listed beyond `sd-review` -- a planning review, a backlog
     #: ship with a codex agent -- either run through this call or no longer
     #: exist, so the subject names the one caller (sd:431 step 8, slice 2,
     #: 2026-09-17).
     Rule(
         id="R10-D7",
-        subject="every review `bin/sd-review` dispatches -- any scope, every "
-                "entry the chain runs -- has this checkout's `CLAUDE.local.md` "
-                "block prepended to its prompt, rendered by "
-                "`local_conventions` from the one caller in `review`; a "
-                "checkout with no block sends none, and the receipt's "
-                "`local_block_prepended` says which happened",
+        subject="the review prompt `bin/sd-review` dispatches opens with "
+                "this checkout's `CLAUDE.local.md` block, rendered by "
+                "`local_conventions` from its one caller in `review`, after "
+                "the preflight has returned without it",
         checker="bin/sd-review::local_conventions",
         proof="replace the empty-block guard `if not block:` in "
               "`local_conventions` of `bin/sd-review` with a condition that "

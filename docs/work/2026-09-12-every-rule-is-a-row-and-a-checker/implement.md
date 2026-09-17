@@ -442,7 +442,18 @@
       citation dropped from either section reddens leg a with that
       section's `does not cite it`; both ids put back into
       `STRANDED_RULE_IDS` reddens leg c; each proof applied by hand reddens
-      its named test with the line leg d quoted.
+      its named test with the line leg d quoted. Residue from the review
+      round on #1020, no code change here: the `R10-D7` subject and section
+      say what `test_the_local_block_reaches_the_prompt` holds, the block
+      on the review prompt, and the two halves it does not hold -- that
+      every provider in a multi-provider chain receives that same prompt,
+      and that `local_block_prepended` is false on a repository without a
+      block -- belong in `tests/test_sd_review.py`, held by #1012 (sd:788)
+      at the time; and `looks_like_shell` in
+      `tests/test_no_shipped_shell.py`, pre-existing code, reads `bash`,
+      `/sh` and ` sh` from a shebang and would pass a `zsh` or `dash`
+      shebang with no suffix, which narrows what the `R11-D6` checker
+      holds to the shebangs it names.
 
 - [x] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become
