@@ -68,8 +68,8 @@ brief use: a hook names the checkout it was installed from, and a lane reads
 the store from the checkout it was given, where a bare name resolves against
 whatever `PATH` holds.
 
-The receipt is evidence of the links, not of what resolves: a link into a
-directory `PATH` does not hold resolves nowhere. To see what holds on the
+The receipt is evidence of the links, not of what resolves: a link in a
+directory that is not on `PATH` resolves nowhere. To see what holds on the
 machine in front of you, run the installer's status command rather than
 reading a list: its `commands:` line enumerates `bin/` and `PATH` at runtime,
 counts the commands that resolve from this checkout, names the missing ones,

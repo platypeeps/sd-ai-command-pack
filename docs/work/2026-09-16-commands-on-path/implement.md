@@ -123,8 +123,8 @@ so the owner reviews and merges the code PR, not a lane.
   (C-10 re-measured in C-19), C-11 parked (size, owner's call), C-28 and
   C-30 to C-35 parked on the code lane; no parked concern blocks. Ledger:
   `design.md`, "Review".
-- Implementation: unblocked on the plan; blocked on the owner's three
-  choices in `prd.md` and on the owner reviewing the code PR.
+- Implementation: the owner's choices in `prd.md` are decided (note
+  #2616); the code PR #1006 awaits the owner's review and merge.
 
 ## Log
 

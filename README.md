@@ -242,8 +242,9 @@ a link makes `--user` refuse by name and write nothing.
 ### What it owns, and what it will not touch
 
 The receipt at `~/.local/state/sd-ai-command-pack/installed.json` records every
-path the installer wrote: a render row carries the digest of what it wrote, and
-a link row the target the link points at. That single fact is what makes the
+path the installer owns: written by it, or an existing link to this checkout it
+adopted. A render row carries the digest of what it wrote, and a link row the
+target the link points at. That single fact is what makes the
 rest safe:
 
 - A surface you rename or retire in `skills/` — or move to `contrib/` —
