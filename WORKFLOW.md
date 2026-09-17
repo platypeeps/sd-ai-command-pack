@@ -353,10 +353,14 @@ are at their cap this month (`source:bin/sd-review::capped_bills`); those
 reach `reviewer_chain` and `pick` in `bin/sd_registry.py` as bill name to
 the month's total, so the fallthrough skips every entry on such a bill and
 `--provider` refuses one by name, saying what the month spent or holds.
-With no library to reach, a library older than `sd_db.calls`, or a
-database that will not open, an entry on a capped bill is refused naming
-the fault and an entry on an uncapped bill is dispatched as before:
-unknown is not uncapped. A `url` entry on a capped bill without a usable
+Once the registry read succeeds, a fault at the ledger -- no library to
+reach with no state file beside the registry, a library older than
+`sd_db.calls`, or a reservation the database will not take -- refuses an
+entry on a capped bill naming the fault and dispatches an entry on an
+uncapped bill as before: unknown is not uncapped. A state file that exists
+but cannot be read, or exists while the library cannot be imported, is
+refused at registry read (`source:bin/sd_registry.py::read_runtime`), and
+nothing is dispatched. A `url` entry on a capped bill without a usable
 `price.in`, `price.out` and `max_tokens` is refused at registry read, on
 the file and on the merged rows, since a cap the ledger cannot reserve
 against is not a cap. Entries with `url` share one OpenAI-compatible client
