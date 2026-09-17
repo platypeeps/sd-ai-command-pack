@@ -63,20 +63,18 @@ class TheHookFile(unittest.TestCase):
         self.assertTrue(mode.startswith("100755 "), f"not tracked as executable: {mode!r}")
         self.assertTrue(os.access(HOOK, os.X_OK), "the hook is not executable on disk")
         text = HOOK.read_text(encoding="utf-8")
-        stated = BUDGET_LINE.search(text)
-        self.assertIsNotNone(stated, "the header does not state `# Budget: N s wall on a one-file diff.`")
-        assert stated is not None
-        constant = CONSTANT_LINE.search(text)
-        self.assertIsNotNone(constant, "the hook does not define BUDGET_SECONDS")
-        assert constant is not None
+        stated = BUDGET_LINE.findall(text)
         self.assertEqual(
-            constant.group(1), stated.group(1),
-            "the header's budget and BUDGET_SECONDS disagree",
+            len(stated), 1,
+            f"the header must state `# Budget: N s wall on a one-file diff.` once, found {stated}",
         )
+        constant = CONSTANT_LINE.findall(text)
+        self.assertEqual(len(constant), 1, f"BUDGET_SECONDS must be defined once, found {constant}")
+        self.assertEqual(constant[0], stated[0], "the header's budget and BUDGET_SECONDS disagree")
         self.assertIn(
-            f"budgeted at {stated.group(1)} s",
+            f"budgeted at {stated[0]} s",
             DESIGN.read_text(encoding="utf-8"),
-            f"design.md does not budget the hook at {stated.group(1)} s",
+            f"design.md does not budget the hook at {stated[0]} s",
         )
 
     def test_both_whole_tree_passes_the_hook_names_exist_here(self):
@@ -270,6 +268,15 @@ class TheLayout(unittest.TestCase):
         self.assertIn(".git/hooks/pre-commit exists and is not the link", result.stderr)
         self.assertFalse(link.is_symlink(), "the stranger was replaced")
         self.assertEqual(link.read_text(encoding="utf-8"), "#!/bin/sh\nexit 0\n")
+
+    def test_make_hooks_refuses_while_core_hooks_path_is_set(self):
+        git("config", "core.hooksPath", ".githooks", cwd=self.root)
+        result = self.make_hooks()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("core.hooksPath is set to .githooks", result.stderr)
+        self.assertIn("git config --unset core.hooksPath", result.stderr)
+        self.assertFalse((self.root / ".git" / "hooks" / "pre-commit").exists(), "a link was made")
+        self.assertFalse((self.root / ".githooks").exists(), "a link was made under the stale path")
 
     def test_the_residue_detector_reports_neither_githooks_nor_hooks_path(self):
         self.assertEqual(self.make_hooks().returncode, 0)
