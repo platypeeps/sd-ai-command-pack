@@ -1,4 +1,4 @@
-"""The pre-commit tier of sd:431: `.githooks/pre-commit`, installed by `make hooks`.
+"""The pre-commit tier of sd:431: `hooks/pre-commit`, installed by `make hooks`.
 
 The hook is the tier that fires while the author is still in the file. Its
 argument, from the item's design page, is that a hook slow enough to be
@@ -8,6 +8,15 @@ exit. Three things are held here: the file is what git will run (tracked,
 executable, its budget stated once and agreed with the design page), it
 refuses a staged Python file Ruff rejects and names the file, and the named
 escape hatch `SD_SKIP_HOOKS=1` skips it with a notice rather than in silence.
+
+The layout is `hooks/pre-commit` linked from `.git/hooks/pre-commit`, never
+`.githooks/` and never `core.hooksPath`: those two are the retired gate
+stack's signatures, and `bin/sd-status` reports both as residue with a
+removal command. A pack whose own hook matched its own residue detector would
+be telling the operator to delete it. The residue case below runs that
+detector over a checkout laid out this way and requires silence from both
+rows; the install case runs `make hooks` there and requires the relative
+link, and a refusal when something else already holds the path.
 
 The behavioural cases run the hook by path inside a throwaway repository, not
 in this checkout: staging a file here would edit the index the developer is
@@ -20,16 +29,20 @@ below pins that.
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-HOOK = REPO_ROOT / ".githooks" / "pre-commit"
+HOOK = REPO_ROOT / "hooks" / "pre-commit"
+LINK_TARGET = "../../hooks/pre-commit"
 DESIGN = REPO_ROOT / "docs/work/2026-09-12-every-rule-is-a-row-and-a-checker/design.md"
 BUDGET_LINE = re.compile(r"^# Budget: (\d+) s wall on a one-file diff\.$", re.MULTILINE)
 CONSTANT_LINE = re.compile(r"^BUDGET_SECONDS = (\d+)$", re.MULTILINE)
@@ -45,7 +58,7 @@ def git(*args: str, cwd: pathlib.Path) -> str:
 class TheHookFile(unittest.TestCase):
     def test_the_hook_is_tracked_executable_and_states_its_budget_once(self):
         self.assertTrue(HOOK.is_file(), f"{HOOK} is missing")
-        mode = git("ls-files", "-s", "--", ".githooks/pre-commit", cwd=REPO_ROOT)
+        mode = git("ls-files", "-s", "--", "hooks/pre-commit", cwd=REPO_ROOT)
         self.assertTrue(mode.startswith("100755 "), f"not tracked as executable: {mode!r}")
         self.assertTrue(os.access(HOOK, os.X_OK), "the hook is not executable on disk")
         text = HOOK.read_text(encoding="utf-8")
@@ -131,6 +144,78 @@ class TheHookRun(unittest.TestCase):
         self.assertEqual(result.returncode, 0, output)
         self.assertRegex(output, r"pre-commit: ok in \d+\.\d\d s \(budget \d+ s\)")
         self.assertIn("in this checkout; not run", output)
+
+
+def scratch_checkout(prefix: str) -> pathlib.Path:
+    """A repository laid out as this one is for hooks: `hooks/pre-commit` tracked."""
+    root = pathlib.Path(tempfile.mkdtemp(prefix=prefix))
+    git("init", "-q", cwd=root)
+    git("config", "user.email", "hook@example.invalid", cwd=root)
+    git("config", "user.name", "hook", cwd=root)
+    (root / "hooks").mkdir()
+    shutil.copy2(HOOK, root / "hooks" / "pre-commit")
+    git("add", "--", "hooks/pre-commit", cwd=root)
+    return root
+
+
+def load_sd_status():
+    """`bin/sd-status` as a module; it has no suffix, so by loader."""
+    path = REPO_ROOT / "bin" / "sd-status"
+    loader = importlib.machinery.SourceFileLoader("sd_status_for_hooks", str(path))
+    spec = importlib.util.spec_from_file_location("sd_status_for_hooks", str(path), loader=loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["sd_status_for_hooks"] = module
+    loader.exec_module(module)
+    return module
+
+
+class TheLayout(unittest.TestCase):
+    """`hooks/` plus a link under `.git/hooks`, which the residue detector ignores."""
+
+    def setUp(self):
+        self.assertTrue(HOOK.is_file(), f"{HOOK} is missing")
+        self.root = scratch_checkout("sd-431-layout-")
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(self.root)], check=False)
+        shutil.copy2(REPO_ROOT / "Makefile", self.root / "Makefile")
+
+    def make_hooks(self) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["make", "hooks"], cwd=self.root, capture_output=True, text=True, check=False
+        )
+
+    def test_make_hooks_links_the_tracked_hook_relatively_and_says_where(self):
+        result = self.make_hooks()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        link = self.root / ".git" / "hooks" / "pre-commit"
+        self.assertTrue(link.is_symlink(), f"{link} is not a symlink")
+        self.assertEqual(os.readlink(link), LINK_TARGET)
+        self.assertTrue(link.resolve().samefile(self.root / "hooks" / "pre-commit"))
+        self.assertIn(f"{link} -> {LINK_TARGET}", result.stdout)
+        again = self.make_hooks()
+        self.assertEqual(again.returncode, 0, "a second run over its own link must pass")
+
+    def test_make_hooks_refuses_to_replace_a_file_that_is_not_its_link(self):
+        link = self.root / ".git" / "hooks" / "pre-commit"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        result = self.make_hooks()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn(str(link), result.stderr)
+        self.assertFalse(link.is_symlink(), "the stranger was replaced")
+        self.assertEqual(link.read_text(encoding="utf-8"), "#!/bin/sh\nexit 0\n")
+
+    def test_the_residue_detector_reports_neither_githooks_nor_hooks_path(self):
+        self.assertEqual(self.make_hooks().returncode, 0)
+        status = load_sd_status()
+        found = {entry["id"] for entry in status.residue_section(self.root)}
+        self.assertNotIn("githooks", found, "the pack's own hook reads as the retired stack's")
+        self.assertNotIn("hooks-path", found, "the install set core.hooksPath")
+        probe = subprocess.run(
+            ["git", "config", "--get", "core.hooksPath"], cwd=self.root,
+            capture_output=True, text=True, check=False,
+        )
+        self.assertEqual(probe.returncode, 1, f"core.hooksPath is set: {probe.stdout!r}")
 
 
 if __name__ == "__main__":
