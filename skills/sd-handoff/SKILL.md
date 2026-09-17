@@ -58,8 +58,7 @@ remote, label, branch, head_sha}; `item` (work-item dir, or **null** — packets
 work with no work item at all); `summary` (≤600 chars); `next[]` (≤5);
 `dont[]` (≤5 — dead ends already tried, the field that saves the most rework);
 `questions[]` (≤3); `files[]`, derived mechanically from `git status
---porcelain` plus `git diff --name-only`, never typed by hand; optional
-`stash_ref` under `refs/sd-handoff/` (local-only, never pushed).
+--porcelain` plus `git diff --name-only`, never typed by hand.
 
 Hard **8 KB** cap. Over it, the tool trims the mechanical file list to a floor
 of 5 and then refuses, saying what to cut. The refusal is the anti-journal
@@ -68,7 +67,7 @@ mechanism, not a formality.
 ## Flags
 
 `--summary` · `--next` (repeatable) · `--dont` (repeatable) · `--question`
-(repeatable) · `--item` · `--stash-ref` · `--cwd` (resolve the packet for that
+(repeatable) · `--item` · `--cwd` (resolve the packet for that
 directory) · `--show` (print the pending packet **and consume it** — the load
 path for Codex/OpenCode sessions, which have no SessionStart hook) · `--json`.
 
@@ -123,9 +122,9 @@ names. `sd-note list` and `sd-note resolve` are the same two verbs.
   particular is worth more than everything else in the file; five real dead
   ends beat a paragraph of narrative.
 
-## Lane B (`--push`, `--park`) is not implemented
+## Lane B is not implemented
 
-The design's Lane A / Lane B split (R10-D3) gives `--push` the carrier-branch
+The design's Lane A / Lane B split (R10-D3) gives Lane B the carrier-branch
 behaviour: append `handoff:` to `## Log`, commit and push WIP, print a restart
 one-liner; on finding an open PR for the carrier branch, convert it to draft
 before pushing and **suppress the Copilot re-request** (R10-D2), because the
@@ -133,7 +132,7 @@ once-per-head rule would otherwise fire on the moved head. The design's
 guards — settled-green refusal and the branch-scoped stash check — belong to
 that lane.
 
-**`bin/sd-handoff` today implements Lane A only.** It has no `--push` and no
-`--park`, and none of those guards exist in the code yet. Do not simulate Lane
+**`bin/sd-handoff` today implements Lane A only.** It has no push flag and no
+park flag, and none of those guards exist in the code yet. Do not simulate Lane
 B by hand: if a carrier branch is what you need, say so and do the commit and
 push deliberately under `sd-ship`'s constraints.

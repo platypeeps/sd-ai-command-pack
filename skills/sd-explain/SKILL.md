@@ -25,8 +25,6 @@ evidence gathering (`sd-research`), or claim-by-claim verification
 
 ## Arguments
 
-Argument names and value sets follow the shared vocabulary in `references/argument-vocabulary.md`; reuse a canonical name and its value set before coining a new one.
-
 Arguments arrive as free text with the invocation: `key=value` pairs and bare
 flags. Unknown argument names are an error — stop and report them before
 building the explanation.

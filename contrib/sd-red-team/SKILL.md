@@ -26,8 +26,6 @@ final approval or implement mitigations.
 
 ## Arguments
 
-Argument names and value sets follow the shared vocabulary in `references/argument-vocabulary.md`; reuse a canonical name and its value set before coining a new one.
-
 Arguments arrive as free text. Unknown argument names are an error — stop and
 identify them before reading artifacts, evidence, or workspace content.
 
@@ -155,11 +153,6 @@ scope, the classification discipline, or the `## Final report` contract.
   not spawn another layer. Under a fresh-session independent-red-team profile the
   worker likewise completes its lane inline in its own session and does not
   re-dispatch.
-- **Active item prefix.** When a work item is active, open each dispatch
-  prompt with `Active item: <item directory>` before the role-specific
-  instructions, so platforms that do not hook-inject context still receive it.
-  When no item is active, omit the prefix and hand the worker its lane input
-  directly.
 
 ## Safety rules
 

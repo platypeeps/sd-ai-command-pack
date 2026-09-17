@@ -23,5 +23,5 @@ was written to justify a decision rather than to inform the next one.>
 
 ## Reversal
 
-<What evidence would undo this. Standing rule 1: a new gate, ledger, hook or
-rule needs a linked incident and a deletion criterion.>
+<What evidence would undo this. A new gate, ledger, hook or rule needs a
+linked incident and a deletion criterion.>

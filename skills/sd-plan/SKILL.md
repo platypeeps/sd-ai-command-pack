@@ -172,8 +172,9 @@ interview, and leave its prose where it will still be current next month.
 - **Keep writes within the authorized scope.** Files belong under the selected
   work root (plus `docs/decisions/` under `--decision`); database progress and
   decision writes belong only to the current item and go through `sd_db`.
-  No unrelated rows, `.claude/`, `.trellis/`, hooks, labels, managed gitignore
-  blocks, bookkeeping commits, or `AGENTS.md` edits are authorized here.
+  No unrelated rows, `.claude/`, other tools' state directories, hooks,
+  labels, managed gitignore blocks, bookkeeping commits, or `AGENTS.md` edits
+  are authorized here.
 - **Never promote past an open `BLOCKING` line**, and never claim approval from
   a review lane that was skipped or that failed.
 - **In `mode: guest`, never write artifacts into the upstream tree** — the

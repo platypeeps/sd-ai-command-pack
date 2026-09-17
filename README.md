@@ -261,7 +261,7 @@ rest safe:
 
 ## Commands
 
-The twelve named surfaces — eleven commands plus `sd-help`, which the taxonomy
+The eleven named surfaces — ten commands plus `sd-help`, which the taxonomy
 makes a skill because a catalog authorizes nothing — rendered identically to
 every platform. Each is documented in its own `skills/sd-*/SKILL.md`, which is
 the file that gets installed, so the documentation and the artifact are the
@@ -273,18 +273,18 @@ relevant rather than invoked. They are not listed here: `sd-help` reads the
 installed tree at runtime, and `sd skill list` reads both roots, which are the
 only two inventories that cannot go stale.
 
-Three of the twelve named surfaces — `sd-deps`, `sd-map` and `sd-skill-adopt` —
+Two of the eleven named surfaces — `sd-map` and `sd-skill-adopt` —
 are in `contrib/` rather than on a path. They are still commands, and the table
 below still describes them; they install with `sd skill try` rather than by
 default. A command is a thing that authorizes side effects, which is a claim
 about the frontmatter, not a claim that everyone needs it installed. The one structural
 difference is in the frontmatter, and it is what the taxonomy means: each of
-the eleven commands sets `disable-model-invocation`, so invoking it is a
+the ten commands sets `disable-model-invocation`, so invoking it is a
 deliberate act; every other surface, `sd-help` included, does not.
 
 **Runs as** says whether there is something to execute. `bin/` is a shipped
 entrypoint you can run; **prose** is a sequence an agent follows, with no
-runner behind it — the skill is the implementation. Six of the twelve are
+runner behind it — the skill is the implementation. Five of the eleven are
 prose today, each saying so in its own "State of the tooling" section, and
 `tests/test_skill_frontmatter.py` fails if one of them ever names a `bin/`
 command without that sentence, or keeps the sentence after the command
@@ -298,7 +298,6 @@ arrives.
 | `sd-ship` | `bin/` | Review committed work, prepare its PR, verify merge authority, and reconcile delivery |
 | `sd-spec` | prose | Update `docs/spec/**` on the PR branch |
 | `sd-status` | `bin/` | Read-only: derived status, open PRs, branch-protection gaps and the states this repo accepts (`.github/sd-status.json`) |
-| `sd-deps` | prose | Batch-triage dependabot and renovate PRs |
 | `sd-help` | prose | Runtime catalog of installed `sd-*` surfaces |
 | `sd-suggest` | prose | Record framework friction as a local proposal; publish only when asked |
 | `sd-skill-adopt` | `bin/` | Safety pre-screen, lint, and canonical transform for an incoming skill |

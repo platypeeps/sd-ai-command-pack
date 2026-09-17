@@ -206,7 +206,7 @@ class SharedTree(unittest.TestCase):
             "setup": section,
             "protection": {"available": False, "reason": "no remote", "gaps": [],
                            "accepted": [], "detail": {}},
-            "handoff": {"packet": {"pending": False, "detail": "none written"}, "carriers": []},
+            "handoff": {"packet": {"pending": False, "detail": "none written"}},
             "backends": [],
             "residue": [],
             "issues": {"available": False, "reason": "no index", "needs_you": [], "other": []},

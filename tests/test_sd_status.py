@@ -1096,20 +1096,6 @@ class HandoffTests(StatusFixture):
         completed = self.run_tool(SD_STATUS)
         self.assertIn("no packet written for this directory", completed.stdout)
 
-    def test_lane_b_carriers_are_derived_from_origin_refs(self) -> None:
-        upstream = self.base / "upstream.git"
-        self.git("init", "-q", "--bare", str(upstream), cwd=self.base)
-        self.git("remote", "add", "origin", str(upstream))
-        self.git("checkout", "-q", "-b", "task/carry")
-        (self.repo / "b.txt").write_text("two\n", encoding="utf-8")
-        self.git("add", "b.txt")
-        self.git("commit", "-q", "-m", "wip: half a thought")
-        self.git("push", "-q", "origin", "task/carry")
-        self.git("checkout", "-q", "main")
-        carriers = self.report()["handoff"]["carriers"]
-        self.assertEqual([entry["branch"] for entry in carriers], ["origin/task/carry"])
-        self.assertIn("wip: half a thought", self.run_tool(SD_STATUS).stdout)
-
 
 class ResidueTests(StatusFixture):
     def test_each_finding_carries_the_command_that_removes_it(self) -> None:
@@ -3968,8 +3954,7 @@ class ReportSectionTests(InventoryFixture):
                       "detected": 0, "entrypoints": {}},
             "protection": {"available": False, "reason": "no remote",
                            "gaps": [], "accepted": [], "detail": {}},
-            "handoff": {"packet": {"pending": False, "detail": "none written"},
-                        "carriers": []},
+            "handoff": {"packet": {"pending": False, "detail": "none written"}},
             "backends": [],
             "residue": [],
             "issues": {"available": False, "reason": "no index",
