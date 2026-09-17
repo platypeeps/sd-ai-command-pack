@@ -85,7 +85,7 @@ SHEBANG_LIMIT = 4096
 
 #: How many public functions the dead-code check cannot speak for, because
 #: another function in the corpus carries the same name. Downward only.
-AMBIGUOUS_CEILING = 124
+AMBIGUOUS_CEILING = 121
 
 
 def tracked(*pathspecs: str, root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:

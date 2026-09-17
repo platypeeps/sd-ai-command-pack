@@ -41,8 +41,6 @@ import contextlib
 import sys
 from pathlib import Path
 
-from .collect import discover_checkouts
-
 # `bin/` is not a package, and where a status comes from is the one rule this
 # module may not keep its own copy of. `sd_lib` owns the `.status-source`
 # marker and the database behind it; between the `docs/work` retire and this
@@ -63,6 +61,33 @@ import sd_lib  # noqa: E402
 # whole PRDs and there are hundreds of them; the state is in the first handful
 # of lines and the rest is prose nobody here is asking about.
 FRONTMATTER_LINES = 40
+
+
+def discover_checkouts(root: Path) -> list[tuple[str, Path]]:
+    """Every checkout under the root, one level of grouping deep.
+
+    Enumerated from the filesystem, never from a configured list: a checkout
+    nobody registered is the interesting one, and a list would only ever show
+    the repos someone remembered to add.
+
+    Here since sd:719 step 5, unchanged from `dashboard/collect.py`, which
+    retired with the Repos view once the system dashboard's
+    `sd_dashboard/fleet.py` read the fleet itself. This tab and `checkout_of`
+    were its last two callers, and the function goes with this file at step 6.
+    """
+    found: list[tuple[str, Path]] = []
+    if not root.is_dir():
+        return found
+    for group in sorted(root.glob("*")):
+        if not group.is_dir() or group.name.startswith("."):
+            continue
+        if (group / ".git").exists():
+            found.append((".", group))
+            continue
+        for repo in sorted(group.glob("*")):
+            if repo.is_dir() and (repo / ".git").exists():
+                found.append((group.name, repo))
+    return found
 
 # Statuses that mean an item is not asking for anything. Everything else is
 # shown, including a value never seen before -- see the module docstring.

@@ -259,7 +259,7 @@ DASHBOARD_CAP = 4_600
 # for the same line, and 6b-7 was spent deleting rationale to fit a write path
 # -- which is the cap working against the comment convention it was explicitly
 # widened to hold. This one bounds what the other cannot: code.
-DASHBOARD_CODE_CAP = 1_183 # R11-D49's second fall; see the notes below
+DASHBOARD_CODE_CAP = 866 # R11-D49's third fall; see the notes below
 
 # The gap between that cap and what `dashboard/` measures, recorded when
 # R11-D41 wrote the rule: 2,300 against 2,271. It is what makes "payable in
@@ -318,6 +318,17 @@ DASHBOARD_CODE_SLACK = 29
 # The directory measured 1,183 code lines with `code_line_count` in the
 # finished commit, and the cap is that plus the 0 lines of gap it stood at
 # before -- the same form as the first fall, with the gap it happened to have.
+#
+# **2026-09-16, the third fall: 1,183 to 866, sd:719 step 5.** The fleet
+# collectors retired. `dashboard/collect.py` (86), `dashboard/sessions.py`
+# (66) and `dashboard/skills.py` (50) went, with the `/api/state`,
+# `/api/sessions` and `/api/skills` routes, the state cache and three tabs
+# in `server.py` (26) and the three views and their polling in `app.js`
+# (102); `discover_checkouts` moved into `work.py` (+13), its one caller
+# left, so 330 lines deleted less 13 moved is the 317 the directory fell by.
+# The system dashboard's Operations > Repos and Sessions read the fleet from
+# `sd_dashboard/fleet.py`. Measured 866 with `code_line_count` in the
+# finished commit, and the cap is that plus the 0 lines of gap, as before.
 
 
 # Every value each ceiling has held, oldest first: read from this file's own
@@ -376,6 +387,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
         ("2026-09-07", 2_328),
         ("2026-09-13", 1_850),
         ("2026-09-16", 1_183),
+        ("2026-09-16", 866),
     ),
 }
 
