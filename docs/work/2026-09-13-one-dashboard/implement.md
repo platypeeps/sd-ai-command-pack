@@ -781,7 +781,7 @@ before starting step 2.
       existed, and red on the mutation that puts the token back after the
       deletion.
 
-- [ ] **8. The citation sweep, enumerated rather than discovered.** Deleting
+- [x] **8. The citation sweep, enumerated rather than discovered.** Deleting
       `dashboard/` turns every live anchored citation into it from `compared` to
       `target-missing`, which `test_the_red_buckets_are_empty` fails on. The
       enumeration, run once before step 3 and re-run before step 7 — filtering on
@@ -843,13 +843,70 @@ before starting step 2.
       four `R12-D*` subjects said "`bin/` or `dashboard/`" until the review
       of this pull request; they say `bin/` now.
 
-- [ ] **9. Close the items.** Note on sd:719 with the measurements re-run; sd:705
+      **Closed at step 9, 2026-09-16.** The mechanical half is 0 before and
+      after: the enumeration command above prints nothing at `15624617` and
+      on the step 9 tree, and `python -m unittest tests.test_doc_citations`
+      prints `target-missing=0` on both, with the census otherwise unchanged
+      by the deletion below. The prose residue named in the paragraph above
+      is held elsewhere and is not this item's to sweep: `bin/sd-status`'s
+      `CLASSES` and `skills/sd-status/SKILL.md` are held by sd:431's lanes,
+      and the `dashboard` entry in `.github/scripts/select-tests.py`'s
+      `IMPORTING_TREES` is an owner action. The ledger half is closed by the
+      step 9 commit: `bin/sd_ledger.py` and `tests/test_sd_ledger.py` are
+      deleted, and the three sites that named them -- `bin/sd_codex.py`'s
+      docstring, `bin/sd-review-ack`'s docstring and
+      `ASSERTS_ONLY_THAT_IT_RAN` in `tests/test_suite_shape.py` -- say so in
+      dated prose or drop the entry. The prose count from this step, re-run
+      on the step 9 tree over base `15624617`, reads 226 lines before the
+      edit and 229 after it: the three added lines are step 9's copies of
+      #2645's bullets, which quote the two enumeration commands and the
+      ledger file's path, and none names a retired file as live.
+
+- [x] **9. Close the items.** Note on sd:719 with the measurements re-run; sd:705
       closed as answered by deletion, naming step 1 as the answer to its port and
       label halves and #898 as the answer to its comment half. sd:452's note
       #1124 quoted the stale comment as a reason to build a screen elsewhere; a
       note saying so closes the loop that misdirection opened.
       Verify: `bin/sd store item 705` shows the closing note and a status of
       `done`; `bin/sd store item 719` shows the measurement note.
+
+      **Landed 2026-09-16.** The three notes are posted: sd:705 #2643 (step 1
+      answered its port and label halves and #898 its comment half; the item
+      stays `done`), sd:452 #2644 (note #1124's stale-comment reading is
+      closed) and sd:719 #2645, the measurement note, re-run on pack main
+      `15624617` (#1013) by team-lead:
+
+      - `git ls-files dashboard/ bin/sd-dashboard`: 0 paths.
+      - `python -m unittest tests.test_doc_citations`: Ran 124, OK; census
+        `target-missing=0`, `anchored-line-into-code=0`, `line-past-end=0`.
+      - `bin/sd-docs-lint`: rc 0.
+      - `bin/sd_install.py --status`: `commands: 16 in bin/, 16 resolve on
+        PATH from this checkout`.
+      - Prose count `grep -rn -E 'dashboard/[a-z_]+\.(py|js)|bin/sd-dashboard'`
+        over live `.md` (archive excluded): 226 lines at `15624617` (217 at
+        the step 7 tree; the difference is the landing paragraphs #1011 and
+        #1013 added).
+      - Readers of `~/.local/state/sd-ai-command-pack/dashboard/ledger.jsonl`
+        outside `bin/sd_ledger.py`: 0 in `bin/`. The on-disk file holds 2
+        `bind` rows, both 2026-09-08, before step 1.
+
+      The decision #2645 records, taken in the same commit as this
+      paragraph: `bin/sd_ledger.py` and `tests/test_sd_ledger.py` are
+      removed. No production caller since #909 (step 1), no reader of the
+      ledger file in the tree, and the R11-D10 deletion criterion was
+      already recorded as "not measurable as built" in the archived
+      artifacts-as-product implement. The removal carried three prose edits
+      and no new test: `bin/sd_codex.py`'s docstring keeps the trade the
+      ledger made (a torn record costs one measurement, a crash costs the
+      nightly) as prose and no longer cites the file; `bin/sd-review-ack`'s
+      docstring names one other lock in the tree, `bin/sd-handoff-restore`,
+      and says the ledger's retired here; `tests/test_suite_shape.py` drops
+      the ledger test from `ASSERTS_ONLY_THAT_IT_RAN`, which
+      `test_every_registered_silent_test_is_still_silent` reddened on the
+      moment the module was gone -- the fail-first for the register edit.
+      The installer still counts `commands: 16 in bin/`; the suite runs one
+      module fewer. The ledger file under the state root is not touched:
+      it is operator state, not the tree.
 
 ## Verification
 
@@ -907,3 +964,9 @@ before starting step 2.
   with the measurement above; `CEILING_HISTORY` holds three closed records
   and `ceiling_moves()` reads `(33, 26, 4)`. Step 8's enumeration is 0 before
   and after; its prose residue is recorded on the step and it stays open.
+- 2026-09-16 step 9 landed: the three notes (sd:705 #2643, sd:452 #2644,
+  sd:719 #2645) and the pack deletion of `bin/sd_ledger.py` and
+  `tests/test_sd_ledger.py` with its three prose edits. Step 9 is ticked
+  with the measurements above; step 8 is ticked as closed at step 9, its
+  mechanical half 0 before and after and its prose residue named as held by
+  sd:431's lanes and the owner. All nine steps are ticked.
