@@ -236,6 +236,30 @@ RULES: tuple[Rule, ...] = (
         teaches="skills/sd-handoff/SKILL.md#Lane B is not implemented",
         state=REPEALED,
     ),
+    #: The other half of the handoff design, narrowed to the lane that exists.
+    #: `R10-D3` split handoff into two lanes; Lane B is the repeal above, and
+    #: what Lane A holds as a rule is the restore hook's registration --
+    #: `SessionStart` on `startup` and `clear` and never on `compact`, because
+    #: a compact matcher would consume the packet into the dying session and
+    #: the `/clear` that follows would find nothing. The checker is the hook
+    #: table itself, pinned whole by its test, so the subject is exactly the
+    #: row of that table (sd:431 step 8, slice 1, 2026-09-16).
+    Rule(
+        id="R10-D3",
+        subject="`bin/sd-handoff-restore` is registered on `SessionStart` "
+                "for the `startup` and `clear` matchers and never for "
+                "`compact`, so a packet is restored into the session that "
+                "follows a `/clear` and is not consumed by the one being "
+                "compacted",
+        checker="bin/sd_install.py::HOOK_SPECS",
+        proof="add `compact` to the `SessionStart` matchers of the "
+              "`bin/sd-handoff-restore` row of `HOOK_SPECS` in "
+              "`bin/sd_install.py`; the table is pinned whole and "
+              "`test_the_hook_table_is_exactly_these_three_registrations` "
+              "goes red",
+        scope="code",
+        teaches="skills/sd-handoff/SKILL.md#The restore side",
+    ),
     #: The code rules, registered against sd:430's checkers and nothing new
     #: (owner decision 2026-09-14, Dec-1 and Dec-2): a new round for rules the
     #: registry is native to, taught from one section of the skill `R10-D6`

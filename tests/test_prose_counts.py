@@ -32,12 +32,22 @@ and no enumerable thing.
 from __future__ import annotations
 
 import collections
+import os
 import pathlib
 import re
+import shutil
 import subprocess
+import tempfile
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+# The containment test, borrowed rather than rebuilt: `git ls-files` lists a
+# symlink as readily as a regular file and `read_text` follows it, so a
+# tracked `skills/x.md -> /etc/passwd` would be read into the census. The
+# citation gate guards its corpus with this predicate for the same reason,
+# and `read_corpus` in `tests/test_rule_registry.py` does the same test inline.
+from tests.test_doc_citations import contained  # noqa: E402
 
 #: The live prose an author writes as current fact, as `git ls-files`
 #: pathspecs. The skills as leg b reads them -- every markdown file under
@@ -83,12 +93,17 @@ PRESENT_TENSE_COUNTS = {
 
 
 def tracked(root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:
-    """Every tracked markdown file the corpus names, as the index reports it."""
+    """Every tracked markdown file the corpus names, as the index reports it.
+
+    Resolved and contained before it is opened: a tracked symlink whose
+    target is outside `root` is not a page of the corpus, whatever the index
+    says, and is dropped here rather than read.
+    """
 
     listed = subprocess.run(
         ["git", "-C", str(root), "ls-files", "-z", "--deduplicate", "--", *CORPUS],
         capture_output=True, text=True, check=True).stdout.split("\0")
-    return [root / name for name in listed if name.endswith(".md")]
+    return contained(root, [root / name for name in listed if name.endswith(".md")])
 
 
 def count_claims(text: str) -> list[tuple[int, str]]:
@@ -180,18 +195,85 @@ at, on the same line. A count that fell is a cleanup: lower the entry in
 `PRESENT_TENSE_COUNTS` in the same change, and delete it at zero.""")
 
     def test_the_walk_reaches_the_corpus(self) -> None:
-        """The control: a pathspec that matched nothing would pass the ratchet."""
+        """The control: a pathspec that matched nothing would pass the ratchet.
 
-        seen = {path.relative_to(REPO_ROOT).parts[:2] for path in tracked()}
+        Two halves. The roots: every top-level name the corpus names is
+        represented. The depth: the walk reaches a page more than one level
+        under its root, and a page outside every pathspec is not reached --
+        `docs/work` is tracked markdown under a corpus root's parent, and it
+        is the one subtree the module docstring keeps out. The depth half
+        holds the walk and not the spelling of `CORPUS`: a `*` in a git
+        pathspec crosses `/` unless `:(glob)` is asked for, so
+        `docs/spec/*.md` lists the same pages `docs/spec/**` does, and a
+        walk that stopped one level down is what this would catch.
+        """
+
+        paths = [path.relative_to(REPO_ROOT).parts for path in tracked()]
+        seen = {parts[:2] for parts in paths}
         self.assertLessEqual({"skills", "README.md", "AGENTS.md", "docs", ".claude"},
                              {parts[0] for parts in seen})
         self.assertIn((".claude", "rules"), seen,
                       "the rules subtree is a corpus root and the walk missed it")
+        self.assertTrue([parts for parts in paths
+                         if parts[:2] == ("docs", "spec") and len(parts) > 3],
+                        "no page two levels under `docs/spec/` was reached")
+        self.assertEqual([parts for parts in paths if parts[:2] == ("docs", "work")],
+                         [], "a `docs/work` page is outside the corpus and was read")
 
     def test_every_baseline_entry_is_a_tracked_page(self) -> None:
         listed = {path.relative_to(REPO_ROOT).as_posix() for path in tracked()}
         self.assertEqual(sorted(set(PRESENT_TENSE_COUNTS) - listed), [],
                          "a baseline entry names a page the corpus does not hold")
+
+
+class TheWalk(unittest.TestCase):
+    """What `tracked` opens, on a repository built for the question."""
+
+    def setUp(self) -> None:
+        scratch = tempfile.mkdtemp(prefix="prose-counts-")
+        self.addCleanup(shutil.rmtree, scratch, ignore_errors=True)
+        self.root = pathlib.Path(scratch) / "tree"
+        self.root.mkdir()
+        self.outside = pathlib.Path(scratch) / "outside.md"
+        self.outside.write_text("The pack ships 16 tools.\n", encoding="utf-8")
+
+    def commit(self) -> None:
+        environment = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull,
+                           GIT_CONFIG_SYSTEM=os.devnull)
+        for command in (["git", "init", "-q"], ["git", "add", "-A", "-f", "--", "."]):
+            subprocess.run(command, cwd=self.root, env=environment, check=True,
+                           capture_output=True)
+
+    def page(self, relative: str, text: str = "no count here\n") -> pathlib.Path:
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_a_tracked_symlink_out_of_the_repository_is_never_read(self) -> None:
+        """The index lists the link; the census must not follow it.
+
+        The target carries a claim, so a walk that followed the link would
+        count it against a page the tree does not hold. Asserted on the
+        walk and on the census both, because the census is what the ratchet
+        reads.
+        """
+
+        self.page("README.md", "The pack ships 3 skills.\n")
+        (self.root / "skills").mkdir()
+        (self.root / "skills" / "escape.md").symlink_to(self.outside)
+        self.commit()
+        self.assertEqual(tracked(self.root), [self.root / "README.md"])
+        self.assertEqual(present_tense_counts(self.root), {"README.md": 1})
+
+    def test_a_nested_page_is_reached_and_one_outside_the_corpus_is_not(self) -> None:
+        """`**` reaches two levels down; a page under no pathspec is not read."""
+
+        deep = self.page(".claude/rules/one/two/deep.md")
+        self.page("docs/work/item/prd.md")
+        self.page("bin/notes.md")
+        self.commit()
+        self.assertEqual(tracked(self.root), [deep])
 
 
 if __name__ == "__main__":  # pragma: no cover - the suite runs this by module

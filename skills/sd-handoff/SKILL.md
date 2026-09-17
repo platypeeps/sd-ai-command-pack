@@ -79,7 +79,8 @@ Exit codes: `0` wrote or showed · `1` refused, with the reason on one line ·
 `sd-handoff-restore` runs on SessionStart matchers `startup|clear` **only** —
 never `compact` (a compact matcher would eat the packet into the dying session,
 so the following `/clear` finds nothing) and never `resume` (old context, no
-use for it). It exits silently when `SD_HANDOFF_RESTORE=0` is set — the hook
+use for it). The two omissions are design, R10-D3, held in `bin/sd_install.py`'s
+hook table. It exits silently when `SD_HANDOFF_RESTORE=0` is set — the hook
 reads the variable and nothing sets it for you, so any unattended `-p` job
 must put it in its own environment or a packet is eaten at 3 a.m.; system's
 `local-cron-jobs` does for its prompt jobs — or when no unconsumed, unexpired

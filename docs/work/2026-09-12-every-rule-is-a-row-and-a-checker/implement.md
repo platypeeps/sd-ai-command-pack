@@ -174,7 +174,7 @@
       |---|---|---|
       | `R10-D1` | `skills/sd-status/SKILL.md` | `bin/sd-status` carries the id in two strings, one of them the `CLASSES` row whose text the skill's table mirrors. The second-list check wants it out of the string; leg a reads the skill table it would have to change. **Decided 2026-09-14 (owner, note 1989):** rewrite the `CLASSES` row and the reason string to drop the literal id and keep the citation in the adjacent comment — the rephrasing the check's own failure text prescribes, and what `R10-D5` did — and only after sd:10 retires the planning-age sweep, because `bin/sd_sweep.py` owned the threshold this rule constrains at the time (pack #995 has since moved it into `sd_lib`). **Landed 2026-09-16, slice D**, after pack #995 cut the sweep; see the Slice D paragraph below. |
       | `R10-D2` | `skills/sd-handoff/SKILL.md` | The section that teaches it says Lane B is *not implemented*. A live row with a checker would assert an enforcement that does not exist, which is the defect this item is about. **Decided 2026-09-14 (owner, note 1989):** it is repealed in the registry — `state=REPEALED`, no checker. Leg c still resolves the citation; leg a skips a repealed row; and a live false enforcement claim becomes an answered citation. This is the first use of the tombstone state the design says must exist before the first repeal, not after. **Landed 2026-09-16, slice B**, see the paragraph under S2 below. |
-      | `R10-D3` | `skills/sd-handoff/SKILL.md` | Its enforcement lives in `bin/sd-handoff-restore`, which has no `.py` suffix. **The import obstacle recorded here is gone** — a `path::symbol` location needs no import and the path needs no suffix. What is left is leg d: the row needs a mutation that reddens a named test, and finding one for a restore path is the work. |
+      | `R10-D3` | `skills/sd-handoff/SKILL.md` | Its enforcement lives in `bin/sd-handoff-restore`, which has no `.py` suffix. **The import obstacle recorded here is gone** — a `path::symbol` location needs no import and the path needs no suffix. What is left is leg d: the row needs a mutation that reddens a named test, and finding one for a restore path is the work. **Landed 2026-09-16, slice E**, with the checker in the installer's hook table rather than the restore path; see the Slice E paragraph below. |
 
       **A stranded id no earlier revision of this document names: `R10-D7`.**
       It is in `STRANDED_RULE_IDS` and was not in the table above, so the claim
@@ -334,6 +334,60 @@
       naming `bin/sd-status` and the line; the sentence deleted from the
       skill section reddens leg a with `R10-D1: ... does not cite it`; the
       row's own proof applied by hand reddens the named test.
+
+      **Slice E, 2026-09-16. `STRANDED_RULE_IDS` 18 → 17.** `R10-D3` is a
+      row, the first of step 8's teaching-section slices (note 2568) and
+      narrowed to the lane that exists. Re-measured on `8548d512` first:
+      the definition is the bold run at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:341`,
+      "Two handoff lanes, split by what they actually solve"; Lane B is the
+      repeal `R10-D2` above, and Lane A's rule is the restore hook's
+      registration -- `SessionStart` on `startup` and `clear`, never
+      `compact` -- held by `source:bin/sd_install.py::HOOK_SPECS`, the one
+      occurrence of that row in the tree, and pinned whole by
+      `test_the_hook_table_is_exactly_these_three_registrations` in
+      `source:tests/test_sd_install.py::IdempotencyTests`, whose docstring
+      already cited the id. The alternative checker the audit named,
+      `bin/sd-handoff-restore`'s `claim`, was not taken: the row's subject is
+      the registration, and the table is where a registration is declared.
+      The teaching section is `The restore side` in
+      `skills/sd-handoff/SKILL.md`, the section that states the matchers and
+      already carried the `bin/sd-rules --for <path>` pointer from step 8's
+      first slice; one sentence there cites the id, and the rule is not
+      restated. The Lane B section had cited the id since before the
+      registry and would have passed leg a with no edit, but it teaches
+      what is not built. Fail-first: the row was committed with the meter,
+      the skill and `MUTATIONS` untouched, and three legs reddened at once,
+      `FAILED (failures=3)` -- leg a with `R10-D3:
+      skills/sd-handoff/SKILL.md#The restore side does not cite it`, leg c's
+      archive baseline with the measured set being the baseline minus
+      exactly `R10-D3`, and leg d's coverage check with
+      `bin/sd_install.py::HOOK_SPECS` in the registry and not in
+      `MUTATIONS`; with the sentence, the entry dropped and the mutation
+      added the module passes, 35 tests. The proof adds `compact` to the
+      row's matchers, and leg d's own run of it reports `applied 1, control
+      0, violated 1, reverted 1, restored 0` -- green before, red after,
+      the copy byte-identical again. `LegD` real 9.50 s at load 5.19 to
+      5.37, under Dec-6's 21 s. Mutations, each on a byte copy and restored
+      by `diff -q`: the citation sentence deleted from the skill section
+      reddens leg a with the same `does not cite it` line; the proof applied
+      by hand reddens the named test with `Tuples differ`, the first element
+      carrying `compact`; the id put back into `STRANDED_RULE_IDS` reddens
+      leg c. Slice 0 rode in the same change, the residue #1015 recorded:
+      the module docstring of `tests/test_sd_rules_for.py` said the live
+      table carried only `code` rows, false since `R13-D1`, and now says
+      when that was true and what the fixture is still for; and `tracked` in
+      `tests/test_prose_counts.py` passes its list through `contained` from
+      `tests/test_doc_citations.py`, so a tracked symlink out of the
+      repository is dropped rather than read -- fail-first on the old body,
+      `test_a_tracked_symlink_out_of_the_repository_is_never_read` reddened
+      with the link listed beside the real page. The walk control gained a
+      depth half, on the live tree and on a fixture repository: a page two
+      levels under `.claude/rules/` is reached and a `docs/work` page is not.
+      What the fixture found: a `*` in a git pathspec crosses `/` unless
+      `:(glob)` is asked for, so `docs/spec/*.md` lists the same pages
+      `docs/spec/**` does and dropping the `**` reddens nothing; the control
+      holds the walk, and a walk cut one level down reddens both halves.
 
 - [x] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become
@@ -711,3 +765,10 @@ The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
   the six-skill list from a write-verb predicate over the tracked skill
   pages, red on the five before the sentences and red again on a seventh
   writer-shaped skill added to a clone. Part (iii) stays open in step 4.
+- 2026-09-16 step 4, slice E, and step 8's first teaching-section slice:
+  `STRANDED_RULE_IDS` 18 → 17. `R10-D3` is a row narrowed to Lane A, the
+  restore hook's `SessionStart` registration on `startup` and `clear` only;
+  checker `bin/sd_install.py::HOOK_SPECS`, taught from `The restore side`
+  in `skills/sd-handoff/SKILL.md`, which names the verb. `LegD` real 9.50 s
+  at load 5.19. Slice 0, #1015's residue, rode along: `tests/test_sd_rules_for.py`'s
+  docstring and `tracked`'s containment in `tests/test_prose_counts.py`.
