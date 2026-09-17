@@ -1839,6 +1839,33 @@ CLONE_BODY = a_body_past_the_clone_floor()
 TWO_OF_A_KIND = (a_function("_leg_d_clone_a", CLONE_BODY),
                  a_function("_leg_d_clone_b", CLONE_BODY))
 
+#: Where the three prose mutations write their violation: the section of
+#: `skills/sd-check/SKILL.md` that teaches the `R13-D*` rows, one sentence of
+#: it per row, so the page that cites a rule is the page that proves it.
+PROSE_RULES_PAGE = "skills/sd-check/SKILL.md"
+
+
+def a_line_inside(path: str, symbol: str) -> int:
+    """The first body line of `symbol` in `path`, read off the tree at import.
+
+    The `R13-D1` mutation cites a line inside a function, and the number is
+    derived rather than written down for the reason the code-health mutations
+    are built from their ceilings: a line number typed here is stale the day
+    the file above it grows, and the mutation would then violate nothing.
+    """
+
+    tree = ast.parse((REPO_ROOT / path).read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == symbol:
+            return node.body[0].lineno
+    raise LookupError(f"{path} declares no function {symbol}")
+
+
+#: A `path:line` into the body of `schema_version`, the anchor the code-health
+#: mutations already lean on, in the file `tests/test_code_health.py` governs.
+INSIDE_A_SYMBOL = (f"bin/sd_library_guard.py:"
+                   f"{a_line_inside('bin/sd_library_guard.py', 'schema_version')}")
+
 MUTATIONS: dict[str, Mutation] = {
     "bin/sd_setup_github.py::setup_github": Mutation(
         path="bin/sd_setup_github.py",
@@ -1901,6 +1928,32 @@ MUTATIONS: dict[str, Mutation] = {
             test="tests.test_code_health.CodeHealth"
                  ".test_no_two_functions_are_the_same_function",
         ),
+    "tests/test_doc_citations.py::"
+    "test_line_citations_into_a_symbol_match_their_baseline": Mutation(
+        path=PROSE_RULES_PAGE,
+        old="where the line it would name sits inside one.",
+        new=f"where the line it would name sits inside one (the line "
+            f"`{INSIDE_A_SYMBOL}` does).",
+        test="tests.test_doc_citations.TheSymbolPreference"
+             ".test_line_citations_into_a_symbol_match_their_baseline",
+    ),
+    "tests/test_prose_counts.py::"
+    "test_present_tense_counts_match_their_baseline": Mutation(
+        path=PROSE_RULES_PAGE,
+        old="page being written.",
+        new="page being written. The pack ships 16 tools.",
+        test="tests.test_prose_counts.ProseCounts"
+             ".test_present_tense_counts_match_their_baseline",
+    ),
+    "tests/test_rule_registry.py::"
+    "test_uncited_tool_behaviour_claims_match_their_baseline": Mutation(
+        path=PROSE_RULES_PAGE,
+        old="The rows in `bin/sd_rules.py` state what each rule exempts;",
+        new="`sd-check` refuses a tree it did not measure.\n"
+            "The rows in `bin/sd_rules.py` state what each rule exempts;",
+        test="tests.test_rule_registry.LegB"
+             ".test_uncited_tool_behaviour_claims_match_their_baseline",
+    ),
 }
 
 

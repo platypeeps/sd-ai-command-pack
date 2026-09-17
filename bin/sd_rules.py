@@ -306,6 +306,76 @@ RULES: tuple[Rule, ...] = (
         scope="code",
         teaches="skills/sd-check/SKILL.md#Code health",
     ),
+    #: The prose rules, in the narrowed forms sd:431's design records, on a
+    #: round of their own for the same reason `R12` is one: the registry is
+    #: native to them. Each holds a per-document baseline that may fall and
+    #: may not rise, so a first run reddens nothing in the existing corpus and
+    #: every new violation is red on the day it is written. The first two are
+    #: new enforcement; the third registers leg b of the meta-check, which has
+    #: held its rule since step 2, and enforces nothing that was not already
+    #: enforced.
+    Rule(
+        id="R13-D1",
+        subject="a `path:line` citation in a live document whose line sits "
+                "inside a `def` or a `class` of a Python file names the "
+                "symbol instead, as `source:<path>::<symbol>`, beyond the "
+                "entries `SYMBOL_ANCHORED_CITATIONS` carries per document, "
+                "and that baseline only shrinks; a line outside every "
+                "symbol, a line inside a name the file declares more than "
+                "once, a `[quoted: ...]` reason and a markdown target keep "
+                "their line anchor, because the symbolic form cannot say them",
+        checker="tests/test_doc_citations.py::"
+                "test_line_citations_into_a_symbol_match_their_baseline",
+        proof="append a `path:line` citation into the body of "
+              "`schema_version` in `bin/sd_library_guard.py` to a sentence "
+              "of `skills/sd-check/SKILL.md`; that document's count rises "
+              "above its baseline and "
+              "`test_line_citations_into_a_symbol_match_their_baseline` "
+              "goes red",
+        scope="prose",
+        teaches="skills/sd-check/SKILL.md#Prose rules",
+    ),
+    Rule(
+        id="R13-D2",
+        subject="no line of live prose states a present-tense count of "
+                "something the tree enumerates -- `<number> tools`, "
+                "`commands`, `skills`, `tests`, `rules`, `files`, `verbs`, "
+                "`checkers`, `surfaces`, `agents` or `platforms` -- unless "
+                "the line reports it against a commit, a `#<n>` number or a "
+                "`YYYY-MM-DD` date, beyond the entries `PRESENT_TENSE_COUNTS` "
+                "carries per document, and that baseline only shrinks",
+        checker="tests/test_prose_counts.py::"
+                "test_present_tense_counts_match_their_baseline",
+        proof="append `The pack ships 16 tools.` to a sentence of "
+              "`skills/sd-check/SKILL.md` that carries no commit, number or "
+              "date; that document's count rises above its baseline and "
+              "`test_present_tense_counts_match_their_baseline` goes red",
+        scope="prose",
+        teaches="skills/sd-check/SKILL.md#Prose rules",
+    ),
+    #: Nothing new is enforced by this row. Leg b's predicate is `claims_in`
+    #: and its baseline is `UNCITED_SKILL_CLAIMS`, both in
+    #: `tests/test_rule_registry.py`, and both have run since step 2; the row
+    #: is what lets a skill cite the rule it is held to, which leg a then
+    #: requires of the section named here.
+    Rule(
+        id="R13-D3",
+        subject="a line of a skill that asserts a tool behaviour -- an "
+                "enforcement verb, `refuses`, `never`, `always` or `cannot`, "
+                "with a pack tool or a test on the same line -- cites a rule "
+                "id the registry carries, beyond the entries "
+                "`UNCITED_SKILL_CLAIMS` carries per document, and that "
+                "baseline only shrinks",
+        checker="tests/test_rule_registry.py::"
+                "test_uncited_tool_behaviour_claims_match_their_baseline",
+        proof="add a line naming `sd-check` with `refuses` and no rule id to "
+              "`skills/sd-check/SKILL.md`; that document gains an uncited "
+              "claim its baseline does not carry and "
+              "`test_uncited_tool_behaviour_claims_match_their_baseline` "
+              "goes red",
+        scope="prose",
+        teaches="skills/sd-check/SKILL.md#Prose rules",
+    ),
 )
 
 

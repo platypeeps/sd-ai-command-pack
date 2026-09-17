@@ -1059,6 +1059,120 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
             for row in classify() if row.reason == "compared"]
 
 
+# ------------------------------------------------ the symbol preference (R13-D1)
+#
+# sd:431, prose rule 1 in the form its design narrowed it to: a `path:line`
+# into code whose line sits inside a function or a class should name the
+# symbol, `source:<path>::<symbol>`, because the number goes stale at the next
+# insertion above it and the name does not. Not a prohibition on line anchors:
+# a line outside every declaration -- a module-level constant, a comment above
+# an import -- has no symbol to name, a `[quoted: ...]` reason needs its line
+# by construction (sd:568), and a page cited by line is `bin/sd-docs-lint`'s
+# subject and the repointer's.
+#
+# The population is the *unanchored* citations. Since sd:525 a live anchored
+# `path:line` into code is `anchored-line-into-code`, which is red, so the
+# `compared` bucket this was first planned over holds no live row into code
+# at all: measured on `ef7c0c7b`, `compared` was one archived row. What is
+# left is the token nobody anchored -- `no-adjacent-anchor`,
+# `separator-not-adjacent`, `anchor-not-a-symbol` -- which the gate opens only
+# to check the line is in range. This reads the same rows and asks one more
+# question of the file: is that line inside something the `source:` form
+# could name?
+
+#: Live citations whose line sits inside a `def` or a `class`, per document.
+#: Measured on `ef7c0c7b` by `symbol_anchored_citations` below, 145 rows;
+#: the 2026-09-05 prd fell 66 -> 64 on `693ed526`, where #1017 deleted
+#: `bin/sd_ledger.py` and two of its citations lost their target. A ratchet on
+#: violations, never a census: each entry may fall and may not rise, and an
+#: entry that reaches zero is deleted. Per document, so a new one in one page
+#: cannot be netted off against a cleanup in another.
+SYMBOL_ANCHORED_CITATIONS = {
+    "actions/docs-gate/README.md": 1,
+    "docs/work/2026-09-04-sd-status-answers-is-anything-wrong-first/implement.md": 1,
+    "docs/work/2026-09-04-sd-status-answers-is-anything-wrong-first/prd.md": 1,
+    "docs/work/2026-09-04-the-citation-gate-skips-what-it-cannot-match/design.md": 3,
+    "docs/work/2026-09-04-the-citation-gate-skips-what-it-cannot-match/implement.md": 1,
+    "docs/work/2026-09-04-the-citation-gate-skips-what-it-cannot-match/prd.md": 1,
+    "docs/work/2026-09-04-the-plan-interview-is-one-sentence/design.md": 2,
+    "docs/work/2026-09-04-the-sweep-trusts-a-branch-field-it-never-resolves/implement.md": 1,
+    "docs/work/2026-09-04-the-sweep-trusts-a-branch-field-it-never-resolves/prd.md": 1,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 41,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 64,
+    "docs/work/2026-09-12-a-second-tracker-with-no-rows/design.md": 4,
+    "docs/work/2026-09-12-a-second-tracker-with-no-rows/implement.md": 5,
+    "docs/work/2026-09-12-the-contribution-tracker-cannot-hold-an-issue/design.md": 3,
+    "docs/work/2026-09-12-the-contribution-tracker-cannot-hold-an-issue/implement.md": 3,
+    "docs/work/2026-09-12-the-contribution-tracker-cannot-hold-an-issue/prd.md": 8,
+    "docs/work/2026-09-13-one-dashboard/implement.md": 3,
+}
+
+
+def enclosing_declaration(tree, line: int) -> str | None:
+    """The `def` or `class` whose span holds `line`, or `None` outside every one.
+
+    The two levels `declared_spans` reads and no deeper, because those are the
+    declarations `source:<path>::<symbol>` can name: a nested function is a
+    local, and the citation the rule prefers would name the function it sits
+    in. Inside a class, the method is the answer where a method holds the line
+    and the class where none does.
+    """
+    import ast
+
+    kinds = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+    for node in tree.body:
+        if not isinstance(node, kinds):
+            continue
+        if not node.lineno <= line <= (node.end_lineno or node.lineno):
+            continue
+        for inner in node.body if isinstance(node, ast.ClassDef) else ():
+            if (isinstance(inner, kinds)
+                    and inner.lineno <= line <= (inner.end_lineno or inner.lineno)):
+                return inner.name
+        return node.name
+    return None
+
+
+def symbol_anchored_citations(
+        docs: list[pathlib.Path] | None = None) -> dict[str, int]:
+    """Live `path:line` citations whose line sits inside a symbol, per document.
+
+    Over `classify`'s rows, so the population is the one the gate already
+    reads and no second tokeniser exists. A row is counted when its document
+    is live, its target is a Python file inside the checkout, and
+    `enclosing_declaration` names something at its line that `declared_at`
+    finds exactly once, because that is the test `source_declaration_error`
+    applies and a name declared twice has no symbolic form to prefer; a
+    `quoted` row is exempt by the design, and a markdown target or an
+    unparseable file has no symbol to prefer. The file is read through
+    `file_lines`, so `ast`'s numbering and this module's agree on which line
+    the citation names.
+    """
+    import ast
+
+    counts: collections.Counter = collections.Counter()
+    trees: dict[str, object] = {}
+    for row in classify(docs):
+        if "archive" in row.doc.parts or row.reason == "quoted" or not row.path:
+            continue
+        if not points_into_code(row.path):
+            continue
+        target = REPO_ROOT / row.path
+        if not (is_under_repo(target) and target.is_file()):
+            continue
+        if row.path not in trees:
+            try:
+                trees[row.path] = ast.parse("\n".join(file_lines(target)))
+            except (SyntaxError, ValueError):
+                trees[row.path] = None
+        tree = trees[row.path]
+        symbol = None if tree is None else enclosing_declaration(tree, row.start)
+        if symbol is None or len(declared_at(tree, symbol)) != 1:
+            continue
+        counts[row.doc.relative_to(REPO_ROOT).as_posix()] += 1
+    return dict(counts)
+
+
 
 class DocCitationTests(unittest.TestCase):
     def test_every_anchored_citation_names_its_symbol_at_the_cited_line(self) -> None:
@@ -1221,6 +1335,109 @@ class DocCitationTests(unittest.TestCase):
 
         self.assertTrue(PAIR.search("`status_filter` (`bin/sd:1378`)"))
         self.assertIsNone(PAIR.search("`status_filter` is reported by `bin/sd:1378`"))
+
+
+class TheSymbolPreference(unittest.TestCase):
+    """R13-D1: a line number inside a symbol should be the symbol's name."""
+
+    def test_line_citations_into_a_symbol_match_their_baseline(self) -> None:
+        """The ratchet. Equality, for the reason leg b's baseline is one.
+
+        A count that rose is a new `path:line` into a function or a class
+        that `source:<path>::<symbol>` could have named; a count that fell is
+        the ordinary good case, and the entry moves with it in the same
+        change. `assertLessEqual` would let the record go stale.
+        """
+        self.assertEqual(symbol_anchored_citations(), SYMBOL_ANCHORED_CITATIONS, """
+The live `path:line` citations into a symbol no longer match their baseline.
+
+Above: measured first, baseline second. A count that rose is a new citation
+naming a line inside a function or a class: cite `source:<path>::<symbol>`
+instead, or the file alone in prose. A count that fell is a cleanup: lower the
+entry in `SYMBOL_ANCHORED_CITATIONS` in the same change, and delete it at zero.""")
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = pathlib.Path(temporary.name)
+        (self.root / "bin").mkdir()
+        (self.root / "bin" / "tool.py").write_text(
+            "LIMIT = 1\n"                     # 1: outside every symbol
+            "\n"
+            "def render():\n"                 # 3
+            "    return LIMIT\n"              # 4: inside `render`
+            "\n"
+            "class Store:\n"                  # 6
+            "    KIND = 'x'\n"                # 7: inside `Store`, no method
+            "\n"
+            "    def open(self):\n"           # 9
+            "        return self.KIND\n",     # 10: inside `open`
+            encoding="utf-8")
+        # One name declared twice, which `source:<path>::<symbol>` refuses.
+        (self.root / "bin" / "twins.py").write_text(
+            "class Disk:\n"                   # 1
+            "    def open(self):\n"           # 2
+            "        return 'disk'\n"         # 3: inside `Disk.open`
+            "\n"
+            "class Net:\n"                    # 5
+            "    def open(self):\n"           # 6
+            "        return 'net'\n"          # 7: inside `Net.open`
+            "\n"
+            "def solo():\n"                   # 9
+            "    return Disk()\n",            # 10: inside `solo`, declared once
+            encoding="utf-8")
+        (self.root / "docs").mkdir()
+        # A page cited by line, and the source a `[quoted: ...]` reason names.
+        (self.root / "docs" / "notes.md").write_text(
+            "LIMIT\nthe example reads `bin/tool.py:4`\n", encoding="utf-8")
+
+    def measured(self, prose: str) -> dict[str, int]:
+        page = self.root / "docs" / "page.md"
+        page.write_text(prose, encoding="utf-8")
+        with mock.patch.dict(globals(), {"REPO_ROOT": self.root}):
+            return symbol_anchored_citations([page])
+
+    def test_a_line_inside_a_function_or_a_class_is_counted(self) -> None:
+        self.assertEqual(self.measured("see `bin/tool.py:4` and `bin/tool.py:7`"
+                                       " and `bin/tool.py:10`\n"),
+                         {"docs/page.md": 3})
+
+    def test_a_line_outside_every_symbol_keeps_its_anchor(self) -> None:
+        """CONTROL: the rule prefers a symbol only where one exists."""
+        self.assertEqual(self.measured("see `bin/tool.py:1`\n"), {})
+
+    def test_a_quoted_reason_and_a_markdown_target_are_exempt(self) -> None:
+        """CONTROLS: sd:568's marker needs its line; a page is not code."""
+        self.assertEqual(self.measured("see `bin/tool.py:4`\n"), {"docs/page.md": 1},
+                         "the same citation unmarked is counted, or the marker"
+                         " below exempts nothing")
+        self.assertEqual(self.measured(
+            "`bin/tool.py:4` [quoted: docs/notes.md:2]\nand `docs/notes.md:1`\n"), {})
+
+    def test_a_name_declared_twice_is_not_one_the_form_can_name(self) -> None:
+        """CONTROL: the rule asks for a citation the resolver accepts (#1015 review).
+
+        `source:bin/twins.py::open` is refused by `source_declaration_error`
+        as two declarations, so a line inside either `open` has no symbolic
+        form to prefer and is not counted; the line inside `solo` is.
+        """
+        self.assertEqual(self.measured("see `bin/twins.py:3` and `bin/twins.py:7`\n"), {})
+        self.assertEqual(self.measured("see `bin/twins.py:10`\n"), {"docs/page.md": 1})
+        self.assertIsNotNone(source_declaration_error(self.root, "bin/twins.py", "open"))
+        self.assertIsNone(source_declaration_error(self.root, "bin/twins.py", "solo"))
+
+    def test_the_enclosing_declaration_is_the_one_the_locator_can_name(self) -> None:
+        import ast
+
+        tree = ast.parse((self.root / "bin" / "tool.py").read_text(encoding="utf-8"))
+        self.assertEqual([enclosing_declaration(tree, line) for line in (1, 4, 7, 10)],
+                         [None, "render", "Store", "open"])
+        for line in (4, 10):
+            with self.subTest(line=line):
+                self.assertEqual(declaration_lines(
+                    self.root, "bin/tool.py", enclosing_declaration(tree, line)),
+                    [3 if line == 4 else 9],
+                    "the name it prefers must be one the `source:` form resolves")
 
 
 class TheMarkerGrammar(unittest.TestCase):

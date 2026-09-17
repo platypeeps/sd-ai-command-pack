@@ -86,6 +86,25 @@ The row in `bin/sd_rules.py` states each number; it is not restated here.
 `bin/sd-rules --for <path>` prints the rows in scope for the file being
 written.
 
+## Prose rules
+
+The registry's prose rules are enforced by the suites their rows name, not by
+sd-check; as with the code rules above, an author meets them as a red result
+from the repository's own `test` entrypoint. Each is a per-document baseline
+that may shrink and may not grow, so the first run swept nothing and every
+new violation is red on the day it is written:
+
+- R13-D1 — a citation into code names the symbol, `source:<path>::<symbol>`,
+  where the line it would name sits inside one.
+- R13-D2 — a count of something the tree enumerates is derived, or carries
+  the commit, pull request number or date it was measured at.
+- R13-D3 — a claim about what a pack tool or a test does cites a rule id on
+  the same line.
+
+The rows in `bin/sd_rules.py` state what each rule exempts; it is not
+restated here. `bin/sd-rules --for <path>` prints the rows in scope for the
+page being written.
+
 ## Reading the output
 
 Output is captured and attributed per check, never interleaved, and tails at
