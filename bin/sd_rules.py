@@ -290,6 +290,33 @@ RULES: tuple[Rule, ...] = (
         scope="code",
         teaches="skills/sd-review/SKILL.md#Local conventions reach the prompt",
     ),
+    #: No shipped shell. `R11-D6` deleted the `Shell coverage` CI job because
+    #: what it measured had ceased to exist, and the fact that made the
+    #: deletion defensible is the rule that survives it: shell -- by suffix or
+    #: by shebang -- lives under `.github/scripts/`, the directory `make check`
+    #: runs on this repository itself, and nowhere else in the tracked tree.
+    #: The checker is the test that stood in for the job, so it is named as a
+    #: `tests/` symbol and the mutation runs it. Taught under `Code health`
+    #: with the `R12` rows, per Dec-2, because it is a rule an author of code
+    #: meets as a red result from the same entrypoint (sd:431 step 8, slice 3,
+    #: 2026-09-17).
+    Rule(
+        id="R11-D6",
+        subject="no tracked file with a shell suffix or a shell shebang "
+                "lives outside `.github/scripts/`, the one directory the "
+                "pack runs shell from on itself, so nothing the installer "
+                "renders or a consumer receives is shell",
+        checker="tests/test_no_shipped_shell.py::"
+                "test_shell_lives_only_in_this_repository_s_own_tooling",
+        proof="change the shebang of `bin/sd-rules` from "
+              "`#!/usr/bin/env python3` to `#!/usr/bin/env bash`; the file "
+              "is tracked, outside `.github/scripts/`, and now reads as "
+              "shell, so "
+              "`test_shell_lives_only_in_this_repository_s_own_tooling` "
+              "goes red",
+        scope="code",
+        teaches="skills/sd-check/SKILL.md#Code health",
+    ),
     #: The code rules, registered against sd:430's checkers and nothing new
     #: (owner decision 2026-09-14, Dec-1 and Dec-2): a new round for rules the
     #: registry is native to, taught from one section of the skill `R10-D6`
