@@ -341,9 +341,10 @@ class TheLayout(unittest.TestCase):
     def test_a_commit_from_a_linked_worktree_leaves_the_main_repository_a_work_tree(self):
         """sd:993. Git runs a linked worktree's hook with `GIT_DIR` and
         `GIT_INDEX_FILE` exported, and a whole-tree pass whose fixture runs
-        `git init --bare` in a temporary directory then re-initialises the
-        clone's own repository as bare (measured 2026-09-17 18:28Z on the pack
-        checkout: `core.bare = true`, `sd-status` "not inside a git repository").
+        `git init .` in a temporary directory then re-initialises the repository
+        at `GIT_DIR`, which git guesses bare for a path not named `.git`
+        (measured 2026-09-17 18:28Z on the pack checkout: `core.bare = true`,
+        `sd-status` "not inside a git repository").
         The hook hands the passes an environment without git's per-invocation
         variables, so a fixture's git acts on the fixture."""
         self.assertEqual(self.make_hooks().returncode, 0)
@@ -358,7 +359,7 @@ class TheLayout(unittest.TestCase):
             "import subprocess\nimport tempfile\nimport unittest\n\n\n"
             "class Fixture(unittest.TestCase):\n"
             "    def test_a_fixture_repository(self):\n"
-            "        subprocess.run(['git', 'init', '-q', '--bare'], cwd=tempfile.mkdtemp(), check=True)\n",
+            "        subprocess.run(['git', 'init', '-q', '-b', 'main', '.'], cwd=tempfile.mkdtemp(), check=True)\n",
             encoding="utf-8",
         )
         git("add", "--", "tests", cwd=self.root)

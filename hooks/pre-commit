@@ -131,9 +131,10 @@ def is_python(path: pathlib.Path) -> bool:
 #: worktree that is `GIT_DIR=<clone>/.git/worktrees/<name>` and the index
 #: beside it; a gate's subprocess that inherits them runs every `git` it
 #: starts against this clone, wherever its cwd is. A whole-tree pass whose
-#: fixture runs `git init --bare` in a temporary directory then re-initialises
-#: the clone's own repository as bare (sd:993, measured 2026-09-17: the pack
-#: checkout answered "must be run in a work tree" after one such commit).
+#: fixture runs `git init .` in a temporary directory then re-initialises the
+#: repository at GIT_DIR, and git guesses bare for a path not named `.git`
+#: (sd:993, measured 2026-09-17: the pack checkout answered "must be run in a
+#: work tree" after one such commit).
 GIT_INVOCATION_VARIABLES = ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX")
 
 
