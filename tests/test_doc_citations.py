@@ -1083,13 +1083,14 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 #: Live citations whose line sits inside a `def` or a `class`, per document.
 #: Measured on `ef7c0c7b` by `symbol_anchored_citations` below, 145 rows;
 #: the 2026-09-05 prd fell 66 -> 64 on `693ed526`, where #1017 deleted
-#: `bin/sd_ledger.py` and two of its citations lost their target. A ratchet on
+#: `bin/sd_ledger.py` and two of its citations lost their target; three fell
+#: by one each when sd:981 added `registered_base` to `bin/sd_lib.py` and
+#: the lines they name moved out of the declarations they sat in. A ratchet on
 #: violations, never a census: each entry may fall and may not rise, and an
 #: entry that reaches zero is deleted. Per document, so a new one in one page
 #: cannot be netted off against a cleanup in another.
 SYMBOL_ANCHORED_CITATIONS = {
     "actions/docs-gate/README.md": 1,
-    "docs/work/2026-09-04-sd-status-answers-is-anything-wrong-first/implement.md": 1,
     "docs/work/2026-09-04-sd-status-answers-is-anything-wrong-first/prd.md": 1,
     "docs/work/2026-09-04-the-citation-gate-skips-what-it-cannot-match/design.md": 3,
     "docs/work/2026-09-04-the-citation-gate-skips-what-it-cannot-match/implement.md": 1,
@@ -1097,8 +1098,8 @@ SYMBOL_ANCHORED_CITATIONS = {
     "docs/work/2026-09-04-the-plan-interview-is-one-sentence/design.md": 2,
     "docs/work/2026-09-04-the-sweep-trusts-a-branch-field-it-never-resolves/implement.md": 1,
     "docs/work/2026-09-04-the-sweep-trusts-a-branch-field-it-never-resolves/prd.md": 1,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 41,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 62,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 40,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 61,
     "docs/work/2026-09-12-a-second-tracker-with-no-rows/design.md": 4,
     "docs/work/2026-09-12-a-second-tracker-with-no-rows/implement.md": 5,
     "docs/work/2026-09-12-the-contribution-tracker-cannot-hold-an-issue/design.md": 3,

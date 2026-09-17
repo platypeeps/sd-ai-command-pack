@@ -105,8 +105,13 @@ def item_for(connection, sd_db, root, item_dir):
     """The row one work-item directory names, or None when there is none.
 
     The resolver is `sd_lib`'s, so a writer and the dashboard key an item the
-    same way: `external_id` builds the identity off the *main* worktree root,
-    and `item_by_external` is the unique index that reads it back.
+    same way: `registered_base` resolves the checkout to the registered
+    repository the way `sd work register` does -- by path, else by origin,
+    so a runner clone reads the row it registered (sd:981) -- and
+    `item_for_artifact` reads it back by that base and the relative path.
+    The `item_by_external` fallback below is for a library without
+    `item_for_artifact`; one that old has no `registered_for` either, and
+    stays path-keyed on purpose.
     """
     import sd_lib
 
@@ -115,9 +120,9 @@ def item_for(connection, sd_db, root, item_dir):
     except ImportError:
         pass
     else:
-        base = sd_lib.main_worktree_root(root)
+        base = sd_lib.registered_base(root, sd_db, connection)
         relative = (item_dir / "prd.md").relative_to(root).as_posix()
-        row = item_for_artifact(connection, str(base), relative)
+        row = item_for_artifact(connection, base, relative)
         return None if row is None else dict(row)
     identity = sd_lib.external_id(root, item_dir)
     row = sd_db.writes.item_by_external(connection, sd_lib.ITEM_ROW_SOURCE, identity)
