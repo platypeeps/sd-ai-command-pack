@@ -595,6 +595,21 @@
       teach it, and the alternative — backfilling only the 3 taught ids —
       exhausts in a single slice. Step 8 is the constraint on step 4, not its
       consequence.
+      **2026-09-16, three parts (note 2568), two of them done.** (i) The
+      verb, `bin/sd-rules --for <path>`, landed at #997. (ii) The writer
+      skills call it in their setup step: on `8548d512` the audit read six
+      skills as writers of this tree, and each now carries one sentence that
+      runs the verb for the file it is about to write and cites the ids it
+      prints -- `sd-handoff` since #997 in its restore step, `sd-plan`,
+      `sd-spec`, `sd-debug`, `sd-humanizer` and `sd-technical-editor` here.
+      `tests/test_writer_skills_consult_the_registry.py` holds the link:
+      `WRITER_SKILLS` is what a write-verb predicate answers over every
+      tracked `skills/*/SKILL.md`, less a `NOT_WRITERS` set that names the
+      three residue skills the predicate also matches and why, so a seventh
+      writer lands in neither and reddens it. `sd-review`'s `setup-github`
+      is left out until the `.github/`-is-code residue is settled. (iii) One
+      teaching section per live-row id, each naming the verb, is in progress
+      in step 4's slices; the step stays open until they land.
 
 Steps 1 to 3 are the deliverable, and all three are done: `bb379027` (#882)
 landed them and `d745474b` (#889) corrected leg b's baseline. Steps 4 to 8 are
@@ -690,3 +705,9 @@ The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
   it from `.git/hooks`, not `.githooks/` and not `core.hooksPath`, which
   `bin/sd-status` reports as residue. The diff-scoping decision is re-made
   in `design.md` on those readings.
+- 2026-09-16 step 8, second slice (part (ii)): five writer skills gain the
+  setup-step sentence that runs `bin/sd-rules --for <path>` and cites the
+  ids it prints; `tests/test_writer_skills_consult_the_registry.py` derives
+  the six-skill list from a write-verb predicate over the tracked skill
+  pages, red on the five before the sentences and red again on a seventh
+  writer-shaped skill added to a clone. Part (iii) stays open in step 4.
