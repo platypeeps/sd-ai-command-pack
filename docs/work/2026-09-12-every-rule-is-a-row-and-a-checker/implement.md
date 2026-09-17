@@ -885,9 +885,10 @@
       **Ticked 2026-09-17, slice H.** Part (iii) landed as slices E to G
       (#1019, #1020, #1021), one teaching section per live-row id, each
       naming the verb; the twelve ids left after them are repealed rows under
-      Dec-9, the decision team-lead took on 2026-09-17 (note 2665), and a
-      repealed row is taught by nothing, so no section is owed and nothing is
-      left for the step to wait on.
+      Dec-9, the decision team-lead took on 2026-09-17 (note 2665), and the
+      twelve rows slice H adds are taught by nothing (leg a skips a repealed
+      row; `R10-D2` keeps the section it had), so no section is owed and
+      nothing is left for the step to wait on.
 
 Steps 1 to 3 are the deliverable, and all three are done: `bb379027` (#882)
 landed them and `d745474b` (#889) corrected leg b's baseline. Steps 4 to 8 were
