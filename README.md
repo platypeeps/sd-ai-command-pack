@@ -227,7 +227,7 @@ off `main` or over uncommitted changes.
 | `bin/sd_install.py --user` | Render every `sd-*` surface into this machine's platform homes, and link the `bin/` commands into `~/.local/bin` (`--bin-dir DIR` for another directory) |
 | `bin/sd_install.py --status` | What is installed, what has drifted, what legacy residue remains |
 | `bin/sd_install.py --pull` | Fast-forward the serving checkout (clean, on `main`) and re-render |
-| `bin/sd_install.py --uninstall` | Remove exactly what the receipt records having written: the renders, the hook entries, and the command links it made |
+| `bin/sd_install.py --uninstall` | Remove exactly what the receipt records: the renders it wrote, the hook entries, and the command links it recorded (a link that already pointed here is recorded without being rewritten, and goes with the rest) |
 | `bin/sd_install.py --adopt-legacy` | Delete the pre-3e fleet installer's successor-less renders |
 | `bin/sd_install.py --repo [PATH]` | Write the marked block into `PATH/CLAUDE.local.md` |
 

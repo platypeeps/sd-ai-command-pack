@@ -8,10 +8,14 @@ re-render after a payload edit.
 
 Two rules constrain every write here, and both are load-bearing:
 
-  * **It owns only names it renders.** `installed.json` records each written
-    path with the digest of what was written. `--uninstall` removes exactly
-    those, and refuses a path whose digest no longer matches unless forced, so
-    a file someone edited by hand is never silently deleted.
+  * **It owns only names it renders or links.** `installed.json` records each
+    written path with the digest of what was written, and each command link as
+    `{"path", "kind": "link", "target"}` with no digest, since a link has no
+    bytes of its own. `--uninstall` removes exactly those: a render whose
+    digest no longer matches is refused unless forced, and a link is removed
+    only while it is still a symlink resolving to its recorded target, so a
+    file someone edited or a link someone retargeted by hand is never silently
+    deleted.
   * **It never edits a tracked repository file.** The single exception outside
     a platform home is the one SessionStart stanza in `~/.claude/settings.json`
     for `sd-handoff-restore`, which is recorded in `owned` like any other write
@@ -438,10 +442,20 @@ def read_receipt(path: Path) -> dict:
 
 
 def owned_entries(receipt: dict) -> list[dict]:
+    """The rows `--uninstall` and the prune steps may act on.
+
+    A row without a `path` names nothing to remove and is dropped -- except a
+    `kind: link` row, which `prune_links` reports as malformed rather than
+    letting it vanish from the account without a word (C-33, review 1).
+    """
     entries = receipt.get("owned")
     if not isinstance(entries, list):
         return []
-    return [item for item in entries if isinstance(item, dict) and "path" in item]
+    return [
+        item
+        for item in entries
+        if isinstance(item, dict) and ("path" in item or item.get("kind") == "link")
+    ]
 
 
 def write_receipt(path: Path, payload: dict) -> None:
@@ -947,10 +961,12 @@ def prune_links(
         raw = entry.get("path")
         target = entry.get("target")
         if not isinstance(raw, str) or not isinstance(target, str):
-            # `owned_entries` admits any dict with a `path`. A row this
-            # function cannot read is nothing it may remove, and it says so
-            # rather than aborting the run (C-33).
-            skipped.append((str(raw), "malformed link row"))
+            # `owned_entries` admits any dict with a `path`, and a link row
+            # without one. A row this function cannot read is nothing it may
+            # remove, and it says so rather than aborting the run (C-33); a
+            # row with no path is shown whole, there being no path to name.
+            shown = str(raw) if raw is not None else json.dumps(entry, sort_keys=True)
+            skipped.append((shown, "malformed link row"))
             continue
         if raw in keep:
             continue
@@ -2175,6 +2191,19 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     if bin_dir is not None and ctx.sandboxed and not _is_within(bin_dir, home.resolve()):
         print(f"error: --bin-dir {bin_dir} is outside --home {home}", file=out)
         return 2
+    # The same test for the directory a flagless run reads from the receipt
+    # (C-30): a receipt is a file anyone can edit, and a stale or tampered
+    # `binDir` would otherwise be written to unchecked. Refused by name, and
+    # `--bin-dir` is the way past it (review 1, finding 2).
+    if bin_dir is None and mode in ("user", "pull") and ctx.sandboxed:
+        recorded_dir = link_directory(ctx, read_receipt(ctx.receipt))
+        if not _is_within(recorded_dir.resolve(), home.resolve()):
+            print(
+                f"error: the receipt's binDir {recorded_dir} is outside --home {home}; "
+                "pass --bin-dir",
+                file=out,
+            )
+            return 2
 
     if mode == "provision-library":
         # `make setup` calls this so the test suite can import `sd_db` without
