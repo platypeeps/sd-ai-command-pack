@@ -67,6 +67,25 @@ configuration was wrong (one sentence on stderr, never a traceback).
 - **Never substitute a hand-rolled command for a `fail` you did not like.**
   Fix the repo's entrypoint or report the failure.
 
+## Code health
+
+The registry's code rules are enforced by `tests/test_code_health.py`, not by
+sd-check; sd-check meets them as one more red result from the repository's
+own `test` entrypoint. They are cited here because this is the skill an author
+has open when that result arrives. Three are per-function ceilings and the
+fourth is a rule over pairs; each has a baseline that may shrink and may not
+grow:
+
+- R12-D1 — complexity, `COMPLEXITY_CEILING`, on the cyclomatic score.
+- R12-D2 — length, `LENGTH_CEILING`, in unparsed statements.
+- R12-D3 — depth, `DEPTH_CEILING`, in indented blocks.
+- R12-D4 — duplication: two functions of one shape, once each is at least
+  `CLONE_FLOOR` AST nodes.
+
+The row in `bin/sd_rules.py` states each number; it is not restated here.
+`bin/sd-rules --for <path>` prints the rows in scope for the file being
+written.
+
 ## Reading the output
 
 Output is captured and attributed per check, never interleaved, and tails at

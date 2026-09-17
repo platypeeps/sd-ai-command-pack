@@ -237,6 +237,76 @@ RULES: tuple[Rule, ...] = (
                 "Lane B (`--push`, `--park`) is not implemented",
         state=REPEALED,
     ),
+    #: The code rules, registered against sd:430's checkers and nothing new
+    #: (owner decision 2026-09-14, Dec-1 and Dec-2): a new round for rules the
+    #: registry is native to, taught from one section of the skill `R10-D6`
+    #: already teaches from. The four checkers have run since
+    #: `tests/test_code_health.py` landed; these rows only register them, and
+    #: the ceilings stay where that file has them. Each subject states its
+    #: ceiling twice, by the constant's name and by its value, because a reader
+    #: at the row needs the number and nothing resolves it for them -- so
+    #: `test_a_code_health_subject_states_the_current_ceiling` reads the value
+    #: back off that module rather than trusting either copy.
+    Rule(
+        id="R12-D1",
+        subject="no function in `bin/` or `dashboard/` is branchier than "
+                "`COMPLEXITY_CEILING`, 20 on the cyclomatic score, beyond "
+                "the entries `COMPLEX` carries, and that baseline only "
+                "shrinks",
+        checker="tests/test_code_health.py::"
+                "test_no_function_is_branchier_than_the_ceiling",
+        proof="insert a function with one decision point more than the "
+              "ceiling ahead of `schema_version` in `bin/sd_library_guard.py`; "
+              "it is in no baseline and "
+              "`test_no_function_is_branchier_than_the_ceiling` goes red",
+        scope="code",
+        teaches="skills/sd-check/SKILL.md#Code health",
+    ),
+    Rule(
+        id="R12-D2",
+        subject="no function in `bin/` or `dashboard/` is longer than "
+                "`LENGTH_CEILING`, 50 statements as `ast.unparse` renders "
+                "them with the docstring left out, beyond the entries `LONG` "
+                "carries, and that baseline only shrinks",
+        checker="tests/test_code_health.py::"
+                "test_no_function_is_longer_than_the_ceiling",
+        proof="insert a function one statement longer than the ceiling ahead "
+              "of `schema_version` in `bin/sd_library_guard.py`; it is in no "
+              "baseline and `test_no_function_is_longer_than_the_ceiling` "
+              "goes red",
+        scope="code",
+        teaches="skills/sd-check/SKILL.md#Code health",
+    ),
+    Rule(
+        id="R12-D3",
+        subject="no function in `bin/` or `dashboard/` nests deeper than "
+                "`DEPTH_CEILING`, 5 indented blocks with an `elif` ladder "
+                "held at one level, beyond the entries `DEEP` carries, and "
+                "that baseline only shrinks",
+        checker="tests/test_code_health.py::"
+                "test_no_function_nests_deeper_than_the_ceiling",
+        proof="insert a function nesting one block deeper than the ceiling "
+              "ahead of `schema_version` in `bin/sd_library_guard.py`; it is "
+              "in no baseline and "
+              "`test_no_function_nests_deeper_than_the_ceiling` goes red",
+        scope="code",
+        teaches="skills/sd-check/SKILL.md#Code health",
+    ),
+    Rule(
+        id="R12-D4",
+        subject="no two functions in `bin/` or `dashboard/` of at least "
+                "`CLONE_FLOOR`, 25 AST nodes each, are the same function "
+                "once locals are renamed and constants blanked, beyond the "
+                "pairs `CLONES` carries, and that baseline only shrinks",
+        checker="tests/test_code_health.py::"
+                "test_no_two_functions_are_the_same_function",
+        proof="insert two functions of one body and two names, each past the "
+              "clone floor, ahead of `schema_version` in "
+              "`bin/sd_library_guard.py`; the pair is not in `CLONES` and "
+              "`test_no_two_functions_are_the_same_function` goes red",
+        scope="code",
+        teaches="skills/sd-check/SKILL.md#Code health",
+    ),
 )
 
 

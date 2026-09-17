@@ -323,6 +323,13 @@ apply to the checkers the item aims it at.
   with the copy out of the slope. Sharing is as strong as copying because the
   `diff -rq` restore proof runs after every row, and a control in `LegD`
   leaves a byte in the copy and requires that proof to fail.
+  **Re-measured 2026-09-16, step 5.** The copy carries an index of its own
+  since the code rules became rows: their checkers enumerate the corpus with
+  `git ls-files`, and in an index-less copy the named test ran nothing. One
+  copy per run still holds; `LegD` read real 3.69 s for 9 tests at load
+  average 7.90 before the four rows and real 14.47 s at 15.85 after, on the
+  same machine under different load, so no ratio is claimed. The slope is
+  the code-health walk, about 1.2 s a child run, two runs a row.
 - **2026-09-13 — leg a counts a citation in a section's body, never in its
   heading.** `section_body` drops the heading line, so a row's id has to appear
   in the body text of the section its `teaches` names. `R10-D1` to `R10-D3`
