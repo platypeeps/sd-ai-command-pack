@@ -131,3 +131,11 @@ so the owner reviews and merges the code PR, not a lane.
 - 2026-09-16 steps 1-7 ticked by lane code-969; C-28 and C-30 to C-35 folded
   where their tests land, C-29 tested as the two-run recovery; the code PR is
   the owner's to review and merge.
+- 2026-09-16 review round 1 on PR #1006 (the cap round): six findings. Folded:
+  the receipt's `binDir` gets the flag's containment test under `--home`
+  (rc 2 before a render or a pull), a `kind: link` row without a `path` is
+  reported as a malformed row, the README uninstall row and the module
+  docstring describe the links as recorded. Rebutted by measurement on the
+  required interpreter (3.13): non-strict `Path.resolve` returns a symlink
+  loop unchanged and `shutil.which` with an empty path returns `None`, so
+  neither needs a guard; both are pinned by tests.
