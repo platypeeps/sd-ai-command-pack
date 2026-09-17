@@ -341,7 +341,7 @@ apply to the checkers the item aims it at.
   control child read 1.28 s and a child that walks nothing 0.10 s; one
   child running all four code-health nodes read 1.28 s, and all eight
   nodes 1.95 s, so the walk is per child, not per node, and the cut is
-  one control child for every row (`source:tests/test_rule_registry.py::batched_controls`),
+  one control child that runs every row's test (`source:tests/test_rule_registry.py::batched_controls`),
   then one mutated child per row. The shape is held by
   `source:tests/test_rule_registry.py::TheSharedCopy`: children at most
   `rows + 1 + 2 * controls`. When a row pushes `LegD` past 21 s the leg
