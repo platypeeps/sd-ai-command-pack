@@ -372,8 +372,18 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 #: The rest were each looked at and each has a recorded reason it is not a
 #: row yet, in the backfill section of this item's `implement.md`, rather
 #: than left for the next reader to rediscover.
+#: **17 after sd:431 step 8, slice 1, 2026-09-16.** `R10-D3` is a row, in
+#: the narrowed form the audit of that step recorded: the design split
+#: handoff into two lanes, Lane B is the repeal `R10-D2`, and what Lane A
+#: holds as a rule is the restore hook's registration on `startup` and
+#: `clear` and never on `compact`. Its checker is the hook table
+#: `bin/sd_install.py::HOOK_SPECS`, pinned whole by
+#: `tests/test_sd_install.py`, and the section that teaches it is the one
+#: that states the matchers, `The restore side` in
+#: `skills/sd-handoff/SKILL.md`, rather than the Lane B section that cited
+#: the id already and teaches only what is not built.
 STRANDED_RULE_IDS = frozenset({
-    "R10-D3", "R10-D7",
+    "R10-D7",
     "R11-D1", "R11-D10", "R11-D13", "R11-D14", "R11-D15",
     "R11-D17", "R11-D20", "R11-D21",
     "R11-D24", "R11-D25", "R11-D27", "R11-D29", "R11-D30", "R11-D5", "R11-D6",
@@ -1888,6 +1898,14 @@ MUTATIONS: dict[str, Mutation] = {
         new="    if False:  # leg d: the auth_mode guard, defeated",
         test="tests.test_sd_review_codex.PreflightTests"
              ".test_a_non_chatgpt_auth_mode_refuses",
+    ),
+    "bin/sd_install.py::HOOK_SPECS": Mutation(
+        path="bin/sd_install.py",
+        old='    ("bin/sd-handoff-restore", "SessionStart", ("startup", "clear")),',
+        new='    ("bin/sd-handoff-restore", "SessionStart", '
+            '("startup", "clear", "compact")),',
+        test="tests.test_sd_install.IdempotencyTests"
+             ".test_the_hook_table_is_exactly_these_three_registrations",
     ),
     "bin/sd-status::_age_rows": Mutation(
         path="bin/sd-status",

@@ -14,10 +14,14 @@ or `.markdown` in any case, which is exactly how `points_into_code` in
 `test_the_scope_rule_is_the_doc_citation_gates` binds the two so they cannot
 drift apart: a suffix one of them starts treating differently fails here.
 
-**The table is patched, not listed.** The live table carries only `code` rows
-today, so the prose and `both` branches are exercised against a fixture table
-swapped in under `mock.patch`; the script must read `sd_rules.RULES` at call
-time for that to work, which is also what keeps it from holding a copy.
+**The table is patched, not listed.** The live table carried only `code` rows
+when this module landed (#997); `R13-D1` to `R13-D3` gave it `prose` rows on
+2026-09-16 (#1015), and `TheLiveTable` reads both branches off it as it
+stands. No live row is `both` on 2026-09-16, and the order and the block
+shape are questions about rows chosen for the purpose, so those are put to a
+fixture table swapped in under `mock.patch`; the script must read
+`sd_rules.RULES` at call time for that to work, which is also what keeps it
+from holding a copy.
 """
 
 from __future__ import annotations
