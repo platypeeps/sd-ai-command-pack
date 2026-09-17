@@ -126,7 +126,10 @@ reading, searching, or editing.
    Group dependent findings, expose verification gaps, and distinguish changes
    that are safe mechanical corrections from those needing author judgment.
 10. In `mode=edit`, map the explicit request or approval to finding IDs and
-    confirm the boundary before changing substantive material. Apply only that
+    confirm the boundary before changing substantive material. When the draft
+    is a file inside a repository, run `bin/sd-rules --for <path>` from that
+    repository's root before the first edit and cite the rule ids it prints in
+    the change ledger rather than restating the rules. Apply only that
     set; preserve citations, firsthand claims, uncertainty, deliberate choices,
     and representative language. If a requested edit would make the draft less
     correct, less supportable, misleading, unsafe, or inconsistent with another

@@ -34,7 +34,11 @@ create a PRD just to record routine progress or work already merged.
    the answer. In an authorized unattended run, record routine choices on the
    item and continue under `WORKFLOW.md`'s stop conditions.
 2. **Write from the templates** in `skills/sd-plan/templates/` (`prd.md`,
-   `design.md`, `implement.md`, `decision.md`, `work-README.md`). Create
+   `design.md`, `implement.md`, `decision.md`, `work-README.md`). Before
+   writing each page, run `bin/sd-rules --for docs/work/<item>/<page>.md`
+   (or `--for docs/decisions/<record>.md` under `--decision`) from the
+   repository root and cite the rule ids it prints in the page rather than
+   restating the rules. Create
    `<work>/README.md` from the template if the directory is new. Add
    `design.md` or `implement.md` only when explicitly requested. Adapt the
    templates to the selected work root's `.status-source` marker, including

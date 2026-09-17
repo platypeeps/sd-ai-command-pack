@@ -101,7 +101,11 @@ fix.
 7. **Change one variable per experiment.** Two edits and a green run leave you
    unable to say which one mattered, and the honest report of that experiment is
    that it produced no evidence. Revert between experiments rather than
-   accumulating them.
+   accumulating them. Before the first edit to a file, run
+   `bin/sd-rules --for <path>` from the repository root and cite the rule ids
+   it prints in the report's **Edits in the tree** entry for that file rather
+   than restating the rules; a test path draws the `bin/` rows too, because
+   the verb classes every non-markdown path as code.
 8. **Classify every piece of evidence** with exactly one primary class:
    - **observed** — seen in output, a log, a debugger, or a file that was read;
    - **inferred** — derived from something observed, with the derivation stated;
