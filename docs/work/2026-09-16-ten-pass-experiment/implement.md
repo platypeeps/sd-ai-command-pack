@@ -5,8 +5,10 @@
 - [x] 1. This item's three pages land on main. (lane) Done 2026-09-17: #991
       merged as e2810a6f, and `prd.md`, `design.md` and `implement.md` are on
       main at ea32e76a.
-- [ ] 2. OWNER-ONLY: answer the open question, which vendor is "the other
-      vendor" when Claude authors, as a note on sd:777.
+- [x] 2. OWNER-ONLY: answer the open question, which vendor is "the other
+      vendor" when Claude authors, as a note on sd:777. Done 2026-09-17: the
+      owner's decision note on sd:777 names Codex; `design.md` records it
+      (#1030, 7f4e0c3d).
 - [ ] 3. OWNER-ONLY: passes 1 to 10. The other vendor reviews the next ten
       code pull requests; after each, one note on sd:777 in the template in
       `prd.md`, cost copied from the query there, or in the `estimate` form

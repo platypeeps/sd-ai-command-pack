@@ -129,3 +129,6 @@ over the ten.
 - 2026-09-17 owner: the other vendor is Codex. `design.md` records it as a
   decision and drops the risk that summed Codex with a recovered vendor;
   implement step 2's note on sd:777 is still to be written.
+- 2026-09-17 owner: the decision note naming Codex is on sd:777, so the
+  note the previous entry called still to be written exists; implement step
+  2 is ticked.
