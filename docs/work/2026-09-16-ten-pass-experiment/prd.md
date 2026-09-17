@@ -122,4 +122,6 @@ over the ten.
   blocking finding, the accepted-severities sub-list had no value at zero
   accepted, fixed on the template line; ten non-blocking, all addressed.
   Copilot round on #1023 at dcc6a954, two findings folded: step 3 names
-  the `estimate` form, and the Problem's row count is dated.
+  the `estimate` form, and the Problem's row count is dated. Verification
+  round at c012a736, one finding folded: the re-record rule names the
+  counted set, current notes only, a superseded note excluded by id.

@@ -24,8 +24,10 @@ is the ledger; sd:10's other criteria settled there too.
   template in `prd.md`, and every pass note already recorded is re-recorded
   in the new shape, as a new note that names the note it supersedes, before
   the next pass runs, so the ten notes the report sums are one shape and
-  main states it. A pass recorded between the reversal and the re-recording
-  does not count toward ten.
+  main states it. The counted set is the current notes only: a replacement
+  note's first line names the note id it supersedes, a note so named is not
+  counted, and a note made between the reversal and the re-recording is
+  not a pass.
 - OPEN, owner: which vendor is "the other vendor" when Claude authors. The
   reviewer chain at `WORKFLOW.md:282` is `[codex, claude, minimax, kimi,
   baseten, exo]`, so Codex is first; MiniMax and Kimi are under recovery.
