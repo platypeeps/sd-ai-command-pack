@@ -455,6 +455,98 @@
       shebang with no suffix, which narrows what the `R11-D6` checker
       holds to the shebangs it names.
 
+      **Slice G, 2026-09-17. `STRANDED_RULE_IDS` 15 → 12.** `R11-D14`,
+      `R11-D27` and `R5-D1` are rows, the audit's slice 4, the store and
+      plugin contract, each committed alone first. The host skill was the
+      one owner decision the audit left on this slice, and team-lead took it
+      on 2026-09-17 under the standing "use your recommendation"
+      authorization, reversible by the owner: `skills/sd-help/SKILL.md`
+      hosts the section, because it is the only skill that names `sd
+      plugin` (lines 20 and 61 on `9832c193`, unchanged since `8548d512`) and
+      Dec-2 (note 1989) declined a new skill for the code rules, and the
+      same reasoning applies here. Re-measured on `9832c193`, none of the
+      cited files changed since `8548d512`: `R11-D14`'s definition is the
+      bold run at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:271`,
+      "The eight keys, written down", held by `source:bin/sd::validate_kind`
+      over `source:bin/sd::KIND_KEYS`, whose comment cites the id, and
+      pinned by `test_a_ninth_key_refuses` in
+      `source:tests/test_sd_plugin.py::KindTests`; the subject names the
+      constant and the count, not the keys, because that class already
+      holds a copy. `R11-D27`'s is the bold run at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:2358`,
+      the line edit, held by `source:bin/sd::edit_field` and
+      read back as bytes by
+      `test_a_set_leaves_every_line_it_did_not_edit_byte_identical` in
+      `source:tests/test_sd_store.py::WriteTests`. `R5-D1`'s is the table
+      cell at
+      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:206`,
+      "Obsidian vault stays system-of-record", held
+      by `source:bin/sd::store_list`, whose docstring cites the id, and by
+      `test_a_note_written_directly_into_the_vault_is_visible_to_the_next_query`
+      in `source:tests/test_sd_store.py::FreshnessTests`, the direct write
+      that module's docstring calls its load-bearing case. All three ids
+      were cited by no file under `skills/`. Teaching: one new section of
+      `skills/sd-help/SKILL.md`, `The store and plugin contract`, placed
+      between `Never`, whose last bullet names `sd plugin add`, and `State
+      of the tooling`, which names `sd plugin list`, so the two verbs the
+      section is about bracket it; three sentences, one per id, written as
+      instructions to the author with no enforcement verb, so leg b's
+      baseline did not move and `UNCITED_SKILL_CLAIMS` is untouched; it
+      carries the `bin/sd-rules --for <path>` pointer. Fail-first, each row
+      alone with the section, the meter and `MUTATIONS` as they stood:
+      `R11-D14` reddened four tests, `FAILED (failures=4)` -- both leg a
+      checks, `carries no heading 'The store and plugin contract'` and
+      `does not cite it`, leg c's archive baseline with the measured set
+      being the baseline minus `R11-D14`, and leg d's coverage with
+      `bin/sd::validate_kind` in the registry and not in `MUTATIONS`;
+      `R11-D27` and `R5-D1` each reddened two, `FAILED (failures=2)`, leg c
+      and leg d's coverage, the section citing them already. Each went to
+      `Ran 35 tests ... OK` with its meter line and its mutation. The
+      `R5-D1` mutation is not the audit's: the audit emptied the query,
+      which reddens the test but is not the violation the id names, and the
+      brief asked for a stale index if one fit the budget. This one writes
+      the kind's listing to a `.json` file in the kind's directory on the
+      first query and reads that file instead of the vault on every query
+      after, so the note the test writes by hand between two queries is
+      what the second cannot see -- red at the second read with `Lists
+      differ: [] != [{'title': 'Ship it', ...}]`, the first read green. Leg
+      d on all three in a fresh copy: `applied 1 control 0 violated 1
+      reverted 1 restored 0`, `enforcement_error` `None`, the named tests
+      red with `0 != 1 : registered pp` on the ninth key, `'status:
+      approved\n' != '---\nstatus: approved\nscore: 7\naliases:...'` on the
+      rebuilt note, and the `Lists differ` above. `LegD` whole: `Ran 9
+      tests in 11.278s`, `real 11.333s`, load 3.99 before and 4.00 after,
+      under Dec-6's 21 s. Mutations on byte copies, each restored by `diff
+      -q` rc 0: the three citations dropped from the section reddens leg a
+      with three `does not cite it` lines; the three ids put back into
+      `STRANDED_RULE_IDS` reddens leg c; each proof applied by hand in a
+      scratch copy reddens its named test with the line leg d quoted. After
+      this slice the twelve left are `R11-D1`, `R11-D5` and the ten
+      dashboard and history ids -- the repeal questions, the audit's slices
+      7 and 8, each an owner decision; no lane takes them without one.
+      From the two review rounds on #1021, four suppressed findings, all
+      taken as prose: the section's `R5-D1` sentence had named `sd store
+      get` beside `sd store list`, while the row's checker, mutation and
+      named test cover `store_list` only; `store_get` in `bin/sd` is a
+      separate read with no row and no mutation, so a stale-read regression
+      there would leave leg d green, and the sentence now names the listing
+      alone (a `store_get` row is not taken: it would be a second live row
+      on one id, which the registry does not carry). The `R11-D14` sentence
+      had read as a requirement to declare all eight keys, where
+      `KIND_REQUIRED` in `bin/sd` requires `fields` and `initial-status`
+      and the other six are optional, and now says so. The `R11-D27`
+      sentence had named `sd store add` beside `sd store set`, where
+      `edit_field` has one caller, `store_set`, and `store_add` renders a
+      new note whole from the kind's template; the sentence names `set`
+      alone and says what `add` does. And the `REPEALED` comment in
+      `bin/sd_rules.py` used `R5-D1` as its example of an id that must not
+      be reused, written when the id was stranded; the example is now
+      `R10-D2`, the one repealed row. Left for the owner: the `R11-D27`
+      row's subject still opens with `sd store add` and `sd store set`, the
+      archive definition's own wording, though the checker holds `set`'s
+      path only; the rows were held unchanged in the review fixes.
+
 - [x] **5. Code rules, citing sd:430's checkers.** `tests/test_code_health.py`
       already enforces complexity, length, depth and clone floor. These become
       registry rows pointing at the existing checkers — no new enforcement, only
@@ -848,3 +940,13 @@ The loads differ, so no ratio is claimed; the copy itself measured 2.16 s for
   taught under `Code health` in `skills/sd-check/SKILL.md`, whose intro now
   names the tests the rows name. Both sections name the verb. `LegD` real
   9.996 s at load 4.11.
+- 2026-09-17 step 4, slice G, and step 8's fourth teaching-section slice:
+  `STRANDED_RULE_IDS` 15 → 12. `R11-D14`, `R11-D27` and `R5-D1` are rows,
+  the store and plugin contract -- the closed kind vocabulary, checker
+  `bin/sd::validate_kind`; the frontmatter line edit, checker
+  `bin/sd::edit_field`; the vault as system-of-record, checker
+  `bin/sd::store_list`, proved by a stale index rather than an empty query
+  -- taught from a new `The store and plugin contract` in
+  `skills/sd-help/SKILL.md`, the host team-lead chose. The section names
+  the verb. `LegD` real 11.333 s at load 3.99. The twelve left are the
+  repeal questions, owner decisions.

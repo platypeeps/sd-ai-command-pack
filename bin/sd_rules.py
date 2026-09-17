@@ -94,7 +94,7 @@ LIVE = "live"
 #: A rule that has been withdrawn. Its id stays in the table forever.
 #:
 #: This state existed before the first repeal rather than after it, because a
-#: repealed id must never become reusable: live prose citing `R5-D1` must not
+#: repealed id must never become reusable: live prose citing `R10-D2` must not
 #: quietly start resolving to whatever rule next claims that id. A repealed row
 #: carries no checker and no proof -- there is nothing left to enforce -- and
 #: no skill has to teach it, so leg a skips it. Leg c still resolves it, which
@@ -314,6 +314,78 @@ RULES: tuple[Rule, ...] = (
               "goes red",
         scope="code",
         teaches="skills/sd-check/SKILL.md#Code health",
+    ),
+    #: The store and plugin contract, three rows taught from one section of
+    #: `skills/sd-help/SKILL.md` -- the one skill that names `sd plugin`, and
+    #: the host team-lead chose on 2026-09-17 for the reason Dec-2 declined a
+    #: new skill for the code rules. `R11-D14` closed the kind vocabulary at
+    #: the eight keys `KIND_KEYS` holds and made a ninth a decision record;
+    #: what enforces it is `validate_kind`, once, by name, and the subject
+    #: names the constant and the count rather than the keys, because the
+    #: test that pins them already holds a copy and a third would drift
+    #: (sd:431 step 8, slice 4, 2026-09-17).
+    Rule(
+        id="R11-D14",
+        subject="a plugin kind is described with the eight keys `KIND_KEYS` "
+                "in `bin/sd` holds and no other; `validate_kind` refuses a "
+                "manifest carrying any further key by name, so a ninth key "
+                "is a decision record and not a commit",
+        checker="bin/sd::validate_kind",
+        proof="replace the unknown-key guard `if unknown:` in `validate_kind` "
+              "of `bin/sd` with a condition that is never true, so a manifest "
+              "carrying a ninth key registers; `test_a_ninth_key_refuses` in "
+              "`tests/test_sd_plugin.py` goes red",
+        scope="code",
+        teaches="skills/sd-help/SKILL.md#The store and plugin contract",
+    ),
+    #: `R11-D27` is the line edit: a field write replaces or inserts one line
+    #: of the frontmatter and reads nothing else in, because a note parsed
+    #: and rendered back loses what the parser did not keep -- list items,
+    #: quoting, key order, blank lines -- and `sd`'s own reader is the one
+    #: reader that cannot see the loss. The checker is `edit_field`, the one
+    #: function every field write goes through, and the test reads the file
+    #: back as bytes rather than through `sd`.
+    Rule(
+        id="R11-D27",
+        subject="`sd store add` and `sd store set` write a frontmatter field "
+                "by replacing or inserting one line through `edit_field` in "
+                "`bin/sd`, so the note comes back byte-identical apart from "
+                "that line and is at no point parsed and rendered back",
+        checker="bin/sd::edit_field",
+        proof="replace the one-line assignment `lines[hits[0]] = ...` in "
+              "`edit_field` of `bin/sd` with one that rebuilds the list from "
+              "the rendered line alone, so every other line of the note is "
+              "dropped; "
+              "`test_a_set_leaves_every_line_it_did_not_edit_byte_identical` "
+              "in `tests/test_sd_store.py` goes red",
+        scope="code",
+        teaches="skills/sd-help/SKILL.md#The store and plugin contract",
+    ),
+    #: `R5-D1` is the oldest id in the table and the property the store was
+    #: rebuilt for: the vault is the system-of-record, and a query reads it
+    #: at the moment of asking rather than an index of it. The checker is
+    #: `store_list`, which lists the kind's directory on every call and
+    #: consults nothing else; the test writes a note by hand between two
+    #: queries and requires the second to see it. The mutation is a stale
+    #: index, not an empty listing, so what leg d proves is the violation the
+    #: id names.
+    Rule(
+        id="R5-D1",
+        subject="the vault is the system-of-record: an `sd store` query "
+                "lists the kind's notes from the vault directory at the "
+                "moment of asking, in `store_list` of `bin/sd`, with no index "
+                "consulted and nothing held between invocations, so a note "
+                "written by hand or by Obsidian is visible to the next query "
+                "with no sync step",
+        checker="bin/sd::store_list",
+        proof="make `store_list` in `bin/sd` write the kind's listing to an "
+              "index file on its first query and read that file instead of "
+              "the vault on every query after; a note written by hand between "
+              "two queries is then invisible to the second, and "
+              "`test_a_note_written_directly_into_the_vault_is_visible_to_the_next_query` "
+              "in `tests/test_sd_store.py` goes red",
+        scope="code",
+        teaches="skills/sd-help/SKILL.md#The store and plugin contract",
     ),
     #: The code rules, registered against sd:430's checkers and nothing new
     #: (owner decision 2026-09-14, Dec-1 and Dec-2): a new round for rules the
