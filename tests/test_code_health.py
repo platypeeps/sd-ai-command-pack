@@ -11,10 +11,14 @@ once said no. It could not: every capability adds lines, and refusing the lines
 means refusing the capability. A number that must be raised to let work proceed
 is a record of growth wearing the costume of a limit.
 
-Worse, it charged for prose. `bin/` measures 20,832 lines today -- already 29
-past the figure it was retired at, from work that landed in the days between,
-and nothing counts them now. Of those, 13,144 carry code and 7,688 are
-docstring, comment or blank. House style puts
+Worse, it charged for prose. When this module landed (2026-09-11, #811)
+`bin/` measured 20,832 lines -- already 29 past the figure it was retired at,
+from work that landed in the days between, and nothing counted them. Of those,
+13,144 carried code and 7,688 were docstring, comment or blank. Re-measured at
+sd:719 step 7 (#1013, 2026-09-17, after `bin/sd-dashboard`'s 39 lines left),
+`sources()` holds 44 files and 27,510 lines, 15,497 carrying code and 12,013
+docstring, comment or blank, by the same tokeniser; the share of prose has
+grown, and still nothing counts it. House style puts
 design reasoning in docstrings, so under a line cap explaining costs exactly
 what implementing costs, and the one time the cap actually bound, what got
 deleted was an explanation (`dashboard/` at 3,999 of 4,000, prose trimmed to
@@ -166,11 +170,15 @@ def _is_migration_tool(path: pathlib.Path) -> bool:
     """`bin/migrate-*`, and only there, because that is what still has a cap.
 
     The exception is inherited from `MIGRATE_CAP`, which governs `bin/migrate-*`
-    alone (`tests/test_loc_caps.py`). Keyed on the basename instead, it would
-    also drop a future `tests/migrate-*.py` -- and drop it from `sources()`
-    and from `expected` at once, so the corpus test would compare two sets that
-    agree about a file neither of them holds. That is the fail-open shape this
-    module exists to avoid, so the directory is part of the predicate.
+    alone (`tests/test_loc_caps.py`). The corpus has been `bin/` alone since
+    sd:719 step 7, so `sources()` and `expected` never see a `migrate-*` file
+    from another tree; the directory stays part of the predicate because it
+    states the cap's own scope rather than borrowing the caller's. Keyed on
+    the basename, a second tree added to the corpus later would widen the
+    exception the day it landed, dropping that tree's `migrate-*` files from
+    `sources()` and from `expected` at once, so the corpus test would compare
+    two sets that agree about a file neither of them holds. That is the
+    fail-open shape this module exists to avoid.
     """
 
     return path.parent.name == "bin" and path.name.startswith("migrate-")
