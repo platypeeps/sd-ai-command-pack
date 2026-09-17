@@ -178,7 +178,7 @@ header discusses at length; `dashboard/jira.py` was 363 lines of it until sd:719
 
 ## Acceptance criteria
 
-- [ ] The operator answers one question: do they intend to work Jira tickets
+- [x] The operator answers one question: do they intend to work Jira tickets
       such that a shadow row would be acted on? **Not answerable from the
       repository** — recorded here as the gate, not as a task.
 - [ ] If **no**: sd:361 is closed as not-to-be-built, `dashboard/jira.py` and
@@ -189,14 +189,14 @@ header discusses at length; `dashboard/jira.py` was 363 lines of it until sd:719
       not kept as a separate feature, because a reference now resolves against
       the shadow rows in the shared database, as `skills/sd-plan/SKILL.md`
       says.
-- [ ] If **yes**: the first step is configuration, not code —
+- [x] If **yes**: the first step is configuration, not code —
       `JIRA_BASE_URL` and `JIRA_EMAIL` exported where `sd shadow sync` runs,
       and one successful collect against the existing
       `dashboard/collect.py` (line 168 as of sd:361, retired at sd:719 step 4) loop proving a row can be produced at all.
       Only then is sd:603 taken, and only then is the port planned, with
       sd:361's "what to build" list rewritten to describe the migration rather
       than the construction.
-- [ ] Either way, sd:361's body is corrected so it no longer claims to be
+- [x] Either way, sd:361's body is corrected so it no longer claims to be
       building an iteration and per-tracker watermarks that exist.
 
 ## References
