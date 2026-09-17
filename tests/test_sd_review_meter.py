@@ -246,6 +246,11 @@ class TheUnusable(MeterFixture):
         self.assertEqual(self.reader.read, [])
 
     def test_a_ledger_fault_caps_the_metered_bill_naming_the_fault(self) -> None:
+        """On a `subscription` bill, so `capped_bills` lists nothing and the
+        line can only be the meter step's own."""
+        self.registry_path.write_text(REGISTRY.replace("cost: plan,", "cost: subscription,"), encoding="utf-8")
+        self.database.unlink()
+        self.seed()
         absent = sd_review.sd_lib.Imported(None, "sd_db is not installed in this virtualenv", "")
         with mock.patch.object(sd_review.sd_lib, "import_sd_db", return_value=absent):
             result = self.review()
