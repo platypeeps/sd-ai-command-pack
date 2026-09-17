@@ -153,7 +153,10 @@ Four slices, in this order. Slice 1 is not this repository's.
       path is refused naming the value and the pinned four, and the reader
       sends no request, with the same-host `http://` value as one of the
       cases; and a `meter_env` test: a bill with `meter:` and no
-      `meter_env:` is refused at registry read naming the bill.
+      `meter_env:` reads, and the meter step caps the bill naming the
+      missing field and sends nothing (owner decision 2026-09-17, note
+      2694, landed in step 4; the read-time refusal this step first
+      asked for is superseded).
       Landed 2026-09-16 for the bound's inputs: `refuse_unbounded` in
       `bin/sd_registry.py`, called from `_provider` on the file and from
       `_adapt` on the merged rows, with `TheBoundsInputs` in
