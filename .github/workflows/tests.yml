@@ -248,11 +248,18 @@ jobs:
       # exact-fill check (sd:965), `set_cap` and the capped usage reads
       # (sd:234), `budget_usd` refused on a start author (sd:235), and the
       # remove verbs (sd:754), none of which a pack test constructs.
+      #
+      # `f6761300` is one `sd_db` commit past `717b8e32`, system #445 (sd:788
+      # slice 4a): `sd_db.meter.latest`, the newest `meter` row for a bill
+      # and window across months. sd:788 slice 4b has `bin/sd-review` read
+      # it at review start; nothing on main at this commit imports it, so
+      # this bump changes no result here. Migration-free: `SCHEMA_VERSION`
+      # 9 at both pins.
       - name: Check out the system checkout, for sd_db
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          ref: 717b8e32b4922d7396e1f7521ad8908d7ba880d2
+          ref: f67613005d701fcd691610e71c6319e280380774
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false
