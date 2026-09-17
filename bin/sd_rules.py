@@ -99,7 +99,10 @@ LIVE = "live"
 #: carries no checker and no proof -- there is nothing left to enforce -- and
 #: no skill has to teach it, so leg a skips it. Leg c still resolves it, which
 #: is the point: prose citing a repealed rule is answered, not left dangling.
-#: The first row to carry it is `R10-D2`, below.
+#: The first row to carry it is `R10-D2`, below. A repealed row may also
+#: carry no `teaches`: a rule that no skill taught when it was withdrawn has
+#: no section to name, and a section invented for it would send a reader to
+#: a heading that says nothing about it (`R11-D1`, below, is the first).
 REPEALED = "repealed"
 
 #: The scopes a rule can have. `code` rules read source, `prose` rules read the
@@ -128,7 +131,9 @@ class Rule(NamedTuple):
     because two copies of a sentence are two things that can disagree. That
     second half has no mechanical check and this module does not claim one --
     asserting an enforcement nothing performs is the exact defect the registry
-    exists to end, and it would be absurd to commit it here.
+    exists to end, and it would be absurd to commit it here. A live row must
+    carry one; a `REPEALED` row may hold `None`, because nothing reads the
+    field on a withdrawn rule and a never-taught rule has no section to name.
     """
 
     id: str
@@ -136,7 +141,7 @@ class Rule(NamedTuple):
     checker: str | None
     proof: str | None
     scope: str
-    teaches: str
+    teaches: str | None
     state: str = LIVE
 
 
@@ -526,6 +531,187 @@ RULES: tuple[Rule, ...] = (
               "goes red",
         scope="prose",
         teaches="skills/sd-check/SKILL.md#Prose rules",
+    ),
+    #: The twelve repeals of sd:431 step 4, slice H, under one family decision
+    #: team-lead took on 2026-09-17 (Dec-9, recommended on note 2665 and
+    #: reversible by the owner by deleting these rows' `REPEALED` state).
+    #: None of the twelve was taught by any skill, so none names a section;
+    #: each keeps its id so the live prose that cites it is answered and the
+    #: id is never handed out again, and each keeps the archive's own sentence
+    #: as its subject so a reader following a citation learns what was ruled.
+    #:
+    #: The first two are the `R10-D2` shape (Dec-4): the enforcement each
+    #: id claims was never built or is gone. `R11-D1` pinned the local exo
+    #: model by name and had the preflight refuse a name absent from
+    #: `/v1/models`; nothing under `bin/` or `tests/` reads `/v1/models`,
+    #: and the `providers.yaml` entry it shaped ships `enabled: false`.
+    #: `R11-D5` put the bash 3.2 gate in CI; no CI job invokes
+    #: `check-bash32-syntax.sh`, as `CONTRIBUTING.md` records, and the local
+    #: `make check` lane that survives is `R11-D6`'s subject, not this one.
+    Rule(
+        id="R11-D1",
+        subject="the local exo provider on `:52415` is model-pinned by name "
+                "in config, and the preflight refuses a name absent from "
+                "`/v1/models`",
+        checker=None,
+        proof=None,
+        scope="code",
+        teaches=None,
+        state=REPEALED,
+    ),
+    Rule(
+        id="R11-D5",
+        subject="the bash 3.2 gate, `check-bash32-syntax.sh`, runs in CI",
+        checker=None,
+        proof=None,
+        scope="code",
+        teaches=None,
+        state=REPEALED,
+    ),
+    #: The ten dashboard and history ids, repealed as one family by the same
+    #: decision: sd:719 is `done` with `dashboard/` and `bin/sd_ledger.py`
+    #: deleted (#1013, #1017), so what each of them ruled on no longer
+    #: exists to be enforced. Per id, what that was, what took it, and what
+    #: still cites it -- every citation a record of what was decided, none a
+    #: consumer of a rule:
+    #:
+    #: - `R11-D10`: the phone's writes and the dashboard's GET-only
+    #:   assertion; `dashboard/` deleted; cited by sd:719's own pages.
+    #: - `R11-D13`: a sequencing decision, plugin registration ahead of
+    #:   step 6b, and a dashboard cap re-derived from the split; the cap
+    #:   left with `dashboard/`; cited by a `tests/test_sd_plugin.py`
+    #:   docstring as the point at which `kinds` was "never enforced". The
+    #:   enforcement that docstring says arrived later is the closed kind
+    #:   vocabulary, and that is `R11-D14`'s live row above, not this id's.
+    #: - `R11-D15`: the `bin/` cap at 14,000; retired by `R11-D48` on
+    #:   2026-09-11 (`tests/test_loc_caps.py`); cited by the 2026-09-05
+    #:   item's pages and a `tests/test_sd_review_boundary.py` comment.
+    #: - `R11-D17`: the plugin table contract, the loader's markup filter
+    #:   and `dashboard/` at 4,000; loader and directory deleted; cited by
+    #:   `tests/test_loc_caps.py`'s history.
+    #: - `R11-D20`: `kind` as a category and one alert per id;
+    #:   `dashboard/now.py` deleted; cited by sd:719's own pages.
+    #: - `R11-D21`: Queues as a plugin tab and a declared action in the
+    #:   manifest. The tab is deleted. `validate_actions` in `bin/sd`
+    #:   survives and refuses a malformed `dashboard.actions` block, but
+    #:   it validates the shape of a key no dashboard reads any more
+    #:   (sd:719 recorded the actions as staying in the manifest and
+    #:   leaving every dashboard), and no test names it, so a live row on
+    #:   it would carry a checker leg d cannot prove; cited by that
+    #:   function's docstring.
+    #: - `R11-D24`: the dashboard cap at 4,300 split into a total and a
+    #:   code-only ceiling; the three dashboard constants deleted at sd:719
+    #:   step 7. Its clause "a cap is never raised in the pull request that
+    #:   busts it" survives as prose in `tests/test_loc_caps.py` and
+    #:   `docs/workflow-control-capacity.md` with no checker; cited there,
+    #:   by the 2026-09-05 item's pages and by sd:719's.
+    #: - `R11-D25`: the read-only Queues tab; deleted; cited by the
+    #:   2026-09-05 item's prd.
+    #: - `R11-D29` and `R11-D30`: the dashboard total re-derived at 4,350
+    #:   and `DASHBOARD_CAP` re-derived under `dashboard/`; the constants
+    #:   deleted; cited by `tests/test_loc_caps.py`'s history, the
+    #:   2026-09-05 item's prd and sd:719's pages.
+    Rule(
+        id="R11-D10",
+        subject="the phone keeps its writes, and the dashboard's GET-only "
+                "assertion is temporary by design",
+        checker=None,
+        proof=None,
+        scope="code",
+        teaches=None,
+        state=REPEALED,
+    ),
+    Rule(
+        id="R11-D13",
+        subject="plugin registration moves ahead of step 6b, and the "
+                "dashboard cap is re-derived from the split rather than "
+                "from the estimate that set it",
+        checker=None,
+        proof=None,
+        scope="code",
+        teaches=None,
+        state=REPEALED,
+    ),
+    Rule(
+        id="R11-D15",
+        subject="the `bin/` cap is 14,000, derived from built code, and "
+                "`sd-help` leaves `bin/` because the taxonomy already said "
+                "it is not a command",
+        checker=None,
+        proof=None,
+        scope="code",
+        teaches=None,
+        state=REPEALED,
+    ),
+    Rule(
+        id="R11-D17",
+        subject="a plugin declares what its table can do and the backbone "
+                "does it; the markup it sends is filtered on the way out of "
+                "the loader; and `dashboard/` is re-derived at 4,000",
+        checker=None,
+        proof=None,
+        scope="code",
+        teaches=None,
+        state=REPEALED,
+    ),
+    Rule(
+        id="R11-D20",
+        subject="`kind` is a category and never a severity, and an alert id "
+                "identifies one alert",
+        checker=None,
+        proof=None,
+        scope="code",
+        teaches=None,
+        state=REPEALED,
+    ),
+    Rule(
+        id="R11-D21",
+        subject="Queues is a plugin tab, and the plugin contract grows a "
+                "declared action",
+        checker=None,
+        proof=None,
+        scope="code",
+        teaches=None,
+        state=REPEALED,
+    ),
+    Rule(
+        id="R11-D24",
+        subject="the dashboard cap is re-derived at 4,300 and split in two, "
+                "a total and a code-only ceiling prose cannot pay for",
+        checker=None,
+        proof=None,
+        scope="code",
+        teaches=None,
+        state=REPEALED,
+    ),
+    Rule(
+        id="R11-D25",
+        subject="the Queues tab is read-only, and setting a status stays in "
+                "Obsidian",
+        checker=None,
+        proof=None,
+        scope="code",
+        teaches=None,
+        state=REPEALED,
+    ),
+    Rule(
+        id="R11-D29",
+        subject="the dashboard total is re-derived at 4,350, itemised",
+        checker=None,
+        proof=None,
+        scope="code",
+        teaches=None,
+        state=REPEALED,
+    ),
+    Rule(
+        id="R11-D30",
+        subject="`DASHBOARD_CAP` is re-derived, and the invariant the "
+                "re-derivation holds is nothing under `dashboard/`",
+        checker=None,
+        proof=None,
+        scope="code",
+        teaches=None,
+        state=REPEALED,
     ),
 )
 
