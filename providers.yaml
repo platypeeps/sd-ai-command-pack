@@ -19,7 +19,7 @@ bills:
   anthropic: { cost: subscription }
   openai:    { cost: subscription }
   moonshot:  { cost: prepaid }
-  minimax:   { cost: plan, meter: "https://www.minimax.io/v1/token_plan/remains" }
+  minimax:   { cost: plan, meter: "https://www.minimax.io/v1/token_plan/remains", meter_env: MINIMAX_API_KEY }
   baseten:   { cost: company, cap_usd_month: 50 }
   local:     { cost: local }
 

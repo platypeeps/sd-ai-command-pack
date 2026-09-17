@@ -261,7 +261,7 @@ minimum of one review. Tier selection still follows repository policy.
       anthropic: { cost: subscription }
       openai:    { cost: subscription }
       moonshot:  { cost: prepaid }
-      minimax:   { cost: plan, meter: "https://www.minimax.io/v1/token_plan/remains" }
+      minimax:   { cost: plan, meter: "https://www.minimax.io/v1/token_plan/remains", meter_env: MINIMAX_API_KEY }
       baseten:   { cost: company, cap_usd_month: 50 }
       local:     { cost: local }
     providers:
@@ -298,12 +298,20 @@ carries a meter instead: the plan grants use in a five-hour window and a
 weekly window, and `GET /v1/token_plan/remains` on `www.minimax.io`, with
 the same key, answers with `current_interval_remaining_percent` and
 `current_weekly_remaining_percent` for `model_name: general`, probed
-2026-09-05. The bill carries that meter as a URL, and that is all it does
-today: nothing probes it, nothing writes `meter` rows, and fallthrough does
-not read either window. The design is for the meter to write the two
-percents as `meter` rows Today shows beside the bill, with a `plan` bill
-reserving no dollars and fallthrough skipping it while either window reads
-zero; the two Baseten tools pin
+2026-09-05. The bill carries that meter as a URL and the variable holding
+its key as `meter_env`, and every `sd-review` start reads it: one `GET` to
+that URL, and to no other -- the scheme, host, port and path are pinned in
+`bin/sd_registry.py` and any other value is refused naming the value and
+the four, with nothing sent -- then the two percents written as `meter`
+rows for every enabled entry on the bill, then the newest row per window
+read back. A window at zero, no row at all, or a newest row older than
+five hours puts the bill beside the capped ones, so fallthrough passes it
+over and `--provider` refuses it by name; a `GET` that fails writes nothing,
+names itself in the result's `meter_faults`, and the rows already there
+decide; `--explain` and `--dry-run` send nothing and read the rows alone. A
+`meter:` without a `meter_env:` reads, and caps the bill at that step naming
+the missing field, because a reinstall never rewrites this file in your
+home. The two Baseten tools pin
 DeepSeek V4 Pro, whose 0813 build is the cheapest of Baseten's frontier
 reviewers. `max_tokens` bounds generated reasoning and the final answer together;
 exhausting it does not establish that the review subject was too large.

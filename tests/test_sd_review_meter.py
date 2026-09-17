@@ -20,11 +20,12 @@ from unittest import mock
 from sd_db import connect
 from sd_db.meter import sample
 
+from tests.test_sd_registry import RECORDED_METER
 from tests.test_sd_review import FakeClient, namespace, sd_review
 from tests.test_sd_review_ledger import LedgerFixture, usage_answer
-from tests.test_sd_registry import RECORDED_METER
 
 PINNED = "https://www.minimax.io/v1/token_plan/remains"
+STAMP = r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00"
 #: A `plan` bill carrying the meter and its key variable, one `url` entry on
 #: it with the price and `max_tokens` a capped base needs, and an uncapped
 #: entry beside it so the fallthrough has somewhere to go.
@@ -101,19 +102,28 @@ class MeterFixture(LedgerFixture):
         finally:
             connection.close()
 
-    def assert_passed_over_and_refused(self, line: str) -> dict[str, Any]:
+    def assert_passed_over_and_refused(self, line: str | re.Pattern[str]) -> dict[str, Any]:
         """Both roads on one line: fallthrough marks `metered` with it and
-        goes to `free`; `--provider metered` raises it and sends nothing."""
+        goes to `free`; `--provider metered` raises it and sends nothing. A
+        pattern stands for a line carrying the stamp of a row this run wrote."""
+        def matches(found: str, prefix: str = "") -> None:
+            if isinstance(line, str):
+                self.assertEqual(found, prefix + line)
+            else:
+                self.assertRegex(found, "^" + re.escape(prefix) + line.pattern)
+
         client = FakeClient(default=usage_answer())
         result = self.review(client)
         self.assertEqual(result["reviewed_by"], ["free"])
-        self.assertEqual(result["capped_bills"], {"plan": line})
+        self.assertEqual(list(result["capped_bills"]), ["plan"])
+        matches(result["capped_bills"]["plan"])
         reasons = {row["provider"]: row["reason"] for row in result["chain"] if not row["eligible"]}
-        self.assertEqual(reasons, {"metered": f"metered is billed to plan: {line}"})
+        self.assertEqual(list(reasons), ["metered"])
+        matches(reasons["metered"], "metered is billed to plan: ")
         picked = FakeClient(default=usage_answer())
         with self.assertRaises(sd_review.sd_registry.ConsentRefusal) as caught:
             self.review(picked, provider="metered")
-        self.assertEqual(str(caught.exception), f"metered is billed to plan: {line}")
+        matches(str(caught.exception), "metered is billed to plan: ")
         self.assertEqual(picked.sent, [])
         return result
 
@@ -130,18 +140,12 @@ class TheReading(MeterFixture):
 
     def test_a_zero_five_hour_window_is_passed_over_and_refused_by_name(self) -> None:
         self.reader = FakeMeter((0, recorded(current_interval_remaining_percent=0), "", True, 200))
-        result = self.review()
-        stamp = re.search(r"read at (\S+)\)", result["capped_bills"]["plan"])
-        self.assertIsNotNone(stamp)
-        self.assert_passed_over_and_refused(f"plan's five-hour window reads 0 percent remaining (read at {stamp.group(1)})")  # type: ignore[union-attr]
+        self.assert_passed_over_and_refused(re.compile(r"plan's five-hour window reads 0 percent remaining \(read at " + STAMP + r"\)$"))
         self.assertEqual([row[2:] for row in self.meter_rows()][:2], [(300, 100.0), (10080, 0.0)])
 
     def test_a_zero_weekly_window_is_passed_over_and_refused_by_name(self) -> None:
         self.reader = FakeMeter((0, recorded(current_weekly_remaining_percent=0), "", True, 200))
-        result = self.review()
-        stamp = re.search(r"read at (\S+)\)", result["capped_bills"]["plan"])
-        self.assertIsNotNone(stamp)
-        self.assert_passed_over_and_refused(f"plan's weekly window reads 0 percent remaining (read at {stamp.group(1)})")  # type: ignore[union-attr]
+        self.assert_passed_over_and_refused(re.compile(r"plan's weekly window reads 0 percent remaining \(read at " + STAMP + r"\)$"))
         self.assertEqual([row[2:] for row in self.meter_rows()][:2], [(300, 0.0), (10080, 100.0)])
 
     def test_a_fresh_answer_is_written_before_classification(self) -> None:
@@ -208,17 +212,9 @@ class TheMissingAndTheStale(MeterFixture):
     def test_an_http_error_is_a_failed_get(self) -> None:
         self.seed_reading(100)
         self.reader = FakeMeter((401, "{}", "HTTP 401 from the meter of bill 'plan'", True, 401))
-        result = self.assert_passed_over_and_refused(f"plan's five-hour window reads 0 percent remaining (read at {self.newest()})")
+        result = self.assert_passed_over_and_refused(re.compile(r"plan's five-hour window reads 0 percent remaining \(read at " + STAMP + r"\)$"))
         self.assertIn("HTTP 401", result["meter_faults"]["plan"])
         self.assertEqual(len(self.meter_rows()), 2)
-
-    def newest(self) -> str:
-        connection = connect(self.database, write=False)
-        try:
-            return str(connection.execute("SELECT timestamp FROM cost WHERE source = 'meter' AND window_minutes = 300 "
-                                          "ORDER BY timestamp DESC, id DESC LIMIT 1").fetchone()[0])
-        finally:
-            connection.close()
 
 
 class TheUnusable(MeterFixture):
