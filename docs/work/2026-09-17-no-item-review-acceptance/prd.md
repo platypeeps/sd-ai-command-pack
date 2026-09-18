@@ -381,7 +381,7 @@ The named no-item test module below is proposed.
 - [x] `make check` exits 0 for each implementation delivery; `sd-docs-lint` reports `clean` for its PR description.
 - [x] A fixture-based manual-workflow test rejects changed HEAD or evidence between acceptance and publication preflight.
 - [x] The tooling delivery clears its existing review gate without invoking its new no-item acceptance path.
-- [ ] The retained archive restores every required review artifact with matching bytes and digests before import.
+- [x] The retained archive restores every required review artifact with matching bytes and digests before import.
 - [x] The independent backup lies outside the checkout, common Git directory, and temporary storage, with verified canonical path and digest.
 - [x] Restoration succeeds from that copy alone when the primary evidence path is unavailable in the isolated fixture.
 - [x] Acceptance uses durable canonical evidence after temporary sources disappear; publication preflight rejects missing or changed durable evidence.
