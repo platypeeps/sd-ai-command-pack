@@ -198,10 +198,10 @@ FENCE_LINE = re.compile(r"^\s*```")
 #: switched off, which is the failure this whole check exists to prevent.
 OVERRIDES_HEADING = "Local overrides of the shared template"
 
-#: One entry in that section: the template section it replaces, then why.
-#: The section is named exactly as a finding names it, so a reader can move a
-#: `FAIL ... `## X`` line into the list by copying the backticked part across.
-OVERRIDE_ENTRY = re.compile(r"^-\s+`##\s+(?P<head>[^`\n]+)`\s*(?P<reason>.*)$", re.S)
+#: Each entry names an H2 section or the opening, followed by its reason.
+OVERRIDE_ENTRY = re.compile(
+    r"^-\s+`(?:##\s+(?P<head>[^`\s][^`\n]*)|the opening)`\s*(?P<reason>.*)$", re.S
+)
 
 
 def sections(text):
@@ -286,6 +286,11 @@ def only_a_local_value(template_block, repo_block):
 REWORDED_FLOOR = 0.40
 
 
+def section_name(head):
+    """Use one label for drift findings and override reports."""
+    return f"`## {head}`" if head else "the opening"
+
+
 def drift(template_text, repo_text):
     """Template-owned blocks this repo no longer carries.
 
@@ -305,7 +310,7 @@ def drift(template_text, repo_text):
 
     for head, body in sections(template_text):
         seen.add(head)
-        name = f"`## {head}`" if head else "the opening"
+        name = section_name(head)
         if head not in repo_sections:
             findings.append((name, "section is missing", ""))
             continue
@@ -334,18 +339,19 @@ def drift(template_text, repo_text):
 
 
 def declared_overrides(repo_text):
-    """Template sections this repo says it states differently, and why.
-
-    Returns `{section heading: reason}`, with an empty reason for an entry that
-    gave none -- reported as a failure rather than honoured, because an override
-    with no reason is indistinguishable from drift someone wanted to stop
-    hearing about, and that is the one use of this section that would break it.
-    """
+    """Return declared reasons by heading; the empty heading denotes the opening."""
 
     body = next((text for head, text in sections(repo_text)
                  if head == OVERRIDES_HEADING), "")
+    # Examples must not authorize overrides, including fences next to prose.
+    lines, fence = [], False
+    for line in body.splitlines():
+        if FENCE_LINE.match(line):
+            fence = not fence
+        elif not fence:
+            lines.append(line)
     found: dict[str, str] = {}
-    for block in blocks(body):
+    for block in blocks("\n".join(lines)):
         # Split the bullet list back into bullets, keeping each entry's
         # continuation lines with it: a reason wraps, and the wrapped half is
         # the half that says why.
@@ -353,7 +359,7 @@ def declared_overrides(repo_text):
             match = OVERRIDE_ENTRY.match(entry.strip())
             if match:
                 reason = flat(match.group("reason")).strip(" —-:")
-                found[match.group("head").strip()] = reason
+                found[(match.group("head") or "").strip()] = reason
     return found
 
 
@@ -370,12 +376,12 @@ def override_faults(declared, template_heads):
     for head in sorted(declared):
         if head not in template_heads:
             faults.append(
-                f"  FAIL CLAUDE.md `## {head}`: declared a local override of a "
+                f"  FAIL CLAUDE.md {section_name(head)}: declared a local override of a "
                 "section the template does not have — fix the name, or drop the "
                 "entry now that the template has moved on")
         elif not declared[head]:
             faults.append(
-                f"  FAIL CLAUDE.md `## {head}`: declared a local override with "
+                f"  FAIL CLAUDE.md {section_name(head)}: declared a local override with "
                 "no reason — say why this repo states it differently, or delete "
                 "the entry and re-sync the section")
     return faults
@@ -392,7 +398,7 @@ def apply_overrides(findings, repo_text, template_text):
     """
 
     declared = declared_overrides(repo_text)
-    template_heads = {head for head, _ in sections(template_text) if head}
+    template_heads = {head for head, _ in sections(template_text)}
     faults = override_faults(declared, template_heads)
     honoured = {head for head in declared if head in template_heads and declared[head]}
 
@@ -402,13 +408,14 @@ def apply_overrides(findings, repo_text, template_text):
     # quietly: an override is a standing decision and should keep asking to be
     # re-read, not disappear into a clean report.
     for head in sorted(honoured):
-        skipped = len([f for f in findings if f[0] == f"`## {head}`"])
-        print(f"  ok   CLAUDE.md `## {head}`: overridden locally "
+        name = section_name(head)
+        skipped = len([f for f in findings if f[0] == name])
+        print(f"  ok   CLAUDE.md {name}: overridden locally "
               f"({skipped} template block(s) not compared) — {declared[head]}")
     for line in faults:
         print(line)
 
-    silenced = {f"`## {head}`" for head in honoured}
+    silenced = {section_name(head) for head in honoured}
     return [f for f in findings if f[0] not in silenced], len(faults)
 
 

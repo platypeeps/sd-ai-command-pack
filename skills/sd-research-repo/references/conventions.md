@@ -46,32 +46,30 @@ one-directional: the template is a floor, not a ceiling. Anything the repo adds
 — a whole local section, an extra paragraph inside a shared one — is the repo
 doing its job and is counted, never reported.
 
-### Saying a section is different on purpose
+### Declare intentional differences
 
-What the repo *replaces* is the case a one-directional check cannot read, so the
-repo declares it:
+Declare each intentional replacement under this heading:
 
 ```markdown
 ## Local overrides of the shared template
 
-- `## Publishing — Notion, not artifacts` — this repo's Notion folder is a team
-  space, so the template's personal `file:///` Source header is replaced by a
-  mirror shape carrying no path from anyone's checkout.
+- `the opening`: use STE-Concise sentences without changing the template instructions.
+- `## Publishing — Notion, not artifacts`: omit personal checkout paths from shared Notion pages.
 ```
 
-Name the section exactly as `review` names it, so a finding can be moved into
-the list by copying its backticked part across. Then:
+Use the exact template heading, including `##`, inside backticks.
+Use `the opening` for content before the first H2 heading, including the document title.
+Place actual declarations outside code fences.
+The parser ignores examples inside triple-backtick fences.
 
-- Every entry states a reason. An entry without one fails the review — an
-  override with no reason cannot be told from drift someone wanted to stop
-  hearing about, which is the one use of this list that would break it.
-- An entry naming a section the template does not have fails too, so a stale
-  override cannot sit here covering nothing.
-- `review` prints each honoured override as an `ok` line saying how many
-  template blocks it stopped comparing. That is the standing cost of an
-  override: later template changes to that section land unseen. Keep overrides
-  to the narrowest section that carries the difference, and re-read the
-  template's copy of that section when the pack moves.
+- State a reason for each entry. Missing reasons fail review and leave drift findings active.
+- Name an existing template section. Unknown sections fail review.
+- Keep overrides narrow. An opening override does not cover H2 sections.
+- Read each overridden section again when the template changes. Later changes within that section receive no comparison.
+
+`review` prints each accepted override, its reason, and the count of suppressed drift findings.
+The opening declaration follows the same rules as section declarations.
+The parser and filtering logic live in `source:bin/sd_research_review.py::declared_overrides` and `source:bin/sd_research_review.py::apply_overrides`.
 
 A repo with no `CLAUDE.md` at all, and a pack install whose `skills/` is missing
 from beside its `bin/`, both fail the review rather than passing quietly: a gate

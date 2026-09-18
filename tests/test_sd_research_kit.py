@@ -611,6 +611,93 @@ class LocalOverrideTests(unittest.TestCase):
         )
         self.assertEqual(found, [])
 
+    def opening_changed(self) -> str:
+        changed = self.template.replace("Applies to this repo.", "Use these repository conventions.")
+        self.assertNotEqual(changed, self.template)
+        return changed
+
+    def test_declared_opening_override_is_honoured(self) -> None:
+        count, printed = self.report(
+            self.opening_changed() + self.OVERRIDE_HEAD
+            + "- `the opening`: use STE-Concise sentences.\n"
+        )
+        self.assertEqual(count, 0, printed)
+        self.assertIn("the opening: overridden locally (1 template block(s) not compared)", printed)
+        self.assertIn("use STE-Concise sentences", printed)
+
+    def test_undeclared_opening_change_still_fails(self) -> None:
+        count, printed = self.report(self.opening_changed())
+        self.assertEqual(count, 1, printed)
+        self.assertIn("FAIL CLAUDE.md the opening", printed)
+
+    def test_opening_override_requires_a_reason(self) -> None:
+        for suffix in ("", ":", " — "):
+            with self.subTest(suffix=suffix):
+                count, printed = self.report(
+                    self.opening_changed() + self.OVERRIDE_HEAD + f"- `the opening`{suffix}\n"
+                )
+                self.assertEqual(count, 2, printed)
+                self.assertIn("the opening: declared a local override with no reason", printed)
+                self.assertIn("FAIL CLAUDE.md the opening: reworded", printed)
+
+    def test_opening_override_does_not_excuse_section_drift(self) -> None:
+        changed = self.opening_changed().replace(
+            "Use only the directories this repo needs; do not invent new ones.\n", ""
+        )
+        count, printed = self.report(
+            changed + self.OVERRIDE_HEAD + "- `the opening`: use STE-Concise sentences.\n"
+        )
+        self.assertEqual(count, 1, printed)
+        self.assertIn("FAIL CLAUDE.md `## Layout`", printed)
+        self.assertNotIn("FAIL CLAUDE.md the opening", printed)
+
+    def test_opening_and_heading_with_same_name_are_distinct(self) -> None:
+        declared = self.module.declared_overrides(
+            self.OVERRIDE_HEAD + "- `the opening`: shorten the preamble.\n"
+            + "- `## the opening`: rename this section.\n"
+        )
+        self.assertEqual(declared, {"": "shorten the preamble.", "the opening": "rename this section."})
+
+    def test_fenced_opening_override_is_not_a_declaration(self) -> None:
+        for prefix in ("", "Example:\n"):
+            with self.subTest(prefix=prefix):
+                count, printed = self.report(
+                    self.opening_changed() + self.OVERRIDE_HEAD + prefix
+                    + "```markdown\n- `the opening`: an example, not a declaration.\n```\n"
+                )
+                self.assertEqual(count, 1, printed)
+                self.assertIn("FAIL CLAUDE.md the opening", printed)
+                self.assertNotIn("overridden locally", printed)
+
+    def test_heading_override_does_not_excuse_opening_drift(self) -> None:
+        template = "# Title\n\nOriginal opening.\n\n## the opening\n\nOriginal section.\n"
+        changed = "# Title\n\nChanged opening.\n\n## the opening\n\nChanged section.\n"
+        findings, _ = self.module.drift(template, changed)
+        with unittest.mock.patch("sys.stdout", new_callable=io.StringIO):
+            remaining, faults = self.module.apply_overrides(
+                findings, changed + self.OVERRIDE_HEAD
+                + "- `## the opening`: shorten this section.\n", template
+            )
+        self.assertEqual(faults, 0)
+        self.assertEqual([entry[0] for entry in remaining], ["the opening"])
+
+    def test_fenced_section_override_is_not_a_declaration(self) -> None:
+        count, printed = self.report(
+            self.replaced + self.OVERRIDE_HEAD
+            + "```markdown\n- `## Style`: an example, not a declaration.\n```\n"
+        )
+        self.assertEqual(count, 1, printed)
+        self.assertIn("FAIL CLAUDE.md `## Style`", printed)
+        self.assertNotIn("overridden locally", printed)
+
+    def test_blank_heading_does_not_authorize_an_opening_override(self) -> None:
+        count, printed = self.report(
+            self.opening_changed() + self.OVERRIDE_HEAD + "- `##   `: shorten the preamble.\n"
+        )
+        self.assertEqual(count, 1, printed)
+        self.assertIn("FAIL CLAUDE.md the opening", printed)
+        self.assertNotIn("overridden locally", printed)
+
 
 class InitClaudeMdTests(unittest.TestCase):
     """`init-claude-md` lays the first copy, and only ever the first.
