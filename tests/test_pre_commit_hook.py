@@ -46,7 +46,10 @@ import unittest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 HOOK = REPO_ROOT / "hooks" / "pre-commit"
 LINK_TARGET = "../../hooks/pre-commit"
-DESIGN = REPO_ROOT / "docs/work/2026-09-12-every-rule-is-a-row-and-a-checker/design.md"
+DESIGN = (
+    REPO_ROOT / "docs/work/archive/2026-09"
+    / "2026-09-12-every-rule-is-a-row-and-a-checker/design.md"
+)
 BUDGET_LINE = re.compile(r"^# Budget: (\d+) s wall on a one-file diff\.$", re.MULTILINE)
 CONSTANT_LINE = re.compile(r"^BUDGET_SECONDS = (\d+)$", re.MULTILINE)
 SKIP_VARIABLE = "SD_SKIP_HOOKS"
