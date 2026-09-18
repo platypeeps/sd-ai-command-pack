@@ -342,50 +342,50 @@ Manual clearance does not make remote publication atomic. Exact-commit push and 
 
 The named no-item test module below is proposed.
 
-- [ ] `python -m unittest discover -s tests -p 'test_sd_ship_no_item.py'` passes with zero failures.
-- [ ] That suite proves accepted exact-head clearance makes zero provider calls and creates no work-item rows.
-- [ ] No-item construction never calls item lookup or publication-client constructors; item-backed construction and output remain compatible.
+- [x] `python -m unittest discover -s tests -p 'test_sd_ship_no_item.py'` passes with zero failures.
+- [x] That suite proves accepted exact-head clearance makes zero provider calls and creates no work-item rows.
+- [x] No-item construction never calls item lookup or publication-client constructors; item-backed construction and output remain compatible.
 - [ ] That suite proves missing depth, failed checks, stale source, changed evidence, and stale tool bindings each refuse clearance.
-- [ ] That suite proves duplicate blockers require separate responses and invalid dispositions cannot clear a blocker.
-- [ ] That suite proves imports preserve failed attempts and all three checker passes without granting clearance.
-- [ ] Three imported passes and zero native passes refuse unapproved dispatch; approved dispatch creates reservation four before its provider call.
+- [x] That suite proves duplicate blockers require separate responses and invalid dispositions cannot clear a blocker.
+- [x] That suite proves imports preserve failed attempts and all three checker passes without granting clearance.
+- [x] Three imported passes and zero native passes refuse unapproved dispatch; approved dispatch creates reservation four before its provider call.
 - [ ] That case rejects stale combined-prefix approval, incomplete aggregate input, missing author exclusions, and incorrect full-branch coverage.
-- [ ] One-, two-, and three-import cases each require explicit native continuation and validate their global request ordinals.
-- [ ] Each case dispatches full-branch review with complete history and never selects imported fix-only coverage.
-- [ ] A native-only control retains the existing initial-review and fix-verification behavior.
-- [ ] Accepted clearance rejects each add, remove, reorder, and content mutation of imported history.
-- [ ] Branch rename, same-HEAD branch copy, and descendant continuation preserve the record and budget; conflicting records refuse dispatch.
+- [x] One-, two-, and three-import cases each require explicit native continuation and validate their global request ordinals.
+- [x] Each case dispatches full-branch review with complete history and never selects imported fix-only coverage.
+- [x] A native-only control retains the existing initial-review and fix-verification behavior.
+- [x] Accepted clearance rejects each add, remove, reorder, and content mutation of imported history.
+- [x] Branch rename, same-HEAD branch copy, and descendant continuation preserve the record and budget; conflicting records refuse dispatch.
 - [ ] Creation and rebinding are atomic, provider-free, and refuse concurrent index changes without orphaning reservations.
-- [ ] Related item-backed receipts refuse no-item allocation, import, dispatch, and clearance without changing either mode's history.
-- [ ] Real-library enumeration needs no known item IDs; schema drift, query errors, and malformed records refuse before dispatch or clearance.
-- [ ] Rebinding preserves all prior prefix digests and request bindings while invalidating acceptance, including a branch-name round trip.
-- [ ] Empty or uncommitted branches refuse allocation; distinct committed changes with a shared base receive independent records.
+- [x] Related item-backed receipts refuse no-item allocation, import, dispatch, and clearance without changing either mode's history.
+- [x] Real-library enumeration needs no known item IDs; schema drift, query errors, and malformed records refuse before dispatch or clearance.
+- [x] Rebinding preserves all prior prefix digests and request bindings while invalidating acceptance, including a branch-name round trip.
+- [x] Empty or uncommitted branches refuse allocation; distinct committed changes with a shared base receive independent records.
 - [ ] Close and reopen preserve every pass, invalidate acceptance, and refuse concurrent writes. Interrupted reservations remain spent.
 - [ ] Closed branch aliases permit unrelated committed work, but identical content retains its original review budget.
-- [ ] Ambiguity and capacity limits produce actionable refusals without deleting evidence; existing records remain readable.
+- [x] Ambiguity and capacity limits produce actionable refusals without deleting evidence; existing records remain readable.
 - [ ] Item-backed golden fixtures retain receipt, request, and acceptance-binding shapes, key derivation, and history digests.
-- [ ] Changed gate code changes tool-binding values; prior acceptance refuses until renewed validation and explicit approval.
-- [ ] Each extracted gate or adapter appears in a binding manifest; mutating its bytes refuses stale clearance in each applicable mode.
-- [ ] No-item acceptance uses the exact `ship-adjudication-no-item:` key; item-backed acceptance keeps its original key derivation.
-- [ ] Both acceptance readers reject a receipt from the other mode, including a forged copy under the expected key.
-- [ ] That suite proves missing bindings, conflicting histories, invalid ancestry, and stale approval digests cannot authorize publication.
+- [x] Changed gate code changes tool-binding values; prior acceptance refuses until renewed validation and explicit approval.
+- [x] Each extracted gate or adapter appears in a binding manifest; mutating its bytes refuses stale clearance in each applicable mode.
+- [x] No-item acceptance uses the exact `ship-adjudication-no-item:` key; item-backed acceptance keeps its original key derivation.
+- [x] Both acceptance readers reject a receipt from the other mode, including a forged copy under the expected key.
+- [x] That suite proves missing bindings, conflicting histories, invalid ancestry, and stale approval digests cannot authorize publication.
 - [ ] That suite proves concurrent record changes refuse acceptance and repeated validation appends no acceptance receipt.
-- [ ] That suite proves item-backed and no-item receipts cannot authorize each other's publication.
-- [ ] That suite reads the persisted reservation from the provider stub before allowing dispatch.
-- [ ] Exit, timeout, and interruption tests resume with the spent pass retained and reject unapproved extra dispatches.
-- [ ] The real provisioned `sd_db` passes no-item storage tests against an isolated database; missing interfaces produce a clear refusal.
+- [x] That suite proves item-backed and no-item receipts cannot authorize each other's publication.
+- [x] That suite reads the persisted reservation from the provider stub before allowing dispatch.
+- [x] Exit, timeout, and interruption tests resume with the spent pass retained and reject unapproved extra dispatches.
+- [x] The real provisioned `sd_db` passes no-item storage tests against an isolated database; missing interfaces produce a clear refusal.
 - [ ] A real shared GitHub guard rejects a moved remote HEAD before merge dispatch, with zero merge API calls.
 - [ ] The documented manual merge request includes the expected HEAD; its fixture rejects a mismatched server-side SHA.
-- [ ] `python -m unittest discover -s tests -p 'test_sd_ship*.py'` passes with zero failures.
-- [ ] `python -m unittest discover -s tests -p 'test_code_health.py'` passes without raising any baseline.
-- [ ] `make check` exits 0 for each implementation delivery; `sd-docs-lint` reports `clean` for its PR description.
-- [ ] A fixture-based manual-workflow test rejects changed HEAD or evidence between acceptance and publication preflight.
-- [ ] The tooling delivery clears its existing review gate without invoking its new no-item acceptance path.
+- [x] `python -m unittest discover -s tests -p 'test_sd_ship*.py'` passes with zero failures.
+- [x] `python -m unittest discover -s tests -p 'test_code_health.py'` passes without raising any baseline.
+- [x] `make check` exits 0 for each implementation delivery; `sd-docs-lint` reports `clean` for its PR description.
+- [x] A fixture-based manual-workflow test rejects changed HEAD or evidence between acceptance and publication preflight.
+- [x] The tooling delivery clears its existing review gate without invoking its new no-item acceptance path.
 - [ ] The retained archive restores every required review artifact with matching bytes and digests before import.
 - [x] The independent backup lies outside the checkout, common Git directory, and temporary storage, with verified canonical path and digest.
 - [x] Restoration succeeds from that copy alone when the primary evidence path is unavailable in the isolated fixture.
-- [ ] Acceptance uses durable canonical evidence after temporary sources disappear; publication preflight rejects missing or changed durable evidence.
-- [ ] Archive restoration preserves exact bytes; relocated evidence requires a new explicitly approved proposal digest.
+- [x] Acceptance uses durable canonical evidence after temporary sources disappear; publication preflight rejects missing or changed durable evidence.
+- [x] Archive restoration preserves exact bytes; relocated evidence requires a new explicitly approved proposal digest.
 
 Checker follow-up verification remains separate from this item's delivery criteria:
 
