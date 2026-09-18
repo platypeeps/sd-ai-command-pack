@@ -179,8 +179,8 @@ The ceiling is what checks this, not this paragraph.
       430 closed   24 open   18 parked   58 unclassifiable
       ```
 
-      and `C-19` surfaces as `parked` from
-      `archive/2026-08/2026-08-26-codex-local-review-adapter/prd.md:61`, which
+      and `C-19` surfaces as `parked` from the
+      [historical C-19 row](https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-08/2026-08-26-codex-local-review-adapter/prd.md#L61), which
       is the must-survive case. These are recorded as the shape to expect, not
       as numbers to pin a test to: the step re-derives against the corpus
       standing when it lands, because a count asserted from a run three days
@@ -291,8 +291,8 @@ The ceiling is what checks this, not this paragraph.
 
       Verified against the live corpus, which is the point of the whole
       section: **20 parked, 14 open, 35 unreadable**, and `C-19` surfaces as
-      parked from
-      `docs/work/archive/2026-08/2026-08-26-codex-local-review-adapter/prd.md:61`
+      parked from the
+      [historical C-19 row](https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-08/2026-08-26-codex-local-review-adapter/prd.md#L61)
       -- the must-survive case, from an archived item, through a `## Review`
       heading no heading-matcher anticipated. The one `git grep` runs in
       **0.043s** real over the whole corpus, which is the run-time this item
