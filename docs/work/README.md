@@ -1,7 +1,20 @@
 # Work items
 
-One directory per item: `<YYYY-MM-DD>-<slug>/prd.md` (+ `design.md`, `implement.md` when
-warranted). Frontmatter `status:` is `planning | ready | in_progress | done`; `in_progress`
-requires `branch:`. Merged and aged items move to `archive/YYYY-MM/`. Pull requests reference
-an item with a `Work:` line. This directory is the entire tracked footprint of the
-sd-ai-command-pack workflow; nothing else in the repo is framework bookkeeping.
+Create one directory per item: `<YYYY-MM-DD>-<slug>/prd.md`.
+Add `design.md` and `implement.md` when needed.
+
+This checkout reads status from the database, as `docs/work/.status-source` specifies.
+Do not add `status:` to active PRD frontmatter.
+Keep archived frontmatter as historical evidence.
+
+For an existing task or followup, add `item: sd:<id>` to the PRD frontmatter.
+Do not register another work row for that task.
+Resolve any existing duplicate path registration first; path bindings take precedence.
+
+For new work, run `sd work register docs/work/<item>/prd.md` from this checkout.
+Registration creates the row in `planning`.
+
+Reference the item with one `Work:` line in the pull request.
+Move completed items to `archive/YYYY-MM/` when their archive conditions hold.
+The [archive index](archive/README.md) links the removed historical snapshot.
+Follow [the documentation conventions](../../CONTRIBUTING.md#documentation-and-decisions) when recording decisions and history.

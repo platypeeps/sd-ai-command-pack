@@ -39,17 +39,9 @@ Shared contributors do not revoke user permission, but existing ownership gates 
 
 - Read [CONTRIBUTING.md](CONTRIBUTING.md), then run `make check` before
   publishing a change.
-- Read [docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md](docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md)
-  before changing the installer or the command set. The `docs/spec/**` pages on
-  adapters, manifests, and provenance describe the pre-3e model and are stale
-  until later steps reach them.
-  - Amended 2026-09-01: no later step reached them. Steps 4 and 7 closed
-    without the triage, so each stale page now carries a dated notice at the
-    top instead of waiting for one. Read the notice before the page; where it
-    says "partly stale" it names which sections still hold. The pages that
-    describe only deleted machinery are still on disk pending a deletion
-    decision, listed with evidence under step 7 in
-    [docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md](docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md).
+- Read [docs/current-architecture.md](docs/current-architecture.md) before changing the installer or command set.
+- Read each `docs/spec/**` notice before using that page.
+  Some pages describe the retired pre-3e model.
 - Planning artifacts live in [docs/work](docs/work/README.md): one directory per
   item, `prd.md` plus `design.md`/`implement.md` when warranted. That directory
   is the whole tracked footprint of the workflow.
@@ -83,10 +75,8 @@ it, and a path written for the reader's own checkout stays unqualified. One
 ruling settles all three of the questions that kept arriving separately, so
 there is nothing further to decide case by case.
 
-It applies to **live text only.** A preserved review body, an archived work
-item, and `CHANGELOG.md` are records of what was said at a time, not claims
-about what holds now. Rewriting one to match today's scope destroys the record
-it exists to keep.
+It applies to **live text only.** A preserved review body and `CHANGELOG.md` record earlier statements.
+Completed work removed from the checkout remains available through Git history.
 
 Two consequences, both enforced rather than remembered:
 

@@ -22,7 +22,7 @@
 > **live** with two clauses gone: `.github/scripts/check-bash32-syntax.sh`
 > exists and `make lint` runs it, but no CI job does -- the `bash32` job that
 > ran it under `STRICT=1` was cut by sd:10 criterion 17 -- and it enumerates
-> every tracked shell script and nothing else: the tracked git hooks it also
+> every tracked `*.sh` file and nothing else: the tracked git hooks it also
 > parsed left with `.githooks/` at step 0 (#597), and the block below no longer
 > claims them. `CONTRIBUTING.md` carries the same account. The surrounding
 > Testing Requirements prose is not: it names a Ruff scope over `install.py`,
@@ -39,7 +39,7 @@
 > tree by sd:10 criterion 18, and `predecessor` stands where it stood, in
 > paths and identifiers as in prose. The triage that
 > produced this notice is recorded under step 7 in
-> `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
+> `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
 
 > Code quality standards for backend and CLI development.
 

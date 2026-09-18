@@ -1,4 +1,4 @@
-"""Criterion 21: the archive is untouched, and nothing in the pack deletes.
+"""Criterion 21 history, the archive boundary, and pack deletion paths.
 
 Two halves. The archive half: the retire changed nothing under `archive/`. The
 code-path half, `NoDeletionPath` at the end: no sweep or park code path
@@ -18,10 +18,10 @@ it needs the history to be present, so it fails rather than skips when the
 commit is not reachable -- `.github/workflows/tests.yml` fetches the whole
 history for that reason.
 
-The *tree* reading is what survives a rewrite of that history: every archived
-`prd.md` still carries its `status:` line, and no active one does. A future
-change that quietly stripped the archive would leave the retire commit exactly
-as it is, and the diff reading would go on passing over it.
+The archive payload left the current tree on 2026-09-17 by owner decision.
+Git history preserves the original records.
+New archived `prd.md` files must still carry their historical `status:` line.
+Active items must not carry one.
 """
 
 from __future__ import annotations
@@ -161,12 +161,11 @@ class TheRetireCommit(unittest.TestCase):
         )
 
 
-class TheArchiveStillSaysWhatItSaid(unittest.TestCase):
-    """The tree reading. What the two sides of the boundary hold today."""
+class TheArchiveBoundary(unittest.TestCase):
+    """Current archived items remain records; active items use database status."""
 
     def test_every_archived_item_keeps_its_status_line(self) -> None:
         archived = tracked("docs/work/archive/*/*/prd.md")
-        self.assertTrue(archived, "the archive enumeration matched nothing")
         missing = sorted(set(archived) - set(carrying_status(
             "docs/work/archive/*/*/prd.md")))
         self.assertEqual(
@@ -174,6 +173,14 @@ class TheArchiveStillSaysWhatItSaid(unittest.TestCase):
             [],
             f"{len(missing)} archived item(s) lost the line that records what "
             f"they were: " + ", ".join(missing[:5]),
+        )
+
+    def test_the_archive_index_names_the_removed_snapshot(self) -> None:
+        index = REPO_ROOT / "docs/work/archive/README.md"
+        self.assertTrue(index.is_file(), "the archive index is missing")
+        self.assertIn(
+            "8ba8fa7a15fcd4783b42cbe580a04e89149be08d",
+            index.read_text(encoding="utf-8"),
         )
 
     def test_no_active_item_carries_one(self) -> None:
