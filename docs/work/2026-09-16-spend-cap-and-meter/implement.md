@@ -194,16 +194,27 @@ Four slices, in this order. Slice 1 is not this repository's.
   `tests/test_sd_registry.py` and `tests/test_sd_review_meter.py`.
 - Every slice: `make check` rc 0 with 0 `FAILED`/`ERROR`, and `bin/sd-docs-lint`
   ends `sd-docs-lint: clean`.
-- Not verifiable here: the live meter call (slice 4, owner only) and the
+- Not verifiable by this gate: the live meter call (slice 4, owner only; run
+  on 2026-09-18 and recorded under Remaining acceptance) and the
   concurrent race against a real database, which the test simulates with two
   threads and one connection each.
 
-## Remaining acceptance — 2026-09-17
+## Remaining acceptance — 2026-09-17, met 2026-09-18
 
 Pack #1012 delivered cap routing. Pack #1031 (`6e20d4d4`) delivered the meter reader.
-sd:788 remains open for two owner checks:
+sd:788 was open for two owner checks. Both were run on 2026-09-18 against the
+deployed meter, with `MINIMAX_API_KEY` present, in one GET that wrote no row:
 
-- [ ] Verify the deployed meter with its key available.
-- [ ] Confirm that `general` represents the text model's plan.
+- [x] Verify the deployed meter with its key available. `meter_reading` on the
+      `minimax` bill returned `launched=True`, HTTP `200`, exit `0`, and
+      `meter_percents` read the body as two percents rather than a sentence:
+      interval 100.0% remaining, weekly 98.0% remaining. This is the deployed
+      answer, not the recorded fixture.
+- [x] Confirm that `general` represents the text model's plan. The deployed
+      `model_remains` carries exactly two entries, `general` and `video`, so
+      `METER_PLAN = "general"` selects the one plan that is not the video plan,
+      and `meter_percents`'s `len(plans) != 1` guard holds against the live
+      answer. Both `METER_FIELDS` were present on it and in range.
 
-Note 2723 records these gaps. The recorded fixture response does not verify the deployed reader.
+Note 2723 records these gaps. It is answered: the fixture did not verify the
+deployed reader, and the check above did.
