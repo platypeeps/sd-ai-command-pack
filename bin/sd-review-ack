@@ -82,6 +82,15 @@ That is `carry-unreadable`, and it is UNSATISFIED. The alternative fails open: a
 machine missing the library would report every carried finding as answered,
 which is this file's own defect reintroduced by an import error.
 
+The verdict is right and the REPORT was not. One word covered two worlds -- a
+store this checkout has never written, and an interpreter with no `sd_db` on it
+at all -- and only the second says nothing whatever about any finding. Read
+from a checkout with no `.venv`, 55 answered findings printed as unacknowledged
+backlog with nothing in the output naming a missing interpreter. `library_problem`
+below reports that fault beside the rows rather than inside them, in the shape
+`sd-status`'s `unreadable-concern-row` already uses for "this reader could not
+classify it, and that is not a verdict about its content" (sd:1019).
+
 WHO WRITES THE RECORD. `--ack` writes one, and so does `bin/sd-ship`, from the
 push it has just made. A gate whose store nothing ever fills is a gate that
 only ever says no, and `sd-status` grew a row from this store before anything
@@ -941,6 +950,30 @@ def _forget_carried_rows() -> None:
         with contextlib.suppress(Exception):
             reader[0].close()
     _CARRY["verdicts"] = {}
+    _CARRY.pop("library", None)
+
+
+def library_problem() -> str:
+    """Why `sd_db` would not import this run, or `""` when it did (sd:1019).
+
+    THE CONDITION `carry-unreadable` CANNOT CARRY. That verdict is right and
+    stays: a machine that cannot read the row may not call the finding
+    answered. But it is one word over two very different worlds -- a store
+    this checkout has never written, and an interpreter with no `sd_db` on it
+    at all -- and only the second is an infrastructure fault that says
+    nothing whatever about any finding. Read from a checkout with no `.venv`,
+    every carried finding in the store came back `carry-unreadable` and 55
+    answered findings were reported as unacknowledged backlog. The count was
+    not wrong about the verdicts; the report was wrong to print them as a
+    verdict about content when no interpreter had been found.
+
+    So this is `unreadable-concern-row`'s shape, not a new verdict: the
+    inability to read is reported as its own condition, beside the rows
+    rather than inside them. Set only when a verdict actually reached for the
+    library, so a run with no carried finding reports nothing -- an absent
+    `sd_db` that changed no answer is not a fault this report has seen.
+    """
+    return str(_CARRY.get("library") or "")
 
 
 def _carry_reader() -> tuple[Any, Any] | None:
@@ -967,8 +1000,12 @@ def _open_carry_reader() -> tuple[Any, Any] | None:
     # would turn into a failure on every machine that has run `make setup`.
     # And `item_by_id` is imported behind `try` because a library without it
     # is a supported state, read as no answer rather than as a traceback.
-    module = sd_lib.import_sd_db().module
+    imported = sd_lib.import_sd_db()
+    module = imported.module
     if module is None:
+        # Recorded, not raised and not folded into the verdict: `library_problem`
+        # above says why the two are different conditions (sd:1019).
+        _CARRY["library"] = imported.problem or "sd_db is not importable here"
         return None
     try:
         from sd_db.reads import item_by_id  # noqa: PLC0415 - absent is a state
@@ -1229,6 +1266,9 @@ def review_state(root: pathlib.Path, rounds: dict[int, dict], ref: str) -> dict:
     return {
         "landing_ref": ref,
         "store_error": broken,
+        # Read after the verdicts, because the library is only reached while
+        # they are computed: `library_problem` above (sd:1019).
+        "library_error": library_problem(),
         "findings": out,
         "unsatisfied": [row for row in out if row["verdict"] not in SATISFIED],
         "pull_requests": sorted(rounds),
@@ -1344,6 +1384,10 @@ def render_findings(result: dict, stream: TextIO, indent: str = "  ") -> None:
     write = stream.write
     if result.get("store_error"):
         write(f"{indent}record unreadable: {result['store_error']}\n")
+    if result.get("library_error"):
+        write(f"{indent}carried items unreadable: {result['library_error']}\n")
+        write(f"{indent}that is a missing interpreter, not an unanswered finding; "
+              f"run `make setup` and read this again\n")
     if result.get("reason"):
         write(f"{indent}unavailable: {result['reason']}\n")
         write(f"{indent}nothing was read, so nothing is acknowledged; --check refuses\n")
