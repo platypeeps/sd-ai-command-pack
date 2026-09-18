@@ -23,6 +23,16 @@
 # `sd_lib.delivered` in rule 2. A commit hook that reaches the network is
 # the hook that gets bypassed. It stays in `make check` and CI.
 #
+# Before any of that, the hook asks whether the interpreter it picked can
+# import Ruff, and refuses with the verdict `unchecked` when it cannot
+# (sd:1020). The refusal is the same refusal; the word is the difference. An
+# unprovisioned interpreter used to reach the reader as `pre-commit: failed,
+# status 1`, which is exactly what a lint verdict on the staged code looks
+# like, and on 2026-09-18 that cost an `sd-review` pass and a commit that was
+# rejected and then pushed as an empty branch. `unchecked` is what
+# `bin/sd-status` calls a class whose check could not run, so this borrows a
+# word the pack already has rather than minting one. It does not fail open.
+#
 # What runs, cheapest first, on the staged files only: Ruff over the staged
 # Python (`.py`, or a python shebang, which is every `bin/` command and this
 # file), then the two whole-tree test passes above. Both read the working
@@ -58,6 +68,11 @@ import time
 BUDGET_SECONDS = 8
 SKIP_VARIABLE = "SD_SKIP_HOOKS"
 WHOLE_TREE_PASSES = ("tests.test_code_health", "tests.test_doc_citations")
+#: The one dev requirement the gates reach for that the standard library does
+#: not carry. `make setup` installs it from requirements-dev.txt; an
+#: interpreter that cannot import it has not been provisioned, and `probe`
+#: reads that as the environment condition below rather than as a lint verdict.
+DEV_REQUIREMENT = "ruff"
 # The bound tests/test_code_health.py reads a shebang with: the whole first
 # line, capped so a binary is not read to its end.
 SHEBANG_LIMIT = 4096
@@ -71,10 +86,70 @@ def repo_root() -> pathlib.Path:
     return pathlib.Path(result.stdout.strip())
 
 
+def main_checkout(root: pathlib.Path) -> pathlib.Path | None:
+    """The clone's main checkout when `root` is a linked worktree, else None.
+
+    `git rev-parse --git-common-dir` is the clone's shared `.git`, which is the
+    main checkout's; from the main checkout itself it names that checkout and
+    this returns None, because `interpreter` has already looked there.
+    """
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"], cwd=root,
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    common = pathlib.Path(result.stdout.strip())
+    if not common.is_absolute():
+        common = root / common
+    checkout = common.parent
+    return None if checkout == root else checkout
+
+
 def interpreter(root: pathlib.Path) -> str:
-    """`.venv/bin/python` when the checkout has one, else whatever `python3` is."""
-    venv = root / ".venv" / "bin" / "python"
-    return str(venv) if venv.is_file() else "python3"
+    """This worktree's `.venv/bin/python`, then the clone's, else `python3` (sd:1020).
+
+    `make setup` provisions one `.venv` per clone, in the main checkout, the
+    way `make hooks` installs one hook per clone there. A linked worktree has
+    neither of its own, and reading only `root` -- which is
+    `git rev-parse --show-toplevel`, the worktree -- sent every commit made
+    from a worktree to whatever bare `python3` was on PATH, which carries
+    none of the dev requirements. Two agents worked around that by hand on
+    2026-09-18 by symlinking the main checkout's `.venv` into their worktree;
+    this consults it by name instead.
+
+    The tools come from that interpreter, the code under test does not: the
+    gates run with `cwd=root` and under `-m`, so `sys.path[0]` is this
+    worktree and its own `tests/` and `sd_lib/` shadow anything the other
+    checkout installed. A hand-made `.venv` in the worktree still wins, so a
+    worktree that wants its own is not overruled.
+    """
+    for checkout in (root, main_checkout(root)):
+        if checkout is None:
+            continue
+        venv = checkout / ".venv" / "bin" / "python"
+        if venv.is_file():
+            return str(venv)
+    return "python3"
+
+
+def provisioned(python: str, root: pathlib.Path) -> bool:
+    """Whether `python` can import `DEV_REQUIREMENT`; False if it will not start.
+
+    Asked up front, before any gate runs, because the answer decides which
+    condition the verdict line names. Inferring it downstream -- from a
+    "no module named ruff" line under a status the hook then reports as
+    `failed` -- is what sd:1020 is: an environment fault wearing a content
+    verdict's clothes. One interpreter start, measured at 0.03 s.
+    """
+    try:
+        probe = subprocess.run(
+            [python, "-c", f"import {DEV_REQUIREMENT}"], cwd=root,
+            env=gate_environment(), capture_output=True, text=True, check=False,
+        )
+    except OSError:
+        return False
+    return probe.returncode == 0
 
 
 def staged_paths() -> list[str]:
@@ -163,7 +238,21 @@ def main() -> int:
     os.chdir(root)
     python = interpreter(root)
     status = 0
-    staged = staged_paths()
+    # `unchecked` is `bin/sd-status`'s word for a class whose check could not
+    # run, and this is that: no gate reached the staged code, so nothing here
+    # is a verdict on it. It is reported as its own condition beside the
+    # refusal rather than folded into it, which is `unreadable-concern-row`'s
+    # shape and sd:1019's. It does not fail open: the commit is still refused,
+    # because a hook that waves a commit through when it cannot run its gates
+    # is an advisory rule in an enforced one's costume.
+    condition = "failed"
+    if not provisioned(python, root):
+        status = 1
+        condition = "unchecked"
+        print(f"pre-commit: {python} cannot import {DEV_REQUIREMENT}, so no gate ran; "
+              f"this is the hook's own environment, not a verdict on the staged code. "
+              f"Run make setup in this clone's main checkout")
+    staged = staged_paths() if status == 0 else []
     unstaged = diverged(staged)
     if unstaged:
         status = 1
@@ -174,9 +263,10 @@ def main() -> int:
     if status == 0 and python_files:
         status = run([python, "-m", "ruff", "check", "--", *python_files], root)
         if status != 0:
-            print(f"pre-commit: ruff failed on {len(python_files)} staged file(s); "
-                  f"if the line above says no module named ruff, {python} lacks "
-                  f"the dev requirements (make setup)")
+            # No "if that says no module named ruff" hedge any more: `provisioned`
+            # above has already asked, so a red here is Ruff's verdict on the
+            # staged code and nothing else (sd:1020).
+            print(f"pre-commit: ruff failed on {len(python_files)} staged file(s)")
     if status == 0:
         # A deletion is not a staged path, so a commit that removes or renames
         # a pass reaches here with the module gone; that is a failure, not a
@@ -190,7 +280,7 @@ def main() -> int:
         else:
             status = run([python, "-m", "unittest", *WHOLE_TREE_PASSES], root)
     elapsed = time.monotonic() - started
-    verdict = "ok" if status == 0 else f"failed, status {status}"
+    verdict = "ok" if status == 0 else f"{condition}, status {status}"
     print(f"pre-commit: {verdict} in {elapsed:.2f} s (budget {BUDGET_SECONDS} s)")
     return status
 
