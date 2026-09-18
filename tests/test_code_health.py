@@ -635,8 +635,6 @@ COMPLEX = frozenset({
     "bin/sd-review::run_provider",  # 40
     "bin/sd-ship::Ship.merge",  # 25
     "bin/sd-ship::Ship.prepare",  # 53
-    "bin/sd-ship::Ship.review",  # 45
-    "bin/sd-ship::Ship.review_inputs",  # 44
     "bin/sd-ship::commit_paths",  # 21
     "bin/sd-status::_work_rows",  # 31
     "bin/sd::store_add",  # 28
@@ -650,7 +648,6 @@ COMPLEX = frozenset({
     "bin/sd_registry.py::parse",  # 26
     "bin/sd_registry.py::url_response",  # 26
     "bin/sd_research_pins.py::report",  # 25
-    "bin/sd_ship_dispositions.py::context",  # 22
     "bin/sd_ship_dispositions.py::validate",  # 27
     "bin/sd_ship_remote.py::GitHub.ready",  # 29
     "bin/sd_work.py::run",  # 29
@@ -664,7 +661,6 @@ LONG = frozenset({
     "bin/sd-review::run_provider",  # 69
     "bin/sd-ship::Ship.merge",  # 55
     "bin/sd-ship::Ship.prepare",  # 80
-    "bin/sd-ship::Ship.review",  # 75
     "bin/sd::build_parser",  # 135
     "bin/sd::store_set",  # 57
     "bin/sd_install.py::cmd_user",  # 64

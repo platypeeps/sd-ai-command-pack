@@ -13,6 +13,7 @@ import stat
 from datetime import datetime, timezone
 from typing import Any
 
+from sd_ship_bindings import adjudicator_binding
 from sd_ship_remote import Refusal, git
 
 MAX_PROPOSAL_BYTES = 2_000_000
@@ -58,8 +59,7 @@ def unique_object(pairs: list[tuple[str, Any]]) -> dict:
 
 
 def key(operation: Any) -> str:
-    # for_item enumerates only literal ship: keys, not this separate namespace.
-    return "ship-adjudication:" + operation.key.removeprefix("ship:")
+    return operation.identity.acceptance_key(operation.key)
 
 
 def context(operation: Any, head: str) -> tuple[dict, list[dict]]:
@@ -81,15 +81,9 @@ def context(operation: Any, head: str) -> tuple[dict, list[dict]]:
             for index, row in enumerate(report["findings"], 1) if row["disposition"] == "blocking"]
     if not rows:
         raise Refusal("blocking report has no blocking findings to adjudicate")
-    folder = pathlib.Path(__file__).resolve().parent
-    tools = {name: hashlib.sha256((folder / name).read_bytes()).hexdigest()
-             for name in ("sd-ship", "sd_ship_dispositions.py", "sd_ship_remote.py")}
-    tools["sd_db.ship"] = hashlib.sha256(pathlib.Path(operation.store.__file__).read_bytes()).hexdigest()
-    for name in ("skills/sd-ship/SKILL.md", ".claude/rules/sd-planning-adversarial-review.md"):
-        tools[name] = hashlib.sha256((folder.parent / name).read_bytes()).hexdigest()
-    return {"repository": operation.repository, "branch": operation.branch, "item": operation.args.item, "head": head,
-            "passes_digest": digest(operation.state["passes"]), "report_digest": digest(report),
-            "review_binding": operation.state["binding"], "adjudicator_binding": digest(tools)}, rows
+    identity = operation.identity.bindings(operation.repository, operation.branch, head, operation.state)
+    return {**identity, "report_digest": digest(report), "review_binding": operation.state["binding"],
+            "adjudicator_binding": adjudicator_binding(operation.store.__file__)}, rows
 
 
 def text(value: Any, label: str) -> None:
@@ -97,11 +91,16 @@ def text(value: Any, label: str) -> None:
         raise Refusal(f"disposition {label} needs nonempty bounded text")
 
 
-def validate(operation: Any, head: str, proposal: Any) -> str:
+def validate(operation: Any, head: str, proposal: Any, *, durable: bool = True) -> str:
     bindings, expected = context(operation, head)
     if (not isinstance(proposal, dict) or set(proposal) != {"schema_version", "bindings", "operator", "authority_context", "findings"}
-            or type(proposal["schema_version"]) is not int or proposal["schema_version"] != 1
-            or digest(proposal["bindings"]) != digest(bindings)):
+            or type(proposal["schema_version"]) is not int or proposal["schema_version"] != 1):
+        raise Refusal("disposition proposal does not bind the current review, history, tools and head")
+    # Before the binding digest, so a missing or changed evidence store names
+    # itself instead of surfacing as an unexplained binding mismatch.
+    if durable:
+        operation.identity.check_evidence(proposal)
+    if digest(proposal["bindings"]) != digest(bindings):
         raise Refusal("disposition proposal does not bind the current review, history, tools and head")
     text(proposal["operator"], "operator")
     text(proposal["authority_context"], "authority context")
@@ -145,6 +144,14 @@ def accepted(operation: Any, head: str) -> dict:
 
 def adjudicate(operation: Any) -> dict:
     args = operation.args
+    prepare = bool(getattr(args, "prepare_evidence", False))
+    # Preparation and acceptance are two decisions, and the operator reads the
+    # durable archive between them. One command could only accept what it had
+    # just written for itself.
+    if prepare and args.accept_dispositions is not None:
+        raise Refusal("--prepare-evidence never accepts dispositions in the same command; prepare, read the archive, then accept")
+    if prepare and args.dispositions_file is None:
+        raise Refusal("--prepare-evidence needs the --dispositions-file whose evidence it makes durable")
     bindings, rows = context(operation, args.expected_head)
     if args.dispositions_file is None:
         if args.accept_dispositions is not None:
@@ -156,6 +163,13 @@ def adjudicate(operation: Any) -> dict:
         proposal = json.loads(read_file(args.dispositions_file, MAX_PROPOSAL_BYTES), object_pairs_hook=unique_object)
     except (ValueError, RecursionError):
         raise Refusal("disposition proposal is not bounded valid JSON") from None
+    if prepare:
+        validate(operation, args.expected_head, proposal, durable=False)
+        prepared = operation.identity.prepare_evidence(proposal)
+        # The returned proposal is validated as it will later be read, so the
+        # operator is offered an artifact that is already acceptable.
+        validate(operation, args.expected_head, prepared)
+        return operation.result("disposition_evidence_prepared", proposal=prepared)
     proposal_digest = validate(operation, args.expected_head, proposal)
     if args.accept_dispositions is None:
         return operation.result("disposition_validated", proposal=proposal, acceptance_digest=proposal_digest)
