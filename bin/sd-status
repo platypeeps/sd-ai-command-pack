@@ -3054,10 +3054,9 @@ def skill_surfaces(root: pathlib.Path) -> list[pathlib.Path]:
     place, that a check reads rather than restates. `_tool_rows` used to carry
     its own `(root / "skills").glob("*/SKILL.md")`, which made the enumeration
     an implementation detail of one check -- and the detail was wrong. It never
-    opened `contrib/`, so the live disclosure in `contrib/sd-map` (and a
-    second one sd:10 has since cut) was invisible while the class reported
-    health over a directory it had not read. That is the same failure the banner refuses when
-    it will not print `clear` over an unchecked class.
+    opened `contrib/`. Contribution skills were invisible. The class still
+    reported health over a directory it had not read. That is the same failure
+    the banner refuses when it will not print `clear` over an unchecked class.
 
     Direction matters. `tests/test_skill_frontmatter.py` already enumerated
     both roots, so the fix is not to teach this file the suite's answer but to
@@ -3142,9 +3141,7 @@ def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
     move it is rather than as a finding that closed and a new one that opened.
 
     Which files count is `skill_surfaces`, not a glob written here. Reading
-    both roots deliberately *adds* findings -- `contrib/sd-map` discloses a
-    `bin/` command that is not built, and it was invisible while this loop
-    read one root. Surfacing them is the point;
+    both roots can deliberately add findings. Surfacing them is the point;
     the roadmap they name is a decision for a person, and a check that hid the
     question to keep its own count at zero was answering a different one.
     """

@@ -279,11 +279,11 @@ rest safe:
 
 ## Commands
 
-The eleven named surfaces — ten commands plus `sd-help`, which the taxonomy
-makes a skill because a catalog authorizes nothing — rendered identically to
-every platform. Each is documented in its own `skills/sd-*/SKILL.md`, which is
-the file that gets installed, so the documentation and the artifact are the
-same object.
+There are ten named surfaces: nine commands plus `sd-help`.
+The taxonomy makes `sd-help` a skill because a catalog authorizes nothing.
+Every platform renders these surfaces identically.
+Each surface has one `skills/sd-*/SKILL.md` file.
+That file is both the installed artifact and its documentation.
 
 `skills/` and `contrib/` also hold the skills these commands draw on —
 knowledge and procedure with no standing side-effect authority, loaded when
@@ -291,22 +291,19 @@ relevant rather than invoked. They are not listed here: `sd-help` reads the
 installed tree at runtime, and `sd skill list` reads both roots, which are the
 only two inventories that cannot go stale.
 
-Two of the eleven named surfaces — `sd-map` and `sd-skill-adopt` —
-are in `contrib/` rather than on a path. They are still commands, and the table
-below still describes them; they install with `sd skill try` rather than by
-default. A command is a thing that authorizes side effects, which is a claim
-about the frontmatter, not a claim that everyone needs it installed. The one structural
-difference is in the frontmatter, and it is what the taxonomy means: each of
-the ten commands sets `disable-model-invocation`, so invoking it is a
-deliberate act; every other surface, `sd-help` included, does not.
+`sd-skill-adopt` is the only named surface in `contrib/`.
+It installs with `sd skill try` instead of the default installer.
+It remains a command because it authorizes side effects.
+Each of the nine commands sets `disable-model-invocation`.
+Every other surface, including `sd-help`, omits that marker.
 
-**Runs as** says whether there is something to execute. `bin/` is a shipped
-entrypoint you can run; **prose** is a sequence an agent follows, with no
-runner behind it — the skill is the implementation. Five of the eleven are
-prose today, each saying so in its own "State of the tooling" section, and
-`tests/test_skill_frontmatter.py` fails if one of them ever names a `bin/`
-command without that sentence, or keeps the sentence after the command
-arrives.
+**Runs as** identifies the execution form.
+`bin/` means the pack ships an executable entry point.
+**prose** means an agent follows the skill without a runner.
+For prose surfaces, the skill is the implementation.
+Four of the ten are prose.
+Each prose skill has a "State of the tooling" section.
+`tests/test_skill_frontmatter.py` checks each claim against the filesystem.
 
 | Command | Runs as | Purpose |
 |---|---|---|
@@ -319,7 +316,6 @@ arrives.
 | `sd-help` | prose | Runtime catalog of installed `sd-*` surfaces |
 | `sd-suggest` | prose | Record framework friction as a local proposal; publish only when asked |
 | `sd-skill-adopt` | `bin/` | Safety pre-screen, lint, and canonical transform for an incoming skill |
-| `sd-map` | prose | Supporting artifacts into an out-of-tree cache; never a gate, never scheduled |
 | `sd-handoff` | `bin/` | Write the local session packet for this directory; `/clear` restores it |
 
 ## Maintaining
