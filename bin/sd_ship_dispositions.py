@@ -13,6 +13,7 @@ import stat
 from datetime import datetime, timezone
 from typing import Any
 
+from sd_ship_bindings import adjudicator_binding
 from sd_ship_remote import Refusal, git
 
 MAX_PROPOSAL_BYTES = 2_000_000
@@ -58,8 +59,7 @@ def unique_object(pairs: list[tuple[str, Any]]) -> dict:
 
 
 def key(operation: Any) -> str:
-    # for_item enumerates only literal ship: keys, not this separate namespace.
-    return "ship-adjudication:" + operation.key.removeprefix("ship:")
+    return operation.identity.acceptance_key(operation.key)
 
 
 def context(operation: Any, head: str) -> tuple[dict, list[dict]]:
@@ -81,15 +81,9 @@ def context(operation: Any, head: str) -> tuple[dict, list[dict]]:
             for index, row in enumerate(report["findings"], 1) if row["disposition"] == "blocking"]
     if not rows:
         raise Refusal("blocking report has no blocking findings to adjudicate")
-    folder = pathlib.Path(__file__).resolve().parent
-    tools = {name: hashlib.sha256((folder / name).read_bytes()).hexdigest()
-             for name in ("sd-ship", "sd_ship_dispositions.py", "sd_ship_remote.py")}
-    tools["sd_db.ship"] = hashlib.sha256(pathlib.Path(operation.store.__file__).read_bytes()).hexdigest()
-    for name in ("skills/sd-ship/SKILL.md", ".claude/rules/sd-planning-adversarial-review.md"):
-        tools[name] = hashlib.sha256((folder.parent / name).read_bytes()).hexdigest()
-    return {"repository": operation.repository, "branch": operation.branch, "item": operation.args.item, "head": head,
-            "passes_digest": digest(operation.state["passes"]), "report_digest": digest(report),
-            "review_binding": operation.state["binding"], "adjudicator_binding": digest(tools)}, rows
+    identity = operation.identity.bindings(operation.repository, operation.branch, head, operation.state)
+    return {**identity, "report_digest": digest(report), "review_binding": operation.state["binding"],
+            "adjudicator_binding": adjudicator_binding(operation.store.__file__)}, rows
 
 
 def text(value: Any, label: str) -> None:
