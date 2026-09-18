@@ -96,29 +96,29 @@ Unasserted halves are named in their rows and are not planned here.
 
 ## Acceptance criteria
 
-- [ ] `tests/test_sd_registry.py`: a test writes cost rows against
+- [x] `tests/test_sd_registry.py`: a test writes cost rows against
       `cap_usd_month`, and `reviewer_chain` passes over the bill, and `pick`
       on it refuses naming the bill and the month's total, carried to both
       as `capped_bills: Mapping[str, str]`, bill name to the exposure line
       (`design.md`, the API change).
-- [ ] An integration test through `review` in `bin/sd-review`: an at-cap bill
+- [x] An integration test through `review` in `bin/sd-review`: an at-cap bill
       in the database reaches fallthrough, which passes over it, and
       `--provider` on it, which refuses; both with the call site wired and
       neither with `capped_bills` handed in by the test.
-- [ ] A test starts two calls concurrently against room for exactly one; one
+- [x] A test starts two calls concurrently against room for exactly one; one
       goes, one is refused, and the settled rows sum under the cap.
-- [ ] Four boundary tests through `review`: `sd_handoff_rows.library()`
+- [x] Four boundary tests through `review`: `sd_handoff_rows.library()`
       refusing (no `sd_db`) and `connect` refusing (a database that will
       not open), each once with an uncapped bill, which is dispatched as
       today, and once with a capped bill, which is refused naming the
       fault; no test bypasses the cap or blocks an uncapped review.
-- [ ] A preflight test: `--preflight` on a capped `url` entry leaves one
+- [x] A preflight test: `--preflight` on a capped `url` entry leaves one
       ledger row for the probe, `run` or `bound`, never none.
-- [ ] A lifecycle test with a fake client: the row is `sending` when the
+- [x] A lifecycle test with a fake client: the row is `sending` when the
       client is called, `run` with the usage after a response that carries
       it, `bound` after a timeout, and no row exists after a `REFUSED`
       returned before the request is built.
-- [ ] A test reads the recorded `tests/fixtures/minimax/token_plan_remains.json`
+- [x] A test reads the recorded `tests/fixtures/minimax/token_plan_remains.json`
       (#1001), selects the `general` entry, writes two `meter` rows, and
       asserts the skip and the refusal with each window at zero in turn; a
       second asserts that a metered bill with no row, or a newest row older
@@ -128,14 +128,14 @@ Unasserted halves are named in their rows and are not planned here.
       field that is missing, a string, a boolean, NaN, an infinity or
       outside 0 to 100 caps the bill naming the field and the value and
       writes no row.
-- [ ] A pinned-meter test: `meter:` naming another scheme (the same-host
+- [x] A pinned-meter test: `meter:` naming another scheme (the same-host
       `http://` value among the cases), host, port or path is refused naming
       the value and the pinned four, and no request is sent; a bill with
       `meter:` and no `meter_env:` reads, and the meter step caps the bill
       naming the missing field and sends nothing (owner decision 2026-09-17,
       note 2694; it was a read-time refusal until slice 4).
-- [ ] `grep -rn token_plan bin tests` counts more than 0 after slice 4.
-- [ ] `make check` rc 0, and `bin/sd-docs-lint` ends `sd-docs-lint: clean`.
+- [x] `grep -rn token_plan bin tests` counts more than 0 after slice 4.
+- [x] `make check` rc 0, and `bin/sd-docs-lint` ends `sd-docs-lint: clean`.
 
 ## References
 

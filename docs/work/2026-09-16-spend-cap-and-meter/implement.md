@@ -203,7 +203,7 @@ Four slices, in this order. Slice 1 is not this repository's.
 Pack #1012 delivered cap routing. Pack #1031 (`6e20d4d4`) delivered the meter reader.
 sd:788 remains open for two owner checks:
 
-- Verify the deployed meter with its key available.
-- Confirm that `general` represents the text model's plan.
+- [ ] Verify the deployed meter with its key available.
+- [ ] Confirm that `general` represents the text model's plan.
 
 Note 2723 records these gaps. The recorded fixture response does not verify the deployed reader.
