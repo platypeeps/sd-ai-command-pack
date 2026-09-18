@@ -34,8 +34,23 @@ Resume only after explicit authorization to run these reviews. Steps 3 through 6
       `bin/sd-status` and eight arriving in `bin/sd_lib.py`, `bin/sd_rules.py`
       and `bin/sd-status`, plus three reworded in place; and one unrelated
       `for-each-ref --format` line left `bin/sd-status` with the function
-      #1011 removed. Net one. This box stays open: the grep is the item's
-      done-when clause and is run again after the tenth pass.
+      #1011 removed. Net one. Re-run 2026-09-18 at cf420fca: 48 lines,
+      none disables a point. The drift is 14 arrivals and no departure.
+      Every arrival is incidental to this item. Nine in `bin/sd-review`
+      and seven in `bin/sd_registry.py` are sd:788's meter, where
+      `percent` names a remaining quota and not a review. Four in
+      `bin/sd_lib.py` and three in `bin/sd_rules.py` are R10-D1's
+      45-day idle-planning threshold, already recorded as moved. One is
+      the same unrelated `for-each-ref --format` line, in
+      `bin/sd-status`. One arrival reads like a review control and is
+      not one: `source:bin/sd-review::dispose`, where
+      `threshold = BLOCKING_ORDER[floor]` labels a finding `blocking`
+      or `advisory`. The pass still runs. Every finding is still
+      collected and still reported. Only the label moves, and the
+      function's own docstring records that nothing is written to a
+      pull request, a label, a check run or any file. This box stays
+      open: the grep is the item's done-when clause and is run again
+      after the tenth pass.
 
 Steps 2 to 5 are the owner's. A lane may prepare step 1 and re-run step 6;
 it runs no pass and writes no note.
