@@ -25,6 +25,11 @@ The [contributor guide](../CONTRIBUTING.md) owns documentation, validation, and 
 The [archive index](work/archive/README.md) records cleanup boundaries and recovery instructions.
 
 The pre-commit hook has an 8-second wall-time budget for a one-file diff.
+It takes its interpreter from this worktree's `.venv`, then from the clone's
+main checkout, the way `make hooks` installs one hook per clone; when neither
+can import the dev requirements it refuses the commit as `unchecked`, which is
+`bin/sd-status`'s word for a check that could not run, rather than as a lint
+verdict on the staged code.
 
 ## Historical design
 

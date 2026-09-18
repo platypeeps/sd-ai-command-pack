@@ -21,6 +21,13 @@ hook per clone, read from the main checkout, shared by every linked
 worktree), a refusal when something else already holds the path, and a
 `git commit` that fails through the link.
 
+sd:1020 adds the fourth thing: an interpreter that cannot run the gates is its
+own condition, `unchecked`, and not a verdict on the staged code. The cases
+below hold the word, the refusal that still stands behind it, the linked
+worktree that reaches the clone's provisioned `.venv` rather than a bare
+`python3`, and the `.gitignore` pattern that hides the symlink such a worktree
+used to be given by hand.
+
 The behavioural cases run the hook by path inside a throwaway repository, not
 in this checkout: staging a file here would edit the index the developer is
 working in, and the hook's two whole-tree test passes take five seconds each
@@ -242,6 +249,40 @@ class TheHookRun(unittest.TestCase):
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("Ran 2 tests", output, "the passes did not run under the python3 fallback")
 
+    def barren_venv(self) -> None:
+        """Replace setUp's borrowed `.venv` with one that has no dev requirements.
+
+        A real interpreter with an empty site-packages, which is what a clone
+        nobody has run `make setup` in actually has; `--without-pip` keeps it
+        to a fraction of a second.
+        """
+        (self.root / ".venv").unlink()
+        subprocess.run(
+            [sys.executable, "-m", "venv", "--without-pip", str(self.root / ".venv")],
+            capture_output=True, text=True, check=True,
+        )
+
+    def test_an_unprovisioned_interpreter_is_unchecked_not_a_lint_verdict(self):
+        """sd:1020. The staged file is clean, so a provisioned run says `ok`.
+
+        Before this, an interpreter without Ruff reached the reader as
+        `pre-commit: failed, status 1`, which is what Ruff rejecting the staged
+        code looks like; on 2026-09-18 that read cost an `sd-review` pass and a
+        commit that was rejected and then pushed as an empty branch. The word
+        is `unchecked`, which is what `bin/sd-status` calls a class whose check
+        could not run.
+        """
+        self.barren_venv()
+        self.stage("ok.py", "x = 1\n")
+        result = self.run_hook()
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, "the hook failed open: " + output)
+        self.assertRegex(output, r"pre-commit: unchecked, status 1 in \d+\.\d\d s \(budget \d+ s\)")
+        self.assertIn("cannot import ruff", output)
+        self.assertIn("make setup", output)
+        self.assertNotIn("pre-commit: failed", output, "an environment fault read as a verdict")
+        self.assertNotIn("Ran ", output, "a whole-tree pass ran under an interpreter without Ruff")
+
     def test_a_red_whole_tree_pass_fails_the_commit_with_its_status(self):
         self.stub_passes(failing="test_doc_citations")  # overwrites setUp's green stubs
         self.stage("ok.py", "x = 1\n")
@@ -384,6 +425,52 @@ class TheLayout(unittest.TestCase):
         self.assertEqual(git("rev-parse", "--is-inside-work-tree", cwd=self.root).strip(), "true")
         self.assertEqual(git("log", "--oneline", "wt", cwd=self.root).count("\n"), 2)
 
+    def test_a_linked_worktree_runs_the_gates_under_the_clones_provisioned_venv(self):
+        """sd:1020. One `.venv` per clone, in the main checkout, as with the hook.
+
+        The worktree gets none of its own. `python3` on PATH is shadowed here by
+        an interpreter with an empty site-packages -- the hook's own shebang
+        resolves through it, so it has to start, it just has no Ruff -- and a
+        run that reaches Ruff at all reached it through
+        `git rev-parse --git-common-dir` and the main checkout's `.venv`.
+        """
+        (self.root / ".venv").symlink_to(pathlib.Path(sys.prefix))
+        (self.root / "tests").mkdir()
+        for name in ("test_code_health", "test_doc_citations"):
+            (self.root / "tests" / f"{name}.py").write_text(
+                "import unittest\n\n\nclass Stub(unittest.TestCase):\n"
+                "    def test_stub(self):\n        pass\n",
+                encoding="utf-8",
+            )
+        git("add", "--", "tests", cwd=self.root)
+        git("commit", "-q", "-m", "layout", cwd=self.root)
+        worktree = self.root.parent / (self.root.name + "-wt")
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(worktree)], check=False)
+        git("worktree", "add", "-q", "-b", "wt", str(worktree), cwd=self.root)
+        self.assertFalse((worktree / ".venv").exists(), "the worktree was given a venv")
+        barren = self.root / "barren"
+        subprocess.run(
+            [sys.executable, "-m", "venv", "--without-pip", str(barren)],
+            capture_output=True, text=True, check=True,
+        )
+        shims = self.root / "shims"
+        shims.mkdir()
+        (shims / "python3").write_text(
+            f'#!/bin/sh\nexec "{barren / "bin" / "python"}" "$@"\n', encoding="utf-8")
+        (shims / "python3").chmod(0o755)
+        (worktree / "bad.py").write_text("import os\n", encoding="utf-8")
+        git("add", "--", "bad.py", cwd=worktree)
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith("GIT_") and key != SKIP_VARIABLE}
+        env["PATH"] = f"{shims}{os.pathsep}{os.environ.get('PATH', '')}"
+        result = subprocess.run(
+            [str(HOOK)], cwd=worktree, env=env, capture_output=True, text=True, check=False,
+        )
+        output = result.stdout + result.stderr
+        self.assertNotIn("unchecked", output, "the worktree fell back to a bare python3")
+        self.assertIn("F401", output, "Ruff did not run from the clone's provisioned venv")
+        self.assertIn("bad.py", output)
+
     def test_make_hooks_refuses_to_replace_a_file_that_is_not_its_link(self):
         link = self.root / ".git" / "hooks" / "pre-commit"
         link.parent.mkdir(parents=True, exist_ok=True)
@@ -414,6 +501,25 @@ class TheLayout(unittest.TestCase):
             capture_output=True, text=True, check=False,
         )
         self.assertEqual(probe.returncode, 1, f"core.hooksPath is set: {probe.stdout!r}")
+
+
+class TheBorrowedVenvIsIgnored(unittest.TestCase):
+    """The clone's `.venv` reaches a worktree as a symlink, which `.venv/` missed.
+
+    `.venv/` is directory-only, so the symlink a worktree gets showed as an
+    untracked path and dirtied `git status` for everyone working there
+    (sd:1020). The pattern is `.venv`, which covers both.
+    """
+
+    def test_a_venv_symlink_is_ignored_the_way_a_venv_directory_is(self):
+        root = pathlib.Path(tempfile.mkdtemp(prefix="sd-1020-ignore-"))
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(root)], check=False)
+        git("init", "-q", cwd=root)
+        shutil.copy2(REPO_ROOT / ".gitignore", root / ".gitignore")
+        (root / "provisioned").mkdir()
+        (root / ".venv").symlink_to(root / "provisioned")
+        untracked = git("status", "--porcelain", "--untracked-files=all", cwd=root)
+        self.assertNotIn(".venv", untracked, f"a .venv symlink is not ignored: {untracked!r}")
 
 
 if __name__ == "__main__":

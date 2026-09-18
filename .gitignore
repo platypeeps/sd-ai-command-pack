@@ -8,7 +8,10 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
-.venv/
+# Not `.venv/`: directory-only, so a `.venv` symlink at a worktree that borrows
+# the clone's provisioned one showed as untracked and dirtied the status of
+# every agent working there (sd:1020).
+.venv
 .coverage
 .coverage.*
 htmlcov/
