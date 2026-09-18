@@ -564,6 +564,7 @@ class ABranchAnotherPullRequestIsBasedOn(unittest.TestCase):
         tied = [
             line for line in sentences(self.step)
             if "fail" in line.lower()
+            and "query" in line.lower()
             and any(word in line.lower() for word in stopping)
         ]
         self.assertTrue(tied, "step 6 treats an unanswered query as an empty answer")
