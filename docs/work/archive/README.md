@@ -2,9 +2,10 @@
 
 This directory accepts newly completed work under `YYYY-MM/`.
 
-The repository removed the earlier archive payload on 2026-09-17.
-That payload contained 491 completed work items and created excessive search noise.
-Commit `8ba8fa7a15fcd4783b42cbe580a04e89149be08d` preserves every removed file.
+Archive cleanup started on 2026-09-17.
+The first batch removed 193 completed work items through 2026-07-23.
+Later reviewed batches remove the remaining obsolete payload.
+Commit `8ba8fa7a15fcd4783b42cbe580a04e89149be08d` preserves the original archive.
 
 Browse the [historical archive snapshot](https://github.com/platypeeps/sd-ai-command-pack/tree/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive).
 Use Git to restore a specific file when local inspection is necessary.

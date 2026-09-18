@@ -52,7 +52,7 @@
 > place; and the Gitignore Maintenance section is removed, as the paragraph
 > above says. Nothing else in the body moved. The triage that produced this
 > notice is recorded under step 7 in
-> `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
+> `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
 
 > Manifest-driven install behavior and local filesystem conventions.
 

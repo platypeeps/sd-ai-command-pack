@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# The pre-commit tier of sd:431 (docs/work/2026-09-12-every-rule-is-a-row-and-a-checker).
+# The pre-commit tier of sd:431.
+# See docs/work/archive/2026-09/2026-09-12-every-rule-is-a-row-and-a-checker.
 #
 # Budget: 8 s wall on a one-file diff.
 #

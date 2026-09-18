@@ -165,7 +165,7 @@ class TheArchiveBoundary(unittest.TestCase):
     """Current archived items remain records; active items use database status."""
 
     def test_every_archived_item_keeps_its_status_line(self) -> None:
-        archived = tracked("docs/work/archive/*/*/prd.md")
+        archived = tracked("docs/work/archive/*/*/prd.md") or self.fail("the archive enumeration matched nothing")
         missing = sorted(set(archived) - set(carrying_status(
             "docs/work/archive/*/*/prd.md")))
         self.assertEqual(

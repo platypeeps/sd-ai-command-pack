@@ -17,7 +17,7 @@
 > The text below is unedited. It is the record of what that machinery
 > specified, not guidance for the repository as it stands. The triage that
 > produced this notice is recorded under step 7 in
-> `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
+> `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
 
 > **Purpose**: Expand your thinking to catch things you might not have considered.
 
@@ -84,7 +84,7 @@ These guides help you **ask the right questions before coding**.
 
 ### When a Design Changes Control Flow That Existing Tests Already Pin
 
-Adopted 2026-08-01, from `https://github.com/platypeeps/sd-ai-command-pack/tree/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-08/2026-07-31-completion-recovery-no-archive-anchor`.
+Adopted 2026-08-01, from `docs/work/archive/2026-08/2026-07-31-completion-recovery-no-archive-anchor`.
 That task's design went through two full rounds of host+Codex adversarial
 review — read-only, line-by-line against real source — before any code was
 written, and both rounds found and fixed real, confirmed defects. Despite
@@ -128,7 +128,7 @@ Enforcement lives in `templates/.agents/skills/sd-review-pr/SKILL.md` [absent: d
 
 ### When Closing Out a Task Whose Work Already Landed
 
-Adopted 2026-08-06, from `https://github.com/platypeeps/sd-ai-command-pack/tree/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-08/2026-07-28-consolidate-shared-script-helpers`.
+Adopted 2026-08-06, from `docs/work/archive/2026-08/2026-07-28-consolidate-shared-script-helpers`.
 That task sat `in_progress` with five unchecked acceptance criteria long after
 the work was done — two of its four planned commits shipped under it, and the
 other two were split mid-implementation into follow-up tasks that inherited two

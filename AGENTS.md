@@ -75,8 +75,9 @@ it, and a path written for the reader's own checkout stays unqualified. One
 ruling settles all three of the questions that kept arriving separately, so
 there is nothing further to decide case by case.
 
-It applies to **live text only.** A preserved review body and `CHANGELOG.md` record earlier statements.
-Completed work removed from the checkout remains available through Git history.
+It applies to **live text only.** Preserved reviews, archived work items, and `CHANGELOG.md` record earlier statements.
+Do not rewrite their prose to match current behavior.
+Archive moves can add lifecycle metadata without changing the recorded discussion.
 
 Two consequences, both enforced rather than remembered:
 

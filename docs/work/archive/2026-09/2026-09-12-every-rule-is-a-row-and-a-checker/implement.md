@@ -275,7 +275,7 @@
       moved six stranded ids on the strength of citations. The stranded set
       gains the three ids above and loses three others the same grammar finds
       defined in a live file: `R10-D2` at `skills/sd-handoff/SKILL.md:123`,
-      `R11-D4` at `CONTRIBUTING.md:85`, and `R11-D20` in the module docstring
+      `R11-D4` at `CONTRIBUTING.md:204`, and `R11-D20` in the module docstring
       of `dashboard/now.py`, each in the closed-bold-then-parenthesis form
       the archived `R5-D1` uses. A grammar that reads the archive reads the
       live tree the same way, so those three are ids with a live definition
