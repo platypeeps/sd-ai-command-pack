@@ -1105,7 +1105,6 @@ SYMBOL_ANCHORED_CITATIONS = {
     "docs/work/2026-09-12-the-contribution-tracker-cannot-hold-an-issue/design.md": 3,
     "docs/work/2026-09-12-the-contribution-tracker-cannot-hold-an-issue/implement.md": 3,
     "docs/work/2026-09-12-the-contribution-tracker-cannot-hold-an-issue/prd.md": 8,
-    "docs/work/2026-09-13-one-dashboard/implement.md": 3,
 }
 
 

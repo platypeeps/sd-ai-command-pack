@@ -2090,11 +2090,11 @@ lines. Proof, 2026-09-16, on a scratch worktree at this branch with
 `git merge --no-commit --no-ff origin/feat/sd-10-sweep-cut` (`5691b193`)
 applied: the only conflicts were this page and its `.citations.tsv`, both
 outside the governed tree; `governed_rows()` returned 14 rows, the two #995
-lines at `tests/test_archive_untouched.py:202` and `:212` among them; and
+  lines at `tests/test_archive_untouched.py:221` and `:231` among them; and
 `python -m unittest tests.test_no_trellis_residue` ended `Ran 4 tests`, `OK`.
 Without the merge the same command also ends `OK`. #995 then merged as
 `486a223b`; on this branch rebased onto it, the two lines stand at
-`tests/test_archive_untouched.py:202` and `:212` and the test is green.
+`tests/test_archive_untouched.py:221` and `:231` and the test is green.
 
 Outside the governed tree, `docs/review-learnings.md` keeps its rows marked
 **historical**, which quote review comments by the paths they named at the

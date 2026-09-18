@@ -1,27 +1,22 @@
 # Contributing
 
-Use Homebrew Python 3.13 on macOS for the local virtualenv; Apple/Xcode Python
-often misses dev dependencies or writes caches into protected locations, and
-some security scanners can lag newer Python AST changes.
+Use Homebrew Python 3.13 for the local virtual environment on macOS.
 
 ## Setup
 
 ```bash
 make setup
-bash scripts/sd-ai-command-pack-toolchain.sh doctor
 ```
 
-`make setup` creates `.venv` and installs `requirements-dev.txt` and
-`requirements-security.txt`.
+This command creates `.venv`, installs the pinned requirements, and provisions the shared library.
+The requirements files use `--require-hashes` locally and in CI.
+To update a dependency, change its pin and run the compile command from that file's header:
 
-Both requirements files are hash-pinned compiled resolutions, installed with
-`--require-hashes` locally and in CI so the transitive closure cannot drift
-between runs. To bump a dependency, edit its `==` pin and rerun the compile
-command recorded in the file's header
-(`uv pip compile --universal --generate-hashes --python-version 3.10 <file> -o <file>`);
-if the bump conflicts with a stale transitive pin, delete that transitive's
-block and recompile. Do not hand-edit hashes. Dependabot updates these files
-with matching hashes on its own.
+```bash
+uv pip compile --universal --generate-hashes --python-version 3.10 <file> -o <file>
+```
+
+Remove a conflicting transitive pin before recompiling. Do not edit hashes by hand.
 
 ## Local Checks
 
@@ -33,368 +28,140 @@ make docs-lint
 make check
 ```
 
-`make check` is exactly `lint audit docs-lint test`, cheap gates first: a
-narrowed `test` exits 2 (sd:840) and `make` stops at the first target that
-fails, so `test` goes last or the three lanes after it would not run on the
-changed-files fast path below. CI runs the same commands with one difference:
-the `lint` target's bash 3.2 parse runs only locally, because no runner has
-bash 3.2 and the job that built one was cut (sd:10, criterion 17). Everything
-else `make check` runs, CI runs.
-`make full-check` and `make generate` are gone: the first wrapped a shipped
-script that no longer exists, and the second regenerated committed per-platform
-copies that no longer exist either — the installer renders from `skills/` at
-install time, so there is nothing to keep in sync.
+`make check` runs `lint`, `audit`, `docs-lint`, then `test`. It stops at the first failure.
+Run the full command before each push.
 
-While you work, `make check CHANGED="<paths>"` is the changed-files fast path
-(sd:10, criterion 16). It runs the test modules those paths need plus an
-always-run set of whole-tree checks, and it skips `coverage combine` and the
-installer coverage gate, which only the full suite can meet. A narrowed run
-then exits 2, so a zero from `make check` means the full suite ran with both
-coverage gates and means nothing else (sd:840); a notice line says the same
-thing in words. `lint`, `audit` and `docs-lint` still run whole -- they run
-before `test`, which is why a narrowed run still gets all three. To cover
-everything you changed against `main`, committed or not:
+During development, select tests for changed paths:
 
 ```bash
 make check CHANGED="$(git diff --name-only origin/main) $(git ls-files --others --exclude-standard)"
 ```
 
-If that diff comes back empty, or fails, `CHANGED` ends up empty or holding
-only blanks, and an empty list runs the full suite with both coverage steps,
-the same as a path nothing names.
+Only a command-line `CHANGED` value selects this mode.
+The test runner ignores this mode when `CI` or `GITHUB_ACTIONS` has a non-empty value.
+Do not use this mode for paths containing whitespace.
+The selector splits the list on whitespace and can miss the intended tests.
 
-Without `CHANGED`, `make check` runs the full suite, and that stays the
-default: run it once, without `CHANGED`, before a push. Only a `CHANGED` given
-on the command line counts, and CI never passes one. `run-tests.sh` ignores
-the fast path when `CI` or `GITHUB_ACTIONS` is set to a non-empty value; an
-empty `CI=` is not a CI runner and does not trip that guard. The list is split
-on whitespace, so do not pass a path with a blank in it: it arrives as two
-paths, and each half is matched by name, so `docs/sd-status notes.md` selects
-whatever names `sd-status` and runs a narrowed suite that covers neither half.
-A blank in a path can narrow the run, not widen it. Any doubt does run the full
-suite instead: a path no test module names, a path more than half of them
-name, the `Makefile`, anything under `.github/`, the Python or dependency
-configuration, `bin/sd_install.py`, and any non-test file under `tests/`.
-`.github/scripts/select-tests.py` holds the rules. A test that reaches a file
-without naming it is not selected unless it is in the always-run set, which is
-why the full run before a push is not optional.
+The selector runs matching modules and an always-run set of checks.
+It cannot detect dependencies that tests do not name.
+An empty list, unknown path, or broad change selects the full suite.
+Read `.github/scripts/select-tests.py` for the selection rules.
 
-`make check` runs coverage-gated tests, Ruff and mypy over `bin/`, optional
-ShellCheck, optional Bandit/Zizmor, and `sd-docs-lint` over this checkout's
-own `docs/`. Missing optional tools print warnings
-instead of blocking Python-only contributor setups. Run `STRICT=1 make lint`
-to turn those missing-tool skips into hard errors for parity with CI.
+A narrowed run skips coverage combination and the installer coverage gate, then exits 2.
+The other three checks still run over their full scope.
+A narrowed run does not replace the full check before a push.
 
-`make lint` also parses every tracked shell script with bash 3.2 — the
-interpreter macOS keeps at `/bin/bash` — through
-`.github/scripts/check-bash32-syntax.sh`, so syntax that only bash 3.2 rejects
-fails before the push. That local run is the only place the gate runs: no CI
-job invokes it, and no CI job runs on macOS (R11-D4), so it is the one
-automated check that runs anything against the interpreter macOS actually
-ships, and it runs on the maintainer's machine rather than on a runner.
+Ruff checks `bin/` and `tests/`. Mypy checks `bin/`.
+The Makefile owns both path inventories. CI reads those inventories.
+Missing optional ShellCheck, Bandit, or Zizmor tools produce warnings.
+Use `STRICT=1 make check` to make missing tools fail.
+This also requires a bash 3.2 interpreter.
 
-Its rationale narrowed at step 3e, and the narrowing is worth stating rather
-than leaving the old reason in place. The gate existed because the pack shipped
-shell scripts that ran on whatever bash a consumer's macOS had. Nothing is
-shipped now. What it still protects is this repository's own three scripts under
-`.github/scripts/`, which `make check` runs through `/bin/bash` locally — a real
-subject, just a much smaller one. That narrowing is also why the CI job that
-built bash 3.2 from source to run the gate on Linux was cut (sd:10, criterion
-17): a from-source interpreter build was guarding three scripts the local run
-already executes under the real interpreter. The script
-list is enumerated from `git ls-files` at run time, never maintained inside the
-gate. A platform with no bash 3.2 (any Linux) prints
-`warning: no bash 3.2 interpreter found` and passes; `STRICT=1` turns that
-missing interpreter into a failure, and `SD_AI_COMMAND_PACK_BASH32` overrides
-the interpreter search with a space-separated candidate list.
+The local lint parses tracked `*.sh` files through `.github/scripts/check-bash32-syntax.sh`.
+The script enumerates its inputs from git.
+Set `SD_AI_COMMAND_PACK_BASH32` to override its space-separated interpreter candidates.
+Without bash 3.2, the script warns and passes unless `STRICT=1`.
+CI does not run this syntax check.
 
-Installer coverage is gated at **100% line and branch** over
-`bin/sd_install.py`, and the gate enumerates its subject from git rather than
-matching a glob. A glob drifts in two directions and reports green through both:
-a new module lands outside the pattern unmeasured, or code is deleted and the
-same 100% then certifies less. Enumeration closes the first; a declared floor
-closes the second.
-
-Which floor does that work changed at step 3e, and the reason is recorded in the
-gate itself. Until 3e the installer was `install.py` plus seventeen `installer/`
-modules, so a file count caught a module vanishing. The machine-scope installer
-is one file, and "at least one file" catches nothing — the surface could be
-gutted to a stub and still pass. So the floor is now a statement count, with
-`MIN_FILES` kept as the cheaper check that fails readably if the file is deleted
-outright. Lower either only in the pull request that legitimately shrinks the
-surface, where a reviewer can see the scope change.
-
-Three coverage lanes were retired at the same step, each because its subject
-stopped existing rather than because the bar was lowered: the shipped-script
-aggregate and per-file floors, the shipped-script documentation gate, and the
-kcov `Shell coverage` job. That last one is the only retirement that touched
-branch protection, since it was a required context; the workflow change and the
-protection change were sequenced together (R11-D6). Nothing measured by those
-lanes is now unmeasured — the payload they measured is deleted.
-
-Ruff covers pack-owned Python in `bin/` and `tests/`; mypy covers `bin/`. The
-authoritative path lists live in the Makefile as `LINT_RUFF_PATHS` and
-`LINT_MYPY_PATHS`, and CI reads them with `make -s lint-ruff-paths` rather than
-restating them — the workflow carried its own hand-copied list until 2026-08-29
-and had silently omitted every `bin/` file.
+Installer coverage requires **100% line and branch coverage** over `bin/sd_install.py`.
+The gate also checks file and statement floors.
+Lower a floor only in the pull request that reduces the measured implementation.
 
 ## Main Branch Policy
 
-Every change to `main` goes through a pull request. Nothing server-side
-enforces that today: GitHub branch protection is deleted, as the next
-paragraph but one records, and there is no local pre-push hook, no server-side
-path policy, and no bookkeeping fast lane. Merges land by hand with `gh pr
-merge` after the maintainer reads the checks; `sd-ship merge` does not run
-against an unprotected branch, because it reads the protection object before
-the pull request's checks and refuses a missing one
-(`bin/sd_ship_remote.py`, `protection()`, called from `bin/sd-ship` ahead of
-`ready()`). A pull-request head and a push to `main` run the
-same two unconditional jobs in `tests.yml` — the `unittest` matrix and `lint`
-— producing two contexts, `unittest (ubuntu-latest, 3.13)` and `lint`; a pull
-request also runs the advisory `route` job from `sd-review-route.yml`.
-Contexts are named by a job's `name:` when it has one and by its YAML key
-otherwise; requiring a name no job produces would pin a context that never
-reports and block every pull request. Four changes moved this set. The macOS
-leg was dropped for the duration of the artifacts-as-product rollout (R11-D4;
-restored by hand at the end of the rollout, no date); `bash32` was added
-because the bash 3.2 syntax gate turned out never to have run in CI at all
-(R11-D5); `Shell coverage` was removed at step 3e, because the shipped shell it
-measured was deleted (R11-D6); and sd:10 criterion 17 cut `bash 3.2 syntax`
-on the same premise and folded the three `security` steps into `lint`.
+Every change to `main` requires a pull request.
+The repository has an accepted branch-protection exception in [.github/sd-status.json](.github/sd-status.json).
+That file owns the reason and the condition that ends the exception.
+Run `bin/sd-status` to inspect live protection.
 
-That sentence is only true while protection is actually enforcing, so state the
-condition rather than the conclusion. Protection on `main` was deleted on
-2026-09-12 and `.github/sd-status.json` records why, as an accepted gap with
-the condition that ends it; while it is gone there are no required contexts,
-and what refuses a red merge is the maintainer reading the checks before
-`gh pr merge`, one person and not a gate. When protection returns, the
-contexts to require are the ones the workflow files produce at that time, not
-a list kept here, and `sd-ship merge` becomes runnable again.
+Use the pack's ship workflow for publication and review.
+While protection is absent, `sd-ship merge` refuses the missing protection object.
+Under the recorded exception, the maintainer reads every check before using `gh pr merge`.
+No server rule or local pre-push hook enforces this check.
+When protection returns, require the contexts that the current workflows produce.
 
-One was, briefly: `bash 3.2 syntax` began reporting when R11-D5 merged but was
-not added to the protection object until 2026-08-30, so for a few hours a red
-result there did not block a merge. Adding it is also what flipped the
-then-open #607 from CLEAN to BLOCKED, until that branch carried the workflow
-producing the context — the required-context ordering trap in its additive
-direction, the mirror of the removal case R11-D4 sequenced around. Both are
-recorded because the trap has now been hit in both directions within a day.
-
-That window is closed, and this paragraph is not what establishes it:
-`sd-status` reads the live protection object and reports whatever gaps exist at
-the time it runs, rather than trusting anything written here. Which is the
-point — a dated claim in a document is the thing most likely to be wrong, as
-the sentence this one replaces was.
-
-`enforce_admins` was deliberately left off in earlier work
-(see `docs/work/archive/2026-07/2026-07-09-main-push-server-side-guard/`,
-which explicitly declined to enable it, and `docs/work/archive/2026-07/2026-07-03-chore-push-scope-guard/`,
-which records it being enabled and disabled again the same day). That decision is
-reversed: an exemption for the only account that merges here made the doctrine
-prose, not authority — a direct push to `main` landed on 2026-08-29 precisely
-because nothing server-side stopped it. If protection is ever relaxed again, this
-section is wrong until it is rewritten; `sd-status` reads the live protection
-object and reports the gap instead of trusting this paragraph.
-
-CI intentionally tests the supported Python floor (3.10) and current project
-runtime (3.13). Intermediate 3.11/3.12 jobs would duplicate the same
-compatibility interval while increasing Actions cost; add one only when a
-version-specific defect provides evidence that endpoint coverage is
-insufficient.
-
-The macOS 3.13 leg is **temporarily dropped** (R11-D4, 2026-08-29). It ran
-12m18s on every pull request, and GitHub bills macOS runners at ten times the
-Linux rate, so the rollout was paying that on roughly fifteen more pull
-requests. It is a cost saving, not a latency one: the run is bounded by
-`Shell coverage` at 13m40s, so wall-clock time is unchanged. What is lost
-is named rather than waved away: with the leg gone, **no CI job runs on macOS
-at all**, so macOS-only Python behaviour, filesystem case-insensitivity, and
-platform-specific path handling are unverified in CI until it returns. The only
-remaining macOS coverage is the maintainer's own `make check` before a push --
-one machine, not a gate.
-
-The leg was originally due back at step 7. It is not: the restore is now a
-manual step the maintainer triggers at the end of the rollout (R11-D4
-amendment, 2026-08-31), because steps 8 through 11 still land pull requests and
-restoring at step 7 would pay the ten-times runner cost on every one of them.
-The consequence is stated rather than buried: the dated deadline was what made
-this removal falsifiable, and "when the rollout is done" is not a date. This
-paragraph is the record instead, and it has no expiry -- it stands, in the
-present tense, until a macOS job actually reports.
-
-No CI job invokes `check-bash32-syntax.sh`, and R11-D5, which put one there,
-is a repealed row in `bin/sd_rules.py` since sd:431 slice H (2026-09-17). One
-did between R11-D5 and sd:10 criterion 17: the `bash32` job built bash 3.2
-from source and ran the gate under `STRICT=1`, to cover bash 3.2 *syntax* on
-Linux runners while no macOS leg ran. It was cut because its subject had shrunk to this repository's own
-three scripts under `.github/scripts/`, which the local `make check` already
-executes under the real `/bin/bash` 3.2. So bash 3.2 syntax, macOS-only Python
-behaviour, filesystem case-insensitivity, and platform path handling are all
-unverified in CI until the macOS leg is restored; the first of those is
-verified by the maintainer's local run and the other three by nothing.
+The matrix in `.github/workflows/tests.yml` currently runs Ubuntu with Python 3.13 only.
+CI does not verify other Python versions or macOS behaviour.
+**The macOS CI leg remains disabled** (R11-D4).
+The maintainer restores it manually at the rollout's end. The restoration has no scheduled date.
+The local bash syntax check does not replace macOS CI.
+Treat local results as evidence from the tested machine only.
 
 ## Payload Rules
 
-- 0.72.0 (tag `v0.72.0`) is the terminal release. There are no further
-  releases: do not add a `CHANGELOG.md` heading and do not create a tag. The
-  release preparation command, the candidate ledger, the payload gate, and the
-  auto-tag job were deleted with it, and `manifest.json` itself was deleted at
-  step 3e.
-- `skills/sd-*/SKILL.md` is the payload, and there is exactly one copy of it.
-  There are no per-platform mirrors to keep in sync and nothing to re-render
-  after an edit: `bin/sd_install.py --user` renders from `skills/` at install time, and
-  a machine picks up an edit the next time it runs.
-- There is no versioning scheme any more, because there is nothing to version.
-  A machine is at whatever commit its serving checkout is at, which
-  `bin/sd_install.py --status` reports, and `--pull` moves forward. The 0.x minor/patch
-  rules that stood here governed a release train that no longer exists.
+- `v0.72.0` is the terminal release. Do not add release tags or `CHANGELOG.md` headings.
+- `skills/sd-*/SKILL.md` holds the payload. Edit that source directly.
+- `bin/sd_install.py --user` renders the skills during installation. The repository has no generated platform copies.
+- `bin/sd_install.py --status` reports the serving checkout's commit. Use `--pull` to update that checkout.
 
 ## Repository Conventions
 
-- Cite code in living documentation by symbol, never by line: a Python
-  function, class, method or module-level assignment is
-  `source:bin/sd-docs-lint::check_pr_link`. The citation check resolves the
-  declaration in that file, so inserting unrelated lines does not require a
-  documentation edit, and a symbol-anchored `path:line` into any file that is
-  not markdown fails the check (sd:525). A claim about a line that is not a
-  declaration, or about a file with no locator such as the `Makefile`, is
-  written as prose naming the enclosing declaration or the file. Place code
-  where it belongs; no citation constrains where a line goes. `path:line`
-  remains the form for a line of a markdown page. Keep historical references
-  tied to the version they describe.
-- `python3 tests/test_doc_citations.py --repoint` names every rewrite it
-  would make and every citation it refuses to guess at, and `--repoint
-  --apply` takes them. A line into code becomes its `source:` locator when the
-  anchored symbol is declared exactly once; a line into a page moves to where
-  the anchored text now is. It reads the anchored text, not the citation
-  string, and changes nothing when two candidates or none exist. A blunt
-  search-and-replace over the numbers in a page has already moved two markers
-  that were about other things.
-- Claude permissions split by what they describe. A rule about *this machine* —
-  a path only you have, a tool only you installed — goes in the ignored
-  `.claude/settings.local.json`. A rule about *this repository's workflow* —
-  a named `make` target, a repository entrypoint, the GitHub tools a shipped skill tells you
-  to call — goes in tracked `.claude/settings.json`, so a second contributor
-  gets the same quiet loop without copying anything, and the rules stop
-  applying the moment they work elsewhere. When in doubt, ask whether the rule
-  would still make sense on someone else's laptop; if not, it is machine-specific.
-- Keep the tracked allowlist free of escape hatches. A rule that permits
-  arbitrary execution grants more than the rest of the list combined, however
-  narrow it looks: Make recipes run shell, `python3` spawns subprocesses,
-  `awk` has `system()`, `sed -i` and `find -exec` write and execute. Name
-  specific `make` targets and path-scope `python3`. Where the capability is
-  genuinely needed, reach for the harness tool that already covers it -- Read,
-  Glob, Grep, Edit, Write -- rather than widening a Bash rule to reach it.
-- **The tracked allowlist is derived, not typed.** `tests/test_permission_allowlist.py`
-  builds it at run time from three inventories this repository already
-  maintains -- the Makefile's public `.PHONY` targets, README's
-  `bin/sd_install.py` table, and the `mcp__github__*` tools a shipped skill
-  names -- and fails if `.claude/settings.json` says anything else, in either
-  direction. To grant something, change the inventory: add the `make` target,
-  add the README row, have the skill name the tool. Editing the JSON by hand
-  fails the test, which is the point.
+### Documentation and decisions
 
-  Two filters run over what the inventories yield, both reading the documents
-  rather than a list somebody remembered. A mode whose name carries a
-  placeholder takes a path, and a path argument is what turns a repo-scoped
-  grant into an arbitrary-path write -- `--repo PATH` writes
-  `PATH/CLAUDE.local.md`, `--home DIR` moves the install root. A row whose
-  described effect begins with *Remove* or *Delete* is not something a second
-  contributor should inherit. Path-scoping the *script* is not the test; what
-  the script does with a path *argument* is.
+Use Claude's STE-Concise style for new and revised prose:
 
-  Only a surface README marks `Read-only:` gets a wildcard, because only there
-  is the whole flag space safe behind one. Everything else is exact-match, and
-  pays for it: `Bash(make test)` matches that string and nothing else, so
-  `make test` inside a pipeline still prompts. That is the intended trade --
-  `make test:*` would also permit `make test -f /somewhere/else/Makefile`, and
-  a wildcard over a command with *verbs* grants the verbs nobody was thinking
-  about, which is why `sd-dashboard`, whose `install` verb wrote a plist into
-  `~/Library/LaunchAgents` until sd:719 deleted it, is absent rather than
-  verb-scoped.
+- Use active voice and simple tenses.
+- Limit each sentence to 20 words and one idea.
+- Remove filler. Preserve exact identifiers, paths, commands, and quoted evidence.
 
-  Two invariants hold whatever the derivation does, and each is a defect that
-  actually shipped. Every path a rule names must exist -- `python3 scripts/:*`
-  once pointed at no directory, and a rule pointing at nothing reads as
-  coverage, so the prompt keeps arriving and the next person widens something
-  real to stop it. And a `bin/` target that is executable with a `python3`
-  shebang must carry both spellings, because `bin/sd-status --json` and
-  `python3 bin/sd-status --json` are both real and a rule matching one does not
-  match the other. `./bin/sd-status` matches neither and will prompt.
-- Do not allow generic file readers. `cat`, `tail`, `cut` and their siblings
-  take any path, so allowing one grants unscoped read of the whole machine --
-  and it reads *around* the `Read(**/...)` deny rules a machine-scope config
-  sets, which is the part that makes it worse than it looks. Read, Grep and
-  Glob do the same work and honour those denies.
-- The once-managed section of `.gitignore` is no longer generated by anything
-  and carries no markers. The marker pair was kept while
-  `docs/spec/backend/manifest-and-filesystem.md` still specified it; sd:10
-  criterion 18 removed that section and the markers in one change. Edit the
-  section by hand like any other.
+Keep one authoritative statement of each current rule or decision. Link to it from other documents.
+Governing documents contain current instructions and, when needed, one sentence explaining the reason.
+Put dated evidence in the existing work item's history. Preserve original review findings and their dispositions there.
+Update the current status in place. Record a history entry only when the decision, scope, or evidence materially changes.
+Do not append repeated corrections or copy decision discussions between documents.
+Git history preserves earlier wording.
+
+### Citations
+
+Cite code declarations by symbol: `source:bin/sd-docs-lint::check_pr_link`.
+The citation check requires one matching declaration.
+For a file without a supported declaration, name the file in prose.
+Use `path:line` only for markdown targets. Keep historical citations tied to their original version.
+
+Preview citation repairs before applying them:
+
+```bash
+python3 tests/test_doc_citations.py --repoint
+python3 tests/test_doc_citations.py --repoint --apply
+```
+
+The repair tool matches anchored text. It refuses ambiguous or missing matches.
+Do not replace line numbers without checking their targets.
+
+### Permissions
+
+Put machine-specific rules in ignored `.claude/settings.local.json`.
+Put repository workflow rules in tracked `.claude/settings.json`.
+Do not grant arbitrary execution or generic file readers through Bash permissions.
+Use scoped commands and the harness's file tools.
+
+`tests/test_permission_allowlist.py` derives the tracked allowlist from three inventories:
+
+- Public Makefile `.PHONY` targets.
+- The README installer table.
+- GitHub MCP tools named by shipped skills.
+
+Change the relevant inventory instead of editing grants by hand.
+The derivation excludes modes with path placeholders and effects that begin with `Remove` or `Delete`.
+Only README surfaces marked `Read-only:` receive wildcards. Other grants match exact commands.
+Every granted path must exist.
+Executable Python entrypoints require both direct and `python3` invocation forms.
+An added `./` prefix can change permission matching.
+
+Edit `.gitignore` directly. No generator maintains it.
 
 ## Specs To Read First
 
-The `docs/spec/**` tree still describes the pre-3e installer, manifest, and
-adapter model in several places, and `docs/FLEET_ROLLOUT.md` with `docs/fleet/**`
-still describes a release train and a fleet of consumer checkouts that no longer
-exist. Those pages are stale by construction — step 3e deleted what they describe
-— and they are corrected as the steps that own them arrive (fleet residue at
-steps 4 and 7) rather than rewritten speculatively here. Deleting them in 3e was
-considered and rejected: a deletion widened because the tree is already open is
-how a reviewable pull request stops being one. Read
-`docs/work/archive/2026-09/2026-08-29-artifacts-as-product/` for what is actually true now.
+Read the [current architecture](docs/current-architecture.md) before changing the installer or command set.
+That page links the historical design and implementation records.
 
-That deferral did not hold, and the paragraph above is left standing as the
-record of the plan rather than rewritten to match what happened. Steps 4 and 7
-both closed without reaching these trees — step 7's checklist row said "triage
-survivors" and the step closed on 2026-09-01 with the row unaddressed — so the
-triage ran on **2026-09-01** as its own pass instead. Every page under
-`docs/spec/**` and `docs/FLEET_ROLLOUT.md` now opens with a dated notice naming
-what was deleted, when, and which record explains it; `docs/fleet/` carries the
-same notice in a new `README.md`, because JSON takes no header. The notices
-supersede: nothing below them was edited.
+Some surviving `docs/spec/**` pages describe the retired installer model.
+Read each page's dated notice before using it.
+The Machine-Scope Installer section's final location remains undecided.
+Its current location is `docs/spec/backend/manifest-and-filesystem.md`.
 
-Deletion was **not** part of that pass. 7,839 lines of specification is a
-content decision for the maintainer, so the pass produced a per-file
-disposition with evidence — keep, stale-notice, or delete — and left the delete
-column as a recommendation. It is in the step 7 entry of
-`docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
-
-One thing to know before acting on that recommendation: `docs/spec/**` is not
-orphan text, even where its content is. `bin/sd-docs-lint` rule 4 enumerates
-the tree at run time and fails any spec directory that holds pages without an
-`index.md` linking each of them; `.github/sd-review.json` and `bin/sd_route.py`
-both carry `docs/spec/**` in `never_skip`, so a change there is never routed
-past review; and `skills/sd-spec/SKILL.md` writes into it as the second stage
-of `sd-ship`. Rule 4 tolerates an index that links a page which is gone, so
-deleting a page is safe — but a directory has to leave with its index, not
-before it.
-
-**The recommendation was executed on 2026-09-01, hours after the triage that
-produced it, and the two paragraphs above
-stand as written.** The maintainer took the delete column. Eighteen files and
-9,324 lines went: `docs/spec/frontend/` and `docs/spec/tooling/` left whole,
-index included; three of `docs/spec/backend/`'s seven pages went while three
-stayed; and `docs/FLEET_ROLLOUT.md`, `docs/fleet/consumers.json` and
-`docs/fleet/surface-partition.json` went with them. `docs/spec/**` is now seven
-files in two directories.
-
-Two files were rewritten rather than deleted, and each for a stated reason.
-`docs/spec/backend/index.md` had to survive because rule 4 requires an index
-wherever pages remain, so it was cut down to an index of the three survivors
-plus a record of what left. `docs/fleet/README.md` was written earlier the same day
-to carry a notice for two JSON files that could not hold one; with both files
-gone it is a tombstone instead, kept at its path so links into `docs/fleet/`
-from this file, from `CHANGELOG.md`, and from archived work items still answer
-rather than 404.
-
-What did **not** change: the six stale-notice pages were untouched by the
-triage. (sd:10 criterion 18 later wrote the predecessor framework's name out
-of them and removed the gitignore-block section of
-`docs/spec/backend/manifest-and-filesystem.md` together with the marker pair
-it kept in `.gitignore`; that settled the first of the two open questions the
-triage recorded against that page. The second, whether its Machine-Scope
-Installer section belongs in `docs/spec/` or `docs/work/archive/`, is still
-open.) `docs/review-learnings.md` still cites
-`docs/FLEET_ROLLOUT.md` in three entries marked **historical**; those are
-quotations from PR #184 and #188 review comments and were true when written, so
-they stay.
+Keep an `index.md` that links every surviving page in each spec directory.
+Spec changes remain subject to review through `never_skip`.
+The `sd-spec` skill maintains specs during shipping.
+Keep `docs/fleet/README.md` as the historical link target.
+Preserve the marked historical review quotations in `docs/review-learnings.md`.
