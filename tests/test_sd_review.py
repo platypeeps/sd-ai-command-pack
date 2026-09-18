@@ -85,7 +85,7 @@ def chat_answer(content: str, **extra: Any) -> tuple[int, str, str, bool]:
 
 
 class FakeClient:
-    """The second seam, recording what left.
+    """The second seam records what the client sent.
 
     `sent` is the assertion that carries the weight. For an entry this
     repository has not consented to -- a host that moved, a scheme edited down

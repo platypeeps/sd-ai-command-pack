@@ -245,15 +245,9 @@ never vendors.
                  roles: [reviewer], max_tokens: 16384, price: { in: 0, out: 0 } }
       baseten: { url: "https://inference.baseten.co/v1", model: deepseek-ai/DeepSeek-V4-Pro-0813, vendor: deepseek,
                  bill: baseten, roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 } }
-      exo:     { url: "http://localhost:52415/v1", model: "<pinned>", vendor: local, bill: local,
-                 roles: [author, reviewer], enabled: false, reason: "model not pinned" }
-      # Shipped disabled, faithful to `prd.md:447-450`. Criterion 6's test
-      # adds an `exo` entry and resolves it, and a disabled entry never
-      # resolves — so that test writes its own enabled entry into a fixture
-      # registry rather than reading this one.
     roles:
       author:   [claude, codex]
-      reviewer: [codex, claude, minimax, kimi, baseten, exo]
+      reviewer: [codex, claude, minimax, kimi, baseten]
 
 A capped bill takes `url` entries only, because the library makes those
 calls and can refuse one before it is sent; a `start` entry on a capped

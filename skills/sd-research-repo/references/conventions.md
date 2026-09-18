@@ -301,20 +301,9 @@ Three things to get right:
   prompt and name the comparison: *"review `git diff main...HEAD`"*. Name the
   documents too when the diff is large.
 - **Its default framing is a code review** — auth boundaries, races, migrations,
-  rollback. Prose needs the focus text to redirect it. That text is what
-  `adversarial-gate render --lens research-brief` prints and what the checklist
-  embeds; it reads:
-
-  ```
-  This is a markdown research repository, not code. Review the uncommitted
-  working-tree changes (git status, git diff, plus untracked new files) as an
-  adversarial reader. Attack the argument, not the syntax: which load-bearing
-  claims does the cited source not actually support; which numbers are missing
-  a unit, a date or a denominator; what does the conclusion depend on that the
-  document never states; where does a document assert something as verified
-  that the repo shows was not checked. Cite file and line. Do not modify any
-  files.
-  ```
+  rollback. Use the focus text printed by `sd-research-kit review`.
+  `CHECKLIST` in `bin/sd_research_review.py` owns that text.
+  Do not copy the prompt into a repository guide.
 
   Run it in the background for anything past a page. It buffers stdout, so it
   prints nothing at all until it exits — silence is normal, not a hang. If you

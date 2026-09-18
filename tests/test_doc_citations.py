@@ -1081,30 +1081,14 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 # could name?
 
 #: Live citations whose line sits inside a `def` or a `class`, per document.
-#: Measured on `ef7c0c7b` by `symbol_anchored_citations` below, 145 rows;
-#: the 2026-09-05 prd fell 66 -> 64 on `693ed526`, where #1017 deleted
-#: `bin/sd_ledger.py` and two of its citations lost their target; three fell
-#: by one each when sd:981 added `registered_base` to `bin/sd_lib.py` and
-#: the lines they name moved out of the declarations they sat in. A ratchet on
-#: violations, never a census: each entry may fall and may not rise, and an
-#: entry that reaches zero is deleted. Per document, so a new one in one page
-#: cannot be netted off against a cleanup in another.
+#: Measured after the 2026-09 archive move. Archived records are outside this
+#: live-prose gate. A ratchet on violations, never a census: each entry may
+#: fall and may not rise, and an entry that reaches zero is deleted.
+#: Per document, so one page cannot offset a new violation in another.
 SYMBOL_ANCHORED_CITATIONS = {
     "actions/docs-gate/README.md": 1,
-    "docs/work/2026-09-04-sd-status-answers-is-anything-wrong-first/prd.md": 1,
-    "docs/work/2026-09-04-the-citation-gate-skips-what-it-cannot-match/design.md": 3,
-    "docs/work/2026-09-04-the-citation-gate-skips-what-it-cannot-match/implement.md": 1,
-    "docs/work/2026-09-04-the-citation-gate-skips-what-it-cannot-match/prd.md": 1,
-    "docs/work/2026-09-04-the-plan-interview-is-one-sentence/design.md": 2,
-    "docs/work/2026-09-04-the-sweep-trusts-a-branch-field-it-never-resolves/implement.md": 1,
-    "docs/work/2026-09-04-the-sweep-trusts-a-branch-field-it-never-resolves/prd.md": 1,
     "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 40,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 61,
-    "docs/work/2026-09-12-a-second-tracker-with-no-rows/design.md": 4,
-    "docs/work/2026-09-12-a-second-tracker-with-no-rows/implement.md": 5,
-    "docs/work/2026-09-12-the-contribution-tracker-cannot-hold-an-issue/design.md": 3,
-    "docs/work/2026-09-12-the-contribution-tracker-cannot-hold-an-issue/implement.md": 3,
-    "docs/work/2026-09-12-the-contribution-tracker-cannot-hold-an-issue/prd.md": 8,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 59,
 }
 
 
@@ -1713,15 +1697,15 @@ class TheMarkerGrammar(unittest.TestCase):
                 self.CODE, "`f` (`bin/x.py:1`) [quoted: source:bin/tool.py]"),
             "target-missing")
 
-    def test_the_live_marker_survives_an_edit_above_the_line_it_names(self) -> None:
-        """The defect itself, on this checkout's real page and this real module.
+    def test_the_historical_marker_survives_an_edit_above_the_line_it_names(self) -> None:
+        """The defect itself, on this checkout's archived page and real module.
 
         `design.md` quotes bin/sd:1231 from this module by line. With a blank
         line inserted above that line in a copy of this module, the page's
         marker must still be `quoted` and the repointer must have nothing to
         say about it -- the three tests that went red were those two answers.
         """
-        page = (REPO_ROOT / "docs" / "work"
+        page = (REPO_ROOT / "docs" / "work" / "archive" / "2026-09"
                 / "2026-09-04-the-citation-gate-skips-what-it-cannot-match" / "design.md")
         relative = pathlib.Path(__file__).resolve().relative_to(REPO_ROOT)
         with tempfile.TemporaryDirectory() as tmp:

@@ -40,11 +40,11 @@ only reports is what the retired stack had; the gate stayed for
 `dashboard/` until the directory did not.
 
 **R11-D41, 2026-09-06: the code cap is payable in kind, and the ceilings
-record their own history.** Two changes, from one reading of what these
-constants have actually done. `CEILING_HISTORY` below holds every value each
-one has held, read from this file's own git log. R11-D41 read nine moves and
-found **not one downward move and not one refusal**, with `bin/` going 8,000 to
-15,750 in seven days and four of those raises inside three days. That is the
+record their own history.** Two changes followed one reading of these constants.
+`CEILING_HISTORY` holds every value from this file's own Git history.
+R11-D41 read six values through 2026-09-06.
+It found **not one downward move and not one refusal**.
+`bin/` went from 8,000 to 15,750 in seven days. That is the
 shape the paragraph below warns about -- 95,000 lines one defensible commit at a
 time -- arriving inside the mechanism built to prevent it, because each raise is
 priced in isolation and nothing ever looks at them together. R11-D48 is what
@@ -139,10 +139,11 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 # The evidence is `CEILING_HISTORY["BIN_CAP"]` below, which is why that entry
 # is kept after the constant it described is gone. Twenty-one recorded values,
 # 8,000 on 2026-08-30 to 20,803 on 2026-09-10: **eleven days, every move
-# upward, not one downward move and not one refusal.** R11-D41 read the first
-# nine of those and kept the gate, on the reasoning that a ceiling which only
-# reports is what the retired stack had. Twelve more raises later the gate has
-# still never returned "no", and what it has returned instead is measurable:
+# upward, not one downward move and not one refusal.** R11-D41 read the six
+# values recorded through 2026-09-06 and kept the gate. It reasoned that a
+# reporting-only ceiling matched the retired stack.
+# Fifteen later raises did not change the result. The gate still never
+# returned "no", and what it returned instead is measurable:
 # each raise is a serialised preparatory pull request, and R11-D38 alone cost
 # an agent twenty-two minutes and blocked four units of work behind it.
 #

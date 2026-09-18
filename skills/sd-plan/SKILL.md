@@ -35,7 +35,7 @@ create a PRD just to record routine progress or work already merged.
    item and continue under `WORKFLOW.md`'s stop conditions.
 2. **Write from the templates** in `skills/sd-plan/templates/` (`prd.md`,
    `design.md`, `implement.md`, `decision.md`, `work-README.md`). Before
-   writing each page, run `bin/sd-rules --for <work>/<item>/<page>.md` (the
+   writing each page, run `sd-rules --for <work>/<item>/<page>.md` (the
    selected work root, `docs/work` unless `--work-dir` chose another; or
    `--for docs/decisions/<record>.md` under `--decision`) from the
    repository root and cite the rule ids it prints in the page rather than

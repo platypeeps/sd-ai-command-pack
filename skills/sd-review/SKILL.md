@@ -130,12 +130,13 @@ prompt this tool dispatches opens with this checkout's `CLAUDE.local.md`
 block, rendered by `local_conventions` in `bin/sd-review` on the dispatch
 path of `review` and asserted on that prompt by
 `test_the_local_block_reaches_the_prompt` in `tests/test_sd_review.py`
-(R10-D7). The provider preflight above returns before that call and sends no
+(R10-D7). The JSON receipt records this signal as `local_block_prepended`.
+The provider preflight above returns before that call and sends no
 local block, as its section says. So read a finding that ignores a local
 convention as a finding about the block's wording before reading it as one
 about the provider. The row in `bin/sd_rules.py` states the rule; it is not
 restated here.
-`bin/sd-rules --for <path>` prints the rows in scope for the file being
+`sd-rules --for <path>` prints the rows in scope for the file being
 written.
 
 ## The `codex-json` entry is subscription-only (R10-D4)
@@ -211,9 +212,11 @@ repositories carried the guard in six hand-written wordings, five of them
 reciting a fix commit that was already behind their pin. Do not write the
 guard by hand; run `setup-github` and let the file gain it.
 
-The rest of `dependabot.yml` is the consumer's. With no file, `setup-github`
-creates a minimal one (one github-actions entry, weekly, five open pull
-requests, the guard). With a file, it appends the guard to the entry's
+The rest of `dependabot.yml` is the consumer's. In a consumer repository,
+`setup-github` creates a minimal file when none exists.
+The file contains one weekly `github-actions` entry, five open pull requests,
+and the guard. A self-install leaves a missing file absent.
+With a file, the command appends the guard to the entry's
 `ignore:` list, creating the list when the entry has none, and replaces an
 existing item for the action -- comment and line -- when one is there. That
 is a line transform, not a YAML round-trip, so the consumer's comments

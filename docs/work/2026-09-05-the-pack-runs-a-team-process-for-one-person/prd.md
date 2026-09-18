@@ -443,11 +443,11 @@ whose money it is: `subscription` for Codex and Claude, `plan` for MiniMax,
 the Token Plan the operator has paid for the year, which grants use in a
 five-hour window and a weekly window that the vendor's `token_plan/remains`
 endpoint reports as a remaining percent each, `prepaid` for the Moonshot
-balance the operator has already paid, `company` for
-Baseten, `local` for exo. The `reviewer` line runs subscription first, the
+balance the operator has already paid, and `company` for Baseten.
+The `reviewer` line runs subscription first, the
 plan next, because its monthly tokens lapse unused where a prepaid balance
 keeps, prepaid after that, company last: `[codex, claude, minimax, kimi,
-baseten, exo]`, with one `url` entry,
+baseten]`, with one `url` entry,
 `baseten`, in place of the `prism` and `gito` CLIs that pointed there,
 from A's round twenty-two. The first entry that is
 enabled, carries the role, is not the author's vendor, has budget left on its
@@ -497,8 +497,8 @@ a subscription entry logs tokens alone.
 An entry carries `vendor:`, the maker of the model behind it, and the
 different-vendor rule compares vendors, not names or bills. `baseten` is
 a bill and an endpoint, not a vendor: the entry's vendor is the model it
-serves, pinned on the entry. `kimi` is Moonshot, `minimax` is MiniMax, `exo` is
-whatever model it serves. Entries carrying a `url:` run through one
+serves, pinned on the entry. `kimi` is Moonshot and `minimax` is MiniMax.
+Entries carrying a `url:` run through one
 OpenAI-compatible client in the library, with `model:` and `max_tokens:` from
 the entry and one reader for all of them that takes the answer from
 `content`, strips a `<think>` block, and ignores `reasoning_content`. That
@@ -879,9 +879,8 @@ pushed and Notion mirrors for its audience. That is intended and stays.
   existing, enumerated from the lint rather than named by number.
 - The 100% coverage floor stays for `bin/sd_install.py`, which writes files under
   the operator's home directory. It is dropped elsewhere.
-- The four line-count ceilings print a warning and stop failing the suite. They
-  were re-derived five times in five days and cost more in bookkeeping than the
-  headroom they defend.
+- `MIGRATE_CAP` stays enforced for the temporary migration tools.
+  The retired `BIN_CAP` and dashboard ceilings remain as historical data.
 - `make check` gains a fast path over changed files. The full suite runs once
   before a push.
 - The `bash32` job builds bash from source to lint the repository's own scripts,
@@ -1138,15 +1137,22 @@ log, not here.
   1122-1129,1234-1242,1254-1287`), so
   `work_item_dirs` is one `iterdir` that skips `archive` by name; `bin/sd_ledger.py` moves to B with the
   database; `record_load` (cut 2026-09-16, 31(b1)); the six helpers
-  copied from `bin/sd-handoff` (`bin/sd-handoff-restore:72-140,356-370`) are
-  imported the way `bin/sd-status:96` does; the `authors` policy key
+  copied from `bin/sd-handoff` are
+  `git` (`source:bin/sd-handoff-restore::git`),
+  `canonical_remote` (`source:bin/sd-handoff-restore::canonical_remote`),
+  `resolve_root` (`source:bin/sd-handoff-restore::resolve_root`),
+  `state_home` (`source:bin/sd-handoff-restore::state_home`),
+  `packet_path` (`source:bin/sd-handoff-restore::packet_path`), and
+  `contains` (`source:bin/sd-handoff-restore::contains`);
+  they are imported the way `bin/sd-status:96` does; the `authors` policy key
   (`bin/sd-review:276`, `:283`, `:1098`, `bin/sd_setup_github.py:230,267`, the schema,
   `.github/sd-review.json`); the unreachable gito and kimi argv branches
   (`bin/sd-review:830-834`) and `except Refusal` (`:1354-1356`); the constant
   `posted` key and its grep test (`bin/sd-review:1110`,
-  `tests/test_sd_review_boundary.py:167`); the second BACKENDS table
-  (`bin/sd-status:903`), derived from the registry instead; the residue
-  detectors (`bin/sd-status:946-1004`) after one clean run across the fleet;
+  `tests/test_sd_review_boundary.py:167`); the second `BACKENDS` table
+  (`source:bin/sd-status::BACKENDS`), derived from the registry instead;
+  `RESIDUE` and `residue_section`
+  (`source:bin/sd-status::residue_section`) after one clean fleet run;
   the history comments in `Makefile`; `--stash-ref` (`bin/sd-handoff:374`) and
   `carrier_branches` (both cut 2026-09-16, 31(b1)); `sd-status`'s `_git` is taken --
   it now calls `sd_lib.git_output`, which already carried the timeout.
@@ -3938,7 +3944,7 @@ from a number the operator types.
   `tests/test_loc_caps.py`: 407 lines before and after, so every line number
   below the constant is unmoved. R11-D32 shifted that file by 24 and broke
   four anchored citations in
-  `docs/work/archive/2026-09/2026-09-02-dashboard-ack-and-mutation-count/prd.md`, which it
+  `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-09-02-dashboard-ack-and-mutation-count/prd.md`, which it
   then had to repoint. Those four are the entire reason — the file is not this
   change's to edit, and rewriting the rationale inside its existing envelope
   costs one round of arithmetic and no cross-item churn.
@@ -4327,7 +4333,7 @@ from a number the operator types.
 
   One mechanical note, and it is the opposite of R11-D34's. That entry kept
   `tests/test_loc_caps.py` **line-neutral** at 407 lines so that four anchored
-  citations in `docs/work/archive/2026-09/2026-09-02-dashboard-ack-and-mutation-count/` would
+  citations in `https://github.com/platypeeps/sd-ai-command-pack/tree/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-09-02-dashboard-ack-and-mutation-count/` would
   not have to be repointed, after R11-D32 shifted the file by 24 and had to
   repoint them. This change does not: the file goes from 407 to 442 lines, and
   the rewritten rationale is longer because the derivation now has four
@@ -4480,7 +4486,7 @@ from a number the operator types.
   unresolved across 12 files** — every one a link into
   `2026-08-29-artifacts-as-product` or
   `2026-09-02-dashboard-ack-and-mutation-count`, both of which moved into
-  `docs/work/archive/2026-09/` after those links were written. This falsifies
+  the [September archive snapshot](https://github.com/platypeeps/sd-ai-command-pack/tree/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09) after those links were written. This falsifies
   the sentence two paragraphs above criterion 33, which argued that keeping a
   `done` directory serves the fourteen lines that link into it. Keeping it did
   not: the archive move broke all fourteen, and for two days nothing said so.
@@ -5396,7 +5402,9 @@ from a number the operator types.
 
   The original symbol list, before `authors`:
 
-  > `sd_sweep`, `parked`, `archived`, `record_load`,
+  > `sd_sweep`, `parked`, `archived`, `record_load`, `carrier_branches`,
+  > `_protection_gaps`, `load_acknowledgements`, `--stash-ref`, `--push`,
+  > `--park`,
 
   and after it:
 

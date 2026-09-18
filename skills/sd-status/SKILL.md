@@ -39,7 +39,7 @@ opens with fifteen top-level lines; the fourteen below are the sections.
 | `work items` | derived item status from `docs/work`, counted, with the parked ones counted and not listed |
 | `contributions (this repo, shared database order)` | upstream activity, local evidence, and dependency readiness from the shared contribution projection |
 | `open pull requests` | open pull requests, via the same code path as `sd-pr-state` |
-| `detected setup` | mode (`full`/`minimal`/`guest`) and the detected check entrypoints |
+| `detected setup` | mode, lowering reason, shared-tree paths to move, and detected check entrypoints |
 | `issues (this repo, from the index)` | indexed issues for this repository, split into the ones the index says need you and the rest |
 | `jira (shared database, all repositories)` | the operator's Jira involvement from the shared database, across every repository: one line per ticket, key and state, open rows first, then rows closed within seven days. Not scoped to the checkout |
 | `protection` | branch-protection **enforcement**, gap by gap, plus the two merge-settings flags |

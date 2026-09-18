@@ -9,7 +9,7 @@ disable-model-invocation: true
 `sd-spec` updates `docs/spec/**` on the current PR branch, in the same commit
 range as the change that made it stale. Invocation is explicit approval to
 write under `docs/spec/` (and, with `--retro`, to append review learnings).
-Before writing each page, run `bin/sd-rules --for docs/spec/<page>.md` from
+Before writing each page, run `sd-rules --for docs/spec/<page>.md` from
 the repository root and cite the rule ids it prints in the page rather than
 restating the rules.
 

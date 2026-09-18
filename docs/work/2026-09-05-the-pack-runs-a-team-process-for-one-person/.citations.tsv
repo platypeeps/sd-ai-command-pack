@@ -1,24 +1,23 @@
-design.md:212	prd.md:1371-1376	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1371	fork, and nobody else has push or higher on it;
-design.md:217	prd.md:1376-1377	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1376	with a second collaborator, and a root with no r
-design.md:250	prd.md:447-450	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	447	Baseten, `local` for exo. The `reviewer` line ru
-implement.md:110	prd.md:1220-1221	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1220	4. Exactly one second-model lane is named anywhe
-implement.md:128	prd.md:1208-1212	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1208	asserts the set of keys `WORKFLOW.md` documents
-implement.md:188	prd.md:1114-1162	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1114	adaptation and omission ledgers and the approval
-implement.md:190	prd.md:1664-1668	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1664	return the same reviewer order from the same `pr
-implement.md:243	prd.md:1289	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1289	same second slice resolves the same, from A's ro
-implement.md:501	prd.md:871	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	871	- `README.md`'s claim that the pack writes "noth
-implement.md:509	prd.md:1405-1406	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1405	fixture remote whose default branch does not req
-implement.md:606	prd.md:1235-1237	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	identical. Every skill that runs a review names
-implement.md:695	prd.md:1407-1408	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1407	branch, asserted by the fixture remote seeing no
-implement.md:709	prd.md:1450-1464	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1450	status change touches no file, asserted by a tes
-implement.md:710	prd.md:1485-1494	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1485	never, and a guest clone retained on the fork's
-implement.md:711	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	the delivering case on a fixture remote that gai
-implement.md:721	prd.md:582	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	582	`docs/work/.status-source`, one line, `row`, bes
-implement.md:721	prd.md:2632	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	2632	retire commit adds a tracked marker, `docs/work/
-implement.md:784	prd.md:1197-1198	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1197	row open, requirement 5. Before the second slice
-implement.md:788	prd.md:1181-1185	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1181	## Landing order
-implement.md:1289	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	the delivering case on a fixture remote that gai
-implement.md:1499	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	identical. Every skill that runs a review names
-implement.md:1544	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	identical. Every skill that runs a review names
-implement.md:1900	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	identical. Every skill that runs a review names
-implement.md:1908	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	the delivering case on a fixture remote that gai
+design.md:212	prd.md:1371-1376	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1371	10. A pull request body carries a `Work:` line o
+design.md:217	prd.md:1376-1377	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1376	operator holds admin permission on the remote, t
+implement.md:110	prd.md:1220-1221	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1220	`Work:` line, and no remote-branch deletion comm
+implement.md:128	prd.md:1208-1212	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1209	1. `WORKFLOW.md` exists at the repository root,
+implement.md:188	prd.md:1114-1162	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1114	list, and the author approves; the omission ledg
+implement.md:190	prd.md:1664-1668	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1664	at GitHub rather than merging unreviewed: a test
+implement.md:243	prd.md:1289	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1289	and its `Attributes:` trailer naming the sha and
+implement.md:499	prd.md:871	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	871	- `README.md`'s claim that the pack writes "noth
+implement.md:507	prd.md:1405-1406	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1405	query finds one function that both gates call; a
+implement.md:604	prd.md:1235-1237	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	requirement 13 removes, so a definition that omi
+implement.md:693	prd.md:1407-1408	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1407	once to merge, adds a second collaborator to the
+implement.md:707	prd.md:1450-1464	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1450	worktree kept across the retire on a branch stil
+implement.md:708	prd.md:1485-1494	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1485	and the fetch while the fixture remote is unreac
+implement.md:709	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	policy to `ready_to_send`, merges the pull reque
+implement.md:719	prd.md:582	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	582	`docs/work/.status-source`, one line, `row`, bes
+implement.md:719	prd.md:2632	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	2632	longer has is nothing to be behind; an unreachab
+implement.md:782	prd.md:1197-1198	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1197	request after the one that lands the reader, fro
+implement.md:786	prd.md:1181-1185	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1181	three vault databases into one vault backlog. Ob
+implement.md:1287	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	policy to `ready_to_send`, merges the pull reque
+implement.md:1497	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	requirement 13 removes, so a definition that omi
+implement.md:1542	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	requirement 13 removes, so a definition that omi
+implement.md:1898	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	requirement 13 removes, so a definition that omi
+implement.md:1906	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	policy to `ready_to_send`, merges the pull reque

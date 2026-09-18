@@ -559,6 +559,15 @@ class ABranchAnotherPullRequestIsBasedOn(unittest.TestCase):
         self.assertTrue(
             tied, "step 6 never ties stopping the run to a non-empty answer")
 
+    def test_a_failed_query_stops_the_run(self) -> None:
+        stopping = ("stop", "ends the run", "refuse", "does not merge")
+        tied = [
+            line for line in sentences(self.step)
+            if "fail" in line.lower()
+            and any(word in line.lower() for word in stopping)
+        ]
+        self.assertTrue(tied, "step 6 treats an unanswered query as an empty answer")
+
 
 class TheReviewedHead(unittest.TestCase):
     """Criterion 32: only a cleared reviewed head, or its verified fix, ships."""

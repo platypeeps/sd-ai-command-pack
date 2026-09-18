@@ -17,7 +17,7 @@
 > The text below is unedited. It is the record of what that machinery
 > specified, not guidance for the repository as it stands. The triage that
 > produced this notice is recorded under step 7 in
-> `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
+> `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
 
 > **Purpose**: Expand your thinking to catch things you might not have considered.
 

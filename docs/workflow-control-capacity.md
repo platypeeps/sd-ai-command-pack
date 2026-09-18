@@ -300,9 +300,9 @@ The record it is argued from is `CEILING_HISTORY["BIN_CAP"]`, which is kept in
 | Downward moves | 0 |
 | Refusals | 0 |
 
-R11-D41 read the first nine of those on 2026-09-06 and kept the gate,
-reasoning that a ceiling which only reports is what the retired stack had.
-Twelve further raises have not changed the answer: the gate has still never
+R11-D41 read the six values recorded through 2026-09-06 and kept the gate.
+It reasoned that a reporting-only ceiling matched the retired stack.
+Fifteen later raises did not change the answer: the gate still never
 returned "no". What it has returned is cost — R11-D24's clause forbids raising
 a cap in the pull request that crossed it, so every raise is a serialised
 preparatory pull request of its own, and R11-D38 alone cost an agent
