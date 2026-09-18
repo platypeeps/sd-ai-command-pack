@@ -255,11 +255,11 @@
       reads four forms now instead of one, and no prose was repointed. The
       three forms the finding above named were read off the archive on
       `2eafa78b`: the table cell at
-      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:251`
+      `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md#L251`
       for `R11-D1`, the heading at
-      `docs/work/archive/2026-09/2026-09-04-host-parsing-refuses-what-it-cannot-parse/implement.md:12`
+      `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-09-04-host-parsing-refuses-what-it-cannot-parse/implement.md#L12`
       for `R11-D30`, and the bold run closed before the parenthesised id at
-      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:206`
+      `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md#L206`
       for `R5-D1`. The fourth form is a bold run that *contains* the id, which
       is the team-lead decision of 2026-09-16, reversible by the owner: it
       makes the bold sentence at
@@ -345,7 +345,7 @@
       row, the first of step 8's teaching-section slices (note 2568) and
       narrowed to the lane that exists. Re-measured on `8548d512` first:
       the definition is the bold run at
-      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:341`,
+      `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md#L341`,
       "Two handoff lanes, split by what they actually solve"; Lane B is the
       repeal `R10-D2` above, and Lane A's rule is the restore hook's
       registration -- `SessionStart` on `startup` and `clear`, never
@@ -399,7 +399,7 @@
       `R11-D6` are rows, the audit's slices 2 and 3 in one change, each
       committed alone first. Re-measured on `58739c79`: `R10-D7`'s
       definition is the bold run at
-      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:168`,
+      `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md#L168`,
       "Partial fallback", the id on the line after, and what holds it is
       `source:bin/sd-review::local_conventions`, whose docstring cites the id
       and whose one caller is the dispatch path of `review`, after the
@@ -411,7 +411,7 @@
       `test_the_local_block_reaches_the_prompt` in
       `source:tests/test_sd_review.py::PipelineTests`. `R11-D6`'s
       definition is the bold run at
-      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:1640`,
+      `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md#L1640`,
       the deletion of the `Shell coverage` job; the rule that survives it is
       the one `tests/test_no_shipped_shell.py` states in its module
       docstring, no shell outside `.github/scripts/`, so the checker is that
@@ -473,20 +473,20 @@
       same reasoning applies here. Re-measured on `9832c193`, none of the
       cited files changed since `8548d512`: `R11-D14`'s definition is the
       bold run at
-      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:271`,
+      `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md#L271`,
       "The eight keys, written down", held by `source:bin/sd::validate_kind`
       over `source:bin/sd::KIND_KEYS`, whose comment cites the id, and
       pinned by `test_a_ninth_key_refuses` in
       `source:tests/test_sd_plugin.py::KindTests`; the subject names the
       constant and the count, not the keys, because that class already
       holds a copy. `R11-D27`'s is the bold run at
-      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:2358`,
+      `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md#L2358`,
       the line edit, held by `source:bin/sd::edit_field` and
       read back as bytes by
       `test_a_set_leaves_every_line_it_did_not_edit_byte_identical` in
       `source:tests/test_sd_store.py::WriteTests`. `R5-D1`'s is the table
       cell at
-      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md:206`,
+      `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md#L206`,
       "Obsidian vault stays system-of-record", held
       by `source:bin/sd::store_list`, whose docstring cites the id, and by
       `test_a_note_written_directly_into_the_vault_is_visible_to_the_next_query`
@@ -575,9 +575,9 @@
       consumers. Re-measured on `ea32e76a`: every defining sentence the
       audit cited stands at the line it named (lines 251, 1582, 1454, 1247,
       1168, 1719, 1994, 2046, 2185, 2257 and 2483 of
-      `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md`,
+      `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/design.md`,
       and the heading at
-      `docs/work/archive/2026-09/2026-09-04-host-parsing-refuses-what-it-cannot-parse/implement.md:12`),
+      `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-09-04-host-parsing-refuses-what-it-cannot-parse/implement.md#L12`),
       and each row's `subject` is that sentence's clause. The audit's slice 7
       came first, as the prerequisite: `teaches` is `str | None` on
       `source:bin/sd_rules.py::Rule`, required of a live row and optional on

@@ -24,10 +24,11 @@ is the ledger; sd:10's other criteria settled there too.
   template in `prd.md`, and every pass note already recorded is re-recorded
   in the new shape, as a new note that names the note it supersedes, before
   the next pass runs, so the ten notes the report sums are one shape and
-  main states it. The counted set is the current notes only: a replacement
-  note's first line names the note id it supersedes, a note so named is not
-  counted, and a note made between the reversal and the re-recording is
-  not a pass.
+  main states it. The counted set is the current notes only.
+  A replacement keeps the `pass N of 10` header.
+  It adds `supersedes note: <id>` after that header.
+  A superseded note is not counted.
+  A note made between the reversal and re-recording is not a pass.
 - 2026-09-17, owner: the other vendor is Codex (OpenAI), the `codex` entry,
   first in the reviewer chain at `WORKFLOW.md:278`. All ten passes are Codex
   passes, so the ratio the report gives is one reviewer's: a pass whose

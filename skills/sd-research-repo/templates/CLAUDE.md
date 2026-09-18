@@ -110,16 +110,9 @@ installed and logged in. Run that and take the command from there. The plugin th
 the `/codex:*` slash commands is not a dependency of this kit and may not be installed, so
 those slash commands must not be reached for.
 
-The focus text that invocation carries:
-
-```
-This is a markdown research repository, not code. Review the uncommitted working-tree
-changes (git status, git diff, plus untracked new files) as an adversarial reader. Attack
-the argument, not the syntax: which load-bearing claims does the cited source not actually
-support; which numbers are missing a unit, a date or a denominator; what does the conclusion
-depend on that the document never states; where does a document assert something as verified
-that the repo shows was not checked. Cite file and line. Do not modify any files.
-```
+Use the focus text that `sd-research-kit review` prints.
+`CHECKLIST` in `bin/sd_research_review.py` owns that text.
+Do not copy the prompt into this guide.
 
 `-s read-only` is not optional — it is what keeps an adversarial reader from editing the work
 it is reviewing. Name the documents in the prompt when the diff is large. Run it in the

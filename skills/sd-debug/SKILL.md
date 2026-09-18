@@ -102,7 +102,7 @@ fix.
    unable to say which one mattered, and the honest report of that experiment is
    that it produced no evidence. Revert between experiments rather than
    accumulating them. Before the first edit to a file, run
-   `bin/sd-rules --for <path>` from the repository root and cite the rule ids
+   `sd-rules --for <path>` from the repository root and cite the rule ids
    it prints in the report's **Edits in the tree** entry for that file rather
    than restating the rules; a test path draws the `bin/` rows too, because
    the verb classes every non-markdown path as code.

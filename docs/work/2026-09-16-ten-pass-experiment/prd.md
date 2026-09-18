@@ -47,8 +47,9 @@ that is agreed before the first pass.
 
 ## Pass note template
 
-One note per pass, plain text: a header line `pass N of 10`, then seven
-fields, one per line, every field filled. `PR`, `head sha` and `reviewer
+One note per pass uses a `pass N of 10` header and seven required fields.
+A replacement adds `supersedes note: <id>` directly after the header.
+`PR`, `head sha` and `reviewer
 entry` are never `none`; a note missing one of them is not a logged pass and
 does not count toward ten, whatever its cost field says. `none` is allowed
 only where a field's own line says so: `session` when no runner row exists,

@@ -375,16 +375,14 @@ criterion 33's rule 7 — added in PR 7, after this pull request — present in
 the lint and run by nothing, which is the same defect this pull request
 exists to remove. The 100% coverage floor stays for
 `bin/sd_install.py`, which writes under the operator's home, and is dropped
-everywhere else. The four line-count ceilings warn and stop failing: they
-were re-derived five times in five days and cost more in bookkeeping than
-the headroom they defend. `make check` gains a changed-files fast path with
+everywhere else. `MIGRATE_CAP` remains enforced for temporary migration tools.
+The retired `BIN_CAP` and dashboard ceilings remain in `CEILING_HISTORY`.
+`make check` gains a changed-files fast path with
 the full suite once before a push. The `bash32` job is cut, the `security`
 job folds into `lint`, and the three residue files are deleted.
 
-**The ceilings warn rather than vanish.** They are a signal that stopped
-being worth a gate, not a signal that stopped being true — and this item
-has its own evidence for the distinction, since an earlier item in this
-repository spent a whole pull request re-deriving one.
+**Retired ceilings remain evidence.** Their histories stay in
+`CEILING_HISTORY`. `MIGRATE_CAP` remains a live gate.
 
 **Verification.** Criteria 14, 15, 16, 17 and 30.
 
@@ -1083,9 +1081,9 @@ the group and the module together. `sync` calls only `collect`, `store` and
 `sd suggest` is a verb group under `bin/sd` and not a `bin/sd-suggest`
 executable, which the criterion decides for us: it must be no palette entry,
 and a verb under `sd` is not an installed entrypoint while a standalone binary
-is. `skills/sd-suggest/SKILL.md:50` states the gap — "There is no `bin/sd-suggest`
-yet" — and `:28` still files to a tracker, which this slice reverses. "Every
-mode" is `bin/sd_lib.py:33` `MODES = ("full", "minimal", "guest")`: the row is
+is. The `sd-suggest` skill files suggestions through this verb group.
+This slice extends that group. "Every mode" is `bin/sd_lib.py:33`
+`MODES = ("full", "minimal", "guest")`: the row is
 written in all three, and only `publish` is gated.
 
 **Two clauses cannot close from this checkout, and this slice does not claim
@@ -1464,10 +1462,10 @@ with its report and decision, to followup sd:777 ("sd:10 criterion 7:
 ten-pass forward experiment on the code review point, report and decision"),
 in decision note 1920 on sd:10.
 The delivery does not wait on it. The grep was re-run over `bin/` and
-`skills/` for percentages, `percent` and `threshold` on 2026-09-13. None of
-its 33 hits disables a review point: they are age and line thresholds, size
-reports, and `sd-review`'s severity floor, which classifies findings and
-turns no review off.
+`skills/` for percentages, `percent` and `threshold` on 2026-09-13.
+That review recorded no hit that disables a review point.
+The matches covered age thresholds, line thresholds, size reports, and the
+`sd-review` severity floor.
 
 **The closure state today, 2026-09-14.** This replaces "The closure state at
 delivery, 2026-09-13", which said every criterion was closed, cut or deferred
@@ -1835,8 +1833,8 @@ the item". (2026-09-13, later: closed. `sd-writing-pack` #41 merged as
 present-tense rules: the drift markers, TCC under launchd, the 02:xx wake, the
 GitHub token facts and the Slack digest. Forty-one load-bearing tokens were
 enumerated from the old text before the edit and all forty-one survive it.
-Dates that fix a state change inside a present-tense rule are left alone;
-what left is the account of the night each rule was learned.
+Dates that fix a state change inside a present-tense rule are left alone.
+What is left is the account of the night each rule was learned.
 
 That field was missing when this file was first written, and adding it was
 the fix. This repository's items carry `branch:` by convention — 238 `prd.md` files

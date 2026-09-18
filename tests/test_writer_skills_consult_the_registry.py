@@ -1,6 +1,6 @@
-"""Every skill that writes a file in this tree names `bin/sd-rules --for`.
+"""Every skill that writes a file in this tree names `sd-rules --for`.
 
-sd:431 step 8, part (ii). The authoring tier is a verb, `bin/sd-rules --for
+sd:431 step 8, part (ii). The authoring tier is a verb, `sd-rules --for
 <path>`, and a verb nobody calls enforces nothing: `design.md`'s tier table
 says the skill "consults the registry and names the rule ids in scope", and
 the owner's note of 2026-09-16 says where -- "skills call it in their setup
@@ -27,7 +27,7 @@ names it; a skill that leaves `NOT_WRITERS` for the tree without moving to
 `WRITER_SKILLS` is named the same way.
 
 **sd-review is not here.** Its `setup-github` writes `.github/`, which
-`bin/sd-rules` classes as code and answers with the `bin/`-shaped rows; the
+`sd-rules` classes as code and answers with the `bin/`-shaped rows; the
 audit left it out until that residue is settled, and the predicate does not
 match it, so nothing here has to say so twice.
 
@@ -48,7 +48,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 #: The literal a skill's setup step carries. `<path>` or a concrete path
 #: follows it; the test reads the verb and the flag, not the argument.
-POINTER = "bin/sd-rules --for"
+POINTER = "sd-rules --for"
 
 #: The skills whose setup step names the verb, as the predicate below answers
 #: on `8548d512` less `NOT_WRITERS`. Sorted, so a diff against the predicate's

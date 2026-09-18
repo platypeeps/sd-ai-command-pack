@@ -127,7 +127,7 @@ reading, searching, or editing.
    that are safe mechanical corrections from those needing author judgment.
 10. In `mode=edit`, map the explicit request or approval to finding IDs and
     confirm the boundary before changing substantive material. When the draft
-    is a file inside a repository, run `bin/sd-rules --for <path>` from that
+    is a file inside a repository, run `sd-rules --for <path>` from that
     repository's root before the first edit and cite the rule ids it prints in
     the change ledger rather than restating the rules. Apply only that
     set; preserve citations, firsthand claims, uncertainty, deliberate choices,

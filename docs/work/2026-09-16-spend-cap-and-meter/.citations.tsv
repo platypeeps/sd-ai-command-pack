@@ -1,3 +1,3 @@
-prd.md:16	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md:1348-1351	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1348	(Deferred 2026-09-14 by owner decision note 1942
-prd.md:40	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md:1262-1306	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1262	the runner: a test ships two commits under
-design.md:8	2026-09-05-the-pack-runs-a-team-process-for-one-person/design.md:302-306	2026-09-05-the-pack-runs-a-team-process-for-one-person/design.md	302	`cap_usd_month` is enforced per call: the librar
+prd.md:16	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md:1348-1351	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1348	`vendor:`, and a test asserts an entry whose ven
+prd.md:40	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md:1262-1306	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1262	`claude` and one authored by `claude` resolves t
+design.md:8	2026-09-05-the-pack-runs-a-team-process-for-one-person/design.md:302-306	2026-09-05-the-pack-runs-a-team-process-for-one-person/design.md	302	identity and seed; enabled, order and caps are r

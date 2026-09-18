@@ -21,7 +21,7 @@
 > tree by sd:10 criterion 18, and `predecessor` stands where it stood, in
 > paths and identifiers as in prose. The triage that
 > produced this notice is recorded under step 7 in
-> `docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
+> `https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-09/2026-08-29-artifacts-as-product/implement.md`.
 
 > How errors are handled in this project.
 

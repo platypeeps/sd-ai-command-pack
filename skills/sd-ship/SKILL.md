@@ -93,9 +93,11 @@ A change with no work item needs no PRD or database row to ship.
    a loop that re-asks every few seconds. The merge waits for CI and nothing
    else, so one wait is one answer — a red one ends the run rather than
    starting a second wait, and a fix to it re-enters at step 1.
-6. **Refuse to merge a branch another open pull request is based on.** Ask
-   before the merge: `gh pr list --base <this branch> --state open`. A
-   non-empty answer ends the run here. GitHub does retarget those pull
+6. **Refuse to merge a branch another open pull request is based on.**
+   Run `gh pr list --base <this branch> --state open` before `sd-ship merge`.
+   A failed query or non-empty answer stops the run.
+   `sd-ship merge` does not perform this query.
+   GitHub does retarget those pull
    requests onto this one's base, but this lane squashes, so what they
    inherited from this branch is not the commit that landed; each retargeted
    diff re-proposes this branch's changes as its own and conflicts with the

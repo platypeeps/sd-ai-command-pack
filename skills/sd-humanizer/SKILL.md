@@ -1,15 +1,8 @@
 ---
 name: sd-humanizer
-description: |
-  Remove signs of AI-generated writing from text. Use when editing or reviewing
-  text to make it sound more natural and human-written. Based on Wikipedia's
-  comprehensive "Signs of AI writing" guide. Detects and fixes patterns including:
-  inflated symbolism, promotional language, superficial -ing analyses, vague
-  attributions, em dash overuse, rule of three, AI vocabulary words, passive
-  voice, negative parallelisms, and filler phrases.
+description: Remove signs of AI-written prose while preserving facts, structure, and the author's voice.
 license: MIT
-metadata:
-  version: "2.9.1"
+version: "2.9.1"
 ---
 
 # sd-humanizer
@@ -392,7 +385,12 @@ When you see these, lean toward leaving the prose alone — they are evidence of
 
 **Pasted text (default).** The user gives text in the conversation. Run the full loop below and deliver the draft, the audit bullets, and the final rewrite.
 
-**File mode.** The user points at a file. Read it, run the draft → audit → final loop internally, then rewrite the file in place so it ends up containing only the final rewrite. When the file is inside a repository, run `bin/sd-rules --for <path>` from that repository's root before the rewrite and keep the rewrite within the rule ids it prints, citing them in the summary rather than restating the rules. Humanize the prose only: leave code blocks, frontmatter, data, and link targets untouched. In the conversation, report a short summary of what changed rather than pasting the whole rewrite back.
+**File mode.** The user points at a file. Read it and run the full loop internally.
+Rewrite the file with only the final version.
+For repository files, run `sd-rules --for <path>` from the repository root before rewriting.
+Follow the printed rule IDs. Cite them in the summary without restating them.
+Change prose only. Preserve code blocks, frontmatter, data, and link targets.
+Report a short change summary. Do not paste the full rewrite into the conversation.
 
 **Embedded mode.** Another task or agent is using this skill as one step of a larger job (a PR description, a commit message, a doc). Run the loop internally and output only the final text. No draft, no audit bullets, no summary. The caller wants prose, not ceremony.
 
