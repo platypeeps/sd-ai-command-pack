@@ -1,7 +1,7 @@
 ---
 title: Explicit review acceptance without placeholder work items
 created: 2026-09-17
-branch: docs/no-item-review-acceptance
+branch: main
 ---
 
 # PRD — no-item review acceptance
