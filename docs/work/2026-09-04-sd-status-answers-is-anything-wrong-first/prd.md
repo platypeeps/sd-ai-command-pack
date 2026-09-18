@@ -150,8 +150,8 @@ description to the same thing.
 - [ ] the ledger scanner classifies this repository's real corpus: `./bin/sd-status
       --json | python3 -c "import json,sys; a=json.load(sys.stdin)['actions'];
       print(sum(1 for r in a if r['check']=='unresolved-concern'))"` prints a non-zero
-      count, and the row for `C-19` in
-      `docs/work/archive/2026-08/2026-08-26-codex-local-review-adapter/prd.md`
+      count, and the
+      [historical C-19 row](https://github.com/platypeeps/sd-ai-command-pack/blob/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-08/2026-08-26-codex-local-review-adapter/prd.md#L61)
       — disposed `ACCEPTED and parked` — is in `actions` at all, as
       `parked-concern` and not as an open one: `ACCEPTED and parked` parks by
       the precedence this design fixes, so asking for it among the *open*

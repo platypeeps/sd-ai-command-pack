@@ -12,6 +12,8 @@ Archive cleanup started on 2026-09-17.
   It covered `2026-07-31-completion-recovery-no-archive-anchor` through `2026-08-10-thin-candidate-loop-rescope`.
 - Batch 4 removed 46 items from `2026-08/`.
   It covered `2026-08-10-thin-conversion-tooling` through `2026-08-24-accepted-finding-disposition-ground`.
+- Batch 5 removed 99 items from `2026-08/` and `2026-09/`.
+  It ended with `2026-08-21-fleet-operator-decision-recovery` in `2026-09/`.
 
 Later reviewed batches remove the remaining obsolete payload.
 Commit `8ba8fa7a15fcd4783b42cbe580a04e89149be08d` preserves the original archive.
