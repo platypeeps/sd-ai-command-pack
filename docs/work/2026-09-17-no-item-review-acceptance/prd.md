@@ -360,16 +360,16 @@ The named no-item test module below is proposed.
 - [x] Real-library enumeration needs no known item IDs; schema drift, query errors, and malformed records refuse before dispatch or clearance.
 - [x] Rebinding preserves all prior prefix digests and request bindings while invalidating acceptance, including a branch-name round trip.
 - [x] Empty or uncommitted branches refuse allocation; distinct committed changes with a shared base receive independent records.
-- [ ] Close and reopen preserve every pass, invalidate acceptance, and refuse concurrent writes. Interrupted reservations remain spent.
-- [ ] Closed branch aliases permit unrelated committed work, but identical content retains its original review budget.
+- [x] Close and reopen preserve every pass, invalidate acceptance, and refuse concurrent writes. Interrupted reservations remain spent.
+- [x] Closed branch aliases permit unrelated committed work, but identical content retains its original review budget.
 - [x] Ambiguity and capacity limits produce actionable refusals without deleting evidence; existing records remain readable.
-- [ ] Item-backed golden fixtures retain receipt, request, and acceptance-binding shapes, key derivation, and history digests.
+- [x] Item-backed golden fixtures retain receipt, request, and acceptance-binding shapes, key derivation, and history digests.
 - [x] Changed gate code changes tool-binding values; prior acceptance refuses until renewed validation and explicit approval.
 - [x] Each extracted gate or adapter appears in a binding manifest; mutating its bytes refuses stale clearance in each applicable mode.
 - [x] No-item acceptance uses the exact `ship-adjudication-no-item:` key; item-backed acceptance keeps its original key derivation.
 - [x] Both acceptance readers reject a receipt from the other mode, including a forged copy under the expected key.
 - [x] That suite proves missing bindings, conflicting histories, invalid ancestry, and stale approval digests cannot authorize publication.
-- [ ] That suite proves concurrent record changes refuse acceptance and repeated validation appends no acceptance receipt.
+- [x] That suite proves concurrent record changes refuse acceptance and repeated validation appends no acceptance receipt.
 - [x] That suite proves item-backed and no-item receipts cannot authorize each other's publication.
 - [x] That suite reads the persisted reservation from the provider stub before allowing dispatch.
 - [x] Exit, timeout, and interruption tests resume with the spent pass retained and reject unapproved extra dispatches.

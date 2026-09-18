@@ -1145,6 +1145,118 @@ class NoItemContracts(unittest.TestCase):
         self.assertEqual(len(state["historical_passes"]), 3)
         self.assertEqual(state["history_digest"], no_item.combined_digest(state))
 
+    def test_a_closed_alias_frees_the_branch_name_but_never_its_content(self):
+        """Closing releases a name. It never releases the work behind it.
+
+        The branch index is the only claim a closed record gives up, so the
+        released name can carry unrelated committed work. The same tree under
+        another name is the same work, and it keeps the budget it already spent
+        instead of being handed a fresh one.
+        """
+        closed = self.create()
+        reviewer, calls = self.native_reviewer(closed)
+        self.success("review", "--review-id", closed, reviewer=reviewer)
+        self.assertEqual(len(calls), 1)
+        self.success("review", "--review-id", closed, "--close-record", "fixture abandoned")
+
+        # Identical content under a second name gets no second budget.
+        _git(self.root, "checkout", "-q", "-b", "copied-topic")
+        failure = self.refused(
+            "review", "--create-record", "--assert-new-work", pattern="existing|record|owned"
+        )
+        self.assertIn(closed, failure["error"])
+        self.assertEqual(len(self.keys()), 1)
+
+        # The released name does carry work that is not the closed record's.
+        _git(self.root, "checkout", "-q", "-B", "topic", "origin/main")
+        self.head = _git(self.root, "rev-parse", "HEAD")
+        self.commit_fix("separate.py", "value = 9\n")
+        active = self.create()
+        self.assertNotEqual(active, closed)
+        _key, (_revision, fresh) = self.record(active)
+        self.assertEqual(fresh["passes"], [])
+        _key, (_revision, retained) = self.record(closed)
+        self.assertEqual(len(retained["passes"]), 1)
+        self.assertEqual(retained["lifecycle"], "closed")
+
+    def test_close_and_reopen_invalidate_acceptance_and_refuse_concurrent_writes(self):
+        """Acceptance binds an identity revision, and the lifecycle moves it.
+
+        Closing and reopening preserve every spent pass, so the budget is not
+        refunded, but the accepted clearance they carried no longer counts. A
+        write that lands between the in-lock read and the identity write leaves
+        the close refusing rather than overwriting it.
+        """
+        review_id, _proposal, proposal_path, _evidence = self.blocking_proposal()
+        self.accept(review_id, proposal_path)
+        self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
+        key, (_revision, before) = self.record(review_id)
+
+        self.success("review", "--review-id", review_id, "--close-record", "fixture abandoned")
+        self.success("review", "--review-id", review_id, "--reopen-record")
+        _key, (_revision, after) = self.record(review_id)
+        self.assertEqual(after["passes"], before["passes"])
+        self.assertEqual(after["historical_passes"], before["historical_passes"])
+        self.assertEqual(after["identity_revision"], before["identity_revision"] + 2)
+        self.refused(
+            "verify-review", "--review-id", review_id, "--expected-head", self.head,
+            pattern="accept|bind|digest|revision|blocking|clearance",
+        )
+
+        original = no_item.claim_branch
+        landed = []
+
+        def racing_claim(connection, store, repository, branch, owner):
+            if not landed:
+                landed.append(None)
+                revision, state = receipts.read(self.connection, key)
+                receipts.save(self.connection, key, revision,
+                              dict(state, identity_revision=state["identity_revision"] + 1))
+            return original(connection, store, repository, branch, owner)
+
+        with patch.object(no_item, "claim_branch", racing_claim):
+            code, value, diagnostic = self.cli(
+                "review", "--review-id", review_id, "--close-record", "fixture race"
+            )
+        self.assertEqual(code, 3, diagnostic)
+        self.assertRegex(value.get("error", ""), "concurrent|changed")
+        _key, (_revision, unchanged) = self.record(review_id)
+        self.assertEqual(unchanged["lifecycle"], "active")
+        self.assertEqual(unchanged["passes"], after["passes"])
+
+    def test_a_concurrent_record_change_refuses_acceptance(self):
+        """The proposal an operator approved belongs to the record they read.
+
+        Validation and acceptance are separate commands, so a record can move
+        between them. The proposal binds the identity revision the lifecycle
+        raises, so a record that changed no longer binds its own proposal and
+        no acceptance receipt is written.
+        """
+        review_id, _proposal, proposal_path, _evidence = self.blocking_proposal()
+        args = (
+            "--review-id", review_id, "--expected-head", self.head,
+            "--dispositions-file", str(proposal_path),
+        )
+        validated = self.success("adjudicate", *args)
+        original = no_item.open_review
+        landed = []
+
+        def racing_open(root, connection, database, cli_args, store, runtime):
+            review = original(root, connection, database, cli_args, store, runtime)
+            if cli_args.accept_dispositions is not None and not landed:
+                landed.append(None)
+                self.success("review", "--review-id", review_id, "--rebind-branch", "topic")
+            return review
+
+        with patch.object(no_item, "open_review", racing_open):
+            code, value, diagnostic = self.cli(
+                "adjudicate", *args, "--accept-dispositions", validated["acceptance_digest"]
+            )
+        self.assertEqual(landed, [None], diagnostic)
+        self.assertEqual(code, 3, diagnostic)
+        self.assertRegex(value.get("error", ""), "does not bind the current review")
+        self.assertEqual(self.keys("ship-adjudication-no-item:"), [])
+
     def test_rebinding_a_closed_record_leaves_another_record_its_branch(self):
         """A stored branch name is a name, not current ownership.
 
