@@ -28,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from typing import Any
 from unittest import mock
 
@@ -1789,6 +1790,48 @@ class ReviewUnacknowledgedTests(InventoryFixture):
         )
         self.assertIn("pr-review-unacknowledged", found.unchecked)
         self.assertNotIn("clear", status.banner(found)["summary"])
+
+    def test_an_unimportable_library_is_unchecked_rather_than_a_verdict(self) -> None:
+        """sd:1019: a checkout with no `.venv` reports an interpreter, not backlog.
+
+        Every `carried` acknowledgement reads `carry-unreadable` when `sd_db`
+        will not import, and `carry-unreadable` is unsatisfied -- rightly, a
+        machine that cannot read the row may not call the finding answered.
+        What was wrong was printing that as a count of unanswered findings
+        with nothing saying an interpreter was missing. The class is marked
+        `unchecked` with the library's own sentence, the way an inline comment
+        nobody could read already marks it.
+        """
+        carried = status.sd_lib.sibling("sd_review_ack", "sd-review-ack")
+        self.ack().write_store(self.repo, {"aa11": {
+            "pr": 7, "disposition": "carried", "commit": None, "cited": "",
+            "reason": "", "item": 4321,
+            "path": "x", "line": 1, "at": "2026-09-12T00:00:00+00:00",
+        }})
+        absent = SimpleNamespace(
+            module=None,
+            problem="sd_db is not installed here: No module named 'sd_db'",
+            provisioned="",
+        )
+        carried._forget_carried_rows()
+        self.addCleanup(carried._forget_carried_rows)
+        with mock.patch.object(carried.sd_lib, "import_sd_db", return_value=absent):
+            found = status.actionable_inventory(
+                self.repo, self.sections(pull_requests=self.reviewed(["aa11"])), self.TODAY
+            )
+        self.assertIn("pr-review-unacknowledged", found.unchecked)
+        self.assertIn(absent.problem, found.unchecked["pr-review-unacknowledged"])
+        self.assertNotIn("clear", status.banner(found)["summary"])
+
+    def test_a_library_that_imports_leaves_the_class_checked(self) -> None:
+        """The control: nothing is marked unchecked when the interpreter is there."""
+        carried = status.sd_lib.sibling("sd_review_ack", "sd-review-ack")
+        carried._forget_carried_rows()
+        self.addCleanup(carried._forget_carried_rows)
+        found = status.actionable_inventory(
+            self.repo, self.sections(pull_requests=self.reviewed(["aa11"])), self.TODAY
+        )
+        self.assertNotIn("pr-review-unacknowledged", found.unchecked)
 
     def test_the_id_is_keyed_on_the_check_and_not_the_class_letter(self) -> None:
         """#7 is both `pr-check-failing` and `pr-review-unacknowledged`.

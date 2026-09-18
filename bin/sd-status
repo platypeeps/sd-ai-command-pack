@@ -2802,6 +2802,19 @@ def _unanswered_rows(
         cause = blind[0][1] + ("" if len({c for _, c in blind}) == 1 else ", among others")
         reasons.append(f"the inline comments on {', '.join(f'#{n}' for n, _ in blind[:5])}{more} "
                        f"could not be read ({cause})")
+    # Asked after the loop, because the library is only reached while the
+    # verdicts are computed. `sd_review_ack.library_problem` says why an
+    # interpreter with no `sd_db` is a condition of its own rather than a
+    # verdict about a finding: read from a checkout with no `.venv`, every
+    # carried finding reads `carry-unreadable` and the counts above are an
+    # infrastructure failure wearing a content verdict's clothes (sd:1019).
+    # It goes where `unreadable-concern-row` goes -- beside the rows, saying
+    # this reader could not classify them -- not into them.
+    absent = ack.library_problem()
+    if absent:
+        reasons.append(f"carried findings could not be resolved ({absent}), so any "
+                       "`carried` acknowledgement above reads unanswered on this "
+                       "checkout rather than on its merits; run `make setup`")
     if reasons:
         unchecked.setdefault(check, "; ".join(reasons))
     return rows

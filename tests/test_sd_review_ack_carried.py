@@ -24,6 +24,7 @@ answered.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import pathlib
@@ -265,6 +266,62 @@ class AnUnreadableItemDecidesNothing(CarriedCase):
         with unittest.mock.patch.object(sd_db, "connect", side_effect=OSError("no store")):
             state = ack.id_verdict(self.root, found["id"], rows, "main")
         self.assertEqual(state, "carry-unreadable")
+
+
+class AnUnimportableLibraryIsReportedAsItself(CarriedCase):
+    """sd:1019. The verdict stays closed; the REPORT stops calling it content.
+
+    `carry-unreadable` is one word over two worlds -- a store this machine has
+    never written, and an interpreter with no `sd_db` on it at all. Read from
+    a checkout with no `.venv`, the second produced that verdict for every
+    carried finding in the store and 55 answered findings printed as
+    unacknowledged backlog. Nothing in the output said an interpreter was
+    missing, so an infrastructure failure arrived wearing a content verdict's
+    clothes. These tests break the import and ask the report to say so.
+    """
+
+    #: What `sd_lib.import_sd_db` returns on a checkout with no `.venv` and no
+    #: `sd_db` on the interpreter's path -- the environment this item is about.
+    ABSENT = SimpleNamespace(
+        module=None,
+        problem="sd_db is not installed here: No module named 'sd_db'",
+        provisioned="",
+    )
+
+    def test_the_report_names_the_missing_interpreter(self):
+        """Its own line, beside the rows, in `unreadable-concern-row`'s shape."""
+        self.carry(ONE, self.item())
+        ack._forget_carried_rows()
+        with unittest.mock.patch.object(ack.sd_lib, "import_sd_db", return_value=self.ABSENT):
+            state = ack.review_state(self.root, {ONE: ROUND[str(ONE)]}, "main")
+        out = io.StringIO()
+        ack.render_findings(state, out)
+        self.assertEqual(state["library_error"], self.ABSENT.problem)
+        self.assertIn(f"carried items unreadable: {self.ABSENT.problem}", out.getvalue())
+        self.assertIn("not an unanswered finding", out.getvalue())
+
+    def test_a_library_that_imports_reports_nothing(self):
+        """The control. A condition that is always reported is not a condition."""
+        self.carry(ONE, self.item())
+        ack._forget_carried_rows()
+        state = ack.review_state(self.root, {ONE: ROUND[str(ONE)]}, "main")
+        self.assertEqual(state["library_error"], "")
+        self.assertEqual([row["verdict"] for row in state["findings"]], ["carried"])
+        self.assertNotIn("carried items unreadable", _rendered(state))
+
+    def test_a_round_with_nothing_carried_never_reaches_for_the_library(self):
+        """An absent `sd_db` that changed no answer is not a fault to report."""
+        ack._forget_carried_rows()
+        with unittest.mock.patch.object(ack.sd_lib, "import_sd_db", return_value=self.ABSENT):
+            state = ack.review_state(self.root, {ONE: ROUND[str(ONE)]}, "main")
+        self.assertEqual([row["verdict"] for row in state["findings"]], ["unread"])
+        self.assertEqual(state["library_error"], "")
+
+
+def _rendered(state: dict) -> str:
+    out = io.StringIO()
+    ack.render_findings(state, out)
+    return out.getvalue()
 
 
 class AWorkRowIsRefusedBeforeItIsWritten(CarriedCase):
