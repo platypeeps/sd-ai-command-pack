@@ -41,9 +41,8 @@ since R11-D48. The pack half is on the order of forty lines in
 
 - [x] **2. One proving collect against the loop that exists.** Run
       `bin/sd-dashboard index` from the checkout — the verb at
-      `bin/sd-dashboard` (line 32 as of sd:361, retired at sd:719 step 4), declared at `bin/sd-dashboard` (lines 97-103 as of sd:361, retired at sd:719 step 4); the
-      pack links no executable anywhere
-      (`AGENTS.md:57-69`) — with the three variables exported. This is the PRD's "one successful collect
+      `bin/sd-dashboard` (line 32 as of sd:361, retired at sd:719 step 4), declared at `bin/sd-dashboard` (lines 97-103 as of sd:361, retired at sd:719 step 4).
+      Use the calling convention (`AGENTS.md:49-61`) with the three variables exported. This is the PRD's "one successful collect
       against the existing `dashboard/collect.py` (line 168 as of sd:361, retired at sd:719 step 4) loop proving a row can
       be produced at all", and it costs no code.
       Verify, in four checks. None of them reads a missing row as a verdict:
@@ -352,8 +351,8 @@ since R11-D48. The pack half is on the order of forty lines in
 
 - [x] **8. The first real sync, and the measurement.** With steps 1 to 7
       landed and the venv reinstalled at the new pin, run
-      `bin/sd shadow sync --strict` once by hand — by path, as every verb
-      here (`AGENTS.md:57-69`) — then re-run the measurement
+      `bin/sd shadow sync --strict` once by hand.
+      Use the calling convention (`AGENTS.md:49-61`), then re-run the measurement
       block in `design.md` and record the numbers on sd:361 as a note.
       Verify: the run prints `shadow sync[jira]: wrote N shadow row(s)` and
       `shadow sync[jira]: cursor moved to cover from <stamp>`; `select

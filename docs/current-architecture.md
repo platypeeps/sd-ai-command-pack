@@ -7,8 +7,8 @@ Git history preserves the retired designs and completed work records.
 
 The repository owns one payload copy under `skills/`.
 Nothing renders into this checkout.
-The installer reads that payload and creates machine-level links.
-`manifest.json` defines the shipped payload and command inventory.
+`skills/paths.json` defines the installed skill set.
+The installer enumerates executable commands from `bin/` at runtime.
 This page summarizes that enforced model.
 
 The executable entrypoints live under `bin/`.

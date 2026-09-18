@@ -18,8 +18,8 @@ it needs the history to be present, so it fails rather than skips when the
 commit is not reachable -- `.github/workflows/tests.yml` fetches the whole
 history for that reason.
 
-The archive payload left the current tree on 2026-09-17 by owner decision.
-Git history preserves the original records.
+The 2026-09-17 removal changed only its reviewed first batch.
+Git history preserves the removed records.
 New archived `prd.md` files must still carry their historical `status:` line.
 Active items must not carry one.
 """

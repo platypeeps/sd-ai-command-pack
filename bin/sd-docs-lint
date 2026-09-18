@@ -144,9 +144,8 @@ def check_shape(
         # The sign inverts outside the archive and holds inside it. Once the
         # marker says `row`, an active item's status lives in the database
         # and a `status:` line left in the file is a second answer that will
-        # drift. The archive is the opposite: its 491 files are records of
-        # what was, they keep their lines, and a naive inversion fails on
-        # every one of them.
+        # drift. The archive is the opposite: its files are historical records.
+        # They keep their lines, and a naive inversion fails on all of them.
         status = fields.get("status", "")
         if archived_status_is_authoritative or sd_lib.ARCHIVE_DIR in item.parts:
             if status not in ITEM_STATUSES:
