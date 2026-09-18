@@ -1,10 +1,20 @@
 ---
 title: implement — four pull requests that need no database, then four that do
-status: planning
 created: 2026-09-05
 ---
 
 # Implement
+
+## Current status — 2026-09-18
+
+The item remains `in_progress`.
+
+Two deferred acceptance dependencies are blocked:
+
+- `sd:777` has no qualifying pass because external provider reviews are cancelled.
+- `sd:788` waits for the owner's live MiniMax check and `general` plan confirmation.
+
+Other open criteria remain listed below.
 
 Eight pull requests. **Four** of them touch no row and can land before item
 B exists at all; four wait on the library or on B's fixture harness. The

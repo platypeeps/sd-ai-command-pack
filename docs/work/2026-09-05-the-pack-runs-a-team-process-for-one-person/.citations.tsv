@@ -1,23 +1,23 @@
 design.md:212	prd.md:1371-1376	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1371	10. A pull request body carries a `Work:` line o
 design.md:217	prd.md:1376-1377	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1376	operator holds admin permission on the remote, t
-implement.md:110	prd.md:1220-1221	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1220	`Work:` line, and no remote-branch deletion comm
-implement.md:128	prd.md:1208-1212	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1209	1. `WORKFLOW.md` exists at the repository root,
-implement.md:188	prd.md:1114-1162	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1114	list, and the author approves; the omission ledg
-implement.md:190	prd.md:1664-1668	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1664	at GitHub rather than merging unreviewed: a test
-implement.md:243	prd.md:1289	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1289	and its `Attributes:` trailer naming the sha and
-implement.md:499	prd.md:871	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	871	- `README.md`'s claim that the pack writes "noth
-implement.md:507	prd.md:1405-1406	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1405	query finds one function that both gates call; a
-implement.md:604	prd.md:1235-1237	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	requirement 13 removes, so a definition that omi
-implement.md:693	prd.md:1407-1408	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1407	once to merge, adds a second collaborator to the
-implement.md:707	prd.md:1450-1464	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1450	worktree kept across the retire on a branch stil
-implement.md:708	prd.md:1485-1494	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1485	and the fetch while the fixture remote is unreac
-implement.md:709	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	policy to `ready_to_send`, merges the pull reque
-implement.md:719	prd.md:582	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	582	`docs/work/.status-source`, one line, `row`, bes
-implement.md:719	prd.md:2632	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	2632	longer has is nothing to be behind; an unreachab
-implement.md:782	prd.md:1197-1198	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1197	request after the one that lands the reader, fro
-implement.md:786	prd.md:1181-1185	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1181	three vault databases into one vault backlog. Ob
-implement.md:1287	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	policy to `ready_to_send`, merges the pull reque
-implement.md:1497	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	requirement 13 removes, so a definition that omi
-implement.md:1542	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	requirement 13 removes, so a definition that omi
-implement.md:1898	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	requirement 13 removes, so a definition that omi
-implement.md:1906	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	policy to `ready_to_send`, merges the pull reque
+implement.md:120	prd.md:1220-1221	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1220	`Work:` line, and no remote-branch deletion comm
+implement.md:138	prd.md:1208-1212	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1209	1. `WORKFLOW.md` exists at the repository root,
+implement.md:198	prd.md:1114-1162	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1114	list, and the author approves; the omission ledg
+implement.md:200	prd.md:1664-1668	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1664	at GitHub rather than merging unreviewed: a test
+implement.md:253	prd.md:1289	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1289	and its `Attributes:` trailer naming the sha and
+implement.md:509	prd.md:871	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	871	- `README.md`'s claim that the pack writes "noth
+implement.md:517	prd.md:1405-1406	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1405	query finds one function that both gates call; a
+implement.md:614	prd.md:1235-1237	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	requirement 13 removes, so a definition that omi
+implement.md:703	prd.md:1407-1408	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1407	once to merge, adds a second collaborator to the
+implement.md:717	prd.md:1450-1464	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1450	worktree kept across the retire on a branch stil
+implement.md:718	prd.md:1485-1494	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1485	and the fetch while the fixture remote is unreac
+implement.md:719	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	policy to `ready_to_send`, merges the pull reque
+implement.md:729	prd.md:582	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	582	`docs/work/.status-source`, one line, `row`, bes
+implement.md:729	prd.md:2632	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	2632	longer has is nothing to be behind; an unreachab
+implement.md:792	prd.md:1197-1198	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1197	request after the one that lands the reader, fro
+implement.md:796	prd.md:1181-1185	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1181	three vault databases into one vault backlog. Ob
+implement.md:1297	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	policy to `ready_to_send`, merges the pull reque
+implement.md:1507	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	requirement 13 removes, so a definition that omi
+implement.md:1552	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	requirement 13 removes, so a definition that omi
+implement.md:1908	prd.md:1235-1236	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1235	requirement 13 removes, so a definition that omi
+implement.md:1916	prd.md:1541-1547	2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md	1541	policy to `ready_to_send`, merges the pull reque
