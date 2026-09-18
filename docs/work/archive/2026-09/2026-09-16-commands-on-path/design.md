@@ -198,14 +198,14 @@ recommendation is `~/.local/bin`, links on by default, `--pull` unchanged.
 | C-25 | 4 | medium | no | addressed |
 | C-26 | 4 | medium | yes | addressed |
 | C-27 | 4 | low | no | addressed |
-| C-28 | 5 | medium | no | parked |
+| C-28 | 5 | medium | no | addressed |
 | C-29 | 5 | medium | no | rebutted |
-| C-30 | 5 | medium | no | parked |
-| C-31 | 5 | medium | no | parked |
-| C-32 | 5 | medium | no | parked |
-| C-33 | 5 | medium | no | parked |
-| C-34 | 5 | low | no | parked |
-| C-35 | 5 | low | no | parked |
+| C-30 | 5 | medium | no | addressed |
+| C-31 | 5 | medium | no | addressed |
+| C-32 | 5 | medium | no | addressed |
+| C-33 | 5 | medium | no | addressed |
+| C-34 | 5 | low | no | addressed |
+| C-35 | 5 | low | no | addressed |
 
 **C-1, a third copy of the rule the item names two of.** The item's rule 3
 names the README table and the `command_report` docstring. `AGENTS.md`

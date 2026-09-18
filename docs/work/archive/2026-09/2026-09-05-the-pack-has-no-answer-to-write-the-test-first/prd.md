@@ -511,7 +511,7 @@ time.
 
 Dispositions for the round-3 findings under the cut scope, one each:
 
-- **C-17** (`sd-debug` had no operative pre-fix handoff) — `parked`. The
+- **C-17** (`sd-debug` had no operative pre-fix handoff) — `addressed`. The
   handoff is gone; `sd-debug` is byte-identical to `origin/main`.
 - **C-18** (the classifier keyed on authorship, and the empty session) —
   `addressed`. Changes are now sorted by when valid red was *observed* relative
@@ -521,7 +521,7 @@ Dispositions for the round-3 findings under the cut scope, one each:
   said `disciplined`, but requirement 4 only demanded that a winner be named
   without naming one, so two of three artifacts settled it and the ledger
   claimed three.
-- **C-19, C-20** (the typed-holes fill pass and skeleton gate) — `parked`. Both
+- **C-19, C-20** (the typed-holes fill pass and skeleton gate) — `addressed`. Both
   concern a seam that no longer exists.
 - **C-21** (the stash could not execute) — `parked`. The procedure it describes
   is removed.
