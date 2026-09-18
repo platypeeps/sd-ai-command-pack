@@ -8,6 +8,8 @@ Archive cleanup started on 2026-09-17.
   It stopped before `2026-07-23-recover-pr-232-main-conflict` in `2026-07/`.
 - Batch 2 removed 82 items from `2026-07/` and `2026-08/`.
   It ended with `2026-07-28-unify-outcome-status-vocabulary` in `2026-08/`.
+- Batch 3 removed 41 items from `2026-08/`.
+  It covered `2026-07-31-completion-recovery-no-archive-anchor` through `2026-08-10-thin-candidate-loop-rescope`.
 
 Later reviewed batches remove the remaining obsolete payload.
 Commit `8ba8fa7a15fcd4783b42cbe580a04e89149be08d` preserves the original archive.

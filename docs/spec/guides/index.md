@@ -84,7 +84,7 @@ These guides help you **ask the right questions before coding**.
 
 ### When a Design Changes Control Flow That Existing Tests Already Pin
 
-Adopted 2026-08-01, from `docs/work/archive/2026-08/2026-07-31-completion-recovery-no-archive-anchor`.
+Adopted 2026-08-01, from the [historical work item](https://github.com/platypeeps/sd-ai-command-pack/tree/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-08/2026-07-31-completion-recovery-no-archive-anchor).
 That task's design went through two full rounds of host+Codex adversarial
 review — read-only, line-by-line against real source — before any code was
 written, and both rounds found and fixed real, confirmed defects. Despite
