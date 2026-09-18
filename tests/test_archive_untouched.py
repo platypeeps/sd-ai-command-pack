@@ -33,6 +33,7 @@ import unittest
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 MARKER = "docs/work/.status-source"
 ARCHIVE = "docs/work/archive/"
+REMOVED_SNAPSHOT = "8ba8fa7a15fcd4783b42cbe580a04e89149be08d"
 
 
 def git(*args: str) -> str:
@@ -179,8 +180,19 @@ class TheArchiveBoundary(unittest.TestCase):
         index = REPO_ROOT / "docs/work/archive/README.md"
         self.assertTrue(index.is_file(), "the archive index is missing")
         self.assertIn(
-            "8ba8fa7a15fcd4783b42cbe580a04e89149be08d",
+            REMOVED_SNAPSHOT,
             index.read_text(encoding="utf-8"),
+        )
+        commit = subprocess.run(
+            ["git", "cat-file", "-e", f"{REMOVED_SNAPSHOT}^{{commit}}"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            commit.returncode,
+            0,
+            f"removed archive snapshot is unreachable: {commit.stderr.strip()}",
         )
 
     def test_no_active_item_carries_one(self) -> None:

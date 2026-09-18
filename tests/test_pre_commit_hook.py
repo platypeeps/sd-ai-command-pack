@@ -46,10 +46,7 @@ import unittest
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 HOOK = REPO_ROOT / "hooks" / "pre-commit"
 LINK_TARGET = "../../hooks/pre-commit"
-DESIGN = (
-    REPO_ROOT / "docs/work/archive/2026-09"
-    / "2026-09-12-every-rule-is-a-row-and-a-checker/design.md"
-)
+POLICY = REPO_ROOT / "docs/current-architecture.md"
 BUDGET_LINE = re.compile(r"^# Budget: (\d+) s wall on a one-file diff\.$", re.MULTILINE)
 CONSTANT_LINE = re.compile(r"^BUDGET_SECONDS = (\d+)$", re.MULTILINE)
 SKIP_VARIABLE = "SD_SKIP_HOOKS"
@@ -77,9 +74,9 @@ class TheHookFile(unittest.TestCase):
         self.assertEqual(len(constant), 1, f"BUDGET_SECONDS must be defined once, found {constant}")
         self.assertEqual(constant[0], stated[0], "the header's budget and BUDGET_SECONDS disagree")
         self.assertIn(
-            f"budgeted at {stated[0]} s",
-            DESIGN.read_text(encoding="utf-8"),
-            f"design.md does not budget the hook at {stated[0]} s",
+            f"has an {stated[0]}-second wall-time budget",
+            POLICY.read_text(encoding="utf-8"),
+            f"current architecture does not budget the hook at {stated[0]} s",
         )
 
     def test_both_whole_tree_passes_the_hook_names_exist_here(self):

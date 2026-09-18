@@ -1,6 +1,6 @@
 # Current architecture
 
-This page describes the current command pack.
+This page owns the current repository topology.
 Git history preserves the retired designs and completed work records.
 
 ## Repository model
@@ -8,8 +8,7 @@ Git history preserves the retired designs and completed work records.
 The repository owns one payload copy under `skills/`.
 Nothing renders into this checkout.
 `skills/paths.json` defines the installed skill set.
-The installer enumerates executable commands from `bin/` at runtime.
-This page summarizes that enforced model.
+The installer enforces the skill set and enumerates commands from `bin/` at runtime.
 
 The executable entrypoints live under `bin/`.
 Each installed command links back to the serving checkout.
@@ -19,45 +18,13 @@ Run `bin/sd_install.py --status` to inspect the current installation.
 The installer does not edit shell configuration.
 The selected installation directory must already be on `PATH`.
 
-## Work model
+## Governing references
 
-Active plans live under `docs/work/<item>/`.
-Each plan uses `prd.md` and optional `design.md` or `implement.md` files.
-Database rows own live task status.
-An existing task binds through `item: sd:<id>` in PRD frontmatter.
+The [work-item guide](work/README.md) owns planning layout, status, registration, and archive rules.
+The [contributor guide](../CONTRIBUTING.md) owns documentation, validation, and delivery rules.
+The [archive index](work/archive/README.md) records cleanup boundaries and recovery instructions.
 
-Completed plans can move into `docs/work/archive/YYYY-MM/`.
-The repository removes obsolete archive payload in reviewed batches.
-Commit `8ba8fa7a15fcd4783b42cbe580a04e89149be08d` preserves that snapshot.
-The [archive index](work/archive/README.md) explains recovery.
-
-## Documentation model
-
-Governing documents state current rules once.
-Other documents link to the governing statement.
-Work records keep dated evidence and distinct decision changes.
-Git history preserves removed discussions and completed plans.
-
-Use STE-Concise for new and revised prose.
-Keep sentences active, direct, and no longer than 20 words.
-Preserve exact commands, paths, identifiers, and quoted evidence.
-
-## Validation model
-
-`make check` is the repository aggregate check.
-It runs lint, audit, documentation lint, and tests.
-Run it without `CHANGED` before publication.
-
-The changed-files mode selects a smaller development test set.
-It exits nonzero because it omits full coverage gates.
-Read [CONTRIBUTING.md](../CONTRIBUTING.md) for exact commands and limitations.
-
-## Delivery model
-
-Use the pack's ship workflow for branch publication, review, and merge.
-Use the review workflow for local review before publication.
-The active branch-protection exception lives in `.github/sd-status.json`.
-Run `bin/sd-status` to inspect the live repository state.
+The pre-commit hook has an 8-second wall-time budget for a one-file diff.
 
 ## Historical design
 
