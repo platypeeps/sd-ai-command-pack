@@ -190,3 +190,8 @@ once the registry lane has run.
   for the owner's step 4; the counts written there stay unmeasured on this
   branch. The citations of these pages were moved to anchor form first,
   which took `tests.test_doc_citations` from `FAILED (failures=5)` to `OK`.
+- 2026-09-17 delivered on `origin/main` at `df6ca716`. Tracker note 2721
+  records the transition from `planning` to `done`.
+- 2026-09-18 verified from a linked worktree. `sd-review --scope planning
+  --explain` exited 0. `sd-status --json` reported no `status-unreadable`
+  finding. The earlier failure describes the pre-delivery branch.

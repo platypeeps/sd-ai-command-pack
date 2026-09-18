@@ -212,7 +212,7 @@ repositories carried the guard in six hand-written wordings, five of them
 reciting a fix commit that was already behind their pin. Do not write the
 guard by hand; run `setup-github` and let the file gain it.
 
-The rest of `dependabot.yml` is the consumer's. In a consumer repository,
+The rest of `dependabot.yml` is the consumer's. In an eligible full-mode consumer repository,
 `setup-github` creates a minimal file when none exists.
 The file contains one weekly `github-actions` entry, five open pull requests,
 and the guard. A self-install leaves a missing file absent.
