@@ -79,7 +79,8 @@ class NoItemContracts(unittest.TestCase):
         self.assertEqual(len(matches), 1, matches)
         return matches[0]
 
-    def cli(self, command, *extra, reviewer=None):
+    def cli(self, command, *extra, reviewer=None, root=None):
+        """`root` runs the command in another checkout of the same repository."""
         output, errors = io.StringIO(), io.StringIO()
         args = [command, "--no-item", "--json", "--database", str(self.database), *extra]
         previous = pathlib.Path.cwd()
@@ -98,7 +99,7 @@ class NoItemContracts(unittest.TestCase):
             contextlib.redirect_stderr(errors),
         ):
             try:
-                os.chdir(self.root)
+                os.chdir(root or self.root)
                 try:
                     code = ship.main(args)
                 except SystemExit as error:
@@ -138,6 +139,14 @@ class NoItemContracts(unittest.TestCase):
         data = (json.dumps(value, indent=2) + "\n").encode()
         path.write_bytes(data)
         return {"path": str(path), "sha256": hashlib.sha256(data).hexdigest()}
+
+    def commit_fix(self, name, value):
+        """Commit a descendant of the current head and return the head it left."""
+        (self.root / name).write_text(value)
+        _git(self.root, "add", name)
+        _git(self.root, "commit", "-q", "-m", f"fix {name}\n\nAuthored-with: human")
+        previous, self.head = self.head, _git(self.root, "rev-parse", "HEAD")
+        return previous
 
     def report(self, *, blocking=False):
         return {
@@ -182,8 +191,14 @@ class NoItemContracts(unittest.TestCase):
         )
         return review_id, manifest
 
-    def native_reviewer(self, review_id, *, imported=0, blocking=False, interrupt=False, duplicate=False):
+    def native_reviewer(self, review_id, *, imported=0, blocking=False, interrupt=False, duplicate=False,
+                        resume=None, shape=None):
+        """`resume` continues a full history without an import; `shape` adjusts
+        the report the stub returns, which is how a fix verification says which
+        head and which prior report it continues.
+        """
         calls = []
+        resume = bool(imported) if resume is None else resume
         _key, (_revision, initial) = self.record(review_id)
         initial_native = len(initial["passes"])
 
@@ -211,15 +226,18 @@ class NoItemContracts(unittest.TestCase):
             report = self.report(blocking=blocking)
             if duplicate:
                 report["findings"].append(dict(report["findings"][0]))
-            if imported:
+            if resume:
                 self.assertIn("--resume-report", argv)
                 self.assertNotIn("--verify-report", argv)
                 self.assertNotIn("--base", argv)
                 prior = pathlib.Path(argv[argv.index("--resume-report") + 1])
                 aggregate = json.loads(prior.read_bytes())
                 self.assertEqual(len(aggregate["history"]), imported + initial_native + len(calls) - 1)
-                self.assertIn("historical-author", aggregate["authored_with"])
+                if imported:
+                    self.assertIn("historical-author", aggregate["authored_with"])
                 report["resume_report_digest"] = ship.digest(aggregate)
+            if shape is not None:
+                shape(report, state, argv)
             return subprocess.CompletedProcess(argv, 1 if blocking else 0, json.dumps(report), "")
 
         return reviewer, calls
@@ -969,6 +987,152 @@ class NoItemContracts(unittest.TestCase):
                 )
                 receipts.save(self.connection, key, receipts.read(self.connection, key)[0], original)
                 self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
+
+    def test_a_native_only_record_verifies_its_fix_and_clears_a_requested_third_pass(self):
+        """The control case with no imported history at all.
+
+        Pass one is the code review, pass two the fix verification of the head
+        it produced, and pass three an explicitly requested continuation. The
+        third pass is where the record used to spend a paid review and then
+        refuse its own clearance: the request carries the combined digest that
+        `history_digest` writes, and the native-only reader compared it against
+        the raw native prefix instead. The last two assertions are that
+        mismatch, stated as the two formats that are not each other.
+        """
+
+        review_id = self.create()
+        reviewer, calls = self.native_reviewer(review_id, blocking=True)
+        code, value, diagnostic = self.cli("review", "--review-id", review_id, reviewer=reviewer)
+        self.assertEqual(code, 3, diagnostic)
+        self.assertIn("blocking", value["error"])
+
+        reviewed = self.commit_fix("fix.py", "value = 2\n")
+
+        def verification(report, state, argv):
+            self.assertIn("--verify-report", argv)
+            self.assertEqual(argv[argv.index("--base") + 1], reviewed)
+            report["subject"]["base"] = reviewed
+            report["verification_report_digest"] = ship.digest(state["passes"][0]["report"])
+
+        reviewer, verify_calls = self.native_reviewer(review_id, shape=verification)
+        self.success("review", "--review-id", review_id, reviewer=reviewer)
+        self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
+
+        # Two passes are spent, so a third head needs an explicit request, and
+        # the renewal digest belongs to the fourth pass onwards.
+        self.commit_fix("more.py", "value = 3\n")
+        self.refused("review", "--review-id", review_id, pattern="spent|explicit new request")
+        _key, (_revision, state) = self.record(review_id)
+        self.refused(
+            "review", "--review-id", review_id, "--additional-review-for", self.head,
+            "--request-reason", "fixture continuation assertion",
+            "--review-history-digest", state["history_digest"], pattern="renews only after",
+        )
+        reviewer, third_calls = self.native_reviewer(review_id, resume=True)
+        self.success(
+            "review", "--review-id", review_id, "--additional-review-for", self.head,
+            "--request-reason", "fixture continuation assertion", reviewer=reviewer,
+        )
+        cleared = self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
+        self.assertEqual([len(calls), len(verify_calls), len(third_calls)], [1, 1, 1])
+        self.assertEqual(cleared["spent_passes"], 3)
+
+        _key, (_revision, state) = self.record(review_id)
+        passes = state["passes"]
+        request = passes[2]["additional_review_request"]
+        self.assertEqual(request["prior_history_digest"], no_item.combined_digest(state, passes[:2]))
+        self.assertNotEqual(request["prior_history_digest"], ship.digest(passes[:2]))
+
+    def test_a_linked_worktree_keeps_its_durable_evidence_in_the_common_git_directory(self):
+        """A linked worktree's `.git` is a file, so no path can be built from it.
+
+        Preparation asks Git where the repository is. The archive then lands in
+        the directory every worktree of this repository shares, which is the
+        scope the record itself has, and acceptance reads it from the worktree
+        that wrote it.
+        """
+
+        linked = self.directory / "linked"
+        _git(self.root, "worktree", "add", "-q", "-b", "linked", str(linked), "topic")
+        self.addCleanup(_git, self.root, "worktree", "remove", "--force", str(linked))
+        self.assertTrue((linked / ".git").is_file())
+
+        review_id = self.success(
+            "review", "--create-record", "--assert-new-work", root=linked
+        )["review_id"]
+        reviewer, calls = self.native_reviewer(review_id, blocking=True)
+        code, value, diagnostic = self.cli("review", "--review-id", review_id, reviewer=reviewer, root=linked)
+        self.assertEqual(code, 3, diagnostic)
+        self.assertIn("blocking", value["error"])
+        self.assertEqual(len(calls), 1)
+
+        data = b"fixture evidence written from a linked worktree\n"
+        source = self.directory / "linked-evidence.txt"
+        source.write_bytes(data)
+        template = self.success(
+            "adjudicate", "--review-id", review_id, "--expected-head", self.head, root=linked
+        )["proposal"]
+        template.update(operator="fixture operator", authority_context="fixture assertion; not authenticated approval")
+        for row in template["findings"]:
+            row.update(
+                response_disposition="rebutted", reason="fixture evidence contradicts this claim",
+                owner="", trigger="", evidence=[{"path": str(source), "sha256": hashlib.sha256(data).hexdigest()}],
+            )
+        proposal_path = self.directory / "linked-dispositions.json"
+        proposal_path.write_text(json.dumps(template))
+        prepared = self.success(
+            "adjudicate", "--review-id", review_id, "--expected-head", self.head,
+            "--dispositions-file", str(proposal_path), "--prepare-evidence", root=linked,
+        )["proposal"]
+        proposal_path.write_text(json.dumps(prepared))
+
+        common = self.root / ".git" / "sd-review-evidence" / review_id
+        archive = pathlib.Path(prepared["bindings"]["evidence_archive"]["path"])
+        member = pathlib.Path(prepared["findings"][0]["evidence"][0]["path"])
+        for path in (archive, member):
+            self.assertTrue(path.is_relative_to(common), path)
+            self.assertFalse(path.is_relative_to(linked), path)
+            self.assertEqual(path.resolve(strict=True), path)
+        self.assertEqual(member.read_bytes(), data)
+        # The evidence is inside the Git directory, so the worktree that wrote
+        # it stays clean and acceptance can still read the exact same bytes.
+        self.assertEqual(_git(linked, "status", "--porcelain", "--untracked-files=all"), "")
+        validated = self.success(
+            "adjudicate", "--review-id", review_id, "--expected-head", self.head,
+            "--dispositions-file", str(proposal_path), root=linked,
+        )
+        self.success(
+            "adjudicate", "--review-id", review_id, "--expected-head", self.head,
+            "--dispositions-file", str(proposal_path),
+            "--accept-dispositions", validated["acceptance_digest"], root=linked,
+        )
+        self.success("verify-review", "--review-id", review_id, "--expected-head", self.head, root=linked)
+
+    def test_a_merged_record_closes_and_releases_the_branch_it_no_longer_needs(self):
+        """A record outlives its branch diff, and closing it is how it ends.
+
+        Once the work reaches the refreshed default branch, `base..head` is
+        empty. That is the allocation and dispatch rule, and it used to run
+        during identity lookup, which left a completed record permanently
+        active and holding its branch alias against every later record.
+        """
+
+        review_id = self.create()
+        branch_index = no_item.index_key("fixture/repo", "branch", "topic")
+        self.assertEqual(receipts.read(self.connection, branch_index)[1]["review_id"], review_id)
+        _git(self.remote.path, "update-ref", "refs/heads/main", self.head)
+
+        # The eligibility rule itself is unchanged: no diff, no new record and
+        # no further review of this one.
+        self.refused("review", "--create-record", "--assert-new-work", pattern="committed diff")
+        self.refused("review", "--review-id", review_id, pattern="committed diff")
+        self.success("review", "--review-id", review_id, "--close-record", "fixture work merged")
+        _key, (_revision, state) = self.record(review_id)
+        self.assertEqual(state["lifecycle"], "closed")
+        self.assertEqual(state["closed"]["reason"], "fixture work merged")
+        self.assertIsNone(receipts.read(self.connection, branch_index)[1]["review_id"])
+        self.success("review", "--review-id", review_id, "--reopen-record")
+        self.assertEqual(receipts.read(self.connection, branch_index)[1]["review_id"], review_id)
 
 
 if __name__ == "__main__":

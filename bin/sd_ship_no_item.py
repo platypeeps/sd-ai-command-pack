@@ -23,7 +23,6 @@ from sd_ship_history import (
     ItemHistory,
     digest,
     full_branch_coverage,
-    validate_additional_requests,
 )
 from sd_ship_identity import ReviewIdentity
 from sd_ship_remote import Refusal, git, slug
@@ -242,8 +241,16 @@ class GitFacts:
     trees: tuple[str, ...]
 
 
-def committed_facts(root: pathlib.Path) -> GitFacts:
-    """Resolve canonical identity from Git alone, after refreshing the base."""
+def committed_facts(root: pathlib.Path, *, require_diff: bool = True) -> GitFacts:
+    """Resolve canonical identity from Git alone, after refreshing the base.
+
+    An outstanding branch diff is an eligibility rule for allocating and
+    dispatching, not part of identity. A record outlives its diff: once the work
+    merges and the refreshed base catches up, `base..head` is empty, and close,
+    reopen and rebind still have to run on it. `require_diff=False` reads the
+    identity without that rule, so a finished record can be closed and its
+    branch alias released instead of staying active forever.
+    """
     # Canonical identity is the configured remote, never the URL a local
     # `insteadOf` rewrite resolves for transport.
     try:
@@ -259,7 +266,7 @@ def committed_facts(root: pathlib.Path) -> GitFacts:
     head = git(root, "rev-parse", "HEAD")
     base = git(root, "merge-base", head, f"refs/remotes/{remote}/{default}")
     commits = tuple(git(root, "rev-list", f"{base}..{head}").split())
-    if not commits:
+    if require_diff and not commits:
         raise Refusal(
             "this branch has no committed diff against the refreshed default branch; "
             "commit the proposed change before allocating a record"
@@ -535,16 +542,26 @@ class NoItemHistory(ItemHistory):
         return with_digest(state)
 
     def _validate_requests(self, state: dict) -> None:
+        """Every request binds the combined prefix, imported history or not.
+
+        The digest a request carries is the one `history_digest` wrote, and in
+        this mode that is always the combined form. Reading a native-only
+        record against the raw native prefix instead compared two formats that
+        never match: the pass was spent, and its clearance then refused.
+
+        An import changes how many passes need a request, not what one says. It
+        spends the budget, so every native pass after an import carries its
+        own; without one the first two passes are the initial review and its fix
+        verification, exactly as the item mode has them.
+        """
         imported = len(state.get("historical_passes") or [])
         passes = self.native(state)
-        if not imported:
-            validate_additional_requests(passes)
-            return
-        for index, entry in enumerate(passes):
+        start = 0 if imported else 2
+        for index, entry in enumerate(passes[start:], start):
             request = entry.get("additional_review_request")
             if (not isinstance(request, dict) or request.get("head") != entry.get("head")
                     or not isinstance(request.get("reason"), str) or not request["reason"].strip()
-                    or request.get("allowed_passes") != 1
+                    or type(request.get("allowed_passes")) is not int or request["allowed_passes"] != 1
                     or request.get("prior_history_digest") != combined_digest(state, passes[:index])):
                 raise Refusal(
                     f"native pass {imported + index + 1} does not bind its exact combined prior history "
@@ -620,9 +637,13 @@ def adjudicate_review(root: pathlib.Path, connection, database: pathlib.Path, ar
 
 
 def any_record(connection: sqlite3.Connection, store, root: pathlib.Path, args) -> tuple[str, GitFacts, int, dict]:
-    """Read a record without the branch and lifecycle guards the others apply."""
+    """Read a record without the branch and lifecycle guards the others apply.
+
+    Rebinding, closing and reopening are the operations a record needs after its
+    work has landed, so they read identity without the outstanding-diff rule.
+    """
     validate_schema(connection)
-    facts = committed_facts(root)
+    facts = committed_facts(root, require_diff=False)
     key = review_key(facts.repository, args.review_id)
     revision, state = store.read(connection, key)
     if not state:

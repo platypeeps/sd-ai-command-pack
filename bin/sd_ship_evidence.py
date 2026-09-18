@@ -6,8 +6,11 @@ repository's own evidence folder, content-addressed, and writes one archive that
 lists each member. Later validation reads only those durable copies, and it
 refuses a missing or changed archive instead of restoring one.
 
-The folder lives under `.git`, so evidence never enters the worktree, never
-appears in `git status`, and never travels with a push.
+The folder lives inside the Git directory, so evidence never enters the
+worktree, never appears in `git status`, and never travels with a push. Git is
+asked where that directory is: in a linked worktree `.git` is a file, not a
+folder, and the common directory is the one every worktree of one repository
+shares, which is the scope a record has.
 """
 
 from __future__ import annotations
@@ -24,9 +27,9 @@ from sd_ship_dispositions import (
     read_file,
     unique_object,
 )
-from sd_ship_remote import Refusal
+from sd_ship_remote import Refusal, git
 
-FOLDER = pathlib.Path(".git") / "sd-review-evidence"
+FOLDER = "sd-review-evidence"
 MEMBER_FOLDER = "blob"
 ARCHIVE_NAME = "archive.json"
 ARCHIVE_SCHEMA_VERSION = 1
@@ -36,11 +39,27 @@ MAX_ARCHIVE_BYTES = 2_000_000
 MAX_MEMBERS = 128
 
 
+def git_folder(root: pathlib.Path) -> pathlib.Path:
+    """Where Git keeps this repository, said by Git rather than by a path.
+
+    `root / ".git"` is a directory in an ordinary checkout and a file in a
+    linked worktree, so constructing the path refuses every worktree. The
+    common directory is asked for by name, and an older Git that answers with a
+    relative path answers it relative to `root`.
+    """
+    answer = pathlib.Path(git(root, "rev-parse", "--git-common-dir"))
+    folder = answer if answer.is_absolute() else root / answer
+    try:
+        return folder.resolve(strict=True)
+    except OSError as error:
+        raise Refusal(f"durable evidence needs a readable Git directory: {folder}: {error.strerror}") from None
+
+
 def evidence_folder(root: pathlib.Path, review_id: str) -> pathlib.Path:
     """One folder per record, named by the record, resolved before any write."""
     if not review_id or "/" in review_id or review_id in (".", ".."):
         raise Refusal("durable evidence needs a simple review record identity")
-    return root.resolve() / FOLDER / review_id
+    return git_folder(root) / FOLDER / review_id
 
 
 def archive_file(root: pathlib.Path, review_id: str) -> pathlib.Path:
