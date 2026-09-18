@@ -1108,6 +1108,75 @@ class NoItemContracts(unittest.TestCase):
         )
         self.success("verify-review", "--review-id", review_id, "--expected-head", self.head, root=linked)
 
+    def test_a_second_import_never_overwrites_the_import_that_landed_first(self):
+        """Eligibility is read before the lock, so it is read again inside it.
+
+        Parsing a manifest and walking its ancestry is the slow part, and it
+        happens outside the lock. A competing import that finishes that work
+        first and lands is what the second one used to overwrite, recomputing
+        the stored digest over a budget three passes shorter.
+        """
+
+        review_id = self.create()
+        landed_path, _manifest = self.manifest(3)
+        second_path, _manifest = self.manifest(2)
+        original = no_item.import_claim
+        landed = []
+
+        def racing_claim(root, args, facts):
+            value = original(root, args, facts)
+            if not landed:
+                landed.append(None)
+                landed[0] = self.success(
+                    "review", "--review-id", review_id, "--import-history", str(landed_path),
+                    "--assert-history-complete",
+                )
+            return value
+
+        with patch.object(no_item, "import_claim", racing_claim):
+            code, value, diagnostic = self.cli(
+                "review", "--review-id", review_id, "--import-history", str(second_path),
+                "--assert-history-complete",
+            )
+        self.assertEqual(code, 3, diagnostic)
+        self.assertRegex(value["error"], "already holds history")
+        self.assertEqual(landed[0]["spent_passes"], 3)
+        _key, (_revision, state) = self.record(review_id)
+        self.assertEqual(len(state["historical_passes"]), 3)
+        self.assertEqual(state["history_digest"], no_item.combined_digest(state))
+
+    def test_rebinding_a_closed_record_leaves_another_record_its_branch(self):
+        """A stored branch name is a name, not current ownership.
+
+        A closed record released its alias, and the next record took it. The
+        rebind of the closed one released that branch unconditionally, which
+        erased a live claim and left the branch free for a second budget.
+        """
+
+        closed = self.create()
+        self.success("review", "--review-id", closed, "--close-record", "fixture abandoned")
+        _git(self.root, "checkout", "-q", "-b", "revived")
+        # Unrelated work on the released branch name, so the new record's own
+        # head and tree claims never collide with the closed record's.
+        _git(self.root, "checkout", "-q", "-B", "topic", "origin/main")
+        self.head = _git(self.root, "rev-parse", "HEAD")
+        self.commit_fix("separate.py", "value = 9\n")
+        active = self.create()
+        branch = no_item.index_key("fixture/repo", "branch", "topic")
+        self.assertEqual(receipts.read(self.connection, branch)[1]["review_id"], active)
+
+        _git(self.root, "checkout", "-q", "revived")
+        self.head = _git(self.root, "rev-parse", "HEAD")
+        self.success("review", "--review-id", closed, "--rebind-branch", "topic")
+        _key, (_revision, state) = self.record(closed)
+        self.assertEqual(state["branch"], "revived")
+        self.assertEqual(
+            receipts.read(self.connection, no_item.index_key("fixture/repo", "branch", "revived"))[1]["review_id"],
+            closed,
+        )
+        # The active record still owns the branch it was allocated on.
+        self.assertEqual(receipts.read(self.connection, branch)[1]["review_id"], active)
+
     def test_a_merged_record_closes_and_releases_the_branch_it_no_longer_needs(self):
         """A record outlives its branch diff, and closing it is how it ends.
 

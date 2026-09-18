@@ -466,17 +466,27 @@ def selected_record(connection: sqlite3.Connection, store, root: pathlib.Path, a
     return key, facts, revision, state
 
 
+def refuse_existing_history(state: dict, review_id: str) -> None:
+    if state.get("historical_passes") or state.get("passes"):
+        raise Refusal(
+            f"no-item record {review_id} already holds history; an import never replaces or merges "
+            "existing records, and every implicated pass is preserved"
+        )
+
+
 def import_into_record(root: pathlib.Path, connection: sqlite3.Connection, database: pathlib.Path, args, store) -> dict:
     key, facts, revision, state = selected_record(connection, store, root, args)
     imported, evidence = import_claim(root, args, facts)
-    if state.get("historical_passes") or state.get("passes"):
-        raise Refusal(
-            f"no-item record {args.review_id} already holds history; an import never replaces or merges "
-            "existing records, and every implicated pass is preserved"
-        )
+    refuse_existing_history(state, args.review_id)
     check_item_receipts(connection, store, facts)
     with store.repository_lock(database, facts.repository):
         revision, state = store.read(connection, key)
+        # Recheck under the lock, as allocation does. Parsing the manifest and
+        # walking its ancestry is slow, so a second import can finish that work
+        # while the first holds the lock; writing then would overwrite an import
+        # that already landed, and recompute the digest over the budget it lost.
+        refuse_existing_history(state, args.review_id)
+        check_item_receipts(connection, store, facts)
         state.update(historical_passes=imported, imported_history=evidence)
         store.save(connection, key, revision, with_digest(state))
     _revision, state = store.read(connection, key)
@@ -669,16 +679,31 @@ def rebind_record(root: pathlib.Path, connection, database: pathlib.Path, args, 
     key, facts, revision, state = any_record(connection, store, root, args)
     if state.get("branch") != args.rebind_branch:
         raise Refusal(f"--rebind-branch must name the stored branch {state.get('branch')}")
-    for previous in NoItemHistory().ancestry_heads(state):
+    walked = NoItemHistory().ancestry_heads(state)
+    for previous in walked:
         ancestor_head(root, previous, facts.head, "reserved head")
     with store.repository_lock(database, facts.repository):
         revision, state = store.read(connection, key)
         if state.get("branch") != args.rebind_branch:
             raise Refusal("no-item record changed concurrently; reconcile before rebinding")
-        if facts.branch != state["branch"] and index_owner(connection, store, facts, "branch", facts.branch):
-            raise Refusal(f"another no-item record already owns branch {facts.branch}")
+        # The walk asks Git, so it stays outside the lock, where a pass reserved
+        # since the read would go unwalked. Only a head this call has not walked
+        # already is walked here, which asks nothing when none appeared.
+        for previous in NoItemHistory().ancestry_heads(state):
+            if previous not in walked:
+                ancestor_head(root, previous, facts.head, "reserved head")
+        owner = index_owner(connection, store, facts, "branch", facts.branch)
+        # This record's own claim is not another record's: a rebind whose
+        # identity write did not land has to be repeatable.
+        if facts.branch != state["branch"] and owner not in (None, args.review_id):
+            raise Refusal(f"another no-item record {owner} already owns branch {facts.branch}")
         aliases = list(dict.fromkeys([*(state.get("branch_aliases") or []), facts.branch]))
-        claim_branch(connection, store, facts.repository, args.rebind_branch, None)
+        # A stored branch name is a name, not current ownership. A closed record
+        # released its alias, and another record may hold that branch now;
+        # releasing it unconditionally would erase a live claim and hand the same
+        # branch a second budget.
+        if index_owner(connection, store, facts, "branch", args.rebind_branch) == args.review_id:
+            claim_branch(connection, store, facts.repository, args.rebind_branch, None)
         claim_branch(connection, store, facts.repository, facts.branch, args.review_id)
         write_identity(connection, store, key, revision, state, branch=facts.branch, branch_aliases=aliases)
     _revision, state = store.read(connection, key)
