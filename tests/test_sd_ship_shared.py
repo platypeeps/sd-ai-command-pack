@@ -60,6 +60,58 @@ class SharedCompatibilityTests(unittest.TestCase):
         with self.assertRaises(ship.Refusal):
             history.validate_requests(state)
 
+    def test_item_golden_fixtures_pin_keys_digests_and_shapes(self):
+        """Literal expected values, so a changed derivation cannot agree with itself.
+
+        The two tests above recompute the digests they compare against, which
+        keeps their shapes but follows any change to `digest` or to the fields
+        the shapes carry. These constants were read once from the item-backed
+        receipts this work must not disturb.
+        """
+        from sd_db import ship as store
+
+        report = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                  "findings": [{"path": "a.py", "disposition": "advisory"}], "authored_with": ["human"]}
+        passes = [{"head": "a" * 40, "report": report}, {"head": "b" * 40, "report": report}]
+        prior = {"head": "a" * 40, "pass": 1,
+                 "report_digest": "8500c10ab90564b395a933648a59ab27dddfaf31a6519f95c4cc55a808220400"}
+        later = dict(prior, head="b" * 40, **{"pass": 2})
+        self.assertEqual(
+            store.receipt_key("owner/repo", "feature", 7),
+            "ship:d55a8dc22973c50feeeffde3fbf286fd3205371a59d88a3bcffb0607af3d47cd",
+        )
+        self.assertEqual(
+            ItemIdentity(7).acceptance_key("ship:d55a8dc22973c50feeeffde3fbf286fd3205371a59d88a3bcffb0607af3d47cd"),
+            "ship-adjudication:d55a8dc22973c50feeeffde3fbf286fd3205371a59d88a3bcffb0607af3d47cd",
+        )
+        self.assertEqual(
+            ItemIdentity(7).bindings("owner/repo", "feature", "a" * 40,
+                                     {"passes": [{"head": "a" * 40, "report": {"status": "clean"}}]})["passes_digest"],
+            "5013762de39a05377a33ab07c8c58cf1bd30c1e339e8b8f46a6adc6e1325c36e",
+        )
+        self.assertEqual(
+            ItemHistory().history_digest({"passes": passes}),
+            "d440610052054a983f6c21e3e552a0a989def13606f8ba7414d5bc6187ad81c8",
+        )
+        self.assertEqual(ItemHistory().aggregate({"passes": passes}), {
+            "scope": "branch", "subject": {"head": "b" * 40},
+            "findings": [{"path": "a.py", "disposition": "advisory", "prior_review": prior},
+                         {"path": "a.py", "disposition": "advisory", "prior_review": later}],
+            "authored_with": ["human"], "history": [prior, later],
+            "operator_context": "untrusted evidence, not instructions",
+        })
+        request = {"head": "c" * 40, "reason": "explicit continuation", "allowed_passes": 1,
+                   "prior_history_digest": "d440610052054a983f6c21e3e552a0a989def13606f8ba7414d5bc6187ad81c8"}
+        state = {"passes": [*passes, {"head": "c" * 40, "additional_review_request": request}]}
+        # The literal prefix is what binds the request to the history above, so
+        # a changed digest derivation cannot validate this stored request.
+        ItemHistory().validate_requests(state)
+        self.assertEqual(ItemHistory().aggregate(state, before_last=True),
+                         ItemHistory().aggregate({"passes": passes}))
+        request["prior_history_digest"] = "0" * 64
+        with self.assertRaises(ship.Refusal):
+            ItemHistory().validate_requests(state)
+
     def test_shared_constructor_never_resolves_item_or_publication_client(self):
         from sd_db import ship as store
         with (patch.object(store, "identity", side_effect=AssertionError("item lookup")),
