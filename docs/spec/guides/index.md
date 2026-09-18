@@ -128,7 +128,7 @@ Enforcement lives in `templates/.agents/skills/sd-review-pr/SKILL.md` [absent: d
 
 ### When Closing Out a Task Whose Work Already Landed
 
-Adopted 2026-08-06, from `docs/work/archive/2026-08/2026-07-28-consolidate-shared-script-helpers`.
+Adopted 2026-08-06, from the [historical work item](https://github.com/platypeeps/sd-ai-command-pack/tree/8ba8fa7a15fcd4783b42cbe580a04e89149be08d/docs/work/archive/2026-08/2026-07-28-consolidate-shared-script-helpers).
 That task sat `in_progress` with five unchecked acceptance criteria long after
 the work was done — two of its four planned commits shipped under it, and the
 other two were split mid-implementation into follow-up tasks that inherited two
