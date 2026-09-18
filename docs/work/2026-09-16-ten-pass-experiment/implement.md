@@ -1,5 +1,10 @@
 # Implement — ten-pass-experiment
 
+## Current status — 2026-09-18
+
+Blocked. The user cancelled external provider reviews. No qualifying Codex pass exists on sd:777.
+Resume only after explicit authorization to run these reviews. Steps 3 through 6 remain open.
+
 ## Step checklist
 
 - [x] 1. This item's three pages land on main. (lane) Done 2026-09-17: #991
