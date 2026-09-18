@@ -11,7 +11,7 @@ For an existing task or followup, add `item: sd:<id>` to the PRD frontmatter.
 Do not register another work row for that task.
 Resolve any existing duplicate path registration first; path bindings take precedence.
 
-For new work, run `sd work register docs/work/<item>/prd.md` from this checkout.
+For new work, run `bin/sd work register docs/work/<item>/prd.md` from this checkout.
 Registration creates the row in `planning`.
 
 Reference the item with one `Work:` line in the pull request.
