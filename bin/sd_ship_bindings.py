@@ -15,7 +15,8 @@ BIN = pathlib.Path(__file__).resolve().parent
 REVIEW_TOOL_FILES = (
     "sd-review", "sd_lib.py", "sd_registry.py", "sd_route.py", "sd_codex.py", "sd-check", "sd-docs-lint",
     "sd-ship", "sd_ship_dispositions.py", "sd_ship_remote.py", "sd_ship_review.py",
-    "sd_ship_history.py", "sd_ship_identity.py", "sd_ship_item.py", "sd_ship_bindings.py",
+    "sd_ship_history.py", "sd_ship_identity.py", "sd_ship_item.py", "sd_ship_no_item.py",
+    "sd_ship_evidence.py", "sd_ship_bindings.py",
 )
 ADJUDICATOR_POLICY_FILES = (
     "skills/sd-ship/SKILL.md", ".claude/rules/sd-planning-adversarial-review.md",

@@ -302,6 +302,28 @@ class DispositionTests(unittest.TestCase):
         self.assertEqual(resolved[2]["passes"], self.raw)
         self.assertEqual(self.operation().state["passes"], self.raw)
 
+    def test_a_forged_no_item_receipt_under_the_item_key_cannot_clear(self):
+        """A no-item acceptance copied to the item key cannot authorize publication.
+
+        The reverse of the no-item contract of the same name. Both readers own
+        this, because either one accepting the other's receipt would let one
+        mode's approval clear work it never reviewed.
+        """
+
+        self.blocked()
+        self.accepted()
+        key = ship.sd_ship_dispositions.key(self.operation())
+        revision, receipt = fixture.receipts.read(self.connection, key)
+        forged = json.loads(json.dumps(receipt))
+        bindings = forged["proposal"]["bindings"]
+        bindings.pop("item")
+        bindings.update(identity_mode="no-item", review_id="0" * 32,
+                        identity_revision=1, schema_version=1)
+        forged["proposal_digest"] = ship.sd_ship_dispositions.digest(forged["proposal"])
+        fixture.receipts.save(self.connection, key, revision, forged)
+        with self.assertRaisesRegex(ship.Refusal, "bind|identity|item"):
+            self.prepare()
+
     def test_reacceptance_requires_prepare_refresh_before_merge(self):
         self.blocked()
         proposal = self.accepted()

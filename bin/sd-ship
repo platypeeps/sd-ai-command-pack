@@ -685,10 +685,33 @@ def quote_branch(repository, branch):
     return quote(f"{repository.split('/')[0]}:{branch}", safe="")
 
 
+def no_item_record_flags(action) -> None:
+    action.add_argument("--create-record", action="store_true", help="allocate a record without provider dispatch or a spent pass")
+    action.add_argument("--assert-new-work", action="store_true", help="explicit assertion of new work, not a renamed or rewritten continuation")
+    action.add_argument("--import-history", type=pathlib.Path, metavar="FILE", help="import an ordered manifest of historical reports as untrusted evidence")
+    action.add_argument("--assert-history-complete", action="store_true", help="explicit operator assertion that the supplied history is complete")
+    action.add_argument("--rebind-branch", metavar="OLD", help="metadata-only rebind to the current branch; preserves every pass and invalidates acceptance")
+    action.add_argument("--close-record", metavar="REASON", help="close the record, whether work completed or was abandoned")
+    action.add_argument("--reopen-record", action="store_true", help="resume the same record and its unchanged spent count")
+    action.add_argument("--retry-review", action="store_true", help="spend the remaining pass on a full-branch retry of an incomplete initial review")
+    action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
+    action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of the complete combined history; required to continue after any import")
+    action.add_argument("--request-reason", help="nonempty operator context; this assertion is not proof of user approval")
+    # No-item review takes no commit, runner or delivery flags at all.
+    action.set_defaults(path=[], message_file=None, author=None)
+
+
+def adjudication_flags(action) -> None:
+    action.add_argument("--expected-head", required=True)
+    action.add_argument("--dispositions-file", type=pathlib.Path, help="canonical absolute path to an evidenced proposal")
+    action.add_argument("--prepare-evidence", action="store_true", help="copy the cited evidence into this record's durable archive; it never accepts in the same command")
+    action.add_argument("--accept-dispositions", metavar="SHA256", help="explicit acceptance of this exact validated proposal; not proof of user approval")
+
+
 def parser():
     command = argparse.ArgumentParser(description=__doc__)
     commands = command.add_subparsers(dest="command", required=True)
-    for name in ("prepare", "merge", "reconcile", "observe", "adjudicate"):
+    for name in ("prepare", "merge", "reconcile", "observe"):
         action = commands.add_parser(name)
         action.add_argument("--item", type=int, required=True)
         action.add_argument("--json", action="store_true")
@@ -705,10 +728,6 @@ def parser():
             action.add_argument("--body-file", type=pathlib.Path)
             action.add_argument("--deliver", action="store_true", default=None)
             action.add_argument("--acceptance-file", type=pathlib.Path)
-        if name == "adjudicate":
-            action.add_argument("--expected-head", required=True)
-            action.add_argument("--dispositions-file", type=pathlib.Path, help="canonical absolute path to an evidenced proposal")
-            action.add_argument("--accept-dispositions", metavar="SHA256", help="explicit acceptance of this exact validated proposal; not proof of user approval")
         if name == "merge":
             action.add_argument("--expected-head", required=True)
             authority = action.add_mutually_exclusive_group()
@@ -716,6 +735,20 @@ def parser():
             authority.add_argument("--manual", action="store_true")
             action.add_argument("--watch", action="store_true")
             action.add_argument("--wait-seconds", type=int, default=900)
+    for name in ("review", "verify-review", "adjudicate"):
+        action = commands.add_parser(name)
+        identity = action.add_mutually_exclusive_group(required=True)
+        identity.add_argument("--item", type=int)
+        identity.add_argument("--no-item", action="store_true", help="a standalone review record, never a placeholder work item")
+        action.add_argument("--json", action="store_true")
+        action.add_argument("--database", type=pathlib.Path, help="owned runner database; defaults to the operator HOME")
+        action.add_argument("--review-id", metavar="ID", help="the stable record identity every later no-item command requires")
+        if name == "review":
+            no_item_record_flags(action)
+        if name == "verify-review":
+            action.add_argument("--expected-head", required=True)
+        if name == "adjudicate":
+            adjudication_flags(action)
     return command
 
 
@@ -746,9 +779,16 @@ def main(argv=None) -> int:
         if root is None:
             raise Refusal("cwd is not inside a Git repository")
         database = args.database or default_path()
-        readonly = args.command == "observe" or (args.command == "adjudicate" and args.accept_dispositions is None)
+        readonly = args.command in ("observe", "verify-review") or (args.command == "adjudicate" and args.accept_dispositions is None)
         connection = connect(database, write=not readonly)
         try:
+            if args.command in ("review", "verify-review") and not args.no_item:
+                raise Refusal("item-backed review and clearance run inside prepare and merge; --no-item selects the standalone record path")
+            if getattr(args, "no_item", False):
+                import sd_ship_no_item
+                result = sd_ship_no_item.run_no_item(root, connection, database, args, ship, review_runtime())
+                print(json.dumps(result, indent=2, sort_keys=True) if args.json else result)
+                return 0 if result["ok"] else 3
             delivery = Ship(root, connection, database, args)
             if readonly:
                 result = getattr(delivery, args.command)()
