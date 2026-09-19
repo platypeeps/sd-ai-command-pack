@@ -464,10 +464,12 @@ No implementation or provider review ran during backup verification.
   them, eight of them mutation-verified one guard at a time. #1067
   (`0300b858`) closed 377 and 378 the same way. The delivery sequence's twelve
   steps are spent and the checker review landed, so the work is delivered.
-  This commit carries the `Delivers: sd:1006` trailer that
-  `source:bin/sd_work.py::_delivery_reason` requires, because
-  `source:.venv/lib/python3.13/site-packages/sd_db/workflow.py` refuses a work
-  item's move to `done` on any other evidence. The row moves once this lands
-  and `sd work deliver` verifies the trailer against the default branch;
+  This commit carries the `Delivers: sd:1006` trailer the closing route needs.
+  `sd task status` does not close a work row: `source:bin/sd_work.py::_status_reason`
+  redirects a `kind=work` item to `sd work deliver`, and the installed
+  workflow library refuses the move on any other evidence.
+  `source:bin/sd_work.py::_delivery_reason` is what then reads the trailer,
+  against the verified tip rather than any named branch, before
+  `sd_db.progress.deliver_work` writes the row. The row moves once this lands;
   archiving the directory follows the row, not the other way round, because
   `bin/sd-docs-lint` rule 2 reads the row and not this file.
