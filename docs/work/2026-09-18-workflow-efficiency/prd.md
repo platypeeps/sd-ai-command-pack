@@ -1,7 +1,7 @@
 ---
 title: Reduce workflow overhead without weakening delivery gates
 created: 2026-09-18
-branch: docs/sd-1021-closeout
+branch: main
 item: sd:1021
 ---
 
@@ -381,9 +381,13 @@ This evidence-only closure starts no additional automatic planning review and au
   The additions are `adjudication.md`, `delivery.md`, `post-merge-closeout.md`, and `recovery.md`.
   This resolves the execution safety refusals; it grants no additional merge or deletion authority.
   Requirements and acceptance remain unchanged; no additional planning review or status change is authorized.
-- 2026-09-19: The `branch:` field named `feat/workflow-policy-alignment`, which
-  no local or remote head has had since #1070 merged and the branch was
-  deleted. `bin/sd-status` reported it as `branch-unresolvable`. The item's own
-  row already names `docs/sd-1021-closeout`, so the field is brought to the row
-  rather than the row to the field. This records a stale locator, not a change
-  of plan: requirements, acceptance, and authorizations are untouched.
+- 2026-09-19: The `branch:` field named `feat/workflow-policy-alignment`, gone
+  since #1070 merged, so `bin/sd-status` reported `branch-unresolvable`. #1074
+  moved it to `docs/sd-1021-closeout`, the branch the row named and one that
+  resolved when it was measured. That branch and its worktree were deleted the
+  same day, and the check named the new value within the hour. The field is
+  `main` now, for the reason the second failure showed and the first hid: this
+  item's work lands and its branches are deleted, so any branch name is a
+  locator with an expiry. `main` is where #1070 landed, it always resolves,
+  and it is what sd:777 and sd:1006 both carried. This records a locator, not
+  a change of plan: requirements, acceptance, and authorizations are untouched.
