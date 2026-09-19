@@ -1130,12 +1130,12 @@ log, not here.
   missing reason rather than as an unresolved path.
 - Cuts: protection gap analysis, acknowledgement loading, both schema files
   and `.github/sd-status.json` (`bin/sd-status:222-832`) become one
-  `protected: yes/no` line; `bin/sd_sweep.py`, the `sweep` verb
-  (`bin/sd:2704-2738,2916-2925`) and `tests/test_sd_sweep.py`; the archive
-  walk and the `archived` and `parked` fields (`bin/sd_lib.py:355-368`,
-  `:271-282`, `:302-303`, `:350`) and every reader (`bin/sd-status:179,186,
-  1118-1125,1230-1238,1250-1283`), so
-  `work_item_dirs` is one `iterdir` that skips `archive` by name; `bin/sd_ledger.py` moves to B with the
+  `protected: yes/no` line -- rescinded 2026-09-19, kept; see the Log.
+  `bin/sd_sweep.py`, the `sweep` verb (`bin/sd:2704-2738,2916-2925`) and
+  `tests/test_sd_sweep.py`; the `parked` field and every reader of it, cut
+  2026-09-19 under 31(a), which keeps `archived`, the archive walk
+  (`bin/sd_lib.py:355-368`, `:271-282`, `:302-303`, `:350`) and their
+  readers, so `work_item_dirs` still skips `archive` by name; `bin/sd_ledger.py` moves to B with the
   database; `record_load` (cut 2026-09-16, 31(b1)); the six helpers
   copied from `bin/sd-handoff` are
   `git` (`source:bin/sd-handoff-restore::git`),

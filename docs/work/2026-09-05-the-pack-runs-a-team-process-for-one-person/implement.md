@@ -2332,3 +2332,22 @@ The general lesson the gate already states: a line number goes stale at the
 next insertion above it and a symbol name does not. Every citation this
 change had to repair was a line citation; none of the `source:` ones needed
 touching.
+
+### Two lists that named `archived` as a cut
+
+Requirement 13's own `Cuts:` list in `prd.md` said two things this day
+overturned: that protection gap analysis and acknowledgement loading become
+one `protected: yes/no` line, and that the archive walk, the `archived`
+field and every reader of it go with `parked`. Both entries are corrected in
+place, in the convention the list already uses for `record_load` -- the
+entry keeps its shape and takes the date and the disposition. A reader who
+does not reach this page still gets the right answer from the list itself,
+which is the point of correcting the list rather than only recording the
+decision here.
+
+One list is deliberately left as it stands: the enumeration above beginning
+"For the seven symbols an earlier list left unenumerated". That is what the
+31(b1) lane measured on its date, and it is visibly of its date -- it counts
+readers in `dashboard/`, a directory sd:719 retired. Rewriting a measurement
+to match a later decision destroys the thing it is kept for. The decision is
+here; the measurement stays there.
