@@ -164,6 +164,12 @@ class ReviewFixture(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.tmp = pathlib.Path(self._tmp.name).resolve()
         self.registry_home = self.tmp / "registry-home"
+        self.tool_bin = self.tmp / "tools"
+        self.tool_bin.mkdir()
+        for name in ("codex", "second", "third", "claude", "fourth", *(f"p{i}" for i in range(10))):
+            executable = self.tool_bin / name
+            executable.write_text("#!/usr/bin/env python3\nraise SystemExit('fixture must use FakeRunner')\n")
+            executable.chmod(0o700)
         (self.registry_home / ".local" / "share" / "sd").mkdir(parents=True)
         (self.registry_home / ".local" / "share" / "sd" / "providers.yaml").write_text(
             FIXTURE_REGISTRY, encoding="utf-8"
@@ -172,7 +178,7 @@ class ReviewFixture(unittest.TestCase):
     def environment(self, **extra: str) -> dict[str, str]:
         """An environment whose HOME is the fixture's, so the run reads the
         fixture's registry rather than the developer's."""
-        return {"HOME": str(self.registry_home), **extra}
+        return {"HOME": str(self.registry_home), "PATH": str(self.tool_bin) + os.pathsep + os.defpath, **extra}
 
     def local_block(self, root: pathlib.Path, *lines: str) -> None:
         body = "\n".join((f"{sd_review.sd_lib.CONSENT_KEY}: {FIXTURE_CONSENT}", *lines))
@@ -619,7 +625,7 @@ class PipelineTests(ReviewFixture):
         self.assertEqual(result["findings"][0]["disposition"], "blocking")
         self.assertEqual(result["findings"][0]["backend"], "codex")
 
-    def test_a_rate_limited_provider_falls_through_and_reports_the_shortfall(self) -> None:
+    def test_a_rate_limited_provider_falls_through_without_a_shortfall(self) -> None:
         root = self.make_repo()
         self.prepare(root)
         runner = FakeRunner(
@@ -630,13 +636,13 @@ class PipelineTests(ReviewFixture):
             }
         )
         result = self.run_review(root, runner)
-        self.assertEqual(result["status"], "rate_limited")
+        self.assertEqual(result["status"], "clean")
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["codex"], sd_review.RATE_LIMITED)
         self.assertEqual(statuses["second"], sd_review.CLEAN)
-        self.assertEqual(result["remaining"], ["codex"])
+        self.assertEqual(result["remaining"], [])
         self.assertEqual(result["reviewed_by"], ["second"])
-        self.assertEqual((result["completed_reviews"], result["requested_reviews"]), (1, 2))
+        self.assertEqual((result["completed_reviews"], result["requested_reviews"]), (1, 1))
 
     def test_an_unavailable_provider_lets_the_chain_continue(self) -> None:
         root = self.make_repo()
@@ -652,8 +658,8 @@ class PipelineTests(ReviewFixture):
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["codex"], sd_review.UNAVAILABLE)
         self.assertEqual(statuses["second"], sd_review.CLEAN)
-        self.assertEqual(result["status"], "unavailable")
-        self.assertEqual((result["completed_reviews"], result["requested_reviews"]), (1, 2))
+        self.assertEqual(result["status"], "clean")
+        self.assertEqual((result["completed_reviews"], result["requested_reviews"]), (1, 1))
 
     def test_every_provider_unavailable_is_not_a_clean_review(self) -> None:
         root = self.make_repo()
@@ -1487,13 +1493,13 @@ class TheUrlEntryRunsTests(ReviewFixture):
         }
         self.assertEqual(statuses["remote"], sd_review.CLEAN)
 
-    def test_a_429_falls_through_and_reports_insufficient_reviews(self) -> None:
+    def test_a_429_falls_through_to_one_successful_review(self) -> None:
         client = FakeClient({"remote": (429, "", "HTTP 429 from remote: slow down", True)})
         result = self.run_review(client)
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["remote"], sd_review.RATE_LIMITED)
         self.assertEqual(statuses["second"], sd_review.CLEAN)
-        self.assertEqual(result["status"], "rate_limited")
+        self.assertEqual(result["status"], "clean")
 
     def test_a_connection_error_is_unavailable_and_the_chain_continues(self) -> None:
         # `launched=False` even though the text says 429: an answer that never
@@ -1504,7 +1510,7 @@ class TheUrlEntryRunsTests(ReviewFixture):
         statuses = {row["backend"]: row["status"] for row in result["outcomes"]}
         self.assertEqual(statuses["remote"], sd_review.UNAVAILABLE)
         self.assertEqual(statuses["second"], sd_review.CLEAN)
-        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["status"], "clean")
 
     def test_a_host_that_moved_refuses_naming_both_and_sends_nothing(self) -> None:
         client = FakeClient()
@@ -1620,8 +1626,8 @@ class ScopeProvidersOverASkipTier(unittest.TestCase):
         deep = sd_review.sd_route.route(
             ["bin/sd_install.py"], lines=1, draft=False, policy=self.policy)
         self.assertEqual(deep.tier, "deep")
-        self.assertGreater(deep.depth, 1, "the deep tier asks for one reviewer, so a"
-                           " floor of one and a replacement of one agree here")
+        # Historical or explicit multi-review plans must retain their count.
+        deep = deep._replace(depth=2)
         self.assertEqual(
             sd_review.review_depth(deep, challenge=False, scope="planning"), deep.depth,
             "the scope's floor reduced the deep tier's read")
@@ -1725,8 +1731,8 @@ class TimingPlanTests(ReviewFixture):
 
     def test_all_fallbacks_receive_an_allowance_without_changing_depth(self):
         root, args, planned = self.planned()
-        self.assertEqual(planned["requested_reviews"], 2)
-        self.assertEqual(planned["fallback_candidates"], ["p2", "p3"])
+        self.assertEqual(planned["requested_reviews"], 1)
+        self.assertEqual(planned["fallback_candidates"], ["p1", "p2", "p3"])
         self.assertEqual(planned["timing"]["execution_seconds"], 12600)
         self.assertEqual([row["name"] for row in planned["timing"]["candidates"]], ["p0", "p1", "p2", "p3"])
         runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""), "p0": sd_review.Completed(127, "", "missing", False)},
@@ -1734,11 +1740,11 @@ class TimingPlanTests(ReviewFixture):
         args.explain = False
         args.expected_timing = sd_review.hashlib.sha256(json.dumps(planned["timing"], sort_keys=True).encode()).hexdigest()
         actual = sd_review.review(root, args, runner, self.environment(), self.chatgpt_home())
-        self.assertEqual(len(runner.calls), 4)
+        self.assertEqual(len(runner.calls), 3)
         self.assertEqual(actual["timing"], planned["timing"])
-        self.assertEqual(actual["completed_reviews"], 2)
-        self.assertEqual(actual["requested_reviews"], 2)
-        self.assertEqual(actual["reviewed_by"], ["p1", "p2"])
+        self.assertEqual(actual["completed_reviews"], 1)
+        self.assertEqual(actual["requested_reviews"], 1)
+        self.assertEqual(actual["reviewed_by"], ["p1"])
 
     def test_timeout_change_refuses_before_check_or_provider(self):
         root, args, report = self.planned(count=2, depth="standard", timeout=90)

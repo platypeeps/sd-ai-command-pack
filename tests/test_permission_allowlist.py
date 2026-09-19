@@ -61,7 +61,7 @@ SETTINGS = REPO_ROOT / ".claude" / "settings.json"
 # A README row reads `| `bin/sd_install.py --flag` | What it does |`. The mode
 # is allowlisted unless the row itself says not to, so both filters below read
 # the document rather than a list of flags somebody kept in their head.
-INSTALL_ROW = re.compile(r"^\|\s*`bin/sd_install\.py ([^`]+)`\s*\|\s*([^|]+?)\s*\|$", re.M)
+INSTALL_ROW = re.compile(r"^\|\s*`(?:python3 )?bin/sd_install\.py ([^`]+)`\s*\|\s*([^|]+?)\s*\|$", re.M)
 
 # A placeholder in the mode means it takes a path, and a path argument is the
 # thing that turns a repo-scoped grant into an arbitrary-path write:

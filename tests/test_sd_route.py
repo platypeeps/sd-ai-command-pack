@@ -63,20 +63,20 @@ class RouteTests(unittest.TestCase):
         self.assertIn("never-skip deny-list", plan.reason)
 
     def test_a_change_past_the_line_threshold_escalates(self) -> None:
-        self.assert_plan(["src/app.py"], 801, False, "deep", 2, None)
+        self.assert_plan(["src/app.py"], 801, False, "deep", 1, None)
 
     def test_a_change_at_the_line_threshold_does_not_escalate(self) -> None:
-        self.assert_plan(["src/app.py"], 800, False, "standard", 2, None)
+        self.assert_plan(["src/app.py"], 800, False, "standard", 1, None)
 
     def test_a_sensitive_glob_escalates(self) -> None:
         plan = self.assert_plan(
-            [".github/workflows/ci.yml"], 10, False, "deep", 2, None
+            [".github/workflows/ci.yml"], 10, False, "deep", 1, None
         )
         self.assertIn("sensitive path", plan.reason)
 
     def test_sensitive_and_large_escalate_twice_but_stop_at_the_top(self) -> None:
         self.assert_plan(
-            [".github/workflows/ci.yml"], 5000, False, "deep", 2, None
+            [".github/workflows/ci.yml"], 5000, False, "deep", 1, None
         )
 
     def test_a_draft_plans_the_cheapest_reviewing_tier(self) -> None:
@@ -100,7 +100,7 @@ class RouteTests(unittest.TestCase):
         """
 
         plan = self.assert_plan(
-            ["src/greet.py", "README.md"], 50, False, "standard", 2, None
+            ["src/greet.py", "README.md"], 50, False, "standard", 1, None
         )
         self.assertIn("no category matched", plan.reason)
         # The same code alone routes identically -- adding documentation to a
@@ -130,7 +130,7 @@ class RouteTests(unittest.TestCase):
             10,
             False,
             "deep",
-            2,
+            1,
             "installer",
             policy=policy,
         )
@@ -142,13 +142,13 @@ class RouteTests(unittest.TestCase):
             10,
             False,
             "deep",
-            2,
+            1,
             "installer",
         )
         self.assertIn("category installer", plan.reason)
 
     def test_an_unmatched_change_falls_back_to_the_default_tier(self) -> None:
-        plan = self.assert_plan(["src/app.py"], 10, False, "standard", 2, None)
+        plan = self.assert_plan(["src/app.py"], 10, False, "standard", 1, None)
         self.assertIn("no category matched", plan.reason)
 
     def test_a_star_does_not_reach_across_directory_separators(self) -> None:
@@ -160,11 +160,8 @@ class RouteTests(unittest.TestCase):
     def test_an_empty_policy_still_produces_a_usable_plan(self) -> None:
         plan = sd_route.route(["src/app.py"], 10, False, {})
         self.assertEqual(plan.tier, "deep")
-        # A policy that says nothing gets the deepest read, and `deep` is two
-        # reviewers. It used to be nobody, because an empty policy named no tier
-        # chain; a change nothing knows how to route is the last one to review
-        # with a single provider.
-        self.assertEqual(plan.depth, 2)
+        # Missing policy still requires review; risk does not add provider calls.
+        self.assertEqual(plan.depth, 1)
         self.assertIsNone(plan.category)
 
     def test_an_empty_path_list_is_never_skippable(self) -> None:

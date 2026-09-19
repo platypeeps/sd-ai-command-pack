@@ -213,6 +213,7 @@ class NoItemContracts(unittest.TestCase):
             if "--explain" in argv:
                 plan = {
                     "status": "explained", "requested_reviews": 1,
+                    "readiness": {"status": "ready", "blockers": [], "warnings": [], "runtime_approval": "not_observable"},
                     "timing": {
                         "phase_seconds": 60, "setup_seconds": 3600,
                         "execution_seconds": 3720,

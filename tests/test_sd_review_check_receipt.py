@@ -75,7 +75,7 @@ class TheRunnersCheckIsAReceiptTests(ReviewFixture):
         ran = [call for call in runner.calls if "sd-check" in " ".join(str(p) for p in call["argv"])]
         return result, ran
 
-    def test_a_receipt_for_this_tree_stands_in_for_the_gate(self) -> None:
+    def test_a_legacy_receipt_cannot_prove_unchanged_inputs(self) -> None:
         root = self.make_repo()
         database, ident = self.seed(root)
         record_check(
@@ -84,10 +84,8 @@ class TheRunnersCheckIsAReceiptTests(ReviewFixture):
         )
         result, ran = self.reviewed(root, database, ident)
         self.assertEqual(result["check"]["status"], "pass")
-        self.assertEqual(result["check"]["source"], "runner")
-        self.assertEqual(result["check"]["run"], ident)
-        self.assertEqual(result["check"]["checks"], [{"name": "gate"}])
-        self.assertEqual(ran, [], "the gate ran anyway; the receipt bought nothing")
+        self.assertNotIn("source", result["check"])
+        self.assertEqual(len(ran), 1, "legacy evidence must rerun the gate")
 
     def test_a_tree_that_moved_is_checked_again(self) -> None:
         """The leg that carries the weight. A commit amended after the runner
@@ -161,5 +159,6 @@ class TheRunnersCheckIsAReceiptTests(ReviewFixture):
         missing = self.tmp / "not-a-database.db"
         missing.write_text("this is not sqlite\n", encoding="utf-8")
         result, ran = self.reviewed(root, missing, "0" * 32)
-        self.assertNotIn("source", result["check"])
-        self.assertEqual(len(ran), 1)
+        self.assertIsNone(result["check"])
+        self.assertEqual(ran, [])
+        self.assertEqual(result["readiness"]["status"], "blocked")

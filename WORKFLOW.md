@@ -5,6 +5,10 @@ people see pull requests and merged commits, and nothing else the pack makes.
 Every default below serves that person. Anything that would show a personal
 process to someone else is off unless this file says otherwise.
 
+For this maintainer's reviewer, writing, and diagram preferences, read the
+sd-ai-command-pack checkout's [.claude/rules/sd-operator-defaults.md](.claude/rules/sd-operator-defaults.md).
+Those instructions do not change executable gates or another operator's permissions.
+
 ## Available controls
 
 `sd task` and the dashboard create and update ordinary tasks directly in the
@@ -36,21 +40,15 @@ creating an item or placeholder planning artifact.
 research kit lays out the repository; the item tracks what is open. You sit at
 the end: external publish or filing is the one gate, and it is yours.
 
-**Development.** Pick the item. The loop writes the prd and design when the
-change earns them, implements, tests, reviews, pushes, and merges where you
-have allowed it. A repository merges unattended only when you set `merge: auto`
-on its row, once, from the dashboard, and only while the remote still answers
-that the repository is yours alone, asked again at every merge; there you
-review the result on the item
-screen after it lands, and revert is one action. This unattended runner rule
-is separate from the assistant's active task permission under **Standing authorization**.
+**Development.** Plan when warranted, then implement, test, review, push, and merge when authorized.
+Unattended merging requires repository `merge: auto` and a fresh sole-operator check before each merge.
+This runner rule is separate from active task permission under **Standing authorization**.
 Without either applicable authority, stop at pull-request-ready.
 
-The loop asks no questions while it runs. Where it would have asked, it decides,
-records the choice on the item as a proposal, and continues. You veto after. It
-stops, and marks the item `blocked` with the reason, on a failing test, a
-blocking review finding still open once the review cap is spent, or a write
-outside the repository.
+The loop proceeds within the approved scope and existing permissions.
+Missing authority, unresolved scope, failed checks, or exhausted review allowance stops the affected operation.
+Record the blocker and next supported action.
+Do not replace required approval with a proposal that the user can veto afterward.
 
 ## Defaults
 
@@ -59,17 +57,20 @@ These run without being asked.
 - `sd-status` reports. It never writes.
 - `sd-review --scope branch --challenge` runs on the machine before a push.
   Blocking findings are fixed or recorded before the branch leaves.
-- CI runs on the pull request. The merge waits for CI and nothing else.
+- CI runs on the pull request.
+  Wait for required checks on the exact head; preserve review, ownership, protection, and authorization gates.
 - `sd-ship` commits enumerated paths, pushes, opens the pull request, waits
   for CI once in the background, merges with an explicit title and body
   whose trailer names the item, and runs `git fetch -p`. The repository
   setting `delete_branch_on_merge` removes
   the remote branch.
-- The default branch is protected: pull requests only, CI required, branches
-  up to date before they merge, no required approvals. It is set in the
-  repository's GitHub settings by hand; nothing in the pack or the dashboard
-  writes it. `sd-status` reports the gaps, and an unattended merge into a
-  branch that is not protected refuses naming the setting.
+  After each confirmed in-scope merge, the agent follows the ship skill's post-merge closeout procedure.
+  It dispositions remaining findings and inventories refs, branches, stashes, and worktrees.
+  Local deletion needs separate, consolidated approval for exact targets with verified recovery evidence.
+- Expected branch protection requires pull requests, current CI, and up-to-date branches, with no required approvals.
+  Configure it deliberately in GitHub; installation does not grant a protection exception.
+  `sd-status` reports gaps; executable merge stops when required protection is absent.
+  Repository-specific accepted gaps do not change that executable gate.
 - `make check` and the pack's `lint` CI job run `sd-docs-lint` against the
   checkout's own `docs/work/`, `docs/spec/` and `docs/decisions/`.
   `sd-ship` runs it again at delivery time. A consumer that wants the gate
@@ -136,20 +137,23 @@ and a body refuses nothing, whatever head moved under it.
 The reviewer is a different vendor from the author, always. Skills name the
 roles `author` and `reviewer`; the provider registry below maps them.
 
-The code point is under measurement by an experiment that is not the point
-itself: over the next ten code pull requests a second vendor reviews the
-change again after it merges, findings accepted against findings rejected
-with each accepted finding's severity, and cost logged per pass. The point
-stays where its row above puts it, before the merge, while the experiment
-runs. The experiment ends in a report on the item, and you decide whether the
-point stays; no ratio decides for you.
+The post-merge ten-pass experiment, `sd:777`, is cancelled.
+Its historical records remain evidence, not instructions to resume external reviews.
+Restart requires a new explicit user decision.
 
 ## Advisory
 
-- Copilot review. In an organisation or shared repository GitHub requests it on
-  its own when the pull request opens. Its findings are read and dispositioned.
-  They never block a merge, and no pack surface requests a round. On a repository you
-  pay for personally it comes from your own global hook, at your choice and cost (sd:10 note 1921).
+- Copilot review requires an explicit request after local review.
+  Honor repository restrictions; the system repository prohibits Copilot requests.
+  Do not request another round automatically after a push.
+  Read and disposition independently posted findings.
+  Pack routing remains advisory; existing repository merge rules still apply.
+
+After every confirmed in-scope merge, follow `skills/sd-ship/references/post-merge-closeout.md` in the sd-ai-command-pack checkout.
+Inspect all paginated threads and review bodies, including late findings.
+Local acknowledgement and remote thread resolution are separate operations.
+Authorized shipping closeout replies with evidence or a verified follow-up before resolving eligible threads.
+Uncertain findings remain open; no automatic Copilot request follows.
 
 ## Never in a shared repository
 
@@ -180,8 +184,8 @@ A shared repository is one where someone else also merges. In it:
 
 ## The path for a change
 
-Small change: branch, commit, `sd-review`, push, pull request, CI, merge.
-Eight commands, one local review, no artifacts.
+Small change: branch, commit, local review, push, pull request, CI, merge.
+Use the ship workflow without inventing a planning artifact.
 
 Change that earns a work item: `sd-plan` writes `prd.md` using the requirements
 already available and asks only for missing decisions. Then the small-change
@@ -252,12 +256,13 @@ suspends it with the reason shown.
 
 ## Providers
 
-One file, read by the library, maps roles to providers. Skills name roles and
-never vendors.
+The provider registry maps roles to providers.
+Reusable skill procedures name roles; operator policy owns preferred entries.
 
-Standard and deep changes require two completed reviews. Cheap changes require
-one; skip requires none. Planning and challenged reviews retain their existing
-minimum of one review. Tier selection still follows repository policy.
+Cheap, standard, and deep changes require one completed independent local review.
+Skip requires none; planning and challenged reviews retain their minimum of one.
+Tier selection still follows repository policy, without adding automatic reviewers.
+Complete the local review before any explicitly requested Copilot escalation.
 
     bills:
       anthropic: { cost: subscription }
@@ -277,7 +282,7 @@ minimum of one review. Tier selection still follows repository policy.
                  bill: baseten, roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 } }
     roles:
       author:   [claude, codex]
-      reviewer: [codex, claude, minimax, kimi, baseten]
+      reviewer: [codex, claude]
 
 A capped bill takes `url` entries only, because the library makes those
 calls and can refuse one before it is sent; a `start` entry on a capped
@@ -301,7 +306,7 @@ weekly window, and `GET /v1/token_plan/remains` on `www.minimax.io`, with
 the same key, answers with `current_interval_remaining_percent` and
 `current_weekly_remaining_percent` for `model_name: general`, probed
 2026-09-05. The bill carries that meter as a URL and the variable holding
-its key as `meter_env`, and every `sd-review` start reads it: one `GET` to
+its key as `meter_env`. A review reads it only for an eligible selected or fallback provider: one `GET` to
 that URL, and to no other -- the scheme, host, port and path are pinned in
 `bin/sd_registry.py` and any other value is refused naming the value and
 the four, with nothing sent -- then the two percents written as `meter`
@@ -313,9 +318,8 @@ names itself in the result's `meter_faults`, and the rows already there
 decide; `--explain` and `--dry-run` send nothing and read the rows alone. A
 `meter:` without a `meter_env:` reads, and caps the bill at that step naming
 the missing field, because a reinstall never rewrites this file in your
-home. The two Baseten tools pin
-DeepSeek V4 Pro, whose 0813 build is the cheapest of Baseten's frontier
-reviewers. `max_tokens` bounds generated reasoning and the final answer together;
+home. The Baseten registry entry pins `deepseek-ai/DeepSeek-V4-Pro-0813`.
+`max_tokens` bounds generated reasoning and the final answer together;
 exhausting it does not establish that the review subject was too large.
 URL entries can declare one optional control: `thinking: disabled|adaptive`
 or `reasoning_effort: none|low|high|max`. The client sends `thinking` as
@@ -342,9 +346,11 @@ its preflight (the cap check is below). A rate limit,
 a missing binary, a failed run or a timeout falls through to the next, and the
 run says which one reviewed and why the earlier ones did not. With none left,
 the review refuses by name rather than reading its own work.
-MiniMax and Kimi can replace each other in either configured order when an
-attempt fails to complete. The chain continues until the required count completes
-or eligible entries run out. Neither provider has a reserved slot. A completed
+Only entries on the reviewer order participate in automatic fallback.
+Enabled reviewer-capable entries outside that order require an explicit `--provider` selection.
+The shipped order contains Codex, then Claude; other providers remain explicit-only.
+Existing provider files and database orders remain unchanged until the operator migrates them.
+The chain continues until the required count completes or eligible entries run out. A completed
 review with findings counts; it does not trigger a replacement. Consent, author
 exclusions and spending limits apply to every fallback, and earlier findings remain.
 `vendor` is the

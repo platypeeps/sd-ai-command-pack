@@ -174,7 +174,8 @@ class URLDiagnostics(ReviewFixture):
             self.assertIn(key + ": missing required field", outcome.diagnostic["validation_error"])
 
     def test_fence_decoding_never_bypasses_byte_or_finish_limits(self) -> None:
-        content = '```json\n{"findings": []}\n```'
+        # Keep the request within the patched limit so this exercises response bounds.
+        content = '```json\n{"findings": []}\n' + ' ' * 4096 + '\n```'
         with mock.patch.object(sd_review, "MAX_OUTPUT_BYTES", len(content.encode()) - 1):
             outcome = self.run_response(self.envelope(content))
         self.assertEqual(outcome.status, sd_review.UNAVAILABLE)

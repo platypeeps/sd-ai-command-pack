@@ -25,6 +25,8 @@ import types
 import unittest
 import unittest.mock
 import urllib.error
+from contextlib import closing
+from dataclasses import replace
 from typing import Any
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -96,6 +98,18 @@ class TheShippedRegistry(unittest.TestCase):
         reviewer = self.registry.resolve("reviewer")
         self.assertNotEqual(author.name, reviewer.name)
         self.assertNotEqual(author.vendor, reviewer.vendor)
+
+    def test_only_codex_and_claude_enter_the_default_reviewer_order(self) -> None:
+        self.assertEqual(
+            [provider.name for provider in self.registry.order("reviewer")],
+            ["codex", "claude"],
+        )
+        for name in ("minimax", "baseten"):
+            with self.subTest(provider=name):
+                provider = self.registry.providers[name]
+                self.assertTrue(provider.enabled)
+                self.assertIn("reviewer", provider.roles)
+                self.assertNotIn("reviewer", provider.ranks)
 
     def test_every_entry_carries_a_vendor(self) -> None:
         """Criterion 6: an entry whose vendor matches the author's is skipped,
@@ -201,6 +215,50 @@ class TheTwoReadersAgree(unittest.TestCase):
         with self.assertRaises(sd_registry.RegistryError) as caught:
             sd_registry.read(SHIPPED, connection=object(), prefer_library=False)
         self.assertIn("sd_db is not installed", str(caught.exception))
+
+    def test_database_membership_keeps_explicit_reviewers_and_supports_rollback(self) -> None:
+        from sd_db import connect, provider_controls  # noqa: PLC0415
+        from sd_db.migrate import initialise  # noqa: PLC0415
+        from sd_db.workflow import StaleItem  # noqa: PLC0415
+
+        original = SHIPPED.read_text()
+        legacy = original.replace("reviewer: [codex, claude]",
+            "reviewer: [codex, claude, minimax, baseten]")
+        self.assertNotEqual(legacy, original)
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "providers.yaml"
+            path.write_text(legacy)
+            database = pathlib.Path(directory) / "sd.db"
+            initialise(database)
+            with closing(connect(database)) as connection:
+                baseline = provider_controls.snapshot(connection, path=path)
+                enabled = {entry["name"]: entry["enabled"] for entry in baseline["providers"]}
+                orders = {**baseline["orders"], "reviewer": ["codex", "claude"]}
+                changed = provider_controls.configure(connection, enabled=enabled, orders=orders,
+                    expected_revision=baseline["revision"], path=path, who="fixture")
+                adapted = sd_registry.read(path, connection=connection)
+                consent, _ = sd_registry.resolve_consent(adapted, None, "configured")
+                with unittest.mock.patch.object(sd_registry._OPENER, "open", side_effect=AssertionError("no provider calls")):
+                    self.assertEqual([entry.name for entry in sd_registry.select_reviewers(adapted, consent=consent)],
+                        ["codex", "claude"])
+                    for name in ("minimax", "baseten"):
+                        with self.subTest(provider=name):
+                            self.assertTrue(adapted.providers[name].enabled)
+                            self.assertNotIn("reviewer", adapted.providers[name].ranks)
+                            self.assertEqual(sd_registry.select_reviewers(adapted, name, consent=consent)[0].name, name)
+                self.assertEqual(changed["bills"], baseline["bills"])
+                self.assertEqual(path.read_text(), legacy)
+                before = tuple(connection.iterdump())
+                with self.assertRaises(StaleItem):
+                    provider_controls.configure(connection, enabled=enabled, orders=baseline["orders"],
+                        expected_revision=baseline["revision"], path=path, who="fixture")
+                self.assertEqual(tuple(connection.iterdump()), before)
+                fresh = provider_controls.snapshot(connection, path=path)
+                restored = provider_controls.configure(connection, enabled=enabled, orders=baseline["orders"],
+                    expected_revision=fresh["revision"], path=path, who="fixture")
+                self.assertEqual(restored["providers"], baseline["providers"])
+                self.assertEqual([entry.name for entry in sd_registry.read(path, connection=connection).order("reviewer")],
+                    ["codex", "claude", "minimax", "baseten"])
 
 
 class TheReasoningControls(unittest.TestCase):
@@ -900,18 +958,33 @@ class TheReviewerChain(unittest.TestCase):
         ]
 
     def test_with_everything_allowed_the_chain_is_the_registry_order(self) -> None:
-        self.assertEqual(self.names(), ["codex", "claude", "minimax", "kimi", "baseten"])
+        self.assertEqual(self.names(), ["codex", "claude"])
+
+    def test_unranked_reviewers_never_enter_automatic_fallback(self) -> None:
+        self.assertEqual(self.names(author_vendors=("openai", "anthropic")), [])
+        self.assertEqual(
+            [candidate.provider.name for candidate in sd_registry.reviewer_chain(
+                self.registry, consent=self.all,
+            )],
+            ["codex", "claude"],
+        )
 
     def test_an_entry_of_the_author_s_vendor_is_skipped(self) -> None:
         self.assertEqual(self.names(author_vendors=("openai",))[0], "claude")
 
     def test_a_bill_at_its_cap_is_passed_over(self) -> None:
+        self.registry.providers["baseten"] = replace(
+            self.registry.providers["baseten"], ranks={"reviewer": 2},
+        )
         self.assertNotIn("baseten", self.names(capped_bills={"baseten": AT_CAP}))
 
     def test_the_chain_reports_every_entry_it_passed_over_and_why(self) -> None:
         """The interesting sentence is the one about what did not run, and
         for a capped bill it carries the month's total the caller measured
         (sd:788 slice 3: `capped_bills` is bill name to exposure line)."""
+        self.registry.providers["baseten"] = replace(
+            self.registry.providers["baseten"], ranks={"reviewer": 2},
+        )
         chain = sd_registry.reviewer_chain(
             self.registry,
             consent=self.all,
@@ -921,7 +994,7 @@ class TheReviewerChain(unittest.TestCase):
         skipped = {c.provider.name: c.reason for c in chain if not c.eligible}
         self.assertIn("openai", skipped["codex"])
         self.assertEqual(skipped["baseten"], f"baseten is billed to baseten: {AT_CAP}")
-        self.assertEqual(len(chain), 5)
+        self.assertEqual(len(chain), 3)
 
     def test_consent_bounds_the_chain_absolutely(self) -> None:
         """Two allowed, the author's vendor is one of them: one candidate, and
@@ -978,15 +1051,27 @@ class ThePick(unittest.TestCase):
             sd_registry.pick(registry, "kimi", consent=self.all)
         self.assertIn("cannot review", str(caught.exception))
 
-    def test_an_entry_on_no_reviewer_list_is_refused_for_that(self) -> None:
-        registry = sd_registry.read_file(SHIPPED)
-        registry.providers["kimi"] = sd_registry.Provider(
-            name="kimi", vendor="moonshot", bill="moonshot", url="http://x/v1",
-            roles=("reviewer",), ranks={},
+    def test_an_enabled_unranked_reviewer_requires_an_explicit_pick(self) -> None:
+        for name in ("minimax", "kimi", "baseten"):
+            with self.subTest(provider=name):
+                provider = self.registry.providers[name]
+                self.assertNotIn("reviewer", provider.ranks)
+                self.assertEqual(
+                    sd_registry.pick(self.registry, name, consent=self.all), provider,
+                )
+
+    def test_an_explicit_unranked_pick_does_not_grant_transmission_consent(self) -> None:
+        with self.assertRaises(sd_registry.ConsentRefusal) as caught:
+            sd_registry.pick(self.registry, "minimax", consent={})
+        self.assertIn("minimax", str(caught.exception))
+
+    def test_an_explicit_unranked_pick_refuses_changed_recipients(self) -> None:
+        self.registry.providers["minimax"] = replace(
+            self.registry.providers["minimax"], url="https://other.example/v1",
         )
-        with self.assertRaises(sd_registry.RegistryError) as caught:
-            sd_registry.pick(registry, "kimi", consent=self.all)
-        self.assertIn("on no reviewer list", str(caught.exception))
+        with self.assertRaises(sd_registry.ConsentRefusal) as caught:
+            sd_registry.pick(self.registry, "minimax", consent=self.all)
+        self.assertIn("other.example", str(caught.exception))
 
     def test_the_direct_pick_asks_readers_the_same_question_the_chain_does(self) -> None:
         """`pick` says it "is refused for the same reasons a fallthrough
@@ -1388,7 +1473,11 @@ class StandingReviewConsentTests(unittest.TestCase):
         registry = sd_registry.read_file(SHIPPED)
         allowed, source = sd_registry.resolve_consent(registry, None, "configured")
         self.assertEqual(source, "machine-configured")
-        self.assertEqual(allowed, {p.name: sd_registry.recipient(p) for p in registry.order("reviewer")})
+        self.assertEqual(allowed, {
+            p.name: sd_registry.recipient(p)
+            for p in registry.providers.values()
+            if p.enabled and "reviewer" in p.roles
+        })
         self.assertEqual(sd_registry.resolve_consent(registry, "", "configured"), ({}, "repository"))
         local = str(next(iter(allowed.values())))
         self.assertEqual(sd_registry.resolve_consent(registry, local, "configured")[0], sd_registry.parse_consent(local))
@@ -1398,14 +1487,13 @@ class StandingReviewConsentTests(unittest.TestCase):
                 sd_registry.resolve_consent(registry, line, policy)
 
     def test_new_configured_providers_still_obey_vendor_bill_reader_and_transport_guards(self):
-        from dataclasses import replace
-
         registry = sd_registry.read_file(SHIPPED)
-        template = next(p for p in registry.order("reviewer") if p.url and p.enabled)
-        entry = replace(template, name="future-reviewer", vendor="future-vendor", ranks={"reviewer": 999})
+        template = registry.providers["baseten"]
+        entry = replace(template, name="future-reviewer", vendor="future-vendor", ranks={})
         registry.providers[entry.name] = entry
         consent, _ = sd_registry.resolve_consent(registry, None, "configured")
         self.assertIn(entry.name, consent)
+        self.assertNotIn(entry, registry.order("reviewer"))
         self.assertEqual(sd_registry.pick(registry, entry.name, consent=consent), entry)
         for overrides in ({"author_vendors": (entry.vendor,)}, {"capped_bills": {entry.bill: AT_CAP}}):
             with self.subTest(overrides=overrides), self.assertRaises(sd_registry.ConsentRefusal):
@@ -1419,6 +1507,11 @@ class StandingReviewConsentTests(unittest.TestCase):
             consent, _ = sd_registry.resolve_consent(registry, None, "configured")
             with self.subTest(changes=changes), self.assertRaises(sd_registry.ConsentRefusal):
                 sd_registry.pick(registry, entry.name, consent=consent, readers=("codex-json",))
+
+    def test_configured_consent_does_not_authorize_non_reviewers(self):
+        registry = sd_registry.read_file(written(WITH_DISABLED))
+        consent, _ = sd_registry.resolve_consent(registry, None, "configured")
+        self.assertEqual(set(consent), {"two"})
 
 
 # sd:788 slice 4: the meter, pinned to one destination and read fail-closed

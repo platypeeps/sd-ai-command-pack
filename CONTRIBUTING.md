@@ -96,8 +96,8 @@ Treat local results as evidence from the tested machine only.
 
 - `v0.72.0` is the terminal release. Do not add release tags or `CHANGELOG.md` headings.
 - `skills/sd-*/SKILL.md` holds the payload. Edit that source directly.
-- `bin/sd_install.py --user` renders the skills during installation. The repository has no generated platform copies.
-- `bin/sd_install.py --status` reports the serving checkout's commit. Use `--pull` to update that checkout.
+- `python3 bin/sd_install.py --user` renders the skills during installation. The repository has no generated platform copies.
+- `python3 bin/sd_install.py --status` reports the serving checkout's commit. Use `--pull` to update that checkout.
 
 ## Repository Conventions
 

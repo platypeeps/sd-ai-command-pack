@@ -133,7 +133,7 @@ class EnvironmentTests(ReviewFixture):
         # HOME is where the run reads the provider registry from, so it is in
         # every environment here; it is not a credential and is not scrubbed.
         parent = self.environment(
-            PATH="/usr/bin",
+            PATH=str(self.tool_bin) + ":/usr/bin",
             CODEX_API_KEY="sk-metered",
             CODEX_ACCESS_TOKEN="tok-metered",
             OPENAI_API_KEY="sk-unrelated",
@@ -165,7 +165,7 @@ class EnvironmentTests(ReviewFixture):
             root,
             namespace(),
             runner,
-            self.environment(PATH="/usr/bin", OPENAI_API_KEY="sk-unrelated"),
+            self.environment(OPENAI_API_KEY="sk-unrelated"),
             self.chatgpt_home(),
         )
         self.assertEqual(result["outcomes"][0]["status"], sd_review.CLEAN)
@@ -177,7 +177,7 @@ class RefusalReachesTheRunTests(ReviewFixture):
         root = self.make_repo()
         (root / "src.py").write_text("x = 1\n", encoding="utf-8")
         runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
-        result = sd_review.review(root, namespace(), runner, self.environment(PATH="/bin"), home)
+        result = sd_review.review(root, namespace(), runner, self.environment(), home)
         return result, runner
 
     def test_a_refused_preflight_never_starts_codex(self) -> None:

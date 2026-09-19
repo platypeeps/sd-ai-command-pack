@@ -13,7 +13,18 @@ The installer enforces the skill set and enumerates commands from `bin/` at runt
 The executable entrypoints live under `bin/`.
 Each installed command links back to the serving checkout.
 The installation receipt records owned command links and digest-vouched rendered files.
-Run `bin/sd_install.py --status` to inspect the current installation.
+Run `python3 bin/sd_install.py --status` to inspect the current installation.
+Run `python3 bin/sd_install.py --verify --json` for strict, read-only verification.
+The strict check rejects receipt, source, rendered-file, command-resolution, and help-probe failures.
+
+Canonical payload and Claude output retain `disable-model-invocation`.
+Codex skills translate only this field into `agents/openai.yaml` policy; their Markdown bodies remain byte-identical.
+The generated companion records the inverse boolean as `policy.allow_implicit_invocation`.
+Absent markers preserve the source invocation policy.
+Source interface and dependency metadata remain unchanged.
+The adapter accepts plain block-mapping keys and lowercase invocation booleans.
+It refuses quoted keys, aliases, flow policy mappings, duplicates, and conflicting invocation controls before rendering.
+This narrow exception does not adapt Claude agents or OpenCode commands.
 
 The installer does not edit shell configuration.
 Bare command names resolve only when the selected installation directory is on `PATH`.

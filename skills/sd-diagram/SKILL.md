@@ -1,13 +1,14 @@
 ---
 name: sd-diagram
-description: Use when the user wants a precise, evidence-traceable diagram specification or conservative Mermaid diagram for a system, process, concept, hierarchy, comparison, state model, or event sequence.
+description: Use when the user wants an evidence-backed technical diagram. Prefer Archify when available; support explicit Mermaid requests and tool-neutral briefs.
 ---
 
 # sd-diagram
 
 Turn bounded source truth into a reviewable structural model, then choose the
 smallest visual form that answers the user's question. The evidence ledger is
-authoritative; Mermaid is one possible rendering.
+authoritative. Prefer Archify when its installed renderer fits the model.
+Honor explicit format requests; explain any unavailable or unsuitable renderer.
 
 Source quality, dating, and attribution rules live in
 `references/source-standards.md`.
@@ -33,7 +34,7 @@ extracting the model.
 - `audience=` — intended reader and assumed knowledge;
 - `form=auto|flow|sequence|architecture|state|tree|matrix|timeline|schematic`
   — default `auto`;
-- `format=mermaid|brief` — default `mermaid` when the model can be represented faithfully;
+- `format=auto|archify|mermaid|brief` — default `auto`, preferring Archify when available and suitable;
 - `depth=brief|standard` — default `standard`.
 
 ## Workflow
@@ -66,7 +67,10 @@ extracting the model.
 5. Draft from the ledger. Use parallel labels and make every node, edge, state,
    event, group, and annotation traceable to a ledger ID. Mark inference in the
    visual and legend, not only in surrounding prose.
-6. For Mermaid, use conservative syntax, stable safe IDs, escaped labels, and
+6. For Archify, read its installed skill and use its matching renderer and verification process.
+   Keep the source ledger authoritative and distinguish deterministic validation from visual review.
+   Do not install missing tools or publish artifacts without authorization.
+   For Mermaid, use conservative syntax, stable safe IDs, escaped labels, and
    no unsupported styling dependency. If labels, syntax, spatial meaning,
    accessibility, or renderer support would distort the model, return a
    tool-neutral visual brief instead of pretending the diagram is valid.
@@ -82,9 +86,8 @@ extracting the model.
 
 ## Safety rules
 
-- This skill is read-only. Do not inspect live systems outside the supplied
-  source boundary, mutate documentation, publish, deploy, or claim a diagram
-  represents implemented reality when it describes inference or intended state.
+- Read source material without changing it. Create local diagram artifacts only within the requested output scope.
+- Do not inspect unrelated live systems, publish, deploy, or label intended behavior as implemented behavior.
 - Never invent components, owners, relationships, causality, order, states,
   dates, labels, confidence, or source locators to complete or beautify a model.
 - Do not flatten cycles, concurrency, conditional or asynchronous edges,
@@ -101,9 +104,11 @@ extracting the model.
 - **Source coverage** — retrieved, inaccessible, stale, and conflicting sources;
 - **Element and relationship ledger** — stable IDs, types, labels, boundaries,
   direction, conditions, confidence, explicit/inferred/conflicting status, and locators;
-- **Diagram or visual brief** — conservative Mermaid or tool-neutral production specification;
+- **Diagram or visual brief** — verified Archify artifact, requested Mermaid, or tool-neutral production specification;
 - **Legend** — notation, boundaries, uncertainty, inference, conflicts, and cross-view references;
 - **Assumptions and conflicts** — unresolved interpretations and alternative models;
 - **Accessibility description** — linear equivalent that does not depend on visual styling;
 - **Review questions** — highest-value confirmations needed before publication or implementation;
-- **Limits** — no automatic discovery, source mutation, rendering guarantee, or publication was performed.
+- **Limits** — source gaps, renderer availability, actual validation, visual-review status, and publication status.
+
+Use STE-Concise. Report applicable results and limits without reproducing every heading above.

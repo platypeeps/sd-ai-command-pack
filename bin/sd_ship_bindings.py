@@ -16,10 +16,12 @@ REVIEW_TOOL_FILES = (
     "sd-review", "sd_lib.py", "sd_registry.py", "sd_route.py", "sd_codex.py", "sd-check", "sd-docs-lint",
     "sd-ship", "sd_ship_dispositions.py", "sd_ship_remote.py", "sd_ship_review.py",
     "sd_ship_history.py", "sd_ship_identity.py", "sd_ship_item.py", "sd_ship_no_item.py",
-    "sd_ship_evidence.py", "sd_ship_bindings.py",
+    "sd_ship_evidence.py", "sd_ship_bindings.py", "sd_ship_workflow.py",
+    "sd_check_receipts.py", "sd_review_material.py", "sd_review_readiness.py",
 )
 ADJUDICATOR_POLICY_FILES = (
-    "skills/sd-ship/SKILL.md", ".claude/rules/sd-planning-adversarial-review.md",
+    "skills/sd-check/SKILL.md", "skills/sd-review/SKILL.md", "skills/sd-ship/SKILL.md",
+    "skills/sd-check/references/check-receipts.md", ".claude/rules/sd-planning-adversarial-review.md",
 )
 
 
@@ -49,4 +51,9 @@ def adjudicator_binding(library_file: str) -> str:
     files["sd_db.ship"] = file_hash(pathlib.Path(library_file))
     for name in ADJUDICATOR_POLICY_FILES:
         files[name] = file_hash(BIN.parent / name)
+    # Conditional skill references still own acceptance rules. Enumerate their
+    # actual inventory so additions and removals also invalidate old clearance.
+    for skill in ("sd-check", "sd-review", "sd-ship"):
+        for path in sorted((BIN.parent / "skills" / skill / "references").rglob("*.md")):
+            files[str(path.relative_to(BIN.parent))] = file_hash(path)
     return digest(files)
