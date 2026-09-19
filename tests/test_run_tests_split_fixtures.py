@@ -64,6 +64,14 @@ class Plain(unittest.TestCase):
         self.assertTrue(self.ready)
 """
 
+FOUR_TESTS = PLAIN + """
+    def test_three(self):
+        self.assertTrue(self.ready)
+
+    def test_four(self):
+        self.assertTrue(self.ready)
+"""
+
 CLASS_FIXTURE = """import os
 import pathlib
 import unittest
@@ -122,24 +130,78 @@ class SplitModuleFixtures(unittest.TestCase):
         (self.root / "tests").mkdir()
         (self.root / ".coveragerc").write_text(COVERAGERC)
         self.counter = self.root / "setupclass-runs"
+        self.programs = self.root / "programs"
+        self.programs.mkdir()
+        getconf = self.programs / "getconf"
+        getconf.write_text('#!/bin/sh\nprintf "%s\\n" "${FIXTURE_CORES:-4}"\n')
+        getconf.chmod(0o755)
 
-    def run_harness(self, **modules: str) -> subprocess.CompletedProcess:
+    def run_harness(self, *, workers="2", environment=None, **modules: str) -> subprocess.CompletedProcess:
         for name in SPLIT_NAMES:
             (self.root / "tests" / f"{name}.py").write_text(modules.get(name, PLAIN))
-        environment = fixture_env(
+        env = fixture_env(
             PYTHON_BIN=sys.executable,
-            TEST_WORKERS="2",
             FIXTURE_COUNTER=str(self.counter),
             PYTHONDONTWRITEBYTECODE="1",
+            CI="",
+            GITHUB_ACTIONS="",
+            PATH=str(self.programs) + os.pathsep + os.environ["PATH"],
         )
+        env.pop("TEST_WORKERS", None)
+        if workers is not None:
+            env["TEST_WORKERS"] = workers
+        env.update(environment or {})
         return subprocess.run(["bash", str(self.root / ".github/scripts/run-tests.sh")], cwd=self.root,
-                              env=environment, text=True, capture_output=True, timeout=300)
+                              env=env, text=True, capture_output=True, timeout=300)
+
+    def test_ci_uses_all_cores_and_local_reserves_one(self) -> None:
+        for environment, single_test_shards in (({}, 6), ({"CI": "1"}, 12), ({"GITHUB_ACTIONS": "true"}, 12)):
+            with self.subTest(environment=environment):
+                result = self.run_harness(workers=None, environment=environment,
+                                          **dict.fromkeys(SPLIT_NAMES, FOUR_TESTS))
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(len(re.findall(r"^Ran 1 test", result.stdout, re.MULTILINE)),
+                                 single_test_shards, result.stdout)
+
+    def test_explicit_worker_limit_is_preserved_in_ci(self) -> None:
+        result = self.run_harness(workers="2", environment={"CI": "true"},
+                                  **dict.fromkeys(SPLIT_NAMES, FOUR_TESTS))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(re.findall(r"^Ran 2 tests", result.stdout, re.MULTILINE)), 6, result.stdout)
+
+    def test_single_or_zero_reported_cores_still_get_one_worker(self) -> None:
+        for cores in ("0", "1"):
+            with self.subTest(cores=cores):
+                result = self.run_harness(workers=None, environment={"CI": "1", "FIXTURE_CORES": cores})
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(len(re.findall(r"^Ran 2 tests", result.stdout, re.MULTILINE)), 3, result.stdout)
+
+    def test_invalid_explicit_worker_limit_refuses_before_tests(self) -> None:
+        for workers in ("0", "many"):
+            with self.subTest(workers=workers):
+                result = self.run_harness(workers=workers)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("TEST_WORKERS must be a positive integer", result.stderr)
+                self.assertFalse((self.root / "unittest-output.log").exists())
 
     def test_split_modules_without_fixtures_are_split(self) -> None:
         result = self.run_harness()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         # Two tests in each of three modules, two shards each.
         self.assertEqual(len(re.findall(r"^Ran 1 test", result.stdout, re.MULTILINE)), 6, result.stdout)
+        self.assertIn("test runner: workers=2 shards=6", result.stdout)
+        summaries = re.findall(r"^shard (\S+): (\d+)s exit=(\d+)$", result.stdout, re.MULTILINE)
+        self.assertEqual({name for name, _, _ in summaries},
+                         {f"tests.{name}.part{part}of2" for name in SPLIT_NAMES for part in (1, 2)})
+        self.assertEqual([status for _, _, status in summaries], ["0"] * 6)
+
+    def test_shard_timing_does_not_hide_a_failed_test(self) -> None:
+        failing = PLAIN.replace("self.assertTrue(self.ready)", "self.assertFalse(self.ready)")
+        result = self.run_harness(test_sd_ship=failing)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("FAILED (failures=1)", result.stdout)
+        self.assertRegex(result.stdout, r"shard tests\.test_sd_ship\.part1of2: \d+s exit=1")
+        self.assertEqual((self.root / "unittest-output.log").read_text(), result.stdout)
 
     def test_an_inherited_set_up_class_is_refused_before_anything_runs(self) -> None:
         result = self.run_harness(test_sd_ship=CLASS_FIXTURE)
