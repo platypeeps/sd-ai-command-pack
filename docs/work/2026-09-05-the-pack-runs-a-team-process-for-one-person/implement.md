@@ -2205,3 +2205,40 @@ and what the acceptance file means; that is the owner's change, and the
 gate holds the two symbols to their two files until it lands. The `authors`
 policy key is 31(b2). The two kept 31(a) deferrals, `parked` and `archived`,
 are untouched.
+
+## 2026-09-19 — 31(b1)'s two held symbols: the cut is rescinded
+
+The paragraph above ends "the gate holds the two symbols to their two files
+until it lands." It does not land. The owner rescinded the cut on
+2026-09-19, so `_protection_gaps` and `load_acknowledgements` stay, and
+criterion 31 stops naming them. The paragraph above stands as what was
+decided on 2026-09-16; this section is what replaced it.
+
+The reason is in `.github/sd-status.json`. Its one accepted gap,
+`unprotected`, is not a boolean. It carries the owner's dated reason in
+`because` ("do not protect main. i am the only operator on these repos"),
+a `since` of 2026-09-12, and an `until` naming the condition that would end
+it: a second account with push or merge rights on this repository. The
+protection section renders that. Requirement 13's replacement, one
+`protected: yes/no` line, renders `no` and drops the rest — on the one
+repository whose answer is deliberately `no`, and where the reason, the
+named human backstop and the expiry condition are the whole content.
+Requirement 13 is a thinning rule, and thinning this costs more than it
+saves.
+
+So the two symbols move from a hold to a keep. Nothing about the
+enforcement changes: `HELD_SYMBOLS`
+(`source:tests/test_cut_symbols.py::HELD_SYMBOLS`) still binds each symbol
+to `bin/sd-status` and `tests/test_sd_status.py`, a hit outside those files
+still fails, and `HELD_SYMBOLS_BOUND`
+(`source:tests/test_cut_symbols.py::HELD_SYMBOLS_BOUND`) still lets the set
+shrink and never grow. A keep that may only shrink is the check that
+catches the symbol spreading to a third file, which is what the bound was
+always for. What changed is the comment above it, which used to tell a
+reader to wait for a lane that is not coming.
+
+Criterion 31 closes on this decision the way criteria 7 and 28 closed on
+theirs: by a recorded owner call, not by an edit to code. The criterion's
+remaining names are `--stash-ref`, `--push`, `--park` and the `authors`
+policy key, all cut. 31(a)'s `parked` and `archived` deferral is a separate
+question and is untouched here.

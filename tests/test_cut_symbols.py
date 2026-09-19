@@ -261,9 +261,9 @@ class ParkedAndArchivedReaders(unittest.TestCase):
 #: on purpose. `Standing rule` is matched in either case: the rule the phrase
 #: cites is defined nowhere, and `standing rule 2` in a comment cites it just
 #: as `Standing rule 2` in a docstring does. `--park` is bounded so that it
-#: does not match `--parked`, `sd-status`'s flag over the `parked` field
-#: whose cut 31(a) deferred; the criterion's `--park` is the Lane B flag of
-#: `sd-handoff`, which was never built.
+#: does not match `--parked`, `sd-status`'s flag over the `parked` field;
+#: the criterion's `--park` is the Lane B flag of `sd-handoff`, which was
+#: never built.
 PROSE_SYMBOLS = (
     ("record_load", r"record_load"),
     ("carrier_branches", r"carrier_branches"),
@@ -286,25 +286,35 @@ PROSE_SYMBOLS = (
      r'"authors"[^:]|"authors":[[:space:]]*[^"[:space:]]'),
 )
 
-#: The 31(b1) symbols this lane leaves in place, each with the files that
-#: may carry it. Both are live functions of `bin/sd-status`'s protection
-#: section: `load_acknowledgements` reads the accepted gaps of
+#: The 31(b1) symbols that are **kept**, each with the files that may carry
+#: it. Both are live functions of `bin/sd-status`'s protection section:
+#: `load_acknowledgements` reads the accepted gaps of
 #: `.github/sd-status.json`, a tracked record that today holds the
 #: `unprotected` acceptance of 2026-09-12, and `_protection_gaps` is what
-#: those acceptances are applied to. Requirement 13 folds the section into
-#: one `protected: yes/no` line, which is a rewrite of the section, the two
-#: schema files and the tracked record, not a symbol sweep, and
-#: `.github/sd-status.json` is a sensitive path for the review policy; it is
-#: the owner's change to make, the way the `authors` key is (31(b2)). Until
-#: then the symbol may not spread: a file outside its set fails below, and a
-#: symbol added here that `HELD_SYMBOLS_BOUND` does not name fails too.
+#: those acceptances are applied to.
+#:
+#: This was a hold, waiting on the owner to rewrite the section into one
+#: `protected: yes/no` line. On 2026-09-19 the owner rescinded that cut and
+#: criterion 31 stopped listing the two symbols. The reason is in the item's
+#: Log: the accepted gap is not a boolean. It carries a dated reason, what
+#: protection was costing, what is genuinely lost, the human standing in for
+#: the lost backstop, and an `until` condition. One word says none of it, and
+#: this is the one repository whose answer is deliberately "no".
+#:
+#: Nothing about the enforcement changes -- a keep is bounded exactly as a
+#: hold was, which is the point: the symbol may not spread. A file outside
+#: its set fails below, and a symbol added here that `HELD_SYMBOLS_BOUND`
+#: does not name fails too. What changed is why the rows are here, so a later
+#: reader does not go looking for the lane that was going to remove them.
 HELD_SYMBOLS = {
     "_protection_gaps": frozenset({"bin/sd-status", "tests/test_sd_status.py"}),
     "load_acknowledgements": frozenset({"bin/sd-status", "tests/test_sd_status.py"}),
 }
 
 #: The frozen ceiling on `HELD_SYMBOLS`: it may lose an entry, never gain
-#: one, and no entry may gain a file.
+#: one, and no entry may gain a file. The ceiling outlives the rescind: a
+#: keep that may only shrink is still the check that catches the symbol
+#: spreading to a third file.
 HELD_SYMBOLS_BOUND = {
     "_protection_gaps": frozenset({"bin/sd-status", "tests/test_sd_status.py"}),
     "load_acknowledgements": frozenset({"bin/sd-status", "tests/test_sd_status.py"}),

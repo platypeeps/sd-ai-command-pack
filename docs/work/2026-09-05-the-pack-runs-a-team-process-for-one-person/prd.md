@@ -1676,8 +1676,8 @@ confirmed by the next `sd-ship` run alone.
     words, since writing pieces park and revive, a review disposition is
     `parked`, and criterion 21's own test says `archived`, so a bare grep
     cannot tell them apart; `record_load`,
-    `carrier_branches`, `_protection_gaps`, `load_acknowledgements`,
-    `--stash-ref`, `--push`, `--park`, the `authors` policy key
+    `carrier_branches` (`_protection_gaps` and `load_acknowledgements` left
+    this list on 2026-09-19, rescinded; see the Log), `--stash-ref`, `--push`, `--park`, the `authors` policy key
     (`bin/sd-review:276`, `:283`, `:1098`, `bin/sd_setup_github.py:230,267`, the
     schema and `.github/sd-review.json`) and not the word, since criterion 6
     introduces `authors` as a row field and a bare grep cannot tell the two
@@ -5499,3 +5499,19 @@ from a number the operator types.
   Followups sd:789 (criterion 11's demotion note) and sd:790 (criterion 31's
   cross-repository regressions) are `done`, by #957 `c43747e4` and system
   #396 `e2a38474`; sd:788 (criterion 6) is still `planning`.
+- 2026-09-19: Requirement 13's cut of `_protection_gaps` and
+  `load_acknowledgements` is **rescinded**, and criterion 31 no longer lists
+  them. The requirement folds `bin/sd-status`'s protection section into one
+  `protected: yes/no` line. That section is the only thing that keeps a live
+  risk visible: `.github/sd-status.json` carries one accepted gap,
+  `unprotected`, and it is not a boolean. It records a dated reason, what
+  protection was costing, what is genuinely lost, the named human standing in
+  for the lost backstop, and an `until` condition -- a second account with
+  push or merge rights. `protected: no` says none of that, so the cut would
+  trade a documented, expiring risk acceptance for one word, on the one
+  repository whose answer is deliberately "no". Requirement 13 exists to cut
+  machinery nothing reads; this is machinery whose whole job is to be read.
+  The two symbols stay, bounded to `bin/sd-status` and
+  `tests/test_sd_status.py` by `HELD_SYMBOLS`, which is now a keep rather
+  than a hold. Criterion 31 closes on this decision, as criterion 7's scoring
+  clause and criterion 28's two clauses did.
