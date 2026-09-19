@@ -77,15 +77,22 @@ Two additions to the checklist, both open, both waiting on that reversal:
 - [ ] 7. The trigger. New work, not configuration: nothing fires on
       `pull_request: closed`. The two shapes are in `prd.md`; the recommended
       one is a step in the merge lane's own checkout, after the prescribed
-      `gh pr merge --squash --match-head-commit`, running
-      `sd-review --provider codex --scope branch --base <parent sha>` with the
-      owner's own key and writing nothing to GitHub. The other shape, a workflow
-      on `pull_request: closed` gated on a merged check, needs `OPENAI_API_KEY`
-      in CI and expands a lane that today holds `contents: read` and asks for
+      `gh pr merge --squash --match-head-commit`, with the owner's own key and
+      writing nothing to GitHub. Two preconditions that shape has to meet, both
+      read off the code and neither satisfied by the bare command:
+      it fetches the squash sha and checks it out detached first, because the
+      subject resolves against the checkout's `HEAD` and the merge lane's
+      checkout is still on the pull request branch; and it runs under the runner
+      if the cost field is to be a copied number, because a direct `sd-review`
+      writes neither the `assignment` row nor the `cost` row with
+      `source = 'run'`. A direct dispatch is allowed, and then the pass takes
+      the estimate form and says why. The other shape, a workflow on
+      `pull_request: closed` gated on a merged check, needs `OPENAI_API_KEY` in
+      CI and expands a lane that today holds `contents: read` and asks for
       nothing. Neither is built by this item. Verifiable by a lane once built:
-      the dispatch resolves `<parent>..<squash>` as its subject, and the run
-      writes an `assignment` row with `role = 'reviewer'` and a `cost` row with
-      `source = 'run'` that the query in `prd.md` then selects.
+      the dispatch resolves `<parent>..<squash>` as its subject, and a
+      runner-backed dispatch writes the `assignment` and `cost` rows the query
+      in `prd.md` then selects.
 - [ ] 8. OWNER-ONLY: the report states the two costs the post-merge position
       carries, that the "would this have blocked the merge" signal is gone and
       that the second vendor saw code Copilot had already reviewed and the owner

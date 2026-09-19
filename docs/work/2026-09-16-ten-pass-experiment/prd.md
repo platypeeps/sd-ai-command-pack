@@ -262,6 +262,13 @@ and every merge on this repository is a squash with a single parent (`e5f17b04`'
 parent is `99ca6fde`), so the squash commit's first parent is that base and
 `<parent>..<squash>` is exactly the change the pull request landed.
 
+One precondition the dispatch has to meet, and it is not free: that resolution
+reads the *checkout's* `HEAD`, and refuses a `--base` that is not already an
+ancestor of it. After a remote squash the merge lane's checkout still sits on
+the pull request branch, which does not contain the squash commit, so the same
+command run there either refuses or resolves a different subject. The dispatch
+fetches the squash sha and checks it out detached before it reviews anything.
+
 Two shapes for the dispatch, neither built here:
 
 1. A workflow on `pull_request: closed` gated on a merged check, running
@@ -277,10 +284,15 @@ workflow's contract intact. Either way it is new work, and this item's
 `implement.md` records that the owner cancelled external provider reviews, so no
 dispatch is built or run before that is reversed in writing.
 
-One side effect worth having: a dispatch through `sd-review` runs under the
-runner, which writes the `run` row the cost query needs. The `cost` table held
-0 `run` rows on 2026-09-16 and on 2026-09-17, so the trigger is also the most
-likely way the cost field becomes a copied number rather than an estimate.
+One side effect is available, but it is not automatic and an earlier draft of
+this section had it backwards. `sd-review` does not run under the runner; the
+runner runs it. Invoked directly, `sd-review` writes no `assignment` row and no
+`cost` row with `source = 'run'`, and the query above selects on exactly that
+join, so a direct dispatch leaves the pass on the estimate form by
+construction. The `cost` table held 0 such rows on 2026-09-16 and on
+2026-09-17. Whoever builds the trigger therefore chooses: route it through the
+runner and the cost field is copied from the store, or shell out to `sd-review`
+and have the note carry an estimate and the reason the runner was not used.
 
 ### The template, field by field, after the merge
 
