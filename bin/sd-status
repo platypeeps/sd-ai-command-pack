@@ -963,7 +963,15 @@ def handoff_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, An
     exactly once, and a status report that ate it would make the restart it
     exists for come up empty. So this opens the file, reads it, and closes it.
     """
-    resolved, _ = handoff.resolve_root(None, environ)
+    # `root`, not `None`. `resolve_root` falls back to `environ["PWD"]`, so
+    # passing nothing made this section answer about whatever directory the
+    # environment named rather than about the repository the rest of the
+    # report is describing -- the two differ whenever `PWD` is stale or the
+    # tool is invoked with a cwd its caller did not export. `root` is
+    # already resolved from cwd, so this hands over what was resolved
+    # instead of resolving a second time from a weaker source. No argument
+    # names the repository, and none is added here: R10-D6 is untouched.
+    resolved, _ = handoff.resolve_root(str(root), environ)
     path = handoff.packet_path(resolved, environ)
     packet: dict[str, Any] = {
         "directory": resolved,

@@ -519,6 +519,28 @@ class Rule5PullRequestLinkTests(LintFixture):
     def test_red_a_bare_none_is_a_path_that_does_not_resolve(self) -> None:
         self.assert_fails("is not a path under", pr_body="Work: none\n")
 
+    def test_red_a_bare_item_name_is_an_unresolved_path(self) -> None:
+        """31(c): `Work: nonexistent-item` fails as a path, not as a reason.
+
+        The two messages send the author to different places. "is not a path
+        under" says the value names nothing; the missing-reason refusal says
+        the value is fine but under-explained. An author given the second for
+        a typo goes looking for a sentence to write instead of for an item
+        that exists.
+
+        The bug was a `startswith("none")` test, so every value beginning with
+        those four letters took the missing-reason branch. That is why the
+        spellings here start with them: `nonexistent-item` is the criterion's
+        own example and `nonesuch` is the shortest one, and a fix that
+        special-cases the first while leaving the prefix test in place fails
+        on the second. The plain `notaname` is the control -- it shares no
+        prefix with the bug and must give the same message, or the branch is
+        still deciding by spelling.
+        """
+        for value in ("nonexistent-item", "nonesuch", "notaname"):
+            with self.subTest(value=value):
+                self.assert_fails("is not a path under", pr_body=f"Work: {value}\n")
+
     def test_red_item_does_not_exist(self) -> None:
         self.assert_fails(
             "does not resolve to a work item", pr_body="Work: docs/work/2026-01-01-ghost\n"

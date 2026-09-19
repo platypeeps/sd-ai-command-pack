@@ -1090,6 +1090,41 @@ class HandoffTests(StatusFixture):
         completed = self.run_tool(SD_STATUS)
         self.assertIn("no packet written for this directory", completed.stdout)
 
+    def test_the_packet_is_the_reported_repository_s_and_not_pwd_s(self) -> None:
+        """31(c): the section answers about the repo the report is about.
+
+        `handoff.resolve_root` falls back to `environ["PWD"]`, and this
+        section used to pass it nothing, so the packet it read was whatever
+        directory the environment named. That is the same directory almost
+        always, which is why the bug survived: it separates only when `PWD`
+        is stale or a caller runs the tool with a cwd it did not export, and
+        then the report describes one repository while its handoff line
+        describes another.
+
+        The fixture makes them differ on purpose. `cwd` is the repository,
+        `PWD` is a second one beside it, and the packet must follow the
+        first. Nothing here passes a repository to the tool -- there is no
+        argument that could, and R10-D6 says there will not be. The fix is
+        that the root already resolved from cwd is the one handed on.
+        """
+        other = self.base / "elsewhere"
+        other.mkdir()
+        self.init_repo(other)
+        path = self.write_packet()
+
+        environment = self.env()
+        environment["PWD"] = str(other)
+        completed = subprocess.run(
+            [sys.executable, str(SD_STATUS), "--json"],
+            cwd=str(self.repo), env=environment, capture_output=True, text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        packet = json.loads(completed.stdout)["handoff"]["packet"]
+
+        self.assertEqual(packet["directory"], str(self.repo))
+        self.assertEqual(packet["path"], str(path))
+        self.assertTrue(packet["pending"], completed.stdout)
+
 
 class ResidueTests(StatusFixture):
     def test_each_finding_carries_the_command_that_removes_it(self) -> None:

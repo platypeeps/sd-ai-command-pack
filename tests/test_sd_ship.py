@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -239,6 +240,74 @@ roles:
     def cli(self, command, *extra):
         return subprocess.run([sys.executable, str(ROOT / "bin/sd-ship"), command, "--item", str(self.item), "--json", *extra],
                               cwd=self.root, env=self.environment, text=True, capture_output=True, timeout=30)
+
+
+    # -- criterion 21: a ship leaves `docs/work/archive/` untouched ---------
+    #
+    # The criterion's other clauses are greps: no deletion verb outside a
+    # frozen set, no sweep or park code path. Those say the pack has no way
+    # to touch the archive. These run the pack and look, which is the
+    # different question -- a grep over the source cannot see a path reached
+    # through a helper, nor one reached by a tool the pack shells out to.
+    #
+    # `sd-plan` is the criterion's other named command and has no
+    # executable; it is `skills/sd-plan/SKILL.md`. Its own words are the
+    # assertion for that half, checked below.
+
+    def archive_digest(self) -> dict[str, str]:
+        """Every file under the archive, by path, as a content hash.
+
+        Hashes and not mtimes: a rewrite that restores the same bytes is not
+        a touch worth failing, and a mtime comparison would call it one on
+        every checkout.
+        """
+        root = self.root / "docs" / "work" / "archive"
+        return {
+            str(path.relative_to(self.root)):
+                hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in sorted(root.rglob("*")) if path.is_file()
+        }
+
+    def seed_archive(self) -> dict[str, str]:
+        buried = self.root / "docs" / "work" / "archive" / "2026-01" / "2026-01-02-shipped"
+        buried.mkdir(parents=True)
+        (buried / "prd.md").write_text(
+            "---\ntitle: a shipped thing\ncreated: 2026-01-02\n"
+            "status: done\n---\n\n# shipped\n", encoding="utf-8")
+        (buried / "implement.md").write_text("done\n", encoding="utf-8")
+        _git(self.root, "add", "-A")
+        # The trailer is not decoration: `sd-review` refuses to plan a review
+        # of a commit that does not say who wrote it, and the refusal surfaces
+        # here as an invalid timing plan rather than as anything about the
+        # archive. Seeding without it tests the trailer rule, not criterion 21.
+        _git(self.root, "commit", "-q", "-m",
+             "archive a done item\n\nAuthored-with: human")
+        return self.archive_digest()
+
+    def test_a_prepare_leaves_every_archived_file_byte_identical(self) -> None:
+        before = self.seed_archive()
+        self.assertEqual(len(before), 2, "the fixture archive did not get written")
+        self.prepare()
+        self.assertEqual(self.archive_digest(), before)
+
+    def test_a_prepare_stages_and_commits_nothing_under_the_archive(self) -> None:
+        """The digest above would miss a file added and then removed again.
+
+        `git status` over the one path is the check that sees the whole
+        working tree rather than the files that happen to exist at the end.
+        """
+        self.seed_archive()
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.prepare()
+        self.assertEqual(
+            _git(self.root, "status", "--porcelain", "--", "docs/work/archive").strip(), "")
+        self.assertEqual(
+            _git(self.root, "diff", "--name-only", head, "HEAD",
+                 "--", "docs/work/archive").strip(), "")
+
+    def test_the_plan_skill_still_disclaims_every_archive_step(self) -> None:
+        page = (ROOT / "skills" / "sd-plan" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("There is no automatic archive, parking or sweep step.", page)
 
     def test_custom_database_controls_ship_receipts_and_the_actual_reviewer(self):
         from sd_db import set_provider_state

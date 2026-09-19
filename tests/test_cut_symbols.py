@@ -440,5 +440,79 @@ class TheRepealedRowStillTeaches(unittest.TestCase):
         self.assertIn(rule_id, "\n".join(body), f"the section {heading!r} does not cite {rule_id}")
 
 
+#: 31(c)'s one-definition greps: `(what, pattern, the one file that may
+#: define it)`.
+#:
+#: The criterion names four -- the provider list, the git wrapper, the
+#: status vocabulary and the ACTIVE set. One is here, and the other three
+#: are absent on purpose rather than forgotten. Each of them found more
+#: than one definition when it was measured on 2026-09-19, so each is a
+#: change to the pack and not a grep over it, and each change is a choice
+#: somebody has to make: which provider list is the list, what counts as a
+#: git wrapper among nine callers, and whether `sd-review`'s two active
+#: statuses and `sd-status`'s three are one set or two. The measurements
+#: and the choices are in the item's `implement.md`. A row joins this tuple
+#: when its choice is made, and the test below then holds it to one.
+#:
+#: The status vocabulary needed no choice. `bin/sd-docs-lint` already
+#: imported `sd_lib` and carried a byte-identical copy of the tuple beside
+#: the import, so there was nothing to decide and nothing to weigh: the
+#: copy became the import it was sitting next to.
+ONE_DEFINITION = (
+    (
+        "the status vocabulary",
+        r'\("planning", *"ready", *"in_progress", *"done"\)',
+        "bin/sd_lib.py",
+    ),
+)
+
+
+class OneDefinitionEach(unittest.TestCase):
+    """31(c): a grep of the governed tree finds no second definition.
+
+    Two tests, because one of them alone proves nothing. The first fails
+    when a second definition appears; the second fails when the pattern
+    stops reaching the first, which is how a gate quietly becomes a gate
+    over an empty set.
+    """
+
+    def test_each_name_has_exactly_one_definition(self) -> None:
+        for what, pattern, owner in ONE_DEFINITION:
+            with self.subTest(what=what):
+                found = sorted({row.split(":", 1)[0] for row in governed_grep(pattern)})
+                self.assertEqual(
+                    found, [owner],
+                    f"{what} is defined in {len(found)} file(s), not only {owner}",
+                )
+
+    def test_the_grep_reaches_the_definition_it_names(self) -> None:
+        for what, pattern, owner in ONE_DEFINITION:
+            with self.subTest(what=what):
+                rows = [row for row in governed_grep(pattern)
+                        if row.startswith(f"{owner}:")]
+                self.assertEqual(
+                    len(rows), 1,
+                    f"the {what} pattern matches {len(rows)} line(s) of {owner}",
+                )
+
+    def test_the_status_vocabulary_pattern_matches_the_live_tuple(self) -> None:
+        """The pattern is tied to the value, not to a remembered spelling.
+
+        Without this, reordering `ITEM_STATUSES` would leave a pattern that
+        matches nothing, and a grep that finds one definition and a grep
+        that finds none both read as a pass on the first test above.
+        """
+        _, pattern, owner = ONE_DEFINITION[0]
+        live = "(" + ", ".join(f'"{status}"' for status in sd_lib.ITEM_STATUSES) + ")"
+        self.assertTrue(
+            _matches(pattern, f"ITEM_STATUSES = {live}"),
+            f"the pattern no longer matches sd_lib.ITEM_STATUSES == {live}",
+        )
+        self.assertIn(
+            f"ITEM_STATUSES = {live}",
+            (REPO_ROOT / owner).read_text(encoding="utf-8"),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

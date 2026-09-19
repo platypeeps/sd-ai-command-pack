@@ -51,7 +51,7 @@ if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
 import sd_lib  # noqa: E402
-from sd_lib import parse_frontmatter, repo_root  # noqa: E402
+from sd_lib import ITEM_STATUSES, parse_frontmatter, repo_root  # noqa: E402
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ITEM_DIR_RE = re.compile(r"^(?P<date>\d{4}-\d{2}-\d{2})-(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)$")
@@ -68,7 +68,6 @@ BLOCKING_RE = re.compile(r"^\s*(?:[-*]\s+)?BLOCKING\b")
 MARKDOWN_LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
 WORK_LINE_RE = re.compile(r"^Work:[ \t]*(?P<value>.*?)[ \t]*$", re.MULTILINE)
 
-ITEM_STATUSES = ("planning", "ready", "in_progress", "done")
 WORKABLE_STATUSES = ("ready", "in_progress")
 DECISION_STATUSES = ("proposed", "accepted", "superseded", "rejected")
 ITEM_DOCUMENTS = ("prd.md", "design.md", "implement.md")
