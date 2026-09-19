@@ -13,7 +13,7 @@
 #
 # Env:
 #   PYTHON_BIN     interpreter to run (default: python3)
-#   TEST_WORKERS   parallel workers (default: online CPUs minus one, min 1)
+#   TEST_WORKERS   workers (default: all CPUs in CI; CPUs minus one locally, min 1)
 set -uo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -56,7 +56,10 @@ else
   case "$cores" in
     '' | *[!0-9]*) cores=4 ;;
   esac
-  if [ "$cores" -gt 1 ]; then
+  [ "$cores" -ge 1 ] || cores=1
+  if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
+    TEST_WORKERS="$cores"
+  elif [ "$cores" -gt 1 ]; then
     TEST_WORKERS=$((cores - 1))
   else
     TEST_WORKERS=1
@@ -371,6 +374,7 @@ watchdog() {
 # passed through xargs, because BSD xargs caps a `-I` replacement at 255 bytes.
 # An empty ids file is refused: `python -m unittest` with no names discovers and
 # runs the whole tree.
+printf 'test runner: workers=%s shards=%s\n' "$TEST_WORKERS" "${#shards[@]}" >> "$run_log" || exit 1
 run_status=0
 set -m
 xargs -P "$TEST_WORKERS" -I {} bash -c '
@@ -380,7 +384,11 @@ xargs -P "$TEST_WORKERS" -I {} bash -c '
     exit 1
   }
   # Unquoted on purpose: one name per line, and a unittest name has no blanks.
+  started=$SECONDS
   "$1" -m coverage run --parallel-mode -m unittest $ids > "$2/$3.log" 2>&1
+  status=$?
+  printf "\nshard %s: %ss exit=%s\n" "$3" "$((SECONDS - started))" "$status" >> "$2/$3.log" || exit 1
+  exit "$status"
 ' _ "$PYTHON_BIN" "$work_dir" {} < "$shard_file" &
 shard_pgid=$!
 if [ "$gate_ppid" != "1" ]; then

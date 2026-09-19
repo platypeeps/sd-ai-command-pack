@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -143,6 +144,18 @@ except urllib.error.HTTPError as error:
 '''
 
 
+def git_transport(binary: str, remote: pathlib.Path, url: str) -> str:
+    """Keep real Git and local transport without starting Python for every call."""
+    network = shlex.join([binary, "-c", f"url.{remote}.insteadOf={url}"])
+    return (
+        '#!/bin/sh\nfor arg in "$@"; do\n'
+        '  case "$arg" in\n'
+        f'    fetch|push|ls-remote) exec {network} "$@" ;;\n'
+        '  esac\ndone\n'
+        f'exec {shlex.quote(binary)} "$@"\n'
+    )
+
+
 class ShipCase(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -180,12 +193,9 @@ class ShipCase(unittest.TestCase):
         (self.programs / "gh").write_text(SHIM)
         (self.programs / "gh").chmod(0o755)
         real_git = shutil.which("git")
+        self.assertIsNotNone(real_git)
         transport = self.programs / "git"
-        transport.write_text("#!/usr/bin/env python3\nimport os,sys\n"
-                             f"binary={real_git!r}\nargs=sys.argv[1:]\n"
-                             f"rewrite=['-c', 'url.{self.remote.path}.insteadOf={self.remote_url}']\n"
-                             "if any(a in ('fetch','push','ls-remote') for a in args): args=rewrite+args\n"
-                             "os.execv(binary,[binary]+args)\n")
+        transport.write_text(git_transport(real_git, self.remote.path, self.remote_url))
         transport.chmod(0o755)
         provider = self.programs / "review-fixture"
         provider.write_text("#!/usr/bin/env python3\nimport json\nprint(json.dumps({'type':'result','subtype':'success','structured_output':{'findings':[]}}))\n")

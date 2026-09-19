@@ -51,6 +51,11 @@ A narrowed run skips coverage combination and the installer coverage gate, then 
 The other three checks still run over their full scope.
 A narrowed run does not replace the full check before a push.
 
+`.github/scripts/run-tests.sh` uses every available CPU in CI.
+Local runs reserve one CPU when multiple CPUs are available.
+Set `TEST_WORKERS` to override either default.
+Each shard reports its name, elapsed seconds, and exit status.
+
 Ruff checks `bin/` and `tests/`. Mypy checks `bin/`.
 The Makefile owns both path inventories. CI reads those inventories.
 Missing optional ShellCheck, Bandit, or Zizmor tools produce warnings.
