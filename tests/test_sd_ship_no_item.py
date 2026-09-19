@@ -70,6 +70,12 @@ class NoItemContracts(unittest.TestCase):
             )
         ]
 
+    def index_entry(self, state):
+        """The branch index row for a record: the one claim a close releases."""
+        key = no_item.index_key(state["repository"], "branch", state["branch"])
+        _revision, entry = receipts.read(self.connection, key)
+        return entry or {}
+
     def record(self, review_id):
         matches = [
             (key, receipts.read(self.connection, key))
@@ -1203,18 +1209,25 @@ class NoItemContracts(unittest.TestCase):
             pattern="accept|bind|digest|revision|blocking|clearance",
         )
 
-        original = no_item.claim_branch
+        # The competitor lands between the record read and the transaction,
+        # which is where a real one lands: `close_record` releases the branch
+        # index and writes the identity inside one transaction, so a writer
+        # that got in after the read makes the versioned save refuse. Racing
+        # inside `claim_branch` would now be racing inside that transaction,
+        # where a second connection gets `database is locked` rather than the
+        # version conflict this case is about.
+        original = no_item.library_transaction
         landed = []
 
-        def racing_claim(connection, store, repository, branch, owner):
+        def racing_transaction(connection):
             if not landed:
                 landed.append(None)
                 revision, state = receipts.read(self.connection, key)
                 receipts.save(self.connection, key, revision,
                               dict(state, identity_revision=state["identity_revision"] + 1))
-            return original(connection, store, repository, branch, owner)
+            return original(connection)
 
-        with patch.object(no_item, "claim_branch", racing_claim):
+        with patch.object(no_item, "library_transaction", racing_transaction):
             code, value, diagnostic = self.cli(
                 "review", "--review-id", review_id, "--close-record", "fixture race"
             )
@@ -1223,6 +1236,16 @@ class NoItemContracts(unittest.TestCase):
         _key, (_revision, unchanged) = self.record(review_id)
         self.assertEqual(unchanged["lifecycle"], "active")
         self.assertEqual(unchanged["passes"], after["passes"])
+        # A refused close must leave nothing half-done. `close_record` gives up
+        # the branch index before its versioned `write_identity`, so reading
+        # the record alone would pass even if the claim had been released and
+        # the name left free for a later allocation to take. The index is the
+        # only claim a close releases, so it is where a partial close shows.
+        index = self.index_entry(unchanged)
+        self.assertEqual(
+            index.get("review_id"), review_id,
+            "the refused close released the branch claim anyway",
+        )
 
     def test_a_concurrent_record_change_refuses_acceptance(self):
         """The proposal an operator approved belongs to the record they read.

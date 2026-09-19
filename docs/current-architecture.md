@@ -26,10 +26,14 @@ The [archive index](work/archive/README.md) records cleanup boundaries and recov
 
 The pre-commit hook has an 8-second wall-time budget for a one-file diff.
 It takes its interpreter from this worktree's `.venv`, then from the clone's
-main checkout, the way `make hooks` installs one hook per clone; when neither
-can import the dev requirements it refuses the commit as `unchecked`, which is
-`bin/sd-status`'s word for a check that could not run, rather than as a lint
-verdict on the staged code.
+main checkout, the way `make hooks` installs one hook per clone, and failing
+both from `python3` on `PATH`, which on a machine that installed the dev
+requirements globally runs the gates perfectly well. Only when the interpreter
+it settled on cannot import them does it refuse the commit as `unchecked`,
+which is `bin/sd-status`'s word for a check that could not run, rather than as
+a lint verdict on the staged code. The clone's checkout is borrowed only where
+`--git-common-dir` names a real `.git`; a separated git directory or a
+submodule falls back rather than reach into an unrelated tree.
 
 ## Historical design
 
