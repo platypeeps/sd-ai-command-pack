@@ -142,7 +142,6 @@ DEFAULT_POLICY: dict[str, Any] = {
     "never_skip": ["docs/spec/**"],
     "sensitive": [".github/workflows/**"],
     "large_change_lines": 800,
-    "authors": [],
     "severity_floor": "medium",
 }
 
@@ -164,8 +163,11 @@ RETIRED_POLICY_KEYS = {
     "challenge_providers": "the challenge stance is a prompt, not a provider. Delete the key",
     "planning_providers": "planning reviews through the same chain as everything else. "
     "Delete the key",
+    "authors": "nothing ever read it. It declared logins CI would hard-fail for, and no "
+    "workflow, no action and no code in this pack acted on the list: the local lane "
+    "reported it and `setup-github` printed it. Delete the key",
 }
-_STRING_LIST_KEYS = ("docs_skip", "never_skip", "sensitive", "authors")
+_STRING_LIST_KEYS = ("docs_skip", "never_skip", "sensitive")
 
 
 def _require(condition: bool, message: str) -> None:
@@ -1436,7 +1438,6 @@ def review(
         "draft": bool(args.draft),
         "policy_source": source,
         "severity_floor": str(policy["severity_floor"]),
-        "authors": list(policy["authors"]),
         "subject": {
             "base": subject.base,
             "head": subject.head,

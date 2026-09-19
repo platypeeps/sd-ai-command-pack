@@ -242,7 +242,6 @@ def setup_github(
         "repo": str(root),
         "mode": repo_mode,
         "policy_source": policy_source,
-        "authors": list(policy["authors"]),
         "workflow": str(WORKFLOW_RELATIVE_PATH),
         "action": action_reference(pin),
         "pin": pin,
@@ -336,8 +335,6 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write(f"sd-review setup-github: {result['repo']}\n")
     write(f"  mode        {result['mode']}\n")
     write(f"  policy      {result['policy_source']}\n")
-    authors = ", ".join(result["authors"]) or "(none listed; rule 5 hard-fails for nobody)"
-    write(f"  authors     {authors}\n")
     write(f"  workflow    {result['workflow']}\n")
     write(f"  action      {result['action']}\n")
     write(f"  dependabot  {result['dependabot']} (guard {result['guard']})\n")

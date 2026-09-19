@@ -235,7 +235,7 @@ class PolicyTests(ReviewFixture):
     def test_this_repository_ships_a_policy_that_validates(self) -> None:
         policy, source = sd_review.load_policy(REPO_ROOT)
         self.assertTrue(source.endswith(".github/sd-review.json"), source)
-        self.assertIn("authors", policy)
+        self.assertIn("severity_floor", policy)
 
     def test_shipped_schema_covers_every_policy_key(self) -> None:
         schema = json.loads((REPO_ROOT / ".github" / "sd-review.schema.json").read_text())
@@ -263,7 +263,9 @@ class PolicyTests(ReviewFixture):
         self.assert_rejects({"large_change_lines": -1}, "non-negative integer")
         self.assert_rejects({"large_change_lines": True}, "non-negative integer")
         self.assert_rejects({"severity_floor": "urgent"}, "severity_floor must be one of")
-        self.assert_rejects({"authors": [3]}, "authors[0] must be a string")
+        # A string value, not a list: retirement is checked by name, before any
+        # type rule, and this shape is the one `test_cut_symbols` bounds out.
+        self.assert_rejects({"authors": "x"}, "authors is retired")
         self.assert_rejects({"tier_order": ["a", "a"]}, "must not repeat a tier")
         self.assert_rejects({"challenge_providers": ["x"]}, "challenge_providers is retired")
         self.assert_rejects({"planning_providers": ["x"]}, "planning_providers is retired")
