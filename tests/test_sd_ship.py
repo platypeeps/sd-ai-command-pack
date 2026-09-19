@@ -445,6 +445,42 @@ roles:
         self.assertEqual(self.remote.rev_parse("main"), original)
         self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
 
+    def test_a_remote_head_that_moved_before_merge_is_refused_with_no_merge_call(self):
+        """The shared readiness guard answers before a merge is ever dispatched.
+
+        `test_moved_head_at_remote_merge_is_refused_atomically` races the head
+        *inside* the merge call, so the remote's own 405 is what refuses there.
+        This is the earlier question: the branch already moved at the remote
+        when the merge is asked for. `GitHub.ready` is the one guard both the
+        item-backed and the no-item flow reach, and it has to refuse on the
+        pull request's own head without spending a merge call to find out.
+        """
+        self.prepare()
+        self.remote.commit_on("topic", "raced\n\nAuthored-with: human", files={"raced.py": "changed\n"})
+        with self.assertRaisesRegex(ship.Refusal, "head or default base moved after local review"):
+            self.merge()
+        self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
+
+    def test_the_manual_merge_request_names_the_expected_head_and_a_stale_one_is_refused(self):
+        """`--expected-head` has to reach GitHub as the request's own `sha`.
+
+        The documented manual form is `sd-ship merge --item ID --expected-head
+        SHA --manual`, and the head it names guards nothing unless the
+        dispatched request carries it: GitHub answers 405 when `sha` is not the
+        pull request's current head. Both halves are asserted here, that the
+        body names the reviewed head, and that a server-side head which no
+        longer matches it refuses rather than merges.
+        """
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.double.moved = True
+        with self.assertRaisesRegex(ship.Refusal, "has not confirmed this pull request merged"):
+            self.merge()
+        dispatched = [call for call in self.remote.calls if call.method == "PUT"]
+        self.assertEqual([call.body["sha"] for call in dispatched], [head])
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "in_progress")
+
     def test_lost_merge_response_reconciles_without_a_second_merge(self):
         self.prepare()
         self.double.lose_merge = True

@@ -374,8 +374,8 @@ The named no-item test module below is proposed.
 - [x] That suite reads the persisted reservation from the provider stub before allowing dispatch.
 - [x] Exit, timeout, and interruption tests resume with the spent pass retained and reject unapproved extra dispatches.
 - [x] The real provisioned `sd_db` passes no-item storage tests against an isolated database; missing interfaces produce a clear refusal.
-- [ ] A real shared GitHub guard rejects a moved remote HEAD before merge dispatch, with zero merge API calls.
-- [ ] The documented manual merge request includes the expected HEAD; its fixture rejects a mismatched server-side SHA.
+- [x] A real shared GitHub guard rejects a moved remote HEAD before merge dispatch, with zero merge API calls.
+- [x] The documented manual merge request includes the expected HEAD; its fixture rejects a mismatched server-side SHA.
 - [x] `python -m unittest discover -s tests -p 'test_sd_ship*.py'` passes with zero failures.
 - [x] `python -m unittest discover -s tests -p 'test_code_health.py'` passes without raising any baseline.
 - [x] `make check` exits 0 for each implementation delivery; `sd-docs-lint` reports `clean` for its PR description.

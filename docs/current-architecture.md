@@ -43,8 +43,11 @@ requirements globally runs the gates perfectly well. Only when the interpreter
 it settled on cannot import them does it refuse the commit as `unchecked`,
 which is `bin/sd-status`'s word for a check that could not run, rather than as
 a lint verdict on the staged code. The clone's checkout is borrowed only where
-`--git-common-dir` names a real `.git`; a separated git directory or a
-submodule falls back rather than reach into an unrelated tree.
+`root` is a linked worktree of it, which its own `--git-dir` shows by sitting
+under that `.git`'s `worktrees/`; a separated git directory, a submodule and a
+bare clone fall back rather than reach into an unrelated tree. The name of the
+common directory does not settle this on its own, because
+`git init --separate-git-dir` can be pointed at a path named `.git`.
 
 ## Historical design
 
