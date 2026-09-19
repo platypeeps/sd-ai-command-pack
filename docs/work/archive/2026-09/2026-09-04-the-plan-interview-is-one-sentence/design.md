@@ -484,7 +484,7 @@ two pages share a dozen measured values. Kept by choice, not owed.
 | C-27 | 2 | low | no | addressed |
 | C-28 | 3 | high | yes | addressed |
 | C-29 | 3 | medium | yes | addressed |
-| C-30 | 3 | low | no | parked |
+| C-30 | 3 | low | no | resolved |
 | C-31 | 4 | high | yes | addressed |
 | C-32 | 4 | medium | yes | addressed |
 | C-33 | 4 | medium | no | addressed |
@@ -624,7 +624,7 @@ Lanes paragraph quotes the tool.
 
 **C-30 — the anti-pinning repair to criterion 1 has no mechanical guard.**
 Nothing stops a later editor pinning `56` where `40` used to be, and the
-criterion would rot again on the same schedule. Parked, not blocking. The guard
+criterion would rot again on the same schedule. Resolved 2026-09-19: the trigger fired. `2026-09-05-the-pack-has-no-answer-to-write-the-test-first/prd.md` pins `82` skill files where there are 32 today, and `40` `OK` where `make check` now reports 128. Both sit in an archived record, so the owner ruled that neither is rewritten and no guard is built. The guard
 would be a lint on the wording of one acceptance criterion, which is a mechanism
 invented to enforce one sentence. Trigger: a second criterion in this repository
 found rotted for the same reason. Owner: the user. It is in Validation's

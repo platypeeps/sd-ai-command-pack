@@ -181,7 +181,7 @@ recommendation is `~/.local/bin`, links on by default, `--pull` unchanged.
 | C-8 | 2 | medium | no | addressed |
 | C-9 | 2 | low | no | addressed |
 | C-10 | 2 | low | no | rebutted |
-| C-11 | 2 | low | no | parked |
+| C-11 | 2 | low | no | resolved |
 | C-12 | 3 | medium | yes | addressed |
 | C-13 | 4 | high | yes | addressed |
 | C-14 | 4 | medium | yes | addressed |
@@ -272,7 +272,7 @@ returns `None` for an empty `path`.
 plan proper is 320 after round 4 (`prd.md` 94, `design.md` 140 above this
 Review, `implement.md` 86 above its completion report), and this Review
 adds the ledger the contract requires.
-Parked, owner's call: the brief enumerates the content each page carries,
+Resolved 2026-09-19 by owner ruling, the item having shipped at that size: the brief enumerates the content each page carries,
 and a shorter set drops one of those items. Trigger: the owner asks; owner:
 plan-969's successor lane.
 

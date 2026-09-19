@@ -170,7 +170,7 @@ ledger below is merged and deduplicated across both.
 | C-4 | codex | 1 | medium | yes | addressed |
 | C-5 | codex | 1 | medium | yes | addressed |
 | C-6 | host | 1 | low | no | rebutted |
-| C-7 | host | 1 | low | no | parked |
+| C-7 | host | 1 | low | no | resolved |
 | C-8 | host | 1 | low | no | addressed |
 | C-9 | codex | 2 | medium | yes | addressed |
 | C-10 | codex | 2 | medium | yes | addressed |
@@ -223,7 +223,7 @@ name.** Rebutted: `skills/_shared/references/argument-vocabulary.md` reserves
 exactly that — how far the interrogation goes.
 
 **C-7 — `pressure=standard|hard` is a skill-owned name outside the shared
-vocabulary.** Parked, not blocking: the vocabulary permits skill-owned names,
+vocabulary.** Resolved 2026-09-19 by owner ruling, the rule already answering it and no second skill having asked: the vocabulary permits skill-owned names,
 and promoting this one is warranted only when a second skill wants an intensity
 dial. Trigger: that second skill. Owner: the user.
 
