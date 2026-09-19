@@ -2,6 +2,7 @@
 title: The ten-pass experiment on the code review point has a pass-log shape before its first pass
 created: 2026-09-16
 item: sd:777
+status: done
 ---
 
 # PRD — ten-pass-experiment
