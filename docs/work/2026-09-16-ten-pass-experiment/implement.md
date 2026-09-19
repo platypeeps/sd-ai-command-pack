@@ -61,3 +61,47 @@ Step 1: `bin/sd-docs-lint` from the worktree ends `sd-docs-lint: clean`, and
 `make check` runs green. Steps 2 to 5 cannot be verified by a lane; ten
 notes of the template's shape on sd:777 are the evidence, read with
 `bin/sd store item 777 --json`. Step 6 is the grep above, quoted.
+
+## Amendment — the post-merge position (2026-09-18)
+
+The owner ruled on 2026-09-18 that a pass runs after its pull request merges.
+`prd.md`'s amendment section holds the settled definitions and `design.md` the
+decisions. Steps 3, 4 and 5 stay OWNER-ONLY and stay open; their wording is
+amended by that section rather than rewritten here, and no box below is ticked
+by this change. The status above still stands: external provider reviews are
+cancelled, so no pass runs and no dispatch is built until the owner reverses
+that in writing.
+
+Two additions to the checklist, both open, both waiting on that reversal:
+
+- [ ] 7. The trigger. New work, not configuration: nothing fires on
+      `pull_request: closed`. The two shapes are in `prd.md`; the recommended
+      one is a step in the merge lane's own checkout, after the prescribed
+      `gh pr merge --squash --match-head-commit`, running
+      `sd-review --provider codex --scope branch --base <parent sha>` with the
+      owner's own key and writing nothing to GitHub. The other shape, a workflow
+      on `pull_request: closed` gated on a merged check, needs `OPENAI_API_KEY`
+      in CI and expands a lane that today holds `contents: read` and asks for
+      nothing. Neither is built by this item. Verifiable by a lane once built:
+      the dispatch resolves `<parent>..<squash>` as its subject, and the run
+      writes an `assignment` row with `role = 'reviewer'` and a `cost` row with
+      `source = 'run'` that the query in `prd.md` then selects.
+- [ ] 8. OWNER-ONLY: the report states the two costs the post-merge position
+      carries, that the "would this have blocked the merge" signal is gone and
+      that the second vendor saw code Copilot had already reviewed and the owner
+      had already fixed. A report that gives the ratio without both is not the
+      report this item asks for.
+
+## Verification (continued)
+
+This amendment's own checks, run on the branch that lands it:
+
+- The review table's code row is byte-identical in `WORKFLOW.md` and
+  `.claude/rules/sd-planning-adversarial-review.md` and still contains
+  `Code, before merge`, so `source:tests/test_sd_ship_skill.py::code_row_cap`
+  still finds it. `tests.test_sd_ship_skill` and `tests.test_workflow_policy`
+  are the check.
+- `tests.test_doc_citations` holds `SYMBOL_ANCHORED_CITATIONS` at its baseline:
+  every citation this amendment adds into a function names
+  `source:<path>::<symbol>`, so no count rises.
+- `bin/sd-docs-lint` ends `sd-docs-lint: clean`.

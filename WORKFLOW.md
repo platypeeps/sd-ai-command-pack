@@ -136,10 +136,13 @@ and a body refuses nothing, whatever head moved under it.
 The reviewer is a different vendor from the author, always. Skills name the
 roles `author` and `reviewer`; the provider registry below maps them.
 
-The code point is an experiment: over ten pull requests, findings accepted
-against findings rejected with each accepted finding's severity, and cost
-logged per pass. The experiment ends in a report on the item, and you
-decide whether the point stays; no ratio decides for you.
+The code point is under measurement by an experiment that is not the point
+itself: over the next ten code pull requests a second vendor reviews the
+change again after it merges, findings accepted against findings rejected
+with each accepted finding's severity, and cost logged per pass. The point
+stays where its row above puts it, before the merge, while the experiment
+runs. The experiment ends in a report on the item, and you decide whether the
+point stays; no ratio decides for you.
 
 ## Advisory
 
