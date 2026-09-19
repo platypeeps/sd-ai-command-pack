@@ -10,10 +10,17 @@ from typing import Any
 from urllib.parse import quote
 
 import sd_lib
+from sd_ship_workflow import blocked
 
 
 class Refusal(Exception):
     """A failed or uncertain prerequisite; never authority to merge."""
+
+    def __init__(self, message: str, *, code: str = "prerequisite_failed", boundary: str = "policy",
+                 next_action: str = "Inspect the error and resolve the failed prerequisite.",
+                 state: str = "policy_block", approval_required: bool = False):
+        self.workflow = blocked(code, boundary, next_action, state=state, approval_required=approval_required)
+        super().__init__(message)
 
 
 def run(root: Path, argv: list[str], *, input: str | None = None, timeout: int = 60) -> str:
@@ -21,9 +28,12 @@ def run(root: Path, argv: list[str], *, input: str | None = None, timeout: int =
         result = subprocess.run(argv, cwd=root, input=input, text=True,
                                 capture_output=True, timeout=timeout, check=False)
     except (OSError, subprocess.SubprocessError) as error:
-        raise Refusal(f"{argv[0]} could not finish: {error}") from None
+        raise Refusal(f"{argv[0]} could not finish: {error}", code="command_unavailable", boundary="runtime",
+                      state="retryable_failure", next_action="Restore command access, then retry this command.") from None
     if result.returncode:
-        raise Refusal((result.stderr or result.stdout or f"{argv[0]} failed").strip()[:2000])
+        raise Refusal((result.stderr or result.stdout or f"{argv[0]} failed").strip()[:2000],
+                      code="command_failed", boundary="runtime", state="retryable_failure",
+                      next_action="Inspect the command error, resolve its cause, then retry.")
     return result.stdout.strip()
 
 
@@ -91,7 +101,8 @@ class GitHub:
         answer = self.answer = sd_lib.remote_permits_full(self.root, ask=ask)
         if (not answer.full or str(metadata.get("full_name", "")).lower() != self.repository
                 or metadata.get("fork") is not False or metadata.get("permissions", {}).get("admin") is not True):
-            raise Refusal(answer.reason or "GitHub ownership did not match origin")
+            raise Refusal(answer.reason or "GitHub ownership did not match origin", code="ownership_refused",
+                          next_action="Resolve repository ownership or use the existing authorized manual workflow.")
         return metadata
 
     def pull(self, number: int) -> dict:
@@ -106,7 +117,8 @@ class GitHub:
             raise Refusal("branch protection could not be observed")
         checks = value.get("required_status_checks") or {}
         if value.get("enforce_admins", {}).get("enabled") is not True:
-            raise Refusal("branch protection does not enforce administrators")
+            raise Refusal("branch protection does not enforce administrators", code="protection_required",
+                          next_action="Restore required branch protection; this command cannot bypass it.")
         if not isinstance(value.get("required_pull_request_reviews"), dict):
             raise Refusal("branch protection does not require pull requests")
         if checks.get("strict") is not True or not (checks.get("contexts") or checks.get("checks")):
@@ -142,8 +154,10 @@ class GitHub:
             # cannot mask a failed or pending current run of the same check.
             if any(entry.get("head_sha") != head or entry.get("status") != "completed"
                    or entry.get("conclusion") not in ("success", "neutral", "skipped") for entry in matching):
-                raise Refusal(f"required CI is not passing on {head}: {context}")
+                raise Refusal(f"required CI is not passing on {head}: {context}", code="ci_not_passing",
+                              boundary="ci", state="retryable_failure", next_action="Wait for or fix exact-head CI, then retry merge.")
             if legacy and (legacy[0].get("sha", head) != head or legacy[0].get("state") != "success"):
                 raise Refusal(f"required status is not passing on {head}: {context}")
             if not matching and not legacy:
-                raise Refusal(f"required CI has no current result on {head}: {context}")
+                raise Refusal(f"required CI has no current result on {head}: {context}", code="ci_missing",
+                              boundary="ci", state="retryable_failure", next_action="Run the required check for this exact head, then retry merge.")

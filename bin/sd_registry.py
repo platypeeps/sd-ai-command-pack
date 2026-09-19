@@ -125,9 +125,8 @@ class Registry:
     def order(self, role: str) -> list[Provider]:
         """The enabled providers holding `role`, best first.
 
-        Only what a role list ranks resolves. An entry that declares the role
-        and appears on no list is capable and never chosen, which is what a
-        shipped-disabled entry looks like from here.
+        Only ranked entries resolve automatically.
+        An enabled, unranked reviewer remains available through an explicit pick.
         """
         if role not in ROLES:
             raise RegistryError(f"no role {role!r}; the roles are {', '.join(ROLES)}")
@@ -873,7 +872,12 @@ def resolve_consent(registry: Registry, line: str | None, policy: str | None) ->
     if line is not None:
         return parse_consent(line), "repository"
     if policy == "configured":
-        return {entry.name: recipient(entry) for entry in registry.order("reviewer")}, "machine-configured"
+        # Consent permits transmission; role ranks control automatic selection.
+        return {
+            entry.name: recipient(entry)
+            for entry in registry.providers.values()
+            if entry.enabled and "reviewer" in entry.roles
+        }, "machine-configured"
     return parse_consent(None), "none"
 
 
@@ -1391,6 +1395,29 @@ class Candidate:
         }
 
 
+def _reviewer_candidate(
+    provider: Provider,
+    *,
+    consent: dict[str, Allowance],
+    author_vendors: tuple[str, ...],
+    capped_bills: Mapping[str, str] | None,
+    readers: tuple[str, ...],
+) -> Candidate:
+    """Apply the same eligibility guards to automatic and explicit selection."""
+    refusal = refuse_reader(provider, readers)
+    if refusal is None:
+        refusal = refuse_allowance(provider, consent.get(provider.name))
+    if refusal is None and provider.vendor in author_vendors:
+        refusal = (
+            f"{provider.name} is an entry of vendor {provider.vendor}, and "
+            f"this branch carries {provider.vendor} authorship. The reviewer "
+            f"is a different vendor from the author, always."
+        )
+    if refusal is None and provider.bill in (capped_bills or {}):
+        refusal = f"{provider.name} is billed to {provider.bill}: {(capped_bills or {})[provider.bill]}"
+    return Candidate(provider, refusal is None, refusal or "")
+
+
 def reviewer_chain(
     registry: Registry,
     *,
@@ -1413,26 +1440,16 @@ def reviewer_chain(
     This evaluates registry, consent, authorship, and declared caps consistently
     for planning and execution; runtime availability preflight happens later.
     """
-    candidates: list[Candidate] = []
-    for provider in registry.order("reviewer"):
-        # Decided here and not at the run, because a tier's depth is a count
-        # of entries taken off this list: an entry that cannot run would occupy
-        # a slot and the change would be read by fewer providers than its tier
-        # asked for, while still reporting clean. That is a fact about the
-        # build, not about the machine at this second, so it belongs here.
-        refusal = refuse_reader(provider, readers)
-        if refusal is None:
-            refusal = refuse_allowance(provider, consent.get(provider.name))
-        if refusal is None and provider.vendor in author_vendors:
-            refusal = (
-                f"{provider.name} is an entry of vendor {provider.vendor}, and "
-                f"this branch carries {provider.vendor} authorship. The reviewer "
-                f"is a different vendor from the author, always."
-            )
-        if refusal is None and provider.bill in (capped_bills or {}):
-            refusal = f"{provider.name} is billed to {provider.bill}: {(capped_bills or {})[provider.bill]}"
-        candidates.append(Candidate(provider, refusal is None, refusal or ""))
-    return candidates
+    return [
+        _reviewer_candidate(
+            provider,
+            consent=consent,
+            author_vendors=author_vendors,
+            capped_bills=capped_bills,
+            readers=readers,
+        )
+        for provider in registry.order("reviewer")
+    ]
 
 
 def pick(
@@ -1446,10 +1463,9 @@ def pick(
 ) -> Provider:
     """`--provider <name>`: one entry for one run, or a refusal that says why.
 
-    A direct pick is refused for the same reasons a fallthrough skips, and
-    reaches entries a fallthrough never sees -- a disabled one is not on the
-    chain at all, and picking it by name should answer with the reason it ships
-    disabled rather than with 'no such provider'.
+    Direct picks can reach enabled reviewers outside the automatic order.
+    They retain the same consent, independence, reader, transport, and spending guards.
+    Disabled entries remain refused with their recorded reason.
     """
     provider = registry.providers.get(name)
     if provider is None:
@@ -1465,20 +1481,38 @@ def pick(
         raise RegistryError(
             f"{name!r} is disabled: {provider.reason or 'no reason recorded'}"
         )
-    for candidate in reviewer_chain(
-        registry,
+    candidate = _reviewer_candidate(
+        provider,
         consent=consent,
         author_vendors=author_vendors,
         capped_bills=capped_bills,
         readers=readers,
-    ):
-        if candidate.provider.name != name:
-            continue
-        if candidate.eligible:
-            return candidate.provider
-        raise ConsentRefusal(candidate.reason)
-    raise RegistryError(
-        f"{name!r} holds the 'reviewer' role but is on no reviewer list in "
-        f"{registry.path}, so nothing ranks it. Add it to the list, or pick an "
-        f"entry the list names."
     )
+    if not candidate.eligible:
+        raise ConsentRefusal(candidate.reason)
+    return provider
+
+
+def select_reviewers(
+    registry: Registry,
+    name: str | None = None,
+    *,
+    consent: dict[str, Allowance],
+    author_vendors: tuple[str, ...] = (),
+    capped_bills: Mapping[str, str] | None = None,
+    readers: tuple[str, ...] = (),
+) -> list[Provider]:
+    """Select one explicit reviewer or the eligible automatic fallback chain."""
+    if name is not None:
+        return [pick(
+            registry, name, consent=consent, author_vendors=author_vendors,
+            capped_bills=capped_bills, readers=readers,
+        )]
+    return [
+        candidate.provider
+        for candidate in reviewer_chain(
+            registry, consent=consent, author_vendors=author_vendors,
+            capped_bills=capped_bills, readers=readers,
+        )
+        if candidate.eligible
+    ]

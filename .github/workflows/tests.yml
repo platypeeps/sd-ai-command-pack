@@ -259,7 +259,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          ref: f67613005d701fcd691610e71c6319e280380774
+          # Provider-policy membership requires the shared library from system #451.
+          ref: 55c4d69168cfa873d57bf063275e2f1a22c5a8e6
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false

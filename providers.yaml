@@ -41,4 +41,5 @@ providers:
 
 roles:
   author:   [claude, codex]
-  reviewer: [codex, claude, minimax, kimi, baseten]
+  # Unranked reviewer-capable entries require an explicit --provider request.
+  reviewer: [codex, claude]

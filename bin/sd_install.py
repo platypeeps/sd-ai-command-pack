@@ -36,10 +36,13 @@ import importlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterable
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -496,6 +499,173 @@ class Written:
     kind: str
 
 
+class MetadataRefused(ValueError):
+    """Invocation metadata cannot be translated without changing its meaning."""
+
+
+def metadata_rows(data: bytes, label: str, indent: str = "") -> tuple[list[str], dict]:
+    """Read plain block-mapping keys; retain other sections as opaque bytes.
+
+    This is deliberately not YAML. Invocation controls accept lowercase booleans
+    and plain keys only. Flow mappings, aliases, quoted keys, and duplicate keys
+    refuse instead of acquiring a second interpretation.
+    """
+    try:
+        lines = data.decode("utf-8").splitlines(keepends=True)
+    except UnicodeError as error:
+        raise MetadataRefused(f"{label}: metadata is not UTF-8") from error
+    fields: dict[str, tuple[int, str]] = {}
+    for index, line in enumerate(lines):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith(indent):
+            raise MetadataRefused(f"{label}: unsupported indentation")
+        part = line[len(indent):].rstrip("\r\n")
+        if part.startswith(" "):
+            if not fields:
+                raise MetadataRefused(f"{label}: unsupported indentation")
+            if next(reversed(fields)) in ("disable-model-invocation", "allow_implicit_invocation"):
+                raise MetadataRefused(f"{label}: invocation controls cannot have scalar continuation lines")
+            continue
+        match = re.fullmatch(r"([a-zA-Z_][\w-]*):(?:[ \t]+(.*))?", part)
+        if match is None:
+            raise MetadataRefused(f"{label}: unsupported mapping syntax: {part}")
+        key, value = match.group(1), match.group(2) or ""
+        if key in fields:
+            raise MetadataRefused(f"{label}: duplicate {key}")
+        fields[key] = (index, value)
+    return lines, fields
+
+
+def invocation_bool(value: str, label: str) -> bool:
+    match = re.fullmatch(r"(true|false)(?:[ \t]+#.*)?", value.strip())
+    if match is None:
+        raise MetadataRefused(f"{label}: expected plain true or false")
+    return match.group(1) == "true"
+
+
+def codex_policy(data: bytes, allow: bool | None) -> bytes:
+    """Preserve interface/dependency bytes and insert one compatible policy."""
+    lines, fields = metadata_rows(data, "agents/openai.yaml")
+    entry = f"  allow_implicit_invocation: {str(allow).lower()}\n"
+    if "policy" not in fields:
+        if allow is None:
+            return data
+        separator = b"" if not data or data.endswith(b"\n") else b"\n"
+        return data + separator + b"policy:\n" + entry.encode()
+    start, value = fields["policy"]
+    if value.split("#", 1)[0].strip():
+        raise MetadataRefused("agents/openai.yaml: policy requires a block mapping")
+    end = min((row[0] for row in fields.values() if row[0] > start), default=len(lines))
+    _, policy = metadata_rows("".join(lines[start + 1:end]).encode(), "policy", "  ")
+    if "allow_implicit_invocation" in policy:
+        actual = invocation_bool(policy["allow_implicit_invocation"][1], "policy")
+        if allow is not None and actual != allow:
+            raise MetadataRefused("agents/openai.yaml: conflicting invocation policy")
+        return data
+    if allow is None:
+        return data
+    if not lines[start].endswith("\n"):
+        lines[start] += "\n"
+    lines.insert(start + 1, entry)
+    return "".join(lines).encode()
+
+
+def codex_payload(surface: Surface) -> tuple[bytes, dict[str, bytes], bool]:
+    """Translate only the Claude command marker, never the Markdown body."""
+    body = surface.skill.read_bytes()
+    extras = {extra.relative: extra.source.read_bytes() for extra in surface.extras}
+    if not body.startswith(b"---\n") and not body.startswith(b"---\r\n"):
+        return body, extras, False
+    match = re.match(br"\A---\r?\n(.*?)^---[ \t]*\r?\n", body, re.M | re.S)
+    if match is None:
+        raise MetadataRefused(f"{surface.name}: unterminated frontmatter")
+    lines, fields = metadata_rows(match.group(1), surface.name)
+    marker = fields.get("disable-model-invocation")
+    if marker is None:
+        if "agents/openai.yaml" in extras:
+            codex_policy(extras["agents/openai.yaml"], None)
+        return body, extras, False
+    index, value = marker
+    allow = not invocation_bool(value, surface.name)
+    del lines[index]
+    body = body[:match.start(1)] + "".join(lines).encode() + body[match.end(1):]
+    key = "agents/openai.yaml"
+    extras[key] = codex_policy(extras.get(key, b""), allow)
+    return body, extras, True
+
+
+def render_plan(surfaces: list[Surface], homes: list[PlatformHome], kind: str) -> list:
+    """Validate the complete payload before creating any destination files."""
+    planned = []
+    for home in homes:
+        for surface in surfaces:
+            adapted = home.key == "codex" and kind == "skill"
+            if adapted:
+                body, extras, policy = codex_payload(surface)
+            else:
+                body = surface.skill.read_bytes()
+                extras = {extra.relative: extra.source.read_bytes() for extra in surface.extras}
+                policy = False
+            target = home.target_for(surface.name)
+            planned.append((target, body, f"{kind}:{home.key}"))
+            if home.layout == "directory":
+                for relative, data in extras.items():
+                    category = "invocation-policy" if policy and relative == "agents/openai.yaml" else "companion"
+                    planned.append((target.parent / relative, data, f"{category}:{home.key}"))
+    return planned
+
+
+def atomic_policy_write(target: Path, body: bytes) -> None:
+    """Never expose a partial policy or truncate the previous owned version."""
+    with tempfile.TemporaryDirectory(prefix=".sd-policy-", dir=target.parent) as directory:
+        scratch = Path(directory) / "openai.yaml"
+        scratch.write_bytes(body)
+        if target.exists():
+            scratch.chmod(target.stat().st_mode & 0o777)
+        os.replace(scratch, target)
+
+
+def write_render_plan(planned: list, dry_run: bool) -> list[Written]:
+    written = []
+    for target, body, kind in planned:
+        written.append(Written(target, digest(body), kind))
+        if not dry_run:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if kind == "invocation-policy:codex":
+                atomic_policy_write(target, body)
+            else:
+                target.write_bytes(body)
+    return written
+
+
+def policy_collisions(planned: list, previous: list[dict]) -> None:
+    """New generated companions cannot overwrite an unowned or modified file."""
+    owned = {row.get("path"): row.get("sha256") for row in previous}
+    for target, _, kind in planned:
+        if kind != "invocation-policy:codex" or not (target.exists() or target.is_symlink()):
+            continue
+        if target.is_symlink() or not target.is_file() or owned.get(str(target)) != digest(target.read_bytes()):
+            raise MetadataRefused(f"{target}: invocation metadata is unowned or modified")
+
+
+def restore_policies(backups: list, out) -> None:
+    """Restore failed policy writes only while their new bytes remain unchanged."""
+    for target, expected, previous in backups:
+        try:
+            if not target.exists():
+                continue
+            if target.is_symlink() or not target.is_file() or target.read_bytes() != expected:
+                print(f"  left in place (policy changed during failed install): {target}", file=out)
+                continue
+            if previous is None:
+                target.unlink()
+            else:
+                atomic_policy_write(target, previous)
+        except OSError as error:
+            print(f"  policy recovery failed: {target}: {error}", file=out)
+
+
 def render(
     surfaces: list[Surface],
     homes: list[PlatformHome],
@@ -503,40 +673,8 @@ def render(
     kind: str = "skill",
     dry_run: bool = False,
 ) -> list[Written]:
-    """Copy every surface into every platform home, verbatim.
-
-    Verbatim is the whole design. A renderer that rewrote frontmatter per
-    platform would be a translation layer with its own bugs and its own drift,
-    and the parity test could then only assert that the translation ran, not
-    that the platforms agree. Byte-identical files let the test assert the
-    strong thing: same digest everywhere.
-    """
-    written: list[Written] = []
-    for home in homes:
-        for surface in surfaces:
-            body = surface.skill.read_bytes()
-            target = home.target_for(surface.name)
-            written.append(Written(target, digest(body), f"{kind}:{home.key}"))
-            if not dry_run:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(body)
-            if home.layout != "directory":
-                # Flat homes have nowhere to put a template beside its skill,
-                # and OpenCode's command loader would read one as a command.
-                continue
-            for extra in surface.extras:
-                data = extra.source.read_bytes()
-                dest = target.parent / extra.relative
-                # `companion`, not `template`: these are a skill's references
-                # and scripts as well as its templates now, and a receipt kind
-                # that names one of the three reads as a bug in the other two.
-                # Kind is metadata -- prune keys on the path -- so an existing
-                # receipt rewrites its rows without touching a single file.
-                written.append(Written(dest, digest(data), f"companion:{home.key}"))
-                if not dry_run:
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_bytes(data)
-    return written
+    """Copy payload bytes, with one Codex-only invocation metadata adapter."""
+    return write_render_plan(render_plan(surfaces, homes, kind), dry_run)
 
 
 # ------------------------------------------------------- the one settings edit
@@ -1528,7 +1666,7 @@ def open_library(ctx: Context):
         return None, f"sd_db could not open {path}: {problem}"
 
 
-def expire_trials(connection, out) -> list[str]:
+def expire_trials(connection, out, *, dry_run: bool = False) -> list[str]:
     """Remove every expired trial that earned no use, and say which.
 
     Criterion 25's second half. The window is the trial's own `started`, not
@@ -1545,10 +1683,12 @@ def expire_trials(connection, out) -> list[str]:
             continue
         if sd_db.skill_use_since(connection, row["skill"], row["started"]):
             continue
-        sd_db.end_trial(connection, row["skill"])
+        if not dry_run:
+            sd_db.end_trial(connection, row["skill"])
         removed.append(row["skill"])
         print(
-            f"removed {row['skill']}: trial expired {row['expires'][:10]} with no use",
+            f"{'would remove' if dry_run else 'removed'} {row['skill']}: "
+            f"trial expired {row['expires'][:10]} with no use",
             file=out,
         )
     return removed
@@ -1649,7 +1789,6 @@ def cmd_user(ctx: Context, out) -> int:
         print(f"warning: {reason}", file=out)
     trials: list[str] = []
     if connection is not None:
-        expire_trials(connection, out)
         import sd_db  # noqa: PLC0415 - only reached when the import worked
 
         trials = [row["skill"] for row in sd_db.active_trials(connection)]
@@ -1710,66 +1849,81 @@ def cmd_user(ctx: Context, out) -> int:
         print(f"warning: {uncited} is cited but not shipped", file=out)
 
     agents = discover_agents(ctx.checkout)
-    written = render(surfaces, ctx.homes, dry_run=ctx.dry_run)
-    # Rendered after the skills and into their own homes, so a machine with no
-    # `agents/` in its checkout converges exactly as before rather than failing
-    # on an absent directory.
-    written += render(agents, ctx.agents, kind="agent", dry_run=ctx.dry_run)
-    current = {str(item.path) for item in written}
-
-    # After the renders and before the receipt: a failure here leaves the
-    # renders standing for the next run and no link the receipt does not name.
     try:
-        links = link_commands(plans, bin_dir, dry_run=ctx.dry_run)
-    except LinkFailed as problem:
+        render_files = render_plan(surfaces, ctx.homes, "skill")
+        render_files += render_plan(agents, ctx.agents, "agent")
+        policy_collisions(render_files, owned_entries(recorded))
+    except (MetadataRefused, OSError) as problem:
         print(f"error: {problem}", file=out)
         return 1
+    if connection is not None:
+        expired = set(expire_trials(connection, out, dry_run=ctx.dry_run))
+        expired -= named_skills(ctx.checkout)
+        surfaces = [surface for surface in surfaces if surface.name not in expired]
+        render_files = render_plan(surfaces, ctx.homes, "skill")
+        render_files += render_plan(agents, ctx.agents, "agent")
+    with ExitStack() as recovery:
+        if not ctx.dry_run:
+            backups = [(path, data, path.read_bytes() if path.exists() else None)
+                       for path, data, kind in render_files if kind == "invocation-policy:codex"]
+            recovery.callback(restore_policies, backups, out)
+        written = write_render_plan(render_files, ctx.dry_run)
+        current = {str(item.path) for item in written}
 
-    previous = owned_entries(recorded)
-    skipped = prune_stale(previous, current, dry_run=ctx.dry_run)
-    skipped += prune_links(previous, {row["path"] for row in links}, dry_run=ctx.dry_run)
+        # Ordinary renders remain retryable. Generated policies recover until
+        # the receipt records ownership, including failures after linking.
+        try:
+            links = link_commands(plans, bin_dir, dry_run=ctx.dry_run)
+        except LinkFailed as problem:
+            print(f"error: {problem}", file=out)
+            return 1
 
-    specs = hook_specs(ctx.checkout)
-    hook_changed = install_hook(ctx.settings, specs, dry_run=ctx.dry_run)
+        previous = owned_entries(recorded)
+        skipped = prune_stale(previous, current, dry_run=ctx.dry_run)
+        skipped += prune_links(previous, {row["path"] for row in links}, dry_run=ctx.dry_run)
 
-    excludes = excludes_file(ctx.home, ctx.environ, sandboxed=ctx.sandboxed)
-    excludes_changed = ensure_excludes_line(excludes, dry_run=ctx.dry_run)
-    set_excludes_config(excludes, dry_run=ctx.dry_run, sandboxed=ctx.sandboxed)
+        specs = hook_specs(ctx.checkout)
+        hook_changed = install_hook(ctx.settings, specs, dry_run=ctx.dry_run)
 
-    # Seeded here rather than at `--provision-library`, because the registry is
-    # what a machine with no library still needs: the file-only reader answers
-    # from it, and `sd-db.sh init` seeds its rows from it when the library does
-    # arrive. Not recorded in `owned`: the installer removes what it owns on
-    # uninstall, and this file is the operator's the moment it lands.
-    seeded_registry, registry_report = seed_registry(ctx)
+        excludes = excludes_file(ctx.home, ctx.environ, sandboxed=ctx.sandboxed)
+        excludes_changed = ensure_excludes_line(excludes, dry_run=ctx.dry_run)
+        set_excludes_config(excludes, dry_run=ctx.dry_run, sandboxed=ctx.sandboxed)
 
-    owned = [
-        {"path": str(item.path), "sha256": item.sha256, "kind": item.kind}
-        for item in written
-    ]
-    owned += links
-    # One receipt entry per command and not per spec: two events share
-    # `bin/sd-skill-use`, and an uninstall that saw it twice would report a
-    # file count one higher than the number of files it touched.
-    for command in sorted({command for command, _, _ in specs}):
-        owned.append(
-            {"path": str(ctx.settings), "kind": "hook", "command": command})
-    # Sorted, so the receipt is canonical rather than merely repeatable. Render
-    # order is platform-major and stable today, which makes two runs agree by
-    # accident; reordering `platform_homes` or nesting the render loop the other
-    # way would churn every row without changing a single installed file, and a
-    # diff that noisy is a diff nobody reads.
-    owned.sort(key=lambda row: (row["path"], row.get("kind", "")))
-    payload = {
-        "schema": RECEIPT_SCHEMA,
-        "checkout": str(ctx.checkout),
-        **git_context(ctx.checkout),
-        "platformHomes": {home.key: str(home.root) for home in ctx.homes},
-        "binDir": str(bin_dir),
-        "owned": owned,
-    }
-    if not ctx.dry_run:
-        write_receipt(ctx.receipt, payload)
+        # Seeded here rather than at `--provision-library`, because the registry is
+        # what a machine with no library still needs: the file-only reader answers
+        # from it, and `sd-db.sh init` seeds its rows from it when the library does
+        # arrive. Not recorded in `owned`: the installer removes what it owns on
+        # uninstall, and this file is the operator's the moment it lands.
+        seeded_registry, registry_report = seed_registry(ctx)
+
+        owned = [
+            {"path": str(item.path), "sha256": item.sha256, "kind": item.kind}
+            for item in written
+        ]
+        owned += links
+        # One receipt entry per command and not per spec: two events share
+        # `bin/sd-skill-use`, and an uninstall that saw it twice would report a
+        # file count one higher than the number of files it touched.
+        for command in sorted({command for command, _, _ in specs}):
+            owned.append(
+                {"path": str(ctx.settings), "kind": "hook", "command": command})
+        # Sorted, so the receipt is canonical rather than merely repeatable. Render
+        # order is platform-major and stable today, which makes two runs agree by
+        # accident; reordering `platform_homes` or nesting the render loop the other
+        # way would churn every row without changing a single installed file, and a
+        # diff that noisy is a diff nobody reads.
+        owned.sort(key=lambda row: (row["path"], row.get("kind", "")))
+        payload = {
+            "schema": RECEIPT_SCHEMA,
+            "checkout": str(ctx.checkout),
+            **git_context(ctx.checkout),
+            "platformHomes": {home.key: str(home.root) for home in ctx.homes},
+            "binDir": str(bin_dir),
+            "owned": owned,
+        }
+        if not ctx.dry_run:
+            write_receipt(ctx.receipt, payload)
+        recovery.pop_all()
 
     prefix = "would render" if ctx.dry_run else "rendered"
     print(
@@ -1884,6 +2038,213 @@ def _resolves_to(candidate: Path, target: Path) -> bool:
     return candidate.resolve() == target.resolve()
 
 
+VERIFY_HELP_COMMANDS = frozenset({"sd", "sd-review", "sd-ship"})
+VERIFY_TIMEOUT = 5
+
+
+def verify_result(component: str, code: str = "ok", **details) -> dict:
+    return {"component": component, "status": "passed" if code == "ok" else "failed",
+            "code": code, **details}
+
+
+def verify_source(ctx: Context, receipt: dict) -> dict:
+    """Read exact source identity without trusting the receipt's dirty flag."""
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ctx.checkout, capture_output=True,
+            text=True, timeout=VERIFY_TIMEOUT, check=False,
+        )
+        state = subprocess.run(
+            ["git", "--no-optional-locks", "status", "--porcelain"], cwd=ctx.checkout,
+            capture_output=True, text=True, timeout=VERIFY_TIMEOUT, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return verify_result("source", "source_unreadable", detail=str(error))
+    if head.returncode or state.returncode or not head.stdout.strip():
+        return verify_result("source", "source_unreadable")
+    commit = head.stdout.strip()
+    if commit != receipt.get("commit"):
+        return verify_result("source", "source_commit_changed", current=commit,
+                             installed=receipt.get("commit"))
+    if state.stdout or receipt.get("dirty") is not False:
+        return verify_result("source", "source_not_clean", commit=commit)
+    return verify_result("source", commit=commit)
+
+
+def verify_receipt(ctx: Context, receipt: dict) -> dict:
+    if not receipt:
+        return verify_result("receipt", "receipt_missing_or_unreadable", path=str(ctx.receipt))
+    if type(receipt.get("schema")) is not int or receipt.get("schema") != RECEIPT_SCHEMA:
+        return verify_result("receipt", "receipt_schema_unsupported")
+    if receipt.get("checkout") != str(ctx.checkout):
+        return verify_result("receipt", "receipt_foreign_checkout")
+    entries = receipt.get("owned")
+    if not isinstance(entries, list) or not entries:
+        return verify_result("receipt", "receipt_malformed")
+    keys = []
+    for row in entries:
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str) or not isinstance(row.get("kind"), str) or not isinstance(row.get("command", ""), str):
+            return verify_result("receipt", "receipt_malformed")
+        keys.append((row["path"], row.get("command", "") if row["kind"] == "hook" else ""))
+    if len(set(keys)) != len(keys):
+        return verify_result("receipt", "receipt_duplicate_rows")
+    return verify_result("receipt", path=str(ctx.receipt))
+
+
+def verification_payload(ctx: Context, receipt: dict) -> list:
+    """Include installed trials without opening or migrating the live database."""
+    root = ctx.home / ".claude" / "skills"
+    trials = []
+    for row in receipt["owned"]:
+        path = Path(row["path"])
+        if row["kind"] == "skill:claude" and path.parent.parent == root:
+            trials.append(path.parent.name)
+    surfaces = discover_surfaces(ctx.checkout, trials)
+    found = {surface.name for surface in surfaces}
+    missing = (named_skills(ctx.checkout) | set(trials)) - found
+    if missing:
+        raise MetadataRefused("missing source skills: " + ", ".join(sorted(missing)))
+    return (render_plan(surfaces, ctx.homes, "skill")
+            + render_plan(discover_agents(ctx.checkout), ctx.agents, "agent"))
+
+
+def verify_rendered(ctx: Context, receipt: dict) -> list[dict]:
+    try:
+        payload = verification_payload(ctx, receipt)
+    except (OSError, MetadataRefused, PathsRefused) as error:
+        return [verify_result("renders", "source_payload_invalid", detail=str(error))]
+    recorded = {row["path"]: row for row in receipt["owned"] if row["kind"] not in ("link", "hook")}
+    results = []
+    for path, data, kind in payload:
+        row = recorded.pop(str(path), {})
+        expected = digest(data)
+        if row.get("kind") != kind or row.get("sha256") != expected:
+            code = "render_receipt_changed"
+        else:
+            try:
+                code = "ok" if not path.is_symlink() and digest(path.read_bytes()) == expected else "render_modified"
+            except OSError:
+                code = "render_missing_or_unreadable"
+        results.append(verify_result("render", code, path=str(path)))
+    results.extend(verify_result("render", "render_foreign_receipt_path", path=path) for path in recorded)
+    return results
+
+
+def verify_interpreter(source: Path, search: str) -> str:
+    """Inspect all command interpreters without executing hook entrypoints."""
+    try:
+        first = source.read_bytes().split(b"\n", 1)[0].decode("utf-8")
+        argv = shlex.split(first[2:]) if first.startswith("#!") else []
+    except (OSError, ValueError):
+        return "interpreter_unreadable"
+    if not argv:
+        return "interpreter_unsupported"
+    program = argv[0]
+    if program == "/usr/bin/env":
+        if len(argv) != 2 or argv[1].startswith("-"):
+            return "interpreter_unsupported"
+        program = shutil.which(argv[1], path=search) or ""
+    if not program or not os.path.isabs(program) or not Path(program).is_file() or not os.access(program, os.X_OK):
+        return "interpreter_missing"
+    return "ok"
+
+
+def verify_hooks(ctx: Context, receipt: dict) -> dict:
+    expected = {(str(ctx.settings), command) for command, _, _ in hook_specs(ctx.checkout)}
+    recorded = {(row["path"], row.get("command")) for row in receipt["owned"] if row["kind"] == "hook"}
+    if recorded != expected:
+        return verify_result("hooks", "hook_receipt_changed")
+    try:
+        settings = json.loads(ctx.settings.read_text(encoding="utf-8"))
+        hooks = settings["hooks"]
+        for command, event, matchers in hook_specs(ctx.checkout):
+            for matcher in matchers:
+                count = sum(
+                    entry == {"type": "command", "command": command}
+                    for group in hooks[event] if group.get("matcher") == matcher
+                    for entry in group["hooks"]
+                )
+                if count != 1:
+                    return verify_result("hooks", "hook_missing_or_modified")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return verify_result("hooks", "hook_unreadable")
+    return verify_result("hooks")
+
+
+def verify_commands(ctx: Context, receipt: dict) -> tuple[list[dict], dict[str, str]]:
+    search = ctx.environ.get("PATH", "")
+    unsupported = [part for part in search.split(os.pathsep) if not os.path.isabs(part)]
+    if unsupported:
+        # Relative entries can resolve differently in the help subprocess's cwd.
+        return [verify_result("path", "path_unsupported_components", entries=unsupported)], {}
+    recorded = {row["path"]: row for row in receipt["owned"] if row["kind"] == "link"}
+    resolved = {}
+    results = []
+    for name in bin_commands(ctx.checkout):
+        source = ctx.checkout / "bin" / name
+        link = link_directory(ctx, receipt) / name
+        row = recorded.pop(str(link), {})
+        found = shutil.which(name, path=search)
+        code = "ok"
+        if row.get("target") != str(source) or not link.is_symlink() or not _resolves_to(link, source):
+            code = "command_link_changed"
+        elif found is None:
+            code = "command_not_on_path"
+        elif not _resolves_to(Path(found), source):
+            code = "command_shadowed"
+        else:
+            code = verify_interpreter(source, search)
+            resolved[name] = found
+        results.append(verify_result("command", code, name=name, resolved=found))
+    results.extend(verify_result("command", "command_foreign_receipt_path", path=path) for path in recorded)
+    return results, resolved
+
+
+def verify_help(ctx: Context, name: str, path: str) -> dict:
+    """Only fixed help argv; never invoke hooks or an operational verb."""
+    try:
+        completed = subprocess.run(
+            [path, "--help"], cwd=ctx.checkout, env={**ctx.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=VERIFY_TIMEOUT, check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return verify_result("smoke", "help_timeout", name=name)
+    except OSError as error:
+        return verify_result("smoke", "help_unavailable", name=name, detail=str(error))
+    return verify_result("smoke", "ok" if completed.returncode == 0 else "help_failed",
+                         name=name, exit_code=completed.returncode)
+
+
+def cmd_verify(ctx: Context, out, *, as_json: bool = False) -> int:
+    """Fail closed on installation drift; no DB, provider, or installation effects."""
+    receipt = read_receipt(ctx.receipt)
+    checks = [verify_receipt(ctx, receipt)]
+    resolved: dict[str, str] = {}
+    if checks[0]["status"] == "passed":
+        checks.append(verify_source(ctx, receipt))
+        checks.extend(verify_rendered(ctx, receipt))
+        checks.append(verify_hooks(ctx, receipt))
+        commands, resolved = verify_commands(ctx, receipt)
+        checks.extend(commands)
+    ready = all(check["status"] == "passed" for check in checks)
+    if ready:
+        checks.extend(verify_help(ctx, name, resolved[name]) for name in sorted(VERIFY_HELP_COMMANDS & resolved.keys()))
+        checks.append({**verify_source(ctx, receipt), "component": "source_after_smoke"})
+    passed = all(check["status"] == "passed" for check in checks)
+    result = {"schema_version": 1, "status": "verified" if passed else "failed", "checks": checks,
+              "smoke": {"status": "complete" if ready else "not_run",
+                        "unsmoked": sorted(set(bin_commands(ctx.checkout)) - VERIFY_HELP_COMMANDS)}}
+    if as_json:
+        print(json.dumps(result, sort_keys=True), file=out)
+    else:
+        print(f"installation: {result['status']}", file=out)
+        for check in checks:
+            if check["status"] == "failed":
+                print(f"  {check['component']}: {check['code']}", file=out)
+    return 0 if passed else 1
+
+
 def cmd_status(ctx: Context, out) -> int:
     """Report what is installed, what drifted, and what legacy residue remains."""
     receipt = read_receipt(ctx.receipt)
@@ -1902,10 +2263,14 @@ def cmd_status(ctx: Context, out) -> int:
             print("checkout is dirty", file=out)
 
     surfaces = discover_surfaces(ctx.checkout)
-    expected = {
-        str(item.path): item.sha256
-        for item in render(surfaces, ctx.homes, dry_run=True)
-    }
+    try:
+        expected = {
+            str(item.path): item.sha256
+            for item in render(surfaces, ctx.homes, dry_run=True)
+        }
+    except MetadataRefused as error:
+        print(f"surfaces: metadata cannot render ({error})", file=out)
+        expected = {}
     missing = 0
     drifted = 0
     for path, sha in expected.items():
@@ -2080,12 +2445,14 @@ def cmd_repo(ctx: Context, repo: Path, out, reviewers: str | None = None) -> int
 # ------------------------------------------------------------------------ CLI
 
 USAGE = """\
-usage: install.py (--user | --status | --pull | --uninstall | --adopt-legacy
+usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --uninstall | --adopt-legacy
                    | --repo [PATH]) [--dry-run] [--home DIR] [--bin-dir DIR]
 
   --user           render every sd-* surface into this machine's platform homes
                    and link the bin/ commands into the link directory
   --status         report what is installed, what drifted, what legacy remains
+  --verify         read-only strict receipt, source, render, PATH and help checks
+  --json           with --verify, emit typed verification results
   --pull           fast-forward the serving checkout (main, clean) and re-render
   --uninstall      remove exactly what the receipt records having written
   --adopt-legacy   delete the old fleet installer's successor-less renders (M1)
@@ -2104,7 +2471,7 @@ usage: install.py (--user | --status | --pull | --uninstall | --adopt-legacy
                    ~/.local/bin); the installer never edits PATH
 """
 
-MODES = ("user", "status", "pull", "uninstall", "adopt-legacy", "repo",
+MODES = ("user", "status", "verify", "pull", "uninstall", "adopt-legacy", "repo",
          "provision-library")
 
 
@@ -2116,6 +2483,7 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     repo_arg = None
     reviewers = None
     dry_run = False
+    as_json = False
     home_arg = None
     bin_dir_arg = None
     index = 0
@@ -2132,6 +2500,8 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
                 repo_arg = argv[index]
         elif token == "--dry-run":
             dry_run = True
+        elif token == "--json":
+            as_json = True
         elif token == "--home":
             index += 1
             if index >= len(argv):
@@ -2161,6 +2531,9 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
 
     if mode is None:
         print(USAGE, file=out, end="")
+        return 2
+    if as_json and mode != "verify":
+        print("error: --json requires --verify", file=out)
         return 2
 
     home = Path(home_arg).expanduser().resolve() if home_arg else Path(
@@ -2217,6 +2590,8 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
         return cmd_user(ctx, out)
     if mode == "status":
         return cmd_status(ctx, out)
+    if mode == "verify":
+        return cmd_verify(ctx, out, as_json=as_json)
     if mode == "pull":
         return cmd_pull(ctx, out)
     if mode == "uninstall":

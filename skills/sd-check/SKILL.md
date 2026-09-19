@@ -44,11 +44,27 @@ correct, not a gap. `--only lint` still runs one on demand.
 | `--dry-run` | print what would run, exit 0 without running it |
 | `--only NAME` | run exactly one of `check`, `test`, `lint` |
 | `--timeout SECONDS` | per-check timeout, default 900; a timeout is a `fail` |
+| `--record-receipt` | Explicitly record eligible full-check evidence in the shared database. |
+| `--database PATH` | Select the receipt database; valid only with `--record-receipt`. |
+
+## Optional check receipts
+
+Default invocations store nothing.
+Use `--record-receipt` only for a proven complete, local-only check in a clean committed checkout.
+The dependency declaration must be tracked at `.github/sd-check-reuse.json`.
+Before recording or reusing evidence, read `skills/sd-check/references/check-receipts.md` in the sd-ai-command-pack checkout.
+It defines the declaration, controlled environment, identity bindings, and refusal conditions.
+Do not combine receipt recording with `--only` or `--dry-run`.
+Recording a receipt does not enable reuse automatically.
+
+The declaration is an operator assertion, not proof of arbitrary command hermeticity or filesystem isolation.
+Do not enable reuse when the check depends on undeclared ignored files, network access, environment, or external dependencies.
+Unknown dependencies mean run the check normally.
 
 ## Exit codes
 
-`0` nothing failed · `1` a check failed · `2` the invocation or the
-configuration was wrong (one sentence on stderr, never a traceback).
+`0` nothing failed; `1` a check or receipt-storage operation failed; `2` invocation or configuration was invalid.
+Receipt-storage failure reports `receipt_error` and provides no reusable receipt, even when the underlying checks passed.
 
 ## Never
 
@@ -60,10 +76,10 @@ configuration was wrong (one sentence on stderr, never a traceback).
 - **Never treat sd-check as a gate you can wave through.** `sd-review` runs it
   first, and a failing deterministic gate is a failing review: no model is
   asked to guess at a change that does not build.
-- **Never let sd-check write.** It changes no git state, makes no network call,
-  and stores nothing. Whatever the repo's own check command does is the repo's
-  business — if that command commits or pushes, that is the repo's bug, not
-  sd-check's contract.
+- Keep wrapper effects separate from repository check effects.
+  The wrapper changes no Git state and makes no network calls itself.
+  Default execution stores nothing; explicit receipt recording permits only its shared-database checkpoint writes.
+  Repository commands can have their own effects; receipt recording does not authorize unrelated writes or transmission.
 - **Never substitute a hand-rolled command for a `fail` you did not like.**
   Fix the repo's entrypoint or report the failure.
 

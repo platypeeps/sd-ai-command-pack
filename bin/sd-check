@@ -18,25 +18,27 @@ Four statuses, and only one of them is a failure:
 target is not a repository that failed lint.
 
 Exit 0 when nothing failed, 1 when a check failed, 2 when the invocation or the
-configuration was wrong. A controlled error prints a sentence, never a
-traceback. sd-check itself writes nothing, changes no git state, and makes no
-network call; whatever the repo's own check command does is the repo's business.
+configuration was wrong. A controlled error prints a sentence, never a traceback.
+Only --record-receipt writes local checkpoint evidence; it never changes Git.
+The repository's check commands own their effects, including any network calls.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import subprocess
 import sys
 import time
-from typing import TextIO
+from typing import Mapping, TextIO
 
 _BIN = str(pathlib.Path(__file__).resolve().parent)
 if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
+import sd_check_receipts  # noqa: E402
 import sd_lib  # noqa: E402
 
 PASS = "pass"
@@ -107,7 +109,7 @@ def plan(
 
 
 def run_one(
-    command: list[str], root: pathlib.Path, timeout: int
+    command: list[str], root: pathlib.Path, timeout: int, environ: Mapping[str, str] | None = None
 ) -> tuple[str, int | None, float, str, str, str]:
     """Run one check. Output is captured and attributed, never interleaved."""
     started = time.monotonic()
@@ -119,6 +121,7 @@ def run_one(
             text=True,
             timeout=timeout,
             check=False,
+            env=environ,
         )
     except subprocess.TimeoutExpired:
         return FAIL, None, time.monotonic() - started, "", "", f"timed out after {timeout}s"
@@ -145,6 +148,7 @@ def execute(
     only: str | None,
     dry_run: bool,
     timeout: int,
+    environ: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     entries = plan(detection, only)
     checks: list[dict[str, object]] = []
@@ -167,7 +171,8 @@ def execute(
                 record["status"] = SKIPPED
                 record["reason"] = "dry run"
             else:
-                status, code, duration, out, err, note = run_one(command, root, timeout)
+                status, code, duration, out, err, note = (run_one(command, root, timeout) if environ is None
+                                                        else run_one(command, root, timeout, environ))
                 out_tail, out_cut = _tail(out)
                 err_tail, err_cut = _tail(err)
                 record.update(
@@ -223,6 +228,8 @@ def render(result: dict[str, object], stream: TextIO) -> None:
         write("sd-check: dry run, nothing executed\n")
     else:
         write(f"sd-check: {result['status']}\n")
+    if result.get("receipt_error"):
+        write(f"sd-check: receipt unavailable: {result['receipt_error']}\n")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -233,6 +240,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
     parser.add_argument("--dry-run", action="store_true", help="print what would run, then exit 0")
     parser.add_argument("--only", metavar="NAME", help=f"run one of {', '.join(sd_lib.CHECK_NAMES)}")
+    parser.add_argument("--record-receipt", action="store_true", help="explicitly store a reusable clean full-check receipt")
+    parser.add_argument("--database", type=pathlib.Path, help="receipt database; only with --record-receipt")
     parser.add_argument(
         "--timeout",
         type=int,
@@ -258,7 +267,23 @@ def main(argv: list[str] | None = None) -> int:
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
         detection = sd_lib.detect_entrypoints(root)
-        result = execute(root, detection, args.only, args.dry_run, args.timeout)
+        if args.database and not args.record_receipt:
+            raise UsageError("--database requires --record-receipt")
+        if args.record_receipt and (args.only or args.dry_run):
+            raise UsageError("--record-receipt requires an actual full check")
+        before, controlled = None, None
+        if args.record_receipt:
+            try:
+                before = sd_check_receipts.prepare_check_receipt(root, os.environ, args.database)
+                controlled = sd_check_receipts.receipt_environment(sd_check_receipts.reuse_contract(root), os.environ)
+            except Exception as error:
+                raise UsageError(f"receipt unavailable: {error}") from None
+        result = execute(root, detection, args.only, args.dry_run, args.timeout, controlled)
+        if before is not None:
+            try:
+                result["receipt_revision"] = sd_check_receipts.store_check_receipt(root, os.environ, args.database, before, result)
+            except Exception as error:
+                result["receipt_error"] = str(error)
     except sd_lib.ConfigError as error:
         print(f"sd-check: error: {error}", file=sys.stderr)
         return 2
@@ -272,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
         render(result, sys.stdout)
     if args.dry_run:
         return 0
-    return 1 if result["status"] == FAIL else 0
+    return 1 if result["status"] == FAIL or result.get("receipt_error") else 0
 
 
 if __name__ == "__main__":

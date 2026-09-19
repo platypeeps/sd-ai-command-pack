@@ -120,7 +120,17 @@ def executable_section() -> str:
 
 
 def reconcile_section() -> str:
-    return section(SKILL_TEXT, "## What a rerun reconciles")
+    text = section(SKILL_TEXT, "## What a rerun reconciles")
+    return text + "\n" + referenced_procedure(text, "recovery.md")
+
+
+def referenced_procedure(text: str, filename: str) -> str:
+    """Follow the procedure the entrypoint actually names, not an assumed copy."""
+    paths = re.findall(r"`(skills/sd-ship/references/[^`]+)`", text)
+    matches = [path for path in paths if pathlib.Path(path).name == filename]
+    if len(matches) != 1:
+        raise AssertionError(f"expected one {filename} reference, found {matches}")
+    return (REPO_ROOT / matches[0]).read_text(encoding="utf-8")
 
 
 def steps() -> dict[int, str]:
@@ -433,6 +443,42 @@ class AChangeWithNoWorkItem(unittest.TestCase):
         self.assertIsNone(POLLING.search("gh pr checks 1 --watch"))
 
 
+class PostMergeCloseout(unittest.TestCase):
+    """Every merge gets an inventory; deletion needs distinct scoped authority."""
+
+    def setUp(self) -> None:
+        self.closeout = referenced_procedure(steps()[9], "post-merge-closeout.md")
+
+    def test_every_merge_loads_closeout_without_requiring_a_cleanup_request(self) -> None:
+        self.assertIn("After every confirmed in-scope merge", steps()[9])
+        self.assertIn("Run this after every confirmed in-scope merge", self.closeout)
+        self.assertIn("even when the user requested no deletion", self.closeout)
+        for resource in ("refs", "branches", "stashes", "worktrees"):
+            with self.subTest(resource=resource):
+                self.assertIn(resource, steps()[9])
+
+    def test_cleanup_keeps_exact_target_approval_and_recovery_boundaries(self) -> None:
+        for token in ("consolidated exact target list", "explicit approval", "full object ID",
+                      "read-back", "Drift or new activity stops", "squash merge",
+                      "dirty, active, locked, unrelated, primary, and serving",
+                      "unique or unverified", "shared virtualenv/cache",
+                      "older reflog entries", "index and untracked parents",
+                      "concurrent stash activity", "before proposing its deletion"):
+            with self.subTest(boundary=token):
+                self.assertIn(token, self.closeout)
+        for command in commands(self.closeout):
+            self.assertIsNone(DELETION.search(command), command)
+
+    def test_threads_need_supported_dispositions_and_readback(self) -> None:
+        for token in ("inline thread", "review-body", "all result pages", "late Copilot",
+                      "Local acknowledgement does not post", "durable successor",
+                      "eligible inline thread", "read back", "leave the thread open",
+                      "Authorized shipping closeout owns remote replies",
+                      "That skill remains local-only"):
+            with self.subTest(boundary=token):
+                self.assertIn(token, self.closeout)
+
+
 class TheNeededByTrailer(unittest.TestCase):
     """Criterion 3: the warning path, the pass path, and one definition.
 
@@ -704,7 +750,7 @@ class TheRowTheMergeWrites(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.step = steps()[8]
+        self.step = steps()[8] + "\n" + referenced_procedure(steps()[8], "delivery.md")
 
     def test_the_step_still_owns_the_closure(self) -> None:
         """The control. A step 8 that stopped naming the trailers would make
@@ -799,7 +845,7 @@ class TheCancelPath(unittest.TestCase):
     """Cancellation completes in the database without requiring another merge."""
 
     def setUp(self) -> None:
-        self.step = steps()[8]
+        self.step = steps()[8] + "\n" + referenced_procedure(steps()[8], "delivery.md")
 
     def test_the_cancel_writes_done_with_a_cancelled_note(self) -> None:
         self.assertTrue(

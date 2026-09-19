@@ -177,9 +177,8 @@ class TheCostRows(LedgerFixture):
         self.assertEqual(result["reviewed_by"], ["free"])
         self.assertEqual([row[2] for row in self.rows()], ["run", "run"])
 
-    def test_a_dead_owners_reservation_is_swept_at_review_start(self) -> None:
-        """A `reserved` row whose pid is dead holds the cap for one run at
-        most: `exposure` counts it before `review` starts and not after."""
+    def test_explanation_keeps_orphans_until_an_actual_ready_review(self) -> None:
+        """A read-only explanation must not release a reservation."""
         self.seed()
         connection = connect(self.database)
         try:
@@ -189,12 +188,14 @@ class TheCostRows(LedgerFixture):
         finally:
             connection.close()
         result = self.review(FakeClient(default=usage_answer()), explain=True)
-        self.assertEqual(result["capped_bills"], {})
+        self.assertIn("paid", result["capped_bills"])
         connection = connect(self.database, write=False)
         try:
-            self.assertEqual(exposure(connection, bill="paid"), 0.0)
+            self.assertEqual(exposure(connection, bill="paid"), 1.0)
         finally:
             connection.close()
+        result = self.review(FakeClient(default=usage_answer()))
+        self.assertEqual(result["capped_bills"], {})
 
 
 class TheConcurrentPair(LedgerFixture):

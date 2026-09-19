@@ -71,7 +71,7 @@ REACHED_WITH_THE_LIBRARY = {
     "sd_install.py::expire_trials": "cmd_user() calls open_library() first",
     # `Ship` is built only by `main`, after `sd_lib.import_sd_db()` answered.
     "sd-ship::Ship.__init__": "main() calls sd_lib.import_sd_db() before building Ship",
-    "sd-ship::Ship.merge": "a Ship exists only after main() called the helper",
+    "sd-ship::Ship.merge_authority": "a Ship exists only after main() called the helper",
     "sd-ship::Ship.note_demotion": "a Ship exists only after main() called the helper",
     "sd-ship::Ship.reconcile": "a Ship exists only after main() called the helper",
     # Handed that same `Ship` by `Ship.adjudicate`.

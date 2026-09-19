@@ -172,6 +172,10 @@ class NeverPostsTests(unittest.TestCase):
             # `gh` and posting-fragment assertions above cover the entry point
             # that would have to do the posting.
             "sd_registry",
+            # Focused local readers; only sd-check explicitly calls receipt writers.
+            "sd_check_receipts",
+            "sd_review_material",
+            "sd_review_readiness",
             # The installer, imported inside the one dispatch branch. It is in
             # this repository and is itself held to the never-posts assertions
             # below, so it widens the allow-list without widening the boundary.
@@ -212,7 +216,7 @@ class NeverPostsTests(unittest.TestCase):
     def test_nothing_is_opened_for_writing_outside_the_attempt_directory(self) -> None:
         writes = [node for node in ast.walk(TREE) if isinstance(node, ast.Call)
                   and isinstance(node.func, ast.Attribute) and node.func.attr == "write_text"]
-        self.assertEqual(len(writes), 2)  # Codex schema and Claude review material.
+        self.assertEqual(len(writes), 1)  # One CLI attempt writer: Codex schema or Claude review material.
         for call in writes:
             target = call.func.value
             self.assertIsInstance(target, ast.BinOp)
@@ -383,11 +387,21 @@ class LineBudgetTests(unittest.TestCase):
         # stale window joins the same map as the capped bills, so the chain
         # and the pick refuse it unchanged; `--explain` and `--dry-run` read
         # the rows and send nothing.
+        #
+        # 2430 -> 2561 is the approved workflow-efficiency slice. It adds
+        # explicit, fully bound check receipts, zero-call readiness, complete
+        # input-byte advice, and post-gate input revalidation. Shared JSON,
+        # CLI attempts, result accounting, and redundant-wrapper removal saved
+        # 59 lines before the final mutation guard. The user approved this
+        # measured increase; shared-core classification and complexity limits
+        # remain unchanged. The exact resulting size keeps this a ratchet.
+        # Receipt identity includes directory topology/modes and resolves
+        # executable paths from the same repository cwd used by dispatch.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2430,
+            2561,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

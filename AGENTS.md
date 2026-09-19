@@ -4,6 +4,8 @@ Instructions for AI assistants working in this repository.
 
 ## Maintainer Rules
 
+- Follow [.claude/rules/sd-operator-defaults.md](.claude/rules/sd-operator-defaults.md) for reviewer selection, STE-Concise, and diagram tooling.
+  These defaults apply to both Claude and Codex.
 - Do not create pull requests in the upstream `Trellis` repository without
   explicit approval from the user for that specific upstream PR. If
   `sd-ai-command-pack` work uncovers a `Trellis`-owned change, document the
@@ -48,7 +50,7 @@ Shared contributors do not revoke user permission, but existing ownership gates 
 
 ## Calling Convention
 
-The pack's executables live in `bin/`. `bin/sd_install.py --user` links each
+The pack's executables live in `bin/`. `python3 bin/sd_install.py --user` links each
 of them into `~/.local/bin` (`--bin-dir DIR` for another directory) and records
 every link in `installed.json`, so once `--user` has run on a machine a bare
 `sd`, `sd-status` or `sd-review` resolves from any directory, provided that
@@ -66,6 +68,10 @@ machine in front of you, run the installer's status command rather than
 reading a list: its `commands:` line enumerates `bin/` and `PATH` at runtime,
 counts the commands that resolve from this checkout, names the missing ones,
 and says whether a command resolves elsewhere.
+
+Codex exposes these procedures as skills: invoke `$sd-review`, `$sd-ship`, or `$sd-plan`.
+Do not expect `/sd-*` entries in its slash-command menu.
+Shell commands remain separate; not every skill has an executable.
 
 ## What a Document Owns
 

@@ -18,6 +18,7 @@ from typing import Any, Callable
 import sd_ship_dispositions
 from sd_ship_history import completed_depth, digest
 from sd_ship_remote import Refusal, git
+from sd_ship_workflow import success
 
 
 class ReviewTimeout(Exception):
@@ -75,7 +76,9 @@ class SharedReview:
         self.revision = self.store.save(self.connection, self.key, self.revision, self.history.stamp(self.state))
 
     def result(self, phase: str, **extra) -> dict:
-        return self.identity.result_fields(phase, self.state, self.runtime.clock(), extra)
+        result = self.identity.result_fields(phase, self.state, self.runtime.clock(), extra)
+        result["workflow"] = success(phase, observed_only=bool(extra.get("observed_only")))
+        return result
 
     def review_inputs(self, head: str) -> dict:
         passes = self.history.native(self.state)
@@ -168,6 +171,8 @@ class SharedReview:
         self.validate_dispatch(head, prior, retry, additional)
         base = passes[-1]["head"] if passes and not (retry or additional) else None
         argv = [sys.executable, str(self.runtime.bin_dir / "sd-review"), "--scope", "branch", "--challenge", "--json", "--database", str(self.database)]
+        if getattr(self.args, "reuse_check", False):
+            argv.append("--reuse-check")
         if base:
             argv += ["--base", base]
         passes.append({"head": head, "started_at": self.runtime.clock(), "base": base, "retry": retry})
@@ -196,6 +201,7 @@ class SharedReview:
             planned = self.runtime.process(self.root, argv + ["--explain"], timeout=self.runtime.setup_seconds)
             try:
                 plan = self.runtime.timing_plan(planned)
+                validate_review_readiness(planned)
             except Refusal:
                 self.save(review_preflight_error=self.preflight_diagnostic(planned))
                 raise
@@ -227,3 +233,27 @@ class SharedReview:
         self.check_review(head)
         if self.runtime.current_head(self.root) != head:
             raise Refusal("HEAD or checkout changed during local checks and review")
+
+
+def validate_review_readiness(planned: subprocess.CompletedProcess) -> None:
+    """Only live explain output needs readiness; stored historical reports retain their schema."""
+    try:
+        readiness = json.loads(planned.stdout)["readiness"]
+        status, blockers = readiness["status"], readiness["blockers"]
+        valid = (status in ("ready", "blocked") and isinstance(blockers, list)
+                 and isinstance(readiness.get("warnings"), list)
+                 and readiness.get("runtime_approval") == "not_observable"
+                 and all(isinstance(row, dict) and all(isinstance(row.get(key), str) and row[key]
+                         for key in ("code", "boundary", "next_action")) for row in blockers)
+                 and (status == "ready") == (not blockers))
+    except (ValueError, KeyError, TypeError, AttributeError):
+        valid = False
+    if not valid:
+        raise Refusal("local review emitted no valid readiness plan; no provider pass was reserved",
+                      code="readiness_invalid", boundary="runtime", state="operator_decision",
+                      next_action="Install matching review tools, then retry prepare.")
+    if blockers:
+        first = blockers[0]
+        raise Refusal(f"local review readiness blocked: {first['code']}; no provider pass was reserved",
+                      code=first["code"], boundary=first["boundary"], next_action=first["next_action"],
+                      state="operator_decision", approval_required=first["code"] == "consent_missing")

@@ -184,6 +184,73 @@ class TheReading(MeterFixture):
         self.assertEqual((result["reviewed_by"], len(reader.read)), (["metered"], 1))
 
 
+class TheMeterSelection(MeterFixture):
+    def set_registry(self, text: str) -> None:
+        self.registry_path.write_text(text, encoding="utf-8")
+        self.database.unlink()
+        self.seed()
+
+    def test_an_unranked_provider_does_not_trigger_a_meter_request(self) -> None:
+        self.set_registry(REGISTRY.replace("reviewer: [metered, free]", "reviewer: [free]"))
+        result = self.review()
+        self.assertEqual(result["reviewed_by"], ["free"])
+        self.assertEqual((self.reader.read, self.meter_rows()), ([], []))
+        self.assertEqual((result["capped_bills"], result["meter_faults"]), ({}, {}))
+
+    def test_an_explicit_unranked_provider_still_reads_its_meter(self) -> None:
+        self.set_registry(REGISTRY.replace("reviewer: [metered, free]", "reviewer: [free]"))
+        result = self.review(provider="metered")
+        self.assertEqual(result["reviewed_by"], ["metered"])
+        self.assertEqual([row["bill"] for row in self.reader.read], ["plan"])
+        self.assertEqual(len(self.meter_rows()), 2)
+
+    def test_an_explicit_pick_does_not_meter_another_ranked_provider(self) -> None:
+        result = self.review(provider="free")
+        self.assertEqual(result["reviewed_by"], ["free"])
+        self.assertEqual((self.reader.read, self.meter_rows()), ([], []))
+
+    def test_a_provider_without_consent_does_not_trigger_a_meter_request(self) -> None:
+        local = self.root / "CLAUDE.local.md"
+        local.write_text(local.read_text().replace("metered@metered.example.test, ", ""))
+        result = self.review()
+        self.assertEqual(result["reviewed_by"], ["free"])
+        with self.assertRaises(sd_review.sd_registry.ConsentRefusal):
+            self.review(provider="metered")
+        self.assertEqual((self.reader.read, self.meter_rows()), ([], []))
+
+    def test_an_author_provider_does_not_trigger_a_meter_request(self) -> None:
+        with mock.patch.object(sd_review, "author_vendors", return_value=("meteredvendor",)):
+            result = self.review()
+            self.assertEqual(result["reviewed_by"], ["free"])
+            with self.assertRaises(sd_review.sd_registry.ConsentRefusal):
+                self.review(provider="metered")
+        self.assertEqual((self.reader.read, self.meter_rows()), ([], []))
+
+    def test_an_unsupported_reader_does_not_trigger_a_meter_request(self) -> None:
+        self.set_registry(REGISTRY.replace("cost: plan,", "cost: subscription,").replace(
+            'url: "https://metered.example.test/v1", model: fixture,',
+            'start: "fixture-cli", reader: unknown-reader,',
+        ))
+        result = self.review()
+        self.assertEqual(result["reviewed_by"], ["free"])
+        with self.assertRaises(sd_review.sd_registry.ConsentRefusal):
+            self.review(provider="metered")
+        self.assertEqual((self.reader.read, self.meter_rows()), ([], []))
+
+    def test_a_disabled_provider_does_not_trigger_a_meter_request(self) -> None:
+        self.set_registry(REGISTRY.replace(
+            "vendor: meteredvendor, bill: plan,", 'vendor: meteredvendor, bill: plan, enabled: false, reason: "fixture",',
+        ))
+        result = self.review()
+        self.assertEqual(result["reviewed_by"], ["free"])
+        self.assertEqual((self.reader.read, self.meter_rows()), ([], []))
+
+    def test_zero_review_depth_does_not_trigger_a_meter_request(self) -> None:
+        with mock.patch.object(sd_review, "review_depth", return_value=0):
+            self.review()
+        self.assertEqual((self.reader.read, self.meter_rows()), ([], []))
+
+
 class TheMissingAndTheStale(MeterFixture):
     def test_no_reading_caps_naming_the_missing_reading(self) -> None:
         self.reader = FakeMeter(OSError("connection refused"))

@@ -4,8 +4,8 @@ Step 3e removed the `Shell coverage` CI job and its required status context
 (R11-D6). That removal is only defensible because of a fact about the tree
 rather than a judgement about the job: the payload it measured -- the shell
 under `templates/scripts/` that every consumer received a copy of -- no longer
-exists. The installer renders `skills/**/SKILL.md` verbatim and nothing else,
-so there is no shipped shell left to cover.
+exists. The installer renders Markdown payloads and Codex invocation-policy
+metadata. It ships no shell.
 
 A deleted CI job leaves nothing behind that notices when its premise stops
 holding. This test is that notice. If shell reappears on the render surface,
@@ -91,7 +91,7 @@ def looks_like_shell(path):
 
 class NoShippedShellTests(unittest.TestCase):
     def test_the_render_surface_is_markdown_only(self):
-        """A skill directory is copied verbatim; a script there is shipped.
+        """A skill's companions are copied; a script there is shipped.
 
         The surface is `skills/<name>/...`, not everything under `skills/`.
         Requirement 10 put one file at the root of the tree -- `paths.json`,
@@ -111,7 +111,7 @@ class NoShippedShellTests(unittest.TestCase):
         self.assertEqual(
             offenders,
             [],
-            "the installer renders this tree verbatim onto every platform home, "
+            "the installer renders this tree onto platform homes, "
             "so a non-markdown file here is payload. If that is intended, the "
             "renderer, its parity test, and R11-D6's premise all need revisiting",
         )

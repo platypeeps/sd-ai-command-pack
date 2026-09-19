@@ -32,6 +32,7 @@ from sd_ship_history import validate_additional_requests as validate_additional_
 from sd_ship_item import ItemIdentity
 from sd_ship_remote import GitHub, Refusal, git, run, slug
 from sd_ship_review import ReviewRuntime, ReviewTimeout, SharedReview
+from sd_ship_workflow import blocked, failure
 
 BIN = pathlib.Path(__file__).resolve().parent
 REVIEW_SETUP_SECONDS = 3600
@@ -221,7 +222,9 @@ def moment() -> str:
 
 def current_head(root: pathlib.Path) -> str:
     if git(root, "status", "--porcelain", "--untracked-files=all"):
-        raise Refusal("checkout has uncommitted changes; commit enumerated paths before preparing")
+        raise Refusal("checkout has uncommitted changes; commit enumerated paths before preparing",
+                      code="checkout_dirty", boundary="input", state="operator_decision",
+                      next_action="Preserve current changes, then commit the intended paths before preparing.")
     return git(root, "rev-parse", "HEAD")
 
 
@@ -273,9 +276,16 @@ def commit_paths(root: pathlib.Path, args) -> None:
 class Ship(SharedReview):
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args):
         from sd_db import ship
+        validate_identity(args)
+        if args.no_item:
+            from sd_ship_no_item import publication_review
+            review = publication_review(root, connection, database, args, ship, review_runtime())
+            self.__dict__.update(review.__dict__)
+            self.api = GitHub(root, self.repository)
+            return
         self.store, self.root, self.connection, self.args = ship, root, connection, args
         self.database = database
-        self.repository = slug(git(root, "remote", "get-url", "origin"))
+        self.repository = slug(git(root, "config", "--get", "remote.origin.url"))
         self.branch = git(root, "symbolic-ref", "--quiet", "--short", "HEAD")
         info = ship.identity(connection, args.item)
         self.item, self.repo = info["item"], info["repo"]
@@ -310,11 +320,35 @@ class Ship(SharedReview):
         return {"claim": value, "item_scope": digest({k: self.item[k] for k in ("title", "body", "path")})}
 
     def assert_scope(self) -> None:
-        if self.state.get("deliver"):
+        if not self.args.no_item and self.state.get("deliver"):
             item = self.store.identity(self.connection, self.args.item)["item"]
             scope = digest({key: item[key] for key in ("title", "body", "path")})
             if self.state.get("acceptance", {}).get("item_scope") != scope:
                 raise Refusal("item acceptance scope changed after the delivery claim")
+
+    def publication_claim(self) -> tuple[str, bool, dict | None, bool]:
+        if self.args.no_item:
+            body = self.args.body_file.read_text() if self.args.body_file else self.state.get("body") or "Code changes reviewed locally."
+            if re.search(r"(?im)^[ \t]*(?:Item|Delivers|Closes|Authored-with|Attributes|Work)[ \t]*:", body):
+                raise Refusal("no-item publication cannot carry item or caller-supplied authorship trailers")
+            return body, False, None, False
+        deliver = bool(self.args.deliver) if self.args.deliver is not None else bool(self.state.get("deliver"))
+        claim = self.acceptance() if self.args.deliver is not None or not self.state else self.state.get("acceptance")
+        body = self.args.body_file.read_text() if self.args.body_file else self.state.get("body") or f"Code changes associated with sd:{self.args.item}."
+        if self.args.body_file and re.search(r"(?im)^(?:Item|Delivers|Closes|Authored-with|Attributes|Work):", body):
+            raise Refusal("the ship adapter owns association and delivery trailers")
+        local_work = bool(self.item["kind"] == "work" and self.item.get("path")
+                          and git(self.root, "ls-files", "--deduplicate", "--", self.item["path"]))
+        return body, deliver, claim, local_work
+
+    def commit_warnings(self, head: str) -> list[str]:
+        warnings = []
+        if not self.args.no_item and pathlib.Path(self.repo["path"]).name in {"sd-ai-command-pack", "system", "sd-writing-pack"}:
+            start = self.state["passes"][-1]["report"].get("authorship_base") or self.state["passes"][0]["report"]["subject"]["base"]
+            for commit, message in sd_lib.commit_messages(self.root, start, head):
+                if not any(line.startswith("Needed-by:") for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()):
+                    warnings.append(f"commit {commit} has no Needed-by trailer; delivery continues")
+        return warnings
 
     def prepare(self) -> dict:
         if self.state.get("phase") in ("merged", "merge_dispatch"):
@@ -336,25 +370,17 @@ class Ship(SharedReview):
         title = self.args.title or self.state.get("title") or git(self.root, "show", "-s", "--format=%s", head)
         if not title or re.match(r"(?i)wip\b", title):
             raise Refusal("provide a final --title; wip titles never reach the default branch")
-        deliver = bool(self.args.deliver) if self.args.deliver is not None else bool(self.state.get("deliver"))
-        claim = self.acceptance() if self.args.deliver is not None or not self.state else self.state.get("acceptance")
-        body = self.args.body_file.read_text() if self.args.body_file else self.state.get("body") or f"Code changes associated with sd:{self.args.item}."
-        if self.args.body_file and re.search(r"(?im)^(?:Item|Delivers|Closes|Authored-with|Attributes|Work):", body):
-            raise Refusal("the ship adapter owns association and delivery trailers")
-        # `--deduplicate`: the answer wanted here is whether the index holds
-        # the item's page at all, and an unmerged path arrives once per merge
-        # stage. Nothing moves -- a non-empty list is truthy at one row or at
-        # three -- so this is the form, not a fix (sd:841).
-        local_work = (self.item["kind"] == "work" and self.item.get("path")
-                      and git(self.root, "ls-files", "--deduplicate", "--", self.item["path"]))
+        body, deliver, claim, local_work = self.publication_claim()
         mode = self.resolve_mode()
-        if (mode != "guest" or local_work) and f"Work: sd:{self.args.item}" not in body:
+        if not self.args.no_item and (mode != "guest" or local_work) and f"Work: sd:{self.args.item}" not in body:
             body += f"\n\nWork: sd:{self.args.item}\n"
         if not self.state:
             self.save(repository=self.repository, branch=self.branch, item=self.args.item, phase="new")
-        if self.state.get("pull_request") and (self.state.get("title") != title or self.state.get("deliver") != deliver):
+        if self.state.get("pull_request") and (self.state.get("title") != title
+                                               or (not self.args.no_item and self.state.get("deliver") != deliver)):
             raise Refusal("existing PR delivery claim or title differs; reconcile the prepared scope first")
-        self.save(title=title, body=body, base=base, deliver=deliver, acceptance=claim)
+        fields = {} if self.args.no_item else {"deliver": deliver, "acceptance": claim}
+        self.save(title=title, body=body, base=base, **fields)
         self.assert_scope()
         # Rules 5 and 8 read the pull request body, and the body is built by
         # now. Without it the rules report themselves not run and CI is the
@@ -373,18 +399,12 @@ class Ship(SharedReview):
             body_path.write_text(body)
             run(self.root, [*lint, "--pr-body", str(body_path)], timeout=300)
         self.review(head)
-        warnings = []
-        if pathlib.Path(self.repo["path"]).name in {"sd-ai-command-pack", "system", "sd-writing-pack"}:
-            start = self.state["passes"][-1]["report"].get("authorship_base") or self.state["passes"][0]["report"]["subject"]["base"]
-            for commit, message in sd_lib.commit_messages(self.root, start, head):
-                if not any(line.startswith("Needed-by:") for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines()):
-                    warnings.append(f"commit {commit} has no Needed-by trailer; delivery continues")
-        self.save(warnings=warnings)
+        self.save(warnings=self.commit_warnings(head))
         self.assert_scope()
         # Artifact exposure is checked again against the actual push target.
         mode = self.resolve_mode()
         if mode == "guest":
-            if not local_work:
+            if not self.args.no_item and not local_work:
                 body = body.replace(f"\n\nWork: sd:{self.args.item}\n", "")
                 self.save(body=body)
             changed = git(self.root, "diff", "--name-only", f"origin/{base}...{head}").splitlines()
@@ -527,6 +547,8 @@ class Ship(SharedReview):
         lookup and the insert share a transaction, as `sd_db.ship.note_merge`
         does for the merge marker.
         """
+        if self.args.no_item:
+            return
         from sd_db.database import transaction
         from sd_db.writes import add_note
         marker, body = sd_lib.demotion_note(self.repository, answer)
@@ -538,10 +560,38 @@ class Ship(SharedReview):
             if not present:
                 add_note(self.connection, self.args.item, sd_lib.DEMOTION_NOTE_KIND, body)
 
-    def merge(self) -> dict:
+    def merge_authority(self, head: str) -> None:
         from sd_db import runner
+        if self.args.run:
+            authority = runner.merge_authority(self.connection, self.args.run, head)
+            if pathlib.Path(authority["work_path"]).resolve() != self.root.resolve() or authority["item"] != self.args.item:
+                raise Refusal("merge assignment does not own this checkout and item")
+        elif not self.args.manual:
+            raise Refusal("merge needs a separate owned --run assignment or explicit --manual invocation",
+                          code="merge_authority_required", state="operator_decision", approval_required=True,
+                          next_action="Obtain merge authorization, then use the appropriate --run or --manual invocation.")
+        elif self.args.no_item:
+            try:
+                self.store.manual_merge_guard(self.connection, str(self.root), repository=self.repository)
+            except TypeError:
+                raise Refusal("install matching sd_db: canonical-repository manual merge guard is unavailable",
+                              code="library_incompatible", boundary="runtime", state="operator_decision",
+                              next_action="Install the matching sd_db library, then retry merge.") from None
+        else:
+            self.store.manual_merge_guard(self.connection, self.repo["path"])
+
+    def squash_body(self) -> str:
+        body = self.state["body"].rstrip() + "\n\n"
+        if not self.args.no_item:
+            body += f"Item: sd:{self.args.item}\n"
+            if self.state.get("deliver"):
+                body += f"Delivers: sd:{self.args.item}\n"
+        return body
+
+    def merge(self) -> dict:
         if not self.state.get("pull_request"):
-            raise Refusal("prepare this branch before merging")
+            raise Refusal("prepare this branch before merging", code="prepare_required", state="operator_decision",
+                          next_action="Run sd-ship prepare with the same identity.")
         observed = self.api.pull(self.state["pull_request"]["number"])
         if observed.get("merged") is True:
             return self.reconcile()
@@ -549,14 +599,7 @@ class Ship(SharedReview):
         if not head or current_head(self.root) != head:
             raise Refusal("--expected-head must name the current exact reviewed commit")
         self.check_review(head)
-        if self.args.run:
-            authority = runner.merge_authority(self.connection, self.args.run, head)
-            if pathlib.Path(authority["work_path"]).resolve() != self.root.resolve() or authority["item"] != self.args.item:
-                raise Refusal("merge assignment does not own this checkout and item")
-        elif not self.args.manual:
-            raise Refusal("merge needs a separate owned --run assignment or explicit --manual invocation")
-        else:
-            self.store.manual_merge_guard(self.connection, self.repo["path"])
+        self.merge_authority(head)
         # The one validated reader of the `mode:` line, as `merge_ownership`
         # and `resolve_mode` read it: a word that is not a mode is named here
         # instead of failing to match "guest" and passing (sd:930).
@@ -575,9 +618,7 @@ class Ship(SharedReview):
         observed = self.api.pull(observed["number"])
         self.api.ready(observed, head, base, protection)
         self.save(phase="ci_passed")
-        body = self.state["body"].rstrip() + f"\n\nItem: sd:{self.args.item}\n"
-        if self.state.get("deliver"):
-            body += f"Delivers: sd:{self.args.item}\n"
+        body = self.squash_body()
         # Preserve actual authorship through the squash, including its vendor
         # at authoring time. No declaration supplied to merge can rewrite it.
         start = self.state["passes"][-1]["report"].get("authorship_base") or self.state["passes"][0]["report"]["subject"]["base"]
@@ -611,8 +652,7 @@ class Ship(SharedReview):
         self.check_review(head)
         if current_head(self.root) != head:
             raise Refusal("HEAD moved immediately before merge")
-        if self.args.run:
-            runner.merge_authority(self.connection, self.args.run, head)
+        self.merge_authority(head)
         if self.merge_ownership().get("default_branch") != base or self.api.protection(base) != protection:
             raise Refusal("ownership or branch protection changed before merge")
         self.save(phase="merge_dispatch", merge_message=body)
@@ -664,8 +704,9 @@ class Ship(SharedReview):
             raise Refusal("default branch changed during merge verification; retry reconciliation")
         evidence = self.result("merged", merge_commit=commit, verified_tip=tip)
         self.save(phase="merged", merge_commit=commit, evidence=evidence)
-        self.store.note_merge(self.connection, self.args.item, evidence)
-        if self.state.get("deliver"):
+        if not self.args.no_item:
+            self.store.note_merge(self.connection, self.args.item, evidence)
+        if not self.args.no_item and self.state.get("deliver"):
             from sd_db.errors import SdDbError
             from sd_db.progress import deliver_work
             self.assert_scope()
@@ -674,7 +715,10 @@ class Ship(SharedReview):
                 # ship transition names it; a `--run` merge has no operator.
                 deliver_work(self.connection, self.args.item, commit, who="sd-ship", verification_root=self.root)
             except (SdDbError, sqlite3.Error, ValueError) as error:
-                return {**evidence, "delivery_pending": True, "delivery_error": str(error)}
+                pending = blocked("delivery_pending", "database", "Resolve the delivery error, then run sd-ship reconcile.",
+                                  state="operator_decision")
+                return {**evidence, "delivery_pending": True, "delivery_error": str(error),
+                        "workflow": {**evidence["workflow"], **pending}}
         git(self.root, "fetch", "--prune", "origin")
         return {**evidence, "delivery_pending": False, "retained_branch": self.branch,
                 "retained_worktrees": git(self.root, "worktree", "list", "--porcelain")}
@@ -686,6 +730,7 @@ def quote_branch(repository, branch):
 
 
 def no_item_record_flags(action) -> None:
+    action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
     action.add_argument("--create-record", action="store_true", help="allocate a record without provider dispatch or a spent pass")
     action.add_argument("--assert-new-work", action="store_true", help="explicit assertion of new work, not a renamed or rewritten continuation")
     action.add_argument("--import-history", type=pathlib.Path, metavar="FILE", help="import an ordered manifest of historical reports as untrusted evidence")
@@ -708,15 +753,40 @@ def adjudication_flags(action) -> None:
     action.add_argument("--accept-dispositions", metavar="SHA256", help="explicit acceptance of this exact validated proposal; not proof of user approval")
 
 
+def identity_flags(action) -> None:
+    identity = action.add_mutually_exclusive_group(required=True)
+    identity.add_argument("--item", type=int)
+    identity.add_argument("--no-item", action="store_true", help="a standalone review record, never a placeholder work item")
+    action.add_argument("--review-id", metavar="ID", help="the stable record identity every later no-item command requires")
+    action.add_argument("--json", action="store_true")
+    action.add_argument("--database", type=pathlib.Path, help="owned runner database; defaults to the operator HOME")
+
+
+def validate_identity(args) -> None:
+    if args.review_id and not args.no_item:
+        raise Refusal("--review-id requires --no-item")
+    if not args.no_item:
+        return
+    forbidden = [name for name in ("path", "message_file", "author", "run", "deliver", "acceptance_file") if getattr(args, name, None)]
+    if forbidden:
+        raise Refusal("no-item publication does not accept commit, runner, or delivery flags: "
+                      + ", ".join("--" + name.replace("_", "-") for name in forbidden),
+                      code="no_item_flags_refused", boundary="input", state="operator_decision",
+                      next_action="Commit separately and use --review-id without item, runner, or delivery flags.")
+    if not args.review_id and not getattr(args, "create_record", False):
+        raise Refusal("no-item commands require --review-id ID; missing record identity never allocates a fresh review budget",
+                      code="review_identity_required", boundary="input", state="operator_decision",
+                      next_action="Use the existing review ID, or explicitly allocate a record for genuinely new work.")
+
+
 def parser():
     command = argparse.ArgumentParser(description=__doc__)
     commands = command.add_subparsers(dest="command", required=True)
     for name in ("prepare", "merge", "reconcile", "observe"):
         action = commands.add_parser(name)
-        action.add_argument("--item", type=int, required=True)
-        action.add_argument("--json", action="store_true")
-        action.add_argument("--database", type=pathlib.Path, help="owned runner database; defaults to the operator HOME")
+        identity_flags(action)
         if name == "prepare":
+            action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
             action.add_argument("--retry-review", action="store_true", help="spend the remaining pass on a full-branch retry of an incomplete initial review")
             action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
             action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of every existing pass; required to renew after three reservations")
@@ -737,12 +807,7 @@ def parser():
             action.add_argument("--wait-seconds", type=int, default=900)
     for name in ("review", "verify-review", "adjudicate"):
         action = commands.add_parser(name)
-        identity = action.add_mutually_exclusive_group(required=True)
-        identity.add_argument("--item", type=int)
-        identity.add_argument("--no-item", action="store_true", help="a standalone review record, never a placeholder work item")
-        action.add_argument("--json", action="store_true")
-        action.add_argument("--database", type=pathlib.Path, help="owned runner database; defaults to the operator HOME")
-        action.add_argument("--review-id", metavar="ID", help="the stable record identity every later no-item command requires")
+        identity_flags(action)
         if name == "review":
             no_item_record_flags(action)
         if name == "verify-review":
@@ -750,6 +815,20 @@ def parser():
         if name == "adjudicate":
             adjudication_flags(action)
     return command
+
+
+def dispatch(root, connection, database, args, store, readonly):
+    if args.no_item and args.command in ("review", "verify-review", "adjudicate"):
+        import sd_ship_no_item
+        return sd_ship_no_item.run_no_item(root, connection, database, args, store, review_runtime())
+    delivery = Ship(root, connection, database, args)
+    if readonly:
+        return getattr(delivery, args.command)()
+    with store.repository_lock(database, delivery.repository):
+        delivery.revision, delivery.state = store.read(connection, delivery.key)
+        if args.no_item and (delivery.state.get("branch") != delivery.branch or delivery.state.get("lifecycle") != "active"):
+            raise Refusal("no-item record changed concurrently; select its current identity before publication")
+        return getattr(delivery, args.command)()
 
 
 def main(argv=None) -> int:
@@ -764,7 +843,8 @@ def main(argv=None) -> int:
     # verb needs did not is a version that does not match this pack.
     imported = sd_lib.import_sd_db()
     if imported.module is None:
-        print(json.dumps({"ok": False, "manualRequired": True, "error": imported.problem}))
+        print(json.dumps(failure(args.command, Refusal(imported.problem, code="library_unavailable", boundary="runtime",
+                         state="operator_decision", next_action="Install the matching sd_db library, then retry."))))
         return 3
     try:
         from sd_db import ship
@@ -772,9 +852,11 @@ def main(argv=None) -> int:
         from sd_db.errors import SdDbError
         from sd_db.workflow import WorkflowError
     except ImportError as error:
-        print(json.dumps({"ok": False, "manualRequired": True, "error": f"install matching sd_db: {error}"}))
+        print(json.dumps(failure(args.command, Refusal(f"install matching sd_db: {error}", code="library_incompatible",
+                         boundary="runtime", state="operator_decision", next_action="Install the matching sd_db library, then retry."))))
         return 3
     try:
+        validate_identity(args)
         root = sd_lib.repo_root(None)
         if root is None:
             raise Refusal("cwd is not inside a Git repository")
@@ -784,22 +866,11 @@ def main(argv=None) -> int:
         try:
             if args.command in ("review", "verify-review") and not args.no_item:
                 raise Refusal("item-backed review and clearance run inside prepare and merge; --no-item selects the standalone record path")
-            if getattr(args, "no_item", False):
-                import sd_ship_no_item
-                result = sd_ship_no_item.run_no_item(root, connection, database, args, ship, review_runtime())
-                print(json.dumps(result, indent=2, sort_keys=True) if args.json else result)
-                return 0 if result["ok"] else 3
-            delivery = Ship(root, connection, database, args)
-            if readonly:
-                result = getattr(delivery, args.command)()
-            else:
-                with ship.repository_lock(database, delivery.repository):
-                    delivery.revision, delivery.state = ship.read(connection, delivery.key)
-                    result = getattr(delivery, args.command)()
+            result = dispatch(root, connection, database, args, ship, readonly)
         finally:
             connection.close()
     except (Refusal, WorkflowError, SdDbError, sd_lib.ConfigError, sd_lib.TrailerError, OSError, sqlite3.Error, ValueError, subprocess.SubprocessError) as error:
-        result = {"ok": False, "manualRequired": True, "error": str(error)}
+        result = failure(args.command, error)
     print(json.dumps(result, indent=2, sort_keys=True) if args.json else result)
     return 0 if result["ok"] else 3
 

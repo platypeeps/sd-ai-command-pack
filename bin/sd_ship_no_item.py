@@ -1,7 +1,7 @@
 """No-item review records: identity, checkpoint keys, and repository indexes.
 
-This adapter performs no item lookup, constructs no publication client, and
-dispatches no provider. It reuses the provisioned `sd_db.ship` checkpoint
+This adapter performs no item lookup and constructs no publication client.
+It reuses the provisioned `sd_db.ship` checkpoint
 primitives with separate keys, so absence is never encoded as a synthetic row.
 """
 
@@ -27,6 +27,7 @@ from sd_ship_history import (
 from sd_ship_identity import ReviewIdentity
 from sd_ship_remote import Refusal, git, slug
 from sd_ship_review import SharedReview
+from sd_ship_workflow import success
 
 REVIEW_PREFIX = "ship-review-no-item:"
 ACCEPTANCE_PREFIX = "ship-adjudication-no-item:"
@@ -413,7 +414,10 @@ class NoItemIdentity(ReviewIdentity):
     def _identity_output(self, state: dict) -> dict:
         return {"identity_mode": "no-item", "review_id": self.review_id,
                 "branch": state.get("branch"), "lifecycle": state.get("lifecycle"),
-                "identity_revision": state.get("identity_revision")}
+                "identity_revision": state.get("identity_revision"),
+                "head": state.get("head"), "reviewed_head": state.get("reviewed_head"),
+                "pull_request": state.get("pull_request"), "warnings": state.get("warnings", []),
+                "review_clearance": state.get("review_clearance")}
 
 
 def create_record(root: pathlib.Path, connection: sqlite3.Connection, database: pathlib.Path, args, store) -> dict:
@@ -445,13 +449,16 @@ def spent_passes(state: dict) -> int:
 
 
 def no_item_result(root: pathlib.Path, phase: str, review_id: str, repository: str, state: dict, extra: dict) -> dict:
-    return NoItemIdentity(review_id, repository, root).result_fields(phase, state, observed_at(), extra)
+    result = NoItemIdentity(review_id, repository, root).result_fields(phase, state, observed_at(), extra)
+    result["workflow"] = success(phase)
+    return result
 
 
-def selected_record(connection: sqlite3.Connection, store, root: pathlib.Path, args) -> tuple[str, GitFacts, int, dict]:
+def selected_record(connection: sqlite3.Connection, store, root: pathlib.Path, args,
+                    *, require_diff: bool = True) -> tuple[str, GitFacts, int, dict]:
     # Dispatch and clearance read the same table, so they own the same guard.
     validate_schema(connection)
-    facts = committed_facts(root)
+    facts = committed_facts(root, require_diff=require_diff)
     key = review_key(facts.repository, args.review_id)
     revision, state = store.read(connection, key)
     if not state:
@@ -596,11 +603,30 @@ def stored_digest(state: dict) -> dict:
     return state
 
 
-def open_review(root: pathlib.Path, connection, database: pathlib.Path, args, store, runtime) -> SharedReview:
-    key, facts, revision, state = selected_record(connection, store, root, args)
+def open_review(root: pathlib.Path, connection, database: pathlib.Path, args, store, runtime,
+                *, require_diff: bool | None = None) -> SharedReview:
+    key, facts, revision, state = selected_record(connection, store, root, args,
+                                                 require_diff=args.command not in ("reconcile", "merge") if require_diff is None else require_diff)
     return SharedReview(root, connection, database, args, store=store, repository=facts.repository,
                         branch=facts.branch, head=facts.head, key=key, revision=revision,
                         state=stored_digest(state), identity=NoItemIdentity(args.review_id, facts.repository, root),
+                        history=NoItemHistory(), runtime=runtime)
+
+
+def publication_review(root: pathlib.Path, connection, database: pathlib.Path, args, store, runtime) -> SharedReview:
+    """Observation reads a durable identity without inspecting or changing the current branch."""
+    validate_schema(connection)
+    repository = slug(git(root, "config", "--get", "remote.origin.url"))
+    key = review_key(repository, args.review_id)
+    revision, state = store.read(connection, key)
+    if not state:
+        raise Refusal(f"no no-item record {args.review_id} exists in this repository")
+    if args.command != "observe":
+        require_diff = args.command == "prepare" and state.get("phase") not in ("merged", "merge_dispatch")
+        return open_review(root, connection, database, args, store, runtime, require_diff=require_diff)
+    return SharedReview(root, connection, database, args, store=store, repository=repository,
+                        branch=state["branch"], head=state.get("head", ""), key=key, revision=revision,
+                        state=stored_digest(state), identity=NoItemIdentity(args.review_id, repository, root),
                         history=NoItemHistory(), runtime=runtime)
 
 

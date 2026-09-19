@@ -154,25 +154,23 @@ class InstallerHarness(unittest.TestCase):
 
 
 class RendererParityTests(InstallerHarness):
-    def test_every_surface_is_byte_identical_across_platforms(self):
-        """Verbatim rendering is the design, so parity is digest equality.
-
-        Asserting the *bytes* match rather than "each platform has N files" is
-        the whole point: a renderer that rewrote frontmatter per platform could
-        pass a count check while shipping three subtly different skills.
-        """
+    def test_every_surface_preserves_body_and_invocation_policy(self):
+        """Only Codex invocation metadata differs; all other bytes stay intact."""
         rc, _ = self.install()
         self.assertEqual(rc, 0)
         surfaces = sd_install.discover_surfaces(REPO_ROOT)
         self.assertTrue(surfaces, "no sd-* surfaces found in the checkout")
         homes = sd_install.platform_homes(self.home, dict(os.environ))
         for surface in surfaces:
-            expected = sd_install.digest(surface.skill.read_bytes())
             for home in homes:
+                source = surface.skill.read_bytes()
+                expected = source
+                if home.key == "codex":
+                    expected = source.replace(b"disable-model-invocation: true\n", b"")
                 target = home.target_for(surface.name)
                 self.assertTrue(target.exists(), f"{target} was not rendered")
                 self.assertEqual(
-                    sd_install.digest(target.read_bytes()),
+                    target.read_bytes(),
                     expected,
                     f"{home.key} render of {surface.name} differs from the source",
                 )
@@ -3037,6 +3035,7 @@ class LinkEdgeCaseTests(InstallerHarness):
 
     def test_a_partial_link_failure_rolls_back_and_writes_no_receipt(self):
         checkout = self.checkout_with_commands("sd", "sd-handoff", "sd-review")
+        (checkout / "skills" / "sd-probe" / "SKILL.md").write_text("---\nname: sd-probe\ndisable-model-invocation: true\n---\n")
         real = os.symlink
         calls = []
 
@@ -3200,6 +3199,542 @@ class LinkEdgeCaseTests(InstallerHarness):
         self.assertTrue(loop.is_symlink(), "the loop was removed")
         self.assertIn(f"left in place (not our link): {loop}", out.getvalue())
         self.assertFalse((bin_dir / "sd").is_symlink(), "our link was left")
+
+
+class CodexMetadataTests(InstallerHarness):
+    def make_surface(self, marker="true", companion=None, newline="\n"):
+        root = self.home / "checkout" / "skills" / "sd-probe"
+        root.mkdir(parents=True, exist_ok=True)
+        source = root / "SKILL.md"
+        front = "---\nname: sd-probe\ndescription: Test the metadata adapter.\n"
+        if marker is not None:
+            front += f"disable-model-invocation: {marker}\n"
+        source.write_bytes((front + "metadata:\n  note: untouched\n---\n\nBody ä.\n").replace("\n", newline).encode())
+        extras = []
+        if companion is not None:
+            path = root / "agents" / "openai.yaml"
+            path.parent.mkdir(exist_ok=True)
+            path.write_bytes(companion)
+            extras.append(sd_install.Extra("agents/openai.yaml", path))
+        self.write_paths(self.home / "checkout", "sd-probe")
+        return sd_install.Surface("sd-probe", source, extras)
+
+    def test_all_real_commands_and_trials_preserve_policy_and_other_bytes(self):
+        import yaml
+
+        trials = [path.parent.name for path in (REPO_ROOT / "contrib").glob("*/SKILL.md")]
+        surfaces = sd_install.discover_surfaces(REPO_ROOT, trials)
+        sd_install.render(surfaces, sd_install.platform_homes(self.home, {}))
+        commands = []
+        for surface in surfaces:
+            original = surface.skill.read_bytes()
+            target = self.home / ".codex" / "skills" / surface.name
+            actual = (target / "SKILL.md").read_bytes()
+            metadata = yaml.safe_load(original.split(b"---", 2)[1])
+            marker = metadata.get("disable-model-invocation")
+            if marker is not None:
+                commands.append(surface.name)
+                policy = yaml.safe_load((target / "agents" / "openai.yaml").read_text())
+                self.assertIs(policy["policy"]["allow_implicit_invocation"], not marker)
+                self.assertEqual(actual, original.replace(f"disable-model-invocation: {str(marker).lower()}\n".encode(), b""))
+            else:
+                self.assertEqual(actual, original)
+            self.assertEqual((self.home / ".claude" / "skills" / surface.name / "SKILL.md").read_bytes(), original)
+        self.assertTrue(commands)
+        self.assertTrue(any(name in trials for name in commands))
+
+    def test_false_crlf_and_compatible_existing_metadata(self):
+        metadata = b'interface:\n  display_name: "Probe"\ndependencies:\n  tools:\n    - type: "mcp"\n'
+        surface = self.make_surface("false", metadata, "\r\n")
+        body, extras, adapted = sd_install.codex_payload(surface)
+        self.assertTrue(adapted)
+        self.assertEqual(body, surface.skill.read_bytes().replace(b"disable-model-invocation: false\r\n", b""))
+        self.assertTrue(extras["agents/openai.yaml"].startswith(metadata))
+        self.assertIn(b"allow_implicit_invocation: true", extras["agents/openai.yaml"])
+        same = b"policy:\n  allow_implicit_invocation: true\ninterface:\n  display_name: Probe\n"
+        self.assertEqual(sd_install.codex_policy(same, True), same)
+        inserted = b"policy: # preserved\n  products:\n    - CODEX\ninterface:\n  display_name: Probe\n"
+        actual = sd_install.codex_policy(inserted, False)
+        self.assertEqual(actual.replace(b"  allow_implicit_invocation: false\n", b""), inserted)
+        self.assertEqual(sd_install.codex_policy(b"interface:\n  display_name: Probe", True), b"interface:\n  display_name: Probe\npolicy:\n  allow_implicit_invocation: true\n")
+        self.assertEqual(sd_install.codex_policy(b"policy:", True), b"policy:\n  allow_implicit_invocation: true\n")
+
+    def test_absent_marker_and_agents_are_unchanged(self):
+        surface = self.make_surface(None, b"policy:\n  allow_implicit_invocation: false\n")
+        self.assertFalse(sd_install.codex_payload(surface)[2])
+        self.assertEqual(sd_install.codex_policy(b"interface:\n  display_name: Probe\n", None), b"interface:\n  display_name: Probe\n")
+        self.assertEqual(sd_install.codex_policy(b"policy:\n  products:\n    - CODEX\n", None), b"policy:\n  products:\n    - CODEX\n")
+        surface.skill.write_bytes(b"No frontmatter.\n")
+        self.assertEqual(sd_install.codex_payload(surface)[0], b"No frontmatter.\n")
+        surface = self.make_surface("nonsense")
+        homes = [sd_install.PlatformHome("codex", self.home / "agent", "flat")]
+        sd_install.render([surface], homes, kind="agent")
+        self.assertEqual(homes[0].target_for(surface.name).read_bytes(), surface.skill.read_bytes())
+
+    def test_malformed_fields_refuse_before_any_render(self):
+        surface = self.make_surface()
+        cases = [
+            b"---\nname: x\ndisable-model-invocation: true\n",
+            b"---\nname: x\ndisable-model-invocation: 'true'\n---\n",
+            b"---\nname: x\ndisable-model-invocation: true\ndisable-model-invocation: false\n---\n",
+            b"---\n'disable-model-invocation': true\n---\n",
+            b"---\nname: \xff\n---\n",
+            b"---\n\tdisable-model-invocation: true\n---\n",
+        ]
+        homes = sd_install.platform_homes(self.home, {})
+        for data in cases:
+            with self.subTest(data=data):
+                surface.skill.write_bytes(data)
+                with self.assertRaises(sd_install.MetadataRefused):
+                    sd_install.render([surface], homes)
+                self.assertFalse(homes[0].root.exists())
+
+    def test_invocation_scalar_continuations_refuse_before_render(self):
+        import yaml
+
+        surface = self.make_surface("true\n  continued scalar")
+        original = surface.skill.read_bytes()
+        parsed = yaml.safe_load(original.split(b"---", 2)[1])
+        self.assertEqual(parsed["disable-model-invocation"], "true continued scalar")
+        homes = sd_install.platform_homes(self.home, {})
+        with self.assertRaisesRegex(sd_install.MetadataRefused, "scalar continuation"):
+            sd_install.render([surface], homes)
+        self.assertEqual(surface.skill.read_bytes(), original)
+        self.assertTrue(all(not home.root.exists() for home in homes))
+        for marker in (None, "true"):
+            with self.subTest(marker=marker):
+                surface = self.make_surface(marker, b"policy:\n  allow_implicit_invocation: false\n    continued scalar\n")
+                with self.assertRaisesRegex(sd_install.MetadataRefused, "scalar continuation"):
+                    sd_install.render([surface], homes)
+                self.assertTrue(all(not home.root.exists() for home in homes))
+
+    def test_unrelated_continuations_and_control_comments_preserve_bytes(self):
+        companion = b"interface:\n  display_name: Original\n    continued scalar\npolicy:\n  allow_implicit_invocation: false\n    # comment stays\n"
+        surface = self.make_surface("true\n  # comment stays", companion)
+        original = surface.skill.read_bytes().replace(b"adapter.\n", b"adapter.\n  continued description\n")
+        surface.skill.write_bytes(original)
+        body, extras, _ = sd_install.codex_payload(surface)
+        self.assertEqual(body, original.replace(b"disable-model-invocation: true\n", b""))
+        self.assertEqual(extras["agents/openai.yaml"], companion)
+
+    def test_unsupported_or_conflicting_policy_refuses(self):
+        self.assertTrue(sd_install.invocation_bool("true # comment", "probe"))
+        with self.assertRaises(sd_install.MetadataRefused):
+            sd_install.invocation_bool("true#not-a-comment", "probe")
+        for data in (b"policy: {}\n", b"policy: *alias\n", b"policy:\n allow_implicit_invocation: false\n", b"policy:\n  allow_implicit_invocation: true\n", b"policy:\n  allow_implicit_invocation: false\n  allow_implicit_invocation: false\n", b"policy:\n  allow_implicit_invocation: null\n"):
+            with self.subTest(data=data), self.assertRaises(sd_install.MetadataRefused):
+                sd_install.codex_policy(data, False)
+        self.assertEqual(sd_install.codex_policy(b"# note\n\n", False), b"# note\n\npolicy:\n  allow_implicit_invocation: false\n")
+        with self.assertRaises(sd_install.MetadataRefused):
+            sd_install.codex_policy(b"policy:\n    allow_implicit_invocation: true\n", False)
+
+    def test_install_collision_drift_removal_and_dry_run(self):
+        surface = self.make_surface()
+        ctx = self.context_for(self.home / "checkout")
+        target = self.home / ".codex" / "skills" / "sd-probe" / "agents" / "openai.yaml"
+        target.parent.mkdir(parents=True)
+        target.write_text("foreign\n")
+        for dry_run in (False, True):
+            ctx.dry_run = dry_run
+            self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 1)
+            self.assertFalse(ctx.receipt.exists())
+            self.assertFalse((self.home / ".claude" / "skills").exists())
+        target.unlink()
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        self.assertFalse(target.exists())
+        ctx.dry_run = False
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        original = target.read_bytes()
+        row = next(row for row in self.receipt["owned"] if row["path"] == str(target))
+        self.assertEqual(row["sha256"], sd_install.digest(original))
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        target.write_bytes(original + b"# changed\n")
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 1)
+        surface.skill.write_bytes(surface.skill.read_bytes().replace(b"disable-model-invocation: true\n", b""))
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(ctx, out), 0)
+        self.assertIn("modified since it was installed", out.getvalue())
+        self.assertTrue(target.exists())
+        target.unlink()
+        surface = self.make_surface()
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        surface.skill.write_bytes(surface.skill.read_bytes().replace(b"disable-model-invocation: true\n", b""))
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        self.assertFalse(target.exists())
+        self.make_surface()
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        self.assertEqual(sd_install.cmd_uninstall(ctx, io.StringIO()), 0)
+        self.assertFalse(target.exists())
+
+    def test_policy_symlink_directory_and_invalid_install_are_refused(self):
+        surface = self.make_surface()
+        target = self.home / "target"
+        target.mkdir()
+        planned = [(target, b"data", "invocation-policy:codex")]
+        with self.assertRaises(sd_install.MetadataRefused):
+            sd_install.policy_collisions(planned, [])
+        target.rmdir()
+        target.symlink_to(self.home / "missing")
+        with self.assertRaises(sd_install.MetadataRefused):
+            sd_install.policy_collisions(planned, [])
+        surface.skill.write_bytes(b"---\ndisable-model-invocation: invalid\n---\n")
+        self.assertEqual(sd_install.cmd_user(self.context_for(self.home / "checkout"), io.StringIO()), 1)
+
+    def test_policy_initial_and_upgrade_failures_restore_retry_state(self):
+        for installed in (False, True):
+            for stage in ("write_render_plan", "install_hook", "seed_registry", "write_receipt"):
+                with self.subTest(installed=installed, stage=stage):
+                    surface = self.make_surface()
+                    ctx = self.context_for(self.home / "checkout")
+                    ctx.home = self.home / f"failure-{installed}-{stage}"
+                    if installed:
+                        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+                        surface.skill.write_bytes(surface.skill.read_bytes().replace(b"invocation: true", b"invocation: false"))
+                    target = ctx.home / ".codex" / "skills" / "sd-probe" / "agents" / "openai.yaml"
+                    before = target.read_bytes() if installed else None
+                    receipt_before = ctx.receipt.read_bytes() if installed else None
+                    real = sd_install.write_render_plan
+
+                    def fail_after_render(*args, render=real, **kwargs):
+                        render(*args, **kwargs)
+                        raise OSError("synthetic render failure")
+
+                    failure = fail_after_render if stage == "write_render_plan" else SystemExit("synthetic failure")
+                    with unittest.mock.patch.object(sd_install, stage, side_effect=failure), self.assertRaises((OSError, SystemExit)):
+                        sd_install.cmd_user(ctx, io.StringIO())
+                    self.assertEqual(target.read_bytes() if target.exists() else None, before)
+                    self.assertEqual(ctx.receipt.read_bytes() if ctx.receipt.exists() else None, receipt_before)
+                    self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+
+    def test_policy_failure_preserves_concurrent_changes(self):
+        self.make_surface()
+        ctx = self.context_for(self.home / "checkout")
+        target = self.home / ".codex" / "skills" / "sd-probe" / "agents" / "openai.yaml"
+
+        def changed(*args, **kwargs):
+            target.write_bytes(b"concurrent change\n")
+            raise SystemExit("synthetic failure")
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(sd_install, "install_hook", side_effect=changed), self.assertRaises(SystemExit):
+            sd_install.cmd_user(ctx, out)
+        self.assertEqual(target.read_bytes(), b"concurrent change\n")
+        self.assertIn("left in place", out.getvalue())
+        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 1)
+
+    def test_partial_policy_write_and_replace_failure_remain_retryable(self):
+        for installed in (False, True):
+            for failure in ("write", "replace"):
+                with self.subTest(installed=installed, failure=failure):
+                    surface = self.make_surface()
+                    ctx = self.context_for(self.home / "checkout")
+                    ctx.home = self.home / f"atomic-{installed}-{failure}"
+                    target = ctx.home / ".codex" / "skills" / "sd-probe" / "agents" / "openai.yaml"
+                    if installed:
+                        self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+                        target.chmod(0o600)
+                        surface.skill.write_bytes(surface.skill.read_bytes().replace(b"invocation: true", b"invocation: false"))
+                    before = target.read_bytes() if installed else None
+                    real_write, real_replace = Path.write_bytes, os.replace
+
+                    def partial(path, data, write=real_write, destination=target, stage=failure):
+                        if stage == "write" and path.name == "openai.yaml" and destination.parent in path.parents:
+                            write(path, data[:8])
+                            raise OSError("synthetic partial write")
+                        return write(path, data)
+
+                    def replace(source, destination, real=real_replace, expected=target, stage=failure):
+                        if stage == "replace" and Path(destination) == expected:
+                            raise OSError("synthetic replace failure")
+                        return real(source, destination)
+
+                    with unittest.mock.patch.object(Path, "write_bytes", partial), unittest.mock.patch.object(os, "replace", replace), self.assertRaises(OSError):
+                        sd_install.cmd_user(ctx, io.StringIO())
+                    self.assertEqual(target.read_bytes() if target.exists() else None, before)
+                    self.assertEqual(list(target.parent.iterdir()), [target] if installed else [])
+                    self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+                    if installed:
+                        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+
+    def test_policy_recovery_preserves_missing_directories_and_symlinks(self):
+        missing = self.home / "missing"
+        directory = self.home / "directory"
+        directory.mkdir()
+        original = self.home / "original"
+        original.write_bytes(b"expected")
+        link = self.home / "link"
+        link.symlink_to(original)
+        out = io.StringIO()
+        sd_install.restore_policies([(path, b"expected", None) for path in (missing, directory, link)], out)
+        self.assertFalse(missing.exists())
+        self.assertTrue(directory.is_dir())
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(original.read_bytes(), b"expected")
+        self.assertEqual(out.getvalue().count("left in place"), 2)
+        with unittest.mock.patch.object(Path, "unlink", side_effect=OSError("synthetic recovery failure")):
+            sd_install.restore_policies([(original, b"expected", None)], out)
+        self.assertIn("policy recovery failed", out.getvalue())
+        self.assertEqual(original.read_bytes(), b"expected")
+
+    def test_dry_run_reports_expired_trials_without_writing(self):
+        import sd_db
+
+        rows = [{"skill": "sd-expired", "started": "2000", "expires": "2001"}]
+        with unittest.mock.patch.object(sd_db, "trials", return_value=rows), unittest.mock.patch.object(sd_db, "skill_use_since", return_value=False), unittest.mock.patch.object(sd_db, "end_trial") as end:
+            out = io.StringIO()
+            self.assertEqual(sd_install.expire_trials(None, out, dry_run=True), ["sd-expired"])
+            self.assertIn("would remove sd-expired", out.getvalue())
+            end.assert_not_called()
+
+    def test_expired_trial_cannot_remove_a_promoted_default_skill(self):
+        import sd_db
+
+        self.make_surface()
+        with unittest.mock.patch.object(sd_install, "open_library", return_value=(object(), "")), unittest.mock.patch.object(sd_db, "active_trials", return_value=[]), unittest.mock.patch.object(sd_install, "expire_trials", return_value=["sd-probe"]):
+            self.assertEqual(sd_install.cmd_user(self.context_for(self.home / "checkout"), io.StringIO()), 0)
+        self.assertTrue((self.home / ".codex" / "skills" / "sd-probe" / "SKILL.md").is_file())
+
+
+class StrictVerificationTests(InstallerHarness):
+    def setUp(self):
+        super().setUp()
+        self.checkout = self.checkout_with_commands("sd", "sd-review", "sd-ship", "sd-hook")
+        for command in (self.checkout / "bin").iterdir():
+            command.write_text("#!/bin/sh\nexit 0\n")
+        subprocess.run(["git", "-C", str(self.checkout), "add", "-A"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(self.checkout), "commit", "-qm", "commands"], check=True, capture_output=True)
+        self.ctx = self.context_for(self.checkout)
+        self.ctx.environ["PATH"] = str(self.home / ".local" / "bin") + os.pathsep + os.environ["PATH"]
+        self.assertEqual(sd_install.cmd_user(self.ctx, io.StringIO()), 0)
+
+    def verify(self):
+        out = io.StringIO()
+        rc = sd_install.cmd_verify(self.ctx, out, as_json=True)
+        return rc, json.loads(out.getvalue())
+
+    def codes(self):
+        rc, payload = self.verify()
+        self.assertEqual(rc, 1)
+        return {check["code"] for check in payload["checks"]}
+
+    def test_pass_runs_only_resolved_safe_help_and_writes_nothing(self):
+        before = {path: path.read_bytes() for path in self.home.rglob("*") if path.is_file()}
+        with unittest.mock.patch.object(sd_install, "open_library", side_effect=AssertionError("database call")):
+            rc, result = self.verify()
+        self.assertEqual(rc, 0)
+        self.assertEqual(result["status"], "verified")
+        self.assertEqual(result["smoke"]["unsmoked"], ["sd-hook"])
+        self.assertEqual({row["name"] for row in result["checks"] if row["component"] == "smoke"}, {"sd", "sd-review", "sd-ship"})
+        after = {path: path.read_bytes() for path in self.home.rglob("*") if path.is_file()}
+        self.assertEqual(before, after)
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_verify(self.ctx, out), 0)
+        self.assertIn("installation: verified", out.getvalue())
+
+    def test_missing_malformed_foreign_and_duplicate_receipts(self):
+        original = self.ctx.receipt.read_bytes()
+        for update, expected in (
+            ({}, "receipt_missing_or_unreadable"),
+            ({"schema": 100}, "receipt_schema_unsupported"),
+            ({"schema": True}, "receipt_schema_unsupported"),
+            ({"checkout": "/foreign"}, "receipt_foreign_checkout"),
+            ({"owned": None}, "receipt_malformed"),
+            ({"owned": [None]}, "receipt_malformed"),
+            ({"owned": [{"path": "x", "kind": "hook", "command": []}]}, "receipt_malformed"),
+        ):
+            data = json.loads(original)
+            data.update(update)
+            if not update:
+                data = {}
+            self.ctx.receipt.write_text(json.dumps(data))
+            self.assertIn(expected, self.codes())
+        data = json.loads(original)
+        data["owned"].append(data["owned"][0])
+        self.ctx.receipt.write_text(json.dumps(data))
+        self.assertIn("receipt_duplicate_rows", self.codes())
+        self.ctx.receipt.write_bytes(b"invalid")
+        self.assertIn("receipt_missing_or_unreadable", self.codes())
+        self.ctx.receipt.unlink()
+        self.assertIn("receipt_missing_or_unreadable", self.codes())
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_verify(self.ctx, out), 1)
+        self.assertIn("receipt_missing_or_unreadable", out.getvalue())
+
+    def test_source_mismatch_dirty_and_unreadable_refuse_smoke(self):
+        receipt = self.receipt
+        receipt["commit"] = "old"
+        self.assertEqual(sd_install.verify_source(self.ctx, receipt)["code"], "source_commit_changed")
+        receipt = self.receipt
+        receipt["dirty"] = True
+        self.assertEqual(sd_install.verify_source(self.ctx, receipt)["code"], "source_not_clean")
+        (self.checkout / "untracked").write_text("changed")
+        with unittest.mock.patch.object(sd_install, "verify_help", side_effect=AssertionError("smoke on dirty source")):
+            self.assertIn("source_not_clean", self.codes())
+        for failure in (OSError("git missing"), subprocess.TimeoutExpired("git", 5)):
+            with unittest.mock.patch.object(sd_install.subprocess, "run", side_effect=failure):
+                self.assertEqual(sd_install.verify_source(self.ctx, receipt)["code"], "source_unreadable")
+        with unittest.mock.patch.object(sd_install.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "")):
+            self.assertEqual(sd_install.verify_source(self.ctx, receipt)["code"], "source_unreadable")
+
+    def test_render_missing_modified_foreign_and_receipt_tampering(self):
+        path = self.home / ".codex" / "skills" / "sd-probe" / "SKILL.md"
+        original = path.read_bytes()
+        path.write_bytes(b"modified")
+        self.assertIn("render_modified", self.codes())
+        path.unlink()
+        self.assertIn("render_missing_or_unreadable", self.codes())
+        path.write_bytes(original)
+        self.assertEqual(self.verify()[0], 0)
+        receipt = self.receipt
+        receipt["owned"].append({"path": "/never-read", "kind": "skill:foreign", "sha256": "wrong"})
+        next(row for row in receipt["owned"] if row["path"] == str(path))["sha256"] = "wrong"
+        self.ctx.receipt.write_text(json.dumps(receipt))
+        self.assertIn("render_foreign_receipt_path", self.codes())
+        self.assertIn("render_receipt_changed", self.codes())
+
+    def test_missing_source_trial_and_invalid_payload_fail(self):
+        receipt = self.receipt
+        receipt["owned"].append({"path": str(self.home / ".claude" / "skills" / "sd-trial" / "SKILL.md"), "kind": "skill:claude", "sha256": "x"})
+        self.assertEqual(sd_install.verify_rendered(self.ctx, receipt)[0]["code"], "source_payload_invalid")
+        (self.checkout / "skills" / "sd-probe" / "SKILL.md").write_text("---\nno end")
+        self.assertEqual(sd_install.verify_rendered(self.ctx, self.receipt)[0]["code"], "source_payload_invalid")
+
+    def test_receipt_and_live_hook_drift_are_detected(self):
+        receipt = self.receipt
+        receipt["owned"] = [row for row in receipt["owned"] if row["kind"] != "hook"]
+        self.assertEqual(sd_install.verify_hooks(self.ctx, receipt)["code"], "hook_receipt_changed")
+        settings = json.loads(self.ctx.settings.read_text())
+        settings["hooks"]["SessionStart"] = []
+        self.ctx.settings.write_text(json.dumps(settings))
+        self.assertIn("hook_missing_or_modified", self.codes())
+        self.ctx.settings.write_text("[]")
+        self.assertIn("hook_unreadable", self.codes())
+
+    def test_path_shadow_link_drift_and_missing_path(self):
+        before = self.ctx.environ["PATH"]
+        other = self.home / "common"
+        other.mkdir()
+        shadow = other / "sd"
+        shadow.write_text("#!/bin/sh\nexit 0\n")
+        shadow.chmod(0o755)
+        self.ctx.environ["PATH"] = str(other) + os.pathsep + before
+        self.assertIn("command_shadowed", self.codes())
+        self.ctx.environ["PATH"] = str(self.home / "missing-bin")
+        self.assertIn("command_not_on_path", self.codes())
+        self.ctx.environ["PATH"] = before
+        link = self.home / ".local" / "bin" / "sd"
+        link.unlink()
+        link.symlink_to(shadow)
+        self.assertIn("command_link_changed", self.codes())
+        receipt = self.receipt
+        receipt["owned"].append({"path": "/foreign-link", "kind": "link", "target": "/foreign"})
+        self.ctx.receipt.write_text(json.dumps(receipt))
+        self.assertIn("command_foreign_receipt_path", self.codes())
+
+    def test_relative_and_empty_path_command_shadows_refuse_without_smoke(self):
+        previous = Path.cwd()
+        self.addCleanup(os.chdir, previous)
+        os.chdir(self.checkout)
+        absolute = self.ctx.environ["PATH"]
+        for component in ("../shadow", ".", ""):
+            with self.subTest(component=component):
+                directory = self.checkout / component if component else self.checkout
+                directory.mkdir(exist_ok=True)
+                shadow = directory / "sd"
+                shadow.write_text("#!/bin/sh\nexit 0\n")
+                shadow.chmod(0o755)
+                subprocess.run(["git", "add", "-A"], check=True, capture_output=True)
+                subprocess.run(["git", "commit", "--allow-empty", "-qm", "shadow fixture"], check=True, capture_output=True)
+                self.assertEqual(sd_install.cmd_user(self.ctx, io.StringIO()), 0)
+                self.ctx.environ["PATH"] = component + os.pathsep + absolute
+                self.assertEqual(Path(sd_install.shutil.which("sd", path=self.ctx.environ["PATH"])).resolve(), shadow.resolve())
+                with unittest.mock.patch.object(sd_install, "verify_help", side_effect=AssertionError("unsafe smoke")):
+                    rc, result = self.verify()
+                self.assertEqual(rc, 1)
+                self.assertIn("path_unsupported_components", {row["code"] for row in result["checks"]})
+                self.assertEqual(result["smoke"]["status"], "not_run")
+                self.ctx.environ["PATH"] = absolute
+        self.assertEqual(self.verify()[0], 0)
+
+    def test_relative_and_empty_path_interpreters_never_execute(self):
+        previous = Path.cwd()
+        self.addCleanup(os.chdir, previous)
+        os.chdir(self.checkout)
+        absolute = self.ctx.environ["PATH"]
+        trace = self.home / "unexpected-interpreter"
+        for command in (self.checkout / "bin").iterdir():
+            command.write_text("#!/usr/bin/env sh\nexit 0\n")
+        for component in ("../shadow", ".", ""):
+            with self.subTest(component=component):
+                directory = self.checkout / component if component else self.checkout
+                directory.mkdir(exist_ok=True)
+                shadow = directory / "sh"
+                shadow.write_text(f"#!/bin/sh\nprintf invoked >> '{trace}'\nexit 0\n")
+                shadow.chmod(0o755)
+                subprocess.run(["git", "add", "-A"], check=True, capture_output=True)
+                subprocess.run(["git", "commit", "--allow-empty", "-qm", "interpreter fixture"], check=True, capture_output=True)
+                self.assertEqual(sd_install.cmd_user(self.ctx, io.StringIO()), 0)
+                self.ctx.environ["PATH"] = component + os.pathsep + absolute
+                rc, result = self.verify()
+                self.assertEqual(rc, 1)
+                self.assertEqual(result["smoke"]["status"], "not_run")
+                self.assertFalse(trace.exists())
+                self.ctx.environ["PATH"] = absolute
+        self.assertEqual(self.verify()[0], 0)
+
+    def test_empty_missing_and_trailing_path_components_refuse(self):
+        absolute = self.ctx.environ["PATH"]
+        for value in ("", os.pathsep, absolute + os.pathsep, absolute + os.pathsep + "relative"):
+            self.ctx.environ["PATH"] = value
+            self.assertIn("path_unsupported_components", self.codes())
+        del self.ctx.environ["PATH"]
+        self.assertIn("path_unsupported_components", self.codes())
+
+    def test_interpreter_validation_covers_every_command_without_execution(self):
+        source = self.checkout / "bin" / "sd-hook"
+        for text, expected in (
+            ("#!/absent/interpreter\n", "interpreter_missing"),
+            (f"#!{self.home}\n", "interpreter_missing"),
+            ("#!/usr/bin/env absent-interpreter\n", "interpreter_missing"),
+            ("#!/usr/bin/env -S python3\n", "interpreter_unsupported"),
+            ("not executable format\n", "interpreter_unsupported"),
+            ("#!'broken\n", "interpreter_unreadable"),
+            ("#!/usr/bin/env python3\n", "ok"),
+        ):
+            source.write_text(text)
+            self.assertEqual(sd_install.verify_interpreter(source, os.environ["PATH"]), expected)
+        source.write_text("#!/absent/interpreter\n")
+        self.assertIn("interpreter_missing", self.codes())
+        source.unlink()
+        self.assertEqual(sd_install.verify_interpreter(source, ""), "interpreter_unreadable")
+
+    def test_help_failures_timeout_and_launch_error_are_typed(self):
+        for side_effect, code in ((subprocess.TimeoutExpired("help", 5), "help_timeout"), (OSError("broken"), "help_unavailable")):
+            with unittest.mock.patch.object(sd_install.subprocess, "run", side_effect=side_effect):
+                self.assertEqual(sd_install.verify_help(self.ctx, "sd", "/path")["code"], code)
+        with unittest.mock.patch.object(sd_install.subprocess, "run", return_value=subprocess.CompletedProcess([], 3)) as run:
+            result = sd_install.verify_help(self.ctx, "sd", str(self.home / ".local" / "bin" / "sd"))
+            self.assertEqual(result["code"], "help_failed")
+            self.assertEqual(run.call_args.args[0], [str(self.home / ".local" / "bin" / "sd"), "--help"])
+            self.assertEqual(run.call_args.kwargs["timeout"], 5)
+        with unittest.mock.patch.object(sd_install, "verify_help", return_value=sd_install.verify_result("smoke", "help_failed")):
+            self.assertIn("help_failed", self.codes())
+        with unittest.mock.patch.object(sd_install, "verify_source", side_effect=[sd_install.verify_result("source"), sd_install.verify_result("source", "source_commit_changed")]) as source:
+            self.assertIn("source_commit_changed", self.codes())
+            self.assertEqual(source.call_count, 2)
+
+    def test_cli_json_mode_and_legacy_status_exit_are_preserved(self):
+        with unittest.mock.patch.object(sd_install, "__file__", str(self.checkout / "bin" / "sd_install.py")):
+            out = io.StringIO()
+            self.assertEqual(sd_install.main(["--verify", "--json", "--home", str(self.home)], self.ctx.environ, out), 0)
+            self.assertEqual(json.loads(out.getvalue())["status"], "verified")
+        self.assertEqual(self.run_cli("--status", "--json")[0], 2)
+        self.ctx.receipt.write_text("invalid")
+        self.assertEqual(sd_install.cmd_status(self.ctx, io.StringIO()), 0)
+        (self.checkout / "skills" / "sd-probe" / "SKILL.md").write_text("---\ndisable-model-invocation: invalid\n---\n")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_status(self.ctx, out), 0)
+        self.assertIn("metadata cannot render", out.getvalue())
 
 
 if __name__ == "__main__":

@@ -11,8 +11,8 @@ and which tier each category starts at are per-repository choices; the rules for
 combining them are not.
 
 **It does not say who reviews.** The registry names the ordered provider chain;
-the tier says how many completed reviewers the change requires. Standard and
-deep changes require two; cheap changes require one and skip requires none.
+the tier records the change's risk classification. Every reviewing tier requires
+one completed independent local review; skip requires none.
 
 Policy shape (every key optional unless noted)::
 
@@ -38,9 +38,9 @@ from typing import Any, Mapping, NamedTuple, Sequence
 DEFAULT_TIER_ORDER: tuple[str, ...] = ("skip", "cheap", "standard", "deep")
 DEFAULT_LARGE_CHANGE_LINES = 800
 
-#: Standard and deep share the two-review requirement. An unknown custom tier
-#: gets one reviewer rather than silently allowing unreviewed changes.
-TIER_DEPTH: dict[str, int] = {"skip": 0, "cheap": 1, "standard": 2, "deep": 2}
+#: Risk classification does not create additional provider calls. Unknown tiers
+#: still require an independent local review rather than silently skipping it.
+TIER_DEPTH: dict[str, int] = {"skip": 0, "cheap": 1, "standard": 1, "deep": 1}
 DEFAULT_DEPTH = 1
 
 

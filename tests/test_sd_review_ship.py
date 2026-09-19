@@ -107,9 +107,16 @@ class FixReviewTests(ReviewFixture):
             report.write_text(json.dumps(prior))
             for explain in (True, False):
                 runner = FakeRunner()
-                with self.subTest(oversized=oversized, explain=explain), self.assertRaises(sd_review.UsageError):
-                    sd_review.review(root, namespace(scope="branch", resume_report=str(report), explain=explain),
-                                     runner, self.environment(), self.chatgpt_home())
+                with self.subTest(oversized=oversized, explain=explain):
+                    if oversized == "report":
+                        with self.assertRaises(sd_review.UsageError):
+                            sd_review.review(root, namespace(scope="branch", resume_report=str(report), explain=explain),
+                                             runner, self.environment(), self.chatgpt_home())
+                    else:
+                        result = sd_review.review(root, namespace(scope="branch", resume_report=str(report), explain=explain),
+                                                  runner, self.environment(), self.chatgpt_home())
+                        self.assertEqual(result["input_manifest"]["status"], "oversized")
+                        self.assertEqual(result["readiness"]["status"], "blocked")
                 self.assertEqual(runner.calls, [])
 
     def test_prior_findings_never_open_untracked_or_git_metadata_sources(self):
@@ -241,10 +248,10 @@ class FixReviewTests(ReviewFixture):
                 for explain in (True, False):
                     runner = FakeRunner()
                     with self.subTest(history=history, multibyte=text[0] == "é", explain=explain), \
-                            patch.object(sd_review, "local_conventions", return_value=text), \
-                            self.assertRaisesRegex(sd_review.UsageError, "fix verification evidence exceeds the bounded input"):
-                        sd_review.review(root, namespace(scope="branch", explain=explain, **kwargs), runner,
-                                         self.environment(), self.chatgpt_home())
+                            patch.object(sd_review, "local_conventions", return_value=text):
+                        result = sd_review.review(root, namespace(scope="branch", explain=explain, **kwargs), runner,
+                                                  self.environment(), self.chatgpt_home())
+                        self.assertEqual(result["input_manifest"]["status"], "oversized")
                     self.assertEqual(runner.calls, [])
 
     def test_cumulative_current_source_remains_bounded_before_any_dispatch(self):
@@ -258,9 +265,11 @@ class FixReviewTests(ReviewFixture):
                                       "findings": findings, "authored_with": []}))
         for explain in (True, False):
             runner = FakeRunner()
-            with self.subTest(explain=explain), self.assertRaisesRegex(sd_review.UsageError, "fix verification evidence exceeds the bounded input"):
-                sd_review.review(root, namespace(scope="branch", resume_report=str(report), explain=explain), runner,
-                                 self.environment(), self.chatgpt_home())
+            with self.subTest(explain=explain):
+                result = sd_review.review(root, namespace(scope="branch", resume_report=str(report), explain=explain), runner,
+                                          self.environment(), self.chatgpt_home())
+                self.assertEqual(result["input_manifest"]["status"], "oversized")
+                self.assertGreater(result["input_manifest"]["context_bytes"], sd_review.MAX_OUTPUT_BYTES)
             self.assertEqual(runner.calls, [])
 
     def test_resume_refuses_fix_only_or_unrelated_prior_head(self):

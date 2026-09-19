@@ -52,12 +52,15 @@ class FallbackTests(ReviewRunFixture):
             f"reviewers: claude@claude, {first}@{first}.example.test, {second}@{second}.example.test\n"
             "<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n")
 
-    def review_alternatives(self, root: pathlib.Path, client: FakeClient) -> dict[str, Any]:
-        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")}, default=sd_review.Completed(
+    def review_alternatives(self, root: pathlib.Path, client: FakeClient, *, local_failure: bool = True) -> dict[str, Any]:
+        answers = {"sd-check": sd_review.Completed(0, "{}", "")}
+        if local_failure:
+            answers["claude"] = sd_review.Completed(1, "", "local review unavailable")
+        runner = FakeRunner(answers, default=sd_review.Completed(
             0, json.dumps({"type": "result", "subtype": "success", "structured_output": {"findings": []}}), ""))
         return sd_review.review(root, namespace(), runner, self.environment(REMOTE_KEY="fixture"), client=client)
 
-    def test_minimax_and_kimi_replace_each_other_until_two_reviews_complete(self) -> None:
+    def test_configured_alternatives_stop_after_one_completed_review(self) -> None:
         root = self.prepare("deep")
         for first, second in (("minimax", "kimi"), ("kimi", "minimax")):
             with self.subTest(order=(first, second)):
@@ -65,8 +68,8 @@ class FallbackTests(ReviewRunFixture):
                 client = FakeClient({first: (1, "", "transport failed", True)})
                 result = self.review_alternatives(root, client)
                 self.assertEqual(result["status"], "clean")
-                self.assertEqual((result["requested_reviews"], result["completed_reviews"]), (2, 2))
-                self.assertEqual(result["reviewed_by"], ["claude", second])
+                self.assertEqual((result["requested_reviews"], result["completed_reviews"]), (1, 1))
+                self.assertEqual(result["reviewed_by"], [second])
                 self.assertEqual([row["provider"] for row in client.sent], [first, second])
                 self.assertEqual([row["backend"] for row in result["outcomes"]], ["claude", first, second])
 
@@ -78,7 +81,7 @@ class FallbackTests(ReviewRunFixture):
                 client = FakeClient()
                 result = self.review_alternatives(root, client)
                 self.assertEqual(result["status"], "clean")
-                self.assertEqual(result["reviewed_by"], ["claude", first])
+                self.assertEqual(result["reviewed_by"], [first])
                 self.assertEqual([row["provider"] for row in client.sent], [first])
 
     def test_failed_alternative_keeps_adverse_findings_after_clean_fallback(self) -> None:
@@ -87,17 +90,18 @@ class FallbackTests(ReviewRunFixture):
         response = chat_answer(finding())
         result = self.review_alternatives(root, FakeClient({"minimax": (1, response[1], "transport failed", True)}))
         self.assertEqual(result["status"], "blocking")
-        self.assertEqual(result["reviewed_by"], ["claude", "kimi"])
+        self.assertEqual(result["reviewed_by"], ["kimi"])
         self.assertEqual(result["findings"][0]["backend"], "minimax")
 
-    def test_one_completed_review_does_not_satisfy_the_two_review_standard(self) -> None:
+    def test_one_completed_local_review_does_not_call_remote_alternatives(self) -> None:
         root = self.prepare("deep")
         self.alternatives(root, "minimax", "kimi")
-        result = self.review_alternatives(root, FakeClient({
-            name: (1, "", "transport failed", True) for name in ("minimax", "kimi")}))
-        self.assertEqual((result["requested_reviews"], result["completed_reviews"]), (2, 1))
-        self.assertEqual(result["status"], "unavailable")
+        client = FakeClient()
+        result = self.review_alternatives(root, client, local_failure=False)
+        self.assertEqual((result["requested_reviews"], result["completed_reviews"]), (1, 1))
+        self.assertEqual(result["status"], "clean")
         self.assertEqual(result["reviewed_by"], ["claude"])
+        self.assertEqual(client.sent, [])
 
     def test_each_availability_failure_uses_the_next_entry_and_records_it(self) -> None:
         root = self.prepare()
@@ -146,8 +150,9 @@ class FallbackTests(ReviewRunFixture):
         local.write_text(local.read_text().replace("second@second", "second@second, third@third"))
         result = self.run_review(root, FakeRunner({"codex": sd_review.Completed(1, "", "failed")}))
         self.assertEqual(result["status"], "clean")
-        self.assertEqual(result["reviewed_by"], ["second", "third"])
-        self.assertEqual(result["completed_reviews"], 2)
+        self.assertEqual(result["reviewed_by"], ["second"])
+        self.assertEqual(result["completed_reviews"], 1)
+        self.assertNotIn("third", [row["backend"] for row in result["outcomes"]])
 
     def test_successful_adverse_review_does_not_trigger_a_replacement(self) -> None:
         root = self.prepare()

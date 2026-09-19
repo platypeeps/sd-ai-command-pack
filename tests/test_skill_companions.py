@@ -18,6 +18,7 @@ from __future__ import annotations
 import importlib.util
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -231,6 +232,41 @@ class RepositoryInvariantTests(unittest.TestCase):
         surfaces = sd_install.discover_surfaces(REPO_ROOT)
         self.assertGreater(len(surfaces), 0, "no surfaces discovered")
         self.assertEqual(sd_install.missing_citations(surfaces), [])
+
+
+class WorkflowReferenceTests(unittest.TestCase):
+    """Checkout-qualified procedures stay reachable from every rendered layout."""
+
+    def test_workflow_references_resolve_from_each_platform(self) -> None:
+        surfaces = sd_install.discover_surfaces(REPO_ROOT)
+        selected = [surface for surface in surfaces
+                    if surface.name in {"sd-check", "sd-review", "sd-ship"}]
+        self.assertEqual({surface.name for surface in selected}, {"sd-check", "sd-review", "sd-ship"})
+        with tempfile.TemporaryDirectory() as raw:
+            homes = sd_install.platform_homes(Path(raw), {})
+            sd_install.render(selected, homes)
+            for home in homes:
+                for surface in selected:
+                    with self.subTest(platform=home.key, skill=surface.name):
+                        body = home.target_for(surface.name).read_text(encoding="utf-8")
+                        paths = re.findall(r"`(skills/sd-[^`]+/references/[^`]+\.md)`", body)
+                        self.assertGreater(len(paths), 0, "conditional procedures disappeared")
+                        self.assertIn("sd-ai-command-pack checkout", body)
+                        for relative in paths:
+                            target = (REPO_ROOT / relative).resolve()
+                            self.assertTrue(target.is_relative_to(REPO_ROOT))
+                            self.assertTrue(target.is_file(), relative)
+                            self.assertGreater(len(target.read_text(encoding="utf-8")), 100)
+
+    def test_every_extracted_procedure_has_an_entrypoint_reference(self) -> None:
+        for name in ("sd-check", "sd-review", "sd-ship"):
+            directory = REPO_ROOT / "skills" / name
+            body = (directory / "SKILL.md").read_text(encoding="utf-8")
+            files = sorted((directory / "references").glob("*.md"))
+            self.assertGreater(len(files), 0, name)
+            for path in files:
+                with self.subTest(path=path):
+                    self.assertIn(f"`{path.relative_to(REPO_ROOT).as_posix()}`", body)
 
 
 if __name__ == "__main__":

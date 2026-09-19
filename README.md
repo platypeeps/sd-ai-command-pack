@@ -55,7 +55,7 @@ say. A skill in `contrib/` is one command away, and use is what moves it.
 below is written by something you invoke against that repository, and nothing
 else is. Its executables write these paths, and no others:
 
-- `CLAUDE.local.md` — per-repo configuration, from `bin/sd_install.py --repo`.
+- `CLAUDE.local.md` — per-repo configuration, from `python3 bin/sd_install.py --repo`.
   Untracked by way of that one excludes line, and that command refuses outright
   if `CLAUDE.local.md` turns out to be tracked, rather than edit a file under
   version control.
@@ -104,10 +104,9 @@ and the workflow each selects is stated in [WORKFLOW.md](WORKFLOW.md):
 Without a `mode:` line the mode is detected, and detection only ever lowers a
 line you wrote.
 
-Agents render to Claude only. Codex keeps its agents as TOML with the
-instructions embedded in a quoted string, and producing that would be a
-translation layer — the one thing this renderer refuses to be, since a
-translated file cannot be checked by comparing bytes. The limit is a test, not
+Agents render to Claude only. Codex agent TOML translation remains outside this installer's scope.
+The Codex skill metadata adapter does not change that boundary.
+The limit is a test, not
 a note: `tests/test_sd_agents.py` asserts nothing lands in `~/.codex/agents`.
 The pack neither renders there nor removes what it finds there; what the test
 guarantees is that the installer writes nothing, not that the directory is
@@ -224,12 +223,38 @@ off `main` or over uncommitted changes.
 
 | Command | What it does |
 |---|---|
-| `bin/sd_install.py --user` | Render every `sd-*` surface into this machine's platform homes, and link the `bin/` commands into `~/.local/bin` (`--bin-dir DIR` for another directory) |
-| `bin/sd_install.py --status` | What is installed, what has drifted, what legacy residue remains |
-| `bin/sd_install.py --pull` | Fast-forward the serving checkout (clean, on `main`) and re-render |
-| `bin/sd_install.py --uninstall` | Remove exactly what the receipt records: the renders it wrote, the hook entries, and the command links it recorded (a link that already pointed here is recorded without being rewritten, and goes with the rest) |
-| `bin/sd_install.py --adopt-legacy` | Delete the pre-3e fleet installer's successor-less renders |
-| `bin/sd_install.py --repo [PATH]` | Write the marked block into `PATH/CLAUDE.local.md` |
+| `python3 bin/sd_install.py --user` | Render skills and link commands into `~/.local/bin`; use `--bin-dir DIR` for another directory |
+| `python3 bin/sd_install.py --status` | Report installed source, drift, and legacy residue without failing on drift |
+| `python3 bin/sd_install.py --verify --json` | Read-only: fail on receipt, source, rendered-file, command-resolution, or bounded help-probe errors |
+| `python3 bin/sd_install.py --pull` | Fast-forward the clean serving checkout on `main`, then render |
+| `python3 bin/sd_install.py --uninstall` | Remove receipt-owned renders, hooks, and command links; preserve modified files and retargeted links |
+| `python3 bin/sd_install.py --adopt-legacy` | Delete the pre-3e fleet installer's successor-less renders |
+| `python3 bin/sd_install.py --repo [PATH]` | Write the marked block into `PATH/CLAUDE.local.md` |
+
+`--verify` runs no provider, meter, database migration, or installation operation.
+It resolves every executable through the current `PATH` and rejects commands from another checkout.
+Relative or empty `PATH` entries fail verification before help probes run.
+It runs only `sd --help`, `sd-review --help`, and `sd-ship --help`, with five-second limits.
+Other commands receive interpreter and resolution checks, but remain explicitly unsmoked.
+Verification requires the receipt's clean source commit; staged source changes are not an installed verification pass.
+
+### Codex invocation metadata
+
+Use `$sd-review`, `$sd-ship`, or another installed skill name in Codex.
+Codex CLI also provides `/skills`; installed skills are not individual `/sd-*` commands.
+Restart Codex if updated skills do not appear.
+See [OpenAI skill documentation](https://developers.openai.com/es-419/docs/build-skills).
+
+The installer preserves canonical Claude command markers.
+For Codex skills, it translates `disable-model-invocation: true` into `policy.allow_implicit_invocation: false` in `agents/openai.yaml`.
+An explicit `false` marker becomes `true`; absent markers add no policy.
+The Markdown body and other source metadata remain unchanged.
+Generated policy files belong to the installation receipt and retain drift protection during removal.
+Failed installations restore unchanged generated policies to their prior state; concurrent changes remain untouched.
+Conflicting or unsupported invocation metadata refuses installation before rendering.
+The adapter accepts plain block-mapping keys and lowercase booleans; other metadata sections remain opaque.
+Invocation booleans cannot have indented continuation lines.
+Claude agents and OpenCode rendering remain unchanged.
 
 `--dry-run` prints what any of them would do and writes nothing. `--home DIR`
 installs into a scratch directory instead of `$HOME`, which is how the tests
@@ -281,7 +306,8 @@ rest safe:
 
 There are ten named surfaces: nine commands plus `sd-help`.
 The taxonomy makes `sd-help` a skill because a catalog authorizes nothing.
-Every platform renders these surfaces identically.
+All platforms preserve Markdown bodies.
+Codex invocation metadata uses the [adapter](#codex-invocation-metadata).
 Each surface has one `skills/sd-*/SKILL.md` file.
 That file is both the installed artifact and its documentation.
 

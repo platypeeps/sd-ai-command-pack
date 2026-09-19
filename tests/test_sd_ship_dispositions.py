@@ -208,9 +208,11 @@ class DispositionTests(unittest.TestCase):
             if kind == "depth":
                 report["completed_reviews"] = 0
             elif kind == "false_count":
-                report["outcomes"] = report["outcomes"][:1]
+                report["outcomes"].pop()
             elif kind == "duplicate_backend":
-                report["outcomes"][1]["backend"] = report["outcomes"][0]["backend"]
+                report["outcomes"].append(dict(report["outcomes"][0]))
+                report["reviewed_by"].append(report["reviewed_by"][0])
+                report["completed_reviews"] = len(report["outcomes"])
             elif kind == "reviewed_by":
                 report["reviewed_by"] = ["invented"]
             elif kind == "check":
