@@ -112,6 +112,28 @@ class ReadinessTests(ReviewFixture):
         self.assertEqual(result["readiness"]["status"], "blocked")
         self.assertIn("reviewer_unavailable", [row["code"] for row in result["readiness"]["blockers"]])
 
+    def test_transport_limits_preserve_required_reviewer_count_and_other_refusals(self):
+        root = self.make_repo()
+        providers = [sd_review.sd_registry.Provider(name=name, vendor=name, bill=name,
+                     start=name, reader="codex-json") for name in ("codex", "second")]
+        result = {"repo": str(root), "codex_preflight": {"ok": True}, "requested_reviews": 1,
+                  "input_manifest": {"status": "oversized", "limit_bytes": 100,
+                                     "transport_bytes": {"codex": 50, "second": 101}}}
+        readiness = sd_review.sd_review_readiness.review_readiness
+        self.assertEqual(readiness(result, providers, self.environment())["status"], "ready")
+        for failure in ("count", "auth", "all_oversized"):
+            candidate = {**result, "input_manifest": dict(result["input_manifest"])}
+            if failure == "count":
+                candidate["requested_reviews"] = 2
+            elif failure == "auth":
+                candidate["codex_preflight"] = {"ok": False, "reason": "fixture refusal"}
+            else:
+                candidate["input_manifest"]["transport_bytes"] = {"codex": 101, "second": 101}
+            with self.subTest(failure=failure):
+                outcome = readiness(candidate, providers, self.environment())
+                self.assertEqual(outcome["status"], "blocked")
+                self.assertIn("input_oversized", [row["code"] for row in outcome["blockers"]])
+
 
 class LedgerReadinessTests(LedgerFixture):
     def test_explanation_does_not_release_orphans_or_write_ledger(self):

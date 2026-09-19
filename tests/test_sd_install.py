@@ -1736,6 +1736,50 @@ class StatusTests(InstallerHarness):
         _, output = self.run_cli("--status")
         self.assertIn("1 missing", output)
 
+    def test_metadata_refusal_reports_unknown_comparisons_without_cleanup_advice(self):
+        checkout = self.committed_checkout()
+        ctx = self.context_for(checkout)
+        source = checkout / "skills" / "sd-probe" / "SKILL.md"
+        original = b"---\nname: sd-probe\ndisable-model-invocation: true\n---\n\nBody.\n"
+        source.write_bytes(original)
+        with unittest.mock.patch.object(sd_install, "open_library", return_value=(None, "synthetic no database")):
+            self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 0)
+        current = self.home / ".config" / "opencode" / "commands" / "sd-probe.md"
+        retired = self.home / ".gemini" / "commands" / "sd-retired.toml"
+        retired.parent.mkdir(parents=True)
+        retired.write_bytes(b"retired\n")
+        sd_install.write_receipt(sd_install.legacy_receipt_path(self.home, ctx.environ), {"files": [
+            {"family": "opencode-commands", "path": current.name, "digest": sd_install.digest(current.read_bytes())},
+            {"family": "gemini-commands", "path": retired.name, "digest": sd_install.digest(retired.read_bytes())},
+        ]})
+        (self.home / ".claude" / "skills" / "sd-probe" / "SKILL.md").unlink()
+        (self.home / ".codex" / "skills" / "sd-probe" / "SKILL.md").write_bytes(b"modified render\n")
+        baseline = io.StringIO()
+        self.assertEqual(sd_install.cmd_status(ctx, baseline), 0)
+        self.assertIn("4 rendered files, 1 missing, 1 modified", baseline.getvalue())
+        self.assertIn("legacy: 1 file(s)", baseline.getvalue())
+        command_report = sd_install.command_report(checkout, ctx.environ)
+        for bad in (original.replace(b"name:", b'"name":'), original.replace(b"true", b"invalid")):
+            with self.subTest(source=bad):
+                source.write_bytes(bad)
+                before = {path: path.read_bytes() for path in self.home.rglob("*") if path.is_file()}
+                output = io.StringIO()
+                with unittest.mock.patch.object(sd_install, "legacy_targets", side_effect=AssertionError("classification needs expected paths")):
+                    self.assertEqual(sd_install.cmd_status(ctx, output), 0)
+                report = output.getvalue()
+                self.assertIn("metadata cannot render", report)
+                self.assertIn("1 in checkout; rendered comparison unavailable", report)
+                self.assertIn("legacy: classification unavailable", report)
+                self.assertIn(f"checkout: {checkout}", report)
+                self.assertIn(command_report, report)
+                self.assertNotIn("rendered files", report)
+                self.assertNotIn("0 missing", report)
+                self.assertNotIn("0 modified", report)
+                self.assertNotIn("--adopt-legacy", report)
+                self.assertNotIn("file(s) from the old fleet installer", report)
+                self.assertEqual(sd_install.verify_rendered(ctx, self.receipt)[0]["code"], "source_payload_invalid")
+                self.assertEqual(before, {path: path.read_bytes() for path in self.home.rglob("*") if path.is_file()})
+
     def _status_of(self, checkout: Path) -> str:
         ctx = self.context_for(checkout)
         installed = io.StringIO()

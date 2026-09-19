@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from unittest import mock
@@ -31,7 +32,8 @@ class OversizeTests(ReviewFixture):
                 result = sd_review.review(root, namespace(), runner, self.environment(), self.chatgpt_home())
                 self.assertEqual(len(runner.calls), 1, "a changed subject must stop before provider dispatch")
                 self.assertEqual(result["status"], "refused")
-                self.assertEqual(result["input_manifest"]["status"], "oversized")
+                self.assertEqual(result["input_manifest"]["status"], "within_limit")
+                self.assertIn("input_changed", [row["code"] for row in result["readiness"]["blockers"]])
                 self.assertIn(target, [row["path"] for row in result["input_manifest"]["paths"]])
 
     def test_same_size_material_and_prompt_changes_also_stop_dispatch(self):
@@ -64,6 +66,8 @@ class OversizeTests(ReviewFixture):
 
     def test_oversize_is_advisory_without_gate_provider_or_meter(self):
         root = self.make_repo()
+        registry = self.registry_home / ".local/share/sd/providers.yaml"
+        registry.write_text(registry.read_text().replace("reader: codex-json", "reader: claude-json"))
         (root / "large.py").write_text("x" * sd_review.MAX_OUTPUT_BYTES)
         for explain in (False, True):
             runner, client = FakeRunner(), FakeClient()
@@ -73,12 +77,84 @@ class OversizeTests(ReviewFixture):
             inventory = result["input_manifest"]
             self.assertEqual(inventory["status"], "oversized")
             self.assertEqual(inventory["limit_bytes"], 2_000_000)
-            self.assertEqual(inventory["next_action"], "split_branch_required")
+            self.assertEqual(inventory["next_action"], "split_input_for_oversized_providers")
             self.assertFalse(inventory["review_complete"])
+            self.assertFalse(inventory["advisory_only"])
+            self.assertTrue(inventory["split_plan_advisory_only"])
             self.assertEqual(inventory["oversized_paths"], ["large.py"])
             self.assertEqual(runner.calls, [])
             self.assertEqual(client.sent, [])
             self.assertEqual(result["completed_reviews"], 0)
+
+    def test_native_codex_counts_only_actual_prompt_with_oversized_fallback(self):
+        root = self.make_repo()
+        (root / "large.py").write_text("x" * (sd_review.MAX_OUTPUT_BYTES + 100))
+        registry = self.registry_home / ".local/share/sd/providers.yaml"
+        registry.write_text(registry.read_text().replace("roles: [author, reviewer], reader: codex-json",
+                                                       "roles: [author, reviewer], reader: claude-json"))
+        for provider in ("codex", None):
+            for failed in (False, True):
+                runner = FakeRunner({"codex": sd_review.Completed(1, "", "synthetic failure")} if failed else {})
+                with self.subTest(provider=provider, failed=failed):
+                    result = sd_review.review(root, namespace(provider=provider), runner, self.environment(), self.chatgpt_home())
+                    calls = [row for row in runner.calls if row["argv"][0] == "codex"]
+                    self.assertEqual(len(calls), 1)
+                    self.assertEqual(len(runner.calls), 2, "oversized fallback must never dispatch")
+                    self.assertEqual(result["readiness"]["status"], "ready")
+                    self.assertEqual(result["input_manifest"]["transport_bytes"]["codex"], len(calls[0]["stdin"].encode()))
+                    self.assertLess(len(calls[0]["stdin"].encode()), sd_review.MAX_OUTPUT_BYTES)
+                    self.assertEqual(result["status"], ("unavailable" if provider else "refused") if failed else "clean")
+                    if provider is None:
+                        self.assertEqual([row["provider"] for row in result["readiness"]["warnings"]], ["second"])
+
+    def test_each_dispatch_enforces_complete_transmitted_prompt(self):
+        root = self.make_repo()
+        subject = sd_review.resolve_subject(root, "worktree")
+        for transport in ({"reader": "codex-json", "start": "codex exec"},
+                          {"reader": "claude-json", "start": "claude"},
+                          {"url": "https://api.example.invalid/v1", "model": "fixture"}):
+            runner, client = FakeRunner(), FakeClient()
+            provider = sd_review.sd_registry.Provider(name="fixture", vendor="fixture", bill="fixture", **transport)
+            with self.subTest(transport=transport):
+                outcome = sd_review.run_provider(provider, root, subject, "x" * (sd_review.MAX_OUTPUT_BYTES + 1),
+                    runner, self.environment(), 10, self.chatgpt_home(), client)
+                self.assertEqual(outcome.status, sd_review.REFUSED)
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(client.sent, [])
+
+    def test_attached_transports_measure_and_bound_the_complete_payload(self):
+        root = self.make_repo()
+        (root / "src.py").write_text("attached material " * 100)
+        subject = sd_review.resolve_subject(root, "worktree")
+        material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        prompt = "fixture prompt " * 100
+        for remote in (False, True):
+            transport = {"url": "https://api.example.invalid/v1"} if remote else {"reader": "claude-json", "start": "claude"}
+            provider = sd_review.sd_registry.Provider(name="fixture", vendor="fixture", bill="fixture", **transport)
+            captured = []
+
+            def reply(argv, env, cwd, timeout, captured=captured):
+                captured.append((sd_review.pathlib.Path(argv[argv.index("--add-dir") + 1]) / "review-subject.md").read_text())
+                return sd_review.Completed(0, json.dumps({"type": "result", "subtype": "success", "structured_output": {"findings": []}}), "")
+
+            client = FakeClient()
+            with self.subTest(remote=remote):
+                outcome = sd_review.run_provider(provider, root, subject, prompt, reply, self.environment(), 10, client=client)
+                self.assertEqual(outcome.status, sd_review.CLEAN)
+                sent = client.sent[0]["prompt"] if remote else captured[0]
+                overhead = (f"\nSchema: {json.dumps(sd_review.CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{sd_review.URL_OUTPUT_CONTRACT}"
+                            if remote else "\n\nReview input:\n")
+                manifest = sd_review.sd_review_material.input_manifest(inventory, prompt, {"fixture": overhead}, sd_review.MAX_OUTPUT_BYTES)
+                self.assertEqual(manifest["transport_bytes"]["fixture"], len(sent.encode()))
+                limit = len(sent.encode()) - 1
+                self.assertLess(len(prompt.encode()), limit)
+                self.assertLess(len(material.encode()), limit)
+                runner, client = FakeRunner(), FakeClient()
+                with mock.patch.object(sd_review, "MAX_OUTPUT_BYTES", limit):
+                    refused = sd_review.run_provider(provider, root, subject, prompt, runner, self.environment(), 10, client=client)
+                self.assertEqual(refused.status, sd_review.REFUSED)
+                self.assertEqual(runner.calls, [])
+                self.assertEqual(client.sent, [])
 
     def test_inventory_preserves_rename_binary_symlink_and_unusual_paths(self):
         root = self.make_repo()

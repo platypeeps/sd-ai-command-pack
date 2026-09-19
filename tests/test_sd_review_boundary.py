@@ -397,11 +397,19 @@ class LineBudgetTests(unittest.TestCase):
         # remain unchanged. The exact resulting size keeps this a ratchet.
         # Receipt identity includes directory topology/modes and resolves
         # executable paths from the same repository cwd used by dispatch.
+        #
+        # 2561 -> 2580 repairs F1/F4 under the approved measured-increase rule.
+        # Native Codex counts only transmitted prompt bytes; attached transports
+        # keep their complete payload bounds. Readiness counts fitting reviewers
+        # without letting an oversized fallback veto them. Dispatch rechecks the
+        # complete payload. Prior-source metadata bounds reads before loading,
+        # preserves cumulative size inventory, and suppresses partial dry-run
+        # stdin. Complexity ceilings and shared-core classification are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2561,
+            2580,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

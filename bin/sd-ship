@@ -730,6 +730,7 @@ def quote_branch(repository, branch):
 
 
 def no_item_record_flags(action) -> None:
+    action.add_argument("--provider", metavar="NAME", help="select one guarded reviewer for this invocation; never changes automatic order")
     action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
     action.add_argument("--create-record", action="store_true", help="allocate a record without provider dispatch or a spent pass")
     action.add_argument("--assert-new-work", action="store_true", help="explicit assertion of new work, not a renamed or rewritten continuation")
@@ -767,6 +768,9 @@ def validate_identity(args) -> None:
         raise Refusal("--review-id requires --no-item")
     if not args.no_item:
         return
+    if getattr(args, "provider", None) is not None and any(getattr(args, name, None) for name in
+            ("create_record", "import_history", "rebind_branch", "close_record", "reopen_record")):
+        raise Refusal("--provider cannot combine with metadata-only record operations")
     forbidden = [name for name in ("path", "message_file", "author", "run", "deliver", "acceptance_file") if getattr(args, name, None)]
     if forbidden:
         raise Refusal("no-item publication does not accept commit, runner, or delivery flags: "
@@ -786,6 +790,7 @@ def parser():
         action = commands.add_parser(name)
         identity_flags(action)
         if name == "prepare":
+            action.add_argument("--provider", metavar="NAME", help="select one guarded reviewer for this invocation; never changes automatic order")
             action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
             action.add_argument("--retry-review", action="store_true", help="spend the remaining pass on a full-branch retry of an incomplete initial review")
             action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")

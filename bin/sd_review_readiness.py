@@ -29,8 +29,11 @@ def review_readiness(result: Mapping[str, Any], chosen: Sequence[sd_registry.Pro
         if result.get(key) and result["requested_reviews"]:
             blockers.append(blocker(code, "policy", str(result[key])))
     runnable = 0
+    material = result.get("input_manifest", {})
     for provider in chosen:
         issues = provider_issues(provider, result["codex_preflight"], env, result.get("repo", ""))
+        if material.get("transport_bytes", {}).get(provider.name, 0) > material.get("limit_bytes", 0):
+            issues.append(blocker("input_oversized", "input", "Split the branch using input_manifest; no review partition was executed.", provider.name))
         if issues:
             warnings.extend(issues)
         else:
@@ -40,8 +43,7 @@ def review_readiness(result: Mapping[str, Any], chosen: Sequence[sd_registry.Pro
         if not warnings:
             blockers.append(blocker("reviewer_unavailable", "provider", "Select an independent, enabled, consented reviewer."))
         warnings = []
-    material = result.get("input_manifest", {})
-    if material.get("status") == "oversized":
+    if material.get("status") == "oversized" and not material.get("transport_bytes"):
         blockers.append(blocker("input_oversized", "input", "Split the branch using input_manifest; no review partition was executed."))
     if material.get("error"):
         blockers.append(blocker("input_unreadable", "input", str(material["error"])))

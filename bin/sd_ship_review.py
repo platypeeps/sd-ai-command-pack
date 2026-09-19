@@ -62,6 +62,23 @@ def validate_findings(report: dict) -> None:
         raise Refusal("local review status contradicts its blocking findings")
 
 
+def validate_provider_selection(report: dict, requested: str | None, *, completed: bool = False) -> None:
+    """An explicit pick authorizes no alternate candidate or completed reviewer."""
+    if requested is None:
+        return
+    timing = report.get("timing")
+    candidates = timing.get("candidates") if isinstance(timing, dict) else None
+    valid = (isinstance(requested, str) and bool(requested) and report.get("providers") == [requested]
+             and report.get("fallback_candidates") == [] and report.get("requested_reviews") == 1
+             and isinstance(candidates, list) and len(candidates) == 1 and isinstance(candidates[0], dict)
+             and candidates[0].get("name") == requested
+             and (not completed or report.get("reviewed_by") == [requested]))
+    if not valid:
+        raise Refusal("local review does not match the requested reviewer; no fallback is permitted",
+                      code="review_provider_mismatch", boundary="provider", state="operator_decision",
+                      next_action="Inspect the complete reviewer plan and repeat the intended --provider selection.")
+
+
 class SharedReview:
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args, *, store,
                  repository: str, branch: str, head: str, key: str, revision, state: dict,
@@ -78,6 +95,11 @@ class SharedReview:
     def result(self, phase: str, **extra) -> dict:
         result = self.identity.result_fields(phase, self.state, self.runtime.clock(), extra)
         result["workflow"] = success(phase, observed_only=bool(extra.get("observed_only")))
+        passes = self.history.native(self.state)
+        if passes:
+            report = passes[-1].get("report") or {}
+            result["review_selection"] = {"requested_provider": passes[-1].get("requested_provider"),
+                                          "reviewed_by": report.get("reviewed_by", [])}
         return result
 
     def review_inputs(self, head: str) -> dict:
@@ -87,6 +109,7 @@ class SharedReview:
         if self.state.get("binding") != self.runtime.binding(self.root):
             raise Refusal("review tools or repository policy changed after review")
         report = complete_report(passes[-1], head, self.state.get("reviewed_head"))
+        validate_provider_selection(report, passes[-1].get("requested_provider"), completed=True)
         self.history.validate_coverage(self.state, report)
         validate_findings(report)
         return report
@@ -135,6 +158,12 @@ class SharedReview:
     def reusable_review(self, head: str, prior: dict, retry: bool, additional: bool) -> bool:
         if additional:
             return False
+        requested = getattr(self.args, "provider", None)
+        if (requested is not None and prior.get("subject", {}).get("head") == head
+                and completed_depth(prior) and prior.get("reviewed_by") != [requested]):
+            raise Refusal("completed receipt does not match the requested reviewer; selection cannot replace review evidence",
+                          code="review_provider_mismatch", boundary="provider", state="operator_decision",
+                          next_action="Reuse the recorded reviewer, or obtain a permitted additional-review request.")
         if not retry and prior.get("status") == "blocking" and prior.get("subject", {}).get("head") == head:
             clearance = self.check_review(head, refresh_adjudication=True)
             self.save(reviewed_head=head, review_clearance=clearance)
@@ -171,11 +200,15 @@ class SharedReview:
         self.validate_dispatch(head, prior, retry, additional)
         base = passes[-1]["head"] if passes and not (retry or additional) else None
         argv = [sys.executable, str(self.runtime.bin_dir / "sd-review"), "--scope", "branch", "--challenge", "--json", "--database", str(self.database)]
+        requested = getattr(self.args, "provider", None)
+        if requested is not None:
+            argv += ["--provider", requested]
         if getattr(self.args, "reuse_check", False):
             argv.append("--reuse-check")
         if base:
             argv += ["--base", base]
-        passes.append({"head": head, "started_at": self.runtime.clock(), "base": base, "retry": retry})
+        passes.append({"head": head, "started_at": self.runtime.clock(), "base": base, "retry": retry,
+                       "requested_provider": requested})
         if request:
             passes[-1]["additional_review_request"] = request
         with tempfile.TemporaryDirectory(prefix="sd-ship-verify-") as directory:
@@ -202,6 +235,7 @@ class SharedReview:
             try:
                 plan = self.runtime.timing_plan(planned)
                 validate_review_readiness(planned)
+                validate_provider_selection(json.loads(planned.stdout), passes[-1].get("requested_provider"))
             except Refusal:
                 self.save(review_preflight_error=self.preflight_diagnostic(planned))
                 raise
@@ -228,6 +262,11 @@ class SharedReview:
         passes[-1]["report"] = report
         passes[-1]["exit_code"] = result.returncode
         self.save(passes=passes, reviewed_head=head if result.returncode == 0 else None, phase="reviewed")
+        try:
+            validate_provider_selection(report, passes[-1].get("requested_provider"), completed=completed_depth(report))
+        except Refusal:
+            self.save(reviewed_head=None)
+            raise
         if result.returncode:
             raise Refusal(f"local review {report.get('status')}: {report.get('completed_reviews', 0)}/{report.get('requested_reviews', 0)} completed; see item ship receipt")
         self.check_review(head)

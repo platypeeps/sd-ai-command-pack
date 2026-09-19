@@ -272,6 +272,49 @@ class FixReviewTests(ReviewFixture):
                 self.assertGreater(result["input_manifest"]["context_bytes"], sd_review.MAX_OUTPUT_BYTES)
             self.assertEqual(runner.calls, [])
 
+    def test_oversized_prior_sources_keep_inventory_without_unbounded_reads_or_dry_run_stdin(self):
+        for sizes in ((sd_review.MAX_OUTPUT_BYTES + 1,), (1_100_000,) * 3):
+            root = self.make_repo("sources-" + str(len(sizes)))
+            subprocess.run(["git", "checkout", "-b", "topic"], cwd=root, check=True, capture_output=True)
+            findings = []
+            for index, size in enumerate(sizes):
+                name = f"source-{index}.py"
+                first = self.commit(root, name, "x" * size)
+                findings.append({"path": name, "disposition": "blocking", "summary": "unchanged original blocker"})
+            self.commit(root, "fix.py", "unrelated = True\n")
+            report = self.tmp / "prior.json"
+            original = json.dumps({"scope": "branch", "subject": {"head": first}, "status": "blocking",
+                                   "findings": findings, "authored_with": []})
+            report.write_text(original)
+            for mode in ({}, {"explain": True}, {"dry_run": True}):
+                runner = FakeRunner()
+                with self.subTest(sizes=sizes, mode=mode), \
+                        patch.object(sd_review, "subprocess_runner", wraps=sd_review.subprocess_runner) as blobs:
+                    result = sd_review.review(root, namespace(scope="branch", provider="codex", base=first,
+                        verify_report=str(report), **mode), runner, self.environment(), self.chatgpt_home())
+                    self.assertEqual(blobs.call_count, 0 if sizes[0] > sd_review.MAX_OUTPUT_BYTES else 1)
+                    self.assertEqual(result["readiness"]["status"], "blocked")
+                    manifest = result["input_manifest"]
+                    self.assertEqual(manifest["status"], "oversized")
+                    paths = {row["path"]: row for row in manifest["paths"]}
+                    self.assertTrue({row["path"] for row in findings}.issubset(paths))
+                    for index, size in enumerate(sizes):
+                        self.assertGreater(paths[f"source-{index}.py"]["bytes"], size)
+                    self.assertGreater(manifest["transport_bytes"]["codex"], sd_review.MAX_OUTPUT_BYTES)
+                    self.assertEqual(result.get("planned_invocations", []), [])
+                    self.assertEqual(runner.calls, [])
+                    self.assertEqual(report.read_text(), original)
+
+    def test_dry_run_never_emits_an_oversized_convention_prompt(self):
+        root, _first = self.branch()
+        runner = FakeRunner()
+        with patch.object(sd_review, "local_conventions", return_value="é" * sd_review.MAX_OUTPUT_BYTES):
+            result = sd_review.review(root, namespace(scope="branch", provider="codex", dry_run=True), runner,
+                                      self.environment(), self.chatgpt_home())
+        self.assertEqual(result["readiness"]["status"], "blocked")
+        self.assertEqual(result["planned_invocations"], [])
+        self.assertEqual(runner.calls, [])
+
     def test_resume_refuses_fix_only_or_unrelated_prior_head(self):
         root, first = self.branch()
         prior = sd_review.review(root, namespace(scope="branch"), FakeRunner(), self.environment(), self.chatgpt_home())

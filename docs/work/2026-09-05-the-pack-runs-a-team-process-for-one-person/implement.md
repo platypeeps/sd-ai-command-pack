@@ -1726,7 +1726,7 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
 - **4.** `DeletedLane.test_no_governed_file_names_the_lane` passes.
 - **7.** The grep of `bin/` and `skills/` for percentages, `percent` and
   `threshold` finds 33 lines. None disables a review point; the nearest is
-  `bin/sd-review:1086` `threshold = BLOCKING_ORDER[floor]`, a severity floor.
+  `source:bin/sd-review::dispose` `threshold = BLOCKING_ORDER[floor]`, a severity floor.
   The back-scoring is cut (2026-09-07). The forward experiment is deferred to
   followup sd:777 by the owner's decision note 1920.
 - **8.** `ConditionalObligations.test_every_site_naming_the_ledger_names_the_gate`

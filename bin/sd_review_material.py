@@ -78,19 +78,22 @@ def tracked_material(root: pathlib.Path, subject: Any) -> dict[str, str]:
     return dict(zip(names, pieces, strict=True))
 
 
-def input_manifest(inventory: list[dict[str, Any]], prompt: str, overheads: dict[str, str], limit: int,
+def input_manifest(inventory: list[dict[str, Any]], prompt: str, overheads: dict[str, str | None], limit: int,
              context: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    context = context or []
     paths = {row["path"]: dict(row) for row in inventory}
-    for row in context or []:
+    for row in context:
         current = paths.setdefault(row["path"], dict(row, bytes=0))
         current["bytes"] += row["bytes"]
     inventory = list(paths.values())
-    context_bytes = sum(row["bytes"] for row in context or [])
-    prompt_bytes = len(prompt.encode("utf-8")) - context_bytes
+    context_bytes = sum(row["bytes"] for row in context)
+    prompt_bytes = len(prompt.encode("utf-8")) - sum(row.get("included_bytes", row["bytes"]) for row in context)
     material_bytes = sum(row["bytes"] for row in inventory)
-    transports = {name: prompt_bytes + material_bytes + len(overhead.encode("utf-8")) for name, overhead in overheads.items()}
+    # None means native repository access: only the complete prompt is transmitted.
+    transports = {name: prompt_bytes + (context_bytes if overhead is None else material_bytes + len(overhead.encode()))
+                  for name, overhead in overheads.items()}
     measured = max(transports.values(), default=prompt_bytes + material_bytes)
-    allowance = max(0, limit - prompt_bytes - max((len(value.encode("utf-8")) for value in overheads.values()), default=0))
+    allowance = max(0, limit - prompt_bytes - max((len((value or "").encode()) for value in overheads.values()), default=0))
     groups: list[dict[str, Any]] = []
     for row in inventory:
         if not groups or groups[-1]["bytes"] + row["bytes"] > allowance or groups[-1]["boundary"] != row["boundary"]:
@@ -101,7 +104,8 @@ def input_manifest(inventory: list[dict[str, Any]], prompt: str, overheads: dict
             "measured_bytes": measured, "prompt_bytes": prompt_bytes, "material_bytes": material_bytes, "context_bytes": context_bytes,
             "transport_bytes": transports, "paths": inventory, "suggested_groups": groups,
             "oversized_paths": [row["path"] for row in inventory if row["bytes"] > allowance],
-            "next_action": "split_branch_required" if measured > limit else None,
-            "advisory_only": True, "dependency_boundaries": "directory hints; semantic dependencies require operator review",
+            "next_action": "split_input_for_oversized_providers" if measured > limit else None,
+            "advisory_only": False, "split_plan_advisory_only": True,
+            "dependency_boundaries": "directory hints; semantic dependencies require operator review",
             "cross_branch_concerns": ["Keep shared interfaces, imports, migrations, and their tests coordinated."],
             "review_complete": False}

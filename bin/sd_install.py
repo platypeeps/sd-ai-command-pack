@@ -2270,7 +2270,10 @@ def cmd_status(ctx: Context, out) -> int:
         }
     except MetadataRefused as error:
         print(f"surfaces: metadata cannot render ({error})", file=out)
-        expected = {}
+        print(f"surfaces: {len(surfaces)} in checkout; rendered comparison unavailable", file=out)
+        print(command_report(ctx.checkout, ctx.environ), file=out)
+        print("legacy: classification unavailable (rendering failed)", file=out)
+        return 0
     missing = 0
     drifted = 0
     for path, sha in expected.items():

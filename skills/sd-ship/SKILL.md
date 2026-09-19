@@ -133,6 +133,15 @@ Before opting in, read `skills/sd-check/references/check-receipts.md` in the sd-
 Reuse requires complete local-only dependencies and unchanged before-and-after identity; legacy receipts rerun.
 This flag does not reuse incomplete reviews or bypass source, policy, or receipt validation.
 
+Add `--provider NAME` to prepare or standalone review only for an explicitly requested reviewer.
+The selection applies to this invocation, without fallback or changes to the automatic order.
+Inspect `sd-review --explain --json` with the same scope, database, history inputs, review modifiers, and `--provider NAME`.
+Existing independence, capability, availability, consent, and spending checks still apply.
+A conflicting selection cannot replace a completed receipt or grant another pass.
+Omitting the flag preserves automatic selection for new dispatches and permits reuse of existing valid evidence.
+Results report `review_selection.requested_provider` and the actual `reviewed_by` list from the retained report.
+Read the recovery reference before retries, fix verification, or additional reviews with an explicit provider.
+
 The additive `workflow` object reports `schema_version`, `phase`, `state`, `blocker`, and `next_action`.
 States are `success`, `retryable_failure`, `operator_decision`, and `policy_block`.
 Blockers identify `code`, `boundary`, `retryable`, and `approval_required`.

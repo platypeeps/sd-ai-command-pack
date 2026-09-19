@@ -30,6 +30,15 @@ For a committed fix, the adapter supplies `--base <previous-head> --verify-repor
 The report carries prior blockers; current source accompanies each finding, including source outside the fix diff.
 Both original and fix-author vendors remain excluded.
 
+Repeat `--provider NAME` on each retry, fix verification, or additional attempt that should use that reviewer.
+An omitted flag uses the normal automatic policy for a new dispatch, not the preceding explicit selection.
+Mixed authorship still blocks that automatic path when no independent candidate remains.
+Each reserved pass retains its requested selector and full review report without changing earlier passes.
+A missing selector on an older pass means legacy automatic selection; a null selector means automatic selection.
+Recorded selectors are evidence, not consent or permission for another attempt.
+An explicit selection must match the actual reviewer when reusing completed evidence.
+The same selector does not bypass changed-head, tool, policy, acceptance, or history checks.
+
 An incomplete initial review needs full-branch coverage.
 After explicit retry authorization, use `sd-ship prepare --item ID --retry-review --json`.
 The retry spends the remaining automatic pass.
