@@ -1,7 +1,7 @@
 ---
 title: Reduce workflow overhead without weakening delivery gates
 created: 2026-09-18
-branch: feat/workflow-policy-alignment
+branch: docs/sd-1021-closeout
 item: sd:1021
 ---
 
@@ -107,66 +107,108 @@ Capture a fresh baseline at the migration checkpoint; these dated values do not 
 
 ## Acceptance criteria
 
-Add missing named regression modules during implementation; these checks are planned, not recorded passes.
+Checked criteria have recorded evidence or an explicitly accepted historical evidence exception, as qualified below.
+AC5 and AC14 contain the two accepted exceptions; neither claims that missing historical checks ran.
 
-- [ ] `python -m unittest tests.test_sd_review_readiness` passes with zero failures and zero provider or quota calls.
-- [ ] `python -m unittest tests.test_sd_workflow_state` passes with zero failures.
+- [x] `python -m unittest tests.test_sd_review_readiness` passes with zero failures and zero provider or quota calls.
+- [x] `python -m unittest tests.test_sd_workflow_state` passes with zero failures.
       Additive fields preserve existing status, error, and exit-code contracts and existing consumer parsing.
       Cases distinguish retryable failure, operator decision, policy blocker, and completion, each with the next supported action.
-- [ ] `python -m unittest tests.test_sd_review_receipts` passes with zero failures.
+- [x] `python -m unittest tests.test_sd_review_receipts` passes with zero failures.
       Dirty, staged, untracked, configuration, command, and runtime changes invalidate otherwise reusable evidence.
       Legacy receipts fail reuse when inputs change or untracked inputs exist.
       Interactive reuse requires explicit opt-in and a clean committed checkout; unknown dependencies disable reuse.
-- [ ] `python -m unittest tests.test_sd_ship_no_item tests.test_sd_ship_remote` passes with zero failures.
+- [x] `python -m unittest tests.test_sd_ship_no_item tests.test_sd_ship_remote` passes with zero failures.
       Cross-clone identity, conflicting assignments, stale heads, missing CI, and missing review acceptance retain their refusals.
       Existing protection, ownership, and approval checks remain unchanged; this batch adds no bypass or machine grant.
-- [ ] Before phase 3 edits and integration, record concurrent worktree, assignment, branch, and `sd:1006` row checks.
+- [x] AC5 — accepted historical evidence exception, not an executed-check claim.
+      Original criterion: before phase 3 edits and integration, record concurrent worktree, assignment, branch, and `sd:1006` row checks.
       Resolve overlaps before proceeding; incorporate newer merged dependencies without altering locked worktrees or the `sd:1006` row.
-- [ ] `python -m unittest tests.test_sd_review_oversize` passes with zero failures and preserves the existing byte limit.
+      Dependency ancestry and one clean locked worktree are recorded; the required phase-boundary snapshots were not located.
+      The user accepted this recording gap on 2026-09-19; current ownership and preservation gates remain unchanged.
+- [x] `python -m unittest tests.test_sd_review_oversize` passes with zero failures and preserves the existing byte limit.
       The advisory inventory covers every changed path and byte; split plans identify dependency boundaries.
       The planner executes no review partitions and produces no aggregate approval or complete-review status.
-- [ ] `python -m unittest tests.test_sd_review_isolation` passes with zero failures and makes no external review calls.
+- [x] `python -m unittest tests.test_sd_review_isolation` passes with zero failures and makes no external review calls.
       Probe results separate OS confinement, file-read access, and instruction sources.
       Unsupported or failed confinement remains a named blocker; it cannot produce an isolation pass.
-- [ ] `python -m unittest tests.test_sd_install` passes with zero failures.
+- [x] `python -m unittest tests.test_sd_install` passes with zero failures.
       Strict status fails on receipt drift, incorrect command resolution, or failed smoke checks.
       Production-render metadata tests preserve explicit-only invocation on actual Codex output and retain canonical Claude markers.
-- [ ] `python -m unittest tests.test_rule_registry tests.test_doc_citations` passes with zero failures after entrypoint extraction.
-- [ ] `python -m unittest tests.test_skill_frontmatter tests.test_workflow_policy` passes with zero failures.
+- [x] `python -m unittest tests.test_rule_registry tests.test_doc_citations` passes with zero failures after entrypoint extraction.
+- [x] `python -m unittest tests.test_skill_frontmatter tests.test_workflow_policy` passes with zero failures.
       Canonical Claude markers remain required; current policy prose matches the remaining implementation and unchanged authorization gates.
-- [ ] `bin/sd-docs-lint` reports `clean`; referenced safety instructions remain reachable.
-- [ ] `python bin/sd_install.py --user --home "$scratch_home"` produces real Codex renders in an isolated scratch home.
+- [x] `bin/sd-docs-lint` reports `clean`; referenced safety instructions remain reachable.
+- [x] `python bin/sd_install.py --user --home "$scratch_home"` produces real Codex renders in an isolated scratch home.
       Run the official validator against those actual renders, never filtered test copies.
       The commands below each report `Skill is valid!`.
+      C-29 records both passes contemporaneously; the raw validator transcript was not located.
 
       ```bash
       python /Users/sven/.codex/skills/.system/skill-creator/scripts/quick_validate.py "$scratch_home/.codex/skills/sd-review"
       python /Users/sven/.codex/skills/.system/skill-creator/scripts/quick_validate.py "$scratch_home/.codex/skills/sd-ship"
       ```
 
-- [ ] `make check` passes in the pack worktree with zero failed groups and the existing installer coverage floor.
-- [ ] `./local-sd-db/sd-db.sh test` passes in the system worktree with zero failures.
+- [x] `make check` passes in the pack worktree with zero failed groups and the existing installer coverage floor.
+- [x] AC14 — system tests passed; the user accepted the historical prompt-preflight evidence gap on 2026-09-19.
+      Original criterion: `./local-sd-db/sd-db.sh test` passes in the system worktree with zero failures.
       Discover the documented `local-agent-prompt` test and preflight before editing that component.
       Record their exact commands and results; any failure blocks migration.
-- [ ] Read back the effective reviewer order as Codex then Claude after migration.
+      Recorded results: library 1,407 tests passed; prompt 18 tests passed.
+      Pre-edit discovery timing and preview execution remain unverified, not passed.
+- [x] Read back the effective reviewer order as Codex then Claude after migration.
       Verify explicit MiniMax/Baseten eligibility without sending payloads or reading remote quota meters.
       Compare the full provider inventory, enabled/disabled reasons, caps, and author order against the captured machine checkpoint.
       Preserve every checkpoint entry and state, including Kimi and exo when present; never derive expectations from seed YAML.
-- [ ] The migration checkpoint contains the registry file, affected provider/bill rows, configuration hash, and current revision.
+- [x] The migration checkpoint contains the registry file, affected provider/bill rows, configuration hash, and current revision.
       Backup read-back matches the captured machine baseline before any migration write.
       Scoped rollback restores only affected rows with an optimistic current-revision check; conflicting concurrent changes stop restoration.
-- [ ] Back up `/Users/sven/.claude/settings.json` and read back the exact scoped hook diff.
+- [x] Back up `/Users/sven/.claude/settings.json` and read back the exact scoped hook diff.
       Automatic request instructions are absent globally; the push detector, system no-Copilot restriction, and unrelated permissions remain unchanged.
       Repository `.githooks` remains unchanged.
-- [ ] Read back affected GitHub settings after scoped changes.
+- [x] Read back affected GitHub settings after scoped changes.
       Automatic Copilot requests are absent; unrelated rules and the system no-Copilot restriction remain unchanged.
-- [ ] Strict installation verification passes against the intended serving checkout after installation.
+- [x] Strict installation verification passes against the intended serving checkout after installation.
       Source checks alone cannot satisfy this criterion.
-- [ ] Restoration fixtures verify the prior serving commit, receipt, rendered surfaces, and matching library runtime.
+- [x] Restoration fixtures verify the prior serving commit, receipt, rendered surfaces, and matching library runtime.
       After any real rollback, repeat strict status, command-resolution, and safe smoke checks against those restored identities.
-- [ ] `python -m unittest tests.test_sd_ship_skill tests.test_sd_review_ack tests.test_sd_review_ack_carried tests.test_sd_status` passes with zero failures.
+- [x] `python -m unittest tests.test_sd_ship_skill tests.test_sd_review_ack tests.test_sd_review_ack_carried tests.test_sd_status` passes with zero failures.
       Closeout tests cover exact-target approval, recovery, concurrent changes, protected work, and evidence-backed review dispositions.
       Existing documentation and rule gates pass for the conditional reference; no cleanup executable or automatic Copilot request appears.
+
+## Acceptance evidence — 2026-09-19
+
+Pack implementation merged through PR #1070 as `c2e47eb596b199eeee70bb93379b5424de35e05d`.
+System implementation merged through PR #451 as `55c4d69168cfa873d57bf063275e2f1a22c5a8e6`.
+The pack merge was a slice; whole-item delivery requires a later verified `Delivers: sd:1021` merge.
+These records establish implementation acceptance, not review clearance for another head.
+
+| Criteria | Recorded evidence |
+|---|---|
+| AC1–4, AC6–11, AC13, AC21 | `/private/tmp/sd-pack-review-fixes-fullgate.DwG057/REPORT.md` and `unittest-output.log`: every named shard exited 0. Exact head `ee9fb82b` passed 3,308 tests in 166.499 seconds; installer coverage remained 100%. Documentation lint reported `clean`. |
+| AC5 | The user accepted the missing historical phase-boundary snapshots. Dependency evidence remains above; no new check proves historical timing. |
+| AC12 | C-29 records both actual scratch-render validator passes. The raw transcript remains unavailable. |
+| AC14 | `/private/tmp/sd-system-fix-verification.1rHhIY/REPORT.md` records passing library and prompt suites. The user accepted only the missing pre-edit prompt evidence. |
+| AC15–16 | `/private/tmp/sd-workflow-policy.wgpIrs/reviewer-migration.uVDl7s/migration-plan.json` records checkpoint identities, preservation, and scoped recovery instructions. Codex then Claude remain automatic; MiniMax/Baseten require explicit selection. All six provider states remain preserved. |
+| AC17–18 | `/private/tmp/sd-workflow-policy.wgpIrs/configuration-changes.json` records exact hook and repository-ruleset read-back. Personal Copilot settings were outside this scope. |
+| AC19 | `/Users/sven/.local/share/sd/runtime-backups/workflow-policy-20260919T140005Z/activation-result.json` records strict installer verification: 260 checks, zero failures. Its earlier service limitation remains preserved. |
+| AC20 | `/private/tmp/sd-restoration-rehearsal.MwidYw/artifacts/result.json` records matching source, receipt, renders, and runtime. Sixteen command checks and three smoke checks passed. This was a fixture, not a live rollback. |
+
+Item note 2949 records later dashboard health: `ok:true`, `code_changed:false` at `2026-09-19T18:41:36Z`.
+It does not rewrite the earlier activation receipt or prove continuing health.
+Two fresh desktop skill inventories each returned 40 enabled SD skills and zero errors.
+The user confirmed discovery through `@sd-ship`; installation did not create `/sd-*` aliases.
+The diagnostic remains at `/private/tmp/sd-codex-discovery.GQcUBZ/DIAGNOSIS.md`.
+
+Approved cleanup removed two backed-up worktrees and their exact local branches without forced removal.
+Recovery remains under `/Users/sven/.local/share/sd/runtime-backups/workflow-policy-20260919T140005Z/closeout/candidate-pairs-aqb6p6h_`.
+Its `removal-completion.json` reports `verified`; all four recovery archive hashes matched during independent read-back.
+Primary checkouts, six dirty worktrees, the archive branch, unrelated work, and shared runtimes remained preserved.
+Follow-ups `sd:1024` and `sd:1025` remain separate planning items.
+
+Decision note 2951 records the user's acceptance of AC5 and AC14 after approval of the docs-only closeout PR.
+This acceptance changes no executable checks, reviewer policy, CI, ownership, protection, or merge authorization.
+It is not a claim that missing checks ran or that this closeout has already merged.
 
 ## Scope and rollback
 
