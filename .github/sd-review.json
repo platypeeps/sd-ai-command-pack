@@ -19,6 +19,5 @@
     "bin/sd-review"
   ],
   "large_change_lines": 800,
-  "authors": ["sdelmas"],
   "severity_floor": "medium"
 }

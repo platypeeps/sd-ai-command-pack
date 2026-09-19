@@ -418,7 +418,7 @@ class TheInstallerGate(Fixture):
         args = argparse.Namespace(
             dry_run=True, json=False, force=False, remove_legacy=False, pin="deadbeef"
         )
-        policy = ({"authors": ["sven"]}, "built-in default")
+        policy = ({}, "built-in default")
         with mock.patch.dict(os.environ, {"PATH": str(bindir)}):
             return sd_setup_github.setup_github(root, args, load_policy=lambda _root: policy)
 

@@ -1145,8 +1145,8 @@ log, not here.
   `packet_path` (`source:bin/sd-handoff-restore::packet_path`), and
   `contains` (`source:bin/sd-handoff-restore::contains`);
   they are imported the way `bin/sd-status:96` does; the `authors` policy key
-  (`bin/sd-review:276`, `:283`, `:1098`, `bin/sd_setup_github.py:230,267`, the schema,
-  `.github/sd-review.json`); the unreachable gito and kimi argv branches
+  (cut by 31(b2): four declaring sites gone, and a `RETIRED_POLICY_KEYS` row
+  in their place); the unreachable gito and kimi argv branches
   (`bin/sd-review:830-834`) and `except Refusal` (`:1354-1356`); the constant
   `posted` key and its grep test (`bin/sd-review:1110`,
   `tests/test_sd_review_boundary.py:167`); the second `BACKENDS` table

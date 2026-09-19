@@ -9,9 +9,18 @@ the name.
 31(a) is `sd_sweep`, the age sweep cut under criterion 21. 31(b1), the
 prose symbols and flags, is `ProseSymbolsAndFlags` below: one grep per
 symbol, and a bounded set of the symbols the lane could not cut because the
-code behind them is live and load-bearing. 31(b2), the `authors` policy key
-in `bin/sd-review`, and 31(c), the bug regressions, land in their own pull
-requests and add their symbols here.
+code behind them is live and load-bearing. 31(b2), the `authors` policy key,
+is cut and its symbol is in `PROSE_SYMBOLS` with the rest; 31(c), the bug
+regressions, lands in its own pull request and adds its symbols here.
+
+31(b2)'s key was declared in four places and read by none. Its schema said a
+CI lane hard-failed the logins it listed; no workflow, no action under
+`actions/` and no code in `bin/` ever read the list, and `setup-github`'s own
+line said as much -- "(none listed; rule 5 hard-fails for nobody)". It is a
+`RETIRED_POLICY_KEYS` row now, so a repository whose `.github/sd-review.json`
+still carries it is refused by name with a remedy rather than by "unknown
+key". The grep is bounded to let that row and the assertion proving it name
+the key; `TheAuthorsBoundStillFindsAKey` is the control on the bound.
 
 31(a) also names `parked` and `archived`, scoped to the `sd_lib` item field
 and its readers. That cut is deferred to a later lane (team-lead decision
@@ -80,6 +89,17 @@ def governed_grep(pattern: str) -> list[str]:
     if result.returncode not in (0, 1):
         raise AssertionError(result.stderr.strip())
     return [line for line in result.stdout.splitlines() if line]
+
+
+def _matches(pattern: str, line: str) -> bool:
+    r"""One line against a `git grep -E` pattern, for bound controls.
+
+    `[:space:]` is POSIX and `re` does not know it, so it is translated
+    rather than the pattern being written twice in two dialects. The one
+    replacement covers both shapes the pattern uses it in: `[[:space:]]*`
+    becomes `[\s]*`, and the negated `[^"[:space:]]` becomes `[^"\s]`.
+    """
+    return re.search(pattern.replace("[:space:]", r"\s"), line) is not None
 
 
 class TheGrepMeasuresSomething(unittest.TestCase):
@@ -256,6 +276,14 @@ PROSE_SYMBOLS = (
     ("cron-jobs.sh", r"cron-jobs\.sh"),
     ("Active item:", r"Active item:"),
     ("sd-deps", r"sd-deps"),
+    # 31(b2). Bounded away from the one place the key may still be named:
+    # its `RETIRED_POLICY_KEYS` row, where the value is a remedy string, so
+    # `"authors": "` is the one form that does not match. Every other shape
+    # the key took is here -- the mapping entry before a list or an object,
+    # the `_STRING_LIST_KEYS` tuple member, and a subscript read.
+    # `TheAuthorsBoundStillFindsAKey` is the control on that bound.
+    ("authors policy key",
+     r'"authors"[^:]|"authors":[[:space:]]*[^"[:space:]]'),
 )
 
 #: The 31(b1) symbols this lane leaves in place, each with the files that
@@ -311,6 +339,37 @@ class ProseSymbolsAndFlags(unittest.TestCase):
                 found = {row.split(":", 1)[0] for row in governed_grep(symbol)}
                 self.assertTrue(found, f"{symbol} is gone: remove its row from HELD_SYMBOLS")
                 self.assertLessEqual(found, files, f"{symbol} spread to {sorted(found - files)}")
+
+    def test_the_authors_bound_still_finds_a_key(self) -> None:
+        """The control on 31(b2)'s bound: it excludes one shape, not the key.
+
+        The pattern lets `"authors": "` through so the `RETIRED_POLICY_KEYS`
+        row and the assertion proving the retirement can name the key they
+        retire. A bound that had swallowed the key itself would make the grep
+        above pass over a policy file that still declares it, which is the
+        failure the whole gate exists to catch.
+        """
+        pattern = dict(PROSE_SYMBOLS)["authors policy key"]
+        live = (
+            '    "authors": [],',
+            '_STRING_LIST_KEYS = ("docs_skip", "sensitive", "authors")',
+            '        "authors": list(policy["authors"]),',
+            '    authors = ", ".join(result["authors"])',
+            '    "authors": {',
+            '  "authors": ["sdelmas"],',
+            '        self.assertIn("authors", policy)',
+            '    for key in ("authors", "sensitive"):',
+        )
+        for line in live:
+            with self.subTest(line=line):
+                self.assertTrue(_matches(pattern, line), "the bound lost a live key shape")
+        retired = (
+            '    "authors": "nothing ever read it. Delete the key",',
+            '        self.assert_rejects({"authors": "x"}, "authors is retired")',
+        )
+        for line in retired:
+            with self.subTest(line=line):
+                self.assertFalse(_matches(pattern, line), "the bound caught its own exception")
 
     def test_the_held_set_is_bounded_and_shrinking(self) -> None:
         self.assertLessEqual(set(HELD_SYMBOLS), set(HELD_SYMBOLS_BOUND))

@@ -55,11 +55,6 @@
       "minimum": 0,
       "description": "Added-plus-removed lines above which the tier escalates one step. Default 800."
     },
-    "authors": {
-      "type": "array",
-      "description": "GitHub logins this repository's framework rules hard-fail for in CI (R10-D5). Everyone else gets a reporting, passing check, so a collaborator who has not adopted the framework can never be blocked by it. The local review lane reads this list and reports it; it is the CI lane, installed separately by `sd-review setup-github`, that acts on it.",
-      "items": {"type": "string", "minLength": 1}
-    },
     "severity_floor": {
       "type": "string",
       "enum": ["high", "medium", "low", "unspecified"],
