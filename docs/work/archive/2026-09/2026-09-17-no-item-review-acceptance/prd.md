@@ -1,7 +1,7 @@
 ---
 title: Explicit review acceptance without placeholder work items
 created: 2026-09-17
-branch: main
+status: done
 ---
 
 # PRD — no-item review acceptance
@@ -473,3 +473,8 @@ No implementation or provider review ran during backup verification.
   `sd_db.progress.deliver_work` writes the row. The row moves once this lands;
   archiving the directory follows the row, not the other way round, because
   `bin/sd-docs-lint` rule 2 reads the row and not this file.
+- 2026-09-19: The row moved to `done`, delivered at `c05ed91c` on
+  `origin/refs/heads/main`, and the directory is archived behind it. `branch:`
+  is dropped and `status: done` takes its place, which is what an archived prd
+  carries: `bin/sd-docs-lint` rule 1 wants a known `status:` where the status
+  source is not the row, and rule 2 reads the live row while one exists.
