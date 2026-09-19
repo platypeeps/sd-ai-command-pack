@@ -1124,18 +1124,18 @@ log, not here.
 
 **Shared scripts.**
 
-- Bugs: `bin/sd-status:851` passes `root` to `handoff.resolve_root`;
+- Bugs: `bin/sd-status:847` passes `root` to `handoff.resolve_root`;
   `bin/sd-docs-lint:244` tests `value.startswith("none")` where it must
   compare the whole token with `none`, so `Work: nonexistent-item` fails as a
   missing reason rather than as an unresolved path.
 - Cuts: protection gap analysis, acknowledgement loading, both schema files
-  and `.github/sd-status.json` (`bin/sd-status:226-836`) become one
-  `protected: yes/no` line; `bin/sd_sweep.py`, the `sweep` verb
-  (`bin/sd:2704-2738,2916-2925`) and `tests/test_sd_sweep.py`; the archive
-  walk and the `archived` and `parked` fields (`bin/sd_lib.py:355-368`,
-  `:271-282`, `:302-303`, `:350`) and every reader (`bin/sd-status:183,190,
-  1122-1129,1234-1242,1254-1287`), so
-  `work_item_dirs` is one `iterdir` that skips `archive` by name; `bin/sd_ledger.py` moves to B with the
+  and `.github/sd-status.json` (`bin/sd-status:222-832`) become one
+  `protected: yes/no` line -- rescinded 2026-09-19, kept; see the Log.
+  `bin/sd_sweep.py`, the `sweep` verb (`bin/sd:2704-2738,2916-2925`) and
+  `tests/test_sd_sweep.py`; the `parked` field and every reader of it, cut
+  2026-09-19 under 31(a), which keeps `archived`, the archive walk
+  (`bin/sd_lib.py:355-368`, `:271-282`, `:302-303`, `:350`) and their
+  readers, so `work_item_dirs` still skips `archive` by name; `bin/sd_ledger.py` moves to B with the
   database; `record_load` (cut 2026-09-16, 31(b1)); the six helpers
   copied from `bin/sd-handoff` are
   `git` (`source:bin/sd-handoff-restore::git`),
@@ -1144,7 +1144,7 @@ log, not here.
   `state_home` (`source:bin/sd-handoff-restore::state_home`),
   `packet_path` (`source:bin/sd-handoff-restore::packet_path`), and
   `contains` (`source:bin/sd-handoff-restore::contains`);
-  they are imported the way `bin/sd-status:96` does; the `authors` policy key
+  they are imported the way `bin/sd-status:95` does; the `authors` policy key
   (cut by 31(b2): four declaring sites gone, and a `RETIRED_POLICY_KEYS` row
   in their place); the unreachable gito and kimi argv branches
   (`bin/sd-review:830-834`) and `except Refusal` (`:1354-1356`); the constant
@@ -1160,9 +1160,9 @@ log, not here.
   not cuts, both pinned self-contained by their own suites; `bin/sd-docs-lint:52,72-82,148` imports the vocabulary, the
   directory walk and the in-progress rule from `sd_lib`.
 - Consistency: a configuration error exits 2 everywhere (`bin/sd:2931-2947`,
-  `bin/sd-status:1269`, `bin/sd-check`, `bin/sd-review:1329`) and JSON
+  `source:bin/sd-status::main`, `bin/sd-check`, `bin/sd-review:1329`) and JSON
   envelopes carry one version key; one ACTIVE status set in `sd_lib` serves
-  `bin/sd-status:1107-1108`, `dashboard/work.py:50` and `bin/sd-review:514`;
+  `bin/sd-status:1103-1104`, `dashboard/work.py:50` and `bin/sd-review:514`;
   the tiers in `.github/sd-review.json:8` go with their key, since the
   registry order is the chain; settled 2026-09-05.
 
@@ -1601,7 +1601,7 @@ confirmed by the next `sd-ship` run alone.
     pruning its own empty parents at `:820` and `:827`, its untrack-and-re-run
     error string at `:961`, and the five uninstall commands in `sd-status`'s
     `RESIDUE` tuple. Requirement 13 cuts that tuple with the residue detectors
-    at `bin/sd-status:960-1018`, which takes five of the eight — but that cut
+    at `bin/sd-status:956-1014`, which takes five of the eight — but that cut
     is gated on "one clean run across the fleet", the run is scheduled
     nowhere, and no pull request names the detectors, so the frozen set is
     eight until it happens and three after. The test asserts the set has not
@@ -1671,11 +1671,11 @@ confirmed by the next `sd-ship` run alone.
     the loop stops at pull-request-ready in every repository.
 31. Requirement 13 is closed line by line. One test lists the symbols, flags
     and files the cuts remove and asserts a grep of the governed tree,
-    criterion 4, for each returns nothing: `sd_sweep`; `parked` and
-    `archived` as the `sd_lib` item field and its readers and not the
-    words, since writing pieces park and revive, a review disposition is
-    `parked`, and criterion 21's own test says `archived`, so a bare grep
-    cannot tell them apart; `record_load`,
+    criterion 4, for each returns nothing: `sd_sweep`; `parked` as the
+    `sd_lib` item field and its readers and not the word, since writing
+    pieces park and revive and a review disposition is `parked`, so a bare
+    grep cannot tell them apart (`archived` left this list on 2026-09-19,
+    kept; see the Log); `record_load`,
     `carrier_branches` (`_protection_gaps` and `load_acknowledgements` left
     this list on 2026-09-19, rescinded; see the Log), `--stash-ref`, `--push`, `--park`, the `authors` policy key
     (`bin/sd-review:276`, `:283`, `:1098`, `bin/sd_setup_github.py:230,267`, the
@@ -5515,3 +5515,55 @@ from a number the operator types.
   `tests/test_sd_status.py` by `HELD_SYMBOLS`, which is now a keep rather
   than a hold. Criterion 31 closes on this decision, as criterion 7's scoring
   clause and criterion 28's two clauses did.
+
+### 2026-09-19 — 31(a): `parked` is cut, `archived` is kept
+
+Decision note 1942 scoped this criterion's `parked` and `archived` to the
+`sd_lib` item field and its readers, and the 31(b1) lane deferred the cut
+because sd:431's slice D was to edit `bin/sd-status` next. Slice D is not
+live: no branch and no worktree on this machine touches that file. The
+owner splits the pair rather than lifting the deferral over both.
+
+**`parked` is cut**, the field and all thirteen readers. The measurements
+that decide it, taken from the filesystem rather than from this page:
+
+- Nothing writes it. `bin/sd_lib.py` said so in the field's own comment
+  ("retired under sd:10, criterion 21; nothing writes it now"). The 45-day
+  age sweep that wrote `<date> age-sweep` was cut with `bin/sd_sweep.py`
+  under criterion 21, and `sd-handoff`'s Lane B `--park`, which would have
+  written the other form, was never built.
+- Nothing it excludes is still excluded by it. 88 `prd.md` files across the
+  operator's repositories carry a `parked:` line, and all 88 sit under
+  `docs/work/archive/`. Every filter that read the field read it as
+  `entry["archived"] or entry["parked"]`, so the `archived` half already
+  covered all 88. The `parked` half of those filters excluded nothing.
+- What `--parked` listed, `archived` already hides. The flag existed to
+  list items the active views had dropped; every one of them is an archived
+  item, and `docs/work/archive/` lists them by being a directory.
+
+So the cut is inert on this machine today, and it cannot stop being inert:
+a new parked-but-live item would need a writer, and there is none.
+
+**`archived` is kept.** It is the opposite case on every count. Every scan
+produces it, from where the item lives rather than from a line someone
+wrote; `bin/sd_lib.py` returns `done` for an archived item without opening
+`prd.md`; and the three filters that read it are what keep 491 closed items
+out of every active view. There is no thinner thing it could become.
+
+`FROZEN_FIELD_READERS` in `tests/test_cut_symbols.py` goes from thirteen
+rows to six, and stops being a freeze waiting on a lane: it is `archived`'s
+ceiling now, and a reader added under `bin/` fails against it. `FIELD_READ`
+still names `parked`, so a read of the cut field fails rather than passing
+unnoticed because the grep stopped looking. One new test asserts the
+`parked` half stayed at zero, and one asserts `sd-status --parked` is an
+unrecognized argument.
+
+One behaviour changes, and no item on this machine is in a position to show
+it: an item that carried `parked:` without being archived used to be
+dropped from the actionable inventory and now fires like any other item.
+`tests/test_sd_status.py` asserts that directly — the intersection fixture
+keeps its `parked:` line and now expects the item to fire — so the change
+is a test's claim rather than an unrecorded consequence.
+
+Criterion 31's list keeps `parked` as a cut name. `archived` leaves it, the
+way `_protection_gaps` and `load_acknowledgements` left it on the same day.

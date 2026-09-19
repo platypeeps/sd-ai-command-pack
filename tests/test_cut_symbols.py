@@ -188,32 +188,34 @@ class DashboardCut(unittest.TestCase):
         self.assertEqual(present, [], f"still on disk: {present}")
 
 
-#: Every site under `bin` that reads the `parked` or `archived` field, as
-#: `path` and the line's text. `bin/sd_lib.py` builds the item; everything
-#: else is `bin/sd-status` (the `--parked` flag, the parked section and the
-#: three "live item" filters). The dashboard row that read the archived count
-#: the pack dashboard derived from the field left the set when sd:719 step 6
-#: retired the client script, and the grep stopped naming the directory when
-#: step 7 deleted it. The later lane that cuts the field shrinks this set;
-#: nothing before it may grow it.
+#: Every site under `bin` that reads the `archived` field, as `path` and the
+#: line's text. `bin/sd_lib.py` builds the item; everything else is
+#: `bin/sd-status`, where three filters ask whether an item is live.
+#:
+#: The set used to freeze `parked` too and carried thirteen rows. 31(a) cut
+#: the `parked` half on 2026-09-19 -- the field, the `--parked` flag, the
+#: parked section and every read -- leaving six. Two of the six are the same
+#: filters with the `or entry["parked"]` clause removed, so their text
+#: changed; the other eleven rows went. The dashboard row that read the
+#: archived count left the set when sd:719 step 6 retired the client script,
+#: and the grep stopped naming the directory when step 7 deleted it.
+#:
+#: `archived` is kept, and this set is its ceiling: a reader added anywhere
+#: under `bin` is a row this set does not carry, and the test below fails it.
 FROZEN_FIELD_READERS = frozenset({
     ("bin/sd_lib.py", "archived=report.archived,"),
     ("bin/sd-status", '"archived": item.archived,'),
-    ("bin/sd-status", '"parked": item.parked,'),
-    ("bin/sd-status", 'parked = [entry for entry in listed if entry["parked"]]'),
     ("bin/sd-status", 'active = [entry for entry in listed if not entry["archived"]]'),
-    ("bin/sd-status", 'if entry["archived"] or entry["parked"]:'),
-    ("bin/sd-status", 'if entry["archived"] or entry["parked"] or entry["status"] == "done":'),
+    ("bin/sd-status", 'if entry["archived"]:'),
+    ("bin/sd-status", 'if entry["archived"] or entry["status"] == "done":'),
     ("bin/sd-status", 'live = [entry for entry in work["items"] if not entry["archived"]]'),
-    ("bin/sd-status", 'mark = "  parked" if entry["parked"] else ""'),
-    ("bin/sd-status", 'if work["parked"]:'),
-    ("bin/sd-status", 'parked = work["parked"]'),
-    ("bin/sd-status", "if args.parked:"),
-    ("bin/sd-status", '"parked": work["parked"]},'),
 })
 
 #: An attribute or key read of either field. `git grep -E` on this platform
-#: has no `\b`, so the attribute form is bounded by hand.
+#: has no `\b`, so the attribute form is bounded by hand. `parked` stays in
+#: the pattern after its cut: the pattern is what proves the cut held, and a
+#: read of the gone field anywhere under `bin` must fail rather than pass
+#: silently because the grep stopped looking for it.
 FIELD_READ = r'\.(parked|archived)([^A-Za-z_]|$)|\["(parked|archived)"\]'
 
 
@@ -235,13 +237,32 @@ def field_readers() -> list[tuple[str, str]]:
 
 
 class ParkedAndArchivedReaders(unittest.TestCase):
-    """31(a)'s `parked` and `archived`: the reader set is frozen, not cut.
+    """31(a)'s two fields: `parked` is cut, `archived` is frozen.
+
+    The split is the owner's call of 2026-09-19. `parked` went because
+    nothing wrote it -- the 45-day age sweep that set it was retired under
+    criterion 21, and `sd-handoff`'s Lane B `--park` was never built -- and
+    because every item carrying the field was also archived, so the
+    `archived` half of each filter already excluded it. `archived` stays: it
+    is derived from where the item lives, every scan produces it, and the
+    three filters are what keep closed work out of an active view.
 
     The assertion is that the set has not grown, not that the grep is empty,
-    the same shape criterion 21 gives the deletion verbs. When the later lane
-    cuts the field, it removes rows from `FROZEN_FIELD_READERS`; a reader
-    added anywhere before then is a row the set does not carry.
+    the same shape criterion 21 gives the deletion verbs. A reader added
+    anywhere under `bin` is a row the set does not carry.
     """
+
+    def test_no_reader_of_the_cut_parked_field_remains(self) -> None:
+        """31(a)'s `parked` half, stated as the criterion states a cut.
+
+        The frozen set above would catch a `parked` read as an unexpected
+        row, but only as one row among any others, and its message would say
+        a reader appeared rather than that the cut came undone. This says it
+        directly, and it is the check that goes red first if the field is
+        put back.
+        """
+        back = [site for site in field_readers() if "parked" in site[1]]
+        self.assertEqual(back, [], "the cut `parked` field has a reader again")
 
     def test_the_readers_are_the_frozen_set_and_no_more(self) -> None:
         unexpected = [site for site in field_readers() if site not in FROZEN_FIELD_READERS]
@@ -261,9 +282,12 @@ class ParkedAndArchivedReaders(unittest.TestCase):
 #: on purpose. `Standing rule` is matched in either case: the rule the phrase
 #: cites is defined nowhere, and `standing rule 2` in a comment cites it just
 #: as `Standing rule 2` in a docstring does. `--park` is bounded so that it
-#: does not match `--parked`, `sd-status`'s flag over the `parked` field;
-#: the criterion's `--park` is the Lane B flag of `sd-handoff`, which was
-#: never built.
+#: does not match `--parked`; the criterion's `--park` is the Lane B flag of
+#: `sd-handoff`, which was never built. 31(a) has since cut `--parked` as
+#: well, so the bound now separates the pattern from a flag that is gone
+#: rather than from a live one -- which is why the control below keeps
+#: asserting it: an unbounded `--park` would match the old spelling wherever
+#: history still writes it, and report the wrong flag as uncut.
 PROSE_SYMBOLS = (
     ("record_load", r"record_load"),
     ("carrier_branches", r"carrier_branches"),
@@ -337,7 +361,8 @@ class ProseSymbolsAndFlags(unittest.TestCase):
     def test_the_bounded_pattern_still_finds_the_bare_flag(self) -> None:
         """The control for `--park`: a pattern narrowed past `--parked` must
         still match the flag it is for, or the assertion above is over
-        nothing."""
+        nothing. `--parked` is itself cut now, but `CHANGELOG.md` and the
+        archived items still write it, so the bound is still load-bearing."""
         pattern = dict(PROSE_SYMBOLS)["--park"]
         self.assertIsNotNone(re.search(pattern, "the design has `--park`"))
         self.assertIsNotNone(re.search(pattern, "sd-handoff --park"))
