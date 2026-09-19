@@ -1,7 +1,7 @@
 ---
 title: Reduce workflow overhead without weakening delivery gates
 created: 2026-09-18
-branch: feat/workflow-policy-alignment
+branch: docs/sd-1021-closeout
 item: sd:1021
 ---
 
@@ -339,3 +339,9 @@ This evidence-only closure starts no additional automatic planning review and au
   The additions are `adjudication.md`, `delivery.md`, `post-merge-closeout.md`, and `recovery.md`.
   This resolves the execution safety refusals; it grants no additional merge or deletion authority.
   Requirements and acceptance remain unchanged; no additional planning review or status change is authorized.
+- 2026-09-19: The `branch:` field named `feat/workflow-policy-alignment`, which
+  no local or remote head has had since #1070 merged and the branch was
+  deleted. `bin/sd-status` reported it as `branch-unresolvable`. The item's own
+  row already names `docs/sd-1021-closeout`, so the field is brought to the row
+  rather than the row to the field. This records a stale locator, not a change
+  of plan: requirements, acceptance, and authorizations are untouched.
