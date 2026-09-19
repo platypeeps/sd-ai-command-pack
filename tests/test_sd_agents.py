@@ -81,40 +81,49 @@ def agent_files() -> list[Path]:
 VERIFIER = AGENTS / "sd-claim-verifier.md"
 FACT_CHECK = REPO_ROOT / "skills" / "sd-fact-check" / "SKILL.md"
 
-#: `- **name** -- ...`, the shape the skill writes each verdict in.
-SKILL_VERDICT_RE = re.compile(r"^\s*-\s+\*\*([a-z ]+)\*\*\s+—", re.MULTILINE)
-#: The agent writes them as a backticked list in one sentence.
-AGENT_VERDICT_RE = re.compile(r"`([a-z ]+)`")
+#: `- **name** -- meaning`, the shape both pages write each verdict in.
+VERDICT_RE = re.compile(r"^[ \t]*-[ \t]+\*\*([a-z ]+)\*\*[ \t]+\u2014[ \t]+(.+?)(?=\n[ \t]*-[ \t]+\*\*|\n[ \t]*\n|\Z)",
+                        re.MULTILINE | re.DOTALL)
 
 
-def skill_verdicts() -> set[str]:
-    """The verdicts `sd-fact-check` defines, read from its own list."""
-    body = FACT_CHECK.read_text(encoding="utf-8")
-    start = body.index("Assign exactly one verdict")
-    end = body.index("Do not remove an audited claim", start)
-    return set(SKILL_VERDICT_RE.findall(body[start:end]))
+def verdicts(page: Path, first: str, last: str) -> dict[str, str]:
+    """The verdict definitions `page` writes between `first` and `last`.
+
+    Whitespace is flattened: the two pages wrap at different indents, and a
+    line break is not a difference in meaning. Everything else is compared
+    byte for byte, trailing `;` and `.` included.
+    """
+    body = page.read_text(encoding="utf-8")
+    window = body[body.index(first):body.index(last, body.index(first))]
+    return {name: " ".join(text.split()) for name, text in VERDICT_RE.findall(window)}
 
 
-def agent_verdicts() -> set[str]:
-    """The verdicts `sd-claim-verifier` says it returns, read from its list."""
-    body = VERIFIER.read_text(encoding="utf-8")
-    start = body.index("Exactly one verdict for this claim:")
-    end = body.index("- The decisive evidence", start)
-    return set(AGENT_VERDICT_RE.findall(body[start:end]))
+def skill_verdicts() -> dict[str, str]:
+    return verdicts(FACT_CHECK, "Assign exactly one verdict", "Do not remove an audited claim")
+
+
+def agent_verdicts() -> dict[str, str]:
+    return verdicts(VERIFIER, "Exactly one verdict for this claim", "defines the same five")
 
 
 class TheVerdictVocabularyIsOne(unittest.TestCase):
     """Requirement 13: the agent emits the five verdicts the skill requires.
 
-    Nothing parses either list, which is exactly why they drifted: the agent
+    Nothing parsed either list, which is exactly why they drifted: the agent
     carried `supported`, `refuted`, `uncertain` and the skill carried five
     names sharing only `supported` with it. A parent running both over one
     claim set had to translate, and a translation nobody wrote down is where
     `refuted` and `contradicted` quietly stop meaning the same thing.
 
-    Both sides are read from the pages rather than written here. A copy in
-    this file would be a third vocabulary, and the next drift would be
-    between the test and the two documents instead of between them.
+    The agent spells the definitions out instead of citing the skill. The
+    installer copies `agents/**` verbatim into `~/.claude/agents`, and a
+    worker started from there runs against another project with no
+    `skills/sd-fact-check/` in it -- a citation resolves to nothing and the
+    worker guesses. So this compares the meanings and not only the names: a
+    copy that nothing checks is the drift this test exists to catch.
+
+    Both sides are read from the pages. A third copy here would only move the
+    drift, from between the two documents to between them and the test.
     """
 
     def test_the_skill_defines_five_verdicts(self) -> None:
@@ -123,6 +132,17 @@ class TheVerdictVocabularyIsOne(unittest.TestCase):
 
     def test_the_agent_returns_exactly_the_skill_s_verdicts(self) -> None:
         self.assertEqual(agent_verdicts(), skill_verdicts())
+
+    def test_the_agent_cites_no_path_for_the_meanings(self) -> None:
+        """An installed copy cannot open a path relative to this checkout."""
+        page = VERIFIER.read_text(encoding="utf-8")
+        start = page.index("Exactly one verdict for this claim")
+        # The list itself, not the paragraph under it: that paragraph names
+        # the skill on purpose, as provenance. What must not appear is a path
+        # a reader of the list has to open to know what a verdict means.
+        window = page[start:page.index("\n\n", page.index("- **outdated**", start))]
+        self.assertIn("**partially supported**", window)
+        self.assertNotIn("skills/", window)
 
 
 class ContractTests(unittest.TestCase):

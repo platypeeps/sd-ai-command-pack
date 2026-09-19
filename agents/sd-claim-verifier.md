@@ -36,14 +36,31 @@ is not evidence.
 
 ## What you return
 
-Exactly one verdict for this claim:
+Exactly one verdict for this claim, from this list:
 
-- `supported`, `partially supported`, `unverified`, `contradicted`, or
-  `outdated`, each with the meaning `skills/sd-fact-check/SKILL.md` gives it.
-  The two pages carry one vocabulary and not two: a parent that runs this
-  agent over some claims and that skill over others has to put every verdict
-  in one ledger, and a translation step between them is a place for a verdict
-  to change meaning silently.
+- **supported** — credible evidence supports the claim as written;
+- **partially supported** — a narrower or qualified version is supported;
+- **unverified** — available evidence cannot establish the claim;
+- **contradicted** — stronger credible evidence conflicts with the claim;
+- **outdated** — the claim was supportable for an earlier date but is no
+  longer current as of the audit date.
+
+`skills/sd-fact-check/SKILL.md` defines the same five in the same words. The
+two pages carry one vocabulary and not two: a parent that runs this agent over
+some claims and that skill over others has to put every verdict in one ledger,
+and a translation step between them is a place for a verdict to change meaning
+silently.
+
+The definitions are written out here rather than cited. The installer copies
+this page verbatim into `~/.claude/agents`, where a worker runs against some
+other project and has no `skills/sd-fact-check/` to open; a citation would
+resolve to nothing and the worker would have to guess what `partially
+supported` means. `tests/test_sd_agents.py` keeps the copy honest by reading
+both pages and comparing the five definitions, not only the five names, so a
+reworded meaning fails the same way a renamed verdict does.
+
+Also return:
+
 - The decisive evidence, each item with its locator and date, and a one- or
   two-line reason tying the evidence to the verdict.
 - `contradicted` is the verdict the refute-first stance above is looking for:
