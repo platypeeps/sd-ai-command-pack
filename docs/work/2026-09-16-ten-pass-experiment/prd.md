@@ -22,7 +22,7 @@ that is agreed before the first pass.
 
 ## Requirements
 
-1. One pass is one plain-text note on sd:777 with the header and the seven
+1. One pass is one plain-text note on sd:777 with the header and the eight
    fields below, in that order, so the report is a sum over ten notes of one
    shape. Each accepted finding's severity is on the note, not only the
    highest, because criterion 7 asks for each.
@@ -47,9 +47,13 @@ that is agreed before the first pass.
 
 ## Pass note template
 
-One note per pass uses a `pass N of 10` header and seven required fields.
+One note per pass uses a `pass N of 10` header and eight required fields.
+The eighth, `reviewed sha`, arrived with the post-merge amendment below, which
+is why the count reads eight and not the seven this section carried until
+2026-09-18; this block is the only copy of the shape, and the amendment cites
+it rather than restating it.
 A replacement adds `supersedes note: <id>` directly after the header.
-`PR`, `head sha` and `reviewer
+`PR`, `head sha`, `reviewed sha` and `reviewer
 entry` are never `none`; a note missing one of them is not a logged pass and
 does not count toward ten, whatever its cost field says. `none` is allowed
 only where a field's own line says so: `session` when no runner row exists,
@@ -60,10 +64,11 @@ Severity values are the review schema's, `source:bin/sd-review::SEVERITIES`:
 
     pass N of 10
     PR: #<number>
-    head sha: <40 hex>
-    reviewer entry: <registry name, e.g. codex>
+    head sha: <40 hex, the pull request's head, the sha Copilot reviewed>
+    reviewed sha: <40 hex, the squash commit this pass ran against; never none>
+    reviewer entry: <registry name, codex for every pass of this experiment>
     session: <the runner session identifier, the value of cost.pass, the key that selects the cost row; or none when no runner row exists>
-    findings accepted / rejected: <A> / <R>; accepted: <one severity per accepted finding, e.g. high, low, low; or none when A is 0>
+    findings accepted / rejected: <A> / <R>; accepted: <one entry per accepted finding, severity then its destination, e.g. high -> sd:1099, low -> 4f2a...; or none when A is 0>
     highest severity accepted: <high|medium|low|unspecified|none>
     cost in USD: <usd from the query row whose pass equals session; or estimate <usd>, and why the runner was not used; the estimate form is required when session is none>
 
@@ -287,9 +292,11 @@ likely way the cost field becomes a copied number rather than an estimate.
   request's head sha, which survives the branch's deletion on the pull request
   record; and an eighth field `reviewed sha: <40 hex>` names the squash commit
   the pass ran against, never `none`, so a later reader reproduces the diff as
-  `<reviewed sha>^..<reviewed sha>`. Requirement 1's "seven fields" becomes
-  eight. No pass note exists yet, so `design.md`'s re-record rule has nothing to
-  re-record and the eighth field costs nothing today.
+  `<reviewed sha>^..<reviewed sha>`. Requirement 1 and the template section now
+  read eight fields, and the block under `## Pass note template` carries the
+  eighth; this amendment states the reason and does not restate the shape. No
+  pass note exists yet, so `design.md`'s re-record rule has nothing to re-record
+  and the eighth field costs nothing today.
 - `reviewer entry: codex` — satisfiable, unchanged. Confirmed against the
   registry rather than assumed: `providers.yaml`'s `roles` map lists
   `reviewer: [codex, claude, minimax, kimi, baseten]`, so `codex` is first in
@@ -301,17 +308,9 @@ likely way the cost field becomes a copied number rather than an estimate.
 - `highest severity accepted` — satisfiable, unchanged.
 - `cost in USD` — satisfiable, unchanged.
 
-The amended note shape, with the eighth field and the destinations:
-
-    pass N of 10
-    PR: #<number>
-    head sha: <40 hex, the pull request's head, the sha Copilot reviewed>
-    reviewed sha: <40 hex, the squash commit this pass ran against; never none>
-    reviewer entry: <registry name, codex for every pass of this experiment>
-    session: <the runner session identifier, the value of cost.pass; or none when no runner row exists>
-    findings accepted / rejected: <A> / <R>; accepted: <one entry per accepted finding, severity then its destination, e.g. high -> sd:1099, low -> 4f2a...; or none when A is 0>
-    highest severity accepted: <high|medium|low|unspecified|none>
-    cost in USD: <usd from the query row whose pass equals session; or estimate <usd>, and why the runner was not used; the estimate form is required when session is none>
+The amended note shape lives in one place, the block under
+`## Pass note template` above, which now carries the eighth field and the
+destinations. A second copy here would drift from it, so there is none.
 
 ### Requirement 3
 
