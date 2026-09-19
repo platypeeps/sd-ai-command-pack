@@ -1527,6 +1527,14 @@ class NoItemContracts(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         key, (_revision, original) = self.record(review_id)
         _git(self.root, "branch", "-m", "renamed")
+        # The reservations the criterion means are the index claims, not the
+        # record payload: a rebind that claimed the new name and released the
+        # old one before its stale save would leave the payload untouched.
+        claims = {
+            name: receipts.read(self.connection, no_item.index_key("fixture/repo", "branch", name))[1]
+            for name in ("topic", "renamed")
+        }
+        self.assertEqual(claims["topic"].get("review_id"), review_id)
 
         def rename(_repository):
             revision, state = receipts.read(self.connection, key)
@@ -1545,6 +1553,11 @@ class NoItemContracts(unittest.TestCase):
         self.assertEqual(current["passes"], original["passes"])
         self.assertEqual(current["historical_passes"], original["historical_passes"])
         self.assertEqual(current["identity_revision"], original["identity_revision"])
+        self.assertEqual(
+            {name: receipts.read(self.connection, no_item.index_key("fixture/repo", "branch", name))[1]
+             for name in ("topic", "renamed")},
+            claims,
+        )
 
 
 if __name__ == "__main__":
