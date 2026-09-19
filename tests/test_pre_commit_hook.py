@@ -553,10 +553,6 @@ class TheBorrowedVenvIsIgnored(unittest.TestCase):
         self.assertNotIn(".venv", untracked, f"a .venv symlink is not ignored: {untracked!r}")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TheClonesCheckoutIsOnlyBorrowedWhenItIsOne(unittest.TestCase):
     """sd:1020 follow-up. `--git-common-dir` is not always `<checkout>/.git`.
 
@@ -630,3 +626,6 @@ class TheClonesCheckoutIsOnlyBorrowedWhenItIsOne(unittest.TestCase):
         worktree.mkdir()
         self.assertIn(str(worktree), self.hook.remedy_checkout("python3", worktree))
 
+
+if __name__ == "__main__":
+    unittest.main()
