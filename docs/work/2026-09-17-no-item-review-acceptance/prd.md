@@ -345,17 +345,17 @@ The named no-item test module below is proposed.
 - [x] `python -m unittest discover -s tests -p 'test_sd_ship_no_item.py'` passes with zero failures.
 - [x] That suite proves accepted exact-head clearance makes zero provider calls and creates no work-item rows.
 - [x] No-item construction never calls item lookup or publication-client constructors; item-backed construction and output remain compatible.
-- [ ] That suite proves missing depth, failed checks, stale source, changed evidence, and stale tool bindings each refuse clearance.
+- [x] That suite proves missing depth, failed checks, stale source, changed evidence, and stale tool bindings each refuse clearance.
 - [x] That suite proves duplicate blockers require separate responses and invalid dispositions cannot clear a blocker.
 - [x] That suite proves imports preserve failed attempts and all three checker passes without granting clearance.
 - [x] Three imported passes and zero native passes refuse unapproved dispatch; approved dispatch creates reservation four before its provider call.
-- [ ] That case rejects stale combined-prefix approval, incomplete aggregate input, missing author exclusions, and incorrect full-branch coverage.
+- [x] That case rejects stale combined-prefix approval, incomplete aggregate input, missing author exclusions, and incorrect full-branch coverage.
 - [x] One-, two-, and three-import cases each require explicit native continuation and validate their global request ordinals.
 - [x] Each case dispatches full-branch review with complete history and never selects imported fix-only coverage.
 - [x] A native-only control retains the existing initial-review and fix-verification behavior.
 - [x] Accepted clearance rejects each add, remove, reorder, and content mutation of imported history.
 - [x] Branch rename, same-HEAD branch copy, and descendant continuation preserve the record and budget; conflicting records refuse dispatch.
-- [ ] Creation and rebinding are atomic, provider-free, and refuse concurrent index changes without orphaning reservations.
+- [x] Creation and rebinding are atomic, provider-free, and refuse concurrent index changes without orphaning reservations.
 - [x] Related item-backed receipts refuse no-item allocation, import, dispatch, and clearance without changing either mode's history.
 - [x] Real-library enumeration needs no known item IDs; schema drift, query errors, and malformed records refuse before dispatch or clearance.
 - [x] Rebinding preserves all prior prefix digests and request bindings while invalidating acceptance, including a branch-name round trip.

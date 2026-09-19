@@ -1339,6 +1339,213 @@ class NoItemContracts(unittest.TestCase):
         self.success("review", "--review-id", review_id, "--reopen-record")
         self.assertEqual(receipts.read(self.connection, branch_index)[1]["review_id"], review_id)
 
+    def _restore(self, key, original):
+        revision, _current = receipts.read(self.connection, key)
+        receipts.save(self.connection, key, revision, no_item.with_digest(json.loads(json.dumps(original))))
+
+    def test_each_clearance_precondition_refuses_on_its_own(self):
+        """Missing depth, a failed check and a stale source each refuse alone.
+
+        The criterion names five conditions and the other two already have
+        cases: changed evidence is
+        `test_accepted_clearance_refuses_changed_durable_evidence`, and stale
+        tool bindings is
+        `test_each_review_manifest_member_mutation_refuses_no_item_clearance`,
+        which enumerates the manifest rather than naming a file.
+
+        Every mutation recomputes `history_digest`, so the record stays
+        self-consistent and `stored_digest` never answers first. Without that
+        each case refuses for the same unrelated reason and proves nothing.
+        Clearance is re-run clean between cases, so the refusal belongs to the
+        mutation and not to something a previous case left behind.
+        """
+
+        review_id = self.create()
+        reviewer, calls = self.native_reviewer(review_id)
+        self.success("review", "--review-id", review_id, reviewer=reviewer)
+        self.assertEqual(len(calls), 1)
+        self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
+        key, (_revision, original) = self.record(review_id)
+
+        def missing_depth(state):
+            state["passes"][-1]["report"]["completed_reviews"] = 0
+
+        def failed_check(state):
+            state["passes"][-1]["report"]["check"] = {"status": "fail", "exit_code": 1}
+
+        def stale_source(state):
+            state["passes"][-1]["head"] = self.base
+
+        cases = (("missing depth", missing_depth),
+                 ("failed checks", failed_check),
+                 ("stale source", stale_source))
+        for condition, mutate in cases:
+            with self.subTest(condition=condition):
+                revision, _current = receipts.read(self.connection, key)
+                mutated = json.loads(json.dumps(original))
+                mutate(mutated)
+                receipts.save(self.connection, key, revision, no_item.with_digest(mutated))
+                self.refused(
+                    "verify-review", "--review-id", review_id, "--expected-head", self.head,
+                    pattern="receipt is incomplete|does not name this exact head",
+                )
+                self._restore(key, original)
+                self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
+
+    def _fresh_three_import(self, label):
+        """A private database per case: a spent pass is never spent twice."""
+        self.database = self.directory / f"continuation-{label}.db"
+        initialise(self.database)
+        self.connection = connect(self.database)
+        self.addCleanup(self.connection.close)
+        review_id, _manifest = self.import_history(3)
+        _key, (_revision, state) = self.record(review_id)
+        return review_id, state["history_digest"]
+
+    def test_the_approved_import_continuation_rejects_each_malformed_input(self):
+        """The fourth pass is approved; what it returns still has to hold.
+
+        A reservation is written before the provider runs, so these cases
+        cannot use `refused`, which asserts the database never moved. The
+        spent pass is the point: an approval buys one dispatch, and a dispatch
+        that comes back malformed does not buy another.
+        """
+
+        def incomplete_aggregate(report, _state, argv):
+            prior = json.loads(pathlib.Path(argv[argv.index("--resume-report") + 1]).read_bytes())
+            prior["history"] = prior["history"][:-1]
+            report["resume_report_digest"] = ship.digest(prior)
+
+        def missing_authors(report, _state, argv):
+            prior = json.loads(pathlib.Path(argv[argv.index("--resume-report") + 1]).read_bytes())
+            prior["authored_with"] = []
+            report["resume_report_digest"] = ship.digest(prior)
+
+        def wrong_coverage(report, _state, _argv):
+            report["authorship_base"] = "0" * 40
+
+        cases = (("incomplete-aggregate-input", incomplete_aggregate),
+                 ("missing-author-exclusions", missing_authors),
+                 ("incorrect-full-branch-coverage", wrong_coverage))
+        for label, shape in cases:
+            with self.subTest(condition=label):
+                review_id, prefix = self._fresh_three_import(label)
+                reviewer, calls = self.native_reviewer(review_id, imported=3, shape=shape)
+                code, value, diagnostic = self.cli(
+                    "review", "--review-id", review_id, "--additional-review-for", self.head,
+                    "--review-history-digest", prefix, "--request-reason", "fixture approval assertion",
+                    reviewer=reviewer,
+                )
+                self.assertEqual(code, 3, diagnostic)
+                self.assertRegex(value.get("error", ""), "full-branch coverage")
+                self.assertEqual(len(calls), 1)
+                _key, (_revision, state) = self.record(review_id)
+                self.assertEqual(len(state["historical_passes"]), 3)
+                self.assertEqual(len(state["passes"]), 1)
+                # The evidence is retained rather than discarded, and the pass
+                # stays spent. What it never does is clear the branch.
+                self.assertIn("report", state["passes"][0])
+                self.refused(
+                    "verify-review", "--review-id", review_id, "--expected-head", self.head,
+                    pattern="full-branch coverage",
+                )
+
+        # Stale combined-prefix approval: the continuation landed, and the
+        # request stored with it no longer names the prefix it was approved
+        # against. Clearance reads the request, not the dispatch that wrote it.
+        review_id, prefix = self._fresh_three_import("stale-combined-prefix")
+        reviewer, calls = self.native_reviewer(review_id, imported=3)
+        self.success(
+            "review", "--review-id", review_id, "--additional-review-for", self.head,
+            "--review-history-digest", prefix, "--request-reason", "fixture approval assertion",
+            reviewer=reviewer,
+        )
+        self.assertEqual(len(calls), 1)
+        self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
+        key, (revision, state) = self.record(review_id)
+        self.assertNotEqual(state["passes"][0]["additional_review_request"]["prior_history_digest"], "0" * 64)
+        state["passes"][0]["additional_review_request"]["prior_history_digest"] = "0" * 64
+        receipts.save(self.connection, key, revision, no_item.with_digest(state))
+        self.refused(
+            "verify-review", "--review-id", review_id, "--expected-head", self.head,
+            pattern="combined prior history",
+        )
+
+    def _racing_lock(self, action):
+        """Enter the real lock, but let `action` land first.
+
+        Both guarded paths read before they lock and read again inside it.
+        Entering the lock is the last moment a concurrent writer could win, so
+        it is where the race is injected. The real lock still runs, so the test
+        proves the recheck and not the absence of locking.
+        """
+
+        original = receipts.repository_lock
+
+        @contextlib.contextmanager
+        def racing(database, repository):
+            action(repository)
+            with original(database, repository):
+                yield
+
+        return patch.object(receipts, "repository_lock", racing)
+
+    def test_a_claim_landing_under_the_lock_refuses_creation_and_rebinding(self):
+        """Creation and rebinding recheck inside the lock and orphan nothing.
+
+        The racing writer calls `write_allocation`, the same function a real
+        concurrent creation calls, so it leaves every claim that one leaves
+        rather than the single index this case happens to read.
+        """
+
+        with patch.dict(os.environ, self.environment):
+            facts = no_item.committed_facts(self.root)
+
+        def allocate(_repository):
+            no_item.write_allocation(self.connection, receipts, "concurrentrecord", facts)
+
+        before = self.keys()
+        with self._racing_lock(allocate):
+            code, result, diagnostic = self.cli("review", "--create-record", "--assert-new-work")
+        self.assertEqual(code, 3, diagnostic)
+        self.assertRegex(result.get("error", ""), "already owns this")
+        # The loser of the race allocates no budget: the only record key added
+        # is the racing writer's own.
+        self.assertEqual(
+            [key for key in self.keys() if key not in before],
+            [no_item.review_key(facts.repository, "concurrentrecord")],
+        )
+
+        # Rebinding, on a private database so the race above leaves no residue.
+        self.database = self.directory / "rebind-race.db"
+        initialise(self.database)
+        self.connection = connect(self.database)
+        self.addCleanup(self.connection.close)
+        review_id = self.create()
+        reviewer, calls = self.native_reviewer(review_id)
+        self.success("review", "--review-id", review_id, reviewer=reviewer)
+        self.assertEqual(len(calls), 1)
+        key, (_revision, original) = self.record(review_id)
+        _git(self.root, "branch", "-m", "renamed")
+
+        def rename(_repository):
+            revision, state = receipts.read(self.connection, key)
+            state["branch"] = "someone-else-renamed-it"
+            receipts.save(self.connection, key, revision, no_item.with_digest(state))
+
+        with self._racing_lock(rename):
+            code, result, diagnostic = self.cli(
+                "review", "--review-id", review_id, "--rebind-branch", "topic"
+            )
+        self.assertEqual(code, 3, diagnostic)
+        self.assertRegex(result.get("error", ""), "changed concurrently")
+        # The spent reservation survives the refusal, and no identity write
+        # landed half-done: the revision the rebind would have raised is intact.
+        _key, (_revision, current) = self.record(review_id)
+        self.assertEqual(current["passes"], original["passes"])
+        self.assertEqual(current["historical_passes"], original["historical_passes"])
+        self.assertEqual(current["identity_revision"], original["identity_revision"])
+
 
 if __name__ == "__main__":
     unittest.main()
