@@ -5,16 +5,46 @@ created: 2026-09-05
 
 # Implement
 
-## Current status — 2026-09-18
+## Current status — 2026-09-19
 
 The item remains `in_progress`.
 
-Two deferred acceptance dependencies are blocked:
+The entry this one replaces said two deferred acceptance dependencies were
+blocked. It was wrong about both, and wrong in a way worth naming, because
+the same shape will recur: it read a followup's row state as this item's
+blocker.
 
-- `sd:777` has no qualifying pass because external provider reviews are cancelled.
-- `sd:788` waits for the owner's live MiniMax check and `general` plan confirmation.
+`sd:777` is `done`. It closed on 2026-09-19 as `9f5e33d8`, without the
+ten-pass data. `sd:788`'s two remaining checks ran on 2026-09-18 and
+passed, recorded in that item's own `implement.md` under "Remaining
+acceptance -- 2026-09-17, met 2026-09-18" (`05b4abe8`): the deployed meter
+returned `launched=True` and HTTP `200`, and `model_remains` carried
+exactly `general` and `video`. Its row still reads `blocked` on a note
+nobody transitioned after the condition that note names was met.
 
-Other open criteria remain listed below.
+Neither row reaches this item either way, which is the part the old entry
+had backwards. A deferral to a followup closes the criterion here on the
+deferral, not on the followup finishing. The gate below says
+`Delivers: sd:10` waits for every open criterion to be "closed, cut or
+deferred by a recorded owner decision", and criterion 6's open parts went
+to `sd:788` exactly as criterion 7's experiment went to `sd:777`. Reading a
+followup's status as a dependency re-opens a criterion this item already
+handed away.
+
+Two criteria are open. The prd's own running list under "What this leaves"
+names three -- 18, 21 and 31 -- and 18 has since closed: the criterion is
+closed when `HELD` is empty, and `tests/test_no_trellis_residue.py` has
+carried an empty `HELD` since the 31(b1) reword. What remains:
+
+- **Criterion 21**, on two clauses, both assertions rather than code. No
+  test puts a `planning` item under `docs/work/archive/` and runs
+  `sd-status`, `sd-plan` and `sd-review --scope planning` against it, and
+  no test ships a `done` item and re-runs `sd-plan` and `sd-ship` over it.
+  The criterion's code-path half is closed, by `NoDeletionPath` in
+  `tests/test_archive_untouched.py`.
+- **Criterion 31(c)**, the bug regressions and the one-definition greps.
+  31(a) and 31(b) have landed. 31(c) is the pull request that carries
+  `Delivers: sd:10`, so nothing else holds the item once these two close.
 
 Eight pull requests. **Four** of them touch no row and can land before item
 B exists at all; four wait on the library or on B's fixture harness. The
