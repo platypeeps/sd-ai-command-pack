@@ -197,18 +197,18 @@ def repo_root(start: pathlib.Path | str | None = None) -> pathlib.Path | None:
 def main_worktree_root(root: pathlib.Path) -> pathlib.Path:
     """The main checkout's root, so linked worktrees share one local config.
 
-    `--git-common-dir` points at the shared `.git` directory; its parent is the
-    main worktree. A layout where that does not hold (a bare or separated git
-    directory) falls back to the worktree it was asked about.
+    Only a linked worktree gets its own `<common>/worktrees/<name>` git dir.
+    A main checkout, a separated git directory (which `--separate-git-dir`
+    can name `.git` beside any unrelated tree), a submodule and a bare clone
+    all answer `--git-dir` with the common one, so its name settles nothing.
     """
-    answer = _git(["rev-parse", "--git-common-dir"], cwd=root)
-    if not answer:
+    def path(flag: str) -> pathlib.Path | None:
+        answer = _git(["rev-parse", flag], cwd=root)
+        return (root / answer).resolve() if answer else None
+    common, git_dir = path("--git-common-dir"), path("--git-dir")
+    if common is None or git_dir is None or common.name != ".git":
         return root
-    common = pathlib.Path(answer)
-    if not common.is_absolute():
-        common = root / common
-    common = common.resolve()
-    return common.parent if common.name == ".git" else root
+    return common.parent if git_dir.parent == common / "worktrees" else root
 
 
 # --------------------------------------------------------------------------

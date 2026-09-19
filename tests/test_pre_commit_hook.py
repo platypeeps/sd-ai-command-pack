@@ -620,6 +620,72 @@ class TheClonesCheckoutIsOnlyBorrowedWhenItIsOne(unittest.TestCase):
             (root / ".venv" / "bin" / "python").resolve(),
         )
 
+    def test_a_separated_git_directory_named_git_is_not_a_main_checkout_either(self):
+        """The fixture the name test could not fail on (#1063 review).
+
+        `git init --separate-git-dir` takes any path, including one named
+        `.git`. The guard used to read only that name, so this layout passed
+        it and the hook borrowed `<stranger>/.venv` -- the foreign toolchain
+        the guard exists to refuse, accepted by the fixture above choosing a
+        name that could never collide.
+        """
+        root = self.tmp / "named-work"
+        root.mkdir()
+        stranger = self.tmp / "named-store"
+        stranger.mkdir()
+        git("init", "-q", f"--separate-git-dir={stranger / '.git'}", ".", cwd=root)
+        (stranger / ".venv" / "bin").mkdir(parents=True)
+        (stranger / ".venv" / "bin" / "python").write_text("#!/bin/sh\nexit 0\n")
+        (stranger / ".venv" / "bin" / "python").chmod(0o755)
+
+        common = pathlib.Path(git("rev-parse", "--git-common-dir", cwd=root).strip())
+        self.assertEqual(
+            common.name, ".git",
+            "fixture is not a `.git` named separated directory, so it proves nothing",
+        )
+        self.assertIsNone(
+            self.hook.main_checkout(root),
+            "a separated git directory named `.git` was taken for a main checkout",
+        )
+        self.assertEqual(
+            self.hook.interpreter(root), "python3",
+            "the hook borrowed an unrelated tree's .venv",
+        )
+
+    def test_a_submodules_worktree_is_not_a_linked_worktree_of_the_superproject(self):
+        """A submodule's `--git-dir` is `modules/<name>`, not `worktrees/<name>`."""
+        child = self.tmp / "child"
+        child.mkdir()
+        git("init", "-q", cwd=child)
+        git("config", "user.email", "hook@example.invalid", cwd=child)
+        git("config", "user.name", "hook", cwd=child)
+        (child / "seed").write_text("seed\n")
+        git("add", "--", "seed", cwd=child)
+        git("commit", "-qm", "seed", cwd=child)
+
+        super_ = self.tmp / "super"
+        super_.mkdir()
+        git("init", "-q", cwd=super_)
+        git("config", "user.email", "hook@example.invalid", cwd=super_)
+        git("config", "user.name", "hook", cwd=super_)
+        (super_ / "seed").write_text("seed\n")
+        git("add", "--", "seed", cwd=super_)
+        git("commit", "-qm", "seed", cwd=super_)
+        (super_ / ".venv" / "bin").mkdir(parents=True)
+        (super_ / ".venv" / "bin" / "python").write_text("#!/bin/sh\nexit 0\n")
+        (super_ / ".venv" / "bin" / "python").chmod(0o755)
+        git("-c", "protocol.file.allow=always", "submodule", "add", "-q",
+            str(child), "kid", cwd=super_)
+
+        self.assertIsNone(
+            self.hook.main_checkout(super_ / "kid"),
+            "a submodule was taken for a linked worktree of its superproject",
+        )
+        self.assertEqual(
+            self.hook.interpreter(super_ / "kid"), "python3",
+            "the hook borrowed the superproject's .venv from a submodule",
+        )
+
     def test_a_bare_python3_still_names_where_to_run_make_setup(self):
         """The fallback case the behavioural test above cannot stage."""
         worktree = self.tmp / "bare"

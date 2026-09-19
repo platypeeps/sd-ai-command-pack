@@ -86,6 +86,24 @@ def repo_root() -> pathlib.Path:
     return pathlib.Path(result.stdout.strip())
 
 
+def rev_parse(root: pathlib.Path, flag: str) -> pathlib.Path | None:
+    """One `git rev-parse` path answer, absolute and resolved, else None.
+
+    `--git-dir` and `--git-common-dir` both answer relative to `cwd` when the
+    answer is inside it, so every caller has to re-anchor them the same way.
+    """
+    result = subprocess.run(
+        ["git", "rev-parse", flag], cwd=root,
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    answer = pathlib.Path(result.stdout.strip())
+    if not answer.is_absolute():
+        answer = root / answer
+    return answer.resolve()
+
+
 def main_checkout(root: pathlib.Path) -> pathlib.Path | None:
     """The clone's main checkout when `root` is a linked worktree, else None.
 
@@ -93,28 +111,33 @@ def main_checkout(root: pathlib.Path) -> pathlib.Path | None:
     main checkout's; from the main checkout itself it names that checkout and
     this returns None, because `interpreter` has already looked there.
 
-    The parent is the main checkout only when that path is actually named
-    `.git`. A separated git directory (`git init --separate-git-dir`), a
-    submodule, and a bare clone's worktree all answer with a directory
-    somewhere else entirely, whose parent is an unrelated tree that may hold
-    an unrelated `.venv`. Borrowing that one would run the gates under a
-    foreign toolchain, which is worse than the refusal this whole change
-    exists to make legible, so an unrecognised layout returns None and the
-    caller falls back. `source:bin/sd_lib.py::main_worktree_root` guards the
+    The name of that directory does not establish the layout, which is the
+    defect this guard used to have: `git init --separate-git-dir=/anywhere/.git`
+    answers with a path named `.git` whose parent is an unrelated tree, so a
+    name test alone accepted `/anywhere` and borrowed `/anywhere/.venv` --
+    exactly the foreign toolchain the guard exists to refuse.
+
+    What does establish it is the per-worktree git directory. Git gives a
+    linked worktree its own `<common>/worktrees/<name>`, and gives nothing
+    else one: a main checkout, a separated git directory, a submodule and a
+    bare clone all answer `--git-dir` with the common directory itself. So
+    `root` is a linked worktree of `common` only when its git directory sits
+    under `common/worktrees`, and only then does `common.parent` name the
+    checkout that `make setup` provisioned. Every other layout returns None
+    and the caller falls back to `python3`, which is the legible refusal this
+    whole change exists to make. The `.git` name test stays for the bare
+    clone, whose `worktrees/` entries hang off a directory with no checkout
+    beside it at all. `source:bin/sd_lib.py::main_worktree_root` guards the
     same call the same way and is the shape copied here; the hook cannot
     import it, because it must run under whatever interpreter git hands it.
     """
-    result = subprocess.run(
-        ["git", "rev-parse", "--git-common-dir"], cwd=root,
-        capture_output=True, text=True, check=False,
-    )
-    if result.returncode != 0 or not result.stdout.strip():
+    common = rev_parse(root, "--git-common-dir")
+    git_dir = rev_parse(root, "--git-dir")
+    if common is None or git_dir is None:
         return None
-    common = pathlib.Path(result.stdout.strip())
-    if not common.is_absolute():
-        common = root / common
-    common = common.resolve()
     if common.name != ".git":
+        return None
+    if git_dir.parent != common / "worktrees":
         return None
     checkout = common.parent
     return None if checkout == root else checkout
