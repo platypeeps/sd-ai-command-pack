@@ -1033,30 +1033,23 @@ class WorkItemTests(StatusFixture):
         self.assertEqual(result["work"]["counts"], {"planning": 1, "in_progress": 1})
         self.assertEqual(result["work"]["active"], 2)
 
-    def test_parked_is_read_from_the_items_own_frontmatter(self) -> None:
+    def test_a_parked_frontmatter_line_is_read_by_nothing(self) -> None:
+        """31(a) cut the field. The line may still sit in an item's
+        frontmatter -- 88 archived items across the operator's repositories
+        carry one -- and it must now be inert rather than an unknown key or
+        a crash. The item counts and is listed like any other."""
         self.item("2026-08-01-alpha")
         self.item("2026-08-02-stale", extra="parked: 2026-08-20 age-sweep\n")
-        result = self.report("--parked")
-        self.assertEqual(len(result["parked"]), 1)
-        self.assertEqual(result["parked"][0]["parked"], "2026-08-20 age-sweep")
-        self.assertEqual(result["parked"][0]["slug"], "stale")
+        result = self.report()
+        self.assertEqual(result["work"]["active"], 2)
+        self.assertNotIn("parked", result["work"])
+        entry = [row for row in result["work"]["items"] if row["slug"] == "stale"][0]
+        self.assertNotIn("parked", entry)
 
-    def test_parked_needs_no_ledger_anywhere(self) -> None:
-        """Nothing outside the item directory records that it was parked."""
-        self.item("2026-08-02-stale", extra="parked: 2026-08-20 age-sweep\n")
-        listing = sorted(
-            str(path.relative_to(self.repo))
-            for path in (self.repo / "docs").rglob("*")
-            if path.is_file()
-        )
-        self.assertEqual(listing, ["docs/work/2026-08-02-stale/prd.md"])
-        self.assertEqual(len(self.report("--parked")["parked"]), 1)
-
-    def test_no_parked_items_says_so(self) -> None:
-        self.item("2026-08-01-alpha")
+    def test_the_parked_flag_is_gone(self) -> None:
         completed = self.run_tool(SD_STATUS, "--parked")
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("no work item carries a `parked:` line", completed.stdout)
+        self.assertEqual(completed.returncode, 2, completed.stdout)
+        self.assertIn("unrecognized arguments: --parked", completed.stderr)
 
     def test_a_broken_frontmatter_status_is_an_inconsistency_not_a_crash(self) -> None:
         self.item("2026-08-01-alpha", status="sideways")
@@ -1586,7 +1579,6 @@ class ReadOnlyTests(StatusFixture):
         self.with_github(pulls=[])
         self.run_tool(SD_STATUS)
         self.run_tool(SD_STATUS, "--json")
-        self.run_tool(SD_STATUS, "--parked")
         self.assertFalse(self.state.exists())
 
     def test_the_working_tree_stays_clean(self) -> None:
@@ -2004,8 +1996,11 @@ class ClassTableTests(unittest.TestCase):
             self.assertIsInstance(sentence, str)
             self.assertGreater(len(sentence.split()), 5)
         joined = " ".join(status.EXCLUDED)
-        for skipped in ("archive", "parked", "Jira", "CHANGELOG.md"):
+        # `parked` left this list with the field, cut by 31(a) on 2026-09-19.
+        # The archive sentence is what excludes every item that carried one.
+        for skipped in ("archive", "Jira", "CHANGELOG.md"):
             self.assertIn(skipped, joined)
+        self.assertNotIn("parked", joined)
 
 
 class ActionIdTests(unittest.TestCase):
@@ -2254,8 +2249,7 @@ class WorkItemInventoryTests(InventoryFixture):
             ["undated-thing"],
         )
 
-    def test_parked_and_archived_items_contribute_no_rows(self) -> None:
-        self.item("2026-01-01-parked", extra="parked: 2026-08-01 age-sweep\n")
+    def test_archived_items_contribute_no_rows(self) -> None:
         archived = self.repo / "docs" / "work" / "archive" / "2026-08"
         archived.mkdir(parents=True)
         (archived / "2026-01-01-old").mkdir()
@@ -2264,19 +2258,19 @@ class WorkItemInventoryTests(InventoryFixture):
         )
         rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY).rows
         self.assertEqual([], [row for row in rows if "old" in row["key"]])
-        self.assertEqual([], [row for row in rows if "parked" in row["key"]])
 
-    def test_one_item_that_is_parked_and_archived_and_branched_at_once(
+    def test_an_archived_item_that_is_branched_and_carries_a_parked_line(
         self,
     ) -> None:
-        """The real case, and the intersection rather than the union.
+        """The real case: `archived` suppresses, and the cut field does not.
 
         `archive/2026-09/2026-08-21-port-integration-only-profile` carries
         `status: in_progress`, a `parked:` line, a `branch:` field and an
-        `archive/` path all at once. The test above holds each condition on a
-        *different* item, so neither ever meets the other: two items with one
-        condition each cannot tell a reader that handles the intersection from
-        one that double-counts it or raises on it.
+        `archive/` path all at once. Until 31(a) that was an intersection of
+        two suppressors, and this test held it to prove the reader handled
+        both rather than double-counting. `parked` is cut, so the archive
+        path is now the only suppressor, and the `parked:` line is inert
+        text that must change nothing.
 
         **The frontmatter's `in_progress` is not what the reader sees.**
         `sd_lib.py:701` returns `done` for any archived item without opening
@@ -2287,11 +2281,13 @@ class WorkItemInventoryTests(InventoryFixture):
         A fixture without it passes with that guard deleted, which is how this
         test was wrong on its first writing.
 
-        The live item is the contrast that makes the rest able to fail. A
-        producer that silently returned nothing would fail on it rather than
-        pass four times over.
+        The two live items are the contrast that makes the rest able to fail.
+        One of them carries the cut `parked:` line and must fire exactly like
+        the one that does not: a reader still consulting the field would drop
+        it, and that is the regression this asserts.
         """
-        self.item("2026-08-01-live", status="in_progress")
+        self.item("2026-08-01-live", status="in_progress",
+                  extra="branch: feat/nope\n")
         self.item("2026-08-02-parked", status="in_progress",
                   extra="parked: 2026-09-01 superseded\nbranch: feat/nope\n")
         archive = self.repo / "docs" / "work" / "archive" / "2026-09"
@@ -2307,11 +2303,11 @@ class WorkItemInventoryTests(InventoryFixture):
             )
         rows = status.actionable_inventory(self.repo, self.sections(), self.TODAY).rows
         self.assertEqual(
-            ["2026-08-01-live"],
+            ["2026-08-01-live", "2026-08-02-parked"],
             sorted({row["key"] for row in rows if "2026-08-0" in row["key"]}),
-            "only the item carrying neither `parked:` nor an archive path may "
-            "fire; the other three carry `branch:` to make the guard "
-            "observable, which is not a fourth suppressor",
+            "the archive path is the only suppressor; both live items fire, "
+            "including the one whose `parked:` line nothing reads any more, "
+            "and all four carry `branch:` to make the guard observable",
         )
         self.assertEqual(
             len(rows), len({(row["check"], row["key"]) for row in rows}),
@@ -2926,7 +2922,7 @@ class RowWorkItemInventoryTests(InventoryFixture):
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
         work = {"status_source": status.sd_lib.FROM_ROW, "items": [
             {"path": f"docs/work/item-{index}", "slug": f"item-{index}",
-             "status": "in_progress", "branch": "main", "archived": False, "parked": False}
+             "status": "in_progress", "branch": "main", "archived": False}
             for index in range(40)]}
         with mock.patch.object(status.sd_lib, "upstream", return_value=("origin", "main")), \
                 mock.patch.object(status.sd_lib, "git_output", wraps=status.sd_lib.git_output) as git_calls:

@@ -200,7 +200,7 @@ class SharedTree(unittest.TestCase):
             "abnormalities": {"summary": "clear", "classes": [], "findings": [],
                               "unchecked": []},
             "work": {"available": False, "reason": "no database", "status_source": "file",
-                     "total": 0, "active": 0, "counts": {}, "items": [], "parked": []},
+                     "total": 0, "active": 0, "counts": {}, "items": []},
             "pull_requests": {"repo": "sven/thing", "pull_requests": [],
                               "available": False, "reason": "no gh"},
             "setup": section,

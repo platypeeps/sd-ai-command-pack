@@ -36,7 +36,7 @@ opens with fifteen top-level lines; the fourteen below are the sections.
 | `pending` | at most ten actionable rows by rank, with the line above them stating the denominator — `10 of 123, by rank`. A class with a cap shows at most that many rows, and a line under the list says how many of its rows the list does not show |
 | `next` | one row: the top-ranked id and its `suggest`. Not a menu, not three options |
 | `open threads` | a count per `source`, then the exclusions named in full, so the counts are never read as a total of everything that exists |
-| `work items` | derived item status from `docs/work`, counted, with the parked ones counted and not listed |
+| `work items` | derived item status from `docs/work`, counted, archived ones counted and not listed |
 | `contributions (this repo, shared database order)` | upstream activity, local evidence, and dependency readiness from the shared contribution projection |
 | `open pull requests` | open pull requests, via the same code path as `sd-pr-state` |
 | `detected setup` | mode, lowering reason, shared-tree paths to move, and detected check entrypoints |
@@ -333,9 +333,7 @@ An acceptance nobody re-reads is itself a row: `accepted-gap-standing` at rank
 ## Flags
 
 `--json` (one machine-readable object) · `--actions` (every actionable row,
-uncapped, one per line, count first) · `--parked` (list only the items that
-carry a `parked:` frontmatter line, read from the item, not from a ledger) ·
-`--limit N` (most PRs to list).
+uncapped, one per line, count first) · `--limit N` (most PRs to list).
 
 **`--json` wins when both `--json` and `--actions` are given.** `pending` caps
 at ten because a report is read whole; `--actions` is the list a caller pipes,

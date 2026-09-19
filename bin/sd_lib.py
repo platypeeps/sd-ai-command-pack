@@ -576,14 +576,6 @@ class WorkItem:
     created: str
     branch: str
     archived: bool
-    #: The frontmatter's `parked:` line verbatim, empty when the item is live.
-    #: Written by whichever pass parked the item: `<date> age-sweep` from the
-    #: 45-day age sweep the pack used to carry (retired under sd:10, criterion
-    #: 21; nothing writes it now), `<date> bulk-park (D2)` from the one-time
-    #: fleet-wide park. Read the value, do not assume the reason -- fleet-wide
-    #: the split is 65 age-sweep to 172 bulk-park. Set here and nowhere else --
-    #: parked is a property of the item, never a row in a separate ledger.
-    parked: str = ""
     inconsistencies: tuple[str, ...] = ()
     #: When the database last recorded anything against this item -- its row's
     #: `updated_at` or the newest of its notes, whichever is later. Empty on a
@@ -1184,7 +1176,6 @@ def work_item(item_dir: pathlib.Path, *, statuses: "Statuses | None" = None) -> 
         created=fields.get("created", ""),
         branch=fields.get("branch", ""),
         archived=report.archived,
-        parked=fields.get("parked", "").strip(),
         inconsistencies=report.inconsistencies,
         activity=report.activity,
     )

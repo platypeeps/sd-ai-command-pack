@@ -221,7 +221,7 @@ carrying `Active item:`; `agents/sd-rust-fill.md`,
 For the seven symbols an earlier list left unenumerated, from requirement
 13's own line references and then the readers: the `archived` and `parked`
 fields at `bin/sd_lib.py:355-368`, `:271-282`, `:302-303`, `:350` and every
-reader — `bin/sd-status:183,190,1122-1129,1234-1242,1254-1287`,
+reader — `bin/sd-status:179,186,1118-1125,1230-1238,1250-1283`,
 `dashboard/work.py`, `dashboard/app.js`,
 `tests/test_dashboard_work.py`, `tests/test_sd_lib.py`,
 `tests/test_sd_docs_lint.py`, `skills/sd-receive-review/SKILL.md`,
@@ -331,10 +331,14 @@ nothing" cannot go green — while this page's own ordering makes a green suite
 a precondition of all eight merges.
 
 **The cut that would clear five of them is in requirement 13 and in no pull
-request.** `prd.md`'s removal list carries "the residue detectors
-(`bin/sd-status:960-1018`) after one clean run across the fleet", which is
-the `RESIDUE` tuple and `residue_section` together. That range holds five of
-the eight grep hits. Three things follow. The cut is **gated** on a clean
+request.** `prd.md`'s removal list carried "the residue detectors
+... after one clean run across the fleet", which is the `RESIDUE` tuple
+(`source:bin/sd-status::RESIDUE`) and `residue_section`
+(`source:bin/sd-status::residue_section`) together. Those hold five of
+the eight grep hits. The quotation elides a line range the entry carried
+into `bin/sd-status`; the prd's C-167 quotes it verbatim, and the two
+symbols above are what it named, which is why they are cited by name here
+rather than by a number that this item's own cuts keep moving. Three things follow. The cut is **gated** on a clean
 fleet run that nothing in this item schedules, so it cannot be assumed. It
 appears in **no pull request** on this page, so requirement 13's own list has
 an entry with no landing site — which criterion 31, closing that requirement
@@ -965,8 +969,8 @@ transfer. What differs between the directions is the move and the edit; the
 branch, the commit, the push and the pull request are identical.
 
 **The seam is 40, not the flat 119 R11-D42 charged for `git push`.** Write-side
-git is already built — `git commit` at `bin/sd_lib.py:1227` — and so is
-network git, `git fetch` at `bin/sd_lib.py:1343` and `:1349`, both through
+git is already built — `git commit` at `bin/sd_lib.py:1218` — and so is
+network git, `git fetch` at `bin/sd_lib.py:1334` and `:1340`, both through
 `sd_lib.git_output` at `:143`, which takes arbitrary argv behind a timeout, no
 shell and a failure-is-None contract across 30 call sites. What is genuinely
 uncrossed is narrower and is not the push: **no `gh` call in `bin/` has ever
@@ -1026,7 +1030,7 @@ exist, and which path names it.
 **`_sibling` at 18 is what the 40 of seam actually bought.** The write is ten
 lines, because `gh api --method POST` goes through `gh_json` unchanged exactly
 as R11-D44 predicted. Reaching `gh_json` costs a loader, because
-`bin/sd-pr-state` has no `.py` suffix. `bin/sd-status:97` carries the same
+`bin/sd-pr-state` has no `.py` suffix. `bin/sd-status:96` carries the same
 eighteen lines for the same reason; a third copy is the argument for moving it
 into `sd_lib`, and two copies is not.
 
@@ -2091,7 +2095,7 @@ A third set, `ALLOWED_IF_PRESENT`, carries the two lines #995 adds to
 quotes `sd-status`'s `.trellis` removal command and the comment above it
 that names the framework. Team-lead's ruling: a test that names the residue
 commands must name them, so both are permanent exemptions of the same kind as
-`bin/sd-status:1091-1093`. They are matched by file and content, not by line
+`bin/sd-status:1087-1089`. They are matched by file and content, not by line
 number, and may match zero lines, so the test is green whether #995 merges
 before this branch or after it; a fourth test fails a row that matches two
 lines. Proof, 2026-09-16, on a scratch worktree at this branch with
@@ -2242,3 +2246,89 @@ theirs: by a recorded owner call, not by an edit to code. The criterion's
 remaining names are `--stash-ref`, `--push`, `--park` and the `authors`
 policy key, all cut. 31(a)'s `parked` and `archived` deferral is a separate
 question and is untouched here.
+
+## 2026-09-19 — 31(a)'s field cut: `parked` goes, `archived` stays
+
+The entry above, "What 31(a) still owes", records the deferral and its
+reason: this pull request was told to leave `bin/sd-status` alone because
+sd:431's slice D edits that file next. Slice D is not live. No branch and no
+worktree on this machine touches `bin/sd-status`, so the reason the deferral
+gave has expired. The owner does not lift it over both fields. The pair is
+split, and the two halves go opposite ways.
+
+**`parked` is cut**: the `sd_lib` item field, its parse, the `--parked`
+flag, `render_parked`, the parked section of the work render, the `parked`
+key of the work section's JSON, and the `or entry["parked"]` clause of the
+two live-item filters. Thirteen reader rows become six. The full reasoning
+and the three measurements are in the item's Log; the short form is that
+nothing writes the field, and every one of the 88 items carrying it is
+archived, so the `archived` half of each filter already excluded all 88.
+
+**`archived` stays.** It is derived from where the item lives, every scan
+produces it, `bin/sd_lib.py` returns `done` for an archived item without
+opening `prd.md`, and the three filters reading it keep 491 closed items out
+of every active view.
+
+What changed in the gate, with the mechanism unchanged:
+
+- `FROZEN_FIELD_READERS` (`source:tests/test_cut_symbols.py::FROZEN_FIELD_READERS`)
+  drops from thirteen rows to six. Two of the six are the same filters with
+  the `parked` clause removed, so their text changed; the other eleven rows
+  went. It is no longer a freeze waiting on a lane. It is `archived`'s
+  ceiling, and a reader added under `bin/` fails against it.
+- `FIELD_READ` (`source:tests/test_cut_symbols.py::FIELD_READ`) still names
+  `parked`. The pattern is what proves the cut held: a read of the gone
+  field must fail rather than pass because the grep stopped looking for it.
+- `ParkedAndArchivedReaders` gains
+  `test_no_reader_of_the_cut_parked_field_remains`, which says the cut
+  directly rather than letting a returned reader arrive as one unexpected
+  row among others.
+
+One behaviour changes. An item carrying `parked:` without being archived was
+dropped from the actionable inventory and now fires like any other item. No
+item on this machine is in that position, and none can arrive there without
+a writer. `tests/test_sd_status.py`'s intersection fixture keeps its
+`parked:` line and now expects that item to fire, so the change is asserted
+rather than left implicit. Three tests over the flag are gone and two
+replace them: one that a `parked:` line is inert, one that `--parked` is an
+unrecognized argument.
+
+The `parked` word in its other senses is untouched, and a grep that does not
+separate them will say otherwise. `sd-writing-pack` parks and revives
+pieces (`park_piece`, `parked_at`); the review ledger's `parked` is a
+concern disposition with a trigger and an owner, read by
+`bin/sd_ship_dispositions.py`, `bin/sd-status`'s `parked-concern` check and
+`skills/sd-receive-review/SKILL.md`. Criterion 31 says so in its own text,
+which is why the criterion scopes the name to the field.
+
+### The citations the cut moved
+
+A cut that deletes lines moves every `path:line` citation below it, and the
+citation says nothing when it drifts -- it keeps resolving, onto different
+code. `bin/sd-status` lost 36 lines and `bin/sd_lib.py` 9, so the blast
+radius is every by-line citation into those two files, not the files this
+change edits.
+
+Enumerated from the tree rather than from memory: fourteen citations name
+`bin/sd-status` by line and fourteen name `bin/sd_lib.py`. The shift map was
+read off `git diff -U0`'s hunk headers and then checked, not assumed: for
+twelve probe lines the old file's line and the new file's shifted line were
+compared byte for byte, and all twelve matched.
+
+Eleven citations sit in live text -- requirement 13's own list, which tells
+an implementer where to look, and `implement.md`'s prose -- and those are
+re-pointed. The rest sit in the Log and in preserved review findings, where
+a citation quotes what was measured on its date; those keep their numbers,
+and `tests/test_doc_citations.py` counts one of them, C-167's, against
+`prd.md`. Two changes pay for it, both corrections rather than accounting:
+requirement 13 named a line of `bin/sd-status` for a configuration error
+exiting 2, and that line had drifted onto a comment about PyYAML, so it now
+reads `source:bin/sd-status::main`; and the passage above quoting requirement 13's
+residue-detector entry said the removal list "carries" a bullet the list no
+longer has, so it now says what it is, a quotation of an entry as it stood,
+with `RESIDUE` and `residue_section` cited by name.
+
+The general lesson the gate already states: a line number goes stale at the
+next insertion above it and a symbol name does not. Every citation this
+change had to repair was a line citation; none of the `source:` ones needed
+touching.

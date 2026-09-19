@@ -10,8 +10,7 @@ Fourteen sections, in output order, under the `pack` banner naming the checkout 
   next           the top-ranked row and its suggestion
   open threads   a count per source, then the exclusions
   work           counted docs/work status from frontmatter or the authoritative row;
-                 flag stale status lines and done rows without closing evidence;
-                 --parked reads each item's own field, written by age sweep/D2 parking
+                 flag stale status lines and done rows without closing evidence
   contributions  the shared contribution projection for this repo
   prs            open pull requests through the sd-pr-state code path
   setup          mode and detected check entrypoints
@@ -147,11 +146,9 @@ def work_section(root: pathlib.Path) -> dict[str, Any]:
                 "activity": item.activity,
                 "branch": item.branch,
                 "archived": item.archived,
-                "parked": item.parked,
                 "inconsistencies": list(item.inconsistencies),
             }
         )
-    parked = [entry for entry in listed if entry["parked"]]
     active = [entry for entry in listed if not entry["archived"]]
     return {
         "status_source": source,
@@ -159,7 +156,6 @@ def work_section(root: pathlib.Path) -> dict[str, Any]:
         "active": len(active),
         "counts": counts,
         "items": listed,
-        "parked": parked,
     }
 
 
@@ -1377,11 +1373,9 @@ BY_CHECK = {kind.check: kind for kind in CLASSES}
 EXCLUDED = (
     "archived work items (docs/work/archive/**) for status, checkboxes and "
     "branches -- closed by where they live; their review ledgers are still read",
-    "parked work items -- parked is a disposition, not an open thread, and "
-    "`sd-status --parked` already lists them",
     "concerns disposed addressed or rebutted -- two of the four dispositions "
     "are closures",
-    "checkboxes on done, archived or parked items -- read as history rather "
+    "checkboxes on done or archived items -- read as history rather "
     "than as missed steps, a convention this asserts rather than observes",
     "Jira rows in the dashboard index -- no committed fact ties a Jira project "
     "key to a checkout, which is the exclusion `issues_section` already makes",
@@ -1907,7 +1901,7 @@ def _work_rows(
     marks = sd_lib.touched(root)
     rows: list[dict[str, Any]] = []
     for entry in work.get("items") or []:
-        if entry["archived"] or entry["parked"]:
+        if entry["archived"]:
             continue
         item = pathlib.PurePosixPath(entry["path"]).name
         slug, status, branch = entry["slug"], entry["status"], entry["branch"]
@@ -2631,7 +2625,7 @@ def _step_rows(root: pathlib.Path, work: dict[str, Any]) -> list[dict[str, Any]]
     """
     rows: list[dict[str, Any]] = []
     for entry in work.get("items") or []:
-        if entry["archived"] or entry["parked"] or entry["status"] == "done":
+        if entry["archived"] or entry["status"] == "done":
             continue
         item = pathlib.PurePosixPath(entry["path"]).name
         where = str(entry["path"])
@@ -3278,14 +3272,11 @@ def _render_work(work: dict[str, Any], write: Any) -> None:
     shown = [entry for entry in live if _always_listed(entry)]
     rest = [entry for entry in live if not _always_listed(entry)]
     for entry in shown + rest[:LISTED_ITEMS]:
-        mark = "  parked" if entry["parked"] else ""
-        write(f"  {entry['status']:<12} {entry['slug']}{mark}\n")
+        write(f"  {entry['status']:<12} {entry['slug']}\n")
         for problem in entry["inconsistencies"]:
             write(f"    ! {problem}\n")
     if len(rest) > LISTED_ITEMS:
         write(f"  ... and {len(rest) - LISTED_ITEMS} more not being worked\n")
-    if work["parked"]:
-        write(f"  {len(work['parked'])} parked; see `sd-status --parked`\n")
 
 
 def _render_protection(section: dict[str, Any], write: Any) -> None:
@@ -3636,17 +3627,6 @@ def _render_jira(section: dict[str, Any], write: Any) -> None:
         write(f"  {key}  {state}  " + json.dumps(row.get("title"), ensure_ascii=False) + "\n")
 
 
-def render_parked(work: dict[str, Any], stream: TextIO) -> None:
-    parked = work["parked"]
-    if not parked:
-        write = stream.write
-        write("sd-status: no work item carries a `parked:` line\n")
-        return
-    stream.write(f"sd-status: {len(parked)} parked work items\n")
-    for entry in parked:
-        stream.write(f"  {entry['parked']:<24} {entry['path']}\n")
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sd-status",
@@ -3656,11 +3636,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
-    parser.add_argument(
-        "--parked",
-        action="store_true",
-        help="list only parked work items, from their own frontmatter",
-    )
     parser.add_argument(
         "--actions",
         action="store_true",
@@ -3684,17 +3659,6 @@ def main(argv: list[str] | None = None) -> int:
         root = sd_lib.repo_root()
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
-        if args.parked:
-            work = work_section(root)
-            if args.json:
-                print(json.dumps(
-                    {"tool": "sd-status", "schema": SCHEMA_VERSION, "repo": str(root),
-                     "parked": work["parked"]},
-                    indent=2, sort_keys=True,
-                ))
-            else:
-                render_parked(work, sys.stdout)
-            return 0
         result = collect(root, dict(os.environ), args.limit)
     except sd_lib.ConfigError as error:
         print(f"sd-status: error: {error}", file=sys.stderr)
