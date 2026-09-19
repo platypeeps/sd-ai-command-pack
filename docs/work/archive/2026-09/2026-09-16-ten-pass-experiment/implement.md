@@ -1,9 +1,49 @@
 # Implement — ten-pass-experiment
 
-## Current status — 2026-09-18
+## Closed — 2026-09-19
 
-Blocked. The user cancelled external provider reviews. No qualifying Codex pass exists on sd:777.
-Resume only after explicit authorization to run these reviews. Steps 3 through 6 remain open.
+Closed without the data. The owner ruled on 2026-09-19 that this experiment ends
+with no pass run and no sample gathered. External provider reviews stay
+cancelled; note 2775 recorded that cancellation on 2026-09-18 and nothing here
+reverses it.
+
+The sample window has elapsed. Ten code pull requests merged after the
+cancellation — #1047, #1050, #1052, #1060, #1061, #1062, #1063, #1065, #1066 and
+#1067 — and no Codex pass ran on any of them. The ten this item asked for are
+gone. A later ten would measure a different pack.
+
+`prd.md`'s frontmatter reads `status: done` because
+`source:bin/sd_lib.py::ITEM_STATUSES` holds no cancelled state. On this item
+`done` means finished, not achieved. This section is what it means.
+
+### What each unrun step would have produced
+
+Five steps close unrun: 3, 4, 5, 7 and 8. Steps 3, 4, 5 and 8 are OWNER-ONLY, so
+this page transcribes the owner's ruling rather than making it.
+
+- **3, the ten passes.** No pass log exists and none will be written. The
+  read-only cost query in `prd.md` still selects 0 rows.
+- **4, the report.** There is no accepted-to-rejected ratio, no highest severity
+  accepted and no cost per pass. The pack carries no measured second-vendor
+  signal on its code review point.
+- **5, the decision note.** The code review point stays as it is. This closure
+  keeps it, not a measurement. That is the outcome the item's own done-when
+  clause was written to prevent, and it is the price of closing here. It is
+  recorded rather than hidden.
+- **7, the trigger.** Nothing fires on a merge and nothing is built. Both shapes
+  and their two preconditions stay on the page for whoever resumes.
+- **8, the post-merge report clause.** Moot without step 4.
+
+### What survives this closure
+
+- Note 2776 on sd:777, the C-19 and C-40 re-evaluation, is a parked concern with
+  its own trigger and its own owner. It outlives the item. `bin/sd-status` reads
+  concern rows out of archived items for exactly this reason.
+- `prd.md`'s pass-note template and `design.md`'s decisions stay on the page.
+  Whoever resumes this experiment does not start from nothing.
+
+Reopening needs a written reversal of the review cancellation and a fresh ten
+pull requests. Neither exists today.
 
 ## Step checklist
 
@@ -25,7 +65,7 @@ Resume only after explicit authorization to run these reviews. Steps 3 through 6
       `estimate`; the report carries no combined total over the ten and no
       sum that mixes a copied cost with an estimate.
 - [ ] 5. OWNER-ONLY: the decision note, keep or remove the code review point.
-- [ ] 6. The grep `grep -rn -E '[0-9]+ ?%|percent|threshold' bin/ skills/`
+- [x] 6. The grep `grep -rn -E '[0-9]+ ?%|percent|threshold' bin/ skills/`
       names no line that disables a review point. At 2eafa78b it finds 33
       lines, the count sd:10 recorded, and none disables a point. Re-run
       2026-09-17 at ea32e76a: 34 lines, none disables a point. The drift,
@@ -48,12 +88,19 @@ Resume only after explicit authorization to run these reviews. Steps 3 through 6
       or `advisory`. The pass still runs. Every finding is still
       collected and still reported. Only the label moves, and the
       function's own docstring records that nothing is written to a
-      pull request, a label, a check run or any file. This box stays
-      open: the grep is the item's done-when clause and is run again
-      after the tenth pass.
+      pull request, a label, a check run or any file. Final re-run
+      2026-09-19 at e547dac3, the tip this closure branches from: 48
+      lines again, and a line-by-line diff against the cf420fca run
+      differs in one line number and no content — the same unrelated
+      `for-each-ref --format` line in `bin/sd-status`, moved from 2965
+      to 2978. No arrival, no departure, no reworded line. None
+      disables a review point. This box closes here: the tenth pass it
+      waited for will not run, and the clause it guards holds at the
+      last tip the item sees.
 
 Steps 2 to 5 are the owner's. A lane may prepare step 1 and re-run step 6;
-it runs no pass and writes no note.
+it runs no pass and writes no note. That held to the end: no pass ran and the
+only box a lane ever ticked below step 2 is step 6's grep.
 
 ## Verification
 
