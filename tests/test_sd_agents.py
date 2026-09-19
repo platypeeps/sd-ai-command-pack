@@ -78,6 +78,53 @@ def agent_files() -> list[Path]:
     return sorted(AGENTS.glob("sd-*.md")) if AGENTS.is_dir() else []
 
 
+VERIFIER = AGENTS / "sd-claim-verifier.md"
+FACT_CHECK = REPO_ROOT / "skills" / "sd-fact-check" / "SKILL.md"
+
+#: `- **name** -- ...`, the shape the skill writes each verdict in.
+SKILL_VERDICT_RE = re.compile(r"^\s*-\s+\*\*([a-z ]+)\*\*\s+—", re.MULTILINE)
+#: The agent writes them as a backticked list in one sentence.
+AGENT_VERDICT_RE = re.compile(r"`([a-z ]+)`")
+
+
+def skill_verdicts() -> set[str]:
+    """The verdicts `sd-fact-check` defines, read from its own list."""
+    body = FACT_CHECK.read_text(encoding="utf-8")
+    start = body.index("Assign exactly one verdict")
+    end = body.index("Do not remove an audited claim", start)
+    return set(SKILL_VERDICT_RE.findall(body[start:end]))
+
+
+def agent_verdicts() -> set[str]:
+    """The verdicts `sd-claim-verifier` says it returns, read from its list."""
+    body = VERIFIER.read_text(encoding="utf-8")
+    start = body.index("Exactly one verdict for this claim:")
+    end = body.index("- The decisive evidence", start)
+    return set(AGENT_VERDICT_RE.findall(body[start:end]))
+
+
+class TheVerdictVocabularyIsOne(unittest.TestCase):
+    """Requirement 13: the agent emits the five verdicts the skill requires.
+
+    Nothing parses either list, which is exactly why they drifted: the agent
+    carried `supported`, `refuted`, `uncertain` and the skill carried five
+    names sharing only `supported` with it. A parent running both over one
+    claim set had to translate, and a translation nobody wrote down is where
+    `refuted` and `contradicted` quietly stop meaning the same thing.
+
+    Both sides are read from the pages rather than written here. A copy in
+    this file would be a third vocabulary, and the next drift would be
+    between the test and the two documents instead of between them.
+    """
+
+    def test_the_skill_defines_five_verdicts(self) -> None:
+        """The bound that keeps the equality below from passing on nothing."""
+        self.assertEqual(len(skill_verdicts()), 5, sorted(skill_verdicts()))
+
+    def test_the_agent_returns_exactly_the_skill_s_verdicts(self) -> None:
+        self.assertEqual(agent_verdicts(), skill_verdicts())
+
+
 class ContractTests(unittest.TestCase):
     def test_there_are_agents_to_check(self) -> None:
         # Without this every assertion below passes over an empty list. The

@@ -38,11 +38,21 @@ is not evidence.
 
 Exactly one verdict for this claim:
 
-- `supported`, `refuted`, or `uncertain`.
+- `supported`, `partially supported`, `unverified`, `contradicted`, or
+  `outdated`, each with the meaning `skills/sd-fact-check/SKILL.md` gives it.
+  The two pages carry one vocabulary and not two: a parent that runs this
+  agent over some claims and that skill over others has to put every verdict
+  in one ledger, and a translation step between them is a place for a verdict
+  to change meaning silently.
 - The decisive evidence, each item with its locator and date, and a one- or
   two-line reason tying the evidence to the verdict.
-- For `uncertain`, name the specific evidence that is missing or in conflict
-  rather than guessing.
+- `contradicted` is the verdict the refute-first stance above is looking for:
+  stronger credible evidence conflicts with the claim. It is not the same as
+  `unverified`, which says the supplied evidence cannot establish the claim
+  either way -- for that one, name the evidence that is missing or in
+  conflict rather than guessing.
+- `outdated` is for a claim that was supportable for an earlier date and is
+  not current as of the audit date. Name both dates.
 - Minimal corrected wording only when the claim is refutable by a precise,
   evidence-backed fix. Never fabricate evidence, a source, a date, or a locator.
 

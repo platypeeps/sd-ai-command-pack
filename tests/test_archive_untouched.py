@@ -26,9 +26,16 @@ Active items must not carry one.
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
+import json
+import os
 import pathlib
 import subprocess
+import sys
+import tempfile
 import unittest
+from typing import Any
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 MARKER = "docs/work/.status-source"
@@ -302,6 +309,142 @@ class NoDeletionPath(unittest.TestCase):
         for path, _ in FROZEN_DELETION_SITES:
             self.assertNotIn("sweep", path)
             self.assertNotIn("park", path)
+
+
+# --------------------------------------------- the archive as a scope boundary
+
+SD_STATUS = REPO_ROOT / "bin" / "sd-status"
+SD_REVIEW = REPO_ROOT / "bin" / "sd-review"
+if str(REPO_ROOT / "bin") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "bin"))
+
+
+def load_sd_review() -> Any:
+    """Import `bin/sd-review` as a module; it ships without a `.py` suffix."""
+    loader = importlib.machinery.SourceFileLoader("sd_review_archive_scope", str(SD_REVIEW))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+PLANNING_PRD = "---\nstatus: planning\nbranch: topic\n---\n\n- [ ] one\n"
+
+
+class TheArchiveIsAScopeBoundary(unittest.TestCase):
+    """Criterion 21: a `planning` item under `archive/` is seen by nothing.
+
+    The criterion names three readers -- `sd-status`, `sd-plan` and
+    `sd-review --scope planning`. Two are executables and are run below. The
+    third is a skill page with no enumeration of its own: step 4 of
+    `skills/sd-plan/SKILL.md` runs `sd-review --scope planning`, so the
+    third reader is the second one. The last test is what keeps that true.
+    If the skill ever grows its own way of finding items, that test fails
+    and this class stops silently claiming to cover a reader it does not.
+
+    The fixture holds two `planning` items differing in one respect: where
+    they live. Asserting only that the archived one is absent would pass
+    just as well in a fixture where nothing was found at all, so every test
+    here asserts the live one present in the same breath.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = pathlib.Path(os.path.realpath(self._tmp.name))
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        for args in (
+            ["init", "--quiet", "--initial-branch", "main"],
+            ["config", "user.email", "fixture@example.invalid"],
+            ["config", "user.name", "Fixture"],
+        ):
+            subprocess.run(["git", *args], cwd=str(self.repo), check=True, capture_output=True)
+        self.live = self.write_item("docs/work/2026-01-01-live")
+        self.buried = self.write_item("docs/work/archive/2026-01/2026-01-02-buried")
+        subprocess.run(["git", "add", "-A"], cwd=str(self.repo), check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "--quiet", "-m", "seed"],
+            cwd=str(self.repo), check=True, capture_output=True,
+        )
+
+    def write_item(self, relative: str) -> pathlib.Path:
+        directory = self.repo / relative
+        directory.mkdir(parents=True)
+        (directory / "prd.md").write_text(PLANNING_PRD, encoding="utf-8")
+        return directory
+
+    def env(self) -> dict[str, str]:
+        """The fixture's own HOME, so no reader picks up the operator's."""
+        home = self.tmp / "home"
+        home.mkdir(exist_ok=True)
+        return {
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(home),
+            "XDG_STATE_HOME": str(self.tmp / "state"),
+            "PWD": str(self.repo),
+        }
+
+    def test_planning_scope_reads_the_live_item_and_not_the_archived_one(self) -> None:
+        subject = load_sd_review().resolve_subject(self.repo, "planning")
+        self.assertEqual(subject.paths, ("docs/work/2026-01-01-live/prd.md",))
+
+    def test_sd_status_sees_no_planning_item_under_the_archive(self) -> None:
+        """The archived item is a record, and its `status:` line is not read.
+
+        `sd-status` does list the directory -- the archive is counted, which
+        is how the report says what it is not showing. What it does not do is
+        take the item's own word for its status: both fixtures say
+        `planning`, and only the live one is reported that way. The archived
+        one comes back `done`, from where it lives rather than from its
+        frontmatter, so it is in no active view and no planning count.
+
+        That is the shape of the guarantee, and it is stronger than absence
+        would be. An item excluded by a list of paths stays excluded only
+        while the list is right. This one is excluded by the same walk that
+        finds it.
+        """
+        completed = subprocess.run(
+            [sys.executable, str(SD_STATUS), "--json"],
+            cwd=str(self.repo), env=self.env(), capture_output=True, text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        work = json.loads(completed.stdout)["work"]
+        by_path = {entry["path"]: entry for entry in work["items"]}
+
+        live = by_path["docs/work/2026-01-01-live"]
+        self.assertFalse(live["archived"])
+        self.assertEqual(live["status"], "planning")
+
+        buried = by_path["docs/work/archive/2026-01/2026-01-02-buried"]
+        self.assertTrue(buried["archived"])
+        self.assertEqual(
+            buried["status"], "done",
+            "the archived item's own `status: planning` line was read",
+        )
+
+        self.assertEqual(work["active"], 1)
+        self.assertEqual(work["counts"]["planning"], 1)
+
+    def test_the_plan_skill_enumerates_through_sd_review_and_not_on_its_own(self) -> None:
+        """The third reader has no third enumeration, and must not grow one.
+
+        `sd-plan` is a skill page, not an executable, so "sd-plan sees no
+        item there" is not directly runnable. What makes it true is that the
+        page delegates: it runs `sd-review --scope planning` rather than
+        walking `docs/work` itself. This asserts both halves of that -- the
+        delegation is present, and no walk sits beside it.
+        """
+        page = (REPO_ROOT / "skills" / "sd-plan" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("sd-review --scope planning", page)
+        for walk in ("glob(", "iterdir", "os.walk", "find docs/work", "ls docs/work"):
+            self.assertNotIn(
+                walk, page,
+                f"skills/sd-plan/SKILL.md enumerates items itself via {walk!r}, "
+                "so sd-review --scope planning no longer covers it",
+            )
+
 
 
 if __name__ == "__main__":
