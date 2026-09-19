@@ -719,10 +719,21 @@ def close_record(root: pathlib.Path, connection, database: pathlib.Path, args, s
         raise Refusal(f"no-item record {args.review_id} is already closed")
     with store.repository_lock(database, facts.repository):
         revision, state = store.read(connection, key)
-        # The alias is released; every HEAD, tree, reservation and reference stays.
-        claim_branch(connection, store, facts.repository, state["branch"], None)
-        write_identity(connection, store, key, revision, state, lifecycle="closed",
-                       closed={"reason": args.close_record.strip(), "closed_at": observed_at()})
+        # The alias is released; every HEAD, tree, reservation and reference
+        # stays. Release and identity write are one transaction, the shape
+        # `write_allocation` already uses for record-and-index: the release is
+        # an unversioned save and the identity write is the versioned one, so
+        # ordering them without a transaction let a concurrent revision bump
+        # refuse the close after the branch claim was already given up. The
+        # record stayed active with its name free, and the next allocation on
+        # that name took a fresh budget -- the one thing a closed alias must
+        # never grant.
+        with library_transaction(connection):
+            claim_branch(connection, store, facts.repository, state["branch"], None)
+            state.update(lifecycle="closed", identity_revision=state.get("identity_revision", 1) + 1,
+                         review_clearance=None,
+                         closed={"reason": args.close_record.strip(), "closed_at": observed_at()})
+            store.save(connection, key, revision, with_digest(state))
     _revision, state = store.read(connection, key)
     return no_item_result(root, "closed", args.review_id, facts.repository, state,
                           {"spent_passes": spent_passes(state), "history_digest": state["history_digest"]})

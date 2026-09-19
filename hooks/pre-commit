@@ -92,6 +92,17 @@ def main_checkout(root: pathlib.Path) -> pathlib.Path | None:
     `git rev-parse --git-common-dir` is the clone's shared `.git`, which is the
     main checkout's; from the main checkout itself it names that checkout and
     this returns None, because `interpreter` has already looked there.
+
+    The parent is the main checkout only when that path is actually named
+    `.git`. A separated git directory (`git init --separate-git-dir`), a
+    submodule, and a bare clone's worktree all answer with a directory
+    somewhere else entirely, whose parent is an unrelated tree that may hold
+    an unrelated `.venv`. Borrowing that one would run the gates under a
+    foreign toolchain, which is worse than the refusal this whole change
+    exists to make legible, so an unrecognised layout returns None and the
+    caller falls back. `source:bin/sd_lib.py::main_worktree_root` guards the
+    same call the same way and is the shape copied here; the hook cannot
+    import it, because it must run under whatever interpreter git hands it.
     """
     result = subprocess.run(
         ["git", "rev-parse", "--git-common-dir"], cwd=root,
@@ -102,6 +113,9 @@ def main_checkout(root: pathlib.Path) -> pathlib.Path | None:
     common = pathlib.Path(result.stdout.strip())
     if not common.is_absolute():
         common = root / common
+    common = common.resolve()
+    if common.name != ".git":
+        return None
     checkout = common.parent
     return None if checkout == root else checkout
 
@@ -150,6 +164,18 @@ def provisioned(python: str, root: pathlib.Path) -> bool:
     except OSError:
         return False
     return probe.returncode == 0
+
+
+def remedy_checkout(python: str, root: pathlib.Path) -> str:
+    """Where `make setup` has to run to provision the interpreter that was picked.
+
+    `interpreter` prefers this worktree's own `.venv`, so naming the main
+    checkout unconditionally would send the reader to a directory whose
+    `.venv` is not the one in use.
+    """
+    if python == "python3":
+        return f"{root} (no .venv in this checkout or the clone's main one)"
+    return str(pathlib.Path(python).parent.parent.parent)
 
 
 def staged_paths() -> list[str]:
@@ -249,9 +275,13 @@ def main() -> int:
     if not provisioned(python, root):
         status = 1
         condition = "unchecked"
+        # Name the checkout whose `.venv` was picked, not "this clone's main
+        # checkout": when the worktree has a `.venv` of its own it wins, and
+        # sending the reader to the main checkout would misname the condition
+        # -- which is the defect sd:1020 is about, in sd:1020's own remedy.
         print(f"pre-commit: {python} cannot import {DEV_REQUIREMENT}, so no gate ran; "
               f"this is the hook's own environment, not a verdict on the staged code. "
-              f"Run make setup in this clone's main checkout")
+              f"Run make setup in {remedy_checkout(python, root)}")
     staged = staged_paths() if status == 0 else []
     unstaged = diverged(staged)
     if unstaged:

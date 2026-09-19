@@ -283,6 +283,27 @@ class TheHookRun(unittest.TestCase):
         self.assertNotIn("pre-commit: failed", output, "an environment fault read as a verdict")
         self.assertNotIn("Ran ", output, "a whole-tree pass ran under an interpreter without Ruff")
 
+    def test_the_remedy_names_the_checkout_whose_venv_actually_failed(self):
+        """sd:1020 follow-up. The remedy must not misname the condition.
+
+        `interpreter` prefers this checkout's own `.venv`, so a message that
+        always says "this clone's main checkout" sends the reader somewhere
+        whose `.venv` is not the one that failed -- which is sd:1020's own
+        defect, committed inside sd:1020's own remedy. Read from the hook's
+        output, not from the helper, so the message stays wired to the run.
+        """
+        self.barren_venv()
+        self.stage("ok.py", "x = 1\n")
+        output = (lambda r: r.stdout + r.stderr)(self.run_hook())
+        self.assertIn("cannot import ruff", output)
+        # The remedy clause specifically: the interpreter path printed earlier
+        # in the same sentence already contains the checkout, so asserting the
+        # path appears anywhere in the output proves nothing.
+        self.assertIn(
+            f"Run make setup in {self.root.resolve()}", output,
+            "the remedy did not name the checkout whose .venv failed",
+        )
+
     def test_a_red_whole_tree_pass_fails_the_commit_with_its_status(self):
         self.stub_passes(failing="test_doc_citations")  # overwrites setUp's green stubs
         self.stage("ok.py", "x = 1\n")
@@ -303,6 +324,16 @@ def scratch_checkout(prefix: str) -> pathlib.Path:
     shutil.copy2(HOOK, root / "hooks" / "pre-commit")
     git("add", "--", "hooks/pre-commit", cwd=root)
     return root
+
+
+def load_hook():
+    """`hooks/pre-commit` as a module; it has no suffix, so by loader."""
+    loader = importlib.machinery.SourceFileLoader("pre_commit_hook", str(HOOK))
+    spec = importlib.util.spec_from_file_location("pre_commit_hook", str(HOOK), loader=loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
 
 
 def load_sd_status():
@@ -520,6 +551,80 @@ class TheBorrowedVenvIsIgnored(unittest.TestCase):
         (root / ".venv").symlink_to(root / "provisioned")
         untracked = git("status", "--porcelain", "--untracked-files=all", cwd=root)
         self.assertNotIn(".venv", untracked, f"a .venv symlink is not ignored: {untracked!r}")
+
+
+class TheClonesCheckoutIsOnlyBorrowedWhenItIsOne(unittest.TestCase):
+    """sd:1020 follow-up. `--git-common-dir` is not always `<checkout>/.git`.
+
+    A separated git directory, a submodule and a bare clone's worktree all
+    answer with a directory somewhere else, whose parent is an unrelated
+    tree. Taking that parent would run the gates under whatever `.venv` the
+    stranger happens to have, which is a wrong answer given confidently --
+    worse than the legible refusal sd:1020 exists to produce.
+    `source:bin/sd_lib.py::main_worktree_root` guards the same call the same
+    way; the hook copies the shape rather than importing it, because it must
+    run under whatever interpreter git hands it.
+    """
+
+    def setUp(self):
+        self.hook = load_hook()
+        self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="sd-1020-layout-"))
+        self.addCleanup(subprocess.run, ["rm", "-rf", str(self.tmp)], check=False)
+
+    def test_a_separated_git_directory_is_not_mistaken_for_a_main_checkout(self):
+        root = self.tmp / "work"
+        root.mkdir()
+        elsewhere = self.tmp / "store" / "thegitdir"
+        elsewhere.parent.mkdir()
+        git("init", "-q", f"--separate-git-dir={elsewhere}", ".", cwd=root)
+        # The stranger whose `.venv` must not be borrowed.
+        (elsewhere.parent / ".venv" / "bin").mkdir(parents=True)
+        (elsewhere.parent / ".venv" / "bin" / "python").write_text("#!/bin/sh\nexit 0\n")
+        (elsewhere.parent / ".venv" / "bin" / "python").chmod(0o755)
+
+        common = git("rev-parse", "--git-common-dir", cwd=root).strip()
+        self.assertNotEqual(
+            pathlib.Path(common).name, ".git",
+            "fixture is not a separated git directory, so it proves nothing",
+        )
+        self.assertIsNone(
+            self.hook.main_checkout(root),
+            "an unrecognised layout was taken for a main checkout",
+        )
+        self.assertEqual(
+            self.hook.interpreter(root), "python3",
+            "the hook borrowed an unrelated tree's .venv",
+        )
+
+    def test_an_ordinary_linked_worktree_still_finds_the_clone(self):
+        """The control: the guard must not close the door sd:1020 opened."""
+        root = self.tmp / "clone"
+        root.mkdir()
+        git("init", "-q", cwd=root)
+        git("config", "user.email", "hook@example.invalid", cwd=root)
+        git("config", "user.name", "hook", cwd=root)
+        (root / "seed").write_text("seed\n")
+        git("add", "--", "seed", cwd=root)
+        git("commit", "-qm", "seed", cwd=root)
+        (root / ".venv" / "bin").mkdir(parents=True)
+        (root / ".venv" / "bin" / "python").write_text("#!/bin/sh\nexit 0\n")
+        (root / ".venv" / "bin" / "python").chmod(0o755)
+
+        linked = self.tmp / "linked"
+        git("worktree", "add", "-q", "--detach", str(linked), cwd=root)
+        self.assertEqual(self.hook.main_checkout(linked), root.resolve())
+        # Resolved on both sides: macOS hands back `/private/var` for `/var`,
+        # and `main_checkout` resolves before it compares.
+        self.assertEqual(
+            pathlib.Path(self.hook.interpreter(linked)).resolve(),
+            (root / ".venv" / "bin" / "python").resolve(),
+        )
+
+    def test_a_bare_python3_still_names_where_to_run_make_setup(self):
+        """The fallback case the behavioural test above cannot stage."""
+        worktree = self.tmp / "bare"
+        worktree.mkdir()
+        self.assertIn(str(worktree), self.hook.remedy_checkout("python3", worktree))
 
 
 if __name__ == "__main__":
