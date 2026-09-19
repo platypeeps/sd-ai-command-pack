@@ -458,3 +458,18 @@ No implementation or provider review ran during backup verification.
 - 2026-09-17: Sven approved V1 scope, post-cap amendments, and the backup destination. Restoration passed.
 - 2026-09-17: Sven approved implementation and local validation. The row moved to `in_progress`; provider review and publication remain unapproved.
 - 2026-09-17: Sven retained whole-opening overrides and required manual review after each template update. Decision `2767` records the policy.
+- 2026-09-19: All 44 acceptance criteria are ticked. The last three, 348, 352
+  and 358, closed as coverage gaps rather than missing behaviour: every guard
+  each names already existed, and #1071 (`e7a8f40f`) added the cases that hold
+  them, eight of them mutation-verified one guard at a time. #1067
+  (`0300b858`) closed 377 and 378 the same way. The delivery sequence's twelve
+  steps are spent and the checker review landed, so the work is delivered.
+  This commit carries the `Delivers: sd:1006` trailer the closing route needs.
+  `sd task status` does not close a work row: `source:bin/sd_work.py::_status_reason`
+  redirects a `kind=work` item to `sd work deliver`, and the installed
+  workflow library refuses the move on any other evidence.
+  `source:bin/sd_work.py::_delivery_reason` is what then reads the trailer,
+  against the verified tip rather than any named branch, before
+  `sd_db.progress.deliver_work` writes the row. The row moves once this lands;
+  archiving the directory follows the row, not the other way round, because
+  `bin/sd-docs-lint` rule 2 reads the row and not this file.
