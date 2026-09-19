@@ -206,12 +206,24 @@ Host probes 8–11 passed for both scopes. Host accepted pass 4 dispositions for
 Requirements 1–10 retain their implementation approval.
 Requirement 11 is approved for implementation after host read-back; no unresolved planning blocker remains for that extension.
 
+The merge-authorization redesign that C-4 and C-6 both touch is deferred by the
+user. That deferral is recorded here and not in either row's verdict cell,
+because it is not what either row decided: both concerns are addressed by
+requirement 4 keeping the existing gates and adding no exception and no grant
+mechanism. `bin/sd-status` reads a ledger row's last cell and ranks
+`source:bin/sd-status::OPEN_WORDS` above `source:bin/sd-status::CLOSED_WORDS`,
+so a `deferred` beside an `addressed` in one cell reports the row open. That is
+the reader working: the cell did carry both. `source:bin/sd-status::_verdict_cell`
+records the same collision reaching an archived C-11 from a narrative column,
+which is why the last cell is what it reads; a cell holding both words is the
+case that fix cannot reach, and the page is where it is answered.
+
 | Finding | Severity | Disposition |
 |---|---|---|
 | C-1: Interactive reuse needs explicit scope and fail-closed identity. | Blocking | Addressed: explicit opt-in, clean committed checkout, legacy invalidation, and unknown-dependency refusal. |
 | C-2: Review partition execution exceeds the bounded oversized-review change. | Blocking | Addressed: advisory inventory and split-branch plan only; no execution or aggregate approval. |
 | C-3: Synthetic success cannot establish unsupported isolation guarantees. | Blocking | Addressed: separate measured boundaries and retain unsupported or failed confinement as blockers; `sd:777` stays cancelled. |
-| C-4: A PR must not authorize its own protection exception. | Blocking | Addressed: the user deferred merge-authorization redesign. Requirement 4 now preserves existing gates without an exception. |
+| C-4: A PR must not authorize its own protection exception. | Blocking | Addressed: requirement 4 preserves the existing gates and adds no exception. |
 | C-5: Typed state must not expand into dashboard redesign. | Nonblocking | Addressed: additive command/API state with only necessary consumer adapters. |
 
 ### Claude planning pass 1
@@ -222,7 +234,7 @@ Lane severities below retain the review's values; response dispositions address 
 
 | ID | Strongest finding | Lane / severity | Response | Evidence |
 |---|---|---|---|---|
-| C-6 | Default-branch content alone cannot independently authorize bypassing protection. | blocking / high | addressed | The user deferred the redesign. Requirement 4 retains existing authorization gates and adds no grant mechanism. |
+| C-6 | Default-branch content alone cannot independently authorize bypassing protection. | blocking / high | addressed | Requirement 4 retains the existing authorization gates and adds no grant mechanism. |
 | C-7 | Unknown collaborator access could silently satisfy the sole-writer precondition. | blocking / medium | addressed | The proposed exception was removed; requirement 4 preserves existing ownership checks. |
 | C-8 | Migration can discard other providers or leave them automatically selected. | blocking / medium | addressed | Requirement 10 and inventory acceptance preserve every provider and state. Automatic inclusion already contradicted: "Rank only Codex then Claude for automatic review". |
 | C-9 | An unnamed global hook change can affect unrelated repositories or edit the wrong hook. | blocking / medium | addressed | Requirement 10 names the machine-wide settings hook and preserves its detector. Hook backup/read-back criteria exclude repository `.githooks`. |

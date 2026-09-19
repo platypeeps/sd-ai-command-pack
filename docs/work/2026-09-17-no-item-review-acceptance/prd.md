@@ -458,3 +458,16 @@ No implementation or provider review ran during backup verification.
 - 2026-09-17: Sven approved V1 scope, post-cap amendments, and the backup destination. Restoration passed.
 - 2026-09-17: Sven approved implementation and local validation. The row moved to `in_progress`; provider review and publication remain unapproved.
 - 2026-09-17: Sven retained whole-opening overrides and required manual review after each template update. Decision `2767` records the policy.
+- 2026-09-19: All 44 acceptance criteria are ticked. The last three, 348, 352
+  and 358, closed as coverage gaps rather than missing behaviour: every guard
+  each names already existed, and #1071 (`e7a8f40f`) added the cases that hold
+  them, eight of them mutation-verified one guard at a time. #1067
+  (`0300b858`) closed 377 and 378 the same way. The delivery sequence's twelve
+  steps are spent and the checker review landed, so the work is delivered.
+  This commit carries the `Delivers: sd:1006` trailer that
+  `source:bin/sd_work.py::_delivery_reason` requires, because
+  `source:.venv/lib/python3.13/site-packages/sd_db/workflow.py` refuses a work
+  item's move to `done` on any other evidence. The row moves once this lands
+  and `sd work deliver` verifies the trailer against the default branch;
+  archiving the directory follows the row, not the other way round, because
+  `bin/sd-docs-lint` rule 2 reads the row and not this file.

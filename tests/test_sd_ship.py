@@ -451,9 +451,15 @@ roles:
         `test_moved_head_at_remote_merge_is_refused_atomically` races the head
         *inside* the merge call, so the remote's own 405 is what refuses there.
         This is the earlier question: the branch already moved at the remote
-        when the merge is asked for. `GitHub.ready` is the one guard both the
-        item-backed and the no-item flow reach, and it has to refuse on the
-        pull request's own head without spending a merge call to find out.
+        when the merge is asked for. `GitHub.ready` has to refuse on the pull
+        request's own head without spending a merge call to find out.
+
+        The guard belongs to the item-backed merge alone.
+        `source:bin/sd-ship::Ship.merge` is its one call site, and
+        `source:bin/sd_ship_no_item.py::run_no_item` refuses every command but
+        `review`, `verify-review` and `adjudicate`, so the no-item flow never
+        asks for a merge and never reaches this guard. The first draft of this
+        docstring claimed both flows reach it; #1067's review caught that.
         """
         self.prepare()
         self.remote.commit_on("topic", "raced\n\nAuthored-with: human", files={"raced.py": "changed\n"})
