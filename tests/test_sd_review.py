@@ -230,6 +230,7 @@ class PolicyTests(ReviewFixture):
         policy, source = sd_review.load_policy(root)
         self.assertEqual(policy["severity_floor"], "high")
         self.assertEqual(policy["large_change_lines"], 800)
+        self.assertEqual(policy["copilot_review"], {"automatic_deep": False})
         self.assertTrue(source.endswith("sd-review.json"))
 
     def test_this_repository_ships_a_policy_that_validates(self) -> None:
@@ -263,6 +264,12 @@ class PolicyTests(ReviewFixture):
         self.assert_rejects({"large_change_lines": -1}, "non-negative integer")
         self.assert_rejects({"large_change_lines": True}, "non-negative integer")
         self.assert_rejects({"severity_floor": "urgent"}, "severity_floor must be one of")
+        self.assert_rejects({"copilot_review": []}, "copilot_review must be an object")
+        self.assert_rejects({"copilot_review": {}}, "automatic_deep must be a boolean")
+        self.assert_rejects({"copilot_review": {"automatic_deep": []}},
+                            "automatic_deep must be a boolean")
+        self.assert_rejects({"copilot_review": {"automatic_deep": False, "review_new_pushes": True}},
+                            "unknown key(s) review_new_pushes")
         # A string value, not a list: retirement is checked by name, before any
         # type rule, and this shape is the one `test_cut_symbols` bounds out.
         self.assert_rejects({"authors": "x"}, "authors is retired")
@@ -604,6 +611,21 @@ class PipelineTests(ReviewFixture):
         self.assertEqual(result["status"], "clean")
         self.assertFalse(result["posted"])
         self.assertEqual(result["findings"], [])
+        self.assertEqual(result["remote_reviews"]["copilot"], {
+            "automatic": False, "tier": "standard"})
+
+    def test_automatic_deep_keeps_the_remote_review_report_shape(self) -> None:
+        root = self.make_repo()
+        self.prepare(root)
+        (root / ".github").mkdir()
+        (root / ".github" / "sd-review.json").write_text(json.dumps({
+            "sensitive": ["src.py"], "copilot_review": {"automatic_deep": True},
+        }))
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""),
+                             "codex": sd_review.Completed(0, '{"findings": []}', "")})
+        result = self.run_review(root, runner)
+        self.assertEqual(result["remote_reviews"]["copilot"], {
+            "automatic": True, "tier": "deep"})
 
     def test_a_failing_gate_stops_before_any_provider(self) -> None:
         root = self.make_repo()

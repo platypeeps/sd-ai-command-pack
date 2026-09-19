@@ -12,6 +12,9 @@ from urllib.parse import quote
 import sd_lib
 from sd_ship_workflow import blocked
 
+COPILOT_REVIEWER = "copilot-pull-request-reviewer[bot]"
+COPILOT_LOGINS = frozenset({COPILOT_REVIEWER, "copilot-pull-request-reviewer", "copilot"})
+
 
 class Refusal(Exception):
     """A failed or uncertain prerequisite; never authority to merge."""
@@ -110,6 +113,46 @@ class GitHub:
         if not isinstance(value, dict) or value.get("number") != number:
             raise Refusal("GitHub did not return the requested pull request")
         return value
+
+    @staticmethod
+    def is_copilot(record: object) -> bool:
+        if not isinstance(record, dict):
+            return False
+        user = record.get("user")
+        login = str(user.get("login") or "").lower() if isinstance(user, dict) else ""
+        return login in COPILOT_LOGINS
+
+    @classmethod
+    def copilot_reviews(cls, reviews: list) -> list[dict]:
+        return [review for review in reviews if cls.is_copilot(review)]
+
+    @classmethod
+    def copilot_comments(cls, comments: list) -> list[dict]:
+        return [comment for comment in comments if cls.is_copilot(comment)]
+
+    @staticmethod
+    def copilot_requested(pull: dict) -> bool:
+        requested = pull.get("requested_reviewers") or []
+        return any(isinstance(reviewer, dict)
+                   and str(reviewer.get("login") or "").lower() in COPILOT_LOGINS
+                   for reviewer in requested)
+
+    @classmethod
+    def copilot_review_status(cls, pull: dict, reviews: list, head: str) -> str:
+        """Return the exact-head Copilot review state without another request."""
+        for review in cls.copilot_reviews(reviews):
+            state = str(review.get("state") or "").upper()
+            if (review.get("commit_id") == head
+                    and bool(review.get("submitted_at")) and state not in ("", "PENDING")):
+                return "completed"
+        if cls.copilot_requested(pull):
+            return "pending"
+        return "absent"
+
+    def request_copilot_review(self, number: int) -> None:
+        """Request one Copilot review through GitHub's reviewer endpoint."""
+        self.api(f"{self.prefix}/pulls/{number}/requested_reviewers", method="POST",
+                 body={"reviewers": [COPILOT_REVIEWER]})
 
     def protection(self, base: str) -> dict:
         value = self.api(f"{self.prefix}/branches/{quote(base, safe='')}/protection")

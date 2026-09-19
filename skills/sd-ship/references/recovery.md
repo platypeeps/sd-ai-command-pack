@@ -23,6 +23,25 @@ A run killed after the push and a refused merge both leave the default branch un
 The row is not `done`, its directory stays untouched, and planning and review continue picking the item.
 Resume the existing publication sequence rather than claiming delivery.
 
+## Copilot request recovery
+
+A successful local Copilot request remains a merge gate.
+Retry prepare with the same identity when the request succeeded but the run stopped.
+An automatic transport failure leaves the pull request `ready_to_send` and records only a warning.
+It records no request receipt, so a retry can make the one automatic request.
+An explicit transport failure also leaves the pull request `ready_to_send`.
+It preserves review acknowledgements and returns a refusal for the operator to resolve.
+
+Use `sd-ship merge --item ID --expected-head SHA --manual --abandon-copilot-review REASON --json`
+only after an operator decides to stop waiting.
+The reason must be nonempty.
+The exception requires explicit manual merge authority; runner authority cannot use it.
+The command binds the abandonment to the current pull request and exact reviewed head.
+It also binds the exact request history available when the operator decided.
+It preserves all request receipts and appends a separate abandonment receipt.
+A later head needs a new decision.
+Published Copilot findings still require disposition before merge.
+
 ## Review retry and fix verification
 
 A completed initial review covers the branch.

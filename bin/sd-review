@@ -142,7 +142,7 @@ DEFAULT_POLICY: dict[str, Any] = {
     "never_skip": ["docs/spec/**"],
     "sensitive": [".github/workflows/**"],
     "large_change_lines": 800,
-    "severity_floor": "medium",
+    "severity_floor": "medium", "copilot_review": {"automatic_deep": False},
 }
 
 POLICY_KEYS = frozenset(DEFAULT_POLICY) | {"$schema"}
@@ -237,7 +237,7 @@ def validate_policy(value: object, source: str) -> dict[str, Any]:
     floor = policy["severity_floor"]
     _require(isinstance(floor, str) and floor in BLOCKING_ORDER, f"{source}: severity_floor must be one of {', '.join(SEVERITIES)}")
 
-    return policy
+    return _validate_copilot_policy(policy, source)
 
 
 def read_json_file(path: pathlib.Path, refusal: type[Exception]) -> Any:
@@ -1446,6 +1446,12 @@ def review(
             "description": subject.description,
         },
         "route": plan._asdict(),
+        "remote_reviews": {
+            "copilot": {
+                "automatic": plan.tier == "deep" and policy["copilot_review"]["automatic_deep"],
+                "tier": plan.tier,
+            }
+        },
         "providers": list(providers),
         "timing": timing,
         "fallback_candidates": [provider.name for provider in chosen[depth:]],
@@ -1802,6 +1808,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.explain or args.dry_run:
         return EXIT_OK
     return STATUS_EXIT.get(str(result["status"]), EXIT_OK)
+
+
+def _validate_copilot_policy(policy: dict[str, Any], source: str) -> dict[str, Any]:
+    copilot = policy["copilot_review"]
+    _require(isinstance(copilot, dict), f"{source}: copilot_review must be an object")
+    unknown_copilot = sorted(set(copilot) - {"automatic_deep"})
+    _require(not unknown_copilot,
+             f"{source}: copilot_review has unknown key(s) {', '.join(unknown_copilot)}")
+    automatic_deep = copilot.get("automatic_deep")
+    _require(type(automatic_deep) is bool,
+             f"{source}: copilot_review.automatic_deep must be a boolean")
+    policy["copilot_review"] = {"automatic_deep": automatic_deep}
+    return policy
 
 
 if __name__ == "__main__":

@@ -405,11 +405,16 @@ class LineBudgetTests(unittest.TestCase):
         # complete payload. Prior-source metadata bounds reads before loading,
         # preserves cumulative size inventory, and suppresses partial dry-run
         # stdin. Complexity ceilings and shared-core classification are unchanged.
+        #
+        # 2580 -> 2603 adds repository-controlled automatic Copilot selection
+        # for deep changes. Lower tiers remain explicit-only. The route report
+        # carries the selection into shipping after local review. Complexity
+        # limits and shared-core classification remain unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2580,
+            2603,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

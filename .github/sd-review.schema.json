@@ -60,6 +60,19 @@
       "enum": ["high", "medium", "low", "unspecified"],
       "description": "The severity at which a finding is dispositioned `blocking` rather than `advisory`, and therefore the severity at which `sd-review` exits 1. Findings are dispositioned locally and are never posted anywhere; this only decides how the local run reports them. Default `medium`.",
       "default": "medium"
+    },
+    "copilot_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Remote Copilot review policy. Local independent review always completes first. False keeps remote review explicit-only.",
+      "required": ["automatic_deep"],
+      "properties": {
+        "automatic_deep": {
+          "type": "boolean",
+          "description": "Request one Copilot review for the high-value `deep` tier during shipping.",
+          "default": false
+        }
+      }
     }
   }
 }
