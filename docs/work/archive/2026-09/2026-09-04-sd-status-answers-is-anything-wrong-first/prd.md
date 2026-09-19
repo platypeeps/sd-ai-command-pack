@@ -221,7 +221,7 @@ planning` lane. The ledger below is merged across both.
 | C-3 | host | 1 | medium | yes | addressed |
 | C-4 | host | 1 | medium | no | rebutted |
 | C-5 | host | 1 | medium | yes | addressed |
-| C-6 | host | 1 | low | no | parked |
+| C-6 | host | 1 | low | no | resolved |
 | C-7 | host | 2 | medium | yes | addressed |
 | C-8 | host | 2 | low | no | rebutted |
 | C-9 | host | 2 | medium | yes | addressed |
@@ -307,7 +307,7 @@ reads only items that are neither archived nor parked nor `done`, and
 `design.md` records the exclusion beside the others so the output can state it.
 
 **C-6 — `--actions` is a fourth flag on a command the design describes as
-having three.** Parked, not blocking. The alternative is that the ids for items
+having three.** Resolved 2026-09-19 by owner ruling: no flag budget was ever adopted, so the trigger below cannot fire, and the design page that names three flags is a record of what was true when it was written. The alternative is that the ids for items
 11..N exist only in `--json`, which makes the human-facing half of requirement 7
 depend on a JSON reader. The flag is additive and read-only. Trigger: a decision
 that `sd-*` commands have a flag budget. Owner: the user.
