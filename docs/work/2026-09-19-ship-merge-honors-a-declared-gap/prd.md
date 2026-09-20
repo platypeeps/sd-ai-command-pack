@@ -184,7 +184,7 @@ used. The thing to restore is the machine backstop, not the protection object.
 - [x] `tests.test_sd_status` passes unchanged in count: the protection
       section's output for this repository is byte-identical before and after.
 - [x] `make check`: 0 non-zero shards, `make exit=0`.
-- [ ] Live: the next pull request in this repository lands through
+- [x] Live: the next pull request in this repository lands through
       `sd-ship merge --expected-head <sha>` with `ok: True`, and the ship
       receipt in `~/.local/share/sd/sd.db` shows `declared_gap: unprotected`.
 
@@ -424,3 +424,31 @@ fix that answered Copilot's citation finding on #1086.
   `behind_by: 3`.
 - The external-check finding is restated a third time and rebutted on the
   same ground.
+
+### 2026-09-20 — the item's own pull request is the live criterion
+
+PR #1086 merged through `sd-ship merge --item 1110 --manual --expected-head
+05485bc0`, `ok: true`, merge commit `4a04aead`, receipt `protection`:
+`{"declared_gap": "unprotected", "until": "a second account with push or
+merge rights on this repository exists"}`. That is the last criterion, and
+it was met by the code it tests rather than by a fixture.
+
+Two dispositions carry forward, both accepted by the owner on the record
+(digest `52730606`):
+
+- **Parked.** Without server-side `strict` enforcement another writer on
+  this account can advance `main` between `still_gated`'s freshness read
+  and the `PUT`. The fix narrows the window to two adjacent API calls;
+  closing it needs protection back or the shared merge authority sd:1021
+  requirement 4 defers. Trigger: a second account gains push or merge
+  rights — the same condition the declaration carries as its `until`.
+- **Rebutted.** An external check that never enqueues is not detected.
+  Requirement 2's last sentence is the ground: app checks that are not
+  repository workflows fall under the check-run rule and add nothing to the
+  expected set. The roster the finding asks for is what the declined
+  protection object carries.
+
+The Copilot wait was explicitly abandoned at merge: the automatic
+deep-tier request was answered at `06bf5b51`, its one finding fixed in
+`f7ade845` and read `landed`, and the operator default forbids repeating
+an automatic request after a later push.
