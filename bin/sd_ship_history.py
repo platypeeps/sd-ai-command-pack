@@ -279,7 +279,7 @@ class ItemHistory(ReviewHistory):
             # instead of one, and has no resume link to compare; the attempt
             # that follows it resumes the same incomplete review.
             if current:
-                self.validate_retry(passes[:index + 1], current, live=index == len(passes) - 1)
+                self.validate_retry(passes[:index + 1], current)
             return
         if index == 0:
             # The first pass may be incomplete only where the next one
@@ -300,8 +300,19 @@ class ItemHistory(ReviewHistory):
             raise Refusal("this review history has no records to aggregate")
         return review_history(entries)
 
-    def validate_retry(self, passes: list[dict], report: dict, live: bool = True) -> None:
-        """The retry resumes the pass before it, whichever pass that is."""
+    def validate_retry(self, passes: list[dict], report: dict) -> None:
+        """The retry resumes the pass before it, whichever pass that is.
+
+        One rule for every pass, stored or live. An earlier draft exempted the
+        stored ones, on the theory that a receipt written under the narrower
+        rule should not be invalidated by widening it. The exemption keyed off
+        the pass's position in the history, and position is not a property of
+        the receipt: the pass being read now becomes a historical one as soon
+        as another is appended, so the relaxation reached evidence that had
+        never been checked strictly. Every stored receipt on this machine
+        satisfies the strict rule already, so the exemption bought nothing and
+        cost the guarantee.
+        """
         preceding = passes[-2]
         incomplete = preceding.get("report") or {}
         # A reservation verified nothing, and what came before it still has to
@@ -310,15 +321,6 @@ class ItemHistory(ReviewHistory):
         # dispatcher uses, so the evidence asked for here is the evidence it
         # was handed.
         prior = review_history(passes[:-1]) if reservation(preceding) else incomplete
-        accepted = {digest(prior) if prior else None}
-        if not live:
-            # A stored pass was written under the rule in force when it ran,
-            # which carried the preceding report's own digest. The aggregate is
-            # a superset of that evidence rather than a contradiction of it, so
-            # widening the rule does not retroactively invalidate a receipt
-            # that was checked once and passed. Only the pass being read now
-            # has to carry the aggregate.
-            accepted.add(digest(incomplete) if incomplete else None)
         if (completed_depth(incomplete) or report.get("subject", {}).get("base") != report.get("authorship_base")
-                or report.get("resume_report_digest") not in accepted):
+                or report.get("resume_report_digest") != (digest(prior) if prior else None)):
             raise Refusal("retry must complete the full branch and retain the incomplete review evidence")

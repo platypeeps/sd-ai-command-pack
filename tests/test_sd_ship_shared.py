@@ -300,9 +300,12 @@ class HistoryChainTests(unittest.TestCase):
         incomplete = {"status": "clean", "requested_reviews": 2, "completed_reviews": 1,
                       "authorship_base": base, "subject": {"base": base, "head": "a" * 40}}
         first = {"head": "a" * 40, "report": incomplete}
+        # `first` completed 1 of the 2 reviews it requested, so it verified
+        # nothing and the retry resumes the aggregate before it, not that
+        # pass's own report.
         resumed = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
                    "authorship_base": base, "subject": {"base": base, "head": "b" * 40},
-                   "resume_report_digest": digest(incomplete)}
+                   "resume_report_digest": digest(review_history([first]))}
         retry = {"head": "b" * 40, "report": resumed, "retry": True}
         verification = self._complete("b" * 40, "c" * 40, retry)
         state = {"passes": [first, retry, {"head": "c" * 40, "report": verification}]}
@@ -441,13 +444,14 @@ class HistoryChainTests(unittest.TestCase):
         with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
             ItemHistory()._validate_coverage(state, dropped)
 
-    def test_a_stored_retry_written_under_the_earlier_rule_stays_valid(self):
-        """Widening the rule must not invalidate a receipt already checked.
+    def test_a_stored_retry_carrying_only_the_preceding_report_is_refused(self):
+        """The rule reads a stored pass exactly as it reads a live one.
 
-        A pass that ran before the aggregate requirement stored the preceding
-        report's own digest. That receipt passed the rule in force when it was
-        written, so re-reading it today must not refuse the whole history. The
-        pass being read now is the one that has to carry the aggregate.
+        This history is the one the removed exemption let through: a retry two
+        entries back whose `resume_report_digest` is the preceding report's
+        own digest rather than the aggregate before it. Position decided the
+        verdict, so the same receipt passed here and failed as the last pass.
+        It is refused in both places now, and this test is what keeps it so.
         """
         base = "0" * 40
         incomplete = {"status": "blocking", "requested_reviews": 2, "completed_reviews": 1,
@@ -455,7 +459,6 @@ class HistoryChainTests(unittest.TestCase):
                       "findings": [{"path": "bin/x.py", "summary": "a real blocker"}],
                       "authored_with": ["codex"]}
         first = {"head": "a" * 40, "report": incomplete}
-        # Written under the earlier rule: the preceding report's own digest.
         legacy = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
                   "authorship_base": base, "subject": {"base": base, "head": "b" * 40},
                   "resume_report_digest": digest(incomplete)}
@@ -464,9 +467,11 @@ class HistoryChainTests(unittest.TestCase):
                "authorship_base": "b" * 40, "subject": {"base": "b" * 40, "head": "c" * 40},
                "verification_report_digest": digest(legacy)}
         state = {"passes": [first, second, {"head": "c" * 40, "report": now}]}
-        self.assertIsNone(ItemHistory()._validate_coverage(state, now))
-        # The exemption is for stored passes only. The same digest carried by
-        # the pass being read now is refused.
-        live = {"passes": [first, {"head": "b" * 40, "report": legacy, "retry": True}]}
         with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
-            ItemHistory()._validate_coverage(live, legacy)
+            ItemHistory()._validate_coverage(state, now)
+        # Non-vacuous: the aggregate digest is the one value that clears it,
+        # so the refusal above names the digest and not some other defect in
+        # the history this test builds.
+        second["report"] = dict(legacy, resume_report_digest=digest(review_history([first])))
+        state["passes"][-1]["report"] = dict(now, verification_report_digest=digest(second["report"]))
+        self.assertIsNone(ItemHistory()._validate_coverage(state, state["passes"][-1]["report"]))
