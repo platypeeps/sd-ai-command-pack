@@ -280,18 +280,14 @@ class Subject(NamedTuple):
     description: str
 
 
-def _git(root: pathlib.Path, args: list[str]) -> str | None:
-    return sd_lib.git_output(args, root)
-
-
 def _default_base(root: pathlib.Path) -> str:
     """The ref a branch is measured against."""
 
-    remote = _git(root, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])
+    remote = sd_lib.git_output(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"], root)
     if remote and remote.strip().startswith("refs/remotes/"):
         return remote.strip()[len("refs/remotes/") :]
     for candidate in ("main", "master"):
-        if _git(root, ["rev-parse", "--verify", "--quiet", candidate]) is not None:
+        if sd_lib.git_output(["rev-parse", "--verify", "--quiet", candidate], root) is not None:
             return candidate
     raise UsageError(
         "cannot resolve a base branch: no origin/HEAD, and neither main nor master exists"
@@ -313,13 +309,38 @@ def _count_lines(path: pathlib.Path) -> int:
         return 0
 
 
+def _for_this_branch(root: pathlib.Path, items: list) -> list:
+    """The one active item this checkout is on, when the branch says which.
+
+    A planning subject is one item's documents, not several items' unioned:
+    a finding against either half of a union is a finding against "the" item.
+    An item records the branch it is worked on, so the checkout already says
+    which one is meant. One candidate needs no disambiguation, and refusing
+    there would stop planning review on every feature branch to answer a
+    question nobody asked. With several, the branch decides; when it decides
+    nothing this refuses and names them rather than picking. `--item` says
+    which without asking the branch at all.
+    """
+    if len(items) == 1:
+        return items
+    branch = sd_lib.git_output(["rev-parse", "--abbrev-ref", "HEAD"], root) or ""
+    on_branch = [i for i in items if branch and (i.branch or "").strip() == branch]
+    if len(on_branch) == 1:
+        return on_branch
+    names = ", ".join(sorted(pathlib.Path(i.path).name for i in items))
+    how = "more than one" if on_branch else "no"
+    raise UsageError(f"branch {branch!r} is the branch of {how} active work item; "
+                     f"name one with --item; active: {names}")
+
+
 def resolve_subject(root: pathlib.Path, scope: str, item: str | None = None, base: str | None = None) -> Subject:
     """Turn a scope name into the exact diff the providers will be given."""
 
     if base is not None:
         if scope != "branch" or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", base) is None:
             raise UsageError("--base requires --scope branch and an exact full commit ID")
-        if _git(root, ["rev-parse", "--verify", f"{base}^{{commit}}"] ) != base or _git(root, ["merge-base", "--is-ancestor", base, "HEAD"]) is None:
+        if (sd_lib.git_output(["rev-parse", "--verify", f"{base}^{{commit}}"], root) != base
+                or sd_lib.git_output(["merge-base", "--is-ancestor", base, "HEAD"], root) is None):
             raise UsageError("--base must name an existing ancestor of HEAD")
     if item is not None and scope != "planning":
         raise UsageError("--item applies to --scope planning only")
@@ -335,10 +356,10 @@ def resolve_subject(root: pathlib.Path, scope: str, item: str | None = None, bas
 
     if scope in ("branch", "pr"):
         base_ref = base or _default_base(root)
-        merge_base = _git(root, ["merge-base", "HEAD", base_ref])
+        merge_base = sd_lib.git_output(["merge-base", "HEAD", base_ref], root)
         if not merge_base:
             raise UsageError(f"cannot find a merge base between HEAD and {base_ref}")
-        head = _git(root, ["rev-parse", "HEAD"]) or "HEAD"
+        head = sd_lib.git_output(["rev-parse", "HEAD"], root) or "HEAD"
         paths, lines = _numstat(root, [f"{merge_base}..{head}"])
         return Subject(
             scope, merge_base, head, tuple(sorted(set(paths))), lines,
@@ -354,6 +375,8 @@ def resolve_subject(root: pathlib.Path, scope: str, item: str | None = None, bas
             names = ", ".join(sorted(pathlib.Path(i.path).name for i in items))
             raise UsageError(f"--item {item!r} names no active work item; active: {names}")
         items = named
+    else:
+        items = _for_this_branch(root, items)
     planning_paths: list[str] = []
     lines = 0
     for active in items:
@@ -1242,7 +1265,7 @@ def prepared_prompt(root: pathlib.Path, subject: Subject, args: argparse.Namespa
             if path.is_absolute() or ".." in path.parts or not (root / path).resolve().is_relative_to(root.resolve()):
                 raise UsageError("prior blocking finding path is outside this repository")
             target = root / path
-            entry = _git(root, ["ls-tree", "-z", "-l", subject.head, "--", f":(literal){name}"])
+            entry = sd_lib.git_output(["ls-tree", "-z", "-l", subject.head, "--", f":(literal){name}"], root)
             if entry is None:
                 raise UsageError("cannot inspect prior finding source at current HEAD")
             current = "[file absent at current HEAD]"
@@ -1358,11 +1381,11 @@ def review(
         if resume:
             prior_head = previous["subject"].get("head")
             if (not isinstance(prior_head, str) or not re.fullmatch(r"[0-9a-f]{40,64}", prior_head)
-                    or _git(root, ["merge-base", prior_head, subject.head]) != prior_head):
+                    or sd_lib.git_output(["merge-base", prior_head, subject.head], root) != prior_head):
                 raise UsageError("prior review head is not an exact ancestor of this branch")
     authored_subject = subject
     if getattr(args, "base", None):
-        target_base = _git(root, ["merge-base", subject.head, _default_base(root)])
+        target_base = sd_lib.git_output(["merge-base", subject.head, _default_base(root)], root)
         if not target_base:
             raise UsageError("cannot establish the refreshed target boundary for item authorship")
         authored_subject = subject._replace(base=target_base)

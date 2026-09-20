@@ -19,7 +19,6 @@ clone is routinely named for its subject and not for its repository.
 
 import os
 import re
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -71,16 +70,34 @@ def checkouts(root):
     return found
 
 
+_SD_LIB = None
+
+
+def _sd_lib():
+    """`sd_lib` out of this file's own `bin/`, loaded once and cached."""
+    global _SD_LIB
+    if _SD_LIB is None:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import sd_lib  # noqa: PLC0415 - only this helper needs it
+        _SD_LIB = sd_lib
+    return _SD_LIB
+
+
 def git(repo, *args):
-    """Run git in repo, returning stripped stdout, or None if the command failed."""
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(repo), *args],
-            capture_output=True, text=True, timeout=20,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return out.stdout.strip() if out.returncode == 0 else None
+    """Run git in repo, returning stripped stdout, or None if the command failed.
+
+    `sd_lib.git_output` does the running. This file used to carry its own
+    `subprocess.run` with its own 20-second timeout, which is a second
+    subprocess policy for the same job: a timeout somebody has to remember to
+    keep in step, and `git -C` where the shared one uses `cwd=`. The name
+    stays because four call sites below read better with it, and because the
+    argument order here is `(repo, *args)` rather than `(args, root)`.
+
+    `bin/` is not a package and `sd-research-kit` deliberately keeps it off
+    `sys.path`, so the module is borrowed by path the way `bin/sd_install.py`
+    borrows it -- the same reason, a rule `sd_lib` owns.
+    """
+    return _sd_lib().git_output(list(args), Path(repo))
 
 
 def slug(checkout):

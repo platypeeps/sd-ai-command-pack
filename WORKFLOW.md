@@ -407,7 +407,7 @@ item screen offers the same list, with vendor, cost and reason beside each
 name. Copilot and Greptile are not entries: they post on the pull request, and
 this lane never posts.
 
-This file is the only list of providers. `sd-review` reads it through the
+This file is the only list of provider identities. `sd-review` reads it through the
 library. `.github/sd-review.json` carries repository policy, paths and severity;
 it names no provider chain. Effective authorization restricts the registry's
 reviewer chain before vendor, transport, availability and spending gates run.

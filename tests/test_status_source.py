@@ -169,7 +169,7 @@ class Fixture(unittest.TestCase):
         return found[0]
 
     def picked(self, root: pathlib.Path | None = None) -> list[str]:
-        """What `bin/sd-review:417` picks, spelled the way that line spells it."""
+        """What `bin/sd-review:440` picks, spelled the way that line spells it."""
         return [
             i.path.name
             for i in sd_lib.work_items(root or self.root)

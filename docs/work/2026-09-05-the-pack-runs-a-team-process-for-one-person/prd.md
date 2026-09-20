@@ -1042,7 +1042,7 @@ log, not here.
   nowhere; each citation inlines its rule or goes.
 - `--scope planning` reviews one item: the one whose `branch:` is checked out,
   else the single non-done item, `ready` included; more than one candidate
-  refuses (`bin/sd-review:514`, `skills/sd-review/SKILL.md:39`), unless
+  refuses (`bin/sd-review:537`, `skills/sd-review/SKILL.md:39`), unless
   `--item <directory name>` names one, added 2026-09-05 so that a
   repository with two active items can review one at a time.
 - One review-record format, defined in `skills/sd-receive-review/SKILL.md:71`;
@@ -1103,7 +1103,7 @@ log, not here.
 - One citation shape, in `_shared/references/source-standards.md`; the review
   greps for it on load-bearing claims or stops implying it checks citations
   (`conventions.md:69,113`, `sd_research_review.py:49-65`).
-- `bin/sd-research-kit:132-135` accepts `-C DIR`.
+- `bin/sd-research-kit` takes no `-C DIR`; R10-D6 rescinds it (see the Log).
 - `skills/sd-brief/SKILL.md:34-39` reads topics from
   `sd store list sdw.topic --status active` and the last-brief date from the
   item row; "saved preferences" goes.
@@ -1147,22 +1147,22 @@ log, not here.
   they are imported the way `bin/sd-status:95` does; the `authors` policy key
   (cut by 31(b2): four declaring sites gone, and a `RETIRED_POLICY_KEYS` row
   in their place); the unreachable gito and kimi argv branches
-  (`bin/sd-review:830-834`) and `except Refusal` (`:1354-1356`); the constant
-  `posted` key and its grep test (`bin/sd-review:1110`,
+  (`bin/sd-review:853-857`) and `except Refusal` (`:1354-1356`); the constant
+  `posted` key and its grep test (`bin/sd-review:1133`,
   `tests/test_sd_review_boundary.py:167`); the second `BACKENDS` table
   (`source:bin/sd-status::BACKENDS`), derived from the registry instead;
   `RESIDUE` and `residue_section`
   (`source:bin/sd-status::residue_section`) after one clean fleet run;
-  the history comments in `Makefile`; `--stash-ref` (`bin/sd-handoff:374`) and
+  the history comments in `Makefile`; `--stash-ref` (`bin/sd-handoff:385`) and
   `carrier_branches` (both cut 2026-09-16, 31(b1)); `sd-status`'s `_git` is taken --
   it now calls `sd_lib.git_output`, which already carried the timeout.
   `bin/sd-pr-state` remains; `bin/sd-handoff` and `bin/sd-handoff-restore` are
   not cuts, both pinned self-contained by their own suites; `bin/sd-docs-lint:52,72-82,148` imports the vocabulary, the
   directory walk and the in-progress rule from `sd_lib`.
 - Consistency: a configuration error exits 2 everywhere (`bin/sd:2931-2947`,
-  `source:bin/sd-status::main`, `bin/sd-check`, `bin/sd-review:1329`) and JSON
-  envelopes carry one version key; one ACTIVE status set in `sd_lib` serves
-  `bin/sd-status:1103-1104`, `dashboard/work.py:50` and `bin/sd-review:514`;
+  `source:bin/sd-status::main`, `bin/sd-check`, `bin/sd-review:1352`) and JSON
+  envelopes carry one version key; `sd_lib.ITEM_STATUSES` is the one status
+  vocabulary, and the three active-status sets reading it answer three questions;
   the tiers in `.github/sd-review.json:8` go with their key, since the
   registry order is the chain; settled 2026-09-05.
 
@@ -1606,7 +1606,7 @@ confirmed by the next `sd-ship` run alone.
     nowhere, and no pull request names the detectors, so the frozen set is
     eight until it happens and three after. The test asserts the set has not
     grown, not that the grep is empty: "names nothing" is unreachable in
-    either state, since `bin/sd_install.py:961` is an error message rather
+    either state, since `bin/sd_install.py:979` is an error message rather
     than a temporary path, and `bin/sd_sweep.py` is in none of the eight. A test ships a `done` item and runs
     `sd-plan` and `sd-ship` again in that repository, and asserts the
     directory is untouched. (The sweep's retirement order, 2026-09-14, by
@@ -1685,16 +1685,16 @@ confirmed by the next `sd-ship` run alone.
     `Standing rule`, `five gates`, `cron-jobs.sh`, `Active item:`,
     `sd-deps`. Each bug has a regression test: planning scope on a
     fixture with two planning items and one `ready` item picks the item
-    whose branch is checked out and refuses when none is; `sd-status <path>`
-    run from another checkout reports the packet under `<path>`;
+    whose branch is checked out and refuses when none is, one candidate
+    being no ambiguity for a branch to settle; `sd-status <path>` run from
+    another checkout reports the packet under `<path>`;
     `Work: nonexistent-item` fails as an unresolved path, not as a missing
-    reason; `sd_research_review` on a directory
-    without `research.conf.py` exits 2; `sd-research-kit -C <dir> <verb>`
-    runs from another working directory; the verdict set in
-    `agents/sd-claim-verifier.md` equals the set in
-    `skills/sd-fact-check/SKILL.md`, read from both files. One provider
-    list, one git wrapper, one status vocabulary and one ACTIVE set exist,
-    asserted by a grep that finds no second definition of each. (Rescoped
+    reason; `sd_research_review` on a directory without `research.conf.py`
+    exits 2; the verdict set in `agents/sd-claim-verifier.md` equals the
+    set in `skills/sd-fact-check/SKILL.md`, read from both files. One git
+    subprocess policy holds, asserted by an AST gate over `bin/` that names
+    every exception; `sd_lib.ITEM_STATUSES` is the one status vocabulary.
+    (Rescoped
     2026-09-14 by owner decision note 1942. `R10-D` is dropped, because
     those are now sd:431's rule registry ids. `parked` and `archived` are
     scoped to the `sd_lib` item field and its readers, as `authors` was
@@ -5567,3 +5567,69 @@ is a test's claim rather than an unrecorded consequence.
 
 Criterion 31's list keeps `parked` as a cut name. `archived` leaves it, the
 way `_protection_gaps` and `load_acknowledgements` left it on the same day.
+
+### 2026-09-19 — 31(c): planning scope, the git policy, two lists, and `-C DIR`
+
+Four open clauses of criterion 31 close, on owner decision note 3006.
+
+**Planning scope is one item.** `--scope planning` said it reviewed "the
+active work item's planning documents", singular, and in fact unioned every
+candidate's, so a finding against either half arrived as a finding against
+"the" item. `bin/sd-review`'s `_for_this_branch` reads the `branch:` an item
+already records and returns the one this checkout is on.
+
+It refuses rather than picking when the branch settles nothing, with one
+exemption written into the criterion: a single candidate is not an
+ambiguity. Refusing there would stop planning review on every feature branch
+to answer a question nobody asked. Six tests cover both refusals, both
+picks, the `--item` override and the `ready` item that is never a subject.
+
+**One git subprocess policy, not one git wrapper name.** The clause asked
+for a grep finding no second wrapper. The survey that answered it was wrong
+twice over: the name-only wrapper it found in `bin/sd-review` was not the
+defect, and the real one — a `git` call with no timeout — sat at seven sites
+the grep never named. `tests/test_git_policy.py` replaces the grep with an AST
+walk of `bin/` that finds every `subprocess.run` on a `git` argv and holds
+each to the policy `bin/sd_lib.py` states, with every exception recorded by
+path and reason.
+
+Three of those exceptions are `bin/sd-handoff`, `bin/sd-handoff-restore` and
+`bin/sd-skill-use`. They could not be routed onto the shared runner as the
+decision worded it: each is loaded by path with no `bin/` on `sys.path`, and
+each is pinned by its own suite to hold no reference to the library at all,
+because a hook that fails to import leaves the session with no hook. The
+timeout constant is copied into them on purpose, the reason is written above
+each copy, and the gate asserts the copies equal the policy's number.
+
+**Two lists that were never one.** The clause asked for one provider list
+and one ACTIVE set. Neither is a duplicate. Three active-status sets exist —
+`bin/sd-status`'s display order, `bin/sd-review`'s planning eligibility,
+`bin/sd_lib.py`'s six-value row vocabulary — and they answer three
+questions, not one question three times. What is genuinely shared is
+`sd_lib.ITEM_STATUSES`, and 31(c) already closed it: `bin/sd-docs-lint`
+imports the vocabulary rather than restating it. The provider side is the
+same shape: `providers.yaml` carries identity and the `provider` rows carry
+state, and `sd_db.registry` merges them on every read. `providers.yaml:1`
+claimed to be "the only list of providers anywhere"; it is the only list of
+provider identities, and `WORKFLOW.md` and `design.md` now say the same.
+
+**`-C DIR` is rescinded, not deferred.** Requirement 13 asked
+`bin/sd-research-kit` to accept `-C DIR`. R10-D6 says an `sd-*` command
+resolves its repository from the current working directory and nowhere else,
+because a command that can be pointed at another checkout is a command that
+can act on one. The requirement predates the rule, and the rule governs. The
+clause leaves criterion 31 and requirement 13 records the reason in place.
+
+The review lane's line ceiling in `tests/test_sd_review_boundary.py` moves
+from 2580 to 2601 for `_for_this_branch`. The function was written at
+thirty-five lines and compressed to twenty-one before the ceiling moved; the
+lane gained no import, no file and no new reach.
+
+`SYMBOL_ANCHORED_CITATIONS` for this `prd.md` falls from 59 to 56: the
+`-C DIR` bullet took one, the ACTIVE rewrite took a `bin/sd-status` line,
+and this entry names `bin/sd-review`'s former wrapper without a line, since
+the line now holds unrelated code. Fifteen other live citations moved rather
+than went — the git-timeout sweep shifted six files under `bin/`, and each
+of the fifteen was re-pointed and then compared byte for byte against the
+text it named before the change. Twelve citations under this Log keep their
+numbers, because a citation there quotes what was measured on its date.

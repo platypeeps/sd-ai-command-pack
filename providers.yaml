@@ -1,4 +1,4 @@
-# The provider registry. One file, and the only list of providers anywhere.
+# The provider registry. One file, and the only list of provider identities.
 #
 # `WORKFLOW.md`'s Providers section documents this format and is where the
 # rules live; this is the file those rules describe. The installer copies it

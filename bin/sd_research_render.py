@@ -52,6 +52,7 @@ try:
 except ImportError:
     sys.exit("needs python-markdown:  pip install markdown")
 
+from sd_lib import GIT_TIMEOUT_SECONDS
 from sd_research_tokens import TOKENS_CSS
 
 CSS = TOKENS_CSS
@@ -87,7 +88,8 @@ def doc_version(repo, src):
     try:
         out = subprocess.run(
             ["git", "log", "--follow", "--date=format-local:%Y-%m-%d", "--format=%ad", "--", src],
-            capture_output=True, text=True, check=True, cwd=repo).stdout.split()
+            capture_output=True, text=True, check=True, cwd=repo,
+            timeout=GIT_TIMEOUT_SECONDS).stdout.split()
         if out:
             return out[-1], "v1.%d" % (len(out) - 1), out[0]
     except Exception:

@@ -398,6 +398,17 @@ class LineBudgetTests(unittest.TestCase):
         # Receipt identity includes directory topology/modes and resolves
         # executable paths from the same repository cwd used by dispatch.
         #
+        # 2580 -> 2601 is criterion 31(c)'s planning scope. `--scope planning`
+        # said it reviewed "the active work item's planning documents" and in
+        # fact unioned every candidate's, so a finding against either half was
+        # a finding against "the" item. `_for_this_branch` reads the `branch:`
+        # an item already records and returns the one this checkout is on,
+        # refusing rather than picking when the branch settles nothing. The
+        # twenty-one lines are that function; the lane gained no new import,
+        # no new file, and no new reach. It was written at thirty-five lines
+        # first and compressed to this before the ceiling was moved, and the
+        # exact resulting size keeps this a ratchet.
+        #
         # 2561 -> 2580 repairs F1/F4 under the approved measured-increase rule.
         # Native Codex counts only transmitted prompt bytes; attached transports
         # keep their complete payload bounds. Readiness counts fitting reviewers
@@ -406,7 +417,7 @@ class LineBudgetTests(unittest.TestCase):
         # preserves cumulative size inventory, and suppresses partial dry-run
         # stdin. Complexity ceilings and shared-core classification are unchanged.
         #
-        # 2580 -> 2603 adds repository-controlled automatic Copilot selection
+        # 2601 -> 2620 adds repository-controlled automatic Copilot selection
         # for deep changes. Lower tiers remain explicit-only. The route report
         # carries the selection into shipping after local review. Complexity
         # limits and shared-core classification remain unchanged.
@@ -414,7 +425,7 @@ class LineBudgetTests(unittest.TestCase):
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2603,
+            2620,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
