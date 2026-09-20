@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import io
 import json
+import os
 import pathlib
 import shlex
 import sys
@@ -25,6 +26,7 @@ import types
 import unittest
 import unittest.mock
 import urllib.error
+import urllib.request
 from contextlib import closing
 from dataclasses import replace
 from typing import Any
@@ -238,7 +240,10 @@ class TheTwoReadersAgree(unittest.TestCase):
                     expected_revision=baseline["revision"], path=path, who="fixture")
                 adapted = sd_registry.read(path, connection=connection)
                 consent, _ = sd_registry.resolve_consent(adapted, None, "configured")
-                with unittest.mock.patch.object(sd_registry._OPENER, "open", side_effect=AssertionError("no provider calls")):
+                # Both openers: a loopback entry takes `_DIRECT_OPENER`, so
+                # guarding only `_OPENER` would stop catching one.
+                with (unittest.mock.patch.object(sd_registry._OPENER, "open", side_effect=AssertionError("no provider calls")),
+                      unittest.mock.patch.object(sd_registry._DIRECT_OPENER, "open", side_effect=AssertionError("no provider calls"))):
                     self.assertEqual([entry.name for entry in sd_registry.select_reviewers(adapted, consent=consent)],
                         ["codex", "claude"])
                     for name in ("minimax", "baseten"):
@@ -321,7 +326,9 @@ class TheReasoningControls(unittest.TestCase):
                                     ({"reasoning_effort": "none"}, {"reasoning_effort": "none"})):
             provider = sd_registry.read(self.write(**controls)).providers["two"]
             provider = sd_registry.Provider(**{**vars(provider), "env": ("OWN_KEY",)})
-            with unittest.mock.patch.object(sd_registry._OPENER, "open", return_value=_Answer("{}")) as opened:
+            # The fixture url is `http://localhost:2/v1`, which routes past
+            # any configured proxy and so through `_DIRECT_OPENER`.
+            with unittest.mock.patch.object(sd_registry._DIRECT_OPENER, "open", return_value=_Answer("{}")) as opened:
                 sd_registry.chat_completion(provider, prompt, {"OWN_KEY": "fixture"}, 30)
             request = opened.call_args.args[0]
             self.assertEqual(json.loads(request.data), {"model": "exact-model", "max_tokens": 16384,
@@ -1635,6 +1642,97 @@ class TheMeterEnvField(unittest.TestCase):
         with self.assertRaises(sd_registry.RegistryError) as caught:
             sd_registry.parse(registry(", meter_env: [A, B]"))
         self.assertIn("'meter_env' of bill 'plan' is ['A', 'B'], which is not a variable name", str(caught.exception))
+
+
+class LoopbackNeedsNoCredentialTests(unittest.TestCase):
+    """sd:1145 -- a locally hosted server authenticates nobody.
+
+    The registry has no way to spell "this recipient wants no key", so the
+    credential rule kept every loopback entry unreachable and the only way
+    round it was a placeholder variable: a secret in name only, and one more
+    thing to keep exported. The exemption is deliberately narrow -- loopback
+    AND no declared variable -- because each half alone is a hole.
+    """
+
+    def entry(self, url, env=()):
+        return sd_registry.Provider(
+            name="local", url=url, start=None, model="m", vendor="v", bill="b",
+            roles=("reviewer",), ranks={}, reader=None, max_tokens=16, env=tuple(env),
+            price=None, enabled=True, reason=None, thinking=None, reasoning_effort=None)
+
+    def test_a_loopback_entry_with_no_variable_is_called_without_a_key(self):
+        sent = {}
+
+        def opener(request, timeout=None):
+            sent["headers"] = dict(request.headers)
+            raise OSError("no server, and the headers are what this asserts")
+
+        with unittest.mock.patch.object(sd_registry, "_DIRECT_OPENER", types.SimpleNamespace(open=opener)):
+            code, _, detail, launched, _ = sd_registry.chat_completion(
+                self.entry("http://localhost:8084/v1"), "p", {}, 5)
+        # It reached the transport rather than being refused before it.
+        self.assertIn("no server", detail)
+        self.assertNotIn("Authorization", sent["headers"])
+        self.assertNotIn("Authorization".lower().capitalize(), sent["headers"])
+
+    def test_a_loopback_url_routes_past_a_configured_proxy(self):
+        """`build_opener` installs a `ProxyHandler` reading `HTTP_PROXY` at
+        import, and urllib's bypass list does not special-case loopback. On
+        a box where `HTTP_PROXY` is set and `NO_PROXY` omits `localhost`,
+        the default opener forwards a loopback request to the proxy and the
+        diff leaves the machine -- the more so now that such a call carries
+        no key and so looks harmless.
+        """
+        self.assertIs(sd_registry._opener("http://localhost:8084/v1/chat/completions"),
+                      sd_registry._DIRECT_OPENER)
+        self.assertIs(sd_registry._opener("http://127.0.0.1:8084/v1/chat/completions"),
+                      sd_registry._DIRECT_OPENER)
+        self.assertIs(sd_registry._opener("https://api.example.com/v1/chat/completions"),
+                      sd_registry._OPENER)
+        self.assertIs(sd_registry._opener("http://127.evil.com/v1/chat/completions"),
+                      sd_registry._OPENER)
+
+    def test_the_two_opener_recipes_differ_under_a_configured_proxy(self):
+        """Both are built at import, so what they hold depends on the
+        environment this process was launched with -- which is why this
+        rebuilds each recipe under a forced `http_proxy` rather than reading
+        the module's own two. `build_opener` drops a `ProxyHandler({})`
+        entirely rather than registering an inert one, so "no ProxyHandler"
+        is what a proxy-free opener looks like.
+        """
+        with unittest.mock.patch.dict(os.environ, {"http_proxy": "http://proxy.example:3128"}):
+            default = urllib.request.build_opener(sd_registry._NoRedirect)
+            direct = urllib.request.build_opener(
+                urllib.request.ProxyHandler({}), sd_registry._NoRedirect)
+        self.assertEqual(
+            [h.proxies for h in default.handlers if isinstance(h, urllib.request.ProxyHandler)],
+            [{"http": "http://proxy.example:3128"}])
+        self.assertEqual(
+            [h for h in direct.handlers if isinstance(h, urllib.request.ProxyHandler)], [])
+
+    def test_a_public_entry_with_no_variable_is_still_refused(self):
+        """The half that would be a hole: no key, but not this machine."""
+        code, _, detail, launched, _ = sd_registry.chat_completion(
+            self.entry("https://api.example.com/v1"), "p", {}, 5)
+        self.assertEqual((code, launched), (1, False))
+        self.assertIn("has no value for any key", detail)
+
+    def test_a_loopback_entry_that_declares_a_variable_still_needs_its_value(self):
+        """The other half: a server configured to check a key gets one."""
+        code, _, detail, launched, _ = sd_registry.chat_completion(
+            self.entry("http://localhost:8084/v1", ("LOCAL_KEY",)), "p", {}, 5)
+        self.assertEqual((code, launched), (1, False))
+        self.assertIn("has no value for LOCAL_KEY", detail)
+
+    def test_loopback_refuses_a_public_name_that_merely_starts_with_127(self):
+        for host in ("127.evil.com", "127.0.0.1.evil.com", "127.1", "localhost.evil.com"):
+            with self.subTest(host=host):
+                self.assertFalse(sd_registry.loopback(self.entry(f"http://{host}/v1")))
+
+    def test_loopback_accepts_the_real_local_addresses(self):
+        for host in ("localhost", "127.0.0.1", "[::1]", "127.0.0.2"):
+            with self.subTest(host=host):
+                self.assertTrue(sd_registry.loopback(self.entry(f"http://{host}/v1")))
 
 
 if __name__ == "__main__":

@@ -1066,27 +1066,49 @@ def refuse_environment(provider: Provider, environ: Mapping[str, str]) -> str | 
     return None
 
 
+def loopback_url(url: str) -> bool:
+    """Whether this URL's host is the machine the pack runs on."""
+    # `hostname` has already stripped the brackets from `[::1]` and
+    # lowercased, so a literal address arrives here ready to parse.
+    host = (urlsplit(url).hostname or "").lower()
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host == "localhost"
+
+
+def loopback(provider: Provider) -> bool:
+    """Whether a url entry's recipient is this machine.
+
+    Use ipaddress or exact localhost, never a 127. prefix: 127.evil.com and
+    127.0.0.1.evil.com are public DNS names. Refuse abbreviated 127.1 too;
+    curl accepts it, but adding a second address parser weakens this boundary.
+
+    One parse, read by both rules that care where a url entry points: the
+    cleartext rule below, and the credential rule in `chat_completion`. Two
+    copies of an address test are two chances to disagree about what counts
+    as this machine, and the pair that disagrees is the pair that sends a
+    diff somewhere unintended.
+
+    `sd_db.calls` carries the same pair for the ledger's own call path,
+    which is the one a run with a database takes; `chat_completion` here is
+    the seam a run without one falls back to. Both had to learn this, and a
+    fix to one alone leaves `--preflight` refusing.
+    """
+    return loopback_url(provider.url) if provider.url else False
+
+
 def refuse_cleartext(provider: Provider) -> str | None:
     """Refuse cleartext outside loopback; never silently upgrade the URL.
 
     Host consent excludes the scheme, so changing https to http can otherwise
     expose the diff without changing its recipient. The configured scheme
-    must remain explicit. Local exo sockets are the loopback exception.
-    Use ipaddress or exact localhost, never a 127. prefix: 127.evil.com and
-    127.0.0.1.evil.com are public DNS names. Refuse abbreviated 127.1 too;
-    curl accepts it, but adding a second address parser weakens this boundary.
+    must remain explicit. A local socket is the loopback exception.
     """
     if not provider.url:
         return None
     parts = urlsplit(provider.url)
-    host = (parts.hostname or "").lower()
-    try:
-        # `hostname` has already stripped the brackets from `[::1]` and
-        # lowercased, so a literal address arrives here ready to parse.
-        loopback = ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        loopback = host == "localhost"
-    if parts.scheme == "https" or loopback:
+    if parts.scheme == "https" or loopback(provider):
         return None
     return (
         f"{provider.name} points at {provider.url!r}, which reaches "
@@ -1122,6 +1144,21 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 _OPENER = urllib.request.build_opener(_NoRedirect)
 
+#: For a recipient on this machine. `build_opener` installs a `ProxyHandler`
+#: that reads `HTTP_PROXY` at import, and urllib's bypass list does not
+#: special-case loopback: on a box where `HTTP_PROXY` is set and `NO_PROXY`
+#: omits `localhost`, a loopback request is forwarded to the proxy and the
+#: diff leaves the machine. An empty mapping installs no proxy at all -- and
+#: `build_opener` drops it rather than registering an inert one -- so the
+#: socket goes where the URL says. A public host keeps `_OPENER`, because a
+#: proxy is how it is reachable at all on such a box.
+_DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+
+
+def _opener(url: str):
+    """The opener for this URL: proxy-free for this machine, default beyond."""
+    return _DIRECT_OPENER if loopback_url(url) else _OPENER
+
 
 def chat_completion(
     provider: Provider,
@@ -1141,7 +1178,15 @@ def chat_completion(
         return (1, "", refusal, False, None)
     name = provider.env[0] if provider.env else ""
     key = environ.get(name, "")
-    if not key:
+    # A locally hosted server reached over loopback is already restricted to
+    # processes running as this user, so a key adds nothing the socket did
+    # not require. Demanding one kept every such entry unreachable: the
+    # registry has no way to spell "this recipient authenticates nobody", and
+    # a placeholder variable exported to satisfy the check would be a secret
+    # in name only. An entry that does declare a variable still has to supply
+    # its value, loopback or not, because a server that was configured to
+    # check a key must not be called without one.
+    if not key and not (loopback(provider) and not provider.env):
         return (1, "", f"{provider.name} has no value for {name or 'any key'}", False, None)
     request_body: dict[str, Any] = {"model": provider.model, "max_tokens": provider.max_tokens,
                             "messages": [{"role": "user", "content": prompt}]}
@@ -1153,12 +1198,12 @@ def chat_completion(
     request = urllib.request.Request(
         endpoint(provider),
         data=payload,
-        headers={"Authorization": f"{AUTH_SCHEME} {key}",
+        headers={**({"Authorization": f"{AUTH_SCHEME} {key}"} if key else {}),
                  "Content-Type": "application/json"},
         method="POST",
     )
     try:
-        with _OPENER.open(request, timeout=timeout) as answer:
+        with _opener(request.full_url).open(request, timeout=timeout) as answer:
             status = getattr(answer, "status", None)
             status = status if type(status) is int and 100 <= status <= 599 else None
             body = answer.read(MAX_RESPONSE_BYTES + 1)
@@ -1238,7 +1283,7 @@ def meter_reading(bill: Bill, environ: Mapping[str, str], timeout: int) -> tuple
         return (1, "", f"bill {bill.name!r} has no value for {bill.meter_env}", False, None)
     request = urllib.request.Request(str(bill.meter), headers={"Authorization": f"{AUTH_SCHEME} {key}"}, method="GET")
     try:
-        with _OPENER.open(request, timeout=timeout) as answer:
+        with _opener(request.full_url).open(request, timeout=timeout) as answer:
             status = getattr(answer, "status", None)
             status = status if type(status) is int and 100 <= status <= 599 else None
             body = answer.read(MAX_RESPONSE_BYTES + 1)

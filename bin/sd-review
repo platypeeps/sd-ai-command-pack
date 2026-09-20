@@ -1590,7 +1590,7 @@ def provider_preflight(result: dict[str, Any], chosen: Sequence[sd_registry.Prov
                   completed_reviews=0, reviewed_by=[], status="preflight_planned", probe_calls=0)
     provider = chosen[0] if chosen else None
     refusal = (sd_registry.refuse_cleartext(provider) or
-               (f"{provider.name} has no declared credential value" if not provider.env or not env.get(provider.env[0]) else None)) if provider else "no eligible provider"
+               (f"{provider.name} has no declared credential value" if (provider.env or not sd_registry.loopback(provider)) and not env.get(provider.env[0] if provider.env else "") else None)) if provider else "no eligible provider"
     result["probe_refusal"] = refusal
     if args.explain:
         return result
