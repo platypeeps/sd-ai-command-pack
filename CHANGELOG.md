@@ -4,6 +4,27 @@
 
 ### Added
 
+- **Google Drive is a publication destination**, on the same terms as Notion:
+  opt-in per document, designated by the user, never inferred. A `DOCS` entry
+  carries `drive=dict(folder="<name or id>", file="<file id or url>")`; the
+  folder is required and the file is optional, and without it the drain creates
+  the Doc and the designation is amended with the id it got.
+
+  One queue and one `sd-status` class serve every destination rather than one
+  each. `bin/sd-status` already refuses the alternative for the same reason
+  (`actionable_inventory`: "One producer, not three"), and two near-identical
+  producers become three at the next destination. A request carries a
+  `destination` field, its own destination's field names, and a `target` phrase
+  it words itself, so the status producer never carries a second copy of the
+  destination table. Adding a destination is a row in
+  `sd_research_publish.DESTINATIONS` plus a drain step in the contract.
+
+  `skills/_shared/references/publication-contract.md` states the drain protocol
+  per destination: the Notion connector for `destination: notion`, the Google
+  Workspace connector for `destination: drive`, mirrored as a Google Doc rather
+  than an uploaded file so it can be read and commented on in place. Handling
+  restrictions survive the mirror at every destination.
+
 - **Publishing a finished document is now the default** (publication contract).
   `skills/_shared/references/publication-contract.md` states it and binds the
   pack and everything installed from it: a finished document publishes to the
@@ -18,10 +39,14 @@
   repo's `root|<key>|<label>|<directory>` line to the dashboard's
   `documents.conf` (once; a key already naming another directory is reported,
   not overwritten) and by writing a Notion sync request under
-  `~/.claude/pending-notion-syncs/` for every document whose `DOCS` entry
-  carries the new `notion=dict(space=..., page=...)` key. A render never calls
-  Notion: it runs in a git hook and in CI, neither of which reaches an MCP
-  server, so an agent session drains the queue. `publish` is those two steps
+  `~/.claude/pending-mirror-syncs/` for every document whose `DOCS` entry
+  designates an outward destination — `notion=dict(space=..., page=...)` or
+  `drive=dict(folder=..., file=...)`. A render never calls either: it runs in a
+  git hook and in CI, neither of which reaches an MCP server, so an agent
+  session drains the queue. Both keys on one entry are two mirrors rather than
+  a choice, and each is its own request file, so either can drain while the
+  other waits. A malformed designation is reported per destination and does not
+  withhold the sibling's request. `publish` is those two steps
   without a rebuild; `init-hook` installs the post-commit hook that re-renders,
   which never fails the commit. A machine with no dashboard checkout still
   renders — registration reports itself skipped.
@@ -39,13 +64,16 @@
   markdown only, and because the pack ships no shell outside `.github/scripts/`.
   It runs git through `sd_lib.git_output`, since `bin/` holds one git policy.
 
-- **`sd-status` names a Notion mirror the queue still owes** (`notion-sync-pending`,
-  rank 75). A render enqueues a mirror because it cannot write one, and an agent
-  session drains the queue; between those two moments the request was a file
-  nobody looked at. The report reads `~/.claude/pending-notion-syncs/`
-  (`SD_NOTION_QUEUE` overrides it), keeps only requests naming the repository it
-  is reporting on, and ages each row from the request's mtime so the one that
-  has waited longest leads. Not abnormal: a queued mirror is work outstanding,
+- **`sd-status` names an outward mirror the queue still owes**
+  (`mirror-sync-pending`, rank 75). A render enqueues a mirror because it cannot
+  write one, and an agent session drains the queue; between those two moments
+  the request was a file nobody looked at. The report reads
+  `~/.claude/pending-mirror-syncs/` (`SD_MIRROR_QUEUE` overrides it), keeps only
+  requests naming the repository it is reporting on, and ages each row from the
+  request's mtime so the one that has waited longest leads. One class for every
+  destination, not one each: the request words its own destination, so the
+  producer never carries a second copy of the destination table and a new
+  destination is a row in `sd_research_publish.DESTINATIONS` and nothing here. Not abnormal: a queued mirror is work outstanding,
   not a defect, so it never reaches the banner. An unreadable request is skipped
   rather than diagnosed, because a row about it would fire every run and name no
   action this tool is allowed to take.

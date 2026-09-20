@@ -112,10 +112,12 @@ delivered, and a skill that ends by naming a path in a build directory has not
 finished. Working state -- ledgers, receipts, handoff packets, monitor state --
 is not a finished document and does not publish.
 
-**Notion is opt-in, per document.** The user designates a document and names its
-space at that time; it is recorded in that document's `notion=` key in
-`research.conf.py`. Nothing infers a target. A render enqueues the sync under
-`~/.claude/pending-notion-syncs/` and an agent session drains it, because
+**An outward destination is opt-in, per document.** Notion and Google Drive are
+mirrors, not defaults. The user designates a document and names its container at
+that time; it is recorded in that document's `notion=` or `drive=` key in
+`research.conf.py`. Nothing infers a target, and both keys on one entry are two
+mirrors rather than a choice. A render enqueues each sync under
+`~/.claude/pending-mirror-syncs/` and an agent session drains it, because
 rendering runs in a git hook and in CI, and neither can reach an MCP server.
 
 **A published page carries its own resources.** The Documents tab serves under

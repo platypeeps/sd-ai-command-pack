@@ -54,8 +54,8 @@ Declare each intentional replacement under this heading:
 ## Local overrides of the shared template
 
 - `the opening`: use STE-Concise sentences without changing the template instructions.
-- `## Publishing — the dashboard by default, Notion on designation`: omit personal
-  checkout paths from shared Notion pages.
+- `## Publishing — the dashboard by default, outward mirrors on designation`: omit
+  personal checkout paths from shared pages.
 ```
 
 Use the exact template heading, including `##`, inside backticks.
@@ -112,16 +112,16 @@ Choose the document that explains scope, current conclusions, decisions, and whe
 For multiple research tracks, use an overview that directs readers to each track.
 
 - Apply this convention during project setup and the next update to an existing project.
-- Use the same title in the Markdown H1, `research.conf.py` `title` and `h1`, and the Notion page title.
+- Use the same title in the Markdown H1, `research.conf.py` `title` and `h1`, and the title of every mirror.
 - Put a prominent **Start here** link near the top of the README.
-  Link the Notion mirror when published; otherwise, link the Markdown source.
-- Identify the main document in the README document table and the Notion parent page.
-- Keep the existing source filename, type prefix, Notion page ID, URL, icon, and parent.
+  Link a mirror when the document has one; otherwise, link the Markdown source.
+- Identify the main document in the README document table and in each mirror's parent container.
+- Keep the existing source filename, type prefix, mirror page or file id, URL, icon, and parent.
   The title identifies the document's role.
 - If another document takes this role, move the `START HERE — ` title marker to the
   new one, strike it from the old one, and update all entry links.
-  Rename no file and re-parent no Notion page: a role change edits titles and
-  links only, never a filename, a type prefix, or a Notion page identity.
+  Rename no file and re-parent no mirror: a role change edits titles and
+  links only, never a filename, a type prefix, or a mirror's identity.
   Exactly one document carries the `START HERE — ` marker.
 
 `sd-research-kit review` enumerates the configured documents and checks the two
@@ -131,8 +131,8 @@ Its scope is the configured documents, not the tree — a superseded draft in
 `90-scratch/` still carrying an old marker is neither cited nor mirrored, and is
 not a duplicate.
 
-The README entry link, the Notion page title and the Notion parent are in no
-file the kit reads, so reading those back after publication stays manual. The
+The README entry link and each mirror's title and parent are in no file the kit
+reads, so reading those back after publication stays manual. The
 review's `ok   main document` line names the surfaces it did check, so that a
 pass is not read as a claim about the two it did not.
 
@@ -175,7 +175,8 @@ current working directory and nowhere else.
 
 Each repo supplies a `research.conf.py` naming `PROJECT` and a `DOCS` list;
 per-doc keys are `src out title h1 eyebrow stand meta vtitle figs legend footer
-skip links sibling notion`. The visual identity is shared and lives in the renderer, so
+skip links sibling notion drive`. The visual identity is shared and lives in the
+renderer, so
 every repo renders the same way.
 
 Two forms are written per document. `build/<name>.html` is standalone, opens
@@ -186,9 +187,9 @@ nothing consumes it, because research is not published as artifacts (see
 Publishing). Add or edit pages in `research.conf.py`, never by editing generated
 files.
 
-Rendering ends by registering `build/` with the dashboard and queueing a Notion
-sync for every document that names one. Both steps are idempotent. See
-Publishing, and `references/publication-contract.md`.
+Rendering ends by registering `build/` with the dashboard and queueing a sync
+for every document that designates an outward destination. Both steps are
+idempotent. See Publishing, and `references/publication-contract.md`.
 
 Verify links before publishing:
 
@@ -212,7 +213,7 @@ moved past it. The list is read out of the documents each run, never maintained.
 
 ## Adversarial review before publishing
 
-Nothing is published — to Notion or anywhere else — until it has been reviewed
+Nothing is published — to a mirror or anywhere else — until it has been reviewed
 against itself. Two halves, both required: the **information** the document rests
 on, and the **product** a reader will actually receive. The mechanical half is a
 command:
@@ -328,7 +329,7 @@ checklist prints reports it — say *that* in Status. "No independent pass" is a
 stated gap; self-review that quietly presents itself as review is the defect
 this section exists to prevent.
 
-## Publishing — the dashboard by default, Notion on designation
+## Publishing — the dashboard by default, outward mirrors on designation
 
 `references/publication-contract.md` governs this. It applies to every skill in
 the pack, not only to research repos; what follows is how a research repo meets
@@ -336,8 +337,8 @@ it.
 
 **Superseded 2026-09-20.** Before this date the standard said every overview,
 map, brief, report and survey had a Notion page. That is now the exception
-rather than the rule: Notion is outward-facing, so a document reaches it only
-when the user designates it and names its space.
+rather than the rule: an outward destination is outward-facing, so a document
+reaches one only when the user designates it and names the container.
 
 ### The dashboard is the default
 
@@ -358,36 +359,51 @@ fail visibly.
 `90-scratch/` is not published. Neither is working state — ledgers, receipts,
 handoff packets. Publish what a reader is meant to read.
 
-### Notion is per document
+### Outward destinations are per document
 
-The user designates a document and names its space at that time. Record it in
-that document's `DOCS` entry, where the document is already described:
+The user designates a document and names its container at that time. Record it
+in that document's `DOCS` entry, where the document is already described:
 
 ```python
 notion=dict(space="Research", page="https://www.notion.so/...")
+drive=dict(folder="Research deliverables", file="https://docs.google.com/document/d/...")
 ```
 
-Until that key exists, the document publishes to the dashboard and nowhere
-else. Do not infer a target from a title, a folder or a neighbouring document.
+| Destination | Key | Container (required) | Existing page or file (optional) |
+| --- | --- | --- | --- |
+| Notion | `notion=` | `space=` | `page=` |
+| Google Drive | `drive=` | `folder=` | `file=` |
+
+Both keys on one entry are two mirrors, not a choice. Until one of these keys
+exists, the document publishes to the dashboard and nowhere else. Do not infer a
+target from a title, a folder or a neighbouring document.
+
+The container is required; the page or file is not. Without it the drain creates
+the page or file and the designation is amended with the id it got. With it the
+drain updates that one, which is what stops a re-render leaving a second copy
+behind.
 
 Recording it in `research.conf.py` is what makes the mirror machine-readable.
 The README's **Notion pages** table stays, for the human reader, but it is no
-longer the only place the target is written.
+longer the only place the target is written; a Drive mirror is listed there too.
 
-### How the mirror is updated
+### How a mirror is updated
 
-A render does not call Notion. It runs in a git hook and in CI, neither of
-which reaches an MCP server, and the pack holds no Notion credential. Instead
-it writes a sync request per designated document under
-`~/.claude/pending-notion-syncs/`, naming the document, its space, its page and
-the source revision.
+A render does not call Notion or Drive. It runs in a git hook and in CI, neither
+of which reaches an MCP server, and the pack holds no credential for either.
+Instead it writes a sync request per designated document per destination under
+`~/.claude/pending-mirror-syncs/`, naming the destination, the document, its
+container, the page or file to update and the source revision.
 
-An agent session drains that queue through the Notion connector. One request
-file per document, so a re-render replaces the pending request rather than
-queueing a second one; a request that is never drained stays on disk.
+An agent session drains that queue through the connector the request names: the
+Notion connector for `destination: notion`, the Google Workspace connector for
+`destination: drive`. One request file per document per destination, so a
+re-render replaces the pending request rather than queueing a second one; a
+request that is never drained stays on disk. `references/publication-contract.md`
+says how the status report surfaces one.
 
 Mirror shape — the full document minus its H1, opening with a pointer back to
-the file so a reader who lands in Notion knows where to edit:
+the file so a reader who lands in the mirror knows where to edit:
 
 ```markdown
 *Source: **`<absolute path to the markdown>`** — edit there, then update this page.*
@@ -399,16 +415,26 @@ the file so a reader who lands in Notion knows where to edit:
 ## 1. First section
 ```
 
-Notion round-trips tables, fenced code blocks (ASCII diagrams included),
-blockquotes, and nested lists faithfully; write an empty table cell as a single
-space. A document too large for one `notion-create-pages` call is created with
-its first half, then extended with `notion-update-page` / `insert_content` at
-`position: end`.
+**Notion.** It round-trips tables, fenced code blocks (ASCII diagrams
+included), blockquotes, and nested lists faithfully; write an empty table cell
+as a single space. A document too large for one `notion-create-pages` call is
+created with its first half, then extended with `notion-update-page` /
+`insert_content` at `position: end`. Give each page an icon and keep it stable
+across updates — a changed icon reads as a different page.
 
-Give each page an icon and keep it stable across updates — a changed icon reads
-as a different page. Handling restrictions survive the mirror: a document that
-may not be shared externally may not be mirrored to a shared Notion page
-either, and designating one does not lift the restriction.
+**Google Drive.** Mirror as a Google Doc, not as an uploaded `.md` or `.html`
+file: the point of the mirror is that someone can read and comment on it in
+place. Create it with the Workspace connector's Markdown import so headings,
+tables and code blocks survive, then record the resulting file id in `file=`.
+Update that file in place on later drains. Keep the document's name equal to its
+title, since Drive search is by name and a renamed copy reads as a second
+document. Resolve `folder=` to a folder id once and prefer the id thereafter —
+two folders may share a name, and a mirror written into the wrong one is a
+disclosure rather than a mistake.
+
+Handling restrictions survive the mirror, at every destination: a document that
+may not be shared externally may not be mirrored to a shared Notion space or a
+shared Drive folder either, and designating one does not lift the restriction.
 
 ### Artifacts
 
