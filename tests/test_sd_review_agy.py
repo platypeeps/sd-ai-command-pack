@@ -16,6 +16,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from typing import Any
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / "bin") not in sys.path:
@@ -23,7 +24,7 @@ if str(REPO_ROOT / "bin") not in sys.path:
 
 import sd_registry  # noqa: E402
 
-from tests.test_sd_review import sd_review  # noqa: E402
+from tests.test_sd_review import ReviewFixture, sd_review  # noqa: E402
 
 #: The smallest registry that runs `agy`. Each test edits one line of it, so
 #: the line a test changes is the reason it fails.
@@ -102,7 +103,8 @@ class TheArgvIsConfined(unittest.TestCase):
         self.assertNotIn("accept-edits", self.argv)
 
     def test_it_asks_for_the_declared_schema_as_json(self) -> None:
-        self.assertEqual(self.argv[self.argv.index("--output-format") + 1], "json")
+        """`stream-json`, not `json`: only the stream names the model that ran."""
+        self.assertEqual(self.argv[self.argv.index("--output-format") + 1], "stream-json")
         schema = json.loads(self.argv[self.argv.index("--json-schema") + 1])
         self.assertEqual(schema, sd_review.CODEX_OUTPUT_SCHEMA)
 
@@ -117,24 +119,35 @@ class TheArgvIsConfined(unittest.TestCase):
         self.assertNotIn("--model", sd_review.agy_argv(self.workdir, "agy", None))
 
 
+def stream(result: dict[str, object], model: str | None = "gemini-3.1-pro-high") -> str:
+    """The NDJSON `agy --output-format stream-json` writes, as observed."""
+    init = {"event": "init", "conversation_id": "x",
+            "init": {"model": model, "cwd": "/tmp", "tools": ["view_file"],
+                     "permission_mode": "request-review"}}
+    frames = [] if model is None else [json.dumps(init)]
+    frames.append(json.dumps({"event": "result", "result": result}))
+    return "\n".join(frames) + "\n"
+
+
 class TheEnvelopeIsReadBack(unittest.TestCase):
     """The observed shape, and every malformed one that must not crash."""
 
-    def answer(self, stdout: str, exit_code: int = 0) -> tuple[object, object]:
-        return sd_review.agy_answer(sd_review.Completed(exit_code, stdout, ""))
+    def answer(self, stdout: str, exit_code: int = 0,
+               expected: str | None = None) -> tuple[object, object]:
+        return sd_review.agy_answer(sd_review.Completed(exit_code, stdout, ""), expected)
 
     def test_a_successful_envelope_yields_its_findings(self) -> None:
         finding = {"path": "src.py", "line": 1, "severity": "high",
                    "summary": "defect", "family": "correctness"}
-        result, parsed = self.answer(json.dumps(
+        result, parsed = self.answer(stream(
             {"conversation_id": "x", "status": "SUCCESS", "response": "{}",
              "structured_output": {"findings": [finding]},
-             "usage": {"total_tokens": 1}}))
+             "usage": {"total_tokens": 1}}), expected="gemini-3.1-pro-high")
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(parsed.findings[0]["summary"], "defect")
 
     def test_an_error_envelope_is_nonzero_even_at_exit_zero(self) -> None:
-        result, parsed = self.answer(json.dumps(
+        result, parsed = self.answer(stream(
             {"conversation_id": "", "status": "ERROR", "response": "",
              "error": "invalid model selection"}))
         self.assertEqual(result.exit_code, 1)
@@ -142,12 +155,19 @@ class TheEnvelopeIsReadBack(unittest.TestCase):
         self.assertIsNone(parsed)
 
     def test_malformed_envelopes_do_not_crash(self) -> None:
-        for stdout in ("", "not json", "[]", "null", '"text"', "{}",
-                       '{"status": 7}', '{"status": "SUCCESS"}',
-                       '{"status": "SUCCESS", "structured_output": []}',
-                       '{"status": "ERROR", "error": null}',
-                       '{"status": "SUCCESS", "structured_output": {"findings": "no"}}'):
-            with self.subTest(stdout=stdout):
+        cases = ["", "not json", "[]", "null", '"text"', "{}",
+                 '{"event": "result"}', '{"event": "result", "result": {}}',
+                 '{"event": 7, "result": {}}', '{"event": "init", "init": {}}',
+                 stream({"status": 7}), stream({"status": "SUCCESS"}),
+                 stream({"status": "SUCCESS", "structured_output": []}),
+                 stream({"status": "ERROR", "error": None}),
+                 stream({"status": "SUCCESS", "structured_output": {"findings": "no"}}),
+                 # A literal past `sys.get_int_max_str_digits()`. `json.loads`
+                 # raises a bare `ValueError`, not `JSONDecodeError`.
+                 '{"event": "result", "result": {"status": "SUCCESS", '
+                 '"structured_output": {"findings": [{"line": ' + "9" * 5000 + "}]}}}"]
+        for stdout in cases:
+            with self.subTest(stdout=stdout[:60]):
                 result, parsed = self.answer(stdout)
                 self.assertNotEqual((result, parsed), (None, None))
 
@@ -157,16 +177,80 @@ class TheEnvelopeIsReadBack(unittest.TestCase):
         The response is empty and no schema key is written, so reading
         `status` alone would turn a session that did nothing into a clean bill.
         """
-        result, parsed = self.answer(json.dumps(
+        result, parsed = self.answer(stream(
             {"conversation_id": "x", "status": "SUCCESS", "response": "",
              "denied_actions": [{"action": "write_file", "display_name": "WriteToFile"}],
              "usage": {"total_tokens": 1}}))
         self.assertEqual(result.exit_code, 0)
         self.assertIsNone(parsed)
 
+    def test_a_substituted_model_is_not_a_review(self) -> None:
+        """Argv asks for a model; the `init` frame says which one answered.
+
+        A Google entry served by an Anthropic model is the defeat the vendor
+        guard exists to stop, reached below the registry instead of in it.
+        """
+        clean = {"conversation_id": "x", "status": "SUCCESS", "response": "{}",
+                 "structured_output": {"findings": []}}
+        result, parsed = self.answer(stream(clean, model="claude-opus-4-6-thinking"),
+                                     expected="gemini-3.1-pro-high")
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("claude-opus-4-6-thinking", result.stderr)
+        self.assertIn("not a review", result.stderr)
+        self.assertIsNone(parsed)
+
+    def test_a_stream_that_names_no_model_refuses_a_pinned_entry(self) -> None:
+        """Unverifiable fails closed; the pin is what independence rests on."""
+        clean = {"conversation_id": "x", "status": "SUCCESS", "response": "{}",
+                 "structured_output": {"findings": []}}
+        result, parsed = self.answer(stream(clean, model=None), expected="gemini-3.1-pro-high")
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("reported no model", result.stderr)
+        self.assertIsNone(parsed)
+
+    def test_the_matching_model_passes_through(self) -> None:
+        result, parsed = self.answer(stream(
+            {"conversation_id": "x", "status": "SUCCESS", "response": "{}",
+             "structured_output": {"findings": []}}), expected="gemini-3.1-pro-high")
+        self.assertEqual(result.exit_code, 0)
+        self.assertEqual(parsed.findings, ())
+
     def test_an_oversized_response_becomes_a_blocker(self) -> None:
         _result, parsed = self.answer("x" * (sd_review.MAX_OUTPUT_BYTES + 1))
         self.assertEqual(parsed.error, "response exceeds the declared byte limit")
+
+
+class TheMaterialReachesTheSession(ReviewFixture):
+    """End to end: `agy` resolves nothing itself, so the diff must be written.
+
+    `agy_argv` points the prompt at `review-subject.md` inside `--add-dir`.
+    Nothing else puts it there, and a session handed an empty file would
+    review nothing and report it clean.
+    """
+
+    def test_the_subject_lands_where_the_prompt_points(self) -> None:
+        root = self.make_repo()
+        (root / "src.py").write_text("agy_exact_subject = True\n")
+        entry = sd_review.sd_registry.Provider(
+            name="agy", vendor="google", bill="first", start="agy",
+            model="gemini-3.1-pro-high", reader="agy-json", env=())
+        calls: list[dict[str, Any]] = []
+
+        def reply(argv: Any, env: Any, cwd: Any, timeout: Any) -> Any:
+            subject = pathlib.Path(argv[argv.index("--add-dir") + 1]) / "review-subject.md"
+            calls.append({"argv": argv, "material": subject.read_text()})
+            return sd_review.Completed(0, stream(
+                {"conversation_id": "x", "status": "SUCCESS", "response": "{}",
+                 "structured_output": {"findings": []}}), "")
+
+        outcome = sd_review.run_provider(
+            entry, root, sd_review.resolve_subject(root, "worktree"),
+            "instructions", reply, self.environment(), 5)
+        self.assertEqual(outcome.status, sd_review.CLEAN, outcome.detail)
+        self.assertIn("agy_exact_subject = True", calls[0]["material"])
+        self.assertIn("instructions", calls[0]["material"])
+        self.assertIn(str(pathlib.Path(calls[0]["argv"][calls[0]["argv"].index("--add-dir") + 1])),
+                      next(word for word in calls[0]["argv"] if word.startswith("--print=")))
 
 
 class TheVendorMustMatchTheModel(unittest.TestCase):

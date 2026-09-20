@@ -654,15 +654,15 @@ def claude_argv(workdir: pathlib.Path, start: str) -> list[str]:
 
 
 def agy_argv(workdir: pathlib.Path, start: str, model: str | None) -> list[str]:
-    """Read-only antigravity CLI; the headless JSON protocol and a declared schema.
+    """Read-only antigravity CLI; the headless NDJSON protocol and a schema.
 
     Thinner confinement than `claude_argv`'s, and the gap is the point. `agy`
     has no equivalent of any of the eight it passes: `--tools`,
     `--allowedTools`, `--permission-mode`, `--strict-mcp-config`,
     `--mcp-config`, `--safe-mode`, `--restricted`, `--no-session-persistence`.
-    So this session may use every tool the CLI has, may reach whatever MCP
-    servers `agy mcp` registered machine-wide, and leaves a resumable
-    conversation behind. Do not assume otherwise when editing this function.
+    The `init` frame lists what that costs: fifty-odd tools reach this session,
+    `run_command`, `write_to_file`, `call_mcp_tool` and `open_browser_url`
+    among them. Do not assume otherwise when editing this function.
 
     `--sandbox` does not make up the difference, and its scope is measured
     rather than read off the help text: under `--sandbox` with
@@ -670,6 +670,15 @@ def agy_argv(workdir: pathlib.Path, start: str, model: str | None) -> list[str]:
     write on the argv below is that headless mode cannot prompt, so a tool
     needing permission is auto-denied. An allow-rule in `agy`'s own
     `settings.json` would lift that, out of this registry's sight.
+
+    The review material does not stay local, and no flag here changes that.
+    Measured with a nonce: nothing under `~/Library/Application Support/
+    Antigravity` held it and no file there was written, yet a later
+    `agy --conversation <id>` replayed it verbatim. The transcript is retained
+    by the vendor, keyed by the `conversation_id` the run returns, and `agy`
+    exposes no subcommand that deletes one. An isolated `HOME` would not help,
+    because there is nothing local to isolate. An operator enabling this entry
+    accepts that the diff under review leaves the machine and stays readable.
 
     `--mode plan` is absent: `agy` warns it has no effect once slash-command
     expansion is off, and refusing that expansion is the stronger guard,
@@ -679,7 +688,7 @@ def agy_argv(workdir: pathlib.Path, start: str, model: str | None) -> list[str]:
     """
     return [*shlex.split(start), "--sandbox", "--disable-slash-commands",
             *(("--model", model) if model else ()),
-            "--add-dir", str(workdir), "--output-format", "json",
+            "--add-dir", str(workdir), "--output-format", "stream-json",
             "--json-schema", json.dumps(CODEX_OUTPUT_SCHEMA),
             # `--print` takes its prompt as the flag's own value: handed a
             # separate word, `agy` reads whatever follows as the prompt.
@@ -700,8 +709,12 @@ def claude_answer(result: Completed) -> tuple[Completed, ParsedFindings | None]:
     if len(result.stdout.encode("utf-8")) > MAX_OUTPUT_BYTES:
         return result._replace(exit_code=result.exit_code or 1), oversized_findings()
     try:
+        # `ValueError`, not `JSONDecodeError`: an integer literal past
+        # `sys.get_int_max_str_digits()` raises the base class, which the
+        # narrower clause let through as a crash. `JSONDecodeError` is a
+        # subclass, so nothing that was caught before stops being caught.
         value = json.loads(result.stdout)
-    except (json.JSONDecodeError, RecursionError):
+    except (ValueError, RecursionError):
         value = None
     if not isinstance(value, dict) or value.get("type") != "result":
         return result, None
@@ -716,27 +729,50 @@ def claude_answer(result: Completed) -> tuple[Completed, ParsedFindings | None]:
     return result, parse_findings(json.dumps(raw)) if isinstance(raw, dict) else None
 
 
-def agy_answer(result: Completed) -> tuple[Completed, ParsedFindings | None]:
-    """Antigravity's result envelope, including errors with a zero process exit.
+def agy_answer(result: Completed, expected: str | None) -> tuple[Completed, ParsedFindings | None]:
+    """Antigravity's NDJSON stream, read for the answer and for what ran.
 
-    One JSON object: `status`, `response`, `usage`, and `structured_output`
-    once `--json-schema` is given. A failure reports `status` `ERROR` with an
-    `error` string and no schema key, so an absent one reads as no findings.
+    The `result` frame carries `status`, `response`, `usage` and, once
+    `--json-schema` is given, `structured_output`. A failure reports `status`
+    `ERROR` with an `error` string and no schema key, so an absent one reads
+    as no findings rather than as an empty clean review; a run whose tools
+    were auto-denied reports `SUCCESS` with neither, and reads the same way.
+
+    `stream-json` is chosen over `json` for the `init` frame alone. It is the
+    one surface that names the model that actually ran, and the single-object
+    `json` envelope has no such field. Argv asks for a model; this confirms
+    one answered. A substitution would otherwise be invisible, and putting an
+    Anthropic model behind a Google entry is exactly the defeat
+    `sd_registry.refuse_vendor_model` exists to stop, so an entry that pinned
+    a model and cannot be told which one ran refuses rather than reports.
     """
     if len(result.stdout.encode("utf-8")) > MAX_OUTPUT_BYTES:
         return result._replace(exit_code=result.exit_code or 1), oversized_findings()
-    try:
-        value = json.loads(result.stdout)
-    except (json.JSONDecodeError, RecursionError):
-        value = None
-    if not isinstance(value, dict) or not isinstance(value.get("status"), str):
+    frames: dict[str, dict[str, Any]] = {}
+    for line in result.stdout.splitlines():
+        try:
+            frame = json.loads(line)
+        except (ValueError, RecursionError):
+            continue
+        event = frame.get("event") if isinstance(frame, dict) else None
+        if isinstance(event, str) and isinstance(frame.get(event), dict):
+            frames[event] = frame[event]
+    final = frames.get("result", {})
+    if not isinstance(final.get("status"), str):
         return result, None
-    if value.get("status") != "SUCCESS":
-        detail = value.get("error")
+    ran = frames.get("init", {}).get("model")
+    if expected and ran != expected:
+        named = f"ran model {ran!r}" if isinstance(ran, str) else "reported no model"
+        return result._replace(exit_code=result.exit_code or 1, stderr=(
+            f"{result.stderr}\nagy {named}, and the entry pins {expected!r}. "
+            "Independence is claimed for the pinned model, so this is not a "
+            "review.").strip()[:2000]), None
+    if final.get("status") != "SUCCESS":
+        detail = final.get("error")
         detail = detail[:2000] if isinstance(detail, str) else ""
         result = result._replace(exit_code=result.exit_code or 1,
                                  stderr=(result.stderr + "\n" + detail).strip()[:2000])
-    raw = value.get("structured_output")
+    raw = final.get("structured_output")
     return result, parse_findings(json.dumps(raw)) if isinstance(raw, dict) else None
 
 
@@ -1152,7 +1188,7 @@ def run_provider(
                 text = result.stdout
             parsed = parse_findings(text)
         elif provider.reader == "agy-json":
-            result, parsed = agy_answer(result)
+            result, parsed = agy_answer(result, provider.model)
         else:
             result, parsed = claude_answer(result)
     return _answer(provider.name, result, parsed, argv, removed)._replace(diagnostic=(
