@@ -2259,6 +2259,25 @@ def yaml_indent(line: str) -> int:
     return len(line) - len(line.lstrip(" "))
 
 
+def yaml_uncommented(line: str) -> str:
+    """`line` without a trailing ` # comment`, quotes respected.
+
+    `- pull_request # validate PRs` is valid YAML naming `pull_request`, and a
+    reader that kept the comment would carry a trigger no event is called,
+    which is how a workflow silently stops being expected (sd:1110 review).
+    """
+    quote = ""
+    for index, char in enumerate(line):
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in "\"'":
+            quote = char
+        elif char == "#" and (index == 0 or line[index - 1] in " \t"):
+            return line[:index].rstrip()
+    return line.rstrip()
+
+
 def yaml_lines(text: str) -> list[str]:
     """Non-blank, non-comment lines, right-stripped. Enough YAML for job names.
 
@@ -2268,9 +2287,9 @@ def yaml_lines(text: str) -> list[str]:
     cannot resolve becomes a stated note rather than a silent wrong answer.
     """
     return [
-        line.rstrip()
+        stripped
         for line in text.split("\n")
-        if line.strip() and not line.lstrip().startswith("#")
+        if (stripped := yaml_uncommented(line)).strip()
     ]
 
 
@@ -2344,6 +2363,34 @@ def workflow_triggers(lines: list[str]) -> set[str]:
             return set(parsed)
         return {name for _, name, _ in yaml_entries(yaml_children(lines, offset))}
     return set()
+
+
+#: A GitHub event name is lower-case words joined by underscores and nothing
+#: else. A trigger that reads otherwise is not an event this reader misnamed;
+#: it is a construct this reader could not resolve, and a caller deciding on
+#: the set must refuse rather than treat the workflow as not expected.
+EVENT_NAME_RE = re.compile(r"^[a-z][a-z_]*$")
+
+#: The keys under `on.pull_request` that make a workflow run for some pull
+#: requests and not others: GitHub skips it when the diff, the base branch or
+#: the activity type is outside the filter, and no run at the head is then a
+#: fact about the filter rather than about the commit. A `types` list is a
+#: filter when it leaves out `synchronize`, the activity that follows a push.
+PULL_REQUEST_FILTERS = ("paths", "paths-ignore", "branches", "branches-ignore")
+
+
+def pull_request_filters(lines: list[str]) -> list[str]:
+    """The filter keys under `on.pull_request`, empty for an unconditional trigger."""
+    for offset, key, _ in yaml_entries(lines):
+        if key not in ("on", "true"):
+            continue
+        block = yaml_sub(yaml_children(lines, offset), "pull_request")
+        found = [name for _, name, _ in yaml_entries(block) if name in PULL_REQUEST_FILTERS]
+        for entry_offset, name, inline in yaml_entries(block):
+            if name == "types" and "synchronize" not in yaml_sequence(yaml_children(block, entry_offset), inline):
+                found.append("types")
+        return found
+    return []
 
 
 #: Where a repository records that it has looked at a protection state and

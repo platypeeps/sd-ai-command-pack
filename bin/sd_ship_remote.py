@@ -261,13 +261,19 @@ class GitHub:
                                   f"{sd_lib.ACKNOWLEDGEMENT_RELATIVE_PATH} at the reviewed commit.")
 
     def expected_workflows(self, head: str) -> list[tuple[str, str]]:
-        """`(path, name)` for every workflow at `head` that runs on `pull_request`.
+        """`(path, name)` for every workflow at `head` that runs on every `pull_request`.
 
         Enumerated from the tree at merge time, `AGENTS.md`'s doctrine: a
         workflow added at `head` is expected at `head`, one deleted there is
         not, and the working tree has no say. `pull_request_target` is left
         out on purpose: its runs carry that event name and never match the
         `event=pull_request` query, so expecting one would refuse every merge.
+        A `pull_request` trigger under a `paths`, `branches` or narrowing
+        `types` filter is left out too: GitHub schedules it for some pull
+        requests and not others, so its absence at the head says nothing;
+        when it did run, `every_check` still holds that run to green. A
+        trigger that is not spelled like an event name is a construct this
+        reader could not resolve, and that refuses rather than drops the file.
         """
         directory = ".github/workflows"
         try:
@@ -280,10 +286,12 @@ class GitHub:
                 continue
             lines = sd_lib.yaml_lines(git(self.root, "show", f"{head}:{path}"))
             triggers = sd_lib.workflow_triggers(lines)
-            if not triggers:
-                raise Refusal(f"{path} at {head[:12]}: could not read its triggers, so whether it validates "
-                              "a pull request is unknown", code="ci_missing", boundary="ci")
-            if "pull_request" in triggers:
+            unresolved = sorted(name for name in triggers if not sd_lib.EVENT_NAME_RE.match(name))
+            if not triggers or unresolved:
+                raise Refusal(f"{path} at {head[:12]}: could not read its triggers"
+                              + (f" ({', '.join(repr(name) for name in unresolved)})" if unresolved else "")
+                              + ", so whether it validates a pull request is unknown", code="ci_missing", boundary="ci")
+            if "pull_request" in triggers and not sd_lib.pull_request_filters(lines):
                 expected.append((path, sd_lib.yaml_field(lines, "name") or path.rsplit("/", 1)[-1]))
         return expected
 

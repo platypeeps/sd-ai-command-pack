@@ -340,3 +340,23 @@ promoted `planning → ready`.
   say what replaces the gate under the declaration. The live criterion is
   ticked when this branch's own pull request lands through
   `sd-ship merge`.
+
+### 2026-09-19 — Codex branch review, two blocking findings, both fixed
+
+- `source:bin/sd_ship_remote.py::expected_workflows` (high): `- pull_request # Validate PRs` is
+  valid YAML, and the reader carried the comment as the event name, so the
+  Tests workflow silently stopped being expected and an advisory run alone
+  merged. Fixed: `sd_lib.yaml_uncommented` strips a trailing comment with
+  quotes respected, and `expected_workflows` refuses a trigger that is not
+  spelled like an event name (`EVENT_NAME_RE`) instead of dropping the
+  file. Two tests.
+- `source:bin/sd_ship_remote.py::every_check` (medium): a `pull_request` trigger under
+  `paths`, `paths-ignore`, `branches`, `branches-ignore`, or a `types` list
+  without `synchronize` runs for some pull requests and not others, so a
+  documentation-only change stayed blocked on a source-only workflow GitHub
+  never scheduled. Fixed: `sd_lib.pull_request_filters` names the filters
+  and such a workflow is not expected; when it did run at the head,
+  `every_check`'s check-run loop still holds it to green. Two tests, one
+  of them the failing filtered run.
+- Development code review point: one automatic pass spent; the fix gets
+  one verification pass (the cap row's "plus one").

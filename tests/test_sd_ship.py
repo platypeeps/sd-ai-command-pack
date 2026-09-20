@@ -2929,6 +2929,53 @@ class DeclaredGapCase(unittest.TestCase):
         self.merge()
         self.assertEqual(self.puts(), 1)
 
+    def test_a_trigger_with_an_inline_comment_is_still_that_trigger(self):
+        """Codex on the branch: `- pull_request # Validate PRs` used to carry the
+        comment as the event name, and the Tests workflow silently stopped
+        being expected. The only run at the head is the advisory one."""
+        commented = self.TESTS.replace("on:\n  pull_request:\n  push:\n    branches: [main]\n",
+                                       "on:\n  - pull_request # Validate PRs\n  - push\n")
+        self.assertNotEqual(commented, self.TESTS)
+        self.declare(workflows={"tests.yml": commented, "sd-review-route.yml": self.ROUTE})
+        self.prepare()
+        next(iter(self.remote.pull_requests.values())).checks = [self.check("route")]
+        self.double.workflow_runs = [self.run_record(".github/workflows/sd-review-route.yml")]
+        self.refuse(r"workflow Tests \(\.github/workflows/tests\.yml\) has no successful pull_request run", "ci_missing")
+
+    def test_a_trigger_the_reader_cannot_resolve_refuses_rather_than_drops_the_workflow(self):
+        odd = self.TESTS.replace("on:\n  pull_request:\n  push:\n    branches: [main]\n", "on: [pull_request, ${{ vars.EVENT }}]\n")
+        self.declare(workflows={"tests.yml": odd, "sd-review-route.yml": self.ROUTE})
+        self.green()
+        self.refuse(r"tests\.yml at [0-9a-f]{12}: could not read its triggers \('\$\{\{ vars\.EVENT \}\}'\)", "ci_missing")
+
+    def test_a_filtered_pull_request_trigger_is_not_expected_but_its_run_still_counts(self):
+        """Codex on the branch: a `paths`-filtered workflow GitHub never
+        scheduled for this diff must not block the merge, and when it did run
+        its result still has to be green."""
+        for filtered in ("on:\n  pull_request:\n    paths: ['src/**']\n",
+                         "on:\n  pull_request:\n    branches-ignore: [wip/**]\n",
+                         "on:\n  pull_request:\n    types: [labeled]\n"):
+            with self.subTest(filtered=filtered.splitlines()[2].strip()):
+                self.restart()
+                lint = "name: Lint\n\n" + filtered + "\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
+                self.declare(workflows={"tests.yml": self.TESTS, "sd-review-route.yml": self.ROUTE, "lint.yml": lint})
+                self.green()
+                self.merge()
+                self.assertEqual(self.puts(), 1)
+        self.restart()
+        lint = "name: Lint\n\non:\n  pull_request:\n    paths: ['src/**']\n\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
+        self.declare(workflows={"tests.yml": self.TESTS, "sd-review-route.yml": self.ROUTE, "lint.yml": lint})
+        self.green()
+        next(iter(self.remote.pull_requests.values())).checks.append(self.check("lint", conclusion="failure"))
+        self.refuse("CI is not passing", "ci_not_passing")
+
+    def test_a_types_list_that_keeps_synchronize_is_unconditional(self):
+        route = self.ROUTE.replace("on:\n  pull_request:\n", "on:\n  pull_request:\n    types: [opened, synchronize, reopened]\n")
+        self.declare(workflows={"tests.yml": self.TESTS, "sd-review-route.yml": route})
+        self.green()
+        self.double.workflow_runs = [self.run_record(".github/workflows/tests.yml")]
+        self.refuse(r"workflow sd-review route", "ci_missing")
+
     def test_a_push_only_workflow_is_not_expected(self):
         nightly = "name: Nightly\n\non:\n  push:\n    branches: [main]\n\njobs:\n  job:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
         self.declare(workflows={"tests.yml": self.TESTS, "sd-review-route.yml": self.ROUTE, "nightly.yml": nightly})
