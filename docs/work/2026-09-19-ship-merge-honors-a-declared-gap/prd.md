@@ -195,7 +195,8 @@ used. The thing to restore is the machine backstop, not the protection object.
 - `source:bin/sd_ship_remote.py::protection` and
   `source:bin/sd_ship_remote.py::ready` — the rule this substitutes for and
   the evidence reader it reuses.
-- `source:bin/sd-status::load_acknowledgements` — the reader that moves.
+- `source:bin/sd_lib.py::load_acknowledgements` — the reader, in the home
+  this item moved it to from `bin/sd-status`, which now aliases it.
 - sd:1021 requirement 4 — "Merge-authorization redesign belongs to a
   user-owned future design, outside this batch."
 - PR #1082 — the merge that prompted this: `sd-ship merge` refused, `gh pr
