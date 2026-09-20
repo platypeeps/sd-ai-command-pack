@@ -237,12 +237,18 @@ class ItemHistory(ReviewHistory):
             if index == len(passes) - 1 or completed_depth(current):
                 full_branch_coverage(current, self.aggregate_prefix(passes[:index]))
             return
+        if index <= checkpoint:
+            # A full-branch review covers everything before it, including an
+            # attempt that never produced a report to check.
+            return
         if entry.get("retry"):
             if index == 0:
                 raise Refusal("a retry has no preceding review to resume")
-            self.validate_retry(passes[:index + 1], current)
-            return
-        if index <= checkpoint:
+            # An attempt that produced no report carries timeout evidence
+            # instead of one, and has no resume link to compare; the attempt
+            # that follows it resumes the same incomplete review.
+            if current:
+                self.validate_retry(passes[:index + 1], current)
             return
         if index == 0:
             # The first pass may be incomplete only where the next one

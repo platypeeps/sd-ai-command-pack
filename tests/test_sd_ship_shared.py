@@ -312,3 +312,25 @@ class HistoryChainTests(unittest.TestCase):
         state["passes"][0]["report"] = dict(incomplete, status="mutated after the fact")
         with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
             ItemHistory()._validate_coverage(state, verification)
+
+    def test_a_retry_that_produced_no_report_is_resumed_by_the_next_one(self):
+        base = "0" * 40
+        incomplete = {"status": "clean", "requested_reviews": 2, "completed_reviews": 1,
+                      "authorship_base": base, "subject": {"base": base, "head": "a" * 40}}
+        first = {"head": "a" * 40, "report": incomplete}
+        # The attempt between them timed out: it reserved a pass and stored no
+        # report at all, which is not a stale link, only an absent one.
+        timed_out = {"head": "b" * 40, "retry": True,
+                     "execution_error": {"kind": "watchdog_expired", "stage": "execution",
+                                         "captured_report": {"scope": "branch", "findings": [],
+                                                             "authored_with": [],
+                                                             "subject": {"head": "b" * 40}}}}
+        resumed = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                   "authorship_base": base, "subject": {"base": base, "head": "c" * 40},
+                   "resume_report_digest": digest(review_history([first, timed_out]))}
+        state = {"passes": [first, timed_out, {"head": "c" * 40, "report": resumed, "retry": True}]}
+        self.assertIsNone(ItemHistory()._validate_coverage(state, resumed))
+        broken = dict(resumed, resume_report_digest=digest({"not": "the prior history"}))
+        state["passes"][-1]["report"] = broken
+        with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
+            ItemHistory()._validate_coverage(state, broken)
