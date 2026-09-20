@@ -448,11 +448,21 @@ class LineBudgetTests(unittest.TestCase):
         # moved, and the exact resulting size keeps this a ratchet. This raise
         # is its own commit, before the one that spends it. Shared-core
         # classification and the complexity ceilings are unchanged.
+        # 2880 -> 2892 buys documentation, not machinery. `agy_argv` gains no
+        # behaviour here: the twelve lines name the eight `claude_argv`
+        # hardening flags `agy` has no equivalent for, and record that
+        # `--sandbox` was measured rather than read off the help text -- a
+        # write inside `--add-dir` lands under it, and what refuses one on the
+        # argv below is headless mode's inability to prompt. Both facts lived
+        # in a pull request body, which nobody reads twice, and the next
+        # editor of that function needs them. This raise is its own commit,
+        # before the one that spends it. Shared-core classification and the
+        # complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2880,
+            2892,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
