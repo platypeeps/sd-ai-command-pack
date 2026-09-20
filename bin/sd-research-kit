@@ -26,7 +26,8 @@ appearing in it would be linted:
 3. neither             -> bootstrap `$XDG_CACHE_HOME/sd-research-kit/venv`
                           (default `~/.cache/...`) and re-exec with it.
 
-`checklinks`, `review` and `pins` need nothing but the standard library.
+`checklinks`, `review`, `pins` and `publish` need nothing but the standard
+library.
 """
 
 from __future__ import annotations
@@ -43,10 +44,14 @@ HERE = Path(__file__).resolve().parent
 CHECKOUT = HERE.parent
 CONVENTIONS = CHECKOUT / "skills" / "sd-research-repo" / "references" / "conventions.md"
 
-USAGE = """usage: sd-research-kit render|checklinks|review|pins|fleet-pins|
-                          init-claude-md|conventions
+USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pins|
+                          init-hook|init-claude-md|conventions
 
-  render        render research.conf.py in this repo into build/
+  render        render research.conf.py in this repo into build/, then register
+                build/ with the dashboard and queue any Notion mirrors
+  publish       the registration and queueing half on its own, without
+                re-rendering
+  init-hook     install the post-commit hook that re-renders this repo
   checklinks    verify every relative markdown link and backticked in-repo path
                 resolves; exit 1 if anything is broken
   review        the mechanical half of the pre-publication adversarial review:
@@ -149,6 +154,13 @@ def main(argv: list[str]) -> int:
 
     if verb == "render":
         return run_render(rest)
+    if verb == "publish":
+        # `render` already does this; the verb exists so a repo can register
+        # itself without a rebuild, and so the git hook has something to call
+        # when only the Notion designation changed.
+        return int(load("sd_research_publish").publish_main())
+    if verb == "init-hook":
+        return int(load("sd_research_publish").init_hook_main())
     if verb == "init-claude-md":
         # Lives in the review module rather than one of its own: the template
         # path and the drift check are there, and a writer that resolved the

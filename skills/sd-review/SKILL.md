@@ -11,6 +11,10 @@ Read the sd-ai-command-pack checkout's `.claude/rules/sd-operator-defaults.md` b
 Use STE-Concise for findings and reports.
 Report only the result, decisive evidence, unresolved findings, and next action.
 
+When the deliverable is a finished document, apply
+`references/publication-contract.md`: it publishes to the dashboard's
+Documents tab by default, and reaches Notion only where the user designated it.
+
 ## Before execution
 
 Inspect `sd-review --explain --json` with the intended scope and modifiers.

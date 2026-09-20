@@ -22,6 +22,10 @@ single inventory section appears, because those are the questions a reader
 came with; the eight older sections keep their order underneath them so
 nobody's muscle memory breaks.
 
+When the deliverable is a finished document, apply
+`references/publication-contract.md`: it publishes to the dashboard's
+Documents tab by default, and reaches Notion only where the user designated it.
+
 ## The fourteen sections, in output order
 
 Above them all sits the banner — two lines, `sd-status: <repo path>` and the

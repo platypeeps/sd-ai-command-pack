@@ -15,6 +15,10 @@ item's progress and decisions through `sd_db`. The work root defaults to
 does not authorize unrelated database rows, other project files, or external
 writes.
 
+When the deliverable is a finished document, apply
+`references/publication-contract.md`: it publishes to the dashboard's
+Documents tab by default, and reaches Notion only where the user designated it.
+
 ## When to use
 
 Use when requested for work spanning more than one session or more than about

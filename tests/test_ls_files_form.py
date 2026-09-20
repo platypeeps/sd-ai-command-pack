@@ -103,6 +103,13 @@ REASON_WORDS = 4
 #: about code is `bin/sd-docs-lint`'s to police.
 PROSE_SUFFIX = ".md"
 
+#: Neither code nor prose: a vendored asset the repository carries so that a
+#: rendered page needs no network. It holds no text to scan, and reading it as
+#: UTF-8 raises rather than returning nothing -- which the walk would report as
+#: a collapsed scan. Excluded by directory and not by extension, so a second
+#: binary asset lands in the same place or not at all.
+ASSET_PREFIX = "bin/fonts/"
+
 #: Floors, not counts. They fail when the scan stops reaching the repository
 #: -- a moved directory, a recogniser that matches nothing -- and they do not
 #: move when a call site is added or deleted, which is the drift that put a
@@ -231,7 +238,9 @@ def surface(root: pathlib.Path = REPO_ROOT) -> list[str]:
         ["git", "ls-files", "-z", "--deduplicate"],
         cwd=root, capture_output=True, text=True, check=True).stdout
     return [name for name in listed.split("\0")
-            if name and not name.endswith(PROSE_SUFFIX)]
+            if name
+            and not name.endswith(PROSE_SUFFIX)
+            and not name.startswith(ASSET_PREFIX)]
 
 
 def scan(root: pathlib.Path = REPO_ROOT) -> tuple[list[Site], list[str]]:

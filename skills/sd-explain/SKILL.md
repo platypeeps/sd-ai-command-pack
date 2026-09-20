@@ -12,6 +12,10 @@ mechanism, limitations, misconceptions, and next step that serve the purpose.
 Read `references/source-standards.md` before evaluating supplied or external
 evidence.
 
+When the deliverable is a finished document, apply
+`references/publication-contract.md`: it publishes to the dashboard's
+Documents tab by default, and reaches Notion only where the user designated it.
+
 ## When to use
 
 Use when the user asks what a concept means, how a mechanism works, why an

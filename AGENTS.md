@@ -99,6 +99,37 @@ Two consequences, both enforced rather than remembered:
   both ends of the scan enumerated from the filesystem, are in
   `tests/test_doc_citations.py`.
 
+## Where a Finished Document Goes
+
+`skills/_shared/references/publication-contract.md` is the policy, and it binds
+this pack and everything installed from it. Read it before deciding where a
+document goes; the short form is here so that nobody has to guess whether one
+exists.
+
+**Publication is the default, not a request.** A finished document is published
+to the local dashboard's **Documents** tab. A document nobody can find was not
+delivered, and a skill that ends by naming a path in a build directory has not
+finished. Working state -- ledgers, receipts, handoff packets, monitor state --
+is not a finished document and does not publish.
+
+**Notion is opt-in, per document.** The user designates a document and names its
+space at that time; it is recorded in that document's `notion=` key in
+`research.conf.py`. Nothing infers a target. A render enqueues the sync under
+`~/.claude/pending-notion-syncs/` and an agent session drains it, because
+rendering runs in a git hook and in CI, and neither can reach an MCP server.
+
+**A published page carries its own resources.** The Documents tab serves under
+`default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`.
+A `<link>`, a `<script>` or a remote image does not load, and the page renders
+degraded rather than failing visibly -- which is why the renderer embeds its
+fonts (`bin/sd_research_fonts.py`) instead of linking them. A skill that emits
+its own HTML meets the same rule by itself.
+
+The contract is a shared reference, so it reaches an installed skill only if
+that skill's `SKILL.md` cites `references/publication-contract.md`. A new
+document-producing skill cites it; the installer warns about a citation it
+cannot resolve, not about one nobody wrote.
+
 ## When the Git Wrapper Is Refused
 
 In a worktree-isolated session the hook rewrites `git ...` into a wrapped form,

@@ -13,6 +13,10 @@ Two reference files govern quality: `references/source-standards.md` (the
 source quality bar) and `references/verification-protocol.md` (how claims
 earn inclusion). Read both before the first search.
 
+When the deliverable is a finished document, apply
+`references/publication-contract.md`: it publishes to the dashboard's
+Documents tab by default, and reaches Notion only where the user designated it.
+
 ## When to use
 
 Use for questions that deserve multiple independent sources and a verdict

@@ -2,6 +2,58 @@
 
 ## Unreleased
 
+### Added
+
+- **Publishing a finished document is now the default** (publication contract).
+  `skills/_shared/references/publication-contract.md` states it and binds the
+  pack and everything installed from it: a finished document publishes to the
+  local dashboard's Documents tab, working state does not publish, a published
+  page embeds its own fonts and images because the tab serves under
+  `default-src 'none'`, and Notion is opt-in per document. Fifteen
+  document-producing skills cite it, `AGENTS.md` carries the short form, and
+  `skills/sd-research-repo/references/conventions.md` is rewritten around it —
+  the standard previously said every brief and report had a Notion page, which
+  is now the exception rather than the rule.
+- **`sd-research-kit publish` and `init-hook`**. `render` ends by appending this
+  repo's `root|<key>|<label>|<directory>` line to the dashboard's
+  `documents.conf` (once; a key already naming another directory is reported,
+  not overwritten) and by writing a Notion sync request under
+  `~/.claude/pending-notion-syncs/` for every document whose `DOCS` entry
+  carries the new `notion=dict(space=..., page=...)` key. A render never calls
+  Notion: it runs in a git hook and in CI, neither of which reaches an MCP
+  server, so an agent session drains the queue. `publish` is those two steps
+  without a rebuild; `init-hook` installs the post-commit hook that re-renders,
+  which never fails the commit. A machine with no dashboard checkout still
+  renders — registration reports itself skipped.
+- **`make fonts`** (`bin/sd_research_fonts_build.py`). Vendors the renderer's
+  Latin woff2 faces from Google Fonts into `bin/fonts/` under readable names and
+  regenerates `bin/sd_research_fonts.py`, which embeds them as data: URIs.
+  Granted in `.claude/settings.json` because it is on the public `.PHONY` line,
+  which is what `tests/test_permission_allowlist.py` derives the allowlist from.
+
+  Both new modules name their entry points `publish_main` and `build_fonts`
+  rather than `main`, following `sd_research_review.init_main`: a second `main`
+  per module walks `AMBIGUOUS_CEILING` upward, and that ceiling is downward
+  only. The post-commit hook is text inside `sd_research_publish.py` rather
+  than a file under `skills/`, because that tree is the render surface and is
+  markdown only, and because the pack ships no shell outside `.github/scripts/`.
+  It runs git through `sd_lib.git_output`, since `bin/` holds one git policy.
+
+### Fixed
+
+- **A rendered research page no longer loads anything over the network.** The
+  renderer emitted three Google Fonts `<link>` tags, which the Documents tab's
+  `default-src 'none'` blocks: every served page would have fallen back to
+  system fonts. The faces are embedded instead, so a page renders identically
+  over `file://` and over loopback. Dropping the optical-size axis from Source
+  Serif 4 took the generated module from 252 KB to 156 KB.
+- **`make lint` no longer hands ruff a binary.** `LINT_BIN` enumerated all of
+  `bin/` from git, so the vendored woff2 files failed the lane with five E902s.
+  `bin/fonts` is excluded by directory, and `tests/test_ls_files_form.py`'s
+  code surface excludes it for the same reason: it read every tracked
+  non-markdown file as UTF-8, and an asset raised rather than returning
+  nothing, which that test reports as a collapsed scan.
+
 ### Changed
 
 - **`sd-ship merge` honors a declared protection gap** (sd:1110). With an
