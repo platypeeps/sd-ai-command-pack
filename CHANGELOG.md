@@ -4,6 +4,38 @@
 
 ### Added
 
+- **Obsidian is where a finished document lives.** `render` writes each
+  document's Markdown to `$OBSIDIAN_VAULT/Briefs/<repo>/<name>.md`, with a
+  frontmatter block naming the source repo, path and revision. A local
+  filesystem write, so the render performs it directly: no connector, no
+  credential, no drain, which is what lets the primary copy be the one that
+  never waits. A machine with no vault publishes everywhere else and reports the
+  missing copy by name.
+
+  Each destination now gets the format it reads natively — Markdown in the
+  vault, HTML on the dashboard, Notion blocks in Notion, a native Google Doc in
+  Drive. The source for every mirror is the Markdown, never the rendered HTML.
+
+- **A Notion mirror is private unless it asks for the team.** `notion=dict()`
+  mirrors to the private space's `Briefs` folder; `notion=dict(team=True)`
+  mirrors to the R&D team space's `R&D Briefs` folder. `space=` overrides the
+  folder and never the scope. Private is the default because the two mistakes
+  are not symmetric: a brief the team cannot see is repaired by adding
+  `team=True` and draining again, and a private brief in a shared team space has
+  already been read. A Drive folder stays required and undefaulted — inventing
+  one would put a document somewhere nobody chose.
+
+### Changed
+
+- **The dashboard is served from `docs/dashboard/`, not `build/`.** The folder
+  is gitignored and `render` adds the ignore entry itself; the dashboard serves
+  everything it finds there. `register_root` moves a row that names this
+  repository's own stale `build/` directory, because a row left pointing at it
+  serves a tree nothing renders into any more; a row naming *another*
+  repository's directory is still only reported. The content-only
+  `build/artifact/` form is gone: nothing consumed it, and the dashboard
+  folder's contract is that everything in it is published.
+
 - **Google Drive is a publication destination**, on the same terms as Notion:
   opt-in per document, designated by the user, never inferred. A `DOCS` entry
   carries `drive=dict(folder="<name or id>", file="<file id or url>")`; the
