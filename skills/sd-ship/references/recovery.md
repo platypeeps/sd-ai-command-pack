@@ -37,9 +37,14 @@ only after an operator decides to stop waiting.
 The reason must be nonempty.
 The exception requires explicit manual merge authority; runner authority cannot use it.
 The command binds the abandonment to the current pull request and exact reviewed head.
-It also binds the exact request history available when the operator decided.
+It binds exact-head receipts when present.
+Otherwise, it binds the latest receipt for that pull request.
+This fallback permits recovery after a later-head request reaches the cap or its transport fails.
+No local receipt means there is nothing to abandon, and the command refuses.
 It preserves all request receipts and appends a separate abandonment receipt.
-A later head needs a new decision.
+A later head or a new exact-head receipt needs a new decision.
+Submitted, non-pending review evidence marks only matching receipt heads completed.
+This completion update also applies when the wait was abandoned.
 Published Copilot findings still require disposition before merge.
 
 ## Review retry and fix verification

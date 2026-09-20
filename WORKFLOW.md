@@ -277,6 +277,9 @@ Automatic review runs once per pull request after the local review and acknowled
 Later pushes still require exact-head local review and CI.
 A completed Copilot review must cover the exact merge head.
 Request an explicit later-head review only when the automatic review is stale.
+If that request cannot be recorded, a manual merge can abandon the latest request basis.
+An exact-head receipt replaces the latest prior receipt as that basis.
+Only submitted, non-pending reviews mark matching request heads complete.
 `false` keeps Copilot explicit-only.
 
     bills:

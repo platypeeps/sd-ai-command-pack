@@ -381,6 +381,15 @@ class Ship(SharedReview):
             raise Refusal("Copilot review abandonment receipt is malformed")
         return [dict(entry) for entry in entries]
 
+    @staticmethod
+    def copilot_abandonment_basis(entries: list[dict], head: str) -> list[dict]:
+        exact = [entry for entry in entries if entry["head"] == head]
+        if exact:
+            return exact
+        if entries:
+            return [entries[-1]]
+        raise Refusal("there is no locally recorded Copilot review request for this pull request to abandon")
+
     def abandon_copilot_review(self, number: int, head: str) -> dict | None:
         supplied = self.args.abandon_copilot_review
         if supplied is None:
@@ -388,11 +397,8 @@ class Ship(SharedReview):
         reason = supplied.strip()
         if not reason:
             raise Refusal("--abandon-copilot-review requires a nonempty reason")
-        requests = [entry for entry in self.copilot_entries()
-                    if entry["pull"] == number and entry["head"] == head]
-        if not requests:
-            raise Refusal("there is no locally recorded Copilot review request for this exact head to abandon")
-        request_digest = digest(requests)
+        requests = [entry for entry in self.copilot_entries() if entry["pull"] == number]
+        request_digest = digest(self.copilot_abandonment_basis(requests, head))
         abandonments = self.copilot_abandonments()
         existing = next((entry for entry in reversed(abandonments)
                          if entry["pull"] == number and entry["head"] == head
@@ -458,7 +464,7 @@ class Ship(SharedReview):
             raise Refusal(
                 f"Copilot review limit of {COPILOT_REVIEW_LIMIT} requests per pull request is reached",
                 code="copilot_review_limit", boundary="review", state="operator_decision",
-                next_action="Use the completed review history or choose a separate task-scoped review path.",
+                next_action="Use the existing history, or explicitly abandon its wait during an authorized manual merge.",
             )
 
     def record_copilot_request(self, entries: list[dict], number: int, head: str,
@@ -586,7 +592,8 @@ class Ship(SharedReview):
 
     def require_copilot_clearance(self, number: int, pull: dict, head: str) -> None:
         entries = [entry for entry in self.copilot_entries() if entry["pull"] == number]
-        request_digest = digest([entry for entry in entries if entry["head"] == head])
+        basis = self.copilot_abandonment_basis(entries, head) if entries else []
+        request_digest = digest(basis) if basis else None
         abandoned = any(entry["pull"] == number and entry["head"] == head
                         and entry["request_digest"] == request_digest
                         for entry in self.copilot_abandonments())
@@ -595,7 +602,7 @@ class Ship(SharedReview):
         if material is None:
             return
         reviews, comments = material
-        self.record_copilot_completion(entries, abandoned)
+        self.record_copilot_completion(entries, reviews)
         try:
             ack = sd_lib.sibling("sd_review_ack_ship_gate", "sd-review-ack")
             report = ack.review_state(
@@ -617,14 +624,22 @@ class Ship(SharedReview):
                 next_action=f"Run sd-review-ack --pr {number}, disposition each finding, then retry merge.",
             )
 
-    def record_copilot_completion(self, entries: list[dict], abandoned: bool) -> None:
-        if not entries or abandoned or entries[-1]["status"] == "completed":
+    def record_copilot_completion(self, entries: list[dict], reviews: list[dict]) -> None:
+        completed_heads = {
+            str(review.get("commit_id") or "") for review in reviews
+            if bool(review.get("submitted_at"))
+            and str(review.get("state") or "").upper() not in ("", "PENDING")
+        }
+        completed_receipts = {(entry["pull"], entry["head"]) for entry in entries
+                              if entry["head"] in completed_heads}
+        if not completed_receipts:
             return
-        latest = entries[-1]
         all_entries = self.copilot_entries()
-        index = all_entries.index(latest)
-        all_entries[index] = {**latest, "status": "completed"}
-        self.save(copilot_reviews=all_entries)
+        updated = [{**entry, "status": "completed"}
+                   if (entry["pull"], entry["head"]) in completed_receipts else entry
+                   for entry in all_entries]
+        if updated != all_entries:
+            self.save(copilot_reviews=updated)
 
     def prepare(self) -> dict:
         if self.state.get("phase") in ("merged", "merge_dispatch"):

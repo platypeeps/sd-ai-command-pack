@@ -158,9 +158,14 @@ Later pushes still require a local review for the exact head and exact-head CI.
 The completed Copilot review must cover the exact merge head.
 Use `--copilot-review request` when a later push makes the automatic review stale.
 The adapter permits at most three Copilot requests per pull request.
+At that cap, use existing history or a separately authorized manual abandonment.
 Use `--abandon-copilot-review REASON` only during merge.
-It stops waiting for a local request on the current pull request and reviewed head.
+It stops waiting for the request basis on the current pull request and reviewed head.
+The basis contains exact-head receipts when present.
+Otherwise, it contains the latest receipt for that pull request.
+No local receipt means there is nothing to abandon, and the command refuses.
 It preserves request history and records a separate abandonment.
+Only submitted, non-pending reviews mark matching request heads complete.
 Published Copilot findings still require disposition.
 
 The additive `workflow` object reports `schema_version`, `phase`, `state`, `blocker`, and `next_action`.

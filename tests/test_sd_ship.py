@@ -437,6 +437,7 @@ roles:
         }]
         with patch.object(ship.time, "sleep"):
             self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(self.operation().state["copilot_reviews"][0]["status"], "completed")
 
     def test_later_push_keeps_one_automatic_review_but_requires_exact_head_review(self):
         self.enable_automatic_copilot()
@@ -495,6 +496,7 @@ roles:
         pull.checks = [{**row, "head_sha": head} for row in pull.checks]
         with patch.object(ship.time, "sleep"):
             self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(self.operation().state["copilot_reviews"][0]["status"], "requested")
 
     def test_explicit_skip_suppresses_a_deep_automatic_review(self):
         self.enable_automatic_copilot()
@@ -715,7 +717,7 @@ roles:
             with patch.object(ship.time, "sleep"):
                 self.merge("--abandon-copilot-review", "provider result is no longer required")
 
-    def test_abandonment_requires_a_request_for_the_exact_head(self):
+    def test_later_head_can_abandon_the_latest_request_after_dispatch_failure(self):
         self.enable_automatic_copilot()
         self.prepare()
         _git(self.root, "commit", "--allow-empty", "-m", "later fix\n\nAuthored-with: human")
@@ -723,8 +725,46 @@ roles:
         self.prepare()
         pull = self.remote.pull(1)
         pull.checks = [{**row, "head_sha": head} for row in pull.checks]
-        with self.assertRaisesRegex(ship.Refusal, "request for this exact head"):
-            self.merge("--abandon-copilot-review", "old request is stale")
+        self.double.copilot_pending.clear()
+        self.double.lose_copilot_request = True
+        with self.assertRaisesRegex(ship.Refusal, "review request transport failed"):
+            self.prepare("--copilot-review", "request")
+        result = self.merge("--abandon-copilot-review", "later-head dispatch failed")
+        self.assertEqual(result["phase"], "merged")
+        state = self.operation().state
+        self.assertEqual(len(state["copilot_reviews"]), 1)
+        self.assertEqual(state["copilot_review_abandonments"][0]["head"], head)
+
+    def test_later_head_can_abandon_the_latest_request_after_request_cap(self):
+        self.enable_automatic_copilot()
+        self.prepare()
+        operation = self.operation()
+        requests = operation.state["copilot_reviews"]
+        operation.save(copilot_reviews=[*requests, *[{
+            "pull": 1, "head": str(index) * 40, "selection": "explicit",
+            "status": "completed", "requested_at": f"2026-09-19T20:0{index}:00Z",
+        } for index in (2, 3)]])
+        _git(self.root, "commit", "--allow-empty", "-m", "later fix\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.prepare()
+        pull = self.remote.pull(1)
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        self.double.copilot_pending.clear()
+        with self.assertRaisesRegex(ship.Refusal, "limit of 3") as caught:
+            self.prepare("--copilot-review", "request")
+        self.assertIn("abandon", caught.exception.workflow["next_action"])
+        result = self.merge("--abandon-copilot-review", "request cap reached")
+        self.assertEqual(result["phase"], "merged")
+        state = self.operation().state
+        abandonment = state["copilot_review_abandonments"][0]
+        self.assertEqual(abandonment["head"], head)
+        self.assertEqual(abandonment["request_digest"], ship.digest([state["copilot_reviews"][-1]]))
+
+    def test_abandonment_refuses_without_a_local_request_receipt(self):
+        self.prepare()
+        with self.assertRaisesRegex(ship.Refusal, "no locally recorded Copilot review request"):
+            self.merge("--abandon-copilot-review", "there is no request")
+        self.assertNotIn("copilot_review_abandonments", self.operation().state)
 
     def test_later_request_on_same_head_supersedes_an_abandonment(self):
         self.enable_automatic_copilot()
@@ -745,6 +785,21 @@ roles:
                                    "--abandon-copilot-review", "runner chose to stop waiting")
         with self.assertRaisesRegex(ship.Refusal, "requires explicit manual merge authority"):
             operation.merge()
+
+    def test_abandoned_completed_review_marks_matching_receipt_complete(self):
+        self.enable_automatic_copilot()
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.double.review_payload["reviews"] = [{
+            "user": {"login": "Copilot"}, "commit_id": head, "state": "COMMENTED",
+            "submitted_at": "2026-09-19T20:00:00Z", "body": "",
+        }]
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge(
+                "--abandon-copilot-review", "completion arrived after the decision")["phase"], "merged")
+        state = self.operation().state
+        self.assertEqual(state["copilot_reviews"][0]["status"], "completed")
+        self.assertEqual(len(state["copilot_review_abandonments"]), 1)
 
     def test_remote_copilot_findings_block_without_a_local_request_receipt(self):
         self.enable_automatic_copilot()
