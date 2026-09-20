@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Changed
+
+- **`sd.merge_authorization` is now `sd.assistant_merge`.** The old name said
+  what the setting was about, not who reads it, and the one database's
+  `repo.merge_policy` -- renamed to `repo.runner_merge` in the same sitting --
+  read the same way. One is the assistant's grant and the other is the
+  runner's, and now each says so. The values are unchanged: `controlled` or
+  `ask`.
+
+### Deprecated
+
+- **`sd.merge_authorization` still reads, for this release only.** A machine
+  whose `config.json` holds the old name resolves it to the new one, so no
+  recorded grant orphans and nothing has to be migrated. `sd config set` and
+  `sd config unset` clear the old name as they write, and `sd config list sd`
+  names it as no longer declared. 1.2.0 removes the alias.
+
 ### Added
 
 - **A Drive mirror defaults to `Briefs/<repo>`.** `drive=dict()` is now a

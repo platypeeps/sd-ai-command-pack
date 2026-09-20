@@ -2920,7 +2920,7 @@ from a number the operator types.
     silently recounted.
   - C-114, minor: "237 `prd.md` files" reads as a present count and is 238
     today, this item's own having been added. Addressed.
-  - C-115, minor: `_local_block_entrypoints` runs to `bin/sd_lib.py:414`,
+  - C-115, minor: `_local_block_entrypoints` runs to `bin/sd_lib.py`,
     not `:412`, in both pages. Corrected.
   - C-116, minor: `design.md`'s mode rule omitted the no-git case criterion
     11 asserts by name. Addressed.
@@ -4732,7 +4732,7 @@ from a number the operator types.
   transcript**, a format nothing here has read. R11-D38's item-rows seam is
   spent — `d9aca2e0` crossed it — and is not reserved again. **No seam is
   reserved for calling GitHub**, and an earlier draft of this derivation
-  reserved one before the transport was checked: `bin/sd_lib.py:275` runs
+  reserved one before the transport was checked: `bin/sd_lib.py` runs
   `["gh", "api", endpoint]` and `bin/sd-pr-state:117-126` `gh_json` takes
   arbitrary `gh` args behind a timeout, an `OSError` guard and a JSON decode.
   The mechanism, its failure vocabulary and its timeouts are all settled, so
