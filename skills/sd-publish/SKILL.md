@@ -44,7 +44,9 @@ identify them before reading sources, profile content, or workspace artifacts.
 - `constraints=` — length, required sections, links, confidentiality,
   accessibility, terminology, or other supplied rules;
 - `profile=auto|off|<locator>` — default `auto`; optional read-only voice and
-  formatting preferences under the personal profile contract; and
+  formatting preferences under the personal profile contract;
+- `judge=off|jev` — default `off`; an optional destination-fit judgment run
+  before the preview, and only when the `jev` command is available; and
 - `depth=brief|standard` — default `standard`.
 
 ## Workflow
@@ -110,7 +112,67 @@ identify them before reading sources, profile content, or workspace artifacts.
     meaning, unclear headings, unexplained acronyms, and missing alternatives
     for proposed media. Minimize exposure without implying the source said
     something different.
-11. Produce a preview that shows the exact draft, destination assumptions,
+11. Judge destination fit when `jev` is available, before the preview. This
+    step is optional and off by default. Run it only when the user sets
+    `judge=jev` and `jev enabled` exits 0. That probe costs nothing and makes
+    no request. Exit 3 means the judgment is unavailable; continue unchanged
+    and record it as not run. Ask both questions in one `ask` request, over
+    the same state:
+    - a `score` for how well the draft matches the destination's register and
+      length expectations. Describe each level as a concrete situation: wrong
+      register or length for this channel; recognizable for it but fighting
+      it in several places; matching its register and sitting inside its
+      length, with rough spots; and reading as written for it, with nothing
+      left to change; and
+    - a `noul` for whether the draft still says what the source said. The
+      condition holds when every load-bearing claim is stated or directly
+      implied by the source span. It fails when the draft contradicts the
+      source, and it fails when the draft adds or strengthens a claim the
+      source does not carry. Name both failure shapes in the instructions, so
+      a low probability is readable.
+    Adaptation drift is the failure this skill exists to prevent, so the
+    second question is a source-faithfulness check and is written as one.
+    Both questions share one state, so send it once as named JSON fields and
+    reference them from the questions with backticked paths such as
+    `draft.body`. The question ids are the keys of the questions object; they
+    are for your code and never reach the model, so put the whole meaning in
+    the question:
+
+    ```sh
+    jev ask --questions q.json --state s.json --state-format json
+    ```
+
+    State carries the exact draft, the source spans it was adapted from, the
+    destination name, and the supplied length or register constraints. Send
+    nothing else. Never send file paths, repository names, credentials,
+    destination account details, or profile content. Every call leaves the
+    machine, so do not send a source the user marked confidential at all;
+    leave `judge=off` and say so in the report.
+12. Act on the two numbers, and treat neither as permission to publish.
+    - A low fit score is a rewrite, not a note. Rework the draft against the
+      destination contract in step 5, then judge the new draft before the
+      preview. Below the top two levels is a reasonable starting threshold;
+      evaluate it on real drafts.
+    - A low faithfulness probability is a stop-and-ask. Name the drifted claim
+      and its source-ledger ID, and ask the user before continuing. Below 0.8
+      is a reasonable starting threshold. A probability near the middle means
+      yes and no are similarly likely, not that the draft is half faithful.
+      Stop there too.
+    - A high score and a high probability change nothing about publication.
+      This skill still does not send, publish, or schedule anything, and the
+      user's approval is still required.
+    - When a request fails, a fallback keeps the lane moving. The flag goes
+      after the verb, and an empty answer set is the batch form:
+      `jev ask --questions q.json --state s.json --state-format json
+      --fallback '{}'`. It prints that answer, exits 0, and writes the reason
+      to standard error. Read the reason. Record the answer as not run, and
+      never as a pass.
+    - Count the answers you got back, not the questions you sent, and report
+      both numbers. Exit 0 says the call returned, not that Jev judged
+      anything: a fallback answers nothing and exits 0 too. A judgment
+      missing either answer is not run. A line that reads the same whether
+      Jev answered or not is how a dead check stays green forever.
+13. Produce a preview that shows the exact draft, destination assumptions,
     material adaptations, omissions, citations, sensitivity decisions, and open
     approvals. A request to send or publish does not execute here. Provide a
     connector-ready handoff only after a fresh preview; the write-capable
@@ -130,6 +192,10 @@ identify them before reading sources, profile content, or workspace artifacts.
 - Do not broaden the source audience, expose sensitive content, or turn an
   internal limitation into public certainty. Unsupported promotional claims
   cannot be introduced during transformation.
+- The `jev` judgment is optional, additive, and off by default. It reads the
+  draft and the source span, returns numbers, and writes nothing. It cannot
+  approve, send, publish, widen an audience, or supply a claim, and a high
+  number is not approval.
 - Profile use is optional, read-only, and preference-only. It cannot establish
   authorship, facts, identity, experience, consent, authority, or approval.
 - Never claim publication, delivery, connector validation, media production,
@@ -157,6 +223,10 @@ identify them before reading sources, profile content, or workspace artifacts.
   destination, wording, or sensitivity decisions;
 - **Connector-ready handoff** — final target locator when supplied, exact
   preview, source/adaptation metadata, verification checks, and authority still
-  required; and
+  required;
+- **Destination-fit judgment** — judge mode, whether `jev` was available,
+  questions sent and answers returned as separate numbers, the fit score, the
+  faithfulness probability, the action each number triggered, and `not run`
+  when the judgment was off, unavailable, or answered by a fallback; and
 - **Execution boundary** — sending, publishing, scheduling, destination writes,
   connector validation, and media production marked `not run`.
