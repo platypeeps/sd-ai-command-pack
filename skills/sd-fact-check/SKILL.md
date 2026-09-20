@@ -174,11 +174,13 @@ underscores. `not_a_factual_claim` is the no-match option: it catches an input
 the five verdicts cannot describe, so the model never forces one of them onto
 an opinion or a prediction.
 
-Give the run its own scratch directory with `scratch=$(mktemp -d)`. Write the
+Give the run its own scratch directory with `scratch=$(mktemp -d)`. Install
+`trap 'rm -rf "$scratch"' EXIT` in that shell, immediately after. Write the
 criteria to `$scratch/criteria.json` and the state to `$scratch/claim.json`.
 Neither file lands in the working directory, so neither reaches a repository,
-a diff, or the audited material. Remove the directory with `rm -rf "$scratch"`
-when the audit ends, however it ends.
+a diff, or the audited material. Run the call below in the same shell. The
+trap removes the directory when that shell exits, so an interrupted or failed
+audit leaves nothing behind.
 
 Pass the criteria file as `@"$scratch/criteria.json"`. The inline
 `--criteria 'name=text,...'` form splits entries on commas and on the first

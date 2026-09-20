@@ -21,11 +21,11 @@ When given text to humanize:
 How you're invoked changes what you deliver (see Invocation Modes). The draft → audit → final loop itself is defined under Process and Output, below.
 
 The loop judges by eye, so it tells you a rewrite reads better without showing
-that it is. When the user asks for prose scores and `jev` is available,
-`references/prose-score-dimensions.md` scores the source and the rewrite on
-the same dimensions, and the difference is the evidence. That pass is
-optional and off by default; without it this skill behaves exactly as it does
-above.
+that it is. An optional pass scores the source and the rewrite on the same
+dimensions, from `references/prose-score-dimensions.md`, and the difference is
+the evidence. OPTIONAL SCORES states when that pass runs, and this paragraph
+states no condition of its own. The pass is off by default; without it this
+skill behaves exactly as it does above.
 
 ## Voice Calibration
 
@@ -394,9 +394,10 @@ file before scoring anything. What follows is only how this skill uses it.
 
 **Run it when all three hold.** The mode is pasted text or file, the user
 asked for prose scores in this session, and `jev enabled` exits `0`. Otherwise
-skip the pass. Embedded mode never scores, because it reports no numbers. Say nothing when the
-user never asked, and say so in one sentence when the user asked and `jev`
-cannot answer here. A reader without `jev` still gets the whole loop above.
+skip the pass. Embedded mode never scores, because it reports no numbers.
+Say nothing when the user never asked, and say so in one sentence when the
+user asked and `jev` cannot answer here. A reader without `jev` still gets the
+whole loop above.
 
 **Score twice, before and after.** Score the source text, run the loop, then
 score the final rewrite. A dimension that dropped is evidence the edit landed.
