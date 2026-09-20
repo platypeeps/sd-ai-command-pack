@@ -1637,10 +1637,6 @@ class TheMeterEnvField(unittest.TestCase):
         self.assertIn("'meter_env' of bill 'plan' is ['A', 'B'], which is not a variable name", str(caught.exception))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class LoopbackNeedsNoCredentialTests(unittest.TestCase):
     """sd:1145 -- a locally hosted server authenticates nobody.
 
@@ -1695,3 +1691,7 @@ class LoopbackNeedsNoCredentialTests(unittest.TestCase):
         for host in ("localhost", "127.0.0.1", "[::1]", "127.0.0.2"):
             with self.subTest(host=host):
                 self.assertTrue(sd_registry.loopback(self.entry(f"http://{host}/v1")))
+
+
+if __name__ == "__main__":
+    unittest.main()
