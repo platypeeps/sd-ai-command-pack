@@ -358,8 +358,17 @@ class HistoryChainTests(unittest.TestCase):
                    "resume_report_digest": digest(review_history([first, timed_out]))}
         state = {"passes": [first, timed_out, {"head": "c" * 40, "report": resumed, "retry": True}]}
         self.assertIsNone(ItemHistory()._validate_coverage(state, resumed))
-        # The exemption is the captured evidence, not the absent report: strip
-        # the evidence and the same reservation is refused again.
-        del state["passes"][1]["execution_error"]
-        with self.assertRaisesRegex(ship.Refusal, "does not continue the initially reviewed head"):
-            ItemHistory()._validate_coverage(state, resumed)
+        # An attempt that died without parseable evidence is the same
+        # reservation: a watchdog leaves a captured report, an unreadable
+        # receipt leaves nothing, and neither verified anything.
+        state["passes"][1] = {"head": "b" * 40,
+                              "execution_error": {"kind": "unreadable_receipt", "stage": "execution"}}
+        bare = dict(resumed, resume_report_digest=None)
+        state["passes"][-1]["report"] = bare
+        self.assertIsNone(ItemHistory()._validate_coverage(state, bare))
+        # The exemption reaches the reservation, not what follows it: a plain
+        # verification cannot continue from a pass that produced no report.
+        state["passes"][-1] = {"head": "c" * 40, "report": dict(
+            bare, subject={"base": "b" * 40, "head": "c" * 40})}
+        with self.assertRaisesRegex(ship.Refusal, "never completed the requested local review depth"):
+            ItemHistory()._validate_coverage(state, state["passes"][-1]["report"])

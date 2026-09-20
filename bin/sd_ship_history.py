@@ -241,13 +241,16 @@ class ItemHistory(ReviewHistory):
             # A full-branch review covers everything before it, including an
             # attempt that never produced a report to check.
             return
-        if not current and timeout_evidence(entry) is not None:
+        if not current:
             # A reservation that produced no report verified nothing, and has
-            # no base of its own to compare. Its evidence is the captured
-            # timeout, and the pass that follows resumes the same incomplete
-            # review, which is where the link is checked. Reading it as a
-            # verification asked it for a report it never had -- a defect only
-            # a chain long enough to hold one reaches.
+            # no base of its own to compare, so it is left to the pass that
+            # resumes it. That is where the link is checked: `validate_retry`
+            # reads the captured timeout when there is one and `None` when
+            # there is not, so an attempt that died without parseable evidence
+            # is resumed rather than blocking recovery for good. Keying this on
+            # the evidence instead was the narrower half of the same defect --
+            # a watchdog leaves a captured report, an unreadable receipt leaves
+            # nothing, and both are reservations.
             return
         if entry.get("retry"):
             if index == 0:
