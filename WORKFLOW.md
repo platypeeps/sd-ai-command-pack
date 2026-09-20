@@ -125,13 +125,13 @@ past the cap marks the item `blocked`; non-blocking findings hold nothing.
 | Research | After the brief and decisions | Claims against sources, gaps, wrong calls | 2 |
 | Research | Final product, before the send box | The piece, page or ticket as a reader sees it | 1 |
 | Development | prd and design | Scope, missing requirements, wrong assumptions | 5 |
-| Development | Code, before merge | Defects a second reader finds | 1, plus one verification of the fix |
+| Development | Code, before merge | Defects a second reader finds | 5 rounds |
 
-The code pass reads a head. A fix that changes it gets one verification pass
-over the diff since the reviewed head, the last automatic pass on that pull
-request; `sd-ship` pushes only the reviewed head or a verified fix of it,
-and merges naming that head with `gh pr merge --squash --match-head-commit <the
-reviewed sha>` — equivalently `PUT /repos/{owner}/{repo}/pulls/{n}/merge`
+The code pass reads a head. A fix that changes it gets a further verification
+pass over the diff since the reviewed head, up to the cap above; `sd-ship`
+pushes only the reviewed head or a verified fix of it, and merges naming that
+head with `gh pr merge --squash --match-head-commit <the reviewed sha>` —
+equivalently `PUT /repos/{owner}/{repo}/pulls/{n}/merge`
 with `sha=` — so a head that moved after the review is refused at GitHub with
 a 405. The flag is what does the refusing: a merge that carries only a title
 and a body refuses nothing, whatever head moved under it.

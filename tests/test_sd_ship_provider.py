@@ -16,6 +16,7 @@ from tests import test_sd_ship as fixture
 from tests import test_sd_ship_no_item_publication as publication
 
 ship = fixture.ship
+CAP = fixture.CAP
 HEAD, BASE = "a" * 40, "b" * 40
 
 
@@ -173,20 +174,27 @@ class ProviderSelection(unittest.TestCase):
         first, _process = self.context("minimax", report_changes=incomplete)
         with self.assertRaises(ship.Refusal):
             first.review(HEAD)
-        second, _process = self.context("baseten", state=first.state, report_changes=incomplete)
-        second.args.retry_review = True
-        with patch("sd_ship_review.git", return_value=""), self.assertRaises(ship.Refusal):
-            second.review(HEAD)
-        prefix = copy.deepcopy(second.state["passes"])
+        # Retries spend the automatic allowance the table's cap grants, and
+        # each one keeps the selector it was dispatched with.
+        selectors, spent = ["minimax"], first
+        for index in range(CAP - 1):
+            choice = "baseten" if index % 2 == 0 else "minimax"
+            spent, _process = self.context(choice, state=spent.state, report_changes=incomplete)
+            spent.args.retry_review = True
+            with patch("sd_ship_review.git", return_value=""), self.assertRaises(ship.Refusal):
+                spent.review(HEAD)
+            selectors.append(choice)
+        prefix = copy.deepcopy(spent.state["passes"])
+        self.assertEqual(len(prefix), CAP)
         self.assertEqual(prefix[:1], first.state["passes"])
-        self.assertEqual([entry["requested_provider"] for entry in prefix], ["minimax", "baseten"])
-        refused, process = self.context("minimax", state=second.state)
+        self.assertEqual([entry["requested_provider"] for entry in prefix], selectors)
+        refused, process = self.context("minimax", state=spent.state)
         refused.args.retry_review = True
         with self.assertRaisesRegex(ship.Refusal, "spent"):
             refused.review(HEAD)
         process.assert_not_called()
         self.assertEqual(refused.state["passes"], prefix)
-        allowed, process = self.context("minimax", state=second.state)
+        allowed, process = self.context("minimax", state=spent.state)
         allowed.args.additional_review_for, allowed.args.request_reason = HEAD, "Synthetic explicit additional request"
         with patch("sd_ship_review.git", return_value=""):
             allowed.review(HEAD)

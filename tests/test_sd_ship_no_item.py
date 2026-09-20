@@ -24,6 +24,7 @@ from tests import test_sd_ship as fixture
 
 ship = fixture.ship
 no_item = importlib.import_module("sd_ship_no_item")
+CAP = fixture.CAP
 bindings = importlib.import_module("sd_ship_bindings")
 
 
@@ -995,13 +996,14 @@ class NoItemContracts(unittest.TestCase):
                 receipts.save(self.connection, key, receipts.read(self.connection, key)[0], original)
                 self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
 
-    def test_a_native_only_record_verifies_its_fix_and_clears_a_requested_third_pass(self):
+    def test_a_native_only_record_verifies_its_fixes_and_clears_a_requested_extra_pass(self):
         """The control case with no imported history at all.
 
-        Pass one is the code review, pass two the fix verification of the head
-        it produced, and pass three an explicitly requested continuation. The
-        third pass is where the record used to spend a paid review and then
-        refuse its own clearance: the request carries the combined digest that
+        Pass one is the code review, each further automatic pass the fix
+        verification of the head its predecessor reviewed, and the pass after
+        the cap an explicitly requested continuation. That requested pass is
+        where the record used to spend a paid review and then refuse its own
+        clearance: the request carries the combined digest that
         `history_digest` writes, and the native-only reader compared it against
         the raw native prefix instead. The last two assertions are that
         mismatch, stated as the two formats that are not each other.
@@ -1013,21 +1015,24 @@ class NoItemContracts(unittest.TestCase):
         self.assertEqual(code, 3, diagnostic)
         self.assertIn("blocking", value["error"])
 
-        reviewed = self.commit_fix("fix.py", "value = 2\n")
+        verified = 0
+        for index in range(1, CAP):
+            reviewed = self.commit_fix(f"fix-{index}.py", f"value = {index + 1}\n")
 
-        def verification(report, state, argv):
-            self.assertIn("--verify-report", argv)
-            self.assertEqual(argv[argv.index("--base") + 1], reviewed)
-            report["subject"]["base"] = reviewed
-            report["verification_report_digest"] = ship.digest(state["passes"][0]["report"])
+            def verification(report, state, argv, reviewed=reviewed, index=index):
+                self.assertIn("--verify-report", argv)
+                self.assertEqual(argv[argv.index("--base") + 1], reviewed)
+                report["subject"]["base"] = reviewed
+                report["verification_report_digest"] = ship.digest(state["passes"][index - 1]["report"])
 
-        reviewer, verify_calls = self.native_reviewer(review_id, shape=verification)
-        self.success("review", "--review-id", review_id, reviewer=reviewer)
-        self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
+            reviewer, verify_calls = self.native_reviewer(review_id, shape=verification)
+            self.success("review", "--review-id", review_id, reviewer=reviewer)
+            self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
+            verified += len(verify_calls)
 
-        # Two passes are spent, so a third head needs an explicit request, and
-        # the renewal digest belongs to the fourth pass onwards.
-        self.commit_fix("more.py", "value = 3\n")
+        # The cap is spent, so the next head needs an explicit request, and
+        # the renewal digest belongs to the pass after that one.
+        self.commit_fix("more.py", "value = 99\n")
         self.refused("review", "--review-id", review_id, pattern="spent|explicit new request")
         _key, (_revision, state) = self.record(review_id)
         self.refused(
@@ -1035,20 +1040,20 @@ class NoItemContracts(unittest.TestCase):
             "--request-reason", "fixture continuation assertion",
             "--review-history-digest", state["history_digest"], pattern="renews only after",
         )
-        reviewer, third_calls = self.native_reviewer(review_id, resume=True)
+        reviewer, extra_calls = self.native_reviewer(review_id, resume=True)
         self.success(
             "review", "--review-id", review_id, "--additional-review-for", self.head,
             "--request-reason", "fixture continuation assertion", reviewer=reviewer,
         )
         cleared = self.success("verify-review", "--review-id", review_id, "--expected-head", self.head)
-        self.assertEqual([len(calls), len(verify_calls), len(third_calls)], [1, 1, 1])
-        self.assertEqual(cleared["spent_passes"], 3)
+        self.assertEqual([len(calls), verified, len(extra_calls)], [1, CAP - 1, 1])
+        self.assertEqual(cleared["spent_passes"], CAP + 1)
 
         _key, (_revision, state) = self.record(review_id)
         passes = state["passes"]
-        request = passes[2]["additional_review_request"]
-        self.assertEqual(request["prior_history_digest"], no_item.combined_digest(state, passes[:2]))
-        self.assertNotEqual(request["prior_history_digest"], ship.digest(passes[:2]))
+        request = passes[CAP]["additional_review_request"]
+        self.assertEqual(request["prior_history_digest"], no_item.combined_digest(state, passes[:CAP]))
+        self.assertNotEqual(request["prior_history_digest"], ship.digest(passes[:CAP]))
 
     def test_a_linked_worktree_keeps_its_durable_evidence_in_the_common_git_directory(self):
         """A linked worktree's `.git` is a file, so no path can be built from it.

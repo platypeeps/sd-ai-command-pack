@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 import sd_ship_dispositions
-from sd_ship_history import completed_depth, digest
+from sd_ship_history import AUTOMATIC_CODE_REVIEW_PASSES, completed_depth, digest
 from sd_ship_remote import Refusal, git
 from sd_ship_workflow import success
 
@@ -143,14 +143,15 @@ class SharedReview:
                 "operator_context": "untrusted assertion, not proof of user approval", **self.history.request_fields(self.state)}
 
     def request_history(self, supplied_digest: str | None) -> None:
+        cap = AUTOMATIC_CODE_REVIEW_PASSES
         spent = self.history.spent(self.state)
         continuation = self.history.requires_continuation(self.state)
         history_digest = self.history.history_digest(self.state)
-        if spent < 2 and not continuation:
-            raise Refusal("additional review requires two spent passes")
-        if spent == 2 and not continuation and supplied_digest is not None:
-            raise Refusal("--review-history-digest renews only after at least three spent passes")
-        if (spent >= 3 or continuation) and supplied_digest != history_digest:
+        if spent < cap and not continuation:
+            raise Refusal(f"additional review requires {cap} spent passes")
+        if spent == cap and not continuation and supplied_digest is not None:
+            raise Refusal(f"--review-history-digest renews only after at least {cap + 1} spent passes")
+        if (spent > cap or continuation) and supplied_digest != history_digest:
             raise Refusal(f"renewal requires --review-history-digest {history_digest} for the complete current history; each digest is spent once")
         self.history.validate_requests(self.state)
         self.history.aggregate(self.state)
@@ -175,10 +176,12 @@ class SharedReview:
 
     def validate_dispatch(self, head: str, prior: dict, retry: bool, additional: bool) -> None:
         passes = self.history.native(self.state)
-        if not additional and (self.history.spent(self.state) >= 2 or self.history.requires_continuation(self.state)):
-            raise Refusal("one code review and one fix verification are spent; further review requires an explicit new request")
+        if not additional and (self.history.spent(self.state) >= AUTOMATIC_CODE_REVIEW_PASSES
+                               or self.history.requires_continuation(self.state)):
+            raise Refusal(f"all {AUTOMATIC_CODE_REVIEW_PASSES} automatic code review passes are spent; "
+                          "further review requires an explicit new request")
         if retry and (not passes or completed_depth(prior)):
-            raise Refusal("--retry-review can continue only an incomplete initial review")
+            raise Refusal("--retry-review can continue only an incomplete review")
         if passes and not retry and not additional:
             if not completed_depth(prior):
                 raise Refusal("the preceding review did not complete its requested depth; use --retry-review for a full-branch retry")

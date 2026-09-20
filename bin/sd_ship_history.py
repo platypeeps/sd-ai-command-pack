@@ -8,6 +8,12 @@ import re
 
 from sd_ship_remote import Refusal
 
+#: Automatic local code-review passes before an explicit request is needed.
+#: The *Development / Code, before merge* row of the review table in
+#: `.claude/rules/sd-planning-adversarial-review.md` states this cap, and
+#: every site that counts passes reads it here rather than spelling a number.
+AUTOMATIC_CODE_REVIEW_PASSES = 5
+
 
 def digest(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
@@ -30,6 +36,26 @@ def timeout_evidence(entry: dict) -> dict | None:
             or any(not isinstance(vendor, str) for vendor in captured["authored_with"])):
         return None
     return captured
+
+
+def reservation(entry: dict) -> bool:
+    """A pass that verified nothing does not supersede the evidence before it.
+
+    There are two ways to verify nothing, and only one of them is visible. A
+    pass may store no report at all. It may also store one in which no
+    reviewer completed the requested depth -- and that one looks like
+    evidence. A failed verification emits a report whose findings list is
+    empty, so reading it as the latest word drops every blocker the completed
+    review before it found, and the retry is handed nothing to resume.
+
+    Written once because the dispatcher that supplies a retry's prior evidence
+    and the validator that checks it have to give the same answer. Two copies
+    of the condition is how they stopped agreeing: one was relaxed to cover an
+    attempt that died leaving nothing parseable, the other was not, and the
+    live retry path refused evidence it had just been handed.
+    """
+    report = entry.get("report") or {}
+    return not report or not completed_depth(report)
 
 
 def review_history(passes: list[dict]) -> dict:
@@ -59,13 +85,29 @@ def review_history(passes: list[dict]) -> dict:
 
 
 def validate_additional_requests(passes: list[dict]) -> None:
-    for index, entry in enumerate(passes[2:], 2):
+    """A request is required past the cap, and authenticated wherever it sits.
+
+    Position alone cannot say whether a stored pass was explicitly requested.
+    A receipt written while the cap was lower carries its request at an index
+    today's cap treats as automatic, and reading the index rather than the
+    entry would let that request go unchecked. The entry states it, so the
+    entry is what is read.
+    """
+    for index, entry in enumerate(passes):
         request = entry.get("additional_review_request")
+        if request is None and index < AUTOMATIC_CODE_REVIEW_PASSES:
+            continue
         if (not isinstance(request, dict) or request.get("head") != entry.get("head")
                 or not isinstance(request.get("reason"), str) or not request["reason"].strip()
                 or type(request.get("allowed_passes")) is not int or request["allowed_passes"] != 1
                 or request.get("prior_history_digest") != digest(passes[:index])):
             raise Refusal("additional review request does not bind its exact prior history and head")
+
+
+def verification_link(previous: dict, report: dict) -> bool:
+    """`report` verifies `previous`: same head reviewed, same evidence carried."""
+    return (report.get("subject", {}).get("base") == previous.get("head")
+            and report.get("verification_report_digest") == digest(previous.get("report") or {}))
 
 
 def full_branch_coverage(report: dict, prior: dict) -> None:
@@ -171,28 +213,112 @@ class ItemHistory(ReviewHistory):
 
     def prior(self, state: dict) -> dict:
         passes = self.native(state)
-        prior = (passes[-1].get("report") or {}) if passes else {}
-        if passes and not prior and timeout_evidence(passes[-1]) is not None:
-            return self.aggregate(state)
-        return prior
+        if not passes:
+            return {}
+        # A reservation carries the whole prefix forward; see `reservation`.
+        return self.aggregate(state) if reservation(passes[-1]) else passes[-1]["report"]
 
     def _validate_coverage(self, state: dict, report: dict) -> None:
-        passes = self.native(state)
-        first, last = passes[0].get("report") or {}, passes[-1]
-        if len(passes) >= 3:
-            self.validate_requests(state)
-            full_branch_coverage(report, self.aggregate(state, before_last=True))
-        elif len(passes) == 2 and last.get("retry"):
-            self.validate_retry(passes, first, report)
-        else:
-            if not completed_depth(first):
-                raise Refusal("the original branch never completed the requested local review depth")
-            if len(passes) == 2 and (report.get("subject", {}).get("base") != passes[0].get("head")
-                                    or report.get("verification_report_digest") != digest(first)):
-                raise Refusal("fix verification does not continue the initially reviewed head")
+        """Each stored pass checked by what it says it is, against its own predecessor.
 
-    def validate_retry(self, passes: list[dict], first: dict, report: dict) -> None:
-        prior = first or (review_history(passes[:1]) if timeout_evidence(passes[0]) is not None else {})
-        if (completed_depth(first) or report.get("subject", {}).get("base") != report.get("authorship_base")
-                or report.get("resume_report_digest") != (digest(prior) if prior else None)):
+        One walk, not three rules chosen by counting. A pass carries what it
+        was: an explicit request, a retry of the pass before it, or an
+        automatic verification of it. Deciding from the count instead made two
+        defects that only a longer chain exposes -- a receipt written under a
+        lower cap read as automatic, and a stale link in the middle that a
+        check on the last pair alone can never see.
+        """
+        passes = self.native(state)
+        if not passes:
+            return
+        self.validate_requests(state)
+        # The checkpoint is read before the walk, not accumulated during it: a
+        # full-branch review supersedes what came *before* it, so a forward
+        # scan that has not reached it yet would refuse its own predecessors.
+        # Only a successful one counts; a failed or reportless pass covers
+        # nothing, and the pass that renews it is where the report arrives.
+        covered = [index for index, entry in enumerate(passes)
+                   if entry.get("additional_review_request")
+                   and completed_depth(self.stored_report(passes, index, report))]
+        checkpoint = covered[-1] if covered else -1
+        for index in range(len(passes)):
+            self.validate_entry(passes, index, self.stored_report(passes, index, report), checkpoint)
+
+    @staticmethod
+    def stored_report(passes: list[dict], index: int, report: dict) -> dict:
+        """The last pass's report is the one freshly read; earlier ones are stored."""
+        return report if index == len(passes) - 1 else (passes[index].get("report") or {})
+
+    def validate_entry(self, passes: list[dict], index: int, current: dict, checkpoint: int) -> None:
+        """One stored pass against its predecessor, by what the entry says it is."""
+        entry = passes[index]
+        if entry.get("additional_review_request"):
+            # The pass being read now is always checked, as it always was.
+            if index == len(passes) - 1 or completed_depth(current):
+                full_branch_coverage(current, self.aggregate_prefix(passes[:index]))
+            return
+        if index <= checkpoint:
+            # A full-branch review covers everything before it, including an
+            # attempt that never produced a report to check.
+            return
+        if not current:
+            # A reservation that produced no report verified nothing, and has
+            # no base of its own to compare, so it is left to the pass that
+            # resumes it. That is where the link is checked: `validate_retry`
+            # reads the captured timeout when there is one and `None` when
+            # there is not, so an attempt that died without parseable evidence
+            # is resumed rather than blocking recovery for good. Keying this on
+            # the evidence instead was the narrower half of the same defect --
+            # a watchdog leaves a captured report, an unreadable receipt leaves
+            # nothing, and both are reservations.
+            return
+        if entry.get("retry"):
+            if index == 0:
+                raise Refusal("a retry has no preceding review to resume")
+            # An attempt that produced no report carries timeout evidence
+            # instead of one, and has no resume link to compare; the attempt
+            # that follows it resumes the same incomplete review.
+            if current:
+                self.validate_retry(passes[:index + 1], current, live=index == len(passes) - 1)
+            return
+        if index == 0:
+            # The first pass may be incomplete only where the next one
+            # retries it; every later pass is reached as a predecessor.
+            retried = len(passes) > 1 and bool(passes[1].get("retry"))
+            if not retried and not completed_depth(current):
+                raise Refusal("the original branch never completed the requested local review depth")
+            return
+        previous = passes[index - 1]
+        if index - 1 > checkpoint and not completed_depth(previous.get("report") or {}):
+            raise Refusal("the original branch never completed the requested local review depth")
+        if not verification_link(previous, current):
+            raise Refusal("fix verification does not continue the initially reviewed head")
+
+    def aggregate_prefix(self, entries: list[dict]) -> dict:
+        """The history a full-branch pass at this point resumes."""
+        if not entries:
+            raise Refusal("this review history has no records to aggregate")
+        return review_history(entries)
+
+    def validate_retry(self, passes: list[dict], report: dict, live: bool = True) -> None:
+        """The retry resumes the pass before it, whichever pass that is."""
+        preceding = passes[-2]
+        incomplete = preceding.get("report") or {}
+        # A reservation verified nothing, and what came before it still has to
+        # be carried: aggregating the prefix keeps an earlier pass's blockers
+        # in the evidence the retry must resume. The same predicate the
+        # dispatcher uses, so the evidence asked for here is the evidence it
+        # was handed.
+        prior = review_history(passes[:-1]) if reservation(preceding) else incomplete
+        accepted = {digest(prior) if prior else None}
+        if not live:
+            # A stored pass was written under the rule in force when it ran,
+            # which carried the preceding report's own digest. The aggregate is
+            # a superset of that evidence rather than a contradiction of it, so
+            # widening the rule does not retroactively invalidate a receipt
+            # that was checked once and passed. Only the pass being read now
+            # has to carry the aggregate.
+            accepted.add(digest(incomplete) if incomplete else None)
+        if (completed_depth(incomplete) or report.get("subject", {}).get("base") != report.get("authorship_base")
+                or report.get("resume_report_digest") not in accepted):
             raise Refusal("retry must complete the full branch and retain the incomplete review evidence")

@@ -48,7 +48,7 @@ Small changes need no placeholder work item.
    With no work root, use `--body-only`; do not create planning files to satisfy tree checks.
    Dispose every blocker.
    Commit fixes and verify the diff since the preceding reviewed head, including current source for prior findings.
-   An incomplete initial review needs full-branch coverage.
+   An incomplete review needs full-branch coverage.
    An unchanged complete review can use explicit evidence-backed acceptance; a reason alone grants no clearance.
 3. **Push only the cleared head.**
    Push refuses unless the current sha matches the head the local review cleared.

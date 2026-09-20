@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 import sd_lib
 import sd_ship_evidence
 from sd_ship_history import (
+    AUTOMATIC_CODE_REVIEW_PASSES,
     ItemHistory,
     digest,
     full_branch_coverage,
@@ -568,14 +569,19 @@ class NoItemHistory(ItemHistory):
 
         An import changes how many passes need a request, not what one says. It
         spends the budget, so every native pass after an import carries its
-        own; without one the first two passes are the initial review and its fix
-        verification, exactly as the item mode has them.
+        own; without one the automatic passes are the initial review and the
+        fix verifications the cap allows, exactly as the item mode has them.
         """
         imported = len(state.get("historical_passes") or [])
         passes = self.native(state)
-        start = 0 if imported else 2
-        for index, entry in enumerate(passes[start:], start):
+        start = 0 if imported else AUTOMATIC_CODE_REVIEW_PASSES
+        for index, entry in enumerate(passes):
             request = entry.get("additional_review_request")
+            # A request below `start` is not required, and is still read: a
+            # receipt written under a lower cap carries one where today's cap
+            # expects none, and skipping it would leave it unauthenticated.
+            if request is None and index < start:
+                continue
             if (not isinstance(request, dict) or request.get("head") != entry.get("head")
                     or not isinstance(request.get("reason"), str) or not request["reason"].strip()
                     or type(request.get("allowed_passes")) is not int or request["allowed_passes"] != 1

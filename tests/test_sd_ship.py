@@ -40,6 +40,10 @@ spec = importlib.util.spec_from_loader(loader.name, loader)
 ship = importlib.util.module_from_spec(spec)
 loader.exec_module(ship)
 
+#: The *Development / Code, before merge* cap. Read from the module that
+#: owns it, so these fixtures follow the row instead of restating it.
+CAP = importlib.import_module("sd_ship_history").AUTOMATIC_CODE_REVIEW_PASSES
+
 
 class ShipDouble(GitHubDouble):
     """Adds precisely the write/read surfaces this adapter calls to the shared double."""
@@ -1581,7 +1585,7 @@ roles:
             self.prepare("--body-file", str(body))
         self.assertFalse(any(call.method == "POST" for call in self.remote.calls))
 
-    def test_one_fix_verification_keeps_prior_findings_and_refuses_a_third_pass(self):
+    def test_fix_verifications_keep_prior_findings_and_refuse_a_pass_past_the_cap(self):
         program = self.programs / "review-fixture"
         payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
             {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": "value is wrong"}]}}
@@ -1600,7 +1604,17 @@ roles:
         self.assertEqual(state["passes"][1]["report"]["subject"]["base"], first["head"])
         self.assertEqual(state["passes"][1]["report"]["verification_report_digest"], ship.digest(first["report"]))
         self.assertEqual(state["passes"][0]["report"]["findings"][0]["summary"], "value is wrong")
-        _git(self.root, "commit", "--allow-empty", "-m", "third change\n\nAuthored-with: human")
+        for count in range(3, CAP + 1):
+            previous = self.operation().state["passes"][-1]
+            _git(self.root, "commit", "--allow-empty", "-m", f"change {count}\n\nAuthored-with: human")
+            prepared = self.prepare()
+            state = self.operation().state
+            self.assertEqual(len(state["passes"]), count)
+            self.assertEqual(state["passes"][-1]["report"]["subject"]["base"], previous["head"])
+            self.assertEqual(state["passes"][-1]["report"]["verification_report_digest"],
+                             ship.digest(previous["report"]))
+        self.assertEqual(state["passes"][0]["report"]["findings"][0]["summary"], "value is wrong")
+        _git(self.root, "commit", "--allow-empty", "-m", "past the cap\n\nAuthored-with: human")
         with self.assertRaisesRegex(ship.Refusal, "spent"):
             self.prepare()
         self.assertEqual(self.remote.rev_parse("topic"), prepared["reviewed_head"])
@@ -1740,7 +1754,12 @@ roles:
         report = state["passes"][1]["report"]
         self.assertIn("src.py", report["subject"]["paths"])
         self.assertEqual(report["subject"]["base"], report["authorship_base"])
-        self.assertEqual(report["resume_report_digest"], ship.digest(first["report"]))
+        # The aggregate, not the first pass's report on its own. That pass
+        # completed no review, so it superseded nothing and the retry resumes
+        # everything before it. The two carry the same findings here; what
+        # changed is which object is the evidence's identity.
+        self.assertEqual(report["resume_report_digest"],
+                         ship.digest(ship.review_history([first])))
         self.assertEqual(self.merge()["phase"], "merged")
 
     def test_missing_receipt_retry_is_explicit_and_never_rolls_back_spent_pass(self):
@@ -1774,16 +1793,17 @@ roles:
         self.assertEqual(self.operation().state["passes"][0], first)
         self.assertEqual(len(self.operation().state["passes"]), 2)
 
-    def test_retry_cannot_spend_a_third_pass(self):
+    def test_retry_cannot_spend_a_pass_past_the_cap(self):
         provider = self.programs / "review-fixture"
         provider.write_text("#!/usr/bin/env python3\nprint('not a review')\n")
         with self.assertRaises(ship.Refusal):
             self.prepare()
-        with self.assertRaises(ship.Refusal):
-            self.prepare("--retry-review")
+        for _ in range(CAP - 1):
+            with self.assertRaises(ship.Refusal):
+                self.prepare("--retry-review")
         with self.assertRaisesRegex(ship.Refusal, "spent"):
             self.prepare("--retry-review")
-        self.assertEqual(len(self.operation().state["passes"]), 2)
+        self.assertEqual(len(self.operation().state["passes"]), CAP)
         self.assertEqual(len(self.remote.pull_requests), 0)
 
     def test_retry_flag_cannot_replace_a_complete_review(self):
@@ -1795,7 +1815,7 @@ roles:
     def spent_reviews(self, blockers=False):
         provider = self.programs / "review-fixture"
         working = provider.read_text()
-        for index in range(2):
+        for index in range(CAP):
             if blockers:
                 payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
                     {"path": "src.py", "line": 1, "severity": "high", "family": "correctness",
@@ -1824,12 +1844,12 @@ roles:
                            "print('{\"type\":\"result\",\"subtype\":\"success\",\"structured_output\":{\"findings\":[]}}')\n")
         self.additional()
         state = self.operation().state
-        self.assertEqual(state["passes"][:2], prior)
-        self.assertEqual(len(state["passes"]), 3)
-        request = state["passes"][2]["additional_review_request"]
+        self.assertEqual(state["passes"][:CAP], prior)
+        self.assertEqual(len(state["passes"]), CAP + 1)
+        request = state["passes"][CAP]["additional_review_request"]
         self.assertEqual(request["prior_history_digest"], ship.digest(prior))
         self.assertEqual(request["head"], _git(self.root, "rev-parse", "HEAD"))
-        report = state["passes"][2]["report"]
+        report = state["passes"][CAP]["report"]
         self.assertIn("src.py", report["subject"]["paths"])
         self.assertEqual(report["subject"]["base"], report["authorship_base"])
         self.assertEqual(report["resume_report_digest"], ship.digest(ship.review_history(prior)))
@@ -1841,13 +1861,37 @@ roles:
         self.assertIn("value = 1", prompt)
         self.assertEqual(self.merge()["phase"], "merged")
 
+    def test_the_pass_after_the_cap_refuses_and_an_explicit_request_still_admits_it(self):
+        """The boundary itself, from both sides.
+
+        The automatic allowance is the table's cap and no more: the pass after
+        it is refused before any dispatch. The explicit-request mechanism is
+        untouched by the raise and still opens exactly one further pass.
+        """
+        provider, working, prior = self.spent_reviews(blockers=True)
+        self.assertEqual(len(prior), CAP)
+        _git(self.root, "commit", "--allow-empty", "-m", "resolve findings\n\nAuthored-with: human")
+        provider.write_text(working)
+        head = _git(self.root, "rev-parse", "HEAD")
+        operation = self.operation("prepare")
+        with patch.object(ship.subprocess, "run", side_effect=AssertionError("review dispatched")):
+            with self.assertRaisesRegex(ship.Refusal, "spent"):
+                operation.review(head)
+        self.assertEqual(self.operation().state["passes"], prior)
+        self.additional()
+        state = self.operation().state
+        self.assertEqual(state["passes"][:CAP], prior)
+        self.assertEqual(len(state["passes"]), CAP + 1)
+        self.assertEqual(state["passes"][CAP]["additional_review_request"]["prior_history_digest"],
+                         ship.digest(prior))
+
     def test_additional_failed_reservation_remains_spent_and_cannot_be_reused(self):
         _, _, prior = self.spent_reviews()
         with self.assertRaises(ship.Refusal):
             self.additional()
         saved = self.operation().state["passes"]
-        self.assertEqual(saved[:2], prior)
-        self.assertEqual(len(saved), 3)
+        self.assertEqual(saved[:CAP], prior)
+        self.assertEqual(len(saved), CAP + 1)
         for flags in ([], ["--retry-review"], ["--additional-review-for", _git(self.root, "rev-parse", "HEAD"),
                                               "--request-reason", "A changed reason must not reset the request"]):
             with self.assertRaises(ship.Refusal):
@@ -1881,7 +1925,7 @@ roles:
                 self.prepare("--additional-review-for", head, "--request-reason", "reason", *extra)
             self.assertEqual(_git(self.root, "rev-parse", "HEAD"), head)
             self.assertEqual(_git(self.root, "diff", "--cached", "--name-only"), "")
-        self.assertEqual(len(self.operation().state["passes"]), 2)
+        self.assertEqual(len(self.operation().state["passes"]), CAP)
 
     def test_additional_receipt_revalidates_history_coverage_and_request_at_merge(self):
         provider, working, _ = self.spent_reviews()
@@ -1934,8 +1978,8 @@ roles:
         with patch.object(ship, "review_process", side_effect=timed_out), self.assertRaisesRegex(ship.Refusal, "watchdog expired"):
             operation.review(head)
         state = self.operation().state
-        self.assertEqual(state["passes"][:2], prior)
-        self.assertEqual(len(state["passes"]), 3)
+        self.assertEqual(state["passes"][:CAP], prior)
+        self.assertEqual(len(state["passes"]), CAP + 1)
         self.assertNotIn("report", state["passes"][-1])
         self.assertEqual(state["passes"][-1]["execution_error"]["stage"], "execution")
         self.assertEqual(state["passes"][-1]["exit_code"], 124)
@@ -1950,10 +1994,10 @@ roles:
             self.additional()
         return provider, working, json.loads(json.dumps(self.operation().state["passes"]))
 
-    def test_renewed_fourth_and_fifth_reviews_preserve_each_prefix_and_full_branch(self):
+    def test_renewed_reviews_past_the_cap_preserve_each_prefix_and_full_branch(self):
         provider, working, prior = self.spent_additional()
         provider.write_text(working)
-        for count in (4, 5):
+        for count in (CAP + 2, CAP + 3):
             _git(self.root, "commit", "--allow-empty", "-m", f"renewal {count}\n\nAuthored-with: human")
             head = _git(self.root, "rev-parse", "HEAD")
             with self.assertRaises(ship.Refusal):
@@ -2011,7 +2055,7 @@ roles:
         head = _git(self.root, "rev-parse", "HEAD")
         for change in ("missing", "type", "reason", "head", "allowance", "digest", "earlier-history", "report-envelope"):
             state = json.loads(json.dumps(original))
-            entry = state["passes"][2]
+            entry = state["passes"][CAP]
             request = entry["additional_review_request"]
             if change == "missing":
                 entry.pop("additional_review_request")
@@ -2087,7 +2131,7 @@ roles:
             operation.state = json.loads(json.dumps(original))
             report = operation.state["passes"][-1]["report"]
             if change == "earlier-request":
-                operation.state["passes"][2].pop("additional_review_request")
+                operation.state["passes"][CAP].pop("additional_review_request")
                 operation.state["passes"][-1]["additional_review_request"]["prior_history_digest"] = ship.digest(operation.state["passes"][:-1])
                 report["resume_report_digest"] = ship.digest(ship.review_history(operation.state["passes"][:-1]))
             elif change == "earlier-history":
@@ -2151,7 +2195,7 @@ roles:
             self.assertEqual((self.root / "src.py").read_text(), "uncommitted = True\n")
             self.assertEqual(self.operation().state["passes"], prior)
 
-    def test_renewal_digest_is_not_accepted_before_three_reservations(self):
+    def test_renewal_digest_is_not_accepted_while_the_cap_is_only_just_spent(self):
         self.spent_reviews()
         prior = self.operation().state["passes"]
         head = _git(self.root, "rev-parse", "HEAD")
@@ -2329,7 +2373,7 @@ roles:
             operation.review(head)
         saved = self.operation().state
         self.assertEqual(saved["passes"][:-1], prior)
-        self.assertEqual(len(saved["passes"]), 3)
+        self.assertEqual(len(saved["passes"]), CAP + 1)
         self.assertIsNone(saved["review_preflight_error"])
         self.assertEqual(before["review_preflight_error"], {"stage": "planning", "kind": "old"})
 

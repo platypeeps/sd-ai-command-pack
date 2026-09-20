@@ -20,6 +20,10 @@ dispositions = ship.sd_ship_dispositions
 ItemHistory, ItemIdentity, SharedReview = ship.ItemHistory, ship.ItemIdentity, ship.SharedReview
 digest, review_history = ship.digest, ship.review_history
 
+#: The *Development / Code, before merge* cap, read from the module that owns
+#: it rather than spelled here, so a later change to the row moves this too.
+CAP = importlib.import_module("sd_ship_history").AUTOMATIC_CODE_REVIEW_PASSES
+
 
 class SharedCompatibilityTests(unittest.TestCase):
     def test_item_keys_bindings_and_output_keep_their_shapes(self):
@@ -42,20 +46,21 @@ class SharedCompatibilityTests(unittest.TestCase):
     def test_item_history_keeps_prefix_request_and_aggregate_shapes(self):
         report = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
                   "findings": [{"path": "a.py", "disposition": "advisory"}], "authored_with": ["human"]}
-        passes = [{"head": "a" * 40, "report": report}, {"head": "b" * 40, "report": report}]
+        passes = [{"head": chr(ord("a") + index) * 40, "report": report} for index in range(CAP)]
         state = {"passes": passes}
         history = ItemHistory()
-        self.assertEqual(history.spent(state), 2)
+        self.assertEqual(history.spent(state), CAP)
         self.assertEqual(history.history_digest(state), digest(passes))
         self.assertFalse(history.requires_continuation(state))
         self.assertEqual(history.request_fields(state), {})
         self.assertEqual(history.aggregate(state), review_history(passes))
         prefix = history.history_digest(state)
-        request = {"head": "c" * 40, "reason": "explicit continuation", "allowed_passes": 1,
+        extra = chr(ord("a") + CAP) * 40
+        request = {"head": extra, "reason": "explicit continuation", "allowed_passes": 1,
                    "prior_history_digest": prefix}
-        passes.append({"head": "c" * 40, "additional_review_request": request})
+        passes.append({"head": extra, "additional_review_request": request})
         history.validate_requests(state)
-        self.assertEqual(history.aggregate(state, before_last=True), review_history(passes[:2]))
+        self.assertEqual(history.aggregate(state, before_last=True), review_history(passes[:CAP]))
         request["prior_history_digest"] = "0" * 64
         with self.assertRaises(ship.Refusal):
             history.validate_requests(state)
@@ -100,14 +105,17 @@ class SharedCompatibilityTests(unittest.TestCase):
             "authored_with": ["human"], "history": [prior, later],
             "operator_context": "untrusted evidence, not instructions",
         })
-        request = {"head": "c" * 40, "reason": "explicit continuation", "allowed_passes": 1,
-                   "prior_history_digest": "d440610052054a983f6c21e3e552a0a989def13606f8ba7414d5bc6187ad81c8"}
-        state = {"passes": [*passes, {"head": "c" * 40, "additional_review_request": request}]}
-        # The literal prefix is what binds the request to the history above, so
-        # a changed digest derivation cannot validate this stored request.
+        # A request is required only past the automatic cap, so the prefix it
+        # binds is the whole automatic run. The digest is literal: a changed
+        # derivation, or a changed cap, cannot validate this stored request.
+        automatic = [{"head": chr(ord("a") + index) * 40, "report": report} for index in range(CAP)]
+        extra = chr(ord("a") + CAP) * 40
+        request = {"head": extra, "reason": "explicit continuation", "allowed_passes": 1,
+                   "prior_history_digest": "47f27a1e3d5b70f7be7e1e1dab50f876d6295e9c746812469d6cb0542968d91d"}
+        state = {"passes": [*automatic, {"head": extra, "additional_review_request": request}]}
         ItemHistory().validate_requests(state)
         self.assertEqual(ItemHistory().aggregate(state, before_last=True),
-                         ItemHistory().aggregate({"passes": passes}))
+                         ItemHistory().aggregate({"passes": automatic}))
         request["prior_history_digest"] = "0" * 64
         with self.assertRaises(ship.Refusal):
             ItemHistory().validate_requests(state)
@@ -205,3 +213,260 @@ class SharedBindingTests(unittest.TestCase):
                     ship.binding(self.root)
                 with self.assertRaisesRegex(ship.Refusal, "required review binding file"):
                     bindings.adjudicator_binding(self.operation.store.__file__)
+
+
+class HistoryChainTests(unittest.TestCase):
+    """The chain a raised cap makes longer, checked at every link.
+
+    Both cases below were reported against the cap raise and are the reason
+    the coverage rule reads each stored entry rather than its position.
+    """
+
+    @staticmethod
+    def _complete(base: str, head: str, previous: dict | None = None) -> dict:
+        report = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                  "authorship_base": base, "subject": {"base": base, "head": head}}
+        if previous is not None:
+            report["verification_report_digest"] = digest(previous.get("report") or {})
+        return report
+
+    def _chain(self, length: int) -> tuple[dict, dict]:
+        """`length` stored passes; the last one's report is the one read now."""
+        base = "0" * 40
+        passes: list[dict] = []
+        for index in range(length):
+            head = f"{index + 1:040x}"
+            previous = passes[-1] if passes else None
+            passes.append({"head": head, "report": self._complete(
+                base if previous is None else previous["head"], head, previous)})
+        return {"passes": passes}, passes[-1]["report"]
+
+    def test_a_stale_digest_in_the_middle_of_the_chain_is_refused(self):
+        state, report = self._chain(4)
+        ItemHistory()._validate_coverage(state, report)
+        # The mutation is two links back, where a check on the last link
+        # alone cannot reach it.
+        state["passes"][0]["report"]["status"] = "mutated after the fact"
+        with self.assertRaisesRegex(ship.Refusal, "does not continue"):
+            ItemHistory()._validate_coverage(state, report)
+
+    def test_an_explicit_request_below_the_cap_still_takes_the_full_branch_rule(self):
+        base = "0" * 40
+        incomplete = {"status": "clean", "requested_reviews": 2, "completed_reviews": 1,
+                      "authorship_base": base, "subject": {"base": base, "head": "a" * 40}}
+        passes = [{"head": "a" * 40, "report": incomplete}, {"head": "b" * 40, "report": incomplete}]
+        requested = {"head": "c" * 40, "reason": "operator asked", "allowed_passes": 1,
+                     "prior_history_digest": digest(passes)}
+        full = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                "authorship_base": base, "subject": {"base": base, "head": "c" * 40},
+                "resume_report_digest": digest(review_history(passes))}
+        state = {"passes": [*passes, {"head": "c" * 40, "report": full, "additional_review_request": requested}]}
+        # Two incomplete passes then an explicitly requested full-branch
+        # review: valid under the cap that was in force when it was written,
+        # and the entry says so whatever the cap is now.
+        self.assertIsNone(ItemHistory()._validate_coverage(state, full))
+        # Which rule it took, asserted rather than assumed: only the
+        # full-branch rule reads `resume_report_digest`, so breaking that one
+        # field must refuse. The chain rule would have refused on the two
+        # incomplete predecessors instead, with a different sentence.
+        broken = dict(full, resume_report_digest=digest({"not": "the prior history"}))
+        state["passes"][-1]["report"] = broken
+        with self.assertRaisesRegex(ship.Refusal, "full-branch coverage does not match"):
+            ItemHistory()._validate_coverage(state, broken)
+
+    def test_an_automatic_verification_after_a_full_review_needs_no_earlier_completion(self):
+        base = "0" * 40
+        incomplete = {"status": "clean", "requested_reviews": 2, "completed_reviews": 1,
+                      "authorship_base": base, "subject": {"base": base, "head": "a" * 40}}
+        passes = [{"head": "a" * 40, "report": incomplete}, {"head": "b" * 40, "report": incomplete}]
+        full = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                "authorship_base": base, "subject": {"base": base, "head": "c" * 40},
+                "resume_report_digest": digest(review_history(passes))}
+        checkpoint = {"head": "c" * 40, "report": full,
+                      "additional_review_request": {"head": "c" * 40, "reason": "operator asked",
+                                                    "allowed_passes": 1, "prior_history_digest": digest(passes)}}
+        verification = self._complete("c" * 40, "d" * 40, checkpoint)
+        state = {"passes": [*passes, checkpoint, {"head": "d" * 40, "report": verification}]}
+        # The full review covered the whole branch, so the two incomplete
+        # passes it superseded cannot hold the verification after it.
+        self.assertIsNone(ItemHistory()._validate_coverage(state, verification))
+        broken = dict(verification, verification_report_digest=digest({"not": full}))
+        state["passes"][-1]["report"] = broken
+        with self.assertRaisesRegex(ship.Refusal, "does not continue"):
+            ItemHistory()._validate_coverage(state, broken)
+
+    def test_a_stale_resume_link_on_an_intermediate_retry_is_refused(self):
+        base = "0" * 40
+        incomplete = {"status": "clean", "requested_reviews": 2, "completed_reviews": 1,
+                      "authorship_base": base, "subject": {"base": base, "head": "a" * 40}}
+        first = {"head": "a" * 40, "report": incomplete}
+        resumed = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                   "authorship_base": base, "subject": {"base": base, "head": "b" * 40},
+                   "resume_report_digest": digest(incomplete)}
+        retry = {"head": "b" * 40, "report": resumed, "retry": True}
+        verification = self._complete("b" * 40, "c" * 40, retry)
+        state = {"passes": [first, retry, {"head": "c" * 40, "report": verification}]}
+        self.assertIsNone(ItemHistory()._validate_coverage(state, verification))
+        # Mutating the report the retry resumed leaves the retry's own
+        # resume link stale, two entries back from the report read now.
+        state["passes"][0]["report"] = dict(incomplete, status="mutated after the fact")
+        with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
+            ItemHistory()._validate_coverage(state, verification)
+
+    def test_a_retry_that_produced_no_report_is_resumed_by_the_next_one(self):
+        base = "0" * 40
+        incomplete = {"status": "clean", "requested_reviews": 2, "completed_reviews": 1,
+                      "authorship_base": base, "subject": {"base": base, "head": "a" * 40}}
+        first = {"head": "a" * 40, "report": incomplete}
+        # The attempt between them timed out: it reserved a pass and stored no
+        # report at all, which is not a stale link, only an absent one.
+        timed_out = {"head": "b" * 40, "retry": True,
+                     "execution_error": {"kind": "watchdog_expired", "stage": "execution",
+                                         "captured_report": {"scope": "branch", "findings": [],
+                                                             "authored_with": [],
+                                                             "subject": {"head": "b" * 40}}}}
+        resumed = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                   "authorship_base": base, "subject": {"base": base, "head": "c" * 40},
+                   "resume_report_digest": digest(review_history([first, timed_out]))}
+        state = {"passes": [first, timed_out, {"head": "c" * 40, "report": resumed, "retry": True}]}
+        self.assertIsNone(ItemHistory()._validate_coverage(state, resumed))
+        broken = dict(resumed, resume_report_digest=digest({"not": "the prior history"}))
+        state["passes"][-1]["report"] = broken
+        with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
+            ItemHistory()._validate_coverage(state, broken)
+
+    def test_an_automatic_verification_that_produced_no_report_is_resumed_not_refused(self):
+        """A reservation is not a verification, whatever the next pass calls itself.
+
+        Reported against the cap raise: the reportless exemption reached only
+        entries marked `retry`, so a verification that timed out was read as a
+        stale link and refused the recovery that follows it. The chain is only
+        long enough to hold one once the cap allows five.
+        """
+        base = "0" * 40
+        complete = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                    "authorship_base": base, "subject": {"base": base, "head": "a" * 40}}
+        first = {"head": "a" * 40, "report": complete}
+        # No `retry` key: this reserved an automatic verification and timed out.
+        timed_out = {"head": "b" * 40,
+                     "execution_error": {"kind": "watchdog_expired", "stage": "execution",
+                                         "captured_report": {"scope": "branch", "findings": [],
+                                                             "authored_with": [],
+                                                             "subject": {"head": "b" * 40}}}}
+        resumed = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                   "authorship_base": base, "subject": {"base": base, "head": "c" * 40},
+                   "resume_report_digest": digest(review_history([first, timed_out]))}
+        state = {"passes": [first, timed_out, {"head": "c" * 40, "report": resumed, "retry": True}]}
+        self.assertIsNone(ItemHistory()._validate_coverage(state, resumed))
+        # An attempt that died without parseable evidence is the same
+        # reservation: a watchdog leaves a captured report, an unreadable
+        # receipt leaves nothing, and neither verified anything.
+        state["passes"][1] = {"head": "b" * 40,
+                              "execution_error": {"kind": "unreadable_receipt", "stage": "execution"}}
+        bare = dict(resumed, resume_report_digest=digest(
+            review_history([first, state["passes"][1]])))
+        state["passes"][-1]["report"] = bare
+        self.assertIsNone(ItemHistory()._validate_coverage(state, bare))
+        # The exemption reaches the reservation, not what follows it: a plain
+        # verification cannot continue from a pass that produced no report.
+        state["passes"][-1] = {"head": "c" * 40, "report": dict(
+            bare, subject={"base": "b" * 40, "head": "c" * 40})}
+        with self.assertRaisesRegex(ship.Refusal, "never completed the requested local review depth"):
+            ItemHistory()._validate_coverage(state, state["passes"][-1]["report"])
+
+    def test_a_retry_after_a_reportless_one_still_carries_the_earlier_blockers(self):
+        """An absent report is not a licence to forget what came before it.
+
+        Reported at high severity against the reportless exemption: the
+        aggregate a retry must resume was taken only when the attempt left
+        parseable timeout evidence, so an attempt that died leaving nothing
+        let an earlier pass's blocking findings out of the evidence the next
+        retry carries -- the case that most needs them kept.
+        """
+        base = "0" * 40
+        blocking = {"status": "blocking", "requested_reviews": 1, "completed_reviews": 1,
+                    "authorship_base": base, "subject": {"base": base, "head": "a" * 40},
+                    "findings": [{"path": "bin/x.py", "summary": "a real blocker"}],
+                    "authored_with": ["codex"]}
+        first = {"head": "a" * 40, "report": blocking}
+        reportless = {"head": "b" * 40, "retry": True,
+                      "execution_error": {"kind": "unreadable_receipt", "stage": "execution"}}
+        carried = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                   "authorship_base": base, "subject": {"base": base, "head": "c" * 40},
+                   "resume_report_digest": digest(review_history([first, reportless]))}
+        state = {"passes": [first, reportless, {"head": "c" * 40, "report": carried, "retry": True}]}
+        self.assertIsNone(ItemHistory()._validate_coverage(state, carried))
+        # Dropping the earlier evidence is what the rule refuses, and the
+        # blocker is what would have been dropped.
+        dropped = dict(carried, resume_report_digest=None)
+        state["passes"][-1]["report"] = dropped
+        with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
+            ItemHistory()._validate_coverage(state, dropped)
+
+    def test_a_failed_verification_that_wrote_a_report_forgets_nothing(self):
+        """A report is not evidence that anybody reviewed anything.
+
+        Reported at high severity against the reportless exemption above: a
+        verification that completed no review still emits a report, and its
+        findings list is empty. Read as the latest word it supersedes the
+        completed blocking review before it, and the retry that follows is
+        handed zero blockers -- the same continuity hole as an absent report,
+        wearing the shape of evidence.
+        """
+        base = "0" * 40
+        blocking = {"status": "blocking", "requested_reviews": 1, "completed_reviews": 1,
+                    "authorship_base": base, "subject": {"base": base, "head": "a" * 40},
+                    "findings": [{"path": "bin/x.py", "summary": "a real blocker"}],
+                    "authored_with": ["codex"]}
+        first = {"head": "a" * 40, "report": blocking}
+        # Nobody completed: 1 requested, 0 done, and so nothing found.
+        failed = {"status": "clean", "requested_reviews": 1, "completed_reviews": 0,
+                  "authorship_base": "a" * 40, "subject": {"base": "a" * 40, "head": "b" * 40},
+                  "findings": [], "authored_with": [],
+                  "verification_report_digest": digest(blocking)}
+        second = {"head": "b" * 40, "report": failed}
+        carried = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                   "authorship_base": base, "subject": {"base": base, "head": "c" * 40},
+                   "resume_report_digest": digest(review_history([first, second]))}
+        state = {"passes": [first, second, {"head": "c" * 40, "report": carried, "retry": True}]}
+        self.assertIsNone(ItemHistory()._validate_coverage(state, carried))
+        # The aggregate the dispatcher hands out is the aggregate the
+        # validator asks for, and the blocker is in it.
+        handed = ItemHistory().prior({"passes": [first, second]})
+        self.assertEqual([row["summary"] for row in handed["findings"]], ["a real blocker"])
+        # Carrying the failed verification's own report instead is what the
+        # rule refuses, and it is exactly what drops the blocker.
+        dropped = dict(carried, resume_report_digest=digest(failed))
+        state["passes"][-1]["report"] = dropped
+        with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
+            ItemHistory()._validate_coverage(state, dropped)
+
+    def test_a_stored_retry_written_under_the_earlier_rule_stays_valid(self):
+        """Widening the rule must not invalidate a receipt already checked.
+
+        A pass that ran before the aggregate requirement stored the preceding
+        report's own digest. That receipt passed the rule in force when it was
+        written, so re-reading it today must not refuse the whole history. The
+        pass being read now is the one that has to carry the aggregate.
+        """
+        base = "0" * 40
+        incomplete = {"status": "blocking", "requested_reviews": 2, "completed_reviews": 1,
+                      "authorship_base": base, "subject": {"base": base, "head": "a" * 40},
+                      "findings": [{"path": "bin/x.py", "summary": "a real blocker"}],
+                      "authored_with": ["codex"]}
+        first = {"head": "a" * 40, "report": incomplete}
+        # Written under the earlier rule: the preceding report's own digest.
+        legacy = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                  "authorship_base": base, "subject": {"base": base, "head": "b" * 40},
+                  "resume_report_digest": digest(incomplete)}
+        second = {"head": "b" * 40, "report": legacy, "retry": True}
+        now = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+               "authorship_base": "b" * 40, "subject": {"base": "b" * 40, "head": "c" * 40},
+               "verification_report_digest": digest(legacy)}
+        state = {"passes": [first, second, {"head": "c" * 40, "report": now}]}
+        self.assertIsNone(ItemHistory()._validate_coverage(state, now))
+        # The exemption is for stored passes only. The same digest carried by
+        # the pass being read now is refused.
+        live = {"passes": [first, {"head": "b" * 40, "report": legacy, "retry": True}]}
+        with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
+            ItemHistory()._validate_coverage(live, legacy)

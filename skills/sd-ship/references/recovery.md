@@ -64,12 +64,12 @@ Recorded selectors are evidence, not consent or permission for another attempt.
 An explicit selection must match the actual reviewer when reusing completed evidence.
 The same selector does not bypass changed-head, tool, policy, acceptance, or history checks.
 
-An incomplete initial review needs full-branch coverage.
+An incomplete review needs full-branch coverage.
 After explicit retry authorization, use `sd-ship prepare --item ID --retry-review --json`.
-The retry spends the remaining automatic pass.
+The retry spends one automatic pass.
 It supplies prior evidence through `--resume-report` and verifies every previous blocker.
 Failed attempts, findings, and the initial receipt remain unchanged.
-A second incomplete run exhausts the automatic allowance and grants no publication clearance.
+Repeated incomplete runs exhaust the automatic allowance and grant no publication clearance.
 
 ## Additional review
 
@@ -79,13 +79,13 @@ Use `--additional-review-for SHA --request-reason TEXT` on a separate `prepare` 
 The head must be clean and committed.
 Do not combine this request with retry or commit flags.
 
-At least two previous reservations must exist.
+At least five previous spent passes must exist.
 The reservation binds the head, reason, and preceding history before dispatch.
 It preserves earlier findings with source heads and report digests.
 It retains the union of author vendors.
 A failed additional review remains spent.
 
-After three reservations, each later pass requires a fresh explicit user decision and current history digest.
+After six spent passes, each later pass requires a fresh explicit user decision and current history digest.
 Add `--review-history-digest SHA256`.
 Without it, the refusal returns the current value before checks, providers, or reservation.
 Stale or reused digests cannot authorize another reservation.
