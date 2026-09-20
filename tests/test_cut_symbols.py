@@ -443,21 +443,28 @@ class TheRepealedRowStillTeaches(unittest.TestCase):
 #: 31(c)'s one-definition greps: `(what, pattern, the one file that may
 #: define it)`.
 #:
-#: The criterion names four -- the provider list, the git wrapper, the
-#: status vocabulary and the ACTIVE set. One is here, and the other three
-#: are absent on purpose rather than forgotten. Each of them found more
-#: than one definition when it was measured on 2026-09-19, so each is a
-#: change to the pack and not a grep over it, and each change is a choice
-#: somebody has to make: which provider list is the list, what counts as a
-#: git wrapper among nine callers, and whether `sd-review`'s two active
-#: statuses and `sd-status`'s three are one set or two. The measurements
-#: and the choices are in the item's `implement.md`. A row joins this tuple
-#: when its choice is made, and the test below then holds it to one.
+#: The criterion named four -- the provider list, the git wrapper, the
+#: status vocabulary and the ACTIVE set. One is here, and the owner settled
+#: the other three on 2026-09-19 (decision note 3006) as not being
+#: duplicates at all, so no row is coming for them.
 #:
 #: The status vocabulary needed no choice. `bin/sd-docs-lint` already
 #: imported `sd_lib` and carried a byte-identical copy of the tuple beside
 #: the import, so there was nothing to decide and nothing to weigh: the
 #: copy became the import it was sitting next to.
+#:
+#: The git wrapper is not a name to grep for. The second wrapper this rule
+#: looked for was a name-only forwarder, and the real defect was a `git`
+#: call with no timeout at seven sites no name-grep reached.
+#: `tests/test_git_policy.py` holds that policy with an AST walk of `bin/`
+#: instead, and records every exception by path and reason.
+#:
+#: The provider list and the ACTIVE set are several on purpose. Three
+#: active-status sets answer three questions -- display order, planning
+#: eligibility, the row vocabulary -- and `providers.yaml` carries provider
+#: identity while the `provider` rows carry state. Collapsing either pair
+#: would lose a distinction, not a duplicate. The item's `prd.md` Log for
+#: that date is the record.
 ONE_DEFINITION = (
     (
         "the status vocabulary",

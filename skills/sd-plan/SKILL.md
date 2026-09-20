@@ -65,9 +65,14 @@ create a PRD just to record routine progress or work already merged.
    field is the record there, and a row beside it would be a second answer to
    one question. `sd work register` refuses such a repository by name, so the
    step cannot create that state by mistake.
-4. **Review the plan.** Run `sd-review --scope planning`, which resolves the
+4. **Review the plan.** Run `sd-review --scope planning`, which resolves one
    active `planning`/`in_progress` item's `prd.md`/`design.md`/`implement.md`
-   and routes them to the reviewer the registry gives. This is the development
+   and routes them to the reviewer the registry gives. Which one: the item
+   whose `branch:` is the branch you are on. With several active items and
+   none of them on this branch, it refuses and names them rather than
+   reviewing them together — say which with `--item`. With one active item
+   the branch decides nothing and that item is the subject. This is the
+   development
    flow's *prd and design* review point. The review table in
    `.claude/rules/sd-planning-adversarial-review.md` gives the cap on that row.
    That file lives only in the sd-ai-command-pack checkout, and planning runs

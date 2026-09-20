@@ -457,18 +457,103 @@ class SubjectTests(ReviewFixture):
         with self.assertRaises(sd_review.UsageError):
             sd_review.resolve_subject(root, "planning")
 
-    def test_item_narrows_planning_scope_to_one_of_two_active_items(self) -> None:
+    # -- criterion 31: planning scope is the item this branch is on ---------
+    #
+    # The fixture the criterion names: two planning items and one `ready`
+    # item. `ready` is not a reviewable state and must not appear whatever
+    # branch is checked out, so it is in every case below as a control.
+    #
+    # What these replace: one test that asserted the union -- two items, no
+    # `--item`, two paths, no refusal. That was the behaviour, and the
+    # subject it produced still described itself as "the active work item's
+    # planning documents", singular. Owner decision 2026-09-19 took the
+    # description over the behaviour.
+
+    def plan_fixture(self, first: str = "topic-one", second: str = "topic-two") -> pathlib.Path:
         root = self.make_repo()
-        for name in ("2026-01-01-first", "2026-01-02-second"):
+        for name, branch in (("2026-01-01-first", first), ("2026-01-02-second", second)):
             item = root / "docs" / "work" / name
             item.mkdir(parents=True)
             (item / "prd.md").write_text(
-                "---\nstatus: planning\nbranch: topic\n---\n\n- [ ] one\n", encoding="utf-8"
+                f"---\nstatus: planning\nbranch: {branch}\n---\n\n- [ ] one\n", encoding="utf-8"
             )
-        both = sd_review.resolve_subject(root, "planning")
-        self.assertEqual(len(both.paths), 2)
+        shipped = root / "docs" / "work" / "2026-01-03-shipped"
+        shipped.mkdir(parents=True)
+        (shipped / "prd.md").write_text(
+            "---\nstatus: ready\nbranch: topic-one\n---\n\n- [ ] one\n", encoding="utf-8"
+        )
+        return root
+
+    def checkout(self, root: pathlib.Path, branch: str) -> None:
+        subprocess.run(["git", "checkout", "--quiet", "-B", branch],
+                       cwd=str(root), check=True, capture_output=True)
+
+    def test_planning_scope_picks_the_item_whose_branch_is_checked_out(self) -> None:
+        root = self.plan_fixture()
+        self.checkout(root, "topic-two")
+        self.assertEqual(
+            sd_review.resolve_subject(root, "planning").paths,
+            ("docs/work/2026-01-02-second/prd.md",),
+        )
+        self.checkout(root, "topic-one")
+        self.assertEqual(
+            sd_review.resolve_subject(root, "planning").paths,
+            ("docs/work/2026-01-01-first/prd.md",),
+        )
+
+    def test_planning_scope_refuses_when_no_active_item_is_on_this_branch(self) -> None:
+        root = self.plan_fixture()
+        self.checkout(root, "somewhere-else")
+        with self.assertRaises(sd_review.UsageError) as caught:
+            sd_review.resolve_subject(root, "planning")
+        message = str(caught.exception)
+        self.assertIn("somewhere-else", message)
+        self.assertIn("--item", message)
+        for name in ("2026-01-01-first", "2026-01-02-second"):
+            self.assertIn(name, message)
+        self.assertNotIn("2026-01-03-shipped", message)
+
+    def test_planning_scope_refuses_when_two_active_items_share_this_branch(self) -> None:
+        """Ambiguity the branch cannot settle is refused, not guessed at."""
+        root = self.plan_fixture(first="shared", second="shared")
+        self.checkout(root, "shared")
+        with self.assertRaises(sd_review.UsageError) as caught:
+            sd_review.resolve_subject(root, "planning")
+        self.assertIn("more than one", str(caught.exception))
+
+    def test_one_active_item_off_its_branch_is_still_the_subject(self) -> None:
+        """One candidate is not an ambiguity, so the branch decides nothing.
+
+        Refusing here would stop planning review on every feature branch to
+        answer a question that was never asked.
+        """
+        root = self.make_repo()
+        item = root / "docs" / "work" / "2026-01-01-only"
+        item.mkdir(parents=True)
+        (item / "prd.md").write_text(
+            "---\nstatus: planning\nbranch: topic\n---\n\n- [ ] one\n", encoding="utf-8"
+        )
+        self.checkout(root, "somewhere-else")
+        self.assertEqual(
+            sd_review.resolve_subject(root, "planning").paths,
+            ("docs/work/2026-01-01-only/prd.md",),
+        )
+
+    def test_item_narrows_planning_scope_whatever_branch_is_checked_out(self) -> None:
+        root = self.plan_fixture()
+        self.checkout(root, "somewhere-else")
         one = sd_review.resolve_subject(root, "planning", "2026-01-02-second")
         self.assertEqual(one.paths, ("docs/work/2026-01-02-second/prd.md",))
+
+    def test_a_ready_item_is_never_the_planning_subject(self) -> None:
+        root = self.plan_fixture()
+        self.checkout(root, "topic-one")
+        self.assertEqual(
+            sd_review.resolve_subject(root, "planning").paths,
+            ("docs/work/2026-01-01-first/prd.md",),
+        )
+        with self.assertRaises(sd_review.UsageError):
+            sd_review.resolve_subject(root, "planning", "2026-01-03-shipped")
 
     def test_item_that_names_no_active_item_is_a_usage_error_naming_the_active_ones(self) -> None:
         root = self.make_repo()
