@@ -363,7 +363,8 @@ class HistoryChainTests(unittest.TestCase):
         # receipt leaves nothing, and neither verified anything.
         state["passes"][1] = {"head": "b" * 40,
                               "execution_error": {"kind": "unreadable_receipt", "stage": "execution"}}
-        bare = dict(resumed, resume_report_digest=None)
+        bare = dict(resumed, resume_report_digest=digest(
+            review_history([first, state["passes"][1]])))
         state["passes"][-1]["report"] = bare
         self.assertIsNone(ItemHistory()._validate_coverage(state, bare))
         # The exemption reaches the reservation, not what follows it: a plain
@@ -372,3 +373,32 @@ class HistoryChainTests(unittest.TestCase):
             bare, subject={"base": "b" * 40, "head": "c" * 40})}
         with self.assertRaisesRegex(ship.Refusal, "never completed the requested local review depth"):
             ItemHistory()._validate_coverage(state, state["passes"][-1]["report"])
+
+    def test_a_retry_after_a_reportless_one_still_carries_the_earlier_blockers(self):
+        """An absent report is not a licence to forget what came before it.
+
+        Reported at high severity against the reportless exemption: the
+        aggregate a retry must resume was taken only when the attempt left
+        parseable timeout evidence, so an attempt that died leaving nothing
+        let an earlier pass's blocking findings out of the evidence the next
+        retry carries -- the case that most needs them kept.
+        """
+        base = "0" * 40
+        blocking = {"status": "blocking", "requested_reviews": 1, "completed_reviews": 1,
+                    "authorship_base": base, "subject": {"base": base, "head": "a" * 40},
+                    "findings": [{"path": "bin/x.py", "summary": "a real blocker"}],
+                    "authored_with": ["codex"]}
+        first = {"head": "a" * 40, "report": blocking}
+        reportless = {"head": "b" * 40, "retry": True,
+                      "execution_error": {"kind": "unreadable_receipt", "stage": "execution"}}
+        carried = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                   "authorship_base": base, "subject": {"base": base, "head": "c" * 40},
+                   "resume_report_digest": digest(review_history([first, reportless]))}
+        state = {"passes": [first, reportless, {"head": "c" * 40, "report": carried, "retry": True}]}
+        self.assertIsNone(ItemHistory()._validate_coverage(state, carried))
+        # Dropping the earlier evidence is what the rule refuses, and the
+        # blocker is what would have been dropped.
+        dropped = dict(carried, resume_report_digest=None)
+        state["passes"][-1]["report"] = dropped
+        with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
+            ItemHistory()._validate_coverage(state, dropped)

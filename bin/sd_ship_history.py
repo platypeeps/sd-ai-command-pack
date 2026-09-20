@@ -38,6 +38,18 @@ def timeout_evidence(entry: dict) -> dict | None:
     return captured
 
 
+def reservation(entry: dict) -> bool:
+    """A pass that stored no report verified nothing, whatever ended it.
+
+    Written once because the dispatcher that supplies a retry's prior evidence
+    and the validator that checks it have to give the same answer. Two copies
+    of the condition is how they stopped agreeing: one was relaxed to cover an
+    attempt that died leaving nothing parseable, the other was not, and the
+    live retry path refused evidence it had just been handed.
+    """
+    return not (entry.get("report") or {})
+
+
 def review_history(passes: list[dict]) -> dict:
     """Preserve the item receipt's aggregate shape and untrusted provenance."""
     findings: list[dict]
@@ -193,10 +205,10 @@ class ItemHistory(ReviewHistory):
 
     def prior(self, state: dict) -> dict:
         passes = self.native(state)
-        prior = (passes[-1].get("report") or {}) if passes else {}
-        if passes and not prior and timeout_evidence(passes[-1]) is not None:
-            return self.aggregate(state)
-        return prior
+        if not passes:
+            return {}
+        # A reservation carries the whole prefix forward; see `reservation`.
+        return self.aggregate(state) if reservation(passes[-1]) else passes[-1]["report"]
 
     def _validate_coverage(self, state: dict, report: dict) -> None:
         """Each stored pass checked by what it says it is, against its own predecessor.
@@ -284,7 +296,12 @@ class ItemHistory(ReviewHistory):
         """The retry resumes the pass before it, whichever pass that is."""
         preceding = passes[-2]
         incomplete = preceding.get("report") or {}
-        prior = incomplete or (review_history(passes[:-1]) if timeout_evidence(preceding) is not None else {})
+        # A reservation has no report of its own, and what came before it still
+        # has to be carried: aggregating the prefix keeps an earlier pass's
+        # blockers in the evidence the retry must resume. The same predicate
+        # the dispatcher uses, so the evidence asked for here is the evidence
+        # it was handed.
+        prior = review_history(passes[:-1]) if reservation(preceding) else incomplete
         if (completed_depth(incomplete) or report.get("subject", {}).get("base") != report.get("authorship_base")
                 or report.get("resume_report_digest") != (digest(prior) if prior else None)):
             raise Refusal("retry must complete the full branch and retain the incomplete review evidence")
