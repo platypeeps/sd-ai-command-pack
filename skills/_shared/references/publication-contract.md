@@ -215,9 +215,8 @@ in it has cleared every publishing check. A brief mirrored into it would read as
 approved for publication, which no designation here claims.
 
 The page or file is optional at every destination. Absent, the drain creates it
-and writes the id back into the designation, which step 4 of the drain requires.
-Present, the drain updates that one rather than leaving a fresh copy behind on
-every render. The two halves are one mechanism: the write-back is what lets the
+and writes the id back, which steps 4 and 5 of the drain require. Present, the
+drain updates that one rather than leaving a fresh copy behind on every render. The two halves are one mechanism: the write-back is what lets the
 next render's request name a page, and naming one is what stops a second copy.
 
 Recording the target makes it machine-readable for the first time. Before this,
@@ -251,7 +250,7 @@ This makes the mirror reliable without giving a hook a long-lived write
 credential to a shared space. It also keeps the outward-facing step in a place
 where a person is present.
 
-Draining is five steps per request, and the order matters:
+Draining is six steps per request, and the order matters:
 
 1. Read the request. It names the destination, the document, its Markdown,
    rendered and source paths, its container, the page or file to update and the
@@ -287,21 +286,58 @@ Draining is five steps per request, and the order matters:
    Never convert a document into a format its destination does not read
    natively. The source for every mirror is the Markdown, not the rendered
    HTML.
-4. Record the id, when step 3 created the page or file rather than updating
-   one. Write it into that document's designation, as `page=` for Notion and
-   `file=` for Drive; in a research repo that designation lives in
-   `research.conf.py`. A request that already named a page or file created
-   nothing, so it has nothing to record here.
 
-   Before the delete, and not after. An id recorded nowhere cannot reach the
-   next request, so the next render enqueues a create again and the next drain
-   leaves a second copy beside the first. That duplicate is silent: both copies
-   carry the same title and the same content, so nothing reads as wrong and no
-   reader can tell which one is stale. The write-back is the only step that
-   makes a mirror updatable rather than repeatable.
-5. Delete the request file. Deleting it is what records that the mirror is
-   current; a request left behind says the sync still owes work, which is the
-   safe thing for it to say if step 3 or step 4 half-finished.
+   **Look before creating.** Where the request names no page or file, search
+   the named container for one already carrying this document's title, and
+   adopt the match instead of creating a second. A drain that creates
+   unconditionally makes a duplicate out of every interrupted earlier drain.
+   Two matches is an ambiguity, not a choice: report it and leave the request
+   in place.
+4. Write the id into the request file, the moment the destination returns it.
+   The request is the durable record, because it is the one file the drain is
+   certain it can write and the one the next drain is certain to read. A
+   request that already named a page or file created nothing, so steps 4 and 5
+   have nothing to record.
+
+   This step exists for the gap between creating a page and recording it. A
+   created page whose id is written nowhere is the duplicate this procedure
+   exists to prevent: the next render enqueues a create again, and the next
+   drain makes a second copy. Both copies carry the same title and the same
+   content, so nothing reads as wrong and no reader can tell which is stale.
+5. Write the id into the document's designation, as `page=` for Notion and
+   `file=` for Drive. In a research repo that designation is a key on the
+   document's `research.conf.py` entry, and it is what the *next render* reads
+   — step 4 only carries the id as far as the current request.
+
+   A designation written as the bare `True` shorthand is amended into the dict
+   that records the id: `notion=True` becomes `notion=dict(page="<id>")`, which
+   is the same designation with the same private scope. A designation written
+   `None` or `False` is switched off, so it enqueues nothing, and no drain ever
+   reaches it. Never add a key to a document that designates no mirror.
+
+   If this write fails — an unwritable file, a config the drain cannot amend —
+   report it and stop, leaving the request in place with its id. The queue then
+   still says work is owed, and the next drain updates the page it names rather
+   than creating one.
+6. Delete the request file, once steps 4 and 5 have both succeeded. Deleting it
+   is what records that the mirror is current; a request left behind says the
+   sync still owes work, which is the safe thing for it to say if any earlier
+   step half-finished.
+
+**What each failure leaves behind.** This is stated, not implied, because a
+procedure whose failure mode is the bug it prevents is not a fix.
+
+| Interrupted after | State | What the next drain does |
+| --- | --- | --- |
+| step 3, before step 4 | a created page, its id recorded nowhere | adopts it by title under step 3 and carries on |
+| step 4, before step 5 | id in the request, not in the designation | updates that page, retries step 5 |
+| step 5, before step 6 | id recorded in both | updates that page, deletes the request |
+
+One state is not covered: a page created in step 3 whose title then changes
+before the next drain runs. Nothing matches it, so the next drain creates a
+second page and the first is orphaned. Rename a mirrored document and check its
+mirror by hand. A destination that creates a page and returns an error instead
+of an id lands in the first row and recovers there.
 
 Never drain a request into a container the request does not name, never create a
 page or file in a container the user has not named for that document, and never

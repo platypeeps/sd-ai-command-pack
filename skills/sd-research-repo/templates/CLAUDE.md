@@ -146,14 +146,19 @@ tab. That is the whole of publication for most documents. `90-scratch/` is not p
 An outward mirror is opt-in, per document. The user designates a document. Record the
 designation as a `notion=` or `drive=` key in that document's `research.conf.py` entry.
 Nothing infers a target from a title, a folder, or a neighbouring document. The markdown
-file stays the source of truth; a mirror is the readable, shareable copy. A designated
-document mirrors into the repo's own mirror folder — put its URL here when the repo
-designates one. Each mirror stays in sync when the source document changes.
+file stays the source of truth; a mirror is the readable, shareable copy. By default a
+designated document mirrors into this repo's own page or folder at that destination — put
+its URL here when the repo designates one. Each destination has its own default: the
+configured briefs folder for Notion, `Briefs/<repo>` in My Drive for Drive. A per-document
+`space=` or `folder=` overrides that default. Each mirror stays in sync when the source
+document changes.
 
 `render` queues one sync request per designated document under
 `~/.claude/pending-mirror-syncs/`, and an agent session drains it. A drain that creates a
 page or file writes the new id back into that document's entry. Use `page=` for Notion and
-`file=` for Drive. Without that write-back the next drain creates a second copy.
+`file=` for Drive. Without that write-back the next drain creates a second copy. A
+write-back that fails leaves the request in place and is reported, so the queue still says
+the work is owed.
 
 Mirror shape — full content minus the H1, opening with a pointer back to the file:
 

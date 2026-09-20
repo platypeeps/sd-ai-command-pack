@@ -302,7 +302,9 @@ class TemplateDriftTests(unittest.TestCase):
     def test_a_filled_in_url_is_not_drift(self) -> None:
         """The template describes the mirror folder; the repo writes the URL."""
 
-        aside = "put its URL here when the repo\ndesignates one"
+        # One line of the prompt, so a rewrap of the paragraph around it does
+        # not read as the prompt having moved.
+        aside = "its URL here when the repo designates one."
         self.assertIn(aside, self.template, "the template's fill-in prompt moved")
         text = self.template.replace(aside, "https://app.notion.com/p/3c9f52b1578281")
         self.assertEqual(self.findings(text), [])

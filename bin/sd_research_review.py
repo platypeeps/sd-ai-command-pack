@@ -615,7 +615,9 @@ The half no script can do — work it before publishing, per document:
        work that the document never states.
     8. Check each drained mirror matches the source, and that handling
        restrictions survived the mirror. A document with no `notion=` or
-       `drive=` key has no mirror to check. Include the main document's
+       `drive=` key has no mirror to check, and neither has one whose key is
+       `None` or `False` -- the off position, which designates nothing rather
+       than designating a default. Include the main document's
        other two surfaces, which no check above reaches: the README's entry
        link and table, and any mirror's title and container. `review` read its
        H1 and rendered title and said so; these two nothing read.

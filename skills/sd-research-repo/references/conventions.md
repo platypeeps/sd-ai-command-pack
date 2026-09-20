@@ -338,7 +338,9 @@ it.
 **Superseded 2026-09-20.** Before this date the standard said every overview,
 map, brief, report and survey had a Notion page. That is now the exception
 rather than the rule: an outward destination is outward-facing, so a document
-reaches one only when the user designates it and names the container.
+reaches one only when the user designates it. The designation alone is enough,
+because each destination has a default container; naming one overrides that
+default.
 
 ### Obsidian and the dashboard are the defaults
 
@@ -390,6 +392,11 @@ drive=dict(folder="Research deliverables", file="https://docs.google.com/documen
 Both keys on one entry are two mirrors, not a choice. Until one of these keys
 exists, the document publishes locally and nowhere else. Do not infer a target
 from a title, a folder or a neighbouring document.
+
+`notion=True` is the same designation as `notion=dict()`, written shorter, and
+a write-back amends it into `notion=dict(page="<id>")`. `None` and `False` are
+the off position: they designate nothing, enqueue nothing, and never receive a
+written-back id.
 
 **A Notion mirror is private unless it asks for the team.** `notion=dict()`
 goes to the folder `$SD_NOTION_PRIVATE_FOLDER` names;
