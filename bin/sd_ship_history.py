@@ -65,14 +65,29 @@ def review_history(passes: list[dict]) -> dict:
 
 
 def validate_additional_requests(passes: list[dict]) -> None:
-    start = AUTOMATIC_CODE_REVIEW_PASSES
-    for index, entry in enumerate(passes[start:], start):
+    """A request is required past the cap, and authenticated wherever it sits.
+
+    Position alone cannot say whether a stored pass was explicitly requested.
+    A receipt written while the cap was lower carries its request at an index
+    today's cap treats as automatic, and reading the index rather than the
+    entry would let that request go unchecked. The entry states it, so the
+    entry is what is read.
+    """
+    for index, entry in enumerate(passes):
         request = entry.get("additional_review_request")
+        if request is None and index < AUTOMATIC_CODE_REVIEW_PASSES:
+            continue
         if (not isinstance(request, dict) or request.get("head") != entry.get("head")
                 or not isinstance(request.get("reason"), str) or not request["reason"].strip()
                 or type(request.get("allowed_passes")) is not int or request["allowed_passes"] != 1
                 or request.get("prior_history_digest") != digest(passes[:index])):
             raise Refusal("additional review request does not bind its exact prior history and head")
+
+
+def verification_link(previous: dict, report: dict) -> bool:
+    """`report` verifies `previous`: same head reviewed, same evidence carried."""
+    return (report.get("subject", {}).get("base") == previous.get("head")
+            and report.get("verification_report_digest") == digest(previous.get("report") or {}))
 
 
 def full_branch_coverage(report: dict, prior: dict) -> None:
@@ -185,7 +200,8 @@ class ItemHistory(ReviewHistory):
 
     def _validate_coverage(self, state: dict, report: dict) -> None:
         passes = self.native(state)
-        if len(passes) > AUTOMATIC_CODE_REVIEW_PASSES:
+        if passes and (passes[-1].get("additional_review_request")
+                       or len(passes) > AUTOMATIC_CODE_REVIEW_PASSES):
             self.validate_requests(state)
             full_branch_coverage(report, self.aggregate(state, before_last=True))
         elif len(passes) >= 2 and passes[-1].get("retry"):
@@ -199,10 +215,18 @@ class ItemHistory(ReviewHistory):
                     raise Refusal("the original branch never completed the requested local review depth")
             if len(passes) == 1 and not completed_depth(passes[0].get("report") or {}):
                 raise Refusal("the original branch never completed the requested local review depth")
-            previous = passes[-2] if len(passes) >= 2 else None
-            if previous is not None and (report.get("subject", {}).get("base") != previous.get("head")
-                                         or report.get("verification_report_digest") != digest(previous.get("report") or {})):
-                raise Refusal("fix verification does not continue the initially reviewed head")
+            # Every link is checked, not only the last one. One final check
+            # sees a stale digest in the middle of a five-pass chain as
+            # nothing at all, because it never reads the pair that carries it.
+            for index in range(1, len(passes)):
+                following = passes[index]
+                if following.get("retry") or following.get("additional_review_request"):
+                    continue
+                # `report` is the last pass's own report, freshly read; every
+                # earlier link is read from the entry that stored it.
+                verified = report if index == len(passes) - 1 else (following.get("report") or {})
+                if not verification_link(passes[index - 1], verified):
+                    raise Refusal("fix verification does not continue the initially reviewed head")
 
     def validate_retry(self, passes: list[dict], report: dict) -> None:
         """The retry resumes the pass before it, whichever pass that is."""

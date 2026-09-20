@@ -213,3 +213,63 @@ class SharedBindingTests(unittest.TestCase):
                     ship.binding(self.root)
                 with self.assertRaisesRegex(ship.Refusal, "required review binding file"):
                     bindings.adjudicator_binding(self.operation.store.__file__)
+
+
+class HistoryChainTests(unittest.TestCase):
+    """The chain a raised cap makes longer, checked at every link.
+
+    Both cases below were reported against the cap raise and are the reason
+    the coverage rule reads each stored entry rather than its position.
+    """
+
+    @staticmethod
+    def _complete(base: str, head: str, previous: dict | None = None) -> dict:
+        report = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                  "authorship_base": base, "subject": {"base": base, "head": head}}
+        if previous is not None:
+            report["verification_report_digest"] = digest(previous.get("report") or {})
+        return report
+
+    def _chain(self, length: int) -> tuple[dict, dict]:
+        """`length` stored passes; the last one's report is the one read now."""
+        base = "0" * 40
+        passes: list[dict] = []
+        for index in range(length):
+            head = f"{index + 1:040x}"
+            previous = passes[-1] if passes else None
+            passes.append({"head": head, "report": self._complete(
+                base if previous is None else previous["head"], head, previous)})
+        return {"passes": passes}, passes[-1]["report"]
+
+    def test_a_stale_digest_in_the_middle_of_the_chain_is_refused(self):
+        state, report = self._chain(4)
+        ItemHistory()._validate_coverage(state, report)
+        # The mutation is two links back, where a check on the last link
+        # alone cannot reach it.
+        state["passes"][0]["report"]["status"] = "mutated after the fact"
+        with self.assertRaisesRegex(ship.Refusal, "does not continue"):
+            ItemHistory()._validate_coverage(state, report)
+
+    def test_an_explicit_request_below_the_cap_still_takes_the_full_branch_rule(self):
+        base = "0" * 40
+        incomplete = {"status": "clean", "requested_reviews": 2, "completed_reviews": 1,
+                      "authorship_base": base, "subject": {"base": base, "head": "a" * 40}}
+        passes = [{"head": "a" * 40, "report": incomplete}, {"head": "b" * 40, "report": incomplete}]
+        requested = {"head": "c" * 40, "reason": "operator asked", "allowed_passes": 1,
+                     "prior_history_digest": digest(passes)}
+        full = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                "authorship_base": base, "subject": {"base": base, "head": "c" * 40},
+                "resume_report_digest": digest(review_history(passes))}
+        state = {"passes": [*passes, {"head": "c" * 40, "report": full, "additional_review_request": requested}]}
+        # Two incomplete passes then an explicitly requested full-branch
+        # review: valid under the cap that was in force when it was written,
+        # and the entry says so whatever the cap is now.
+        self.assertIsNone(ItemHistory()._validate_coverage(state, full))
+        # Which rule it took, asserted rather than assumed: only the
+        # full-branch rule reads `resume_report_digest`, so breaking that one
+        # field must refuse. The chain rule would have refused on the two
+        # incomplete predecessors instead, with a different sentence.
+        broken = dict(full, resume_report_digest=digest({"not": "the prior history"}))
+        state["passes"][-1]["report"] = broken
+        with self.assertRaisesRegex(ship.Refusal, "full-branch coverage does not match"):
+            ItemHistory()._validate_coverage(state, broken)

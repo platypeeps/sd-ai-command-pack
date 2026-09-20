@@ -575,8 +575,13 @@ class NoItemHistory(ItemHistory):
         imported = len(state.get("historical_passes") or [])
         passes = self.native(state)
         start = 0 if imported else AUTOMATIC_CODE_REVIEW_PASSES
-        for index, entry in enumerate(passes[start:], start):
+        for index, entry in enumerate(passes):
             request = entry.get("additional_review_request")
+            # A request below `start` is not required, and is still read: a
+            # receipt written under a lower cap carries one where today's cap
+            # expects none, and skipping it would leave it unauthenticated.
+            if request is None and index < start:
+                continue
             if (not isinstance(request, dict) or request.get("head") != entry.get("head")
                     or not isinstance(request.get("reason"), str) or not request["reason"].strip()
                     or type(request.get("allowed_passes")) is not int or request["allowed_passes"] != 1
