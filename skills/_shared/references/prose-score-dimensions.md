@@ -139,7 +139,7 @@ that reads exactly like a measurement.
       "Passive appears only where the actor is unknown or beside the point, and naming one would add nothing.",
       "One or two passive sentences drop an actor the reader can still infer from the surrounding text.",
       "Several main claims name no actor. The reader has to guess who performs the action.",
-      "Subjectless fragments carry the argument, as in 'No configuration file needed' or 'The results are preserved automatically'."
+      "Agentless passives carry the argument throughout, as in 'The results are preserved automatically' or 'The decision was made last quarter'."
     ]
   },
   "signposting": {

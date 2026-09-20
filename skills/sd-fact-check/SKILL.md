@@ -155,7 +155,8 @@ reading that flags disagreement. It never assigns a verdict.
 Each criterion describes one concrete situation and stands on its own. The
 model reads these descriptions and not this page, so none of them refers to
 another criterion or to the workflow above. Keep them in a scratch JSON
-file of their own, outside the audited material:
+file of their own, outside the audited material and outside the working
+directory:
 
 ```json
 {
@@ -173,9 +174,15 @@ underscores. `not_a_factual_claim` is the no-match option: it catches an input
 the five verdicts cannot describe, so the model never forces one of them onto
 an opinion or a prediction.
 
-Pass that file as `@criteria.json`. The inline `--criteria 'name=text,...'`
-form splits entries on commas and on the first `=` of each entry, so these
-descriptions cannot be written inline.
+Give the run its own scratch directory with `scratch=$(mktemp -d)`. Write the
+criteria to `$scratch/criteria.json` and the state to `$scratch/claim.json`.
+Neither file lands in the working directory, so neither reaches a repository,
+a diff, or the audited material. Remove the directory with `rm -rf "$scratch"`
+when the audit ends, however it ends.
+
+Pass the criteria file as `@"$scratch/criteria.json"`. The inline
+`--criteria 'name=text,...'` form splits entries on commas and on the first
+`=` of each entry, so these descriptions cannot be written inline.
 
 ### The call
 
@@ -191,8 +198,8 @@ State is the claim and its span, one claim per call:
 
 ```sh
 jev choice 'How does the evidence relate to the claim as written?' \
-    --state claim.json --state-format json \
-    --criteria @criteria.json \
+    --state "$scratch/claim.json" --state-format json \
+    --criteria @"$scratch/criteria.json" \
     --unsure-below 0.8 --fallback not_asked
 ```
 
