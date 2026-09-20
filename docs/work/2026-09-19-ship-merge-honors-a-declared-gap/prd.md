@@ -390,3 +390,18 @@ promoted `planning → ready`.
   requirement 4 leaves to a user-owned design.
 - The cap row is spent. A further finding on this branch is the owner's
   call, not an automatic pass.
+
+### 2026-09-20 — owner-authorized post-cap pass, one new finding
+
+The owner authorized one pass past the code-review cap for the docs-only
+fix that answered Copilot's citation finding on #1086.
+
+- `source:bin/sd_lib.py::YAML_KEY_RE` (high): a quoted mapping key,
+  `"pull_request":`, did not match, and its unquoted siblings parsed
+  normally, so the workflow silently left the expected set. Fixed: the
+  key pattern accepts the bare, double- and single-quoted forms, and
+  `yaml_key` reads whichever matched; `bin/sd-status`'s two other readers
+  of the pattern go through it too. Two fixtures.
+- The external-check finding is restated and rebutted again on the same
+  ground as the ship-lane pass: requirement 2's last sentence, and the
+  protection object the owner declined.

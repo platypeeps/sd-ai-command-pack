@@ -2969,6 +2969,22 @@ class DeclaredGapCase(unittest.TestCase):
                 self.merge()
                 self.assertEqual(self.puts(), 1)
 
+    def test_a_quoted_event_key_is_the_same_key(self):
+        """Post-cap review: `"pull_request":` beside an unquoted `push:` was
+        dropped while its sibling parsed, so the workflow silently stopped
+        being expected."""
+        for spelling in ('on:\n  push:\n    branches: [main]\n  "pull_request":\n',
+                         "on:\n  push:\n    branches: [main]\n  'pull_request':\n"):
+            with self.subTest(spelling=spelling.splitlines()[-1].strip()):
+                self.restart()
+                tests = self.TESTS.replace("on:\n  pull_request:\n  push:\n    branches: [main]\n", spelling)
+                self.assertNotEqual(tests, self.TESTS)
+                self.declare(workflows={"tests.yml": tests, "sd-review-route.yml": self.ROUTE})
+                self.prepare()
+                next(iter(self.remote.pull_requests.values())).checks = [self.check("route")]
+                self.double.workflow_runs = [self.run_record(".github/workflows/sd-review-route.yml")]
+                self.refuse(r"workflow Tests \(\.github/workflows/tests\.yml\) has no successful pull_request run", "ci_missing")
+
     def test_the_single_event_form_is_read(self):
         """Codex on the verification pass: `on: pull_request` returned no
         trigger and refused every merge under the declaration."""

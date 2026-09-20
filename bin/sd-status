@@ -232,13 +232,13 @@ def _mappings(lines: list[str]) -> list[dict[str, str]]:
             found.append(current)
             inner = _KEY_RE.match(item.group("rest"))
             if inner:
-                current[inner.group("key")] = _scalar(inner.group("value"))
+                current[sd_lib.yaml_key(inner)] = _scalar(inner.group("value"))
             continue
         if not found or _indent(line) <= base:
             continue
         match = _KEY_RE.match(line)
         if match:
-            found[-1][match.group("key")] = _scalar(match.group("value"))
+            found[-1][sd_lib.yaml_key(match)] = _scalar(match.group("value"))
     return found
 
 

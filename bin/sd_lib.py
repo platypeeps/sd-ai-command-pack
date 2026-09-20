@@ -2242,7 +2242,16 @@ def display_value(value: Any) -> bool:
 # tree to report; `sd-ship merge` reads the reviewed head to decide, and both
 # must read the same shape or one of them is wrong without anyone knowing.
 
-YAML_KEY_RE = re.compile(r"^(?P<indent>\s*)(?P<key>[A-Za-z_][A-Za-z0-9_.\-]*):\s*(?P<value>.*?)\s*$")
+#: A mapping key, quoted or not. `"pull_request":` is the same key as
+#: `pull_request:`, and a reader that matched only the bare form dropped
+#: the entry while its unquoted siblings still parsed -- a workflow that
+#: silently stopped being expected (sd:1110 post-cap review).
+YAML_KEY_RE = re.compile(r"^(?P<indent>\s*)(?:\"(?P<dquoted>[^\"]+)\"|'(?P<squoted>[^']+)'|(?P<bare>[A-Za-z_][A-Za-z0-9_.\-]*)):\s*(?P<value>.*?)\s*$")
+
+
+def yaml_key(match: re.Match[str]) -> str:
+    """The key `YAML_KEY_RE` matched, whichever of its three forms it took."""
+    return match.group("dquoted") or match.group("squoted") or match.group("bare")
 YAML_ITEM_RE = re.compile(r"^(?P<indent>\s*)-\s*(?P<rest>.*?)\s*$")
 
 PR_TRIGGERS = ("pull_request", "pull_request_target")
@@ -2314,7 +2323,7 @@ def yaml_entries(lines: list[str]) -> list[tuple[int, str, str]]:
             continue
         match = YAML_KEY_RE.match(line)
         if match:
-            found.append((offset, match.group("key"), match.group("value")))
+            found.append((offset, yaml_key(match), match.group("value")))
     return found
 
 
