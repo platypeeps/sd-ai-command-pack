@@ -2232,3 +2232,301 @@ def display_value(value: Any) -> bool:
     disagree again about what empty means.
     """
     return value is not None and value != [] and value != ""
+
+
+# --------------------------------------------------------------------------
+# Workflow files and the protection acknowledgement, read once for two commands
+# --------------------------------------------------------------------------
+#
+# Moved here from `bin/sd-status` on sd:1110. `sd-status` reads the working
+# tree to report; `sd-ship merge` reads the reviewed head to decide, and both
+# must read the same shape or one of them is wrong without anyone knowing.
+
+YAML_KEY_RE = re.compile(r"^(?P<indent>\s*)(?P<key>[A-Za-z_][A-Za-z0-9_.\-]*):\s*(?P<value>.*?)\s*$")
+YAML_ITEM_RE = re.compile(r"^(?P<indent>\s*)-\s*(?P<rest>.*?)\s*$")
+
+PR_TRIGGERS = ("pull_request", "pull_request_target")
+
+
+def yaml_scalar(value: str) -> str:
+    text = value.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
+        return text[1:-1]
+    return text
+
+
+def yaml_indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def yaml_lines(text: str) -> list[str]:
+    """Non-blank, non-comment lines, right-stripped. Enough YAML for job names.
+
+    A workflow file's job list is a handful of nested mappings, and PyYAML is
+    not stdlib. This reads the shape workflows actually have -- the same
+    bargain `_taskfile_tasks` above already makes -- and every construct it
+    cannot resolve becomes a stated note rather than a silent wrong answer.
+    """
+    return [
+        line.rstrip()
+        for line in text.split("\n")
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def yaml_children(lines: list[str], index: int) -> list[str]:
+    base = yaml_indent(lines[index])
+    out = []
+    for line in lines[index + 1 :]:
+        if yaml_indent(line) <= base:
+            break
+        out.append(line)
+    return out
+
+
+def yaml_entries(lines: list[str]) -> list[tuple[int, str, str]]:
+    """`(offset, key, inline value)` for the mapping keys at the top indent."""
+    if not lines:
+        return []
+    base = yaml_indent(lines[0])
+    found = []
+    for offset, line in enumerate(lines):
+        if yaml_indent(line) != base:
+            continue
+        match = YAML_KEY_RE.match(line)
+        if match:
+            found.append((offset, match.group("key"), match.group("value")))
+    return found
+
+
+def yaml_field(lines: list[str], key: str) -> str | None:
+    for _, name, value in yaml_entries(lines):
+        if name == key:
+            return value
+    return None
+
+
+def yaml_sub(lines: list[str], key: str) -> list[str]:
+    for offset, name, _ in yaml_entries(lines):
+        if name == key:
+            return yaml_children(lines, offset)
+    return []
+
+
+def yaml_inline_list(value: str) -> list[str] | None:
+    text = value.strip()
+    if text.startswith("[") and text.endswith("]"):
+        return [yaml_scalar(part) for part in text[1:-1].split(",") if part.strip()]
+    return None
+
+
+def yaml_sequence(lines: list[str], inline: str) -> list[str]:
+    parsed = yaml_inline_list(inline)
+    if parsed is not None:
+        return parsed
+    if not lines:
+        return []
+    base = yaml_indent(lines[0])
+    return [
+        yaml_scalar(match.group("rest"))
+        for line in lines
+        if yaml_indent(line) == base and (match := YAML_ITEM_RE.match(line))
+    ]
+
+
+def workflow_triggers(lines: list[str]) -> set[str]:
+    """The workflow's event names; an empty set means "could not tell"."""
+    for offset, key, inline in yaml_entries(lines):
+        if key not in ("on", "true"):  # a YAML 1.1 loader would fold `on` to true
+            continue
+        parsed = yaml_sequence(yaml_children(lines, offset), inline)
+        if parsed:
+            return set(parsed)
+        return {name for _, name, _ in yaml_entries(yaml_children(lines, offset))}
+    return set()
+
+
+#: Where a repository records that it has looked at a protection state and
+#: decided to keep it. A sibling of `.github/sd-review.json` rather than a key
+#: inside it: that file is `bin/sd-review`'s routing policy, it rejects unknown
+#: keys by design, and a malformed acknowledgement must not take the review
+#: lane down with it. Same directory, same `<command>.json` convention, same
+#: property that matters -- it is in git, so a collaborator sees it in a diff
+#: instead of finding it in somebody's machine config.
+ACKNOWLEDGEMENT_RELATIVE_PATH = pathlib.Path(".github") / "sd-status.json"
+
+#: The facts an acknowledgement may pin, and the whole vocabulary it may use.
+#: Deliberately not the gap id: `reviews` is emitted for two opposite states of
+#: the branch -- the review object being absent, which means no pull request is
+#: required at all, and the object existing while asking for 0 approvals. An
+#: acknowledgement keyed on the id alone would accept the first while meaning
+#: the second, which is how a suppression becomes a hole. A key outside this
+#: tuple is rejected at load time rather than quietly matching nothing.
+#:
+#: `branch_protection` is the same move one level up. The other four reduce a
+#: protection *object*, so on a branch that has none they are all constants --
+#: an `unprotected` entry pinning only those would accept the id whatever the
+#: branch looked like, which is the shape the non-empty `state` rule forbids.
+#: This is the fact that can be wrong there, and therefore the one that can go
+#: stale.
+ACKNOWLEDGED_FACTS = (
+    "branch_protection",
+    "enforce_admins",
+    "required_approving_review_count",
+    "required_pull_request_reviews",
+    "strict",
+)
+
+
+#: Every finding an acknowledgement can name, and the whole vocabulary `id`
+#: may use. One tuple, read by the producers below and by the loader, because
+#: the ids used to be scattered string literals with no set anywhere: an entry
+#: reading `unprotectd` or `enforce-admins` passed every check the loader made,
+#: matched no finding, printed nothing, and left the gap it was written to
+#: accept printing on every run -- a silent suppression of the accept, which is
+#: the failure this file exists to prevent.
+#:
+#: What is deliberately *not* here is as load-bearing as what is.
+#: `squash_message` and `rebase_merge` are real ids the report prints, on merge
+#: settings that never pass through `_apply_acknowledgements`; `acknowledgements`
+#: is the id a fault in the file itself carries, and a broken file must not be
+#: able to accept its own breakage. All three are ids no acknowledgement could
+#: ever match, so admitting them here would re-open the hole under a
+#: better-spelled name.
+ACKNOWLEDGEABLE_GAPS = (
+    "enforce_admins",
+    "produced_not_required",
+    "required_checks",
+    "required_not_produced",
+    "reviews",
+    "strict",
+    "unprotected",
+)
+
+
+def load_acknowledgements(root: pathlib.Path) -> tuple[list[dict[str, Any]], list[str]]:
+    """Accepted protection states, read from `.github/sd-status.json`.
+
+    **Incident.** One of this repository's protection gaps cannot be closed:
+    `main` requires a pull request but zero approving reviews, and with
+    `enforce_admins` on, one maintainer, and GitHub refusing self-approval,
+    raising the count locks the repository while deleting the review object
+    loses the pull-request requirement outright. So the row printed `GAP` on
+    every run with no action behind it -- and a section that always has a
+    standing red line is a section a reader learns to skim, which is where a
+    real regression would land unread.
+
+    **Deletion criterion.** Each entry carries `until:`, the condition that
+    ends it, and it is printed every run beside the acceptance. When that
+    condition is met the entry is deleted from the file and the gap returns on
+    its own; nothing here needs changing for that to happen. An entry whose
+    `until` has come true and which is still in the file is a bug in the file,
+    not in this reader.
+
+    Returns `(entries, problems)`. A file that exists and is wrong yields no
+    entries and a problem per fault: never a silent fall back, and never a
+    partial application. Failing this way fails closed -- every gap the file
+    meant to accept goes on printing as a gap.
+    """
+    path = root / ACKNOWLEDGEMENT_RELATIVE_PATH
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return [], []
+    except (OSError, UnicodeDecodeError) as error:
+        return [], [f"{ACKNOWLEDGEMENT_RELATIVE_PATH}: cannot be read ({error})"]
+    return parse_acknowledgements(text)
+
+
+def parse_acknowledgements(text: str) -> tuple[list[dict[str, Any]], list[str]]:
+    """The file's content, wherever it was read from, to `(entries, problems)`.
+
+    `load_acknowledgements` reads the working tree and hands the text here;
+    `sd-ship merge` reads the reviewed head (`git show <head>:...`) and hands
+    its text here. One parser, two readers: a declaration the merge honours
+    is the one `sd-status` reports, by construction rather than by agreement.
+    """
+    try:
+        loaded = json.loads(text)
+    except ValueError as error:
+        return [], [f"{ACKNOWLEDGEMENT_RELATIVE_PATH}: not valid JSON ({error})"]
+
+    where = str(ACKNOWLEDGEMENT_RELATIVE_PATH)
+    if not isinstance(loaded, dict):
+        return [], [f"{where}: the top level must be a JSON object"]
+    known = ("$schema", "accepted_gaps")
+    unknown = sorted(set(loaded) - set(known))
+    if unknown:
+        # Both known keys are named, `$schema` included: a message that listed
+        # only `accepted_gaps` would read as though the schema pointer this
+        # repository's own file carries were itself the mistake.
+        return [], [
+            f"{where}: unknown key(s) {', '.join(unknown)}; known keys are {', '.join(known)}"
+        ]
+    raw = loaded.get("accepted_gaps", [])
+    if not isinstance(raw, list):
+        return [], [f"{where}: accepted_gaps must be a list"]
+
+    entries: list[dict[str, Any]] = []
+    problems: list[str] = []
+    for index, entry in enumerate(raw):
+        faults = acknowledgement_problems(f"{where}: accepted_gaps[{index}]", entry)
+        problems.extend(faults)
+        if not faults:
+            # A faulty entry is not carried, and it makes no difference which
+            # way that goes: one fault anywhere discards the whole file two
+            # lines below. Dropping it here keeps the list that reaches the
+            # matcher to entries this reader has fully checked.
+            entries.append(entry)
+    if problems:
+        return [], problems
+    return entries, []
+
+
+def acknowledgement_problems(label: str, entry: Any) -> list[str]:
+    """Everything wrong with one `accepted_gaps` entry, in the order read.
+
+    Split out of `load_acknowledgements` rather than inlined: the loader reads
+    a file, and this decides whether one entry can mean anything, which are
+    two jobs that grew past what one function can hold at a glance.
+
+    The two vocabularies are the substance. `state` may name only facts this
+    reader can observe, and `id` may name only a finding an acknowledgement
+    can be matched against -- both rejected here rather than quietly matching
+    nothing, which is the failure this whole file was written to remove.
+    """
+    problems: list[str] = []
+    if not isinstance(entry, dict):
+        return [f"{label} must be an object"]
+    missing = [key for key in ("id", "state", "because", "since", "until") if key not in entry]
+    if missing:
+        # `because` and `until` are required rather than optional because an
+        # acknowledgement without a reason and an end condition is a
+        # suppression, and a suppression is the thing this replaces.
+        return [f"{label} is missing {', '.join(missing)}"]
+    for key in ("id", "because", "since", "until"):
+        if not isinstance(entry[key], str) or not entry[key].strip():
+            problems.append(f"{label}.{key} must be a non-empty string")
+    gap_id = entry["id"]
+    if isinstance(gap_id, str) and gap_id.strip() and gap_id not in ACKNOWLEDGEABLE_GAPS:
+        # Compared exactly rather than stripped, and that is not pedantry:
+        # `_apply_acknowledgements` matches `entry["id"] == gap["id"]`, so
+        # ` reviews ` would load clean and accept nothing, which is the whole
+        # defect being closed here, one space to the left.
+        problems.append(
+            f"{label}.id {gap_id!r} is not an acknowledgeable gap, so it would accept "
+            f"nothing; known ids are {', '.join(ACKNOWLEDGEABLE_GAPS)}"
+        )
+    state = entry["state"]
+    if not isinstance(state, dict) or not state:
+        # An empty `state` would accept the id whatever the branch looks like,
+        # which is exactly the shape this file must not be able to take: see
+        # ACKNOWLEDGED_FACTS.
+        problems.append(f"{label}.state must be a non-empty object of observed facts")
+    else:
+        problems.extend(
+            f"{label}.state.{fact} is not an observable protection fact; "
+            f"known facts are {', '.join(ACKNOWLEDGED_FACTS)}"
+            for fact in sorted(set(state) - set(ACKNOWLEDGED_FACTS))
+        )
+    return problems

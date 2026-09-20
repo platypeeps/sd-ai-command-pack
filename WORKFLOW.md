@@ -70,7 +70,9 @@ These run without being asked.
 - Expected branch protection requires pull requests, current CI, and up-to-date branches, with no required approvals.
   Configure it deliberately in GitHub; installation does not grant a protection exception.
   `sd-status` reports gaps; executable merge stops when required protection is absent.
-  Repository-specific accepted gaps do not change that executable gate.
+  One accepted gap changes that gate: an `unprotected` entry in `.github/sd-status.json` at the reviewed commit.
+  Under it, `sd-ship merge` requires every check run, every status, and a `pull_request` run of every workflow at the head to pass.
+  The receipt records `declared_gap: unprotected`. Any other gap, and a declaration only in the working tree, do not change the gate.
 - `make check` and the pack's `lint` CI job run `sd-docs-lint` against the
   checkout's own `docs/work/`, `docs/spec/` and `docs/decisions/`.
   `sd-ship` runs it again at delivery time. A consumer that wants the gate

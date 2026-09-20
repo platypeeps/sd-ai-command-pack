@@ -310,12 +310,14 @@ PROSE_SYMBOLS = (
      r'"authors"[^:]|"authors":[[:space:]]*[^"[:space:]]'),
 )
 
-#: The 31(b1) symbols that are **kept**, each with the files that may carry
-#: it. Both are live functions of `bin/sd-status`'s protection section:
-#: `load_acknowledgements` reads the accepted gaps of
-#: `.github/sd-status.json`, a tracked record that today holds the
-#: `unprotected` acceptance of 2026-09-12, and `_protection_gaps` is what
-#: those acceptances are applied to.
+#: The 31(b1) symbol that is **kept**, with the files that may carry it.
+#: `_protection_gaps` is the live function of `bin/sd-status`'s protection
+#: section that the accepted gaps of `.github/sd-status.json` -- a tracked
+#: record that today holds the `unprotected` acceptance of 2026-09-12 -- are
+#: applied to. `load_acknowledgements` sat beside it until sd:1110 moved the
+#: loader to `bin/sd_lib.py`, where `sd-ship merge` reads it too; the row
+#: left this table (a keep may shrink) and `ONE_DEFINITION` below bounds the
+#: definition instead.
 #:
 #: This was a hold, waiting on the owner to rewrite the section into one
 #: `protected: yes/no` line. On 2026-09-19 the owner rescinded that cut and
@@ -332,7 +334,6 @@ PROSE_SYMBOLS = (
 #: reader does not go looking for the lane that was going to remove them.
 HELD_SYMBOLS = {
     "_protection_gaps": frozenset({"bin/sd-status", "tests/test_sd_status.py"}),
-    "load_acknowledgements": frozenset({"bin/sd-status", "tests/test_sd_status.py"}),
 }
 
 #: The frozen ceiling on `HELD_SYMBOLS`: it may lose an entry, never gain
@@ -341,7 +342,6 @@ HELD_SYMBOLS = {
 #: spreading to a third file.
 HELD_SYMBOLS_BOUND = {
     "_protection_gaps": frozenset({"bin/sd-status", "tests/test_sd_status.py"}),
-    "load_acknowledgements": frozenset({"bin/sd-status", "tests/test_sd_status.py"}),
 }
 
 
@@ -465,10 +465,25 @@ class TheRepealedRowStillTeaches(unittest.TestCase):
 #: identity while the `provider` rows carry state. Collapsing either pair
 #: would lose a distinction, not a duplicate. The item's `prd.md` Log for
 #: that date is the record.
+#:
+#: The acknowledgement loader moved with sd:1110: `sd-ship merge` reads the
+#: declaration at the reviewed commit through the same parser `sd-status`
+#: reads the working tree with, so a second copy in either command would be
+#: the two readers disagreeing about what a declaration is.
 ONE_DEFINITION = (
     (
         "the status vocabulary",
         r'\("planning", *"ready", *"in_progress", *"done"\)',
+        "bin/sd_lib.py",
+    ),
+    (
+        "the acknowledgement loader",
+        r"def load_acknowledgements\(",
+        "bin/sd_lib.py",
+    ),
+    (
+        "the acknowledgement parser",
+        r"def parse_acknowledgements\(",
         "bin/sd_lib.py",
     ),
 )

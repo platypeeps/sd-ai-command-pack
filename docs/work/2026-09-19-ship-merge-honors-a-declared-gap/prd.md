@@ -122,64 +122,68 @@ used. The thing to restore is the machine backstop, not the protection object.
 
 ## Acceptance criteria
 
-- [ ] `tests/test_sd_ship.py`: a fixture with a 404 protection object, a
+- [x] `tests/test_sd_ship.py`: a fixture with a 404 protection object, a
       declaration whose `state` is `{"branch_protection": false}`, and every
       check run at `head` completed `success` reaches the merge `PUT` exactly
       once; the receipt's `protection` field is
       `{"declared_gap": "unprotected", "until": ...}`.
-- [ ] Same fixture without the declaration: the refusal is the present one
+- [x] Same fixture without the declaration: the refusal is the present one
       ("Branch not protected"), and the `PUT` count is 0. The test is run
       red first by removing the declaration check.
-- [ ] Same fixture with the declaration and one check run at `head` whose
+- [x] Same fixture with the declaration and one check run at `head` whose
       conclusion is `failure`: refusal with code `ci_not_passing`, `PUT` count
       0. A second variant with the failing run at a *different* SHA and a
       passing rerun at `head` also refuses: the latest run at the head is
       what counts, and a run for another commit is not evidence.
-- [ ] Status histories at `head`, written as the literal newest-first array
+- [x] Status histories at `head`, written as the literal newest-first array
       the `/statuses` endpoint returns for one context:
       `[success, pending]` merges, `PUT` count 1 (CI recovered);
       `[success, failure]` merges, `PUT` count 1 (CI recovered);
       `[failure, success]` refuses, `PUT` count 0 (currently failing);
       `[pending, success]` refuses, `PUT` count 0 (currently pending).
-- [ ] Same fixture with the declaration and zero check runs and zero statuses
+- [x] Same fixture with the declaration and zero check runs and zero statuses
       at `head`: refusal, `PUT` count 0.
-- [ ] Only the advisory workflow ran: `.github/workflows/` at `head` holds
+- [x] Only the advisory workflow ran: `.github/workflows/` at `head` holds
       `tests.yml` and `sd-review-route.yml`, both on `pull_request`; the only
       check run and the only workflow run at `head` are `route`, `success`.
       Refusal names `Tests`; `PUT` count 0. A second fixture renames the file
       `tests.yaml` and asserts the same refusal, so the `.yaml` spelling is
       enumerated and not skipped.
-- [ ] A workflow present at `head` but absent from the working tree is still
+- [x] A workflow present at `head` but absent from the working tree is still
       expected; one absent at `head` and present in the working tree is not.
-      Two fixtures, `PUT` counts 0 and 1.
-- [ ] A workflow on both `push` and `pull_request` with one run at `head`
+      Two fixtures, asked of `expected_workflows` directly: `merge` refuses a
+      dirty checkout before it reads anything, so a `PUT` count over a dirty
+      tree measures that older guard and not this reader (Log, 2026-09-19).
+- [x] A workflow on both `push` and `pull_request` with one run at `head`
       whose `event` is `push`, `success`, and none for `pull_request`:
       refusal names the workflow, `PUT` count 0. The same fixture with a
       second run, `event: pull_request`, `success`: `PUT` count 1.
-- [ ] A workflow whose `on` is `push` only is not expected; a fixture with a
+- [x] A workflow whose `on` is `push` only is not expected; a fixture with a
       third such workflow and no run for it merges, `PUT` count 1.
-- [ ] An entry with `id: reviews` and `state: {"branch_protection": false}`
+- [x] An entry with `id: reviews` and `state: {"branch_protection": false}`
       and no `unprotected` entry: refusal, `PUT` count 0 — another gap's
       acceptance does not authorize this one.
-- [ ] Declaration present and GitHub returns a protection object: refusal
+- [x] Declaration present and GitHub returns a protection object: refusal
       names the mismatch, `PUT` count 0.
-- [ ] Declaration file invalid (unknown key, bad JSON, wrong `state` shape):
+- [x] Declaration file invalid (unknown key, bad JSON, wrong `state` shape):
       refusal names the file's fault, `PUT` count 0.
-- [ ] The declaration exists only in the working tree and not at `head`:
-      refusal, `PUT` count 0. The converse — at `head`, deleted from the
-      working tree — merges, because the working tree is not what is landing.
-- [ ] The protection endpoint answers 403 and the declaration is present:
+- [x] The declaration exists only in the working tree and not at `head`:
+      `declared_gap` answers `None` and names the missing file at `head`. The
+      converse — at `head`, deleted from the working tree — answers the entry,
+      because the working tree is not what is landing. Asked of the reader
+      directly, for the reason the workflow-set criterion gives.
+- [x] The protection endpoint answers 403 and the declaration is present:
       refusal is the present one, not a merge; `PUT` count 0.
-- [ ] The final pre-`PUT` comparison: a fixture whose protection endpoint
+- [x] The final pre-`PUT` comparison: a fixture whose protection endpoint
       answers 404 on the first read and returns an object on the second
       refuses with the present "ownership or branch protection changed before
       merge".
-- [ ] `grep -rn "def load_acknowledgements" bin/` prints exactly one line, in
+- [x] `grep -rn "def load_acknowledgements" bin/` prints exactly one line, in
       `bin/sd_lib.py`; `tests.test_cut_symbols.OneDefinitionEach` holds the
       row and goes red when a copy is pasted into `bin/sd-status`.
-- [ ] `tests.test_sd_status` passes unchanged in count: the protection
+- [x] `tests.test_sd_status` passes unchanged in count: the protection
       section's output for this repository is byte-identical before and after.
-- [ ] `make check`: 0 non-zero shards, `make exit=0`.
+- [x] `make check`: 0 non-zero shards, `make exit=0`.
 - [ ] Live: the next pull request in this repository lands through
       `sd-ship merge --expected-head <sha>` with `ok: True`, and the ship
       receipt in `~/.local/share/sd/sd.db` shows `declared_gap: unprotected`.
@@ -310,3 +314,29 @@ an independent read. Codex: `status: clean`, 0 findings; `make check`
 passed in the same run (exit 0). No `BLOCKING` line is open; the item is
 promoted `planning → ready`.
 
+### 2026-09-19 — implemented on `feat/sd-1110-declared-gap`
+
+- `bin/sd_ship_remote.py`: `api_status` reads the HTTP status through
+  `gh api --include`; `gate` returns the validated protection object or the
+  declaration read at `head`; `every_check` is the substitute for the
+  required-checks list; `expected_workflows` enumerates `pull_request`
+  workflows from the tree at `head`. `ready` dispatches to `every_check`
+  when the gate is a declaration. `bin/sd-ship`: `merge` calls `gate`,
+  records the gate on the receipt, and `still_gated` repeats the read before
+  the `PUT`. `Ship.merge` left `tests/test_code_health.py`'s `COMPLEX`
+  baseline with that extraction.
+- `bin/sd_lib.py`: the YAML reader, `load_acknowledgements`,
+  `parse_acknowledgements` and `acknowledgement_problems` moved from
+  `bin/sd-status`, which now aliases them. `tests/test_cut_symbols.py`:
+  `ONE_DEFINITION` gained the loader and the parser; the
+  `load_acknowledgements` row left `HELD_SYMBOLS` (a keep may shrink).
+- Two criteria changed shape. `merge` refuses an uncommitted checkout
+  before it reads the head, an older guard that stands, so a `PUT` count
+  over a dirty working tree cannot observe the readers. Both working-tree
+  criteria ask `expected_workflows` and `declared_gap` directly instead; the
+  rest of the table is asserted through `merge` and its `PUT` count as
+  written. `tests.test_sd_ship.DeclaredGapCase` holds sixteen tests.
+- `WORKFLOW.md`, the `unprotected` entry's `because`, and `CHANGELOG.md`
+  say what replaces the gate under the declaration. The live criterion is
+  ticked when this branch's own pull request lands through
+  `sd-ship merge`.
