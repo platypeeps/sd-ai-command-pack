@@ -39,6 +39,17 @@
   markdown only, and because the pack ships no shell outside `.github/scripts/`.
   It runs git through `sd_lib.git_output`, since `bin/` holds one git policy.
 
+- **`sd-status` names a Notion mirror the queue still owes** (`notion-sync-pending`,
+  rank 75). A render enqueues a mirror because it cannot write one, and an agent
+  session drains the queue; between those two moments the request was a file
+  nobody looked at. The report reads `~/.claude/pending-notion-syncs/`
+  (`SD_NOTION_QUEUE` overrides it), keeps only requests naming the repository it
+  is reporting on, and ages each row from the request's mtime so the one that
+  has waited longest leads. Not abnormal: a queued mirror is work outstanding,
+  not a defect, so it never reaches the banner. An unreadable request is skipped
+  rather than diagnosed, because a row about it would fire every run and name no
+  action this tool is allowed to take.
+
 ### Fixed
 
 - **A rendered research page no longer loads anything over the network.** The
