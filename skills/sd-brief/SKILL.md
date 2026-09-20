@@ -12,6 +12,10 @@ breadth plus recency over known topics; depth on a single question is
 
 Source quality and dating rules live in `references/source-standards.md`.
 
+When the deliverable is a finished document, apply
+`references/publication-contract.md`: it publishes to the dashboard's
+Documents tab by default, and reaches Notion only where the user designated it.
+
 ## When to use
 
 Use when the user wants "what do I need to know" across their standing

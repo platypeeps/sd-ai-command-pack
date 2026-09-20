@@ -4,7 +4,7 @@ VENV ?= .venv
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
 
-.PHONY: setup hooks test lint audit docs-lint check
+.PHONY: setup hooks fonts test lint audit docs-lint check
 
 setup:
 	"$(PYTHON)" -m venv "$(VENV)"
@@ -111,7 +111,11 @@ test:
 # a conflict ruff and mypy would each be handed the same file three times.
 # Both dedupe internally, so this one is waste rather than a wrong answer --
 # but every `ls-files` in this repository now says what it means (item 481).
-LINT_BIN := $(shell git ls-files --deduplicate -- bin)
+# `:(exclude)bin/fonts`: that directory holds vendored woff2 files, and ruff
+# reads every path it is handed as UTF-8 source -- a binary there fails the
+# lane with E902 rather than being skipped. Excluded by directory and not by
+# extension, so a second binary asset lands in the same place or not at all.
+LINT_BIN := $(shell git ls-files --deduplicate -- bin ':(exclude)bin/fonts')
 LINT_RUFF_PATHS := $(LINT_BIN) tests
 LINT_MYPY_PATHS := $(LINT_BIN)
 
@@ -212,6 +216,14 @@ audit:
 # provisioned library. Item 370.
 docs-lint:
 	"$(VENV_PYTHON)" bin/sd-docs-lint
+
+# Re-vendor the research renderer's Latin woff2 faces and rewrite
+# bin/sd_research_fonts.py from them. Needs network; not part of `check`,
+# because a check that reaches Google fails on a plane. Run it after
+# changing FAMILIES in bin/sd_research_fonts_build.py, and commit both the
+# files under bin/fonts/ and the regenerated module.
+fonts:
+	"$(VENV_PYTHON)" bin/sd_research_fonts_build.py
 
 # `full-check` is gone with step 3e: it ran a shipped script that no longer
 # exists, and every lane it wrapped that still has a subject is already a target

@@ -54,7 +54,8 @@ Declare each intentional replacement under this heading:
 ## Local overrides of the shared template
 
 - `the opening`: use STE-Concise sentences without changing the template instructions.
-- `## Publishing — Notion, not artifacts`: omit personal checkout paths from shared Notion pages.
+- `## Publishing — the dashboard by default, Notion on designation`: omit personal
+  checkout paths from shared Notion pages.
 ```
 
 Use the exact template heading, including `##`, inside backticks.
@@ -174,15 +175,20 @@ current working directory and nowhere else.
 
 Each repo supplies a `research.conf.py` naming `PROJECT` and a `DOCS` list;
 per-doc keys are `src out title h1 eyebrow stand meta vtitle figs legend footer
-skip links sibling`. The visual identity is shared and lives in the renderer, so
+skip links sibling notion`. The visual identity is shared and lives in the renderer, so
 every repo renders the same way.
 
-Two forms are written per document. `build/<name>.html` is standalone and opens
-with `file://`; it is a local reading form, not a publishing surface.
+Two forms are written per document. `build/<name>.html` is standalone, opens
+with `file://`, and is the form the dashboard's Documents tab lists and serves
+— the published form, not merely a local one.
 `build/artifact/<name>.html` is content only — the renderer still emits it, but
 nothing consumes it, because research is not published as artifacts (see
 Publishing). Add or edit pages in `research.conf.py`, never by editing generated
 files.
+
+Rendering ends by registering `build/` with the dashboard and queueing a Notion
+sync for every document that names one. Both steps are idempotent. See
+Publishing, and `references/publication-contract.md`.
 
 Verify links before publishing:
 
@@ -322,24 +328,66 @@ checklist prints reports it — say *that* in Status. "No independent pass" is a
 stated gap; self-review that quietly presents itself as review is the defect
 this section exists to prevent.
 
-## Publishing — Notion, not artifacts
+## Publishing — the dashboard by default, Notion on designation
 
-**Research is not published as artifacts** — the hosted single-page surface the
-renderer's `build/artifact/` form was written for. Notion is the publishing
-surface. Pages published as artifacts before 2026-08-27 stay where they are as
-historical record; nothing new goes there, and updates go to Notion.
+`references/publication-contract.md` governs this. It applies to every skill in
+the pack, not only to research repos; what follows is how a research repo meets
+it.
 
-Every overview, map, brief, report, and survey has a Notion page under the
-repo's own folder, mirroring the repo's layout. Which folder that is belongs to
-the repo, not to this standard: record it in the repo's `research.conf.py` and
-its README, not in a table here.
+**Superseded 2026-09-20.** Before this date the standard said every overview,
+map, brief, report and survey had a Notion page. That is now the exception
+rather than the rule: Notion is outward-facing, so a document reaches it only
+when the user designates it and names its space.
 
-The markdown file is the source of truth; the Notion page is the readable,
-shareable mirror, and is updated whenever the source document changes.
-`90-scratch/` is not mirrored.
+### The dashboard is the default
 
-Mirror shape — the full document minus its H1, opening with a pointer back to the
-file so a reader who lands in Notion knows where to edit:
+`sd-research-kit render` ends by registering `build/` with the local
+dashboard's Documents tab, and the tab lists and serves `build/<name>.html`.
+That standalone form is therefore the published form, not merely a local
+reading form. Registration is one line in the dashboard's `documents.conf`,
+written once and idempotent; the dashboard reads that file and never writes it,
+so the repo keeps owning its own output.
+
+The Documents tab serves under `default-src 'none'; style-src 'unsafe-inline';
+img-src data:; font-src data:`. The renderer already meets it — fonts are
+embedded as data: URIs by `bin/sd_research_fonts.py`, styles are inline, and
+there is no script. Do not add a `<link>`, a `<script>` or a remote image to a
+rendered page: it will not load, and the page will render degraded rather than
+fail visibly.
+
+`90-scratch/` is not published. Neither is working state — ledgers, receipts,
+handoff packets. Publish what a reader is meant to read.
+
+### Notion is per document
+
+The user designates a document and names its space at that time. Record it in
+that document's `DOCS` entry, where the document is already described:
+
+```python
+notion=dict(space="Research", page="https://www.notion.so/...")
+```
+
+Until that key exists, the document publishes to the dashboard and nowhere
+else. Do not infer a target from a title, a folder or a neighbouring document.
+
+Recording it in `research.conf.py` is what makes the mirror machine-readable.
+The README's **Notion pages** table stays, for the human reader, but it is no
+longer the only place the target is written.
+
+### How the mirror is updated
+
+A render does not call Notion. It runs in a git hook and in CI, neither of
+which reaches an MCP server, and the pack holds no Notion credential. Instead
+it writes a sync request per designated document under
+`~/.claude/pending-notion-syncs/`, naming the document, its space, its page and
+the source revision.
+
+An agent session drains that queue through the Notion connector. One request
+file per document, so a re-render replaces the pending request rather than
+queueing a second one; a request that is never drained stays on disk.
+
+Mirror shape — the full document minus its H1, opening with a pointer back to
+the file so a reader who lands in Notion knows where to edit:
 
 ```markdown
 *Source: **`<absolute path to the markdown>`** — edit there, then update this page.*
@@ -358,10 +406,15 @@ its first half, then extended with `notion-update-page` / `insert_content` at
 `position: end`.
 
 Give each page an icon and keep it stable across updates — a changed icon reads
-as a different page. Record every page in the README's **Notion pages** table:
-document, page title, URL. Handling restrictions survive the mirror: a document
-that may not be shared externally may not be mirrored to a shared Notion page
-either.
+as a different page. Handling restrictions survive the mirror: a document that
+may not be shared externally may not be mirrored to a shared Notion page
+either, and designating one does not lift the restriction.
+
+### Artifacts
+
+Research is still not published as artifacts — the hosted single-page surface
+the renderer's `build/artifact/` form was written for. Pages published as
+artifacts before 2026-08-27 stay where they are as historical record.
 
 ## Style
 

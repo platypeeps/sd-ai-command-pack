@@ -13,6 +13,10 @@ Before writing each page, run `sd-rules --for docs/spec/<page>.md` from
 the repository root and cite the rule ids it prints in the page rather than
 restating the rules.
 
+When the deliverable is a finished document, apply
+`references/publication-contract.md`: it publishes to the dashboard's
+Documents tab by default, and reaches Notion only where the user designated it.
+
 ## When to use
 
 - As the second stage of `sd-ship`, before docs-lint and the commit.

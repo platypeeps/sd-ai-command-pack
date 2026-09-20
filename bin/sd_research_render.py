@@ -30,12 +30,19 @@ Each DOCS entry:
     skip     optional   ["Section title", ...] dropped from the rendered page
     links    optional   [(label, href), ...] shown in the rail
     sibling  optional   raw HTML for a "Companions" rail block
+    notion   optional   dict(space="...", page="...") — the Notion mirror this
+                        document is designated for. Absent means the document
+                        publishes to the dashboard and nowhere else.
 
 Writes two files per doc:
 
-    build/<out>.html            standalone — opens with file://, the local reading form
-    build/artifact/<out>.html   content-only — legacy; nothing consumes it now that
-                                research is published to Notion, not as artifacts
+    build/<out>.html            standalone — opens with file://, and is what the
+                                dashboard's Documents tab lists and serves
+    build/artifact/<out>.html   content-only — legacy; nothing consumes it
+
+Rendering ends by registering `build/` with the dashboard and queueing a Notion
+sync for every document that names one. See `sd_research_publish` and
+`skills/_shared/references/publication-contract.md`.
 
 Never hand-wrap HTML for publishing; that mismatch is what this exists to prevent.
 """
@@ -45,6 +52,7 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 try:
@@ -53,6 +61,8 @@ except ImportError:
     sys.exit("needs python-markdown:  pip install markdown")
 
 from sd_lib import GIT_TIMEOUT_SECONDS
+from sd_research_fonts import FONTS_CSS
+from sd_research_publish import publish
 from sd_research_tokens import TOKENS_CSS
 
 CSS = TOKENS_CSS
@@ -149,11 +159,10 @@ def build_one(repo, cfg, project):
     created, ver, updated = doc_version(repo, cfg["src"])
 
     parts = ["<title>%s</title>" % html.escape(cfg["title"]),
-             '<link rel="preconnect" href="https://fonts.googleapis.com">',
-             '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>',
-             '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
-             'family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&'
-             'family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">',
+             # Fonts are embedded, not linked. The dashboard serves documents under
+             # `default-src 'none'`, which blocks an external stylesheet: a linked
+             # Google Fonts page falls back to system fonts. See sd_research_fonts.
+             "<style>%s</style>" % FONTS_CSS,
              "<style>%s</style>" % CSS,
              '<div class="wrap">',
              '<aside class="rail">',
@@ -213,6 +222,13 @@ def main():
     print("%s  ->  build/" % os.path.basename(repo))
     for cfg in ns["DOCS"]:
         build_one(repo, cfg, project)
+
+    # Publication is the default, not a step the user asks for: a document
+    # nobody can find was not delivered. Registration is idempotent and
+    # enqueueing overwrites, so re-rendering costs nothing and leaves no
+    # duplicates.
+    for line in publish(Path(repo), project, ns["DOCS"]):
+        print("  %s" % line)
 
 
 if __name__ == "__main__":

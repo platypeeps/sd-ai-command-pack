@@ -9,6 +9,7 @@
       "Bash(make audit)",
       "Bash(make check)",
       "Bash(make docs-lint)",
+      "Bash(make fonts)",
       "Bash(make hooks)",
       "Bash(make lint)",
       "Bash(make setup)",

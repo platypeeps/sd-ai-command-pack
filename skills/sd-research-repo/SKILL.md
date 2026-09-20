@@ -16,6 +16,10 @@ layout, type prefixes, document shape, rendering, review, publishing) and
 editing goes through the file tools rather than the shell). Read the first before
 writing or moving any document; read the second before fanning work out.
 
+When the deliverable is a finished document, apply
+`references/publication-contract.md`: it publishes to the dashboard's
+Documents tab by default, and reaches Notion only where the user designated it.
+
 ## When to use
 
 Use when the repo you are standing in is a research repo and the task is to
@@ -113,9 +117,17 @@ records the differences that are on purpose. Both are in
    review to prose — the exact invocation and its limits are in
    `references/conventions.md`. If it is unavailable, record that in Status
    rather than letting self-review pass as review.
-8. Publish to Notion, not as an artifact, in the mirror shape the reference
-   gives. Record the page in the repo's README table. Handling restrictions
-   survive the mirror.
+8. Publication to the dashboard already happened: `render` registered `build/`
+   and the Documents tab serves it. Nothing further is needed for a document
+   that publishes locally, which is every document until the user designates
+   one.
+
+   For a document carrying a `notion=` key, `render` left a request in
+   `~/.claude/pending-notion-syncs/`. Drain it: read each JSON file, mirror
+   that document to the named space through the Notion connector in the shape
+   `references/conventions.md` gives, record the page in the repo's README
+   table, then delete the request file. A request whose handling restrictions
+   forbid an external mirror is reported and left in place, never drained.
 9. Report what was done, what was verified, and what was not.
 
 ## Sub-agent dispatch
@@ -140,8 +152,10 @@ planning a fan-out that ends in a written file.
   `references/conventions.md`, and do not mirror a document externally whose
   handling restrictions forbid it.
 - Never hand-edit `build/`. It is generated; change `research.conf.py` instead.
-- Rendering and publishing act on real surfaces. Render freely; publish only when
-  the user asked for it.
+- Rendering and local publication act on the machine only: the Documents tab is
+  served on loopback, so render freely. Mirroring to Notion is outward-facing —
+  do it only for a document the user designated, and only into the space they
+  named.
 
 ## Final report
 

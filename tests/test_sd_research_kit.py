@@ -28,7 +28,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KIT = REPO_ROOT / "bin" / "sd-research-kit"
-VERBS = ("render", "checklinks", "review", "pins", "conventions", "init-claude-md")
+VERBS = (
+    "render",
+    "publish",
+    "checklinks",
+    "review",
+    "pins",
+    "conventions",
+    "init-hook",
+    "init-claude-md",
+)
 TEMPLATE = REPO_ROOT / "skills" / "sd-research-repo" / "templates" / "CLAUDE.md"
 
 
@@ -66,7 +75,9 @@ class VerbSurfaceTests(unittest.TestCase):
             self.assertIn(verb, result.stdout, f"{verb} missing from usage")
 
     def test_an_unknown_verb_fails(self) -> None:
-        result = run("publish")
+        # Not a plausible verb name: `publish` stood here until it became one,
+        # and the test then asserted that a real verb was rejected.
+        result = run("transmogrify")
         self.assertEqual(result.returncode, 1)
         self.assertIn("usage:", result.stderr)
 

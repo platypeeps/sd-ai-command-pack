@@ -11,6 +11,10 @@ market search, research sweep, neutral comparison, execution plan, or action.
 
 Source quality and dating rules live in `references/source-standards.md`.
 
+When the deliverable is a finished document, apply
+`references/publication-contract.md`: it publishes to the dashboard's
+Documents tab by default, and reaches Notion only where the user designated it.
+
 ## When to use
 
 Use when the user wants a recommendation between at least two known options and
