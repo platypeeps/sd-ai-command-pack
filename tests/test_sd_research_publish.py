@@ -42,6 +42,11 @@ def load():
 
 PUBLISH = load()
 
+#: `mirror_targets` resolves a destination's default container from the
+#: repo name, so every call needs a repo even when the designation names
+#: its container outright.
+REPO = Path("/repos/my-research")
+
 HEADER = "# Generated documents the dashboard lists and serves.\n#\n#   root|<key>|<label>|<directory>\n\nroot|hoa|Stage Run HOA|~/repos/hoa/reports\n"
 
 
@@ -108,89 +113,109 @@ class RegisterTests(Fixture):
 
 class MirrorTargetTests(unittest.TestCase):
     def test_no_key_means_local_only(self) -> None:
-        self.assertEqual(PUBLISH.mirror_targets({"out": "doc"}), ([], []))
+        self.assertEqual(PUBLISH.mirror_targets({"out": "doc"}, REPO), ([], []))
 
-    def test_drive_needs_a_folder_and_notion_does_not(self) -> None:
-        """Notion has a default folder per scope; no Drive folder was ever
-        named as a default, and inventing one puts a document somewhere
-        nobody chose."""
-        targets, problems = PUBLISH.mirror_targets({"out": "d", "drive": {"file": "x"}})
-        self.assertEqual(targets, [])
-        self.assertEqual(len(problems), 1)
-        targets, problems = PUBLISH.mirror_targets({"out": "d", "notion": {}})
-        self.assertEqual(problems, [])
-        self.assertEqual(len(targets), 1)
+    def test_no_destination_needs_a_container_named(self) -> None:
+        """Every destination has a default, so a bare designation is valid
+        everywhere. A folder nobody has to name is a folder nobody can
+        misspell."""
+        for key in ("notion", "drive"):
+            with self.subTest(key):
+                targets, problems = PUBLISH.mirror_targets(
+                    {"out": "d", key: {}}, REPO)
+                self.assertEqual(problems, [])
+                self.assertEqual(len(targets), 1)
+
+    def test_a_drive_mirror_defaults_to_briefs_and_the_repo_name(self) -> None:
+        """The shape the vault uses, so the copies agree on where a brief
+        lives. The drain resolves the path and creates the repo folder when it
+        is missing, which is what lets a new repo publish without anyone
+        provisioning a folder first."""
+        (drive,), _ = PUBLISH.mirror_targets({"drive": {}}, REPO)
+        self.assertEqual(drive["folder"], "Briefs/my-research")
+        self.assertEqual(drive["target"], "the Briefs/my-research Drive folder")
+
+    def test_naming_a_drive_folder_overrides_the_default(self) -> None:
+        (drive,), _ = PUBLISH.mirror_targets(
+            {"drive": dict(folder="Deliverables")}, REPO)
+        self.assertEqual(drive["folder"], "Deliverables")
 
     def test_an_empty_notion_dict_is_still_a_designation(self) -> None:
         """`notion=dict()` is falsy, so presence decides, not truth."""
         for written in ({}, True):
             with self.subTest(repr(written)):
-                targets, _ = PUBLISH.mirror_targets({"notion": written})
+                targets, _ = PUBLISH.mirror_targets({"notion": written}, REPO)
                 self.assertEqual(len(targets), 1)
 
     def test_a_designation_turned_off_designates_nothing(self) -> None:
         for written in (None, False):
             with self.subTest(repr(written)):
                 self.assertEqual(
-                    PUBLISH.mirror_targets({"notion": written}), ([], []))
+                    PUBLISH.mirror_targets({"notion": written}, REPO), ([], []))
 
     def test_notion_is_private_unless_the_document_asks_for_the_team(self) -> None:
         """The recoverable mistake is the one that happens by accident: a brief
         the team cannot see is repaired by adding `team=True` and draining
         again, and a private brief in a shared space cannot be unseen."""
-        (private,), _ = PUBLISH.mirror_targets({"notion": {}})
+        (private,), _ = PUBLISH.mirror_targets({"notion": {}}, REPO)
         self.assertEqual(private["scope"], "private")
         self.assertEqual(private["space"], "Briefs")
-        (team,), _ = PUBLISH.mirror_targets({"notion": dict(team=True)})
+        (team,), _ = PUBLISH.mirror_targets({"notion": dict(team=True)}, REPO)
         self.assertEqual(team["scope"], "team")
         self.assertEqual(team["space"], "R&D Briefs")
 
     def test_naming_a_folder_does_not_change_the_space(self) -> None:
         """`space=` says where inside a space, never which space."""
-        (target,), _ = PUBLISH.mirror_targets({"notion": dict(space="Archive")})
+        (target,), _ = PUBLISH.mirror_targets(
+            {"notion": dict(space="Archive")}, REPO)
         self.assertEqual(target["scope"], "private")
         self.assertEqual(target["space"], "Archive")
         (target,), _ = PUBLISH.mirror_targets(
-            {"notion": dict(space="Archive", team=True)})
+            {"notion": dict(space="Archive", team=True)}, REPO)
         self.assertEqual(target["scope"], "team")
 
     def test_a_non_dict_is_refused(self) -> None:
         for key in ("notion", "drive"):
             with self.subTest(key):
-                targets, problems = PUBLISH.mirror_targets({"out": "d", key: "R"})
+                targets, problems = PUBLISH.mirror_targets(
+                    {"out": "d", key: "R"}, REPO)
                 self.assertEqual(targets, [])
                 self.assertTrue(any("must be a dict" in p for p in problems))
 
     def test_each_destination_keeps_its_own_field_names(self) -> None:
         """A drain reads the fields its connector needs, not a generic pair."""
-        (notion,), _ = PUBLISH.mirror_targets({"notion": dict(space="R", page="p")})
+        (notion,), _ = PUBLISH.mirror_targets(
+            {"notion": dict(space="R", page="p")}, REPO)
         self.assertEqual(notion["destination"], "notion")
         self.assertEqual((notion["space"], notion["page"]), ("R", "p"))
         self.assertIn("scope", notion)
-        (drive,), _ = PUBLISH.mirror_targets({"drive": dict(folder="F", file="f")})
+        (drive,), _ = PUBLISH.mirror_targets(
+            {"drive": dict(folder="F", file="f")}, REPO)
         self.assertEqual(drive["destination"], "drive")
         self.assertEqual((drive["folder"], drive["file"]), ("F", "f"))
 
     def test_the_target_is_worded_for_whoever_reads_the_request(self) -> None:
         """`sd-status` prints this, so it never carries the destination table."""
-        (notion,), _ = PUBLISH.mirror_targets({"notion": {}})
+        (notion,), _ = PUBLISH.mirror_targets({"notion": {}}, REPO)
         self.assertEqual(notion["target"], "the private Briefs folder")
-        (team,), _ = PUBLISH.mirror_targets({"notion": dict(team=True)})
+        (team,), _ = PUBLISH.mirror_targets({"notion": dict(team=True)}, REPO)
         self.assertEqual(
             team["target"], "the R&D Briefs folder in the R&D team space")
-        (drive,), _ = PUBLISH.mirror_targets({"drive": dict(folder="Deliverables")})
+        (drive,), _ = PUBLISH.mirror_targets(
+            {"drive": dict(folder="Deliverables")}, REPO)
         self.assertEqual(drive["target"], "the Deliverables Drive folder")
 
     def test_two_keys_are_two_mirrors_and_not_a_choice(self) -> None:
         targets, _ = PUBLISH.mirror_targets(
-            {"notion": {}, "drive": dict(folder="F")}
-        )
+            {"notion": {}, "drive": dict(folder="F")}, REPO)
         self.assertEqual([t["destination"] for t in targets], ["notion", "drive"])
 
     def test_an_unknown_key_designates_nothing(self) -> None:
         """A destination is a row in the table; anything else is a typo, and a
         typo that queued a mirror would queue it to a place nothing drains."""
-        self.assertEqual(PUBLISH.mirror_targets({"sharepoint": {"site": "x"}}), ([], []))
+        self.assertEqual(
+            PUBLISH.mirror_targets({"sharepoint": {"site": "x"}}, REPO),
+            ([], []))
 
 
 class EnqueueTests(Fixture):
@@ -252,19 +277,28 @@ class EnqueueTests(Fixture):
         self.assertFalse(PUBLISH.QUEUE.exists())
 
     def test_a_malformed_target_is_reported_and_skipped(self) -> None:
-        said = PUBLISH.enqueue(self.repo, [dict(out="c", drive={"file": "x"})])
-        self.assertTrue(any("needs a folder" in line for line in said))
+        said = PUBLISH.enqueue(self.repo, [dict(out="c", drive="Deliverables")])
+        self.assertTrue(any("must be a dict" in line for line in said))
         self.assertFalse(PUBLISH.QUEUE.exists())
 
     def test_a_malformed_designation_does_not_withhold_the_good_one(self) -> None:
         """The dashboard copy is already written; one bad key must not cost the
         other destination its request."""
         said = PUBLISH.enqueue(self.repo, [dict(
-            out="c", notion={}, drive={"file": "x"},
+            out="c", notion={}, drive="Deliverables",
         )])
-        self.assertTrue(any("needs a folder" in line for line in said))
+        self.assertTrue(any("must be a dict" in line for line in said))
         self.assertEqual([p.name for p in PUBLISH.QUEUE.iterdir()],
                          ["my-research.c.notion.json"])
+
+    def test_a_drive_request_naming_no_folder_carries_the_default(self) -> None:
+        """Naming the file to update says nothing about where it lives, so the
+        request still has to state a folder for the drain to resolve."""
+        PUBLISH.enqueue(self.repo, [dict(out="c", drive={"file": "x"})])
+        wrote = json.loads(
+            (PUBLISH.QUEUE / "my-research.c.drive.json").read_text())
+        self.assertEqual(wrote["folder"], "Briefs/my-research")
+        self.assertEqual(wrote["file"], "x")
 
 
 class ObsidianTests(Fixture):

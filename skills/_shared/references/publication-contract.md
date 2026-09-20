@@ -133,10 +133,11 @@ in `research.conf.py`:
 | Destination | Key | Container | Existing page or file (optional) |
 | --- | --- | --- | --- |
 | Notion | `notion=` | defaulted per scope; `space=` overrides the folder | `page=` |
-| Google Drive | `drive=` | `folder=`, required | `file=` |
+| Google Drive | `drive=` | defaults to `Briefs/<repo>`; `folder=` overrides | `file=` |
 
     notion=dict()                    # private space, Briefs folder
     notion=dict(team=True)           # R&D team space, R&D Briefs folder
+    drive=dict()                     # My Drive, Briefs/<repo> folder
     drive=dict(folder="<name or id>", file="<file id or url>")
 
 Both keys on one entry are two mirrors, not a choice. Until one of these keys
@@ -157,8 +158,21 @@ one.
 inside a space, not which space. A document that must reach the team says so
 with `team=True` and nothing else does it.
 
-A Drive folder is required and has no default. No folder was ever named as one,
-and inventing a default would put a document somewhere nobody chose.
+### A Drive mirror lands beside its siblings
+
+`drive=dict()` mirrors to **`Briefs/<repo>` in My Drive** — the same shape the
+vault uses, so the two copies agree on where a brief lives. A reader who knows
+where one brief is knows where all of them are, whichever copy they found first.
+
+The drain resolves that path and creates the repo folder when it is missing, so
+a new repo publishes without anyone provisioning a folder first. `folder=`
+overrides the default with a folder name or id, for a document that belongs
+somewhere a reader already looks.
+
+The Drive folder that `sdw.drive_publishing_folder` names is a different thing
+and is not this default. That folder is the Mezmo blog's gate: a piece sitting
+in it has cleared every publishing check. A brief mirrored into it would read as
+approved for publication, which no designation here claims.
 
 The page or file is optional at every destination: absent, the drain creates it
 and the designation can be amended with the id it got; present, the drain
@@ -207,7 +221,9 @@ Draining is four steps per request, and the order matters:
    - `drive` — the Google Workspace connector, as a native Google Doc. Not an
      uploaded `.md` or `.html` file: the point of the mirror is that someone can
      read and comment on it in place. Import the Markdown so headings, tables
-     and code blocks survive.
+     and code blocks survive. A `folder` of the form `Briefs/<repo>` resolves
+     under My Drive's root; create the repo folder when it is missing, and do
+     not adopt a `Briefs` folder found somewhere else.
 
    Never convert a document into a format its destination does not read
    natively. The source for every mirror is the Markdown, not the rendered
