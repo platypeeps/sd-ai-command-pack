@@ -132,11 +132,11 @@ in `research.conf.py`:
 
 | Destination | Key | Container | Existing page or file (optional) |
 | --- | --- | --- | --- |
-| Notion | `notion=` | defaulted per scope; `space=` overrides the folder | `page=` |
+| Notion | `notion=` | a configured page id per scope, `<folder>/<repo>`; `space=` overrides it | `page=` |
 | Google Drive | `drive=` | defaults to `Briefs/<repo>`; `folder=` overrides | `file=` |
 
-    notion=dict()                    # private space, Briefs folder
-    notion=dict(team=True)           # R&D team space, R&D Briefs folder
+    notion=dict()                    # private briefs folder, <repo> page
+    notion=dict(team=True)           # team briefs folder, <repo> page
     drive=dict()                     # My Drive, Briefs/<repo> folder
     drive=dict(folder="<name or id>", file="<file id or url>")
 
@@ -145,8 +145,8 @@ exists, the document publishes locally and nowhere else.
 
 ### A Notion mirror is private unless it asks for the team
 
-`notion=dict()` mirrors to **your private space, `Briefs` folder**.
-`notion=dict(team=True)` mirrors to the **R&D team space, `R&D Briefs` folder**.
+`notion=dict()` mirrors to the folder `$SD_NOTION_PRIVATE_FOLDER` names.
+`notion=dict(team=True)` mirrors to the one `$SD_NOTION_TEAM_FOLDER` names.
 
 The default is private because the two mistakes are not symmetric. A brief the
 team cannot see is repaired by adding `team=True` and draining again. A private
@@ -157,6 +157,33 @@ one.
 `space=` overrides the folder, never the scope: naming a folder says where
 inside a space, not which space. A document that must reach the team says so
 with `team=True` and nothing else does it.
+
+**Each default folder is a configured Notion page id, not a folder name.** A
+name lookup that finds nothing returns an empty result rather than an error, so
+a rename would move every default mirror to nowhere and tell no one. A page id
+belongs to one Notion account, so no id ships with the pack either. Each
+operator sets their own, beside `$OBSIDIAN_VAULT`:
+
+    SD_NOTION_PRIVATE_FOLDER=<notion page id>
+    SD_NOTION_TEAM_FOLDER=<notion page id>
+
+A page URL is accepted in place of a bare id. An unset variable, or one holding
+a folder name rather than an id, refuses that mirror and names the variable to
+set. The render still writes the local copies; only the outward request is
+withheld. Nothing falls back to a folder name or to a page some other account
+owns.
+
+**A default lands in the repo's own page under that folder**, the way a Drive
+default lands in `Briefs/<repo>`. The request carries the repo in `subfolder`,
+and the drain creates that page under `space_id` when it is missing. Without
+it, every repository's briefs pile into the folder itself, beside the per-repo
+pages already there.
+
+A `space=` override is pinned by id too when it is written as a page id or a
+page URL, and it replaces the whole container — no `subfolder` is appended to
+what the user named. Written as a plain name it cannot be pinned, so the
+request says which of the two it is: `resolve: "id"` with the folder in
+`space_id`, or `resolve: "name"` with `space_id` empty and the name in `space`.
 
 ### A Drive mirror lands beside its siblings
 
@@ -198,6 +225,13 @@ One queue carries every destination, and `bin/sd-status` reports a pending
 request as `mirror-sync-pending`. A document designated for two places is two
 requests, and either can drain while the other waits.
 
+That queue was once `~/.claude/pending-notion-syncs`, before one queue carried
+every destination. A render moves anything left there into the current queue,
+and the status report covers both names, so the rename costs no request its
+row either side of the move. Neither directory is created by looking, an
+emptied one is left standing rather than swept, and a request moves verbatim
+rather than being rewritten to a schema it was not written under.
+
 This makes the mirror reliable without giving a hook a long-lived write
 credential to a shared space. It also keeps the outward-facing step in a place
 where a person is present.
@@ -207,7 +241,10 @@ Draining is four steps per request, and the order matters:
 1. Read the request. It names the destination, the document, its Markdown,
    rendered and source paths, its container, the page or file to update and the
    revision the render was made from. A Notion request also names its `scope`,
-   `private` or `team`.
+   `private` or `team`, how its container was resolved — `resolve: "id"` with
+   the folder's page id in `space_id`, or `resolve: "name"` with the folder's
+   name in `space` — and `subfolder`, the page under that container the
+   document belongs in.
 2. Check the document's handling restrictions first. One that may not be shared
    externally is not mirrored to a shared destination, and designating it did
    not lift that. Report it and leave the request in place.
@@ -215,9 +252,16 @@ Draining is four steps per request, and the order matters:
    format**, updating the page or file the request names rather than creating a
    second one:
 
-   - `notion` — the Notion connector, as Notion blocks. Honour `scope`: a
-     `private` request goes to your private space and never to the team space,
-     whatever the folder is called.
+   - `notion` — the Notion connector, as Notion blocks. With `resolve: "id"`,
+     write under the page `space_id` names and never search for that folder by
+     name. With `resolve: "name"`, look the folder up by the name in `space`,
+     and treat a lookup that finds nothing as a failure to report rather than
+     an empty result — do not create a folder to make the name resolve. Where
+     the request names a `subfolder`, the document goes in that page under the
+     container and not in the container itself; create it when it is missing,
+     the way a Drive drain creates `Briefs/<repo>`. Honour `scope` either way:
+     a `private` request goes to your private space and never to the team
+     space, whatever the folder is called.
    - `drive` — the Google Workspace connector, as a native Google Doc. Not an
      uploaded `.md` or `.html` file: the point of the mirror is that someone can
      read and comment on it in place. Import the Markdown so headings, tables

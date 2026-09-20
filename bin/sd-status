@@ -2944,6 +2944,16 @@ def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
 MIRROR_QUEUE = "SD_MIRROR_QUEUE"
 MIRROR_QUEUE_DEFAULT = "~/.claude/pending-mirror-syncs"
 
+#: What that queue was called before one queue carried every destination.
+#: Read too, and never written: `sd_research_publish.migrate_legacy_queue`
+#: empties it on the next render, but a machine that has not rendered since
+#: the rename still holds requests here, and this tool exists to say that work
+#: is owed. Reading both is what stops the rename hiding a request between the
+#: upgrade and the render that migrates it; once it is migrated this finds
+#: nothing, so the second look costs a `is_dir()` that fails.
+LEGACY_MIRROR_QUEUE = "SD_NOTION_QUEUE"
+LEGACY_MIRROR_QUEUE_DEFAULT = "~/.claude/pending-notion-syncs"
+
 
 def _mirror_rows(
     root: pathlib.Path, day: datetime.date, environ: dict[str, str],
@@ -2969,13 +2979,38 @@ def _mirror_rows(
     banner is for things that are wrong. Age carries the urgency instead: rows
     of a class sort oldest first, so a request that has sat for a fortnight
     leads the ones written this morning.
+
+    Both the current queue and the one it was renamed from are read. The
+    remedy is the same for either, and running it migrates the older one, so
+    the rename never costs a request its row.
     """
-    queue = pathlib.Path(
-        environ.get(MIRROR_QUEUE) or MIRROR_QUEUE_DEFAULT).expanduser()
-    if not queue.is_dir():
+    queues = [
+        pathlib.Path(environ.get(name) or default).expanduser()
+        for name, default in (
+            (MIRROR_QUEUE, MIRROR_QUEUE_DEFAULT),
+            (LEGACY_MIRROR_QUEUE, LEGACY_MIRROR_QUEUE_DEFAULT),
+        )
+    ]
+    # Deduplicated by resolved path, not by string: pointing both variables at
+    # one directory is how a test drives this, and it must not report every
+    # request there twice. Neither directory is created by looking.
+    seen: set[pathlib.Path] = set()
+    found: list[pathlib.Path] = []
+    for queue in queues:
+        if not queue.is_dir():
+            continue
+        try:
+            resolved = queue.resolve()
+        except OSError:
+            resolved = queue
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        found += sorted(queue.glob("*.json"))
+    if not found:
         return []
     rows: list[dict[str, Any]] = []
-    for path in sorted(queue.glob("*.json")):
+    for path in found:
         try:
             request = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):

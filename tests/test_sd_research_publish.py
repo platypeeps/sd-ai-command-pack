@@ -49,9 +49,38 @@ REPO = Path("/repos/my-research")
 
 HEADER = "# Generated documents the dashboard lists and serves.\n#\n#   root|<key>|<label>|<directory>\n\nroot|hoa|Stage Run HOA|~/repos/hoa/reports\n"
 
+#: One test operator's two Notion folders. Written here and nowhere in `bin/`:
+#: a page id belongs to one Notion account, so an id in the source would mirror
+#: another operator's brief into a page they do not own.
+PRIVATE_FOLDER = "3c9f52b1-5782-81a7-a466-fb0e2df4d928"
+TEAM_FOLDER = "3cff52b1-5782-806a-acb0-ca0c8f41524b"
 
-class Fixture(unittest.TestCase):
+
+class Configured(unittest.TestCase):
+    """A test operator whose environment names both Notion folders.
+
+    `PUBLISH.ENVIRON` is replaced outright, so no test reads the configuration
+    of the machine running it and none of them leaks a folder to the next.
+    """
+
     def setUp(self) -> None:
+        super().setUp()
+        original = PUBLISH.ENVIRON
+        self.addCleanup(setattr, PUBLISH, "ENVIRON", original)
+        self.configure(private=PRIVATE_FOLDER, team=TEAM_FOLDER)
+
+    def configure(self, **folders: str) -> None:
+        """Set these `SD_NOTION_<SCOPE>_FOLDER` variables, and only these."""
+        PUBLISH.ENVIRON = {
+            "SD_NOTION_%s_FOLDER" % scope.upper(): value
+            for scope, value in folders.items()
+            if value
+        }
+
+
+class Fixture(Configured):
+    def setUp(self) -> None:
+        super().setUp()
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
@@ -63,13 +92,19 @@ class Fixture(unittest.TestCase):
         (self.repo / "build").mkdir(parents=True)
 
         self.vault = self.root / "vault"
-        original = (PUBLISH.DASHBOARD_HOME, PUBLISH.QUEUE, PUBLISH.VAULT)
+        original = (PUBLISH.DASHBOARD_HOME, PUBLISH.QUEUE, PUBLISH.VAULT,
+                    PUBLISH.LEGACY_QUEUE)
         PUBLISH.DASHBOARD_HOME = self.dashboard
         PUBLISH.QUEUE = self.root / "queue"
         PUBLISH.VAULT = str(self.vault)
+        # Pointed inside the fixture even when a test does not use it, so no
+        # test can read or empty the queue of the machine running it.
+        self.legacy = self.root / "legacy-queue"
+        PUBLISH.LEGACY_QUEUE = self.legacy
 
         def restore() -> None:
-            (PUBLISH.DASHBOARD_HOME, PUBLISH.QUEUE, PUBLISH.VAULT) = original
+            (PUBLISH.DASHBOARD_HOME, PUBLISH.QUEUE, PUBLISH.VAULT,
+             PUBLISH.LEGACY_QUEUE) = original
 
         self.addCleanup(restore)
 
@@ -111,14 +146,14 @@ class RegisterTests(Fixture):
         self.assertIn("not registered", said)
 
 
-class MirrorTargetTests(unittest.TestCase):
+class MirrorTargetTests(Configured):
     def test_no_key_means_local_only(self) -> None:
         self.assertEqual(PUBLISH.mirror_targets({"out": "doc"}, REPO), ([], []))
 
     def test_no_destination_needs_a_container_named(self) -> None:
         """Every destination has a default, so a bare designation is valid
-        everywhere. A folder nobody has to name is a folder nobody can
-        misspell."""
+        everywhere once Notion's folders are configured. A folder nobody has to
+        name is a folder nobody can misspell."""
         for key in ("notion", "drive"):
             with self.subTest(key):
                 targets, problems = PUBLISH.mirror_targets(
@@ -159,10 +194,10 @@ class MirrorTargetTests(unittest.TestCase):
         again, and a private brief in a shared space cannot be unseen."""
         (private,), _ = PUBLISH.mirror_targets({"notion": {}}, REPO)
         self.assertEqual(private["scope"], "private")
-        self.assertEqual(private["space"], "Briefs")
+        self.assertEqual(private["space_id"], PRIVATE_FOLDER)
         (team,), _ = PUBLISH.mirror_targets({"notion": dict(team=True)}, REPO)
         self.assertEqual(team["scope"], "team")
-        self.assertEqual(team["space"], "R&D Briefs")
+        self.assertEqual(team["space_id"], TEAM_FOLDER)
 
     def test_naming_a_folder_does_not_change_the_space(self) -> None:
         """`space=` says where inside a space, never which space."""
@@ -173,6 +208,122 @@ class MirrorTargetTests(unittest.TestCase):
         (target,), _ = PUBLISH.mirror_targets(
             {"notion": dict(space="Archive", team=True)}, REPO)
         self.assertEqual(target["scope"], "team")
+
+    def test_a_notion_default_is_the_operator_s_configured_page_id(self) -> None:
+        """The folder is a page id this operator configured, resolved as one.
+
+        A name lookup that finds nothing returns an empty result rather than an
+        error, so a rename would move every default mirror to nowhere and say
+        so to nobody."""
+        for flag, folder in ((False, PRIVATE_FOLDER), (True, TEAM_FOLDER)):
+            with self.subTest(team=flag):
+                (target,), _ = PUBLISH.mirror_targets(
+                    {"notion": dict(team=flag)}, REPO)
+                self.assertEqual(target["space_id"], folder)
+                self.assertEqual(target["resolve"], "id")
+
+    def test_an_unconfigured_notion_default_refuses_and_names_the_setting(
+            self) -> None:
+        """No id ships in `bin/`, because a page id belongs to one account.
+
+        So an unconfigured operator gets a refusal naming the variable to set,
+        not a request bound for a page somebody else owns."""
+        for flag, setting in ((False, "SD_NOTION_PRIVATE_FOLDER"),
+                              (True, "SD_NOTION_TEAM_FOLDER")):
+            with self.subTest(team=flag):
+                self.configure()
+                targets, problems = PUBLISH.mirror_targets(
+                    {"notion": dict(team=flag)}, REPO)
+                self.assertEqual(targets, [])
+                self.assertEqual(len(problems), 1)
+                self.assertIn(setting, problems[0])
+
+    def test_a_folder_name_in_the_setting_is_not_configuration(self) -> None:
+        """A name is what the defect was. An operator who pasted one has not
+        named a folder this can reach, so it refuses rather than passing the
+        name along for the drain to look up."""
+        self.configure(private="Briefs")
+        targets, problems = PUBLISH.mirror_targets({"notion": {}}, REPO)
+        self.assertEqual(targets, [])
+        self.assertIn("SD_NOTION_PRIVATE_FOLDER", problems[0])
+
+    def test_one_scope_configured_does_not_serve_the_other(self) -> None:
+        """A configured private folder is not a team folder. Reusing it would
+        put a brief in the space the operator did not name."""
+        self.configure(private=PRIVATE_FOLDER)
+        (private,), _ = PUBLISH.mirror_targets({"notion": {}}, REPO)
+        self.assertEqual(private["space_id"], PRIVATE_FOLDER)
+        targets, problems = PUBLISH.mirror_targets(
+            {"notion": dict(team=True)}, REPO)
+        self.assertEqual(targets, [])
+        self.assertIn("SD_NOTION_TEAM_FOLDER", problems[0])
+
+    def test_a_notion_default_names_the_repo_the_way_drive_does(self) -> None:
+        """The vault uses `Briefs/<repo>`, and the configured folder already
+        holds one page per repo. A default that stopped at the folder dropped
+        every repository's briefs in beside those pages."""
+        (drive,), _ = PUBLISH.mirror_targets({"drive": {}}, REPO)
+        self.assertEqual(drive["folder"], "Briefs/my-research")
+        (notion,), _ = PUBLISH.mirror_targets({"notion": {}}, REPO)
+        self.assertEqual(notion["subfolder"], "my-research")
+        self.assertIn("my-research", notion["target"])
+
+    def test_naming_a_container_replaces_it_rather_than_nesting_under_it(
+            self) -> None:
+        """`space=` says where the document goes. Appending the repo to what
+        the user named would put it somewhere they did not ask for."""
+        (target,), _ = PUBLISH.mirror_targets(
+            {"notion": dict(space="Archive")}, REPO)
+        self.assertEqual(target["subfolder"], "")
+
+    def test_no_folder_name_is_written_down_for_a_rename_to_invalidate(
+            self) -> None:
+        """Nothing in the table is a folder name, so a rename reaches nothing.
+
+        The scopes name a config key and word a report; a default request
+        carries the id and no name at all."""
+        for scope in PUBLISH.NOTION_SCOPES.values():
+            with self.subTest(scope.scope):
+                self.assertTrue(scope.setting.startswith("SD_NOTION_"))
+                self.assertNotIn("Briefs", scope.phrase)
+        (private,), _ = PUBLISH.mirror_targets({"notion": {}}, REPO)
+        self.assertEqual(private["space"], "")
+
+    def test_an_override_resolves_by_id_whenever_it_names_one(self) -> None:
+        """`space=` may be an id or a page URL, and then it is rename-proof.
+
+        A plain name is not, so the request says `name` rather than implying a
+        resolution it did not make."""
+        for written in ("3cff52b1-5782-806a-acb0-ca0c8f41524b",
+                        "https://www.notion.so/Old-Name-"
+                        "3cff52b15782806aacb0ca0c8f41524b"):
+            with self.subTest(written):
+                (target,), _ = PUBLISH.mirror_targets(
+                    {"notion": dict(space=written)}, REPO)
+                self.assertEqual(target["resolve"], "id")
+                self.assertTrue(target["space_id"].endswith("524b"))
+        (named,), _ = PUBLISH.mirror_targets(
+            {"notion": dict(space="Archive")}, REPO)
+        self.assertEqual(named["space_id"], "")
+        self.assertEqual(named["resolve"], "name")
+
+    def test_a_query_string_or_fragment_does_not_defeat_id_resolution(
+            self) -> None:
+        """A copied Notion link carries `?pvs=` and `#<block id>`.
+
+        The id is read off the URL path, so both are gone before it is looked
+        for. Matching the whole link found no id, which read as a folder name
+        and sent the drain looking for a folder called `https://...`."""
+        base = ("https://www.notion.so/Briefs-"
+                "3cff52b15782806aacb0ca0c8f41524b")
+        for suffix in ("", "?pvs=4", "#3c9f52b15782817aa466fb0e2df4d928",
+                       "?pvs=4#3c9f52b15782817aa466fb0e2df4d928", "/"):
+            with self.subTest(suffix or "bare"):
+                (target,), _ = PUBLISH.mirror_targets(
+                    {"notion": dict(space=base + suffix)}, REPO)
+                self.assertEqual(target["resolve"], "id")
+                self.assertEqual(
+                    target["space_id"], "3cff52b15782806aacb0ca0c8f41524b")
 
     def test_a_non_dict_is_refused(self) -> None:
         for key in ("notion", "drive"):
@@ -197,10 +348,13 @@ class MirrorTargetTests(unittest.TestCase):
     def test_the_target_is_worded_for_whoever_reads_the_request(self) -> None:
         """`sd-status` prints this, so it never carries the destination table."""
         (notion,), _ = PUBLISH.mirror_targets({"notion": {}}, REPO)
-        self.assertEqual(notion["target"], "the private Briefs folder")
+        self.assertEqual(
+            notion["target"],
+            "your private Notion briefs folder, under my-research")
         (team,), _ = PUBLISH.mirror_targets({"notion": dict(team=True)}, REPO)
         self.assertEqual(
-            team["target"], "the R&D Briefs folder in the R&D team space")
+            team["target"],
+            "your team Notion briefs folder, under my-research")
         (drive,), _ = PUBLISH.mirror_targets(
             {"drive": dict(folder="Deliverables")}, REPO)
         self.assertEqual(drive["target"], "the Deliverables Drive folder")
@@ -243,6 +397,28 @@ class EnqueueTests(Fixture):
         self.assertEqual(request["space"], "Research")
         self.assertEqual(request["page"], "https://notion.so/a")
         self.assertEqual(request["document"], "a")
+
+    def test_a_default_notion_request_carries_the_folder_id_and_the_repo(
+            self) -> None:
+        """The drain reads `space_id` and `subfolder`, so both reach the file."""
+        PUBLISH.enqueue(self.repo, [dict(
+            src="10-x/a.md", out="a", title="A", notion=dict(team=True))])
+        request = json.loads(
+            (PUBLISH.QUEUE / "my-research.a.notion.json").read_text())
+        self.assertEqual(request["space_id"], TEAM_FOLDER)
+        self.assertEqual(request["resolve"], "id")
+        self.assertEqual(request["subfolder"], "my-research")
+
+    def test_an_unconfigured_default_queues_nothing_and_reports_it(self) -> None:
+        """A refusal is reported and no request is written. A request bound for
+        an unresolved folder would sit in the queue claiming work is owed."""
+        self.configure()
+        reports = PUBLISH.enqueue(self.repo, [dict(
+            src="10-x/a.md", out="a", title="A", notion=dict())])
+        self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
+        self.assertTrue(
+            any("SD_NOTION_PRIVATE_FOLDER" in line for line in reports),
+            reports)
 
     def test_a_drive_designation_queues_a_drive_request(self) -> None:
         PUBLISH.enqueue(self.repo, [dict(
@@ -346,6 +522,108 @@ class ObsidianTests(Fixture):
         said = PUBLISH.write_obsidian(self.repo, docs)
         self.assertTrue(any("cannot read" in line for line in said))
         self.assertTrue((self.briefs() / "a.md").is_file())
+
+
+class LegacyQueueTests(Fixture):
+    """The queue's former name, emptied rather than read for ever.
+
+    `~/.claude/pending-notion-syncs` was the queue from the first render that
+    enqueued until one queue carried every destination. A machine that
+    rendered in that window holds requests there, and nothing has read that
+    path since -- so the rename made them durable and invisible, which is the
+    one thing a durable queue must never be.
+    """
+
+    def legacy_request(self, name: str = "old.doc.notion.json") -> Path:
+        self.legacy.mkdir(parents=True, exist_ok=True)
+        path = self.legacy / name
+        path.write_text(json.dumps({"repo": str(self.repo), "document": "doc"}),
+                        encoding="utf-8")
+        return path
+
+    def test_a_stranded_request_moves_into_the_current_queue(self) -> None:
+        """With no current directory at all, which is the upgrade's own shape:
+        the rename landed before this machine's next render."""
+        self.legacy_request()
+        reports = PUBLISH.migrate_legacy_queue()
+        self.assertEqual(
+            sorted(p.name for p in PUBLISH.QUEUE.iterdir()),
+            ["old.doc.notion.json"])
+        self.assertEqual(list(self.legacy.iterdir()), [])
+        self.assertTrue(any("migrated 1 request" in line for line in reports),
+                        reports)
+
+    def test_the_request_arrives_with_its_contents_intact(self) -> None:
+        """An old request may predate a field a reader now expects. Rewriting
+        somebody's queued work to a schema it was not written under is worse
+        than handing it over as it stands."""
+        written = json.loads(self.legacy_request().read_text())
+        PUBLISH.migrate_legacy_queue()
+        moved = json.loads(
+            (PUBLISH.QUEUE / "old.doc.notion.json").read_text())
+        self.assertEqual(moved, written)
+
+    def test_both_queues_present_leaves_one(self) -> None:
+        """The two hold different documents, and every one of them survives."""
+        PUBLISH.QUEUE.mkdir(parents=True)
+        (PUBLISH.QUEUE / "new.doc.drive.json").write_text("{}", encoding="utf-8")
+        self.legacy_request()
+        PUBLISH.migrate_legacy_queue()
+        self.assertEqual(
+            sorted(p.name for p in PUBLISH.QUEUE.iterdir()),
+            ["new.doc.drive.json", "old.doc.notion.json"])
+        self.assertEqual(list(self.legacy.iterdir()), [])
+
+    def test_the_current_queue_wins_a_name_collision(self) -> None:
+        """The rename is what stopped the old name being written, so a file in
+        the current queue was written after its legacy twin. Keeping the older
+        one would replace a current request with a stale revision."""
+        PUBLISH.QUEUE.mkdir(parents=True)
+        current = PUBLISH.QUEUE / "old.doc.notion.json"
+        current.write_text('{"revision": "current"}', encoding="utf-8")
+        self.legacy_request()
+        PUBLISH.migrate_legacy_queue()
+        self.assertEqual(current.read_text(), '{"revision": "current"}')
+        self.assertEqual(list(self.legacy.iterdir()), [])
+
+    def test_looking_creates_neither_directory(self) -> None:
+        """A migration that provisioned a queue would leave every machine
+        holding a directory it never used."""
+        self.assertEqual(PUBLISH.migrate_legacy_queue(), [])
+        self.assertFalse(self.legacy.exists())
+        self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_an_empty_legacy_directory_makes_no_queue_and_no_report(
+            self) -> None:
+        self.legacy.mkdir(parents=True)
+        self.assertEqual(PUBLISH.migrate_legacy_queue(), [])
+        self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_one_directory_under_both_names_is_left_alone(self) -> None:
+        """A machine that pointed the old variable at the new directory has
+        one queue. Migrating it into itself would delete the queue."""
+        PUBLISH.LEGACY_QUEUE = PUBLISH.QUEUE
+        PUBLISH.QUEUE.mkdir(parents=True)
+        (PUBLISH.QUEUE / "new.doc.notion.json").write_text(
+            "{}", encoding="utf-8")
+        self.assertEqual(PUBLISH.migrate_legacy_queue(), [])
+        self.assertEqual(
+            sorted(p.name for p in PUBLISH.QUEUE.iterdir()),
+            ["new.doc.notion.json"])
+
+    def test_a_render_migrates_even_when_it_designates_nothing(self) -> None:
+        """The stranded machine need not still designate a document. `publish`
+        runs on every render, and `enqueue` returns before touching the
+        directory when it has no request of its own to write."""
+        self.legacy_request()
+        (self.repo / "10-x").mkdir(parents=True)
+        (self.repo / "10-x" / "a.md").write_text("# A\n", encoding="utf-8")
+        reports = PUBLISH.publish(
+            self.repo, "My Research",
+            [dict(src="10-x/a.md", out="a", title="A")])
+        self.assertTrue(any("migrated 1 request" in line for line in reports),
+                        reports)
+        self.assertTrue((PUBLISH.QUEUE / "old.doc.notion.json").is_file())
 
 
 class GitignoreTests(Fixture):

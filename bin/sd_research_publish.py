@@ -34,6 +34,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, NamedTuple
+from urllib.parse import urlsplit
 
 from sd_lib import git_output
 
@@ -52,6 +53,15 @@ DASHBOARD_HOME = Path(
 #: refuses for the same reason (C-3, one producer and not three).
 QUEUE = Path(
     os.environ.get("SD_MIRROR_QUEUE", "~/.claude/pending-mirror-syncs")
+).expanduser()
+
+#: What `QUEUE` was called before one queue carried every destination. A
+#: machine that rendered between the queue landing and the rename holds
+#: requests here, and nothing has read this path since -- so the upgrade left
+#: them durable and invisible, which is the one thing a durable queue must
+#: never be. `migrate_legacy_queue` empties it; nothing writes it.
+LEGACY_QUEUE = Path(
+    os.environ.get("SD_NOTION_QUEUE", "~/.claude/pending-notion-syncs")
 ).expanduser()
 
 
@@ -102,13 +112,42 @@ class Destination(NamedTuple):
 #: deliberately not open-ended: an unknown key in a DOCS entry is a typo, and a
 #: table that accepted anything would queue a mirror to a place nothing drains.
 DESTINATIONS = (
+    # `space` is the key a designation writes, and the label a request carries.
+    # The container a Notion drain resolves is `space_id`, set by
+    # `notion_target`; this row never resolves one.
     Destination("notion", "space", "page", "Notion folder"),
     Destination("drive", "folder", "file", "Drive folder",
                 default=BRIEFS + "/%s"),
 )
 
-#: Where a Notion mirror goes when the designation names no space, as
-#: `(scope, folder, phrase)`.
+class NotionScope(NamedTuple):
+    """One Notion default destination: the setting that names it, in words.
+
+    The folder itself is neither a name nor an id written here. A name cannot
+    be: a lookup that finds nothing returns an empty result rather than an
+    error, so a rename would move every default mirror to nowhere and tell no
+    one -- and both of this maintainer's folders have been renamed once
+    already. An id cannot be either: a page id belongs to one Notion account,
+    and a default shipped in this file would send another operator's brief to
+    a page they do not own. So the id is the operator's to configure, and this
+    table holds the key it is configured under.
+    """
+
+    #: `private` or `team`: which Notion space the mirror may reach.
+    scope: str
+    #: The environment variable holding this operator's folder page id.
+    #: Beside `OBSIDIAN_VAULT`, `SD_DASHBOARD_HOME` and `SD_MIRROR_QUEUE`,
+    #: which is where this module's other per-machine destinations live. Not
+    #: `sd config`: that namespace holds standing authorization, and a folder
+    #: is a destination rather than a permission.
+    setting: str
+    #: How a report and a status row name the folder, over the repo name. The
+    #: configured folder's own name is not knowable here, and guessing one
+    #: would print a label no operator's Notion has to agree with.
+    phrase: str
+
+
+#: Where a Notion mirror goes when the designation names no folder.
 #:
 #: Private is the default and the team space is the opt-in, because the two
 #: mistakes are not symmetric. A brief the team cannot see is repaired by
@@ -116,9 +155,38 @@ DESTINATIONS = (
 #: space has already been seen by the team, and deleting it does not undo that.
 #: So the direction that is recoverable is the one that happens by accident.
 NOTION_SCOPES = {
-    False: ("private", BRIEFS, "the private %s folder" % BRIEFS),
-    True: ("team", "R&D Briefs", "the R&D Briefs folder in the R&D team space"),
+    False: NotionScope("private", "SD_NOTION_PRIVATE_FOLDER",
+                       "your private Notion briefs folder, under %s"),
+    True: NotionScope("team", "SD_NOTION_TEAM_FOLDER",
+                      "your team Notion briefs folder, under %s"),
 }
+
+#: The environment the folder settings are read out of. A module attribute for
+#: the same reason `QUEUE` and `VAULT` are: a test points it at a fixture
+#: rather than at the machine running the test.
+ENVIRON: dict[str, str] = dict(os.environ)
+
+#: A Notion page id: 32 hex digits, dashed or not, alone or ending a page's
+#: URL path. `space=` may be written either way, and so may the configured
+#: default, so naming a folder never costs the designation its id resolution.
+NOTION_ID = re.compile(
+    r"(?:^|[/-])([0-9a-fA-F]{8}-?(?:[0-9a-fA-F]{4}-?){3}[0-9a-fA-F]{12})$")
+
+
+def notion_id(value: str) -> str:
+    """The Notion page id `value` names, or `""` when it names none.
+
+    Read off the URL *path*, so a query string and a fragment are both gone
+    before the id is looked for. A copied link often carries `#<block id>`,
+    and matching against the whole link found no id at all -- which read as
+    "this is a folder name" and sent the drain looking for a folder called
+    `https://...`.
+
+    Returned verbatim rather than normalised: the id goes to a connector, and
+    rewriting the operator's spelling of it is a second thing that can be wrong.
+    """
+    found = NOTION_ID.search(urlsplit(value.strip()).path.rstrip("/"))
+    return found.group(1) if found else ""
 
 #: The dashboard builds a URL from the key, so the key is what a URL may carry.
 #: Mirrored from `sd_dashboard/documents.py`, which rejects anything else.
@@ -200,25 +268,65 @@ def revision(repo: Path) -> str:
     return git_output(["rev-parse", "HEAD"], repo) or "unknown"
 
 
-def notion_target(raw: dict[str, Any]) -> dict[str, str]:
-    """One Notion designation resolved to a folder, a scope and a phrase.
+def notion_target(
+    raw: dict[str, Any], repo: Path
+) -> tuple[dict[str, str] | None, str]:
+    """One Notion designation resolved to a container, or what was missing.
 
     `team=True` is the only way a brief reaches the shared space; see
     `NOTION_SCOPES` for why that direction is the one that must be asked for.
     An explicit `space=` overrides the folder but never the scope: naming a
     folder says where inside a space, not which space.
+
+    The container is carried as `space_id`, a Notion page id, and `resolve`
+    says how it was arrived at. `id` is every configured default and any
+    `space=` written as an id or a page URL; a rename cannot touch those.
+    `name` is a `space=` written as a plain name, which no id can be derived
+    from -- there the drain does look the folder up by name, and the contract
+    makes an empty lookup a failure to report rather than a folder to create.
+
+    A default also carries `subfolder`, the repo's own page under that folder,
+    the way a Drive default carries `Briefs/<repo>`. An explicit `space=` does
+    not: naming a container says where the document goes, and appending to
+    what the user named would put it somewhere they did not ask for.
+
+    A default with nothing configured returns no target and says so, naming
+    the variable to set. Falling back would mirror the document into whichever
+    page this file happened to name, which is another account's page on every
+    machine but one. A setting that is not a page id is not configured: an
+    operator who pasted a folder's name has not named a folder this can reach.
     """
-    scope, folder, phrase = NOTION_SCOPES[bool(raw.get("team"))]
+    scope, setting, phrase = NOTION_SCOPES[bool(raw.get("team"))]
     named = str(raw.get("space", "")).strip()
-    if named and named != folder:
-        phrase = "the %s folder in your %s space" % (named, scope)
+    if named:
+        override = notion_id(named)
+        return {
+            "destination": "notion",
+            "scope": scope,
+            "space_id": override,
+            "resolve": "id" if override else "name",
+            "space": "" if override else named,
+            "subfolder": "",
+            "page": str(raw.get("page", "")).strip(),
+            "target": "the %s folder in your %s space" % (named, scope),
+        }, ""
+
+    configured = notion_id(str(ENVIRON.get(setting, "")))
+    if not configured:
+        return None, (
+            "notion= has no %s folder configured: set %s to the Notion page "
+            "id of that folder, or name one with space=" % (scope, setting)
+        )
     return {
         "destination": "notion",
         "scope": scope,
-        "space": named or folder,
+        "space_id": configured,
+        "resolve": "id",
+        "space": "",
+        "subfolder": repo.name,
         "page": str(raw.get("page", "")).strip(),
-        "target": phrase,
-    }
+        "target": phrase % repo.name,
+    }, ""
 
 
 def mirror_targets(
@@ -234,10 +342,13 @@ def mirror_targets(
     Returns a list because a document may be designated for several places at
     once. `notion=` and `drive=` on one entry are two mirrors, not a choice.
 
-    A designation that names no container gets its destination's default:
-    `Briefs/<repo>` for Drive, the per-scope folder for Notion. Both are the
-    shape the vault already uses, so a reader who knows where one brief is
-    knows where all of them are, whichever copy they found first.
+    A designation that names no container gets its destination's default, and
+    both defaults name the repo: `Briefs/<repo>` for Drive, and for Notion the
+    repo's own page under the configured briefs folder. That is the shape the
+    vault already uses, so a reader who knows where one brief is knows where
+    all of them are, whichever copy they found first. Notion's default used to
+    stop at the folder, which dropped every repo's briefs into one page
+    alongside the per-repo pages already there.
 
     Problems are returned rather than raised, and returned *per destination*.
     A malformed designation is the user's to fix, and one bad key must not cost
@@ -261,7 +372,11 @@ def mirror_targets(
             )
             continue
         if dest.name == "notion":
-            targets.append(notion_target(raw))
+            target, problem = notion_target(raw, repo)
+            if target is None:
+                problems.append(problem)
+            else:
+                targets.append(target)
             continue
         # Notion returned above, so this is the destination whose default is
         # a path the drain resolves rather than a container it is handed.
@@ -373,6 +488,63 @@ def ignore_dashboard(repo: Path) -> str:
     return "gitignore: added docs/dashboard/"
 
 
+def migrate_legacy_queue() -> list[str]:
+    """Move any request left under the queue's former name into `QUEUE`.
+
+    Migration rather than reading both for ever. Two directories mean every
+    reader has to know both names, and a reader written later knows one -- the
+    defect being closed here is exactly that. Moving once leaves one queue,
+    and this function then finds nothing and says nothing on every later run.
+
+    Nothing is created by looking. A machine that never used the old name has
+    no legacy directory, and this neither makes one nor makes `QUEUE` to
+    receive an empty migration.
+
+    The emptied directory is left standing. Removing it would buy tidiness at
+    the price of a new deletion path, and `tests/test_archive_untouched.py`
+    enumerates and freezes every one under `bin/` precisely so that no new
+    sweep appears for a reason that small. An empty directory strands nothing:
+    the requests were what was stranded, and they have moved.
+
+    The current queue wins a name collision. Both directories hold one request
+    per document per destination under the same filename, and the rename is
+    what stopped the old name being written -- so a file in `QUEUE` was
+    written after its legacy twin, and keeping the older one would replace a
+    current request with a stale revision.
+
+    The requests move verbatim. An old request may predate a field a reader
+    now expects; `bin/sd-status` already falls back for the one it reads, and
+    rewriting somebody's queued work to a schema it was not written under is a
+    worse answer than handing it over as it stands.
+    """
+    if not LEGACY_QUEUE.is_dir() or LEGACY_QUEUE == QUEUE:
+        return []
+    try:
+        found = sorted(LEGACY_QUEUE.glob("*.json"))
+    except OSError as problem:
+        return ["mirror: cannot read %s (%s)" % (LEGACY_QUEUE, problem)]
+
+    reports: list[str] = []
+    moved = 0
+    for path in found:
+        target = QUEUE / path.name
+        try:
+            if target.exists():
+                path.unlink()
+                continue
+            QUEUE.mkdir(parents=True, exist_ok=True)
+            path.replace(target)
+        except OSError as problem:
+            reports.append(
+                "mirror: cannot migrate %s (%s)" % (path.name, problem))
+            continue
+        moved += 1
+    if moved:
+        reports.append(
+            "mirror: migrated %d request(s) from %s" % (moved, LEGACY_QUEUE))
+    return reports
+
+
 def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     """Write one sync request per document per designated destination."""
     reports: list[str] = []
@@ -417,6 +589,11 @@ def publish(repo: Path, project: str, docs: list[dict[str, Any]]) -> list[str]:
     reports = write_obsidian(repo, docs)
     reports.append(ignore_dashboard(repo))
     reports.append(register_root(repo, project or repo.name, repo / DASHBOARD_DIR))
+    # Before enqueueing, and here rather than inside `enqueue`: a repo that
+    # designates nothing still runs on the machine holding the stranded queue,
+    # and `enqueue` returns before touching the directory when it has no
+    # request of its own to write.
+    reports += migrate_legacy_queue()
     reports += enqueue(repo, docs)
     return reports
 

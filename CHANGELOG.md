@@ -123,6 +123,51 @@
 
 ### Fixed
 
+- **A Notion default folder is a configured page id, not a folder name.**
+  `NOTION_SCOPES` held `Briefs` and `R&D Briefs` as lookup keys, and the owner
+  has since renamed both folders. A name lookup that finds nothing returns an
+  empty result rather than an error, so the next rename would have sent every
+  default mirror nowhere and said so to no one. Each scope now names an
+  environment variable instead — `SD_NOTION_PRIVATE_FOLDER` and
+  `SD_NOTION_TEAM_FOLDER`, beside `OBSIDIAN_VAULT` — holding that operator's
+  folder page id. Per operator and not shipped, because a page id belongs to
+  one Notion account and a default in the source would mirror another
+  operator's brief into a page they do not own. An unset variable, or one
+  holding a folder name rather than an id, refuses that mirror, names the
+  variable to set and queues nothing; the local copies are written either way.
+  A request carries
+  `space_id` and `resolve`, so a drain knows whether its container came from an
+  id or a name. A `space=` override written as a page id or page URL is pinned
+  the same way; written as a plain name it says `resolve: "name"`, and the
+  contract makes an empty lookup a failure to report rather than a folder to
+  create.
+- **A Notion default names the repo, the way a Drive default does.** The
+  request carries `subfolder`, and the drain creates the repo's page under the
+  configured folder when it is missing. Notion's default stopped at the folder
+  while Drive's was already `Briefs/<repo>`, so a drained brief landed in the
+  folder itself, beside the per-repo pages already there. `mirror_targets`
+  claimed both defaults were the shape the vault uses, which was true of one of
+  them.
+- **A queue left under the mirror queue's former name is no longer stranded.**
+  `~/.claude/pending-notion-syncs` was the queue from the first render that
+  enqueued until one queue carried every destination, and nothing has read that
+  path since the rename — so a machine that rendered in that window holds
+  requests that are durable and invisible, which is the one thing a durable
+  queue must never be. A render now migrates them into the current queue, and
+  `bin/sd-status` reports requests in either, so
+  the rename costs no request its row before the migrating render happens.
+  Migration rather than permanent dual-reading: two directories mean every
+  reader has to know both names, and the reader written later knows one, which
+  is the defect itself. `SD_NOTION_QUEUE` names the old directory where it
+  moved. Neither directory is created by looking, an emptied one is left
+  standing rather than swept, the current queue wins a name collision because
+  the rename is what stopped the old name being written, and a request moves
+  verbatim.
+- **A copied Notion link resolves to its page id.** `notion_id` stripped the
+  query string but not the fragment, so a `space=` ending in `#<block id>`
+  yielded no id at all — which read as a folder name and sent the drain looking
+  for a folder called `https://...`. The id is read off the URL path, so a
+  query string and a fragment are both gone before it is looked for.
 - **A rendered research page no longer loads anything over the network.** The
   renderer emitted three Google Fonts `<link>` tags, which the Documents tab's
   `default-src 'none'` blocks: every served page would have fallen back to

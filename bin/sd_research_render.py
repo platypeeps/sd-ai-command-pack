@@ -31,7 +31,11 @@ Each DOCS entry:
     links    optional   [(label, href), ...] shown in the rail
     sibling  optional   raw HTML for a "Companions" rail block
     notion   optional   dict(space="...", page="...") — the Notion mirror this
-                        document is designated for
+                        document is designated for. The default folder is the
+                        page id `$SD_NOTION_PRIVATE_FOLDER` (or
+                        `$SD_NOTION_TEAM_FOLDER`) holds, with the repo's own
+                        page under it; `space=` overrides that, by id or page
+                        URL where one is known
     drive    optional   dict(folder="...", file="...") — the Google Drive mirror
                         this document is designated for. With neither key, the
                         document publishes to the dashboard and nowhere else;
