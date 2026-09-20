@@ -118,9 +118,36 @@ class Fixture(Configured):
             if line.startswith("root|")
         ]
 
+    def rows(self, key: str = "my-research") -> list[str]:
+        """Every row for one key, whichever form it takes."""
+        return [
+            line
+            for line in self.conf.read_text(encoding="utf-8").splitlines()
+            if line.split("|")[1:2] == [key]
+        ]
+
 
 class RegisterTests(Fixture):
-    def test_a_new_repo_gains_one_line(self) -> None:
+    def test_the_default_directory_is_registered_without_a_path(self) -> None:
+        """The dashboard finds `docs/dashboard/`. A path here is drift."""
+        said = PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        self.assertIn("registered my-research", said)
+        self.assertEqual(self.rows(), ["label|my-research|MINE"])
+        self.assertEqual(len(self.roots()), 1, "no root| row, so no path to go stale")
+
+    def test_a_second_run_of_the_default_adds_nothing(self) -> None:
+        PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        said = PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        self.assertIn("already registered", said)
+        self.assertEqual(self.rows(), ["label|my-research|MINE"])
+
+    def test_a_new_label_rewrites_the_row_rather_than_adding_one(self) -> None:
+        PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        said = PUBLISH.register_root(self.repo, "YOURS", self.repo / "docs" / "dashboard")
+        self.assertIn("relabelled", said)
+        self.assertEqual(self.rows(), ["label|my-research|YOURS"])
+
+    def test_a_directory_the_dashboard_cannot_find_still_gets_a_path(self) -> None:
         said = PUBLISH.register_root(self.repo, "MINE", self.repo / "build")
         self.assertIn("registered my-research", said)
         self.assertEqual(len(self.roots()), 2)
@@ -656,9 +683,7 @@ class BuildMigrationTests(Fixture):
             encoding="utf-8")
         said = PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
         self.assertIn("moved", said)
-        mine = [r for r in self.roots() if "my-research" in r]
-        self.assertEqual(len(mine), 1, "moved, not duplicated")
-        self.assertTrue(mine[0].endswith("docs/dashboard"))
+        self.assertEqual(self.rows(), ["label|my-research|MINE"], "moved, not duplicated")
 
     def test_a_row_naming_another_repo_is_still_left_alone(self) -> None:
         """Moving a row is this repository reclaiming its own; a key that names
@@ -668,6 +693,49 @@ class BuildMigrationTests(Fixture):
             encoding="utf-8")
         said = PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
         self.assertIn("left alone", said)
+
+
+class RootRowUpgradeTests(Fixture):
+    """The rows this renderer wrote before it knew about `label|`."""
+
+    def test_a_root_row_for_the_default_location_becomes_a_label_row(self) -> None:
+        """The regression: every rendered repo carries one of these today, and
+        a re-render must retire it rather than leave the stale path standing."""
+        self.conf.write_text(
+            HEADER + "root|my-research|MINE|%s\n" % (self.repo / "docs" / "dashboard"),
+            encoding="utf-8")
+        said = PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        self.assertIn("moved", said)
+        self.assertEqual(self.rows(), ["label|my-research|MINE"])
+        self.assertEqual([r for r in self.roots() if "my-research" in r], [],
+                         "the path is gone, not duplicated")
+
+    def test_the_upgrade_keeps_the_label_the_row_carried(self) -> None:
+        self.conf.write_text(
+            HEADER + "root|my-research|TRACES|%s\n" % (self.repo / "docs" / "dashboard"),
+            encoding="utf-8")
+        PUBLISH.register_root(self.repo, "TRACES", self.repo / "docs" / "dashboard")
+        self.assertEqual(self.rows(), ["label|my-research|TRACES"])
+
+    def test_a_root_row_for_a_genuinely_other_path_survives_untouched(self) -> None:
+        """`hoa` publishes into `reports`, and the fixture header carries it.
+
+        It is the one row that genuinely needs a path, so nothing here may
+        take it, rewrite it or drop its directory.
+        """
+        row = "root|hoa|Stage Run HOA|~/repos/hoa/reports"
+        self.assertEqual(self.rows("hoa"), [row], "the fixture starts with it")
+        said = PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        self.assertIn("registered my-research", said)
+        self.assertEqual(self.rows("hoa"), [row])
+        self.assertEqual(self.rows(), ["label|my-research|MINE"])
+
+    def test_a_foreign_row_for_this_key_is_still_left_alone(self) -> None:
+        self.conf.write_text(
+            HEADER + "root|my-research|Someone Else|~/elsewhere\n", encoding="utf-8")
+        said = PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        self.assertIn("left alone", said)
+        self.assertEqual(self.rows(), ["root|my-research|Someone Else|~/elsewhere"])
 
 
 class RepoKeyTests(unittest.TestCase):

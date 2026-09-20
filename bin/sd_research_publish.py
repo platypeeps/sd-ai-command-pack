@@ -5,9 +5,11 @@ The publication contract is
 `skills/_shared/references/publication-contract.md`; this is the half of it a
 script can carry out. Two jobs, both run at the end of `render`:
 
-1. **Register.** Append this repo's `root|key|label|directory` line to the
-   dashboard's `documents.conf`, once. The dashboard reads that file and never
-   writes it, so nothing here touches the dashboard's own source.
+1. **Register.** Append this repo's `label|key|label` line to the dashboard's
+   `documents.conf`, once. The dashboard finds `docs/dashboard/` on disk, so
+   the line says what to call it and carries no path; `root|` stays for a
+   directory the dashboard cannot find. The dashboard reads that file and
+   never writes it, so nothing here touches the dashboard's own source.
 
 2. **Enqueue.** For each document designated for a destination in
    `DESTINATIONS`, write a sync request naming the document, its container, the
@@ -209,8 +211,42 @@ def repo_key(repo: Path) -> str:
     return stem or "docs"
 
 
+def _shown(directory: Path) -> str:
+    """`~` and not the absolute path: `documents.conf` is shared across
+    machines, and an absolute path under one machine's home is wrong on the
+    next."""
+    home = str(Path.home())
+    shown = str(directory)
+    if shown == home or shown.startswith(home + os.sep):
+        shown = "~" + shown[len(home) :]
+    return shown
+
+
+def _own_row(repo: Path, path: str) -> bool:
+    """Whether a row's directory is inside this repository, so ours to rewrite.
+
+    A row naming another repository's directory is a collision to report, not
+    a row to take. `build/` and `docs/dashboard/` are both inside this one.
+    """
+    try:
+        return Path(path).expanduser().is_relative_to(repo)
+    except (OSError, ValueError):
+        return False
+
+
 def register_root(repo: Path, label: str, directory: Path) -> str:
-    """Add this repo's root line to `documents.conf` if it is not there.
+    """Register this repo with the dashboard, once.
+
+    The dashboard finds `docs/dashboard/` by itself, so registering the default
+    location means saying what to call it and nothing more:
+
+        label|<key>|<label>
+
+    A path here would be the default location written down a second time, and
+    it goes stale the moment the repository moves while still looking
+    authoritative. `root|<key>|<label>|<directory>` stays for a directory the
+    dashboard cannot find -- somewhere outside `docs/dashboard/` -- which is
+    the only thing a row can say that the disk does not.
 
     Returns a one-line report. Never raises on a missing dashboard: a machine
     without the dashboard checked out still renders its documents, and failing
@@ -224,38 +260,41 @@ def register_root(repo: Path, label: str, directory: Path) -> str:
     if not KEY.fullmatch(key):
         return "dashboard not registered: %r is not a usable key" % key
 
-    # `~` and not the absolute path: `documents.conf` is shared across machines,
-    # and an absolute path under one machine's home is wrong on the next.
-    home = str(Path.home())
-    shown = str(directory)
-    if shown == home or shown.startswith(home + os.sep):
-        shown = "~" + shown[len(home) :]
+    found = directory == repo / DASHBOARD_DIR
+    shown = _shown(directory)
+    line = ("label|%s|%s" % (key, label) if found
+            else "root|%s|%s|%s" % (key, label, shown))
+    named = label if found else shown
 
-    line = "root|%s|%s|%s" % (key, label, shown)
     text = conf.read_text(encoding="utf-8")
     lines = text.splitlines(keepends=True)
     for index, existing in enumerate(lines):
         parts = [p.strip() for p in existing.strip().split("|")]
-        if len(parts) != 4 or parts[0] != "root" or parts[1] != key:
+        form = parts[0] if parts else ""
+        if form == "label" and len(parts) == 3 and parts[1] == key:
+            pass
+        elif form == "root" and len(parts) == 4 and parts[1] == key:
+            # A row naming a directory outside this repository belongs to
+            # something else, whatever it calls itself.
+            if not _own_row(repo, parts[3]):
+                return "dashboard: %s already names %s; left alone" % (key, parts[3])
+        else:
             continue
         if existing.strip() == line:
             return "dashboard: already registered as %s" % key
-        # A row for this key naming this repository's own superseded output
-        # directory is this repository's row to move. `build/` was the
-        # published directory before `docs/dashboard/`, and leaving the old row
-        # standing would serve a tree nothing renders into any more.
-        if Path(parts[3]).expanduser().name == "build" and (
-                Path(parts[3]).expanduser().parent == repo):
-            lines[index] = line + "\n"
-            conf.write_text("".join(lines), encoding="utf-8")
-            return "dashboard: moved %s off build/ -> %s" % (key, shown)
-        return "dashboard: %s already names %s; left alone" % (key, parts[3])
+        # Ours, and saying the wrong thing. Rewritten in place rather than
+        # appended, because two rows for one key is the drift twice over.
+        lines[index] = line + "\n"
+        conf.write_text("".join(lines), encoding="utf-8")
+        if form == "label":
+            return "dashboard: relabelled %s -> %s" % (key, named)
+        return "dashboard: moved %s off %s -> %s" % (key, parts[3], named)
 
     with conf.open("a", encoding="utf-8") as handle:
         if not text.endswith("\n"):
             handle.write("\n")
         handle.write(line + "\n")
-    return "dashboard: registered %s -> %s" % (key, shown)
+    return "dashboard: registered %s -> %s" % (key, named)
 
 
 def revision(repo: Path) -> str:

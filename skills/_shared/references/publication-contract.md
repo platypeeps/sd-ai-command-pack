@@ -82,10 +82,20 @@ A skill that emits its own HTML meets the same rule by itself.
 
 ## Registration
 
-A repository enters the Documents tab through one line in the dashboard's
-`documents.conf`:
+The dashboard finds `docs/dashboard/` by itself: every checkout under its
+`REPO_ROOT` holding that directory is a document root, enumerated from disk.
+So a repository publishing to the default location enters the Documents tab
+by having the directory, and the only thing left to say is what to call it:
 
-    root|<key>|<label>|<directory>
+    label|<key>|<label>
+
+`root|<key>|<label>|<directory>` stays for a directory the dashboard cannot
+find — somewhere outside `docs/dashboard/`, as `hoa` publishes into `reports`.
+It is the one form that can say something the disk does not, so it is the one
+form that should carry a path. **Do not write a `root|` row for the default
+location.** It is the default written down a second time, and it goes stale the
+moment the repository moves while still looking authoritative — which is the
+drift the enumeration removed.
 
 Whatever installs the repository's documents writes that line, and writes it
 once. For a research repo that is `sd-research-kit render`, which registers
@@ -93,11 +103,14 @@ once. For a research repo that is `sd-research-kit render`, which registers
 same without rebuilding. Registration is idempotent, and a key already naming
 another directory is reported rather than overwritten.
 
-One exception to "reported rather than overwritten": a row for this repository's
-key naming this repository's own `build/` is moved. `build/` was the published
-directory before `docs/dashboard/`, and a row left pointing at it serves a tree
-nothing renders into any more. A row naming *another* repository's directory is
-still a collision, and is still only reported.
+One exception to "reported rather than overwritten": a row for this
+repository's key naming a directory *inside this repository* is this
+repository's row, and is rewritten in place rather than duplicated. That
+retires a `build/` row — the published directory before `docs/dashboard/` —
+and it retires a `root|` row for the default location that an earlier renderer
+wrote, replacing it with the `label|` row and keeping the label it carried. A
+row naming *another* repository's directory is still a collision, and is still
+only reported.
 
 It does not belong in the dashboard's source: a fleet dashboard carrying one
 repository's path would be wrong in a way that is awkward to undo, which is why
