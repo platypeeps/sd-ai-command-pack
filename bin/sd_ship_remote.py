@@ -260,23 +260,22 @@ class GitHub:
                       next_action="Restore branch protection, or declare the accepted gap in "
                                   f"{sd_lib.ACKNOWLEDGEMENT_RELATIVE_PATH} at the reviewed commit.")
 
-    def expected_workflows(self, head: str, base: str, changed: list[str]) -> list[tuple[str, str]]:
-        """`(path, name)` for every workflow at `head` GitHub schedules for this pull request.
+    def expected_workflows(self, head: str) -> list[tuple[str, str]]:
+        """`(path, name)` for every workflow at `head` whose `on` includes `pull_request`.
 
         Enumerated from the tree at merge time, `AGENTS.md`'s doctrine: a
         workflow added at `head` is expected at `head`, one deleted there is
         not, and the working tree has no say. `pull_request_target` is left
         out on purpose: its runs carry that event name and never match the
         `event=pull_request` query, so expecting one would refuse every merge.
-        A `pull_request` trigger under `branches`, `paths` or `types` filters
-        is evaluated against `base` and `changed` the way GitHub evaluates it
-        (`sd_lib.pull_request_trigger_applies`): a workflow the filter selects
-        for this pull request is expected, one it does not select is not, and
-        a filter this cannot read leaves the workflow expected. When a
-        workflow ran that was not expected, `every_check` still holds its
-        run to green. A trigger that is not spelled like an event name is a
-        construct this reader could not resolve, and that refuses rather
-        than drops the file.
+        A `branches`, `paths` or `types` filter under the trigger is not
+        read: the item's requirement 2 makes a workflow that did not run for
+        the event a refusal naming it, never a pass, and reconstructing
+        GitHub's scheduling here would be a second matcher whose every
+        divergence from the real one is a merge without the run (the
+        verification pass found two in one attempt). A trigger that is not
+        spelled like an event name is a construct this reader could not
+        resolve, and that refuses rather than drops the file.
         """
         directory = ".github/workflows"
         try:
@@ -294,16 +293,11 @@ class GitHub:
                 raise Refusal(f"{path} at {head[:12]}: could not read its triggers"
                               + (f" ({', '.join(repr(name) for name in unresolved)})" if unresolved else "")
                               + ", so whether it validates a pull request is unknown", code="ci_missing", boundary="ci")
-            if "pull_request" in triggers and sd_lib.pull_request_trigger_applies(sd_lib.pull_request_filters(lines), base, changed):
+            if "pull_request" in triggers:
                 expected.append((path, sd_lib.yaml_field(lines, "name") or path.rsplit("/", 1)[-1]))
         return expected
 
-    def pull_request_paths(self, base: str, head: str) -> list[str]:
-        """The paths this pull request changes: `base`'s tip, fetched now, to `head`."""
-        git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}:refs/remotes/origin/{base}")
-        return [line for line in git(self.root, "diff", "--name-only", f"origin/{base}...{head}").splitlines() if line]
-
-    def every_check(self, base: str, head: str) -> None:
+    def every_check(self, head: str) -> None:
         """The substitute for required checks under a declared gap: all of them.
 
         Every check run `filter=latest` reports at `head` must have completed
@@ -331,7 +325,7 @@ class GitHub:
                 raise Refusal(f"status is not passing on {head}: {context}", code="ci_not_passing",
                               next_action="Wait for or fix exact-head CI, then retry merge.", boundary="ci", state="retryable_failure")
         pull_request_runs = self.pages(f"{self.prefix}/actions/runs?head_sha={head}&event=pull_request", "workflow_runs")
-        for path, name in self.expected_workflows(head, base, self.pull_request_paths(base, head)):
+        for path, name in self.expected_workflows(head):
             if not any(run.get("path") == path and run.get("head_sha") == head and run.get("event") == "pull_request"
                        and run.get("status") == "completed" and run.get("conclusion") == "success"
                        for run in pull_request_runs):
@@ -351,7 +345,7 @@ class GitHub:
         if comparison.get("behind_by") != 0:
             raise Refusal("the reviewed branch is behind the current default branch")
         if "declared_gap" in protection:
-            self.every_check(base, head)
+            self.every_check(head)
             return
         runs = self.pages(f"{self.prefix}/commits/{head}/check-runs?filter=latest", "check_runs")
         statuses = self.pages(f"{self.prefix}/commits/{head}/statuses")

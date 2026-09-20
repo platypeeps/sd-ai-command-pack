@@ -358,24 +358,34 @@ promoted `planning → ready`.
 - Development code review point: one automatic pass spent; the fix gets
   one verification pass (the cap row's "plus one").
 
-### 2026-09-19 — verification pass, two blocking findings, both fixed
+### 2026-09-19 — verification pass, two blocking findings
 
 - `source:bin/sd_ship_remote.py::expected_workflows` (high): the first fix
   dropped every filtered workflow, including Tests under
-  `branches: [main]` on a merge into main. Fixed the other way round:
-  `sd_lib.pull_request_trigger_applies` evaluates the filter the way GitHub
-  does — `github_glob` (`*` stops at `/`, `**` does not, `?`, `[...]`,
-  `+`), `github_filter_matches` with the last matching pattern winning and
-  `!` deselecting, `branches`/`branches-ignore` against the base,
-  `paths`/`paths-ignore` against `git diff --name-only origin/<base>...<head>`
-  after a fetch, `types` without `synchronize` as "never fires on a push".
-  A pattern this cannot read, both `paths` keys at once, or an empty diff
-  leave the workflow expected: uncertainty refuses, it does not merge.
-  Five fixtures each way, a failing run of an unexpected workflow, and
-  `FilterSemantics` on the pure functions.
+  `branches: [main]` on a merge into main. A second attempt evaluated the
+  filters the way GitHub does; the ship lane's review then found two
+  divergences from GitHub's cheat sheet in one probe (`docs/**/*.md` against
+  `docs/README.md`, `*.jsx?` where `?` repeats the character before it).
+  Resolved by returning to requirement 2 as written: a workflow whose `on`
+  includes `pull_request` is expected whatever filter sits under the
+  trigger, and one that did not run for the event is a refusal naming it.
+  The first pass's medium finding — a documentation-only change blocked on
+  a source-only workflow — is rebutted on that requirement: the refusal
+  names the workflow, the operator sees why, and a merge that guessed the
+  filter would be the hole. No workflow in this repository carries a
+  `paths` or `branches` filter. The glob matcher is gone; three fixtures
+  hold the rule for `paths`, `branches` and `types`.
 - `source:bin/sd_lib.py::workflow_triggers` (medium): the single-event
   form `on: pull_request` read as no trigger and refused every merge under
   the declaration. Fixed: an inline scalar is that one event. Two spellings
   and a `workflow_dispatch`-only workflow beside the gate.
+- Ship lane, medium, `every_check`: an external check that never enqueues
+  is not missed. Rebutted on requirement 2's last sentence: app checks that
+  are not repository workflows fall under the check-run rule and add
+  nothing to the expected set. A roster of required contexts is what the
+  protection object carries, and the owner declined that object
+  (`.github/sd-status.json`, `because`); writing the roster into the
+  declaration would re-create it under another name, which sd:1021
+  requirement 4 leaves to a user-owned design.
 - The cap row is spent. A further finding on this branch is the owner's
   call, not an automatic pass.

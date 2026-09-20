@@ -2912,13 +2912,13 @@ class DeclaredGapCase(unittest.TestCase):
         expected = [(".github/workflows/sd-review-route.yml", "sd-review route"), (".github/workflows/tests.yml", "Tests")]
         # Present at head, deleted from the working tree: still expected.
         (self.root / ".github/workflows/tests.yml").unlink()
-        self.assertEqual(self.adapter().expected_workflows(head, "main", ["src.py"]), expected)
+        self.assertEqual(self.adapter().expected_workflows(head), expected)
         # Absent at head, present only in the working tree: not expected.
         _git(self.root, "rm", "-q", ".github/workflows/tests.yml")
         _git(self.root, "commit", "-q", "-m", "drop tests\n\nAuthored-with: human")
         head = self.head()
         (self.root / ".github/workflows/tests.yml").write_text(self.TESTS)
-        self.assertEqual(self.adapter().expected_workflows(head, "main", ["src.py"]), expected[:1])
+        self.assertEqual(self.adapter().expected_workflows(head), expected[:1])
 
     def test_a_push_run_is_not_evidence_of_the_pull_request_validation(self):
         self.declare()
@@ -2948,31 +2948,14 @@ class DeclaredGapCase(unittest.TestCase):
         self.green()
         self.refuse(r"tests\.yml at [0-9a-f]{12}: could not read its triggers \('\$\{\{ vars\.EVENT \}\}'\)", "ci_missing")
 
-    def test_a_filter_the_pull_request_falls_outside_leaves_the_workflow_unexpected(self):
-        """Codex on the branch: a `paths`-filtered workflow GitHub never
-        scheduled for this diff must not block the merge. The fixture's diff
-        touches `src.py`, `Makefile` and the declared files, never `docs/`."""
+    def test_a_filtered_workflow_that_did_not_run_is_a_refusal_naming_it(self):
+        """Requirement 2: a `paths`, `branches` or `types` filter under the
+        trigger does not make the workflow optional. GitHub's scheduling is
+        not reconstructed here; the workflow ran for the event or the merge
+        names it."""
         for filtered in ("on:\n  pull_request:\n    paths: ['docs/**']\n",
-                         "on:\n  pull_request:\n    paths-ignore: ['**']\n",
-                         "on:\n  pull_request:\n    branches: [release/**]\n",
-                         "on:\n  pull_request:\n    branches-ignore: [main]\n",
+                         "on:\n  pull_request:\n    branches: [main]\n",
                          "on:\n  pull_request:\n    types: [labeled]\n"):
-            with self.subTest(filtered=filtered.splitlines()[2].strip()):
-                self.restart()
-                lint = "name: Lint\n\n" + filtered + "\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
-                self.declare(workflows={"tests.yml": self.TESTS, "sd-review-route.yml": self.ROUTE, "lint.yml": lint})
-                self.green()
-                self.merge()
-                self.assertEqual(self.puts(), 1)
-
-    def test_a_filter_the_pull_request_satisfies_keeps_the_workflow_expected(self):
-        """Codex on the verification pass: `branches: [main]` selects a merge
-        into main, so Tests under that filter is still owed a run."""
-        for filtered in ("on:\n  pull_request:\n    branches: [main]\n",
-                         "on:\n  pull_request:\n    paths: ['**.py']\n",
-                         "on:\n  pull_request:\n    paths-ignore: ['docs/**']\n",
-                         "on:\n  pull_request:\n    branches-ignore: [wip/**]\n",
-                         "on:\n  pull_request:\n    paths: ['[unreadable']\n"):
             with self.subTest(filtered=filtered.splitlines()[2].strip()):
                 self.restart()
                 tests = self.TESTS.replace("on:\n  pull_request:\n  push:\n    branches: [main]\n", filtered)
@@ -2982,13 +2965,9 @@ class DeclaredGapCase(unittest.TestCase):
                 next(iter(self.remote.pull_requests.values())).checks = [self.check("route")]
                 self.double.workflow_runs = [self.run_record(".github/workflows/sd-review-route.yml")]
                 self.refuse(r"workflow Tests \(\.github/workflows/tests\.yml\) has no successful pull_request run", "ci_missing")
-
-    def test_a_run_of_an_unexpected_workflow_still_has_to_be_green(self):
-        lint = "name: Lint\n\non:\n  pull_request:\n    paths: ['docs/**']\n\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
-        self.declare(workflows={"tests.yml": self.TESTS, "sd-review-route.yml": self.ROUTE, "lint.yml": lint})
-        self.green()
-        next(iter(self.remote.pull_requests.values())).checks.append(self.check("lint", conclusion="failure"))
-        self.refuse("CI is not passing", "ci_not_passing")
+                self.double.workflow_runs.append(self.run_record(".github/workflows/tests.yml"))
+                self.merge()
+                self.assertEqual(self.puts(), 1)
 
     def test_the_single_event_form_is_read(self):
         """Codex on the verification pass: `on: pull_request` returned no
@@ -3012,13 +2991,6 @@ class DeclaredGapCase(unittest.TestCase):
         self.green()
         self.merge()
         self.assertEqual(self.puts(), 1)
-
-    def test_a_types_list_that_keeps_synchronize_is_unconditional(self):
-        route = self.ROUTE.replace("on:\n  pull_request:\n", "on:\n  pull_request:\n    types: [opened, synchronize, reopened]\n")
-        self.declare(workflows={"tests.yml": self.TESTS, "sd-review-route.yml": route})
-        self.green()
-        self.double.workflow_runs = [self.run_record(".github/workflows/tests.yml")]
-        self.refuse(r"workflow sd-review route", "ci_missing")
 
     def test_a_push_only_workflow_is_not_expected(self):
         nightly = "name: Nightly\n\non:\n  push:\n    branches: [main]\n\njobs:\n  job:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
@@ -3086,47 +3058,6 @@ class DeclaredGapCase(unittest.TestCase):
         double._route = route
         self.refuse("ownership or branch protection changed before merge")
 
-
-
-class FilterSemantics(unittest.TestCase):
-    """`sd_lib`'s reading of GitHub's filter patterns, the rules the
-    workflow-syntax reference states: `*` stops at `/`, `**` does not, a
-    later `!pattern` deselects, and what cannot be read is not "no"."""
-
-    def test_star_stops_at_a_slash_and_double_star_does_not(self):
-        self.assertFalse(ship.sd_lib.github_filter_matches(["*.py"], "a/b.py"))
-        self.assertTrue(ship.sd_lib.github_filter_matches(["**.py"], "a/b.py"))
-        self.assertTrue(ship.sd_lib.github_filter_matches(["feature/*"], "feature/x"))
-        self.assertFalse(ship.sd_lib.github_filter_matches(["feature/*"], "feature/x/y"))
-        self.assertTrue(ship.sd_lib.github_filter_matches(["release/**"], "release/1/2"))
-        self.assertTrue(ship.sd_lib.github_filter_matches(["v?.?"], "v1.2"))
-        self.assertTrue(ship.sd_lib.github_filter_matches(["[mM]ain"], "Main"))
-
-    def test_the_last_matching_pattern_wins(self):
-        self.assertFalse(ship.sd_lib.github_filter_matches(["**.py", "!tests/**"], "tests/t.py"))
-        self.assertTrue(ship.sd_lib.github_filter_matches(["!tests/**", "**.py"], "tests/t.py"))
-        self.assertFalse(ship.sd_lib.github_filter_matches(["!main"], "main"))
-
-    def test_an_unreadable_pattern_is_neither_yes_nor_no(self):
-        self.assertIsNone(ship.sd_lib.github_filter_matches(["[main"], "main"))
-        self.assertIsNone(ship.sd_lib.github_glob("+"))
-
-    def test_applies_reads_each_filter_as_github_schedules_it(self):
-        applies = ship.sd_lib.pull_request_trigger_applies
-        self.assertTrue(applies({}, "main", ["a"]))
-        self.assertTrue(applies({"branches": ["main"]}, "main", ["a"]))
-        self.assertFalse(applies({"branches": ["release/**"]}, "main", ["a"]))
-        self.assertFalse(applies({"branches-ignore": ["main"]}, "main", ["a"]))
-        self.assertFalse(applies({"paths": ["src/**"]}, "main", ["docs/a.md"]))
-        self.assertTrue(applies({"paths": ["src/**"]}, "main", ["docs/a.md", "src/x.py"]))
-        self.assertFalse(applies({"paths-ignore": ["docs/**"]}, "main", ["docs/a.md"]))
-        self.assertTrue(applies({"paths-ignore": ["docs/**"]}, "main", ["docs/a.md", "src/x.py"]))
-        # Both keys at once is a file GitHub refuses; an empty diff is one this cannot judge.
-        self.assertTrue(applies({"paths": ["a"], "paths-ignore": ["b"]}, "main", ["zzz"]))
-        self.assertTrue(applies({"paths": ["src/**"]}, "main", []))
-        self.assertTrue(applies({"paths": ["[x"]}, "main", ["docs/a.md"]))
-        self.assertFalse(applies({"types": ["labeled"]}, "main", ["a"]))
-        self.assertTrue(applies({"types": ["opened", "synchronize"]}, "main", ["a"]))
 
 
 if __name__ == "__main__":
