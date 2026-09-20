@@ -1999,7 +1999,7 @@ class ClassTableTests(unittest.TestCase):
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual(len(names), len(status.BY_CHECK))
 
-    def test_the_table_carries_the_twenty_three_checks_the_design_enumerates(self) -> None:
+    def test_the_table_carries_the_twenty_four_checks_the_design_enumerates(self) -> None:
         # Pinned as a set, not a count: a count passes when a check is renamed
         # into a duplicate of another, which is the drift this table exists to
         # make impossible.
@@ -2014,7 +2014,7 @@ class ClassTableTests(unittest.TestCase):
                 "parked-concern", "idle-planning", "undated-planning",
                 "issue-open", "source-marker", "unreadable-concern-row",
                 "undisclosed-tool", "pr-review-unacknowledged",
-                "merged-pr-review-unacknowledged",
+                "merged-pr-review-unacknowledged", "mirror-sync-pending",
             },
         )
 
@@ -5328,6 +5328,145 @@ class SkillPageClaimTests(StatusFixture):
         for name, tool in placed:
             with self.subTest(f"{name} in bin/{tool}"):
                 self.assertTrue(defines(sources[tool], name))
+
+
+class MirrorSyncPendingTests(InventoryFixture):
+    """`mirror-sync-pending`: the queue that is durable and otherwise invisible.
+
+    A render enqueues an outward mirror because it cannot write one itself, and
+    an agent session drains the queue later. Between those two moments the
+    request is a file nobody looks at. These fixtures are what makes the
+    report look at it.
+    """
+
+    def queue(self) -> pathlib.Path:
+        """A queue directory of this test's own, and the environment naming it."""
+        held = tempfile.TemporaryDirectory()
+        self.addCleanup(held.cleanup)
+        return pathlib.Path(held.name)
+
+    def request(self, queue: pathlib.Path, name: str, **fields: Any) -> pathlib.Path:
+        path = queue / name
+        body: dict[str, Any] = {
+            "repo": str(self.repo),
+            "document": "the delivery",
+            "destination": "notion",
+            "target": "the Research Notion space",
+        }
+        body.update(fields)
+        path.write_text(json.dumps(body), encoding="utf-8")
+        return path
+
+    def queued(self, queue: pathlib.Path) -> list[dict[str, Any]]:
+        rows = status.actionable_inventory(
+            self.repo, self.sections(), self.TODAY,
+            environ={status.MIRROR_QUEUE: str(queue)},
+        ).rows
+        return self.by_check(rows, "mirror-sync-pending")
+
+    def test_a_queued_mirror_for_this_repository_is_a_row(self) -> None:
+        queue = self.queue()
+        self.request(queue, "widget.delivery.notion.json")
+        rows = self.queued(queue)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["key"], "widget.delivery.notion.json")
+        self.assertEqual(rows[0]["title"], "the delivery")
+        self.assertIn("the Research Notion space", rows[0]["detail"])
+
+    def test_a_drive_request_is_the_same_class_worded_for_drive(self) -> None:
+        """One class for every destination. The request words its own, so this
+        producer never carries a second copy of the destination table."""
+        queue = self.queue()
+        self.request(
+            queue, "widget.delivery.drive.json",
+            destination="drive", target="the Deliverables Drive folder",
+        )
+        row, = self.queued(queue)
+        self.assertEqual(row["check"], "mirror-sync-pending")
+        self.assertIn("the Deliverables Drive folder", row["detail"])
+
+    def test_one_document_designated_twice_is_two_rows(self) -> None:
+        """Either mirror can drain while the other waits, so each is its own
+        piece of outstanding work and its own id."""
+        queue = self.queue()
+        self.request(queue, "widget.delivery.notion.json")
+        self.request(
+            queue, "widget.delivery.drive.json",
+            destination="drive", target="the Deliverables Drive folder",
+        )
+        rows = self.queued(queue)
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(len({row["id"] for row in rows}), 2)
+
+    def test_a_request_with_no_destination_still_names_the_document(self) -> None:
+        """The fallback is for a request written before `target` existed; a row
+        with a vague destination beats no row at all."""
+        queue = self.queue()
+        path = queue / "widget.old.json"
+        path.write_text(json.dumps(
+            {"repo": str(self.repo), "document": "the delivery"}), encoding="utf-8")
+        row, = self.queued(queue)
+        self.assertIn("an unnamed destination", row["detail"])
+
+    def test_a_request_naming_another_checkout_is_that_checkouts_row(self) -> None:
+        """The queue is machine-wide; this tool reports on one repository."""
+        queue = self.queue()
+        elsewhere = tempfile.TemporaryDirectory()
+        self.addCleanup(elsewhere.cleanup)
+        self.request(queue, "other.delivery.notion.json", repo=elsewhere.name)
+        self.assertEqual(self.queued(queue), [])
+
+    def test_an_unreadable_request_is_skipped_rather_than_diagnosed(self) -> None:
+        """A row about it would fire every run and name no action this tool may take."""
+        queue = self.queue()
+        (queue / "truncated.json").write_text("{not json", encoding="utf-8")
+        (queue / "a-list.json").write_text("[]", encoding="utf-8")
+        self.request(queue, "widget.delivery.notion.json")
+        self.assertEqual([row["key"] for row in self.queued(queue)],
+                         ["widget.delivery.notion.json"])
+
+    def test_an_absent_queue_is_quiet(self) -> None:
+        """The default is a machine-wide path most repositories never write to."""
+        queue = self.queue() / "never-created"
+        self.assertEqual(self.queued(queue), [])
+
+    def test_an_empty_queue_is_quiet(self) -> None:
+        self.assertEqual(self.queued(self.queue()), [])
+
+    def test_a_queued_mirror_is_work_outstanding_and_not_a_defect(self) -> None:
+        """Not abnormal, so it never reaches the banner; rank puts it below the defects."""
+        queue = self.queue()
+        self.request(queue, "widget.delivery.notion.json")
+        row = self.queued(queue)[0]
+        self.assertFalse(row["abnormal"])
+        self.assertEqual(row["rank"], 75)
+        self.assertEqual(row["source"], "~/.claude/pending-mirror-syncs/")
+
+    def test_the_request_that_has_waited_longest_leads(self) -> None:
+        """Age carries the urgency, because the class itself is never abnormal."""
+        queue = self.queue()
+        fresh = self.request(queue, "a-fresh.json", document="fresh")
+        stale = self.request(queue, "z-stale.json", document="stale")
+        # Local noon, not UTC midnight: the producer reads the mtime back with
+        # `date.fromtimestamp`, which is local, so a midnight fixture lands on
+        # the day before west of Greenwich and the age is off by one there.
+        when = datetime.datetime(2026, 8, 24, 12, 0).timestamp()
+        os.utime(stale, (when, when))
+        os.utime(fresh, None)
+        rows = self.queued(queue)
+        self.assertEqual([row["title"] for row in rows], ["stale", "fresh"])
+        self.assertEqual(rows[0]["age_days"], 14)
+
+    def test_the_skill_table_carries_this_class(self) -> None:
+        """`skills/sd-status/SKILL.md` mirrors `CLASSES` word for word."""
+        kind = status.BY_CHECK["mirror-sync-pending"]
+        skill = BIN.parent / "skills" / "sd-status" / "SKILL.md"
+        table = skill.read_text(encoding="utf-8")
+        self.assertIn(
+            f"| {kind.rank} | `{kind.check}` | `{kind.letter}` | no | "
+            f"`{kind.source}` | {kind.what} |",
+            table,
+        )
 
 
 if __name__ == "__main__":

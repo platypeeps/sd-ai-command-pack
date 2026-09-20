@@ -48,7 +48,7 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
                           init-hook|init-claude-md|conventions
 
   render        render research.conf.py in this repo into build/, then register
-                build/ with the dashboard and queue any Notion mirrors
+                build/ with the dashboard and queue any outward mirrors
   publish       the registration and queueing half on its own, without
                 re-rendering
   init-hook     install the post-commit hook that re-renders this repo
@@ -157,7 +157,7 @@ def main(argv: list[str]) -> int:
     if verb == "publish":
         # `render` already does this; the verb exists so a repo can register
         # itself without a rebuild, and so the git hook has something to call
-        # when only the Notion designation changed.
+        # when only a destination designation changed.
         return int(load("sd_research_publish").publish_main())
     if verb == "init-hook":
         return int(load("sd_research_publish").init_hook_main())

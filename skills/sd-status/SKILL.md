@@ -24,7 +24,8 @@ nobody's muscle memory breaks.
 
 When the deliverable is a finished document, apply
 `references/publication-contract.md`: it publishes to the dashboard's
-Documents tab by default, and reaches Notion only where the user designated it.
+Documents tab by default, and reaches an outward destination — Notion, Google
+Drive — only where the user designated that document for it.
 
 ## The fourteen sections, in output order
 
@@ -98,6 +99,7 @@ this table before running the command.
 | 60 | `pr-needs-action` | `p` | no | `open pull requests` | an open pull request waiting on a review or a merge |
 | 65 | `merged-pr-review-unacknowledged` | `p` | no | `merged PRs (14 days) + local acknowledgements` | a pull request merged in the last 14 days with a review finding nobody answered |
 | 70 | `open-step` | `s` | no | `- [ ] in item docs` | an unchecked box on an item nobody has closed |
+| 75 | `mirror-sync-pending` | `n` | no | `~/.claude/pending-mirror-syncs/` | a published document whose designated mirror is not written yet |
 | 80 | `unmerged-branch` | `b` | no | `origin heads` | a branch on origin with no open pull request carrying it |
 | 90 | `parked-concern` | `c` | no | `## Review ledger` | a concern parked behind a trigger nobody is watching |
 | 100 | `idle-planning` | `w` | yes | `item activity + idle threshold` | an item idle in planning past the 45-day threshold |
