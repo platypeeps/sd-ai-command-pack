@@ -251,7 +251,7 @@ carrying `Active item:`; `agents/sd-rust-fill.md`,
 For the seven symbols an earlier list left unenumerated, from requirement
 13's own line references and then the readers: the `archived` and `parked`
 fields at `bin/sd_lib.py:355-368`, `:271-282`, `:302-303`, `:350` and every
-reader — `bin/sd-status:179,186,1118-1125,1230-1238,1250-1283`,
+reader — `bin/sd-status:181,188,1148-1155,1260-1268,1280-1313`,
 `dashboard/work.py`, `dashboard/app.js`,
 `tests/test_dashboard_work.py`, `tests/test_sd_lib.py`,
 `tests/test_sd_docs_lint.py`, `skills/sd-receive-review/SKILL.md`,
@@ -1060,7 +1060,7 @@ exist, and which path names it.
 **`_sibling` at 18 is what the 40 of seam actually bought.** The write is ten
 lines, because `gh api --method POST` goes through `gh_json` unchanged exactly
 as R11-D44 predicted. Reaching `gh_json` costs a loader, because
-`bin/sd-pr-state` has no `.py` suffix. `bin/sd-status:96` carries the same
+`bin/sd-pr-state` has no `.py` suffix. `bin/sd-status:98` carries the same
 eighteen lines for the same reason; a third copy is the argument for moving it
 into `sd_lib`, and two copies is not.
 
@@ -2125,7 +2125,7 @@ A third set, `ALLOWED_IF_PRESENT`, carries the two lines #995 adds to
 quotes `sd-status`'s `.trellis` removal command and the comment above it
 that names the framework. Team-lead's ruling: a test that names the residue
 commands must name them, so both are permanent exemptions of the same kind as
-`bin/sd-status:1087-1089`. They are matched by file and content, not by line
+`bin/sd-status:1117-1119`. They are matched by file and content, not by line
 number, and may match zero lines, so the test is green whether #995 merges
 before this branch or after it; a fourth test fails a row that matches two
 lines. Proof, 2026-09-16, on a scratch worktree at this branch with

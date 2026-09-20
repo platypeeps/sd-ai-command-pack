@@ -50,7 +50,7 @@ opens with fifteen top-level lines; the fourteen below are the sections.
 | `jira (shared database, all repositories)` | the operator's Jira involvement from the shared database, across every repository: one line per ticket, key and state, open rows first, then rows closed within seven days. Not scoped to the checkout |
 | `protection` | branch-protection **enforcement**, gap by gap, plus the two merge-settings flags |
 | `resumable handoffs` | the pending local packet for this directory (**read, never consumed**) |
-| `backends` | which review backends are installed — names only |
+| `backends` | the review lanes the provider registry declares, plus `copilot`, which no entry names — names and states only, enumerated at runtime |
 | `legacy residue` | legacy leftovers, each with the exact command that removes it |
 
 The contribution section filters the shared projection by the current checkout path and its GitHub repository name.
