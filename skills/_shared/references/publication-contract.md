@@ -3,8 +3,9 @@
 Read this before deciding where a finished document goes.
 
 This contract applies to the pack and to every consumer of it. It states one
-default and two opt-ins. It does not decide whether a document is finished;
-that is the producing skill's judgment.
+default destination and a set of outward ones, each opt-in per document. It
+does not decide whether a document is finished; that is the producing skill's
+judgment.
 
 ## The default destination is the dashboard
 
@@ -17,8 +18,8 @@ writes to it, so the producing repository owns its own output. A report belongs
 to the repository that generates it.
 
 Publication is local. Serving a page on loopback is not disclosure, and this
-contract grants no authority to send anything outside the machine. Notion is the
-only outward destination here, and it is opt-in per document.
+contract grants no authority to send anything outside the machine. Every outward
+destination below is opt-in per document, and none is reached by default.
 
 ## What publishes, and what does not
 
@@ -81,32 +82,51 @@ The dashboard's freshness indicator is then a statement about the render, not
 about whether anyone remembered. A verification-only mode that fails on stale
 output is acceptable where a write hook is not wanted; silence is not.
 
-## Notion is per document, and opt-in
+## Outward destinations are per document, and opt-in
 
-Notion mirrors are the durable shareable copies. They are outward-facing, so no
-document reaches Notion by default and no skill infers a target.
+An outward mirror is the durable shareable copy. Outward destinations are
+outward-facing by definition, so no document reaches one by default and no skill
+infers a target from a title, a path or a neighbour.
 
-The user designates a document and names its space at that time. The
-designation is recorded where the document is already described — the `notion`
-key of that document's entry in `research.conf.py`:
+The user designates a document and names its container at that time. The
+designation is recorded where the document is already described — a destination
+key on that document's entry in `research.conf.py`:
+
+| Destination | Key | Container (required) | Existing page or file (optional) |
+| --- | --- | --- | --- |
+| Notion | `notion=` | `space=` | `page=` |
+| Google Drive | `drive=` | `folder=` | `file=` |
 
     notion=dict(space="<space>", page="<page id or url>")
+    drive=dict(folder="<folder name or id>", file="<file id or url>")
 
-Until that key exists, the document publishes to the dashboard and nowhere else.
+Both keys on one entry are two mirrors, not a choice. Until one of these keys
+exists, the document publishes to the dashboard and nowhere else.
+
+The container is required, because a mirror with nowhere to go is not a
+designation. The page or file is optional: absent, the drain creates it and the
+designation can be amended with the id it got; present, the drain updates that
+one rather than leaving a fresh copy behind on every render.
 
 Recording the target makes it machine-readable for the first time. Before this,
 the page title and parent lived in no file the kit read, so verifying a mirror
 against its source was manual and therefore skipped.
 
-## How a Notion mirror is updated
+## How an outward mirror is updated
 
-A render does not call Notion. Rendering runs in a git hook and in CI, neither
-of which can reach an MCP server, and the pack holds no Notion credential.
+A render does not call any outward destination. Rendering runs in a git hook and
+in CI, neither of which can reach an MCP server, and the pack holds no
+credential for any of them.
 
-So a render enqueues. It writes a sync request naming the document, its space,
-its page and the source revision. An agent session drains the queue through the
-Notion connector and records the result. The request is durable: an enqueue that
-is never drained stays visible rather than expiring.
+So a render enqueues. It writes one sync request per document per destination,
+naming the document, its container, the page or file to update and the source
+revision. An agent session drains the queue through that destination's connector
+and records the result. The request is durable: an enqueue that is never drained
+stays visible rather than expiring.
+
+One queue carries every destination, and `bin/sd-status` reports a pending
+request as `mirror-sync-pending`. A document designated for two places is two
+requests, and either can drain while the other waits.
 
 This makes the mirror reliable without giving a hook a long-lived write
 credential to a shared space. It also keeps the outward-facing step in a place
@@ -114,19 +134,23 @@ where a person is present.
 
 Draining is four steps per request, and the order matters:
 
-1. Read the request. It names the document, its rendered and source paths, its
-   space, its page and the revision the render was made from.
+1. Read the request. It names the destination, the document, its rendered and
+   source paths, its container, the page or file to update and the revision the
+   render was made from.
 2. Check the document's handling restrictions first. One that may not be shared
-   externally is not mirrored to a shared space, and designating it did not lift
-   that. Report it and leave the request in place.
-3. Mirror the document to the named space, updating the page the request names
-   rather than creating a second one.
+   externally is not mirrored to a shared destination, and designating it did
+   not lift that. Report it and leave the request in place.
+3. Mirror the document to the named container, updating the page or file the
+   request names rather than creating a second one. Use that destination's
+   connector: the Notion connector for `notion`, the Google Workspace connector
+   for `drive`.
 4. Delete the request file. Deleting it is what records that the mirror is
    current; a request left behind says the sync still owes work, which is the
    safe thing for it to say if step 3 half-finished.
 
-Never drain a request into a space the request does not name, and never create a
-page in a space the user has not named for that document.
+Never drain a request into a container the request does not name, never create a
+page or file in a container the user has not named for that document, and never
+drain a request to a destination other than the one it names.
 
 ## Order
 

@@ -1,13 +1,14 @@
 ---
 name: sd-research-repo
-description: Use when writing, rendering, reviewing, or publishing a document in a research repo that follows the shared research-repo standard — the numbered layout, provenance blocks, Status sections, and the Notion mirror.
+description: Use when writing, rendering, reviewing, or publishing a document in a research repo that follows the shared research-repo standard — the numbered layout, provenance blocks, Status sections, and the outward mirrors.
 ---
 
 # sd-research-repo
 
 Run this skill for work inside a **research repo**: a checkout laid out
 `00-overview/` … `90-scratch/`, carrying a `research.conf.py`, whose documents are
-rendered and then mirrored to Notion. It carries the standard those repos follow
+rendered, published to the dashboard, and mirrored outward where designated. It
+carries the standard those repos follow
 and the pipeline that gets a document from draft to published.
 
 Two reference files govern the work: `references/conventions.md` (the standard —
@@ -18,13 +19,14 @@ writing or moving any document; read the second before fanning work out.
 
 When the deliverable is a finished document, apply
 `references/publication-contract.md`: it publishes to the dashboard's
-Documents tab by default, and reaches Notion only where the user designated it.
+Documents tab by default, and reaches an outward destination — Notion, Google
+Drive — only where the user designated that document for it.
 
 ## When to use
 
 Use when the repo you are standing in is a research repo and the task is to
 write, restructure, render, review, or publish one of its documents — including
-adding a page to `research.conf.py` or preparing the Notion mirror.
+adding a page to `research.conf.py` or preparing an outward mirror.
 
 Do not use for:
 
@@ -75,9 +77,12 @@ records the differences that are on purpose. Both are in
    is the one defect the renderer cannot catch.
    Identify exactly one main document titled `START HERE — <descriptive project or decision title>`.
    Apply this during setup and the next update to an existing project.
-   Match its Markdown H1, rendered `title` and `h1`, and Notion page title.
-   Link it near the README's top and identify it in the README table and Notion parent.
-   Keep its source filename and existing Notion page identity.
+   Match its Markdown H1, rendered `title` and `h1`, and the title of every
+   mirror it has.
+   Link it near the README's top and identify it in the README table and in each
+   mirror's parent container.
+   Keep its source filename and the identity of every page or file it already
+   mirrors to.
    Before publishing, check the configured documents — the standard's scope, not
    the whole tree — for missing, duplicate, or mismatched main-document titles.
    `90-scratch/` holds superseded drafts that are never cited and never mirrored;
@@ -122,12 +127,14 @@ records the differences that are on purpose. Both are in
    that publishes locally, which is every document until the user designates
    one.
 
-   For a document carrying a `notion=` key, `render` left a request in
-   `~/.claude/pending-notion-syncs/`. Drain it: read each JSON file, mirror
-   that document to the named space through the Notion connector in the shape
-   `references/conventions.md` gives, record the page in the repo's README
-   table, then delete the request file. A request whose handling restrictions
-   forbid an external mirror is reported and left in place, never drained.
+   For a document carrying a `notion=` or `drive=` key, `render` left a request
+   in `~/.claude/pending-mirror-syncs/`. Drain it: read each JSON file, mirror
+   that document to the container the request names — through the Notion
+   connector for `destination: notion`, the Google Workspace connector for
+   `destination: drive` — in the shape `references/conventions.md` gives,
+   record the page or file in the repo's README table, then delete the request
+   file. A request whose handling restrictions forbid an external mirror is
+   reported and left in place, never drained.
 9. Report what was done, what was verified, and what was not.
 
 ## Sub-agent dispatch
@@ -153,9 +160,9 @@ planning a fan-out that ends in a written file.
   handling restrictions forbid it.
 - Never hand-edit `build/`. It is generated; change `research.conf.py` instead.
 - Rendering and local publication act on the machine only: the Documents tab is
-  served on loopback, so render freely. Mirroring to Notion is outward-facing —
-  do it only for a document the user designated, and only into the space they
-  named.
+  served on loopback, so render freely. Mirroring to Notion or Drive is
+  outward-facing — do it only for a document the user designated, only to the
+  destination its request names, and only into the container they named.
 
 ## Final report
 

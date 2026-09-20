@@ -13,7 +13,8 @@ Report only the result, decisive evidence, unresolved findings, and next action.
 
 When the deliverable is a finished document, apply
 `references/publication-contract.md`: it publishes to the dashboard's
-Documents tab by default, and reaches Notion only where the user designated it.
+Documents tab by default, and reaches an outward destination — Notion, Google
+Drive — only where the user designated that document for it.
 
 ## Before execution
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Register a research repo with the dashboard, and queue its Notion mirrors.
+"""Register a research repo with the dashboard, and queue its outward mirrors.
 
 The publication contract is
 `skills/_shared/references/publication-contract.md`; this is the half of it a
@@ -9,16 +9,21 @@ script can carry out. Two jobs, both run at the end of `render`:
    dashboard's `documents.conf`, once. The dashboard reads that file and never
    writes it, so nothing here touches the dashboard's own source.
 
-2. **Enqueue.** For each document carrying a `notion` key, write a sync request
-   naming the document, its space, its page and the source revision. Rendering
-   runs in a git hook and in CI, neither of which can reach an MCP server, and
-   the pack holds no Notion credential -- so a render cannot call Notion and
-   does not try. An agent session drains the queue.
+2. **Enqueue.** For each document designated for a destination in
+   `DESTINATIONS`, write a sync request naming the document, its container, the
+   page or file to update and the source revision. Rendering runs in a git hook
+   and in CI, neither of which can reach an MCP server, and the pack holds no
+   credential for any destination -- so a render never calls one and does not
+   try. An agent session drains the queue.
 
-One request file per document, named after the repo and the document, so a
-re-render overwrites the pending request rather than queueing a second one. A
-request that is never drained stays on disk: the queue does not expire, because
-an expiring queue reports a mirror as done that was never written.
+One queue for every destination rather than one queue each, and one request
+file per document *per destination*: a document designated for two places is
+two independent pieces of outstanding work, and either can drain while the
+other waits. The filename carries the repo, the document and the destination,
+so a re-render overwrites the pending request rather than queueing a second.
+
+A request that is never drained stays on disk: the queue does not expire,
+because an expiring queue reports a mirror as done that was never written.
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from sd_lib import git_output
 
@@ -41,10 +46,44 @@ DASHBOARD_HOME = Path(
 
 #: Durable, outside any repo, and beside the vault-write queue that already
 #: works this way. `~/.claude/` and not `/tmp`: a request that a reboot deletes
-#: is a mirror nobody knows went missing.
+#: is a mirror nobody knows went missing. One queue for every destination:
+#: `bin/sd-status` reads it, and a queue per destination would mean a producer
+#: and a status class per destination, which `actionable_inventory` already
+#: refuses for the same reason (C-3, one producer and not three).
 QUEUE = Path(
-    os.environ.get("SD_NOTION_QUEUE", "~/.claude/pending-notion-syncs")
+    os.environ.get("SD_MIRROR_QUEUE", "~/.claude/pending-mirror-syncs")
 ).expanduser()
+
+
+class Destination(NamedTuple):
+    """One place a document may be designated for, and what naming it takes.
+
+    The dashboard is deliberately absent: it is the default, it takes no
+    designation, and a render writes it rather than queueing it.
+
+    `where` is required because a mirror with no container has nowhere to go.
+    `what` is optional: absent, the drain creates the page or file and the
+    designation can be amended with the id it got; present, the drain updates
+    that one rather than creating a second copy on every render.
+    """
+
+    #: The DOCS key the user writes, and the `destination` field of a request.
+    name: str
+    #: The required field: the container the mirror is written into.
+    where: str
+    #: The optional field: the existing page or file to update in place.
+    what: str
+    #: How a report and a status row name the container, in words.
+    noun: str
+
+
+#: Adding a destination is a row here plus a drain step in the contract. It is
+#: deliberately not open-ended: an unknown key in a DOCS entry is a typo, and a
+#: table that accepted anything would queue a mirror to a place nothing drains.
+DESTINATIONS = (
+    Destination("notion", "space", "page", "Notion space"),
+    Destination("drive", "folder", "file", "Drive folder"),
+)
 
 #: The dashboard builds a URL from the key, so the key is what a URL may carry.
 #: Mirrored from `sd_dashboard/documents.py`, which rejects anything else.
@@ -115,36 +154,57 @@ def revision(repo: Path) -> str:
     return git_output(["rev-parse", "HEAD"], repo) or "unknown"
 
 
-def notion_target(cfg: dict[str, Any]) -> dict[str, str] | None:
-    """The `notion` key of a DOCS entry, or None when the document is local.
+def mirror_targets(cfg: dict[str, Any]) -> tuple[list[dict[str, str]], list[str]]:
+    """The destinations this DOCS entry designates, and what was wrong.
 
-    A document publishes to the dashboard and nowhere else until this key
-    exists. The user designates a document and names its space at that time;
-    nothing here infers a target from a title, a path or a neighbour.
+    A document publishes to the dashboard and nowhere else until one of these
+    keys exists. The user designates a document and names its container at that
+    time; nothing here infers a destination from a title, a path or a neighbour,
+    and nothing promotes a document because it looks finished.
+
+    Returns a list because a document may be designated for several places at
+    once. `notion=` and `drive=` on one entry are two mirrors, not a choice.
+
+    Problems are returned rather than raised, and returned *per destination*.
+    A malformed designation is the user's to fix, and one bad key must not cost
+    the other destination its request: the dashboard copy is written either way,
+    so withholding a valid mirror would punish the destination that was fine.
     """
-    target = cfg.get("notion")
-    if not target:
-        return None
-    if not isinstance(target, dict):
-        raise ValueError("notion= must be a dict, not %s" % type(target).__name__)
-    space = str(target.get("space", "")).strip()
-    if not space:
-        raise ValueError("notion= needs a space")
-    return {"space": space, "page": str(target.get("page", "")).strip()}
+    targets: list[dict[str, str]] = []
+    problems: list[str] = []
+    for dest in DESTINATIONS:
+        raw = cfg.get(dest.name)
+        if not raw:
+            continue
+        if not isinstance(raw, dict):
+            problems.append(
+                "%s= must be a dict, not %s" % (dest.name, type(raw).__name__)
+            )
+            continue
+        where = str(raw.get(dest.where, "")).strip()
+        if not where:
+            problems.append("%s= needs a %s" % (dest.name, dest.where))
+            continue
+        targets.append({
+            "destination": dest.name,
+            dest.where: where,
+            dest.what: str(raw.get(dest.what, "")).strip(),
+            # Worded here rather than by whoever reads the request. `sd-status`
+            # prints this verbatim, so it never has to carry a second copy of
+            # the destination table to say which place a row is waiting on.
+            "target": "the %s %s" % (where, dest.noun),
+        })
+    return targets, problems
 
 
 def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
-    """Write a sync request per document that names a Notion target."""
+    """Write one sync request per document per designated destination."""
     reports: list[str] = []
     wanted: list[tuple[dict[str, Any], dict[str, str]]] = []
     for cfg in docs:
-        try:
-            target = notion_target(cfg)
-        except ValueError as problem:
-            reports.append("notion: %s in %s" % (problem, cfg.get("out", "?")))
-            continue
-        if target is not None:
-            wanted.append((cfg, target))
+        targets, problems = mirror_targets(cfg)
+        reports += ["mirror: %s in %s" % (p, cfg.get("out", "?")) for p in problems]
+        wanted += [(cfg, target) for target in targets]
     if not wanted:
         return reports
 
@@ -161,12 +221,11 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
             "title": cfg.get("title", out),
             "source": str(repo / src) if src else "",
             "rendered": str(repo / "build" / (out + ".html")),
-            "space": target["space"],
-            "page": target["page"],
         }
-        path = QUEUE / ("%s.%s.json" % (key, out or "doc"))
+        request.update(target)
+        path = QUEUE / ("%s.%s.%s.json" % (key, out or "doc", target["destination"]))
         path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
-        reports.append("notion: queued %s -> %s" % (out, target["space"]))
+        reports.append("mirror: queued %s -> %s" % (out, target["target"]))
     return reports
 
 
@@ -185,7 +244,7 @@ def publish(repo: Path, project: str, docs: list[dict[str, Any]]) -> list[str]:
 #: and the pack ships no shell outside `.github/scripts/`. So the hook is
 #: Python, stdlib only, and it lives in the module that installs it. It carries
 #: `#` comments rather than a docstring because it is itself inside one.
-HOOK = '#!/usr/bin/env python3\n# Re-render this research repo after a commit that touched a document.\n#\n# Installed by `sd-research-kit init-hook`. Post-commit and not pre-commit:\n# `build/` is generated and not committed, so there is nothing to stage, and\n# the commit is the revision a queued Notion sync should name.\n#\n# Rendered output goes stale the moment its source changes, and a stale page is\n# worse than a missing one because it looks current. This is what keeps the\n# dashboard\'s Documents tab a statement about the render rather than about who\n# remembered to run it.\n#\n# Never fails the commit. The commit is already made when this runs, so exiting\n# non-zero would report a failure for work that succeeded. A render that cannot\n# run says so and leaves the commit alone.\n#\n# `SD_SKIP_RENDER=1 git commit` skips it.\n\nimport os\nimport shutil\nimport subprocess\nimport sys\n\n\ndef main():\n    if os.environ.get("SD_SKIP_RENDER"):\n        return 0\n    try:\n        root = subprocess.run(\n            ["git", "rev-parse", "--show-toplevel"],\n            capture_output=True, text=True, timeout=30, check=True,\n        ).stdout.strip()\n        if not os.path.isfile(os.path.join(root, "research.conf.py")):\n            return 0\n        # Only when the commit carried a document. A commit touching nothing\n        # but the config or a script still renders: both change the output.\n        changed = subprocess.run(\n            ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],\n            cwd=root, capture_output=True, text=True, timeout=30, check=True,\n        ).stdout.split()\n    except (OSError, subprocess.SubprocessError):\n        return 0\n    if not any(name.endswith((".md", ".py")) for name in changed):\n        return 0\n\n    kit = shutil.which("sd-research-kit")\n    if kit is None:\n        print("post-commit: sd-research-kit not on PATH; build/ is now stale",\n              file=sys.stderr)\n        return 0\n    try:\n        subprocess.run([kit, "render"], cwd=root, timeout=600, check=True)\n    except (OSError, subprocess.SubprocessError):\n        print("post-commit: render failed; build/ is now stale", file=sys.stderr)\n    return 0\n\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+HOOK = '#!/usr/bin/env python3\n# Re-render this research repo after a commit that touched a document.\n#\n# Installed by `sd-research-kit init-hook`. Post-commit and not pre-commit:\n# `build/` is generated and not committed, so there is nothing to stage, and\n# the commit is the revision a queued mirror should name.\n#\n# Rendered output goes stale the moment its source changes, and a stale page is\n# worse than a missing one because it looks current. This is what keeps the\n# dashboard\'s Documents tab a statement about the render rather than about who\n# remembered to run it.\n#\n# Never fails the commit. The commit is already made when this runs, so exiting\n# non-zero would report a failure for work that succeeded. A render that cannot\n# run says so and leaves the commit alone.\n#\n# `SD_SKIP_RENDER=1 git commit` skips it.\n\nimport os\nimport shutil\nimport subprocess\nimport sys\n\n\ndef main():\n    if os.environ.get("SD_SKIP_RENDER"):\n        return 0\n    try:\n        root = subprocess.run(\n            ["git", "rev-parse", "--show-toplevel"],\n            capture_output=True, text=True, timeout=30, check=True,\n        ).stdout.strip()\n        if not os.path.isfile(os.path.join(root, "research.conf.py")):\n            return 0\n        # Only when the commit carried a document. A commit touching nothing\n        # but the config or a script still renders: both change the output.\n        changed = subprocess.run(\n            ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],\n            cwd=root, capture_output=True, text=True, timeout=30, check=True,\n        ).stdout.split()\n    except (OSError, subprocess.SubprocessError):\n        return 0\n    if not any(name.endswith((".md", ".py")) for name in changed):\n        return 0\n\n    kit = shutil.which("sd-research-kit")\n    if kit is None:\n        print("post-commit: sd-research-kit not on PATH; build/ is now stale",\n              file=sys.stderr)\n        return 0\n    try:\n        subprocess.run([kit, "render"], cwd=root, timeout=600, check=True)\n    except (OSError, subprocess.SubprocessError):\n        print("post-commit: render failed; build/ is now stale", file=sys.stderr)\n    return 0\n\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
 
 
 def init_hook_main() -> int:

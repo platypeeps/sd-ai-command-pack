@@ -31,8 +31,11 @@ Each DOCS entry:
     links    optional   [(label, href), ...] shown in the rail
     sibling  optional   raw HTML for a "Companions" rail block
     notion   optional   dict(space="...", page="...") — the Notion mirror this
-                        document is designated for. Absent means the document
-                        publishes to the dashboard and nowhere else.
+                        document is designated for
+    drive    optional   dict(folder="...", file="...") — the Google Drive mirror
+                        this document is designated for. With neither key, the
+                        document publishes to the dashboard and nowhere else;
+                        with both, it has two mirrors rather than a choice.
 
 Writes two files per doc:
 
@@ -40,8 +43,8 @@ Writes two files per doc:
                                 dashboard's Documents tab lists and serves
     build/artifact/<out>.html   content-only — legacy; nothing consumes it
 
-Rendering ends by registering `build/` with the dashboard and queueing a Notion
-sync for every document that names one. See `sd_research_publish` and
+Rendering ends by registering `build/` with the dashboard and queueing a sync
+for every document that designates a destination. See `sd_research_publish` and
 `skills/_shared/references/publication-contract.md`.
 
 Never hand-wrap HTML for publishing; that mismatch is what this exists to prevent.

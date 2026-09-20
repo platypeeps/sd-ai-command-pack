@@ -1095,8 +1095,8 @@ CLASSES = (
           ("merged_pull_requests",), newest_first=True, pending_cap=MERGED_PENDING_CAP),
     Class("open-step", "s", False, 70, "- [ ] in item docs",
           "an unchecked box on an item nobody has closed"),
-    Class("notion-sync-pending", "n", False, 75, "~/.claude/pending-notion-syncs/",
-          "a published document whose designated Notion mirror is not written yet"),
+    Class("mirror-sync-pending", "n", False, 75, "~/.claude/pending-mirror-syncs/",
+          "a published document whose designated mirror is not written yet"),
     Class("unmerged-branch", "b", False, 80, "origin heads",
           "a branch on origin with no open pull request carrying it"),
     Class("parked-concern", "c", False, 90, "## Review ledger",
@@ -1302,7 +1302,7 @@ def actionable_inventory(
     rows += _branch_rows(root, pulls, protection)
     rows += _marker_rows(root)
     rows += _tool_rows(root)
-    rows += _notion_rows(root, day, env)
+    rows += _mirror_rows(root, day, env)
     rows += _concern_rows(root)
     rows += _accepted_rows(protection)
     _mark_unasked(sections, unchecked)
@@ -2941,17 +2941,20 @@ def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
 #: this tool derives and stores nothing, and draining is the agent's job.
 #: The same environment variable the writer honours, so a test can point both
 #: at one directory and a machine that moved the queue moves it once.
-NOTION_QUEUE = "SD_NOTION_QUEUE"
-NOTION_QUEUE_DEFAULT = "~/.claude/pending-notion-syncs"
+MIRROR_QUEUE = "SD_MIRROR_QUEUE"
+MIRROR_QUEUE_DEFAULT = "~/.claude/pending-mirror-syncs"
 
 
-def _notion_rows(
+def _mirror_rows(
     root: pathlib.Path, day: datetime.date, environ: dict[str, str],
 ) -> list[dict[str, Any]]:
-    """Queued Notion mirrors this repository's renders asked for.
+    """Queued outward mirrors this repository's renders asked for.
 
-    A render cannot call Notion -- it runs in a git hook and in CI, neither of
-    which reaches an MCP server -- so it enqueues and an agent session drains.
+    A render cannot reach Notion or Drive -- it runs in a git hook and in CI,
+    neither of which reaches an MCP server -- so it enqueues and an agent
+    session drains. One class for every destination, not one each: a queued
+    mirror is the same fact and the same remedy wherever it is bound, and the
+    request words its own destination so this producer never has to know them.
     Without this class the queue is durable and invisible, which is the worst
     of both: the request keeps saying work is owed and nothing ever says so.
     `skills/_shared/references/publication-contract.md` is the contract.
@@ -2968,7 +2971,7 @@ def _notion_rows(
     leads the ones written this morning.
     """
     queue = pathlib.Path(
-        environ.get(NOTION_QUEUE) or NOTION_QUEUE_DEFAULT).expanduser()
+        environ.get(MIRROR_QUEUE) or MIRROR_QUEUE_DEFAULT).expanduser()
     if not queue.is_dir():
         return []
     rows: list[dict[str, Any]] = []
@@ -2989,14 +2992,17 @@ def _notion_rows(
         if named != root.resolve():
             continue
         document = str(request.get("document") or path.stem)
-        space = str(request.get("space") or "an unnamed space")
+        # The request words its own destination, so a new destination is a row
+        # in `sd_research_publish.DESTINATIONS` and nothing here. The fallback
+        # is for a request written before that field existed.
+        target = str(request.get("target") or "an unnamed destination")
         try:
             age = (day - datetime.date.fromtimestamp(path.stat().st_mtime)).days
         except (OSError, OverflowError, ValueError):
             age = 0
         rows.append(_row(
-            "notion-sync-pending", path.name, document,
-            f"{document} is queued for the {space} Notion space and not mirrored yet",
+            "mirror-sync-pending", path.name, document,
+            f"{document} is queued for {target} and not mirrored yet",
             f"drain it with sd-research-repo stage=publish, or delete {path}",
             age_days=max(age, 0),
         ))
