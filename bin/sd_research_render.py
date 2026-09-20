@@ -37,14 +37,17 @@ Each DOCS entry:
                         document publishes to the dashboard and nowhere else;
                         with both, it has two mirrors rather than a choice.
 
-Writes two files per doc:
+Writes one file per doc:
 
-    build/<out>.html            standalone — opens with file://, and is what the
+    docs/dashboard/<out>.html   standalone — opens with file://, and is what the
                                 dashboard's Documents tab lists and serves
-    build/artifact/<out>.html   content-only — legacy; nothing consumes it
 
-Rendering ends by registering `build/` with the dashboard and queueing a sync
-for every document that designates a destination. See `sd_research_publish` and
+`docs/dashboard/` is gitignored: it is regenerated on every commit, and the
+dashboard serves whatever it finds there.
+
+Rendering ends by writing each document's Markdown into the Obsidian vault,
+registering `docs/dashboard/` with the dashboard, and queueing a sync for every
+document that designates an outward destination. See `sd_research_publish` and
 `skills/_shared/references/publication-contract.md`.
 
 Never hand-wrap HTML for publishing; that mismatch is what this exists to prevent.
@@ -187,12 +190,13 @@ def build_one(repo, cfg, project):
              "</main>", "</div>"]
     content = "\n".join(p for p in parts if p)
 
-    out_dir = os.path.join(repo, "build")
-    os.makedirs(os.path.join(out_dir, "artifact"), exist_ok=True)
+    out_dir = os.path.join(repo, "docs", "dashboard")
+    os.makedirs(out_dir, exist_ok=True)
 
-    # artifact form: content only — the Artifact tool supplies the skeleton
-    art = os.path.join(out_dir, "artifact", cfg["out"] + ".html")
-    open(art, "w").write(content + "\n")
+    # One form, not two. The content-only `artifact/` copy was documented as
+    # legacy with nothing consuming it, and the dashboard folder's contract is
+    # that everything in it is published -- so carrying dead output into it
+    # would publish a file no reader was ever meant to open.
 
     # standalone form: openable with file://
     standalone = ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
@@ -222,7 +226,7 @@ def main():
     # one live config builds its DOCS list with a loop.
     exec(compile(open(conf).read(), conf, "exec"), ns)  # nosec B102
     project = ns.get("PROJECT", os.path.basename(repo).split("-")[0].upper())
-    print("%s  ->  build/" % os.path.basename(repo))
+    print("%s  ->  docs/dashboard/" % os.path.basename(repo))
     for cfg in ns["DOCS"]:
         build_one(repo, cfg, project)
 

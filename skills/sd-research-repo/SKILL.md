@@ -18,9 +18,10 @@ editing goes through the file tools rather than the shell). Read the first befor
 writing or moving any document; read the second before fanning work out.
 
 When the deliverable is a finished document, apply
-`references/publication-contract.md`: it publishes to the dashboard's
-Documents tab by default, and reaches an outward destination — Notion, Google
-Drive — only where the user designated that document for it.
+`references/publication-contract.md`: it publishes to the Obsidian
+vault and the dashboard's Documents tab by default, and reaches an
+outward destination — Notion, Google Drive — only where the user designated that
+document for it.
 
 ## When to use
 
@@ -122,10 +123,10 @@ records the differences that are on purpose. Both are in
    review to prose — the exact invocation and its limits are in
    `references/conventions.md`. If it is unavailable, record that in Status
    rather than letting self-review pass as review.
-8. Publication to the dashboard already happened: `render` registered `build/`
-   and the Documents tab serves it. Nothing further is needed for a document
-   that publishes locally, which is every document until the user designates
-   one.
+8. Local publication already happened: `render` wrote each document's Markdown
+   into `$OBSIDIAN_VAULT/Briefs/<repo>/` and registered `docs/dashboard/` with
+   the Documents tab. Nothing further is needed for a document that publishes
+   locally, which is every document until the user designates one.
 
    For a document carrying a `notion=` or `drive=` key, `render` left a request
    in `~/.claude/pending-mirror-syncs/`. Drain it: read each JSON file, mirror
@@ -158,7 +159,8 @@ planning a fan-out that ends in a written file.
 - Do not publish anything that has not passed the review in
   `references/conventions.md`, and do not mirror a document externally whose
   handling restrictions forbid it.
-- Never hand-edit `build/`. It is generated; change `research.conf.py` instead.
+- Never hand-edit `docs/dashboard/`, or a vault note under `Briefs/`. Both are
+  generated; change the source Markdown or `research.conf.py` instead.
 - Rendering and local publication act on the machine only: the Documents tab is
   served on loopback, so render freely. Mirroring to Notion or Drive is
   outward-facing — do it only for a document the user designated, only to the

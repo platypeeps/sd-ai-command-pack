@@ -55,13 +55,29 @@ QUEUE = Path(
 ).expanduser()
 
 
+#: The vault the Obsidian copy is written into, and the folder inside it that
+#: holds briefs. `$OBSIDIAN_VAULT` is the same variable `bin/sd`'s vault driver
+#: reads, and it is deliberately not defaulted here: `store_root` refuses an
+#: unset one rather than guessing, and a second spelling of that path is how a
+#: write lands in somebody else's vault layout.
+VAULT = os.environ.get("OBSIDIAN_VAULT", "")
+BRIEFS = "Briefs"
+
+#: Where the dashboard's HTML is written, relative to the repo. Gitignored:
+#: it is generated on every commit, and a generated tree in history turns each
+#: render into a diff nobody reads. It replaces `build/`, which was both the
+#: rendering scratch space and the published directory -- one of which belongs
+#: in the repo's own layout and the other of which is a publication surface.
+DASHBOARD_DIR = Path("docs") / "dashboard"
+
+
 class Destination(NamedTuple):
-    """One place a document may be designated for, and what naming it takes.
+    """One outward place a document may be designated for.
 
-    The dashboard is deliberately absent: it is the default, it takes no
-    designation, and a render writes it rather than queueing it.
+    The dashboard and Obsidian are deliberately absent: both are local writes a
+    render performs itself, so neither takes a queue, a connector or a drain.
+    This table is what leaves the machine.
 
-    `where` is required because a mirror with no container has nowhere to go.
     `what` is optional: absent, the drain creates the page or file and the
     designation can be amended with the id it got; present, the drain updates
     that one rather than creating a second copy on every render.
@@ -69,21 +85,39 @@ class Destination(NamedTuple):
 
     #: The DOCS key the user writes, and the `destination` field of a request.
     name: str
-    #: The required field: the container the mirror is written into.
+    #: The field naming the container the mirror is written into.
     where: str
     #: The optional field: the existing page or file to update in place.
     what: str
     #: How a report and a status row name the container, in words.
     noun: str
+    #: True when a designation must name the container itself. Notion does not:
+    #: it has a default folder per scope. Drive does: no folder was ever named
+    #: as its default, and inventing one would put a document somewhere nobody
+    #: chose.
+    needs_where: bool = True
 
 
 #: Adding a destination is a row here plus a drain step in the contract. It is
 #: deliberately not open-ended: an unknown key in a DOCS entry is a typo, and a
 #: table that accepted anything would queue a mirror to a place nothing drains.
 DESTINATIONS = (
-    Destination("notion", "space", "page", "Notion space"),
+    Destination("notion", "space", "page", "Notion folder", needs_where=False),
     Destination("drive", "folder", "file", "Drive folder"),
 )
+
+#: Where a Notion mirror goes when the designation names no space, as
+#: `(scope, folder, phrase)`.
+#:
+#: Private is the default and the team space is the opt-in, because the two
+#: mistakes are not symmetric. A brief the team cannot see is repaired by
+#: adding `team=True` and draining again. A private brief in a shared team
+#: space has already been seen by the team, and deleting it does not undo that.
+#: So the direction that is recoverable is the one that happens by accident.
+NOTION_SCOPES = {
+    False: ("private", BRIEFS, "the private %s folder" % BRIEFS),
+    True: ("team", "R&D Briefs", "the R&D Briefs folder in the R&D team space"),
+}
 
 #: The dashboard builds a URL from the key, so the key is what a URL may carry.
 #: Mirrored from `sd_dashboard/documents.py`, which rejects anything else.
@@ -130,12 +164,23 @@ def register_root(repo: Path, label: str, directory: Path) -> str:
 
     line = "root|%s|%s|%s" % (key, label, shown)
     text = conf.read_text(encoding="utf-8")
-    for existing in text.splitlines():
+    lines = text.splitlines(keepends=True)
+    for index, existing in enumerate(lines):
         parts = [p.strip() for p in existing.strip().split("|")]
-        if len(parts) == 4 and parts[0] == "root" and parts[1] == key:
-            if existing.strip() == line:
-                return "dashboard: already registered as %s" % key
-            return "dashboard: %s already names %s; left alone" % (key, parts[3])
+        if len(parts) != 4 or parts[0] != "root" or parts[1] != key:
+            continue
+        if existing.strip() == line:
+            return "dashboard: already registered as %s" % key
+        # A row for this key naming this repository's own superseded output
+        # directory is this repository's row to move. `build/` was the
+        # published directory before `docs/dashboard/`, and leaving the old row
+        # standing would serve a tree nothing renders into any more.
+        if Path(parts[3]).expanduser().name == "build" and (
+                Path(parts[3]).expanduser().parent == repo):
+            lines[index] = line + "\n"
+            conf.write_text("".join(lines), encoding="utf-8")
+            return "dashboard: moved %s off build/ -> %s" % (key, shown)
+        return "dashboard: %s already names %s; left alone" % (key, parts[3])
 
     with conf.open("a", encoding="utf-8") as handle:
         if not text.endswith("\n"):
@@ -154,35 +199,64 @@ def revision(repo: Path) -> str:
     return git_output(["rev-parse", "HEAD"], repo) or "unknown"
 
 
-def mirror_targets(cfg: dict[str, Any]) -> tuple[list[dict[str, str]], list[str]]:
-    """The destinations this DOCS entry designates, and what was wrong.
+def notion_target(raw: dict[str, Any]) -> dict[str, str]:
+    """One Notion designation resolved to a folder, a scope and a phrase.
 
-    A document publishes to the dashboard and nowhere else until one of these
-    keys exists. The user designates a document and names its container at that
-    time; nothing here infers a destination from a title, a path or a neighbour,
-    and nothing promotes a document because it looks finished.
+    `team=True` is the only way a brief reaches the shared space; see
+    `NOTION_SCOPES` for why that direction is the one that must be asked for.
+    An explicit `space=` overrides the folder but never the scope: naming a
+    folder says where inside a space, not which space.
+    """
+    scope, folder, phrase = NOTION_SCOPES[bool(raw.get("team"))]
+    named = str(raw.get("space", "")).strip()
+    if named and named != folder:
+        phrase = "the %s folder in your %s space" % (named, scope)
+    return {
+        "destination": "notion",
+        "scope": scope,
+        "space": named or folder,
+        "page": str(raw.get("page", "")).strip(),
+        "target": phrase,
+    }
+
+
+def mirror_targets(cfg: dict[str, Any]) -> tuple[list[dict[str, str]], list[str]]:
+    """The outward destinations this DOCS entry designates, and what was wrong.
+
+    A document publishes to the dashboard and to Obsidian whatever this
+    returns; these are the copies that leave the machine. Nothing here infers a
+    destination from a title, a path or a neighbour, and nothing promotes a
+    document because it looks finished.
 
     Returns a list because a document may be designated for several places at
     once. `notion=` and `drive=` on one entry are two mirrors, not a choice.
 
     Problems are returned rather than raised, and returned *per destination*.
     A malformed designation is the user's to fix, and one bad key must not cost
-    the other destination its request: the dashboard copy is written either way,
+    the other destination its request: the local copies are written either way,
     so withholding a valid mirror would punish the destination that was fine.
     """
     targets: list[dict[str, str]] = []
     problems: list[str] = []
     for dest in DESTINATIONS:
         raw = cfg.get(dest.name)
-        if not raw:
+        if raw is None or raw is False:
             continue
+        # `notion=dict()` is a designation, and an empty dict is falsy -- so
+        # presence is what counts here, not truth. `notion=True` is the same
+        # designation written shorter.
+        if raw is True:
+            raw = {}
         if not isinstance(raw, dict):
             problems.append(
                 "%s= must be a dict, not %s" % (dest.name, type(raw).__name__)
             )
             continue
+        if dest.name == "notion":
+            targets.append(notion_target(raw))
+            continue
         where = str(raw.get(dest.where, "")).strip()
-        if not where:
+        if not where and dest.needs_where:
             problems.append("%s= needs a %s" % (dest.name, dest.where))
             continue
         targets.append({
@@ -195,6 +269,101 @@ def mirror_targets(cfg: dict[str, Any]) -> tuple[list[dict[str, str]], list[str]
             "target": "the %s %s" % (where, dest.noun),
         })
     return targets, problems
+
+
+def vault_folder(repo: Path) -> Path | None:
+    """`<vault>/Briefs/<repo>`, or None when no vault is configured.
+
+    None rather than a raise: a machine with no vault still renders and still
+    publishes to the dashboard, the same way one with no dashboard checkout
+    does. The copy that is missing is reported by name.
+    """
+    if not VAULT:
+        return None
+    return Path(VAULT).expanduser() / BRIEFS / repo.name
+
+
+def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
+    """Write every document's Markdown into the vault, under its repo folder.
+
+    Obsidian is where these documents live, so this is not a mirror of the
+    published form -- it is the Markdown itself, carried across with a
+    frontmatter block naming where it came from. Markdown and not HTML: the
+    vault's whole value is that a note is editable and linkable, and an HTML
+    blob in it is neither.
+
+    A local filesystem write, so a render performs it rather than queueing it.
+    Nothing here reaches the network and nothing needs a credential, which is
+    what lets the primary copy be the one that never waits for a drain.
+    """
+    folder = vault_folder(repo)
+    if folder is None:
+        return ["obsidian: OBSIDIAN_VAULT is not set; no vault copy written"]
+
+    rev = revision(repo)
+    reports: list[str] = []
+    written = 0
+    for cfg in docs:
+        src = str(cfg.get("src", "")).strip()
+        out = str(cfg.get("out", "")).strip()
+        if not src or not out:
+            continue
+        source = repo / src
+        try:
+            body = source.read_text(encoding="utf-8")
+        except OSError as problem:
+            reports.append("obsidian: cannot read %s (%s)" % (src, problem))
+            continue
+        # Frontmatter, not a prose header: Obsidian reads these as properties,
+        # so the provenance is queryable in the vault rather than being a line
+        # a reader has to notice. Written by this tool on every render, so it
+        # is replaced wholesale and never merged with a hand-edited one --
+        # which is also why the vault copy is not the place to edit.
+        front = "\n".join([
+            "---",
+            "source_repo: %s" % repo.name,
+            "source_path: %s" % src,
+            "revision: %s" % rev,
+            "rendered_by: sd-research-kit",
+            "---",
+            "",
+        ])
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / (out + ".md")).write_text(front + body, encoding="utf-8")
+        except OSError as problem:
+            reports.append("obsidian: cannot write %s.md (%s)" % (out, problem))
+            continue
+        written += 1
+    if written:
+        reports.append("obsidian: wrote %d document(s) to %s" % (written, folder))
+    return reports
+
+
+def ignore_dashboard(repo: Path) -> str:
+    """Keep `docs/dashboard/` out of the repo's history, idempotently.
+
+    The folder is a publication surface, regenerated on every commit. Tracking
+    it would put a generated diff in front of a reader on every render, and the
+    hook that re-renders after a commit would make the working tree dirty the
+    moment it finished.
+    """
+    entry = "docs/dashboard/"
+    path = repo / ".gitignore"
+    try:
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    except OSError as problem:
+        return "gitignore: cannot read .gitignore (%s)" % problem
+    if any(line.strip().rstrip("/") == entry.rstrip("/") for line in text.splitlines()):
+        return "gitignore: docs/dashboard/ already ignored"
+    try:
+        with path.open("a", encoding="utf-8") as handle:
+            if text and not text.endswith("\n"):
+                handle.write("\n")
+            handle.write("%s\n" % entry)
+    except OSError as problem:
+        return "gitignore: cannot write .gitignore (%s)" % problem
+    return "gitignore: added docs/dashboard/"
 
 
 def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
@@ -211,6 +380,7 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     QUEUE.mkdir(parents=True, exist_ok=True)
     rev = revision(repo)
     key = repo_key(repo)
+    vault = vault_folder(repo)
     for cfg, target in wanted:
         out = str(cfg.get("out", "")).strip()
         src = str(cfg.get("src", "")).strip()
@@ -220,7 +390,8 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
             "document": out,
             "title": cfg.get("title", out),
             "source": str(repo / src) if src else "",
-            "rendered": str(repo / "build" / (out + ".html")),
+            "rendered": str(repo / DASHBOARD_DIR / (out + ".html")),
+            "markdown": str(vault / (out + ".md")) if vault else "",
         }
         request.update(target)
         path = QUEUE / ("%s.%s.%s.json" % (key, out or "doc", target["destination"]))
@@ -230,9 +401,15 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
 
 
 def publish(repo: Path, project: str, docs: list[dict[str, Any]]) -> list[str]:
-    """Both jobs, in the order the contract states them."""
-    build = repo / "build"
-    reports = [register_root(repo, project or repo.name, build)]
+    """Every job, in the order the contract states them.
+
+    Local copies first, outward queue last. The order is the contract's: the
+    copies that cannot leak are written before the ones that can, so a run that
+    stops halfway has published locally and disclosed nothing.
+    """
+    reports = write_obsidian(repo, docs)
+    reports.append(ignore_dashboard(repo))
+    reports.append(register_root(repo, project or repo.name, repo / DASHBOARD_DIR))
     reports += enqueue(repo, docs)
     return reports
 

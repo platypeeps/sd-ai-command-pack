@@ -47,8 +47,8 @@ CONVENTIONS = CHECKOUT / "skills" / "sd-research-repo" / "references" / "convent
 USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pins|
                           init-hook|init-claude-md|conventions
 
-  render        render research.conf.py in this repo into build/, then register
-                build/ with the dashboard and queue any outward mirrors
+  render        render research.conf.py into docs/dashboard/, write the vault
+                copies, register with the dashboard, queue outward mirrors
   publish       the registration and queueing half on its own, without
                 re-rendering
   init-hook     install the post-commit hook that re-renders this repo
