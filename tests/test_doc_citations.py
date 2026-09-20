@@ -1088,7 +1088,7 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 SYMBOL_ANCHORED_CITATIONS = {
     "actions/docs-gate/README.md": 1,
     "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 39,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 59,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 56,
 }
 
 
@@ -1977,9 +1977,9 @@ class TheSeparatorIsNarrowedByAParenthesis(unittest.TestCase):
         buckets, so the census can tell them apart.
         """
 
-        text = "(`bin/sd-review:514`, `skills/sd-review/SKILL.md:39`)"
+        text = "(`bin/sd-review:537`, `skills/sd-review/SKILL.md:39`)"
         self.assertTrue(PAREN_PAIR.search(text))
-        self.assertFalse(is_symbol("bin/sd-review:514"))
+        self.assertFalse(is_symbol("bin/sd-review:537"))
 
 
 class TheReasonsThatHaveNoLiveInstance(unittest.TestCase):

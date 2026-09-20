@@ -51,7 +51,7 @@ _BIN = str(pathlib.Path(__file__).resolve().parent)
 if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
-from sd_lib import repo_root  # noqa: E402
+from sd_lib import GIT_TIMEOUT_SECONDS, repo_root  # noqa: E402
 
 #: How far back the trend reaches, and how often it is sampled inside that.
 #: Weekly, because the interesting movement in this repository happens over
@@ -84,9 +84,12 @@ def _git(root: pathlib.Path, *argv: str) -> bytes:
     nobody leaves switched on.
     """
 
-    done = subprocess.run(["git", *argv], cwd=root,
-                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                          check=False)
+    try:
+        done = subprocess.run(["git", *argv], cwd=root,
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              timeout=GIT_TIMEOUT_SECONDS, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return b""
     return done.stdout if done.returncode == 0 else b""
 
 
@@ -120,10 +123,13 @@ def _contents(root: pathlib.Path, blobs: list[str]) -> dict[str, str]:
 
     if not blobs:
         return {}
-    done = subprocess.run(["git", "cat-file", "--batch"], cwd=root,
-                          input=("\n".join(blobs) + "\n").encode(),
-                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                          check=False)
+    try:
+        done = subprocess.run(["git", "cat-file", "--batch"], cwd=root,
+                              input=("\n".join(blobs) + "\n").encode(),
+                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                              timeout=GIT_TIMEOUT_SECONDS, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return {}
     stream, texts, at = done.stdout, {}, 0
     while at < len(stream):
         end = stream.find(b"\n", at)

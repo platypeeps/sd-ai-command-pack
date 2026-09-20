@@ -70,6 +70,17 @@ HOOK_SPECS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 
 EXCLUDES_LINE = "CLAUDE.local.md"
 
+#: How long a local `git` read may take here. The same bound `sd_lib` sets,
+#: named separately because these four calls run before any sibling is
+#: borrowed and one of them asks git what its own global config says -- a
+#: question that hangs on an unreachable network filesystem like any other.
+GIT_TIMEOUT = 15
+
+#: `--pull` fetches. A network round trip is not a local read and does not
+#: belong under the same number; it is still bounded, because an install that
+#: waits forever for a remote is an install nobody can script.
+PULL_TIMEOUT = 120
+
 
 def sibling(name: str):
     """A module out of this file's own `bin/`, which is not a package.
@@ -846,9 +857,10 @@ def configured_excludes() -> str | None:
             ["git", "config", "--global", "--get", "core.excludesFile"],
             capture_output=True,
             text=True,
+            timeout=GIT_TIMEOUT,
             check=False,
         )
-    except OSError:
+    except (OSError, subprocess.SubprocessError):
         return None
     return done.stdout.strip() if done.returncode == 0 else ""
 
@@ -914,11 +926,17 @@ def set_excludes_config(
         return
     if dry_run:
         return
-    subprocess.run(  # nosec B603 - fixed argv, no shell
-        ["git", "config", "--global", "core.excludesFile", str(path)],
-        capture_output=True,
-        check=False,
-    )
+    try:
+        subprocess.run(  # nosec B603 - fixed argv, no shell
+            ["git", "config", "--global", "core.excludesFile", str(path)],
+            capture_output=True,
+            timeout=GIT_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # Same answer as `configured_excludes` gives for an unusable git: this
+        # writes a convenience, and an install does not fail over one.
+        return
 
 
 # ------------------------------------------------------------------ reconcile
@@ -1308,9 +1326,10 @@ def path_is_tracked(repo: Path, relative: str) -> bool:
         done = subprocess.run(  # nosec B603 - fixed argv, no shell
             ["git", "-C", str(repo), "ls-files", "--error-unmatch", "--", relative],
             capture_output=True,
+            timeout=GIT_TIMEOUT,
             check=False,
         )
-    except OSError:
+    except (OSError, subprocess.SubprocessError):
         return False
     return done.returncode == 0
 
@@ -2325,12 +2344,17 @@ def cmd_pull(ctx: Context, out) -> int:
     if ctx.dry_run:
         print(f"would fast-forward {ctx.checkout} and re-render", file=out)
         return 0
-    done = subprocess.run(  # nosec B603 - fixed argv, no shell
-        ["git", "-C", str(ctx.checkout), "pull", "--ff-only"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    try:
+        done = subprocess.run(  # nosec B603 - fixed argv, no shell
+            ["git", "-C", str(ctx.checkout), "pull", "--ff-only"],
+            capture_output=True,
+            text=True,
+            timeout=PULL_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        print(f"error: git pull --ff-only could not finish: {error}", file=out)
+        return 1
     if done.returncode != 0:
         print(f"error: git pull --ff-only failed:\n{done.stderr.strip()}", file=out)
         return 1

@@ -1463,6 +1463,27 @@ class ExcludesTests(InstallerHarness):
             sd_install.set_excludes_config(self.home / "ignore")
         self.assertEqual(run.call_count, 1, "an existing core.excludesFile was rewritten")
 
+    def test_a_git_that_will_not_finish_does_not_fail_the_install(self):
+        """The bound added with the timeout has to have somewhere to land.
+
+        `configured_excludes` already answers an unusable git with `None` and
+        the caller returns; the write has the same standing, so a `git` that
+        hangs past the bound leaves the convenience unwritten and nothing
+        else. Without the guard this raises out of `install`.
+        """
+        calls = []
+
+        def record(args, **kwargs):
+            calls.append(args)
+            if "--get" in args:
+                return subprocess.CompletedProcess(args, 1, stdout="", stderr="")
+            raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+        with unittest.mock.patch("subprocess.run", side_effect=record):
+            sd_install.set_excludes_config(self.home / "ignore")
+        self.assertEqual(len(calls), 2, "the write was never attempted")
+        self.assertIn("core.excludesFile", calls[1])
+
     def test_a_dry_run_does_not_write_the_config(self):
         completed = subprocess.CompletedProcess([], 1, stdout="", stderr="")
         with unittest.mock.patch("subprocess.run", return_value=completed) as run:
@@ -2038,6 +2059,27 @@ class PullBehaviourTests(InstallerHarness):
         rc = sd_install.cmd_pull(self.context(repo), out)
         self.assertEqual(rc, 1, "a repo with no remote should fail to pull")
         self.assertIn("git pull --ff-only failed", out.getvalue())
+
+    def test_a_pull_that_will_not_finish_is_reported_and_not_raised(self):
+        """`PULL_TIMEOUT` bounds a fetch, so it can expire on a slow network.
+
+        A fetch that never returns used to hang the command; it now ends as
+        the failure it is, with the reason named, and the exit code is the
+        one a failed pull already had.
+        """
+        repo = self.make_main_checkout()
+        real = subprocess.run
+
+        def fake(args, **kwargs):
+            if "pull" in args:
+                raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+            return real(args, **kwargs)
+
+        out = io.StringIO()
+        with unittest.mock.patch("subprocess.run", side_effect=fake):
+            rc = sd_install.cmd_pull(self.context(repo), out)
+        self.assertEqual(rc, 1)
+        self.assertIn("could not finish", out.getvalue())
 
     def test_a_successful_pull_re_renders(self):
         completed = subprocess.CompletedProcess([], 0, stdout="Already up to date.\n", stderr="")
