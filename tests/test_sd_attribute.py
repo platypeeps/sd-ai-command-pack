@@ -464,5 +464,64 @@ class TheCommandTests(AttributeFixture):
         self.assertEqual(self.said()[second], "claude/anthropic")
 
 
+class TheContentGateTests(AttributeFixture):
+    """The gate runs on content, and the attributing commit has none.
+
+    `hooks/pre-commit` runs two whole-tree test passes on every commit. On the
+    empty commit `attribute` makes there is nothing for them to read, and on a
+    loaded machine they spend the whole `GIT_TIMEOUT_SECONDS` bound and lose
+    the attribution to `subprocess.TimeoutExpired`. Reproduced on 2026-09-20 in
+    a fresh worktree, which is where every agent in this repository works.
+
+    The hook installed below is that hook's shape and not that hook: it reads
+    the same variable, and it records that it ran and then sleeps past the
+    bound, so a gate that runs on nothing is a failure and not a slow pass.
+    """
+
+    def install_hook(self, sleep_seconds: float) -> pathlib.Path:
+        """A pre-commit hook that marks the run, sleeps, and honours the skip."""
+        marker = self.root / "hook-ran"
+        hooks = self.root / ".git" / "hooks"
+        hooks.mkdir(parents=True, exist_ok=True)
+        hook = hooks / "pre-commit"
+        hook.write_text(
+            "#!/usr/bin/env python3\n"
+            "import os, pathlib, time\n"
+            f"if os.environ.get({sd_lib.SKIP_HOOKS_VARIABLE!r}) == '1':\n"
+            "    raise SystemExit(0)\n"
+            f"pathlib.Path({str(marker)!r}).write_text('ran', encoding='utf-8')\n"
+            f"time.sleep({sleep_seconds!r})\n",
+            encoding="utf-8",
+        )
+        hook.chmod(0o755)
+        return marker
+
+    def test_a_slow_gate_does_not_cost_the_attribution(self) -> None:
+        silent = self.commit("feat: something")
+        marker = self.install_hook(sd_lib.GIT_TIMEOUT_SECONDS + 5)
+        sha, value, covered = sd_lib.attribute(
+            self.root, silent, "claude", registry(claude="anthropic"))
+        self.assertEqual(covered, [silent])
+        self.assertEqual(value, "claude/anthropic")
+        self.assertFalse(
+            marker.exists(),
+            "a content gate ran on a commit that carries no content",
+        )
+        self.assertEqual(self.said()[silent], "claude/anthropic")
+        self.assertEqual(self.said()[sha], sd_lib.HUMAN_AUTHOR)
+
+    def test_a_staged_index_still_goes_through_the_gate(self) -> None:
+        """Staged content rides into this commit, so the gate that reads it runs."""
+        silent = self.commit("feat: something")
+        marker = self.install_hook(0)
+        (self.root / "staged.py").write_text("y = 1\n", encoding="utf-8")
+        self.git("add", "staged.py")
+        sd_lib.attribute(self.root, silent, "claude", registry(claude="anthropic"))
+        self.assertTrue(
+            marker.exists(),
+            "staged content went in without the gate that reads content",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

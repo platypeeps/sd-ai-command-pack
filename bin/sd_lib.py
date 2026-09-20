@@ -1931,6 +1931,41 @@ def _covered(root: pathlib.Path, target: str) -> list[str]:
     return covered
 
 
+#: The pack's own hook bypass, read by `hooks/pre-commit`. Named here so the
+#: one caller that sets it and the hook that reads it share a spelling, and so
+#: a bypass stays greppable -- which is the reason that hook gives for having a
+#: variable at all, where `--no-verify` leaves no trace.
+SKIP_HOOKS_VARIABLE = "SD_SKIP_HOOKS"
+
+
+def _attribution_environment(root: pathlib.Path) -> dict[str, str] | None:
+    """The environment for the attributing commit, or None to inherit this one.
+
+    `git commit` with no pathspec commits the index, and `attribute` passes
+    none, so the commit it makes is empty exactly while the index is. When it
+    is, a content gate has no content to read and running it is pure cost:
+    this repository's `hooks/pre-commit` runs two whole-tree test passes,
+    measured at 6.3 to 6.7 s under a load average near 85 on 2026-09-20,
+    against the 15 s bound `GIT_TIMEOUT_SECONDS` puts on the commit. A slower
+    machine spends the whole bound and `attribute` raises
+    `subprocess.TimeoutExpired` where an attribution should have landed --
+    reproduced that day in a fresh worktree, which is every agent's worktree.
+
+    `SD_SKIP_HOOKS=1` and not `--no-verify`: it is the bypass the hook
+    documents, it prints a notice rather than passing in silence, and it
+    leaves a `commit-msg` hook running, which does have something to read --
+    this commit carries the `Attributes:` and `Authored-with:` trailers.
+
+    A staged index is not this case. It rides into the commit, so it is
+    content, and the gate that reads content still runs on it. Git failing to
+    answer reads as staged for the same reason: the gate stays on.
+    """
+    staged = git_output(["diff", "--cached", "--name-only"], root)
+    if staged is None or staged:
+        return None
+    return {**os.environ, SKIP_HOOKS_VARIABLE: "1"}
+
+
 def attribute(
     root: pathlib.Path, target: str, name: str, registry: Any
 ) -> tuple[str, str, list[str]]:
@@ -1946,6 +1981,9 @@ def attribute(
     shares, and two clones attributing different commits of one branch diverge
     on it. A commit is branch-local, pushes with the branch, and squashes away
     at the merge with everything else.
+
+    Empty is also why the content gate is skipped for it; the condition and
+    its measurement are in `_attribution_environment`.
     """
     value = attribution_value(name, registry)
     covered = _covered(root, target)
@@ -1958,6 +1996,7 @@ def attribute(
                "the trailer or lost it to a rewrite.",
          "-m", "\n".join(trailers)],
         cwd=str(root), capture_output=True, text=True,
+        env=_attribution_environment(root),
         timeout=GIT_TIMEOUT_SECONDS, check=False,
     )
     if written.returncode != 0:
