@@ -20,6 +20,10 @@ dispositions = ship.sd_ship_dispositions
 ItemHistory, ItemIdentity, SharedReview = ship.ItemHistory, ship.ItemIdentity, ship.SharedReview
 digest, review_history = ship.digest, ship.review_history
 
+#: The *Development / Code, before merge* cap, read from the module that owns
+#: it rather than spelled here, so a later change to the row moves this too.
+CAP = importlib.import_module("sd_ship_history").AUTOMATIC_CODE_REVIEW_PASSES
+
 
 class SharedCompatibilityTests(unittest.TestCase):
     def test_item_keys_bindings_and_output_keep_their_shapes(self):
@@ -42,20 +46,21 @@ class SharedCompatibilityTests(unittest.TestCase):
     def test_item_history_keeps_prefix_request_and_aggregate_shapes(self):
         report = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
                   "findings": [{"path": "a.py", "disposition": "advisory"}], "authored_with": ["human"]}
-        passes = [{"head": "a" * 40, "report": report}, {"head": "b" * 40, "report": report}]
+        passes = [{"head": chr(ord("a") + index) * 40, "report": report} for index in range(CAP)]
         state = {"passes": passes}
         history = ItemHistory()
-        self.assertEqual(history.spent(state), 2)
+        self.assertEqual(history.spent(state), CAP)
         self.assertEqual(history.history_digest(state), digest(passes))
         self.assertFalse(history.requires_continuation(state))
         self.assertEqual(history.request_fields(state), {})
         self.assertEqual(history.aggregate(state), review_history(passes))
         prefix = history.history_digest(state)
-        request = {"head": "c" * 40, "reason": "explicit continuation", "allowed_passes": 1,
+        extra = chr(ord("a") + CAP) * 40
+        request = {"head": extra, "reason": "explicit continuation", "allowed_passes": 1,
                    "prior_history_digest": prefix}
-        passes.append({"head": "c" * 40, "additional_review_request": request})
+        passes.append({"head": extra, "additional_review_request": request})
         history.validate_requests(state)
-        self.assertEqual(history.aggregate(state, before_last=True), review_history(passes[:2]))
+        self.assertEqual(history.aggregate(state, before_last=True), review_history(passes[:CAP]))
         request["prior_history_digest"] = "0" * 64
         with self.assertRaises(ship.Refusal):
             history.validate_requests(state)
@@ -100,14 +105,17 @@ class SharedCompatibilityTests(unittest.TestCase):
             "authored_with": ["human"], "history": [prior, later],
             "operator_context": "untrusted evidence, not instructions",
         })
-        request = {"head": "c" * 40, "reason": "explicit continuation", "allowed_passes": 1,
-                   "prior_history_digest": "d440610052054a983f6c21e3e552a0a989def13606f8ba7414d5bc6187ad81c8"}
-        state = {"passes": [*passes, {"head": "c" * 40, "additional_review_request": request}]}
-        # The literal prefix is what binds the request to the history above, so
-        # a changed digest derivation cannot validate this stored request.
+        # A request is required only past the automatic cap, so the prefix it
+        # binds is the whole automatic run. The digest is literal: a changed
+        # derivation, or a changed cap, cannot validate this stored request.
+        automatic = [{"head": chr(ord("a") + index) * 40, "report": report} for index in range(CAP)]
+        extra = chr(ord("a") + CAP) * 40
+        request = {"head": extra, "reason": "explicit continuation", "allowed_passes": 1,
+                   "prior_history_digest": "47f27a1e3d5b70f7be7e1e1dab50f876d6295e9c746812469d6cb0542968d91d"}
+        state = {"passes": [*automatic, {"head": extra, "additional_review_request": request}]}
         ItemHistory().validate_requests(state)
         self.assertEqual(ItemHistory().aggregate(state, before_last=True),
-                         ItemHistory().aggregate({"passes": passes}))
+                         ItemHistory().aggregate({"passes": automatic}))
         request["prior_history_digest"] = "0" * 64
         with self.assertRaises(ship.Refusal):
             ItemHistory().validate_requests(state)

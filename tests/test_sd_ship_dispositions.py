@@ -476,28 +476,29 @@ class DispositionTests(unittest.TestCase):
             with self.subTest(field=field, value=value):
                 self.rejected_proposal(trial)
 
-    def test_four_spent_passes_can_reuse_exact_complete_report_without_another_review(
+    def test_every_spent_pass_can_reuse_exact_complete_report_without_another_review(
         self,
     ):
         self.blocked()
-        fixture._git(
-            self.root,
-            "commit",
-            "--allow-empty",
-            "-m",
-            "fixture fix attempt\n\nAuthored-with: human",
-        )
-        self.head = fixture._git(self.root, "rev-parse", "HEAD")
-        with self.assertRaises(ship.Refusal):
-            self.prepare()
-        for count in (2, 3):
+        for index in range(fixture.CAP - 1):
+            fixture._git(
+                self.root,
+                "commit",
+                "--allow-empty",
+                "-m",
+                f"fixture fix attempt {index + 1}\n\nAuthored-with: human",
+            )
+            self.head = fixture._git(self.root, "rev-parse", "HEAD")
+            with self.assertRaises(ship.Refusal):
+                self.prepare()
+        for renewal in (False, True):
             arguments = [
                 "--additional-review-for",
                 self.head,
                 "--request-reason",
                 "fixture explicit review",
             ]
-            if count == 3:
+            if renewal:
                 arguments += [
                     "--review-history-digest",
                     ship.digest(self.operation().state["passes"]),
@@ -505,13 +506,13 @@ class DispositionTests(unittest.TestCase):
             with self.assertRaises(ship.Refusal):
                 self.prepare(*arguments)
         previous = json.loads(json.dumps(self.operation().state["passes"]))
-        self.assertEqual(len(previous), 4)
+        self.assertEqual(len(previous), fixture.CAP + 2)
         self.assertIsNone(self.operation().state["reviewed_head"])
         self.accepted()
         with patch.object(
             ship,
             "review_process",
-            side_effect=AssertionError("fifth review dispatched"),
+            side_effect=AssertionError("a further review dispatched"),
         ):
             self.prepare()
         self.assertEqual(self.operation().state["passes"], previous)

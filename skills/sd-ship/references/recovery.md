@@ -64,12 +64,12 @@ Recorded selectors are evidence, not consent or permission for another attempt.
 An explicit selection must match the actual reviewer when reusing completed evidence.
 The same selector does not bypass changed-head, tool, policy, acceptance, or history checks.
 
-An incomplete initial review needs full-branch coverage.
+An incomplete review needs full-branch coverage.
 After explicit retry authorization, use `sd-ship prepare --item ID --retry-review --json`.
-The retry spends the remaining automatic pass.
+The retry spends one automatic pass.
 It supplies prior evidence through `--resume-report` and verifies every previous blocker.
 Failed attempts, findings, and the initial receipt remain unchanged.
-A second incomplete run exhausts the automatic allowance and grants no publication clearance.
+Repeated incomplete runs exhaust the automatic allowance and grant no publication clearance.
 
 ## Additional review
 

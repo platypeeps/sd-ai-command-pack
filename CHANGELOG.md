@@ -66,6 +66,18 @@
   an entry for another gap still refuses. `load_acknowledgements` moved to
   `bin/sd_lib.py` so `sd-status` and `sd-ship` read one parser.
 
+- **Internal code review runs to five automatic rounds.** The review
+  table's *Development / Code, before merge* row read "1, plus one
+  verification of the fix". It now reads "5 rounds". The other three rows
+  keep their caps. `bin/sd_ship_history.py` states the number once, as
+  `AUTOMATIC_CODE_REVIEW_PASSES`. The dispatch gate, the request gate and
+  the coverage check all read it from there, so no site carries a literal.
+  The explicit-request mechanism is unchanged. `--additional-review-for`
+  with `--request-reason` still opens one further pass, and
+  `--review-history-digest` still renews a pass after that, each digest
+  spent once. Only the point where the automatic allowance runs out moved,
+  from the second pass to the fifth.
+
 ## 1.0.0 - 2026-09-01
 
 ### Changed

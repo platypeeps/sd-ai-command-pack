@@ -8,6 +8,12 @@ import re
 
 from sd_ship_remote import Refusal
 
+#: Automatic local code-review passes before an explicit request is needed.
+#: The *Development / Code, before merge* row of the review table in
+#: `.claude/rules/sd-planning-adversarial-review.md` states this cap, and
+#: every site that counts passes reads it here rather than spelling a number.
+AUTOMATIC_CODE_REVIEW_PASSES = 5
+
 
 def digest(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
@@ -59,7 +65,8 @@ def review_history(passes: list[dict]) -> dict:
 
 
 def validate_additional_requests(passes: list[dict]) -> None:
-    for index, entry in enumerate(passes[2:], 2):
+    start = AUTOMATIC_CODE_REVIEW_PASSES
+    for index, entry in enumerate(passes[start:], start):
         request = entry.get("additional_review_request")
         if (not isinstance(request, dict) or request.get("head") != entry.get("head")
                 or not isinstance(request.get("reason"), str) or not request["reason"].strip()
@@ -178,21 +185,30 @@ class ItemHistory(ReviewHistory):
 
     def _validate_coverage(self, state: dict, report: dict) -> None:
         passes = self.native(state)
-        first, last = passes[0].get("report") or {}, passes[-1]
-        if len(passes) >= 3:
+        if len(passes) > AUTOMATIC_CODE_REVIEW_PASSES:
             self.validate_requests(state)
             full_branch_coverage(report, self.aggregate(state, before_last=True))
-        elif len(passes) == 2 and last.get("retry"):
-            self.validate_retry(passes, first, report)
+        elif len(passes) >= 2 and passes[-1].get("retry"):
+            self.validate_retry(passes, report)
         else:
-            if not completed_depth(first):
+            # Every automatic pass but the first verifies the head its
+            # predecessor reviewed, so the chain is checked link by link. A
+            # pass may be incomplete only where the next one retries it.
+            for index, entry in enumerate(passes[:-1]):
+                if not passes[index + 1].get("retry") and not completed_depth(entry.get("report") or {}):
+                    raise Refusal("the original branch never completed the requested local review depth")
+            if len(passes) == 1 and not completed_depth(passes[0].get("report") or {}):
                 raise Refusal("the original branch never completed the requested local review depth")
-            if len(passes) == 2 and (report.get("subject", {}).get("base") != passes[0].get("head")
-                                    or report.get("verification_report_digest") != digest(first)):
+            previous = passes[-2] if len(passes) >= 2 else None
+            if previous is not None and (report.get("subject", {}).get("base") != previous.get("head")
+                                         or report.get("verification_report_digest") != digest(previous.get("report") or {})):
                 raise Refusal("fix verification does not continue the initially reviewed head")
 
-    def validate_retry(self, passes: list[dict], first: dict, report: dict) -> None:
-        prior = first or (review_history(passes[:1]) if timeout_evidence(passes[0]) is not None else {})
-        if (completed_depth(first) or report.get("subject", {}).get("base") != report.get("authorship_base")
+    def validate_retry(self, passes: list[dict], report: dict) -> None:
+        """The retry resumes the pass before it, whichever pass that is."""
+        preceding = passes[-2]
+        incomplete = preceding.get("report") or {}
+        prior = incomplete or (review_history(passes[:-1]) if timeout_evidence(preceding) is not None else {})
+        if (completed_depth(incomplete) or report.get("subject", {}).get("base") != report.get("authorship_base")
                 or report.get("resume_report_digest") != (digest(prior) if prior else None)):
             raise Refusal("retry must complete the full branch and retain the incomplete review evidence")

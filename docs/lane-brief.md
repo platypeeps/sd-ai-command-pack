@@ -135,7 +135,7 @@ for the controls a run passes through.
 >    `completed_at` in the past; trust the timestamps, not the status field.
 > 6. **The capped review is the pack's own; the Copilot round is outside the
 >    cap.** The *code, before merge* row of [`WORKFLOW.md`](../WORKFLOW.md)
->    caps `sd-review` at 1 pass plus one verification of the fix.
+>    caps `sd-review` at 5 automatic rounds.
 >    `copilot-pull-request-reviewer` is not that pass: it is the advisory
 >    review of the same page, and no cap counts its runs, which is why it may
 >    run more than once, below. Read the review

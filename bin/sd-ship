@@ -1071,7 +1071,7 @@ def no_item_record_flags(action) -> None:
     action.add_argument("--rebind-branch", metavar="OLD", help="metadata-only rebind to the current branch; preserves every pass and invalidates acceptance")
     action.add_argument("--close-record", metavar="REASON", help="close the record, whether work completed or was abandoned")
     action.add_argument("--reopen-record", action="store_true", help="resume the same record and its unchanged spent count")
-    action.add_argument("--retry-review", action="store_true", help="spend the remaining pass on a full-branch retry of an incomplete initial review")
+    action.add_argument("--retry-review", action="store_true", help="spend one automatic pass on a full-branch retry of an incomplete review")
     action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
     action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of the complete combined history; required to continue after any import")
     action.add_argument("--request-reason", help="nonempty operator context; this assertion is not proof of user approval")
@@ -1124,7 +1124,7 @@ def parser():
         if name == "prepare":
             action.add_argument("--provider", metavar="NAME", help="select one guarded reviewer for this invocation; never changes automatic order")
             action.add_argument("--reuse-check", action="store_true", help="opt into exact-input successful check-receipt reuse")
-            action.add_argument("--retry-review", action="store_true", help="spend the remaining pass on a full-branch retry of an incomplete initial review")
+            action.add_argument("--retry-review", action="store_true", help="spend one automatic pass on a full-branch retry of an incomplete review")
             action.add_argument("--additional-review-for", metavar="SHA", help="record one explicit post-cap operator request for this exact committed head")
             action.add_argument("--review-history-digest", metavar="SHA256", help="one-use digest of every existing pass; required to renew after three reservations")
             action.add_argument("--request-reason", help="nonempty operator context; this assertion is not proof of user approval")
