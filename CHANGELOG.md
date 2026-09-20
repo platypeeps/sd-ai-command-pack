@@ -4,6 +4,17 @@
 
 ### Added
 
+- **A Drive mirror defaults to `Briefs/<repo>`.** `drive=dict()` is now a
+  complete designation: it mirrors to `Briefs/<repo>` in My Drive, the same
+  shape the vault uses, so the copies agree on where a brief lives. The drain
+  resolves the path and creates the repo folder when it is missing, so a new
+  repo publishes without anyone provisioning a folder first. `folder=` still
+  overrides. With every destination now carrying a default, `Destination` drops
+  `needs_where` for `default`, and no designation has to name a container to be
+  valid. The folder `sdw.drive_publishing_folder` names is unrelated and
+  unchanged: it is the Mezmo blog's gate, and a brief in it would read as
+  cleared for publication.
+
 - **Obsidian is where a finished document lives.** `render` writes each
   document's Markdown to `$OBSIDIAN_VAULT/Briefs/<repo>/<name>.md`, with a
   frontmatter block naming the source repo, path and revision. A local

@@ -373,13 +373,14 @@ in that document's `DOCS` entry, where the document is already described:
 ```python
 notion=dict()                    # private space, Briefs folder
 notion=dict(team=True)           # R&D team space, R&D Briefs folder
-drive=dict(folder="Research deliverables", file="https://docs.google.com/document/d/...")
+drive=dict()                     # My Drive, Briefs/<repo> folder
+drive=dict(folder="Research deliverables", file="https://docs.google.com/d/...")
 ```
 
 | Destination | Key | Container | Existing page or file (optional) |
 | --- | --- | --- | --- |
 | Notion | `notion=` | defaulted per scope; `space=` overrides the folder | `page=` |
-| Google Drive | `drive=` | `folder=`, required | `file=` |
+| Google Drive | `drive=` | defaults to `Briefs/<repo>`; `folder=` overrides | `file=` |
 
 Both keys on one entry are two mirrors, not a choice. Until one of these keys
 exists, the document publishes locally and nowhere else. Do not infer a target
@@ -392,8 +393,15 @@ mistakes are not symmetric: a brief the team cannot see is repaired by adding
 `team=True` and draining again, and a private brief in a shared team space has
 already been read. `space=` overrides the folder, never the scope.
 
-A Drive folder is required and has no default; inventing one would put a
-document somewhere nobody chose.
+**A Drive mirror lands beside its siblings.** `drive=dict()` goes to
+`Briefs/<repo>` in My Drive, the same shape the vault uses, so the two copies
+agree on where a brief lives. The drain resolves the path and creates the repo
+folder when it is missing. `folder=` overrides it for a document that belongs
+somewhere a reader already looks.
+
+The folder `sdw.drive_publishing_folder` names is not this default. That one is
+the Mezmo blog's gate, and a brief placed in it would read as cleared for
+publication.
 
 The page or file is optional everywhere. Without it the drain creates the page
 or file and the designation is amended with the id it got. With it the drain
@@ -449,9 +457,11 @@ place. Create it with the Workspace connector's Markdown import so headings,
 tables and code blocks survive, then record the resulting file id in `file=`.
 Update that file in place on later drains. Keep the document's name equal to its
 title, since Drive search is by name and a renamed copy reads as a second
-document. Resolve `folder=` to a folder id once and prefer the id thereafter —
-two folders may share a name, and a mirror written into the wrong one is a
-disclosure rather than a mistake.
+document. Resolve the folder to an id once and prefer the id thereafter
+— two folders may share a name, and a mirror written into the wrong one is a
+disclosure rather than a mistake. `Briefs/<repo>` resolves under My Drive's
+root, and the repo folder is created when it is missing; a `Briefs` folder
+found anywhere else is a different folder and not this one.
 
 Handling restrictions survive the mirror, at every destination: a document that
 may not be shared externally may not be mirrored to a shared Notion space or a
