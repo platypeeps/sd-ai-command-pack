@@ -407,7 +407,9 @@ class SchemaAcrossTransportsTests(ReviewFixture):
             url="https://fixture.example/v1" if transport == "url" else None,
             reader=None if transport == "url" else transport)
         envelope = ({"type": "result", "subtype": "success", "is_error": False,
-                     "structured_output": payload} if transport == "claude-json" else payload)
+                     "structured_output": payload} if transport == "claude-json" else
+                    {"status": "SUCCESS", "response": "", "structured_output": payload}
+                    if transport == "agy-json" else payload)
         client = FakeClient(default=(0, json.dumps({"choices": [{"message": {"content": json.dumps(payload)}}]}), "", True))
         return sd_review.run_provider(provider, self.tmp,
             sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""), "review",

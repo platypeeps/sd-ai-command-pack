@@ -279,6 +279,11 @@ def _adapt(registry: Any, meter_envs: Mapping[str, str | None] | None = None) ->
         bill = registry.bills.get(provider.bill)
         if provider.url and bill is not None and bill.capped:
             refuse_unbounded(provider.name, provider.bill, provider.max_tokens, dict(provider.price), Path(registry.path))
+        # A row can carry a model the file does not, so the vendor claim is
+        # checked on what was merged rather than on what was written.
+        mismatch = refuse_vendor_model(provider.name, provider.vendor, provider.model, provider.start)
+        if mismatch is not None:
+            raise RegistryError(f"{registry.path}: {mismatch}")
     return Registry(
         path=Path(registry.path),
         bills={
@@ -646,6 +651,82 @@ def refuse_unbounded(name: str, bill: str, max_tokens: Any, price: Mapping[str, 
         )
 
 
+#: Model-name prefixes that name their vendor beyond doubt, lower case. The
+#: list is short on purpose. A name matching nothing here yields no opinion,
+#: so an entry pinning an unfamiliar model is left alone rather than guessed
+#: at, and only a plain contradiction is refused. These three are the vendors
+#: one command is known to multiplex, and their names are first-party rather
+#: than an aggregator's label: `deepseek-ai/...` is served by Baseten, whose
+#: own entry calls it `deepseek`, and whose vendor another operator may
+#: legitimately write differently.
+MODEL_VENDORS: tuple[tuple[str, str], ...] = (
+    ("claude-", "anthropic"),
+    ("anthropic/", "anthropic"),
+    ("gpt-", "openai"),
+    ("openai/", "openai"),
+    ("o1-", "openai"),
+    ("o3-", "openai"),
+    ("o4-", "openai"),
+    ("gemini-", "google"),
+    ("google/", "google"),
+)
+
+
+def model_vendor(model: str | None) -> str | None:
+    """Return the vendor a model name identifies, or None for no opinion."""
+    name = (model or "").strip().lower()
+    for prefix, vendor in MODEL_VENDORS:
+        if name.startswith(prefix):
+            return vendor
+    return None
+
+
+def declared_models(model: str | None, start: str | None) -> tuple[str, ...]:
+    """Every model an entry pins: the 'model' key, and the start line's own.
+
+    A start line is argv, so a `--model` written there selects a model exactly
+    as the key does. Reading only the key would leave the guard below checking
+    the half of the entry an operator did not use.
+    """
+    names = [model] if model and str(model).strip() else []
+    try:
+        words = shlex.split(start or "")
+    except ValueError:
+        words = []
+    for index, word in enumerate(words):
+        if word in ("--model", "-m") and index + 1 < len(words):
+            names.append(words[index + 1])
+        elif word.startswith("--model="):
+            names.append(word.split("=", 1)[1])
+    return tuple(name for name in (str(one).strip() for one in names) if name)
+
+
+def refuse_vendor_model(
+    name: str, vendor: str, model: str | None, start: str | None
+) -> str | None:
+    """Refuse an entry whose vendor disagrees with the model it runs.
+
+    One command serves several vendors' models -- `agy` serves Google's and
+    Anthropic's and OpenAI's -- so 'vendor' is a claim about the model, not
+    about the executable. The independence guard compares that claim against
+    the branch's authorship trailers, so an entry declaring one vendor while
+    running another's model would let the author's own model review the
+    author's own work, and the guard would report the review as independent.
+    """
+    for pinned in declared_models(model, start):
+        actual = model_vendor(pinned)
+        if actual is not None and actual != vendor:
+            return (
+                f"provider {name!r} declares vendor {vendor!r} and runs model "
+                f"{pinned!r}, which is {actual!r}'s. A vendor is matched against "
+                f"the branch's authorship trailers to keep a reviewer independent "
+                f"of the author, so this entry would review {actual!r}-authored "
+                f"work with an {actual!r} model and be reported as independent. "
+                f"Name the model's own vendor, or pin a model of vendor {vendor!r}."
+            )
+    return None
+
+
 def _provider(
     name: str,
     body: dict[str, Any],
@@ -734,6 +815,9 @@ def _provider(
             f"padding or a capital could never match, and the entry would "
             f"review work its own vendor wrote. Write it lower case."
         )
+    mismatch = refuse_vendor_model(name, vendor, body.get("model"), start)
+    if mismatch is not None:
+        raise RegistryError(f"{path}: {mismatch}")
 
     enabled = body.get("enabled", True)
     if not isinstance(enabled, bool):
@@ -1450,6 +1534,14 @@ def _reviewer_candidate(
 ) -> Candidate:
     """Apply the same eligibility guards to automatic and explicit selection."""
     refusal = refuse_reader(provider, readers)
+    if refusal is None:
+        # Ahead of consent, and again rather than only at read time: the guard
+        # this one protects is six lines below, so it is checked where it is
+        # used, and an entry that would defeat it should say so rather than
+        # report whichever unrelated refusal happened to be tested first.
+        refusal = refuse_vendor_model(
+            provider.name, provider.vendor, provider.model, provider.start
+        )
     if refusal is None:
         refusal = refuse_allowance(provider, consent.get(provider.name))
     if refusal is None and provider.vendor in author_vendors:
