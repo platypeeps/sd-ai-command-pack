@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import sqlite3
@@ -50,6 +51,9 @@ class ShipDouble(GitHubDouble):
         self.lose_create = False
         self.no_create_result = False
         self.statuses = []
+        #: Workflow runs `GET /actions/runs` serves, filtered by the query's
+        #: `head_sha` and `event` as GitHub filters them (sd:1110).
+        self.workflow_runs = []
         self.review_payload = {"reviews": [], "comments": []}
         self.review_sequences = {"reviews": [], "comments": []}
         self.copilot_requests = []
@@ -106,6 +110,15 @@ class ShipDouble(GitHubDouble):
             return 201, self._pull(self.remote.pull(number))
         if path.endswith("/statuses"):
             return 200, self.statuses
+        if method == "GET" and path.endswith("/protection") and isinstance(self.remote.protection, RemoteRefusal):
+            raise self.remote.protection  # a 403 or 5xx, which is not "absent" (sd:1110)
+        if method == "GET" and path == f"{prefix}/actions/runs":
+            wanted_sha = query.get("head_sha", [None])[0]
+            wanted_event = query.get("event", [None])[0]
+            runs = [run for run in self.workflow_runs
+                    if (wanted_sha is None or run.get("head_sha") == wanted_sha)
+                    and (wanted_event is None or run.get("event") == wanted_event)]
+            return 200, {"total_count": len(runs), "workflow_runs": runs}
         # The review a `prepare` reads to record the findings its push answers.
         # Empty unless a test says otherwise, and answered here rather than by
         # the shared double because the adapter is the only caller of it.
@@ -151,18 +164,30 @@ class ShipDouble(GitHubDouble):
         return Handler
 
 
+#: The fixture `gh`. It answers the way the real one does: the body on stdout,
+#: and with `--include` the response line and headers ahead of it, on a
+#: refusal too (`HTTP/2.0 404 Not Found` then the JSON), which is what
+#: `GitHub.api_status` reads the status from. Exit 1 on a non-2xx, as gh.
 SHIM = '''#!/usr/bin/env python3
 import json,os,sys,urllib.request,urllib.error
 args=sys.argv[1:]
 assert args[0]=='api',args
+include='--include' in args
+args=[a for a in args if a!='--include']
 path=args[1]
 method=args[args.index('--method')+1]
 data=sys.stdin.read().encode() if '--input' in args else None
 req=urllib.request.Request(os.environ['SHIP_DOUBLE']+'/'+path,data=data,method=method,headers={'Content-Type':'application/json'})
+def emit(status,reason,body):
+ if include: print('HTTP/2.0 %d %s\\nContent-Type: application/json\\n' % (status,reason))
+ print(body)
 try:
- with urllib.request.urlopen(req) as response: print(response.read().decode())
+ with urllib.request.urlopen(req) as response: emit(response.status,response.reason,response.read().decode())
 except urllib.error.HTTPError as error:
- print(error.read().decode(),file=sys.stderr);sys.exit(1)
+ body=error.read().decode()
+ emit(error.code,error.reason,body)
+ message=json.loads(body).get('message','') if body.startswith('{') else ''
+ print('gh: %s (HTTP %d)' % (message,error.code),file=sys.stderr);sys.exit(1)
 '''
 
 
@@ -1098,11 +1123,12 @@ roles:
         self.remote.collaborators = []
         saved = self.remote.protection
         self.remote.protection = None
-        # An unprotected branch is a 404 from GitHub, which `gh` reports on
-        # stderr with exit 1 and the transport refuses verbatim, before
-        # `GitHub.protection` ever sees a body. So this is the transport's
-        # refusal, named; the guard that refuses a body that is not an object
-        # is reached only from `tests/test_sd_ship_remote.py` (sd:929).
+        # An unprotected branch is a 404 from GitHub. `GitHub.gate` reads the
+        # status and, with no declaration at the reviewed head (this fixture
+        # commits none), refuses with GitHub's message and the status; the
+        # guard that refuses a body that is not an object is reached only
+        # from `tests/test_sd_ship_remote.py` (sd:929). The declared-gap path
+        # is `DeclaredGapCase` below (sd:1110).
         with self.assertRaisesRegex(ship.Refusal, "Branch not protected"):
             self.merge()
         self.remote.protection = saved
@@ -2736,6 +2762,355 @@ class CaptureDepthTests(unittest.TestCase):
                 ship.capture_too_deep(body)
                 spent.append(time.thread_time() - started)
         self.assertLess(min(large_cpu) / min(small_cpu), 24)
+
+
+class DeclaredGapCase(unittest.TestCase):
+    """`sd-ship merge` under `.github/sd-status.json`'s `unprotected` entry (sd:1110).
+
+    The rig is `ShipCase`'s with the protection object removed -- borrowed
+    method by method rather than inherited, so `ShipCase`'s own tests do not
+    run a second time under this name. Every test
+    here starts from a 404, commits a declaration (or a wrong one) on the
+    branch the merge will land, and answers check runs, statuses and
+    workflow runs for the exact head. `PUT` counts are the assertion that
+    matters; a refusal that still merged is the failure the item exists to
+    prevent.
+    """
+
+    TESTS = "name: Tests\n\non:\n  pull_request:\n  push:\n    branches: [main]\n\njobs:\n  unittest:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
+    ROUTE = "name: sd-review route\n\non:\n  pull_request:\n\njobs:\n  route:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
+    DECLARATION = {
+        "accepted_gaps": [{
+            "id": "unprotected", "state": {"branch_protection": False},
+            "because": "fixture: one operator", "since": "2026-09-12",
+            "until": "a second account with push or merge rights exists",
+        }]
+    }
+
+    args, operation, prepare, merge = ShipCase.args, ShipCase.operation, ShipCase.prepare, ShipCase.merge
+
+    def setUp(self):
+        ShipCase.setUp(self)
+        self.remote.protection = None
+
+    def commit(self, files: dict[str, str], message: str = "declare\n\nAuthored-with: human") -> str:
+        """Commit `files` on `topic` at the remote and pull them into the clone.
+
+        The reviewed head is what the merge reads, so every fixture file has
+        to be in the commit, not the working tree.
+        """
+        sha = self.remote.commit_on("topic", message, files=files)
+        _git(self.root, "fetch", "-q", "origin", "topic")
+        _git(self.root, "reset", "-q", "--hard", "FETCH_HEAD")
+        return sha
+
+    def declare(self, entries=None, *, workflows=None, raw: str | None = None) -> str:
+        declaration = raw if raw is not None else json.dumps(entries if entries is not None else self.DECLARATION, indent=2) + "\n"
+        files = {".github/sd-status.json": declaration}
+        for name, text in (workflows if workflows is not None else {"tests.yml": self.TESTS, "sd-review-route.yml": self.ROUTE}).items():
+            files[f".github/workflows/{name}"] = text
+        return self.commit(files)
+
+    def restart(self) -> None:
+        """A fresh rig mid-test: the loops below merge, and a merged fixture cannot merge twice."""
+        self.doCleanups()
+        self.setUp()
+
+    def head(self) -> str:
+        return _git(self.root, "rev-parse", "HEAD")
+
+    def adapter(self) -> ship.GitHub:
+        return ship.GitHub(self.root, self.remote.slug)
+
+    def run_record(self, path: str, *, event: str = "pull_request", conclusion: str = "success", sha: str | None = None, status: str = "completed") -> dict:
+        return {"path": path, "name": path.rsplit("/", 1)[-1], "event": event, "status": status,
+                "conclusion": conclusion, "head_sha": sha or self.head()}
+
+    def check(self, name: str, *, conclusion: str = "success", sha: str | None = None, status: str = "completed") -> dict:
+        return {"name": name, "status": status, "conclusion": conclusion, "head_sha": sha or self.head(), "app": {"id": 7}}
+
+    def green(self) -> None:
+        """Every check, status and expected workflow run passing at the head."""
+        self.prepare()
+        pull = next(iter(self.remote.pull_requests.values()))
+        pull.checks = [self.check("unittest (ubuntu-latest, 3.13)"), self.check("route"), self.check("copilot-pull-request-reviewer")]
+        self.double.workflow_runs = [self.run_record(".github/workflows/tests.yml"), self.run_record(".github/workflows/sd-review-route.yml")]
+
+    def puts(self) -> int:
+        return len([call for call in self.remote.calls if call.method == "PUT"])
+
+    def refuse(self, pattern: str, code: str | None = None) -> None:
+        with self.assertRaisesRegex(ship.Refusal, pattern) as caught:
+            self.merge()
+        if code is not None:
+            self.assertEqual(caught.exception.workflow["blocker"]["code"], code)
+        self.assertEqual(self.puts(), 0)
+
+    def test_a_declared_gap_with_every_check_green_merges_once_and_the_receipt_says_so(self):
+        self.declare()
+        self.green()
+        result = self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(result["protection"], {"declared_gap": "unprotected", "until": "a second account with push or merge rights exists"})
+        key = receipts.receipt_key(self.remote.slug, "topic", self.item)
+        self.assertEqual(receipts.read(self.connection, key)[1]["protection"]["declared_gap"], "unprotected")
+
+    def test_without_the_declaration_the_refusal_is_the_present_one(self):
+        self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        self.green()
+        self.refuse("Branch not protected", "protection_required")
+
+    def test_a_failing_check_run_at_the_head_refuses(self):
+        self.declare()
+        self.green()
+        pull = next(iter(self.remote.pull_requests.values()))
+        pull.checks[0] = self.check("unittest (ubuntu-latest, 3.13)", conclusion="failure")
+        self.refuse("CI is not passing", "ci_not_passing")
+
+    def test_a_failing_run_at_another_sha_with_a_passing_rerun_at_the_head_still_refuses(self):
+        """`filter=latest` at the head is what counts; the double reports both."""
+        self.declare()
+        self.green()
+        pull = next(iter(self.remote.pull_requests.values()))
+        pull.checks.append(self.check("unittest (ubuntu-latest, 3.13)", conclusion="failure", sha="0" * 40))
+        self.refuse("CI is not passing", "ci_not_passing")
+
+    def test_status_history_is_read_newest_first_per_context(self):
+        for history, puts in (("success,pending", 1), ("success,failure", 1), ("failure,success", 0), ("pending,success", 0)):
+            with self.subTest(history=history):
+                self.restart()
+                self.declare()
+                self.green()
+                self.double.statuses = [{"context": "legacy", "state": state, "sha": self.head()} for state in history.split(",")]
+                if puts:
+                    self.merge()
+                    self.assertEqual(self.puts(), 1)
+                else:
+                    self.refuse("status is not passing", "ci_not_passing")
+
+    def test_nothing_validated_the_head_refuses(self):
+        self.declare()
+        self.green()
+        next(iter(self.remote.pull_requests.values())).checks = []
+        self.double.workflow_runs = []
+        self.refuse("nothing validated", "ci_missing")
+
+    def test_only_the_advisory_workflow_ran_refuses_naming_tests(self):
+        for spelling in ("tests.yml", "tests.yaml"):
+            with self.subTest(spelling=spelling):
+                self.restart()
+                self.declare(workflows={spelling: self.TESTS, "sd-review-route.yml": self.ROUTE})
+                self.prepare()
+                next(iter(self.remote.pull_requests.values())).checks = [self.check("route")]
+                self.double.workflow_runs = [self.run_record(".github/workflows/sd-review-route.yml")]
+                self.refuse(r"workflow Tests \(\.github/workflows/" + re.escape(spelling) + r"\) has no successful pull_request run", "ci_missing")
+
+    def test_the_expected_set_is_read_at_the_head_not_the_working_tree(self):
+        """`merge` refuses a dirty tree before it reads anything, so the
+        reader is asked directly: the tree has no say either way."""
+        head = self.declare()
+        expected = [(".github/workflows/sd-review-route.yml", "sd-review route"), (".github/workflows/tests.yml", "Tests")]
+        # Present at head, deleted from the working tree: still expected.
+        (self.root / ".github/workflows/tests.yml").unlink()
+        self.assertEqual(self.adapter().expected_workflows(head), expected)
+        # Absent at head, present only in the working tree: not expected.
+        _git(self.root, "rm", "-q", ".github/workflows/tests.yml")
+        _git(self.root, "commit", "-q", "-m", "drop tests\n\nAuthored-with: human")
+        head = self.head()
+        (self.root / ".github/workflows/tests.yml").write_text(self.TESTS)
+        self.assertEqual(self.adapter().expected_workflows(head), expected[:1])
+
+    def test_a_push_run_is_not_evidence_of_the_pull_request_validation(self):
+        self.declare()
+        self.green()
+        self.double.workflow_runs = [self.run_record(".github/workflows/tests.yml", event="push"), self.run_record(".github/workflows/sd-review-route.yml")]
+        self.refuse("workflow Tests", "ci_missing")
+        self.double.workflow_runs.append(self.run_record(".github/workflows/tests.yml", event="pull_request"))
+        self.merge()
+        self.assertEqual(self.puts(), 1)
+
+    def test_a_trigger_with_an_inline_comment_is_still_that_trigger(self):
+        """Codex on the branch: `- pull_request # Validate PRs` used to carry the
+        comment as the event name, and the Tests workflow silently stopped
+        being expected. The only run at the head is the advisory one."""
+        commented = self.TESTS.replace("on:\n  pull_request:\n  push:\n    branches: [main]\n",
+                                       "on:\n  - pull_request # Validate PRs\n  - push\n")
+        self.assertNotEqual(commented, self.TESTS)
+        self.declare(workflows={"tests.yml": commented, "sd-review-route.yml": self.ROUTE})
+        self.prepare()
+        next(iter(self.remote.pull_requests.values())).checks = [self.check("route")]
+        self.double.workflow_runs = [self.run_record(".github/workflows/sd-review-route.yml")]
+        self.refuse(r"workflow Tests \(\.github/workflows/tests\.yml\) has no successful pull_request run", "ci_missing")
+
+    def test_a_trigger_the_reader_cannot_resolve_refuses_rather_than_drops_the_workflow(self):
+        odd = self.TESTS.replace("on:\n  pull_request:\n  push:\n    branches: [main]\n", "on: [pull_request, ${{ vars.EVENT }}]\n")
+        self.declare(workflows={"tests.yml": odd, "sd-review-route.yml": self.ROUTE})
+        self.green()
+        self.refuse(r"tests\.yml at [0-9a-f]{12}: could not read its triggers \('\$\{\{ vars\.EVENT \}\}'\)", "ci_missing")
+
+    def test_a_filtered_workflow_that_did_not_run_is_a_refusal_naming_it(self):
+        """Requirement 2: a `paths`, `branches` or `types` filter under the
+        trigger does not make the workflow optional. GitHub's scheduling is
+        not reconstructed here; the workflow ran for the event or the merge
+        names it."""
+        for filtered in ("on:\n  pull_request:\n    paths: ['docs/**']\n",
+                         "on:\n  pull_request:\n    branches: [main]\n",
+                         "on:\n  pull_request:\n    types: [labeled]\n"):
+            with self.subTest(filtered=filtered.splitlines()[2].strip()):
+                self.restart()
+                tests = self.TESTS.replace("on:\n  pull_request:\n  push:\n    branches: [main]\n", filtered)
+                self.assertNotEqual(tests, self.TESTS)
+                self.declare(workflows={"tests.yml": tests, "sd-review-route.yml": self.ROUTE})
+                self.prepare()
+                next(iter(self.remote.pull_requests.values())).checks = [self.check("route")]
+                self.double.workflow_runs = [self.run_record(".github/workflows/sd-review-route.yml")]
+                self.refuse(r"workflow Tests \(\.github/workflows/tests\.yml\) has no successful pull_request run", "ci_missing")
+                self.double.workflow_runs.append(self.run_record(".github/workflows/tests.yml"))
+                self.merge()
+                self.assertEqual(self.puts(), 1)
+
+    def test_a_quoted_event_key_is_the_same_key(self):
+        """Post-cap review: `"pull_request":` beside an unquoted `push:` was
+        dropped while its sibling parsed, so the workflow silently stopped
+        being expected."""
+        for spelling in ('on:\n  push:\n    branches: [main]\n  "pull_request":\n',
+                         "on:\n  push:\n    branches: [main]\n  'pull_request':\n"):
+            with self.subTest(spelling=spelling.splitlines()[-1].strip()):
+                self.restart()
+                tests = self.TESTS.replace("on:\n  pull_request:\n  push:\n    branches: [main]\n", spelling)
+                self.assertNotEqual(tests, self.TESTS)
+                self.declare(workflows={"tests.yml": tests, "sd-review-route.yml": self.ROUTE})
+                self.prepare()
+                next(iter(self.remote.pull_requests.values())).checks = [self.check("route")]
+                self.double.workflow_runs = [self.run_record(".github/workflows/sd-review-route.yml")]
+                self.refuse(r"workflow Tests \(\.github/workflows/tests\.yml\) has no successful pull_request run", "ci_missing")
+
+    def test_a_space_before_the_colon_is_still_that_key(self):
+        """Verification pass: `pull_request :` read as no key while `push:`
+        beside it parsed, so the block looked complete."""
+        self.declare(workflows={"tests.yml": self.TESTS.replace(
+            "on:\n  pull_request:\n  push:\n    branches: [main]\n",
+            "on:\n  push:\n    branches: [main]\n  pull_request :\n"), "sd-review-route.yml": self.ROUTE})
+        self.prepare()
+        next(iter(self.remote.pull_requests.values())).checks = [self.check("route")]
+        self.double.workflow_runs = [self.run_record(".github/workflows/sd-review-route.yml")]
+        self.refuse(r"workflow Tests \(\.github/workflows/tests\.yml\) has no successful pull_request run", "ci_missing")
+
+    def test_a_line_in_the_trigger_block_this_cannot_read_refuses(self):
+        """A sibling that parses must not make an unreadable line invisible."""
+        self.declare(workflows={"tests.yml": self.TESTS.replace(
+            "on:\n  pull_request:\n  push:\n    branches: [main]\n",
+            "on:\n  push:\n  ?  [a, b]\n"), "sd-review-route.yml": self.ROUTE})
+        self.green()
+        self.refuse(r"tests\.yml at [0-9a-f]{12}: could not read its triggers \('\?  \[a, b\]'\)", "ci_missing")
+
+    def test_the_base_advancing_before_the_put_refuses(self):
+        """Under the declared gap nothing server-side keeps the branch fresh,
+        so the freshness `ready` read is read again before the dispatch."""
+        self.declare()
+        self.green()
+        seen = {"count": 0}
+        double = self.double
+        saved = double._route
+
+        def route(method, path, body):
+            if method == "GET" and "/compare/" in path:
+                seen["count"] += 1
+                if seen["count"] >= 2:
+                    return 200, {"behind_by": 3, "ahead_by": 1, "status": "diverged"}
+            return saved(method, path, body)
+        double._route = route
+        self.refuse("default branch advanced after the readiness check", "base_moved")
+
+    def test_the_single_event_form_is_read(self):
+        """Codex on the verification pass: `on: pull_request` returned no
+        trigger and refused every merge under the declaration."""
+        for spelling in ("on: pull_request\n", "on: [pull_request, push]\n"):
+            with self.subTest(spelling=spelling.strip()):
+                self.restart()
+                tests = self.TESTS.replace("on:\n  pull_request:\n  push:\n    branches: [main]\n", spelling)
+                self.declare(workflows={"tests.yml": tests, "sd-review-route.yml": self.ROUTE})
+                self.prepare()
+                next(iter(self.remote.pull_requests.values())).checks = [self.check("route")]
+                self.double.workflow_runs = [self.run_record(".github/workflows/sd-review-route.yml")]
+                self.refuse(r"workflow Tests", "ci_missing")
+                self.double.workflow_runs.append(self.run_record(".github/workflows/tests.yml"))
+                self.merge()
+                self.assertEqual(self.puts(), 1)
+
+    def test_an_unrelated_manual_workflow_blocks_nothing(self):
+        manual = "name: Manual\n\non: workflow_dispatch\n\njobs:\n  job:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
+        self.declare(workflows={"tests.yml": self.TESTS, "sd-review-route.yml": self.ROUTE, "manual.yml": manual})
+        self.green()
+        self.merge()
+        self.assertEqual(self.puts(), 1)
+
+    def test_a_push_only_workflow_is_not_expected(self):
+        nightly = "name: Nightly\n\non:\n  push:\n    branches: [main]\n\njobs:\n  job:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
+        self.declare(workflows={"tests.yml": self.TESTS, "sd-review-route.yml": self.ROUTE, "nightly.yml": nightly})
+        self.green()
+        self.merge()
+        self.assertEqual(self.puts(), 1)
+
+    def test_another_gaps_acceptance_does_not_authorize_this_one(self):
+        entries = {"accepted_gaps": [dict(self.DECLARATION["accepted_gaps"][0], id="reviews")]}
+        self.declare(entries)
+        self.green()
+        self.refuse("carries no `unprotected` entry", "protection_required")
+
+    def test_a_declaration_beside_a_protection_object_is_a_mismatch(self):
+        self.declare()
+        self.green()
+        self.remote.protection = {"enforce_admins": {"enabled": True}, "required_pull_request_reviews": {"required_approving_review_count": 0},
+                                  "required_status_checks": {"strict": True, "contexts": ["check"], "checks": [{"context": "check", "app_id": 7}]}}
+        self.refuse("does not match the observed state")
+
+    def test_an_invalid_declaration_file_names_its_fault(self):
+        for label, raw, fault in (
+            ("unknown key", json.dumps({"accepted_gaps": [], "extra": 1}), "unknown key"),
+            ("bad JSON", "{not json", "not valid JSON"),
+            ("wrong state shape", json.dumps({"accepted_gaps": [dict(self.DECLARATION["accepted_gaps"][0], state=[])]}), "state must be a non-empty object"),
+        ):
+            with self.subTest(label=label):
+                self.restart()
+                self.declare(raw=raw)
+                self.green()
+                self.refuse(fault, "protection_required")
+
+    def test_the_declaration_is_read_at_the_head_not_the_working_tree(self):
+        """Same reason as the workflow set: the reader, asked over a dirty tree."""
+        head = self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        (self.root / ".github/sd-status.json").write_text(json.dumps(self.DECLARATION))
+        api = self.adapter()
+        self.assertIsNone(api.declared_gap(head))
+        self.assertEqual(api.declaration_faults, [f".github/sd-status.json is not in the tree at {head[:12]}"])
+        head = self.declare()
+        (self.root / ".github/sd-status.json").unlink()
+        self.assertEqual(self.adapter().declared_gap(head), {"declared_gap": "unprotected", "until": "a second account with push or merge rights exists"})
+
+    def test_a_403_from_the_protection_endpoint_is_not_absence(self):
+        self.declare()
+        self.green()
+        self.remote.protection = RemoteRefusal(403, "Resource not accessible by integration")
+        self.refuse(r"Resource not accessible by integration \(HTTP 403\)")
+
+    def test_protection_appearing_between_the_two_reads_refuses_as_changed(self):
+        self.declare()
+        self.green()
+        reads = {"count": 0}
+        double = self.double
+        saved = double._route
+
+        def route(method, path, body):
+            if method == "GET" and path.endswith("/protection"):
+                reads["count"] += 1
+                if reads["count"] >= 2:
+                    return 200, {"enforce_admins": {"enabled": True}, "required_pull_request_reviews": {"required_approving_review_count": 0},
+                                 "required_status_checks": {"strict": True, "contexts": ["check"], "checks": [{"context": "check", "app_id": 7}]}}
+            return saved(method, path, body)
+        double._route = route
+        self.refuse("ownership or branch protection changed before merge")
+
 
 
 if __name__ == "__main__":

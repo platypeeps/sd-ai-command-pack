@@ -633,7 +633,6 @@ COMPLEX = frozenset({
     "bin/sd-review::resolve_subject",  # 26
     "bin/sd-review::review",  # 97
     "bin/sd-review::run_provider",  # 40
-    "bin/sd-ship::Ship.merge",  # 25
     "bin/sd-ship::Ship.prepare",  # 53
     "bin/sd-ship::commit_paths",  # 21
     "bin/sd-status::_work_rows",  # 31

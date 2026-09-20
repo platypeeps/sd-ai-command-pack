@@ -1601,7 +1601,7 @@ confirmed by the next `sd-ship` run alone.
     pruning its own empty parents at `:820` and `:827`, its untrack-and-re-run
     error string at `:961`, and the five uninstall commands in `sd-status`'s
     `RESIDUE` tuple. Requirement 13 cuts that tuple with the residue detectors
-    at `bin/sd-status:956-1014`, which takes five of the eight — but that cut
+    at `source:bin/sd-status::residue_section`, which takes five of the eight — but that cut
     is gated on "one clean run across the fleet", the run is scheduled
     nowhere, and no pull request names the detectors, so the frozen set is
     eight until it happens and three after. The test asserts the set has not

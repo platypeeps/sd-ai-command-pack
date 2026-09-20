@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **`sd-ship merge` honors a declared protection gap** (sd:1110). With an
+  `unprotected` entry in `.github/sd-status.json` at the reviewed commit and
+  a 404 from the protection endpoint, the merge substitutes "every check
+  run, every status, and a `pull_request` run of every workflow at the head"
+  for the required-checks list, and the receipt records
+  `declared_gap: unprotected`. The declaration is read at the head, never
+  from the working tree; a 403, a declaration beside a protection object, or
+  an entry for another gap still refuses. `load_acknowledgements` moved to
+  `bin/sd_lib.py` so `sd-status` and `sd-ship` read one parser.
+
 ## 1.0.0 - 2026-09-01
 
 ### Changed

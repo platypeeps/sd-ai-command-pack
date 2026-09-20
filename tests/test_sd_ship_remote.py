@@ -8,8 +8,8 @@ drives the method end to end, through a real bare Git fixture and an HTTP
 double, but its fixture answers with one valid document and its tests vary
 one field of it: the `enforce_admins` guard is reached there, and nothing
 else is. The test that sets the double's protection to `None` reads a 404
-from the transport, which `run` refuses before the method sees a body, so
-the first guard was credited to a test that never executes it (sd:929,
+through `api_status`, which `protection` refuses by status before any guard
+sees a body, so the first guard was credited to a test that never executes it (sd:929,
 measured with coverage on this file; sd:852 had added the reviews guard
 alone and called the other three covered).
 
@@ -69,6 +69,12 @@ class StubbedGitHub(sd_ship_remote.GitHub):
     def api(self, path: str, *, method: str = "GET", body: dict | None = None) -> Any:
         self.requested.append(path)
         return self.answer
+
+    def api_status(self, path: str) -> tuple[int, Any]:
+        # `protection` reads the object through the status-bearing call since
+        # sd:1110, so a 404 can be an answer; every document here is a 200.
+        self.requested.append(path)
+        return 200, self.answer
 
 
 class ProtectionCase(unittest.TestCase):
