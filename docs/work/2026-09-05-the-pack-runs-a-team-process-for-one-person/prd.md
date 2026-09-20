@@ -1040,11 +1040,11 @@ log, not here.
   (`skills/sd-suggest/SKILL.md:38`, `templates/decision.md:26`) and
   R10-D1 to D7 (`sd-plan:51,97`, `sd-ship:148`, `sd-review:48`) are defined
   nowhere; each citation inlines its rule or goes.
-- `--scope planning` reviews one item: the one whose `branch:` is checked out,
-  else the single non-done item, `ready` included; more than one candidate
-  refuses (`bin/sd-review:537`, `skills/sd-review/SKILL.md:39`), unless
-  `--item <directory name>` names one, added 2026-09-05 so that a
-  repository with two active items can review one at a time.
+- `--scope planning` reviews one active item (`planning` or `in_progress`;
+  `ready` is not a candidate): the sole candidate, else the one whose `branch:`
+  is checked out; with several and none on this branch it refuses and names
+  them (`source:bin/sd-review::_for_this_branch`, `skills/sd-review/SKILL.md:43`),
+  unless `--item <directory name>` names one, added 2026-09-05.
 - One review-record format, defined in `skills/sd-receive-review/SKILL.md:71`;
   `sd-plan`'s `## Review` (:41) and `sd-ship`'s "record the decision" (:46)
   cite it. Once B lands the record is rows on the item.
@@ -1146,21 +1146,21 @@ log, not here.
   `contains` (`source:bin/sd-handoff-restore::contains`);
   they are imported the way `bin/sd-status:95` does; the `authors` policy key
   (cut by 31(b2): four declaring sites gone, and a `RETIRED_POLICY_KEYS` row
-  in their place); the unreachable gito and kimi argv branches
-  (`bin/sd-review:853-857`) and `except Refusal` (`:1354-1356`); the constant
-  `posted` key and its grep test (`bin/sd-review:1133`,
-  `tests/test_sd_review_boundary.py:167`); the second `BACKENDS` table
+  in their place); the unreachable gito and kimi argv branches and their
+  `except Refusal` (both gone, so no line is left to cite); the constant
+  `posted` key and its grep test (both gone; `posted` survives only as a
+  report field); the second `BACKENDS` table
   (`source:bin/sd-status::BACKENDS`), derived from the registry instead;
   `RESIDUE` and `residue_section`
   (`source:bin/sd-status::residue_section`) after one clean fleet run;
-  the history comments in `Makefile`; `--stash-ref` (`bin/sd-handoff:385`) and
+  the history comments in `Makefile`; `--stash-ref` (no line is left to cite) and
   `carrier_branches` (both cut 2026-09-16, 31(b1)); `sd-status`'s `_git` is taken --
   it now calls `sd_lib.git_output`, which already carried the timeout.
   `bin/sd-pr-state` remains; `bin/sd-handoff` and `bin/sd-handoff-restore` are
   not cuts, both pinned self-contained by their own suites; `bin/sd-docs-lint:52,72-82,148` imports the vocabulary, the
   directory walk and the in-progress rule from `sd_lib`.
 - Consistency: a configuration error exits 2 everywhere (`bin/sd:2931-2947`,
-  `source:bin/sd-status::main`, `bin/sd-check`, `bin/sd-review:1352`) and JSON
+  `source:bin/sd-status::main`, `bin/sd-check`, `source:bin/sd-review::main`) and JSON
   envelopes carry one version key; `sd_lib.ITEM_STATUSES` is the one status
   vocabulary, and the three active-status sets reading it answer three questions;
   the tiers in `.github/sd-review.json:8` go with their key, since the
@@ -1606,7 +1606,7 @@ confirmed by the next `sd-ship` run alone.
     nowhere, and no pull request names the detectors, so the frozen set is
     eight until it happens and three after. The test asserts the set has not
     grown, not that the grep is empty: "names nothing" is unreachable in
-    either state, since `bin/sd_install.py:979` is an error message rather
+    either state, since `bin/sd_install.py:1294` is an error message rather
     than a temporary path, and `bin/sd_sweep.py` is in none of the eight. A test ships a `done` item and runs
     `sd-plan` and `sd-ship` again in that repository, and asserts the
     directory is untouched. (The sweep's retirement order, 2026-09-14, by
@@ -5633,3 +5633,21 @@ than went — the git-timeout sweep shifted six files under `bin/`, and each
 of the fifteen was re-pointed and then compared byte for byte against the
 text it named before the change. Twelve citations under this Log keep their
 numbers, because a citation there quotes what was measured on its date.
+
+### 2026-09-19 — #1082's eleven Copilot findings: the shift kept the rot
+
+#1082 re-pointed every by-line citation under the hunk shift and verified the
+shift byte for byte. That verification proves a citation lands on the line it
+landed on before, not that the line was ever the right one. Copilot read the
+targets and found eleven that were not: `--stash-ref` cited into a handoff
+error path, the deletion-verb sites cited into hook cleanup, `read_paths`
+cited as `shared_references`, `install_hook`/`remove_hook` cited into
+metadata parsing, the planning-selection bullet still describing a `ready`
+candidate, and cut argv branches cited into trailer constants.
+
+Each is repaired at the claim, not the number: a symbol that still exists is
+cited as `source:<path>::<symbol>`; a cut symbol says so and carries no line;
+a line that must stay a line points at the code the sentence describes. The
+requirement bullet now states the `planning`/`in_progress` contract. The
+ratchet falls to 35 and 52.
+

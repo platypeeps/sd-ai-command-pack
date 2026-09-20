@@ -257,7 +257,7 @@ reader — `bin/sd-status:179,186,1118-1125,1230-1238,1250-1283`,
 `tests/test_sd_docs_lint.py`, `skills/sd-receive-review/SKILL.md`,
 `.claude/sd-ai-command-pack/planning-adversarial-review.md`,
 `docs/spec/backend/quality-guidelines.md` and `docs/spec/guides/index.md`;
-`--stash-ref` at `bin/sd-handoff:385` with `skills/sd-handoff/SKILL.md` and
+`--stash-ref` (cut by 31(b1); no line is left to cite) with `skills/sd-handoff/SKILL.md` and
 `tests/test_sd_handoff.py`; `--park` and `--push` in
 `skills/sd-handoff/SKILL.md`, `skills/sd-plan/SKILL.md`,
 `skills/sd-status/SKILL.md` and `tests/test_skill_frontmatter.py`; the
@@ -273,8 +273,8 @@ line deletion; an earlier draft cited `:287` and `:1092`, which are a
 And, for criterion 21's deletion-verb grep, two sites no other clause of this
 pull request reaches: `bin/sd-status`'s `RESIDUE` tuple at `:960-996` — the
 file is already above for the `sd_lib` field readers, named again because the
-grep lands on a different block of it — and `bin/sd_install.py:831`, `:827`
-and `:961`. Neither is a deletion here. Both are enumerate-and-freeze sites,
+grep lands on a different block of it — and `bin/sd_install.py:994`, `:1001`
+and `:1294`. Neither is a deletion here. Both are enumerate-and-freeze sites,
 for the reason Verification gives below.
 
 **`authors` is two different things and criterion 31's grep cannot tell them
@@ -351,9 +351,9 @@ draft assumed deleting `bin/sd_sweep.py` would do it. It does not. Run on
 2026-09-05, `git grep -nE 'git rm|rmtree|rmdir' -- bin skills` returns eight
 lines and `bin/sd_sweep.py` is in none of them: five are removal-suggestion
 **strings** in `bin/sd-status`'s `RESIDUE` tuple at `:965-995`, telling an
-operator how to uninstall a Trellis or legacy footprint; `bin/sd_install.py:831`
-and `:827` are the installer pruning its own empty parents, which the
-criterion's own words allow; and `bin/sd_install.py:979` is an error message
+operator how to uninstall a Trellis or legacy footprint; `bin/sd_install.py:994`
+and `:1001` are the installer pruning its own empty parents, which the
+criterion's own words allow; and `bin/sd_install.py:1294` is an error message
 reading "Untrack it (git rm --cached) and re-run", which is neither a code
 path nor a temporary path. So deleting `sd_sweep.py` and the `parked`
 handling clears **zero** of the eight, and a criterion phrased "names
@@ -379,7 +379,7 @@ PR 2's merge until a fleet run that may never come.
 So the grep becomes an enumerate-and-freeze over both states: the eight lines
 today, the three that remain if the detectors go, and an assertion that the
 set has not grown and that no hit is a sweep or park code path. Even at three
-the grep is not empty — `bin/sd_install.py:979` is an error message, not a
+the grep is not empty — `bin/sd_install.py:1294` is an error message, not a
 temporary path — so "names nothing" is unreachable in either state.
 `bin/sd-status`'s `RESIDUE` tuple and `bin/sd_install.py` join this pull
 request's Touches for that reason, and the residue detectors are carried here
@@ -984,17 +984,17 @@ base of 16,723 measured on `main` after PR 8b merged at `05adec9e`.** 204 of
 body, 8 of glue, 40 of seam, 24 of body variance, 12 of post-report at 5.7%.
 Down from R11-D42's 417, and the difference is two corrections.
 
-`skills/paths.json` exists and has readers only — `bin/sd_install.py:264` and
+`skills/paths.json` exists and has readers only — `source:bin/sd_install.py::read_paths` and
 `bin/sd_skill.py`. **Nothing writes it programmatically.**
 
 **R11-D42 priced promotion and demotion as two functions on the
-`install_hook` / `remove_hook` precedent, and R11-D44 does not.** That pair at
-`bin/sd_install.py:547` and `:608` is 72 and 76 lines, and reading it shows the
+`install_hook` / `remove_hook` precedent, and R11-D44 does not.** That pair
+(`source:bin/sd_install.py::install_hook`, `source:bin/sd_install.py::remove_hook`) is 72 and 76 lines, and reading it shows the
 cost is not the two directions. It is that `~/.claude/settings.json` is
 somebody else's file: idempotence against a second `--user` run, interleaving
 against another installer, refusing rather than overwriting a file that will
 not parse. `skills/paths.json` is this repository's own tracked file with a
-validating reader already at `bin/sd_install.py:276`, so none of the three
+validating reader already, `source:bin/sd_install.py::read_paths`, so none of the three
 transfer. What differs between the directions is the move and the edit; the
 branch, the commit, the push and the pull request are identical.
 

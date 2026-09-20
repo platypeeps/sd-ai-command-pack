@@ -1087,8 +1087,8 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 #: Per document, so one page cannot offset a new violation in another.
 SYMBOL_ANCHORED_CITATIONS = {
     "actions/docs-gate/README.md": 1,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 39,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 56,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 35,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 52,
 }
 
 
