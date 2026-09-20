@@ -1124,12 +1124,12 @@ log, not here.
 
 **Shared scripts.**
 
-- Bugs: `bin/sd-status:847` passes `root` to `handoff.resolve_root`;
+- Bugs: `bin/sd-status:877` passes `root` to `handoff.resolve_root`;
   `bin/sd-docs-lint:244` tests `value.startswith("none")` where it must
   compare the whole token with `none`, so `Work: nonexistent-item` fails as a
   missing reason rather than as an unresolved path.
 - Cuts: protection gap analysis, acknowledgement loading, both schema files
-  and `.github/sd-status.json` (`bin/sd-status:222-832`) become one
+  and `.github/sd-status.json` (`bin/sd-status:224-862`) become one
   `protected: yes/no` line -- rescinded 2026-09-19, kept; see the Log.
   `bin/sd_sweep.py`, the `sweep` verb (`bin/sd:2704-2738,2916-2925`) and
   `tests/test_sd_sweep.py`; the `parked` field and every reader of it, cut
@@ -1144,13 +1144,13 @@ log, not here.
   `state_home` (`source:bin/sd-handoff-restore::state_home`),
   `packet_path` (`source:bin/sd-handoff-restore::packet_path`), and
   `contains` (`source:bin/sd-handoff-restore::contains`);
-  they are imported the way `bin/sd-status:95` does; the `authors` policy key
+  they are imported the way `bin/sd-status:97` does; the `authors` policy key
   (cut by 31(b2): four declaring sites gone, and a `RETIRED_POLICY_KEYS` row
   in their place); the unreachable gito and kimi argv branches and their
   `except Refusal` (both gone, so no line is left to cite); the constant
   `posted` key and its grep test (still pending: `bin/sd-review:1502`,
   `tests/test_sd_review_boundary.py:214`); the second `BACKENDS` table
-  (`source:bin/sd-status::BACKENDS`), derived from the registry instead;
+  (cut: the section enumerates the registry, so no line is left to cite);
   `RESIDUE` and `residue_section`
   (`source:bin/sd-status::residue_section`) after one clean fleet run;
   the history comments in `Makefile`; `--stash-ref` (no line is left to cite) and
@@ -2859,7 +2859,7 @@ from a number the operator types.
   - C-102, blocking: criterion 9's first clause, that no pack surface
     requests a Copilot review, needs `skills/sd-ship/SKILL.md:55`,
     `skills/sd-handoff/SKILL.md:109`, `bin/sd-review:239` and
-    `bin/sd-status:921,940`. PR 4 claimed the criterion and touched none of
+    `bin/sd-status:951,970`. PR 4 claimed the criterion and touched none of
     them, so the grep would have failed at its merge and the criterion would
     have closed on its documentation clause alone. Addressed.
   - C-103, blocking: PR 1 justified criterion 4's scope by "deleting that
@@ -3363,7 +3363,7 @@ from a number the operator types.
     state.
   - **C-167, blocking: requirement 13's removal list has an entry no pull
     request lands. `addressed`.** "The residue detectors
-    (`bin/sd-status:960-1018`) after one
+    (`bin/sd-status:990-1048`) after one
     clean run across the fleet" is the `RESIDUE` tuple and `residue_section`,
     and the string `residue` appears nowhere in `implement.md`. The cut is
     gated on a fleet run this item does not schedule, and criterion 31 cannot
@@ -5066,7 +5066,7 @@ from a number the operator types.
   R11-D44 reserved 40 for the first `gh` write. The write itself is ten lines,
   because `gh api --method POST` goes through `gh_json` unchanged exactly as
   predicted — but reaching `gh_json` at all costs a loader, since `bin/sd-pr-state`
-  has no `.py` suffix and cannot be imported. `bin/sd-status:97` already carries
+  has no `.py` suffix and cannot be imported. `bin/sd-status:99` already carries
   the same eighteen lines for the same reason, and a third copy will be the
   argument for moving it into `sd_lib`. Not this slice: two copies is a
   coincidence, three is a policy.

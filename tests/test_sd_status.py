@@ -1147,22 +1147,79 @@ class ResidueTests(StatusFixture):
         self.assertEqual(found["hooks-path"]["remove"], "git config --unset core.hooksPath")
 
 
+#: A registry holding one entry of each shape, under names this repository
+#: writes nowhere else. A hand-written backend list cannot produce them, which
+#: is what makes the tests below falsify a recited one.
+FIXTURE_REGISTRY = """\
+bills:
+  acme:  { cost: prepaid }
+  seat:  { cost: subscription }
+  local: { cost: local }
+
+providers:
+  acme-cli:  { start: "git status", vendor: acme, bill: seat,
+               roles: [reviewer], reader: codex-json, env: [] }
+  acme-url:  { url: "https://api.acme.example/v1", model: acme-1, vendor: acme,
+               bill: acme, roles: [reviewer], max_tokens: 1024,
+               price: { in: 1, out: 1 }, env: [ACME_API_KEY] }
+  homelab:   { url: "http://localhost:9099/v1", model: homelab-1, vendor: local,
+               bill: local, roles: [reviewer], max_tokens: 1024,
+               price: { in: 0, out: 0 }, env: [] }
+
+roles:
+  author:   []
+  reviewer: [acme-cli]
+"""
+
+
 class BackendTests(StatusFixture):
+    def seed_registry(self) -> pathlib.Path:
+        """Give the temp HOME a registry, where the installer puts one."""
+        path = self.home / ".local" / "share" / "sd" / "providers.yaml"
+        path.parent.mkdir(parents=True)
+        path.write_text(FIXTURE_REGISTRY, encoding="utf-8")
+        return path
+
+    def backends(self) -> list[dict[str, str]]:
+        return self.report()["backends"]
+
     def test_backends_are_reported_by_name_and_state_only(self) -> None:
-        result = self.report()
-        for entry in result["backends"]:
+        self.seed_registry()
+        rows = self.backends()
+        for entry in rows:
             self.assertEqual(set(entry), {"backend", "command", "state"})
             self.assertIn(entry["state"], ("present", "absent", "unauthenticated"))
-        names = [entry["backend"] for entry in result["backends"]]
-        self.assertIn("codex", names)
-        self.assertIn("copilot", names)
+        self.assertIn("copilot", [entry["backend"] for entry in rows])
 
-    def test_an_empty_path_makes_every_backend_absent(self) -> None:
-        result = self.report()
-        states = {entry["backend"]: entry["state"] for entry in result["backends"]}
-        # The fixture PATH holds git alone, so nothing else can be found.
-        self.assertEqual(states["codex"], "absent")
-        self.assertEqual(states["kimi"], "absent")
+    def test_the_registry_names_the_lanes(self) -> None:
+        """The section enumerates entries no list in this repository holds."""
+        self.seed_registry()
+        states = {entry["backend"]: entry["state"] for entry in self.backends()}
+        # The fixture PATH holds git alone, so this start entry resolves.
+        self.assertEqual(states["acme-cli"], "present")
+        # A url entry declaring a key needs its value, which nothing exports.
+        self.assertEqual(states["acme-url"], "unauthenticated")
+        # A keyless entry reaching this machine authenticates through the
+        # socket, which is the rule `sd_registry.loopback` carries.
+        self.assertEqual(states["homelab"], "present")
+
+    def test_a_url_entry_reports_no_command(self) -> None:
+        """It runs no program, so the section invents none for it."""
+        self.seed_registry()
+        commands = {entry["backend"]: entry["command"] for entry in self.backends()}
+        self.assertEqual(commands["acme-url"], "")
+        self.assertEqual(commands["acme-cli"], "git")
+
+    def test_no_registry_leaves_the_lane_no_entry_names(self) -> None:
+        """A missing registry degrades the section; it does not fail the run.
+
+        `copilot` survives because GitHub's reviewer is reached through `gh`
+        and no provider entry can describe it. The fixture PATH holds git
+        alone, so `gh` is not found either.
+        """
+        rows = self.backends()
+        self.assertEqual([entry["backend"] for entry in rows], ["copilot"])
+        self.assertEqual(rows[0]["state"], "absent")
 
 
 class RepoResolutionTests(StatusFixture):

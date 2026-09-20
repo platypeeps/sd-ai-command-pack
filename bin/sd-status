@@ -18,7 +18,7 @@ Fourteen sections, in output order, under the `pack` banner naming the checkout 
   jira           the operator's Jira rows from the shared database, every repository
   protection     actual enforcement gaps and both r7 merge-settings flags
   handoff        this directory's pending packet, never consumed
-  backends       installed review backend names only
+  backends       the registry's review lanes plus copilot, by name and state only
   residue        legacy leftovers with exact removal commands
 
 Open-row closing contradictions require trailers reachable from local or remote default refs.
@@ -42,6 +42,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import sys
 from collections.abc import Sequence
@@ -56,6 +57,7 @@ if str(_BIN) not in sys.path:
     sys.path.insert(0, str(_BIN))
 
 import sd_lib  # noqa: E402
+import sd_registry  # noqa: E402
 
 # Nothing here imports from `dashboard/`. The issues section used to fall
 # back to that package's index reader, guarded so a copy of `bin/` alone --
@@ -757,20 +759,55 @@ def handoff_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, An
 # 7. Backend availability
 # --------------------------------------------------------------------------
 
-#: Review backends and the executable each one is. Names only, never values:
-#: this section says whether a lane could run, not what its credentials are.
-BACKENDS = (
-    ("codex", "codex"),
-    ("kimi", "kimi"),
-    ("antigravity", "agy"),
-    ("copilot", "gh"),
-    ("prism", "prism"),
-    ("gito", "gito"),
-)
+#: The one review lane the registry cannot describe. `copilot` is GitHub's own
+#: reviewer, asked for through `gh`, so no provider entry names it and nothing
+#: enumerates it. Every other name this tuple used to carry is gone: three of
+#: them (`antigravity`, `prism`, `gito`) named lanes the pack cannot dispatch,
+#: and three real reviewers were missing. A list recited here drifts from the
+#: registry silently, so the registry is read instead.
+UNREGISTERED = (("copilot", "gh"),)
+
+
+def _provider_row(provider: Any) -> dict[str, str]:
+    """One registry entry as a lane, its command and its state.
+
+    A `url` entry runs no command, so `command` is empty rather than invented:
+    this section reports names, never values, and a URL is a value.
+    """
+    if not provider.enabled:
+        # A disabled entry is off; the operator turned it off and a reason says
+        # why. It cannot run, which is what `absent` means here.
+        return {"backend": provider.name, "command": "", "state": "absent"}
+    if provider.kind == "url":
+        declared = provider.env[0] if provider.env else ""
+        if declared:
+            state = "present" if os.environ.get(declared) else "unauthenticated"
+        else:
+            # An entry declaring no key is callable only when its recipient is
+            # this machine. `sd_registry.loopback` is the one parse of that
+            # question, and `chat_completion` applies the same rule before it
+            # refuses a keyless call.
+            state = "present" if sd_registry.loopback(provider) else "unauthenticated"
+        return {"backend": provider.name, "command": "", "state": state}
+    executable = shlex.split(provider.start)[0] if provider.start else ""
+    state = "absent" if not executable or shutil.which(executable) is None else "present"
+    if state == "present" and provider.name == "codex":
+        # A CLI keeps its own credentials, so a declared variable does not say
+        # whether it is signed in. Codex is the one that answers from a local
+        # file, which costs nothing to read.
+        if not (pathlib.Path.home() / ".codex" / "auth.json").is_file():
+            state = "unauthenticated"
+    return {"backend": provider.name, "command": executable, "state": state}
 
 
 def backends_section(root: pathlib.Path) -> list[dict[str, str]]:
     """Which lanes are installed, and where it is cheap to tell, authenticated.
+
+    The lanes come from the provider registry at runtime, so a reviewer added
+    to `providers.yaml` appears here without an edit and one removed stops
+    being claimed. An unreadable or absent registry reports no registry lane
+    rather than failing the section; `sd-review --explain` is where a missing
+    registry is a refusal.
 
     Deliberately shallow: this asks the filesystem and, for `gh`, the one local
     command that answers without a network call. It is not a substitute for the
@@ -778,20 +815,13 @@ def backends_section(root: pathlib.Path) -> list[dict[str, str]]:
     backend will actually run -- and which land with `sd-review` at step 3c.
     Authentication is reported as a state, never as a credential.
     """
-    found = []
-    for name, executable in BACKENDS:
+    registry, _reason = sd_registry.read_or_report(with_database=True)
+    found = [_provider_row(provider) for provider in registry.providers.values()]
+    for name, executable in UNREGISTERED:
         if shutil.which(executable) is None:
             state = "absent"
-        elif name == "copilot":
-            state = "present" if pr_state.gh_authenticated(root) else "unauthenticated"
-        elif name == "codex":
-            state = (
-                "present"
-                if (pathlib.Path.home() / ".codex" / "auth.json").is_file()
-                else "unauthenticated"
-            )
         else:
-            state = "present"
+            state = "present" if pr_state.gh_authenticated(root) else "unauthenticated"
         found.append({"backend": name, "command": executable, "state": state})
     return found
 
