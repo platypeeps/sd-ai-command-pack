@@ -438,11 +438,21 @@ class LineBudgetTests(unittest.TestCase):
         # it -- and a raise nobody can read separately is the failure that rule
         # exists to prevent. Shared-core classification and the complexity
         # ceilings are unchanged; `sd_route` stays outside the lane and pure.
+        # 2826 -> 2880 admits `agy-json`, a third reader for the antigravity
+        # CLI. The number is the argument again: the lane measured exactly
+        # 2826 before it, sitting on its own floor, so any third reader busts
+        # the ratchet whatever it costs. The fifty-four lines are an argv
+        # builder, an envelope parser, and four dispatch edits; the lane gained
+        # no new import, no new file, and no new reach. The builder was written
+        # at sixty-five lines first and compressed to this before the ceiling
+        # moved, and the exact resulting size keeps this a ratchet. This raise
+        # is its own commit, before the one that spends it. Shared-core
+        # classification and the complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2826,
+            2880,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
