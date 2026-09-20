@@ -19,7 +19,10 @@ Check the complete fallback chain, required review count, authorship exclusions,
 Stop if the plan includes an unrequested explicit-only provider.
 One completed independent local review satisfies each reviewing tier; risk classification does not add reviewers.
 Complete local review and fix verification before requesting any Copilot review.
-Copilot is an explicit escalation, not a routine second review or an automatic request after every push.
+Copilot is an optional second review.
+Repository policy may request it automatically for the configured `deep` tier.
+Otherwise, request it only after explicit task direction.
+Never repeat an automatic request after a later push.
 Honor repository restrictions on remote reviewer requests.
 An unavailable local reviewer needs an operator decision, not an automatic remote escalation.
 

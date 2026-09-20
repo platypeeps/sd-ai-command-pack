@@ -57,6 +57,12 @@ Small changes need no placeholder work item.
 4. **Open or reconcile the pull request.**
    Include `Work:` only when an associated item exists.
    The line is absent otherwise; it is not a completion claim.
+   After exact-head confirmation, request Copilot when repository policy selects the final tier.
+   `--copilot-review request` permits one explicit request.
+   `--copilot-review skip` needs explicit task direction and suppresses automatic selection.
+   Suppression persists for the task until a later explicit request replaces it.
+   Automatic selection applies only to full-owned, non-draft pull requests.
+   Never repeat an automatic request on later pushes.
 5. **Wait for CI once.**
    Start `gh pr checks <N> --watch --fail-fast` once in the background, or use the adapter's bounded watch.
    Do not start both.
@@ -142,6 +148,26 @@ Omitting the flag preserves automatic selection for new dispatches and permits r
 Results report `review_selection.requested_provider` and the actual `reviewed_by` list from the retained report.
 Read the recovery reference before retries, fix verification, or additional reviews with an explicit provider.
 
+`--copilot-review auto` is the prepare default.
+It reads `copilot_review.automatic_deep` through the retained local review report.
+An absent policy defaults to `false` and keeps Copilot explicit-only.
+Each request binds one exact head and persists before merge.
+Merge waits for a submitted review, stable review material, and verified finding dispositions.
+An automatic request occurs once per pull request.
+Later pushes still require a local review for the exact head and exact-head CI.
+The completed Copilot review must cover the exact merge head.
+Use `--copilot-review request` when a later push makes the automatic review stale.
+The adapter permits at most three Copilot requests per pull request.
+At that cap, use existing history or a separately authorized manual abandonment.
+Use `--abandon-copilot-review REASON` only during merge.
+It stops waiting for the request basis on the current pull request and reviewed head.
+The basis contains exact-head receipts when present.
+Otherwise, it contains the latest receipt for that pull request.
+No local receipt means there is nothing to abandon, and the command refuses.
+It preserves request history and records a separate abandonment.
+Only submitted, non-pending reviews mark matching request heads complete.
+Published Copilot findings still require disposition.
+
 The additive `workflow` object reports `schema_version`, `phase`, `state`, `blocker`, and `next_action`.
 States are `success`, `retryable_failure`, `operator_decision`, and `policy_block`.
 Blockers identify `code`, `boundary`, `retryable`, and `approval_required`.
@@ -172,9 +198,9 @@ Do not invent acceptance for the operator.
 
 ## Remote findings
 
-Do not request PR reviews automatically.
-Complete local review before an explicitly requested Copilot escalation.
-Honor repository restrictions and avoid repeated requests after each push.
+Complete local review before any Copilot request.
+Request automatically only through the configured `deep` tier.
+Honor repository restrictions and avoid repeated automatic requests after later pushes.
 Read and disposition findings posted independently.
 
 After push, the adapter can record `fixed <commit>` for findings supported by new changes to the named file.

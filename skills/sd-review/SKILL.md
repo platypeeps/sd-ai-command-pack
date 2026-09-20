@@ -67,7 +67,8 @@ Do not substitute another diff or copy a cap into this procedure.
 Reviewing tiers require one completed independent local review.
 Skip requires none, subject to planning and challenge minimums.
 Unranked, enabled reviewers require explicit `--provider NAME` selection and the same eligibility checks.
-Copilot requires a separate explicit request after local review; it is not an automatic local slot.
+Copilot never fills the local slot.
+Shipping may request it afterward through the configured `deep` tier or explicit task direction.
 
 The registry uses read-only database controls when available.
 A missing database permits file defaults without creating a database.

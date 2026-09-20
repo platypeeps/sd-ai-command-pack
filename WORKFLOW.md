@@ -143,11 +143,17 @@ Restart requires a new explicit user decision.
 
 ## Advisory
 
-- Copilot review requires an explicit request after local review.
-  Honor repository restrictions; the system repository prohibits Copilot requests.
-  Do not request another round automatically after a push.
+- Copilot is an optional second review after local review.
+  Repository policy can select automatic review for the high-value `deep` tier.
+  Other requests require explicit task direction.
+  Automatic review applies once per pull request, not after each push.
+  Task-scoped suppression persists until a later explicit request replaces it.
+  The shipping adapter caps total Copilot requests at three per pull request.
+  Shared repositories receive no pack reviewer requests.
   Read and disposition independently posted findings.
-  Pack routing remains advisory; existing repository merge rules still apply.
+  Policy selection remains advisory until a review is requested.
+  After that request, completion and finding disposition become merge gates.
+  Existing repository merge rules still apply.
 
 After every confirmed in-scope merge, follow `skills/sd-ship/references/post-merge-closeout.md` in the sd-ai-command-pack checkout.
 Inspect all paginated threads and review bodies, including late findings.
@@ -157,7 +163,9 @@ Uncertain findings remain open; no automatic Copilot request follows.
 
 ## Never in a shared repository
 
-A shared repository is one where someone else also merges. In it:
+A shared repository resolves to `guest` or `minimal` mode.
+`full` requires administration, a non-fork remote, and exclusive push access.
+In a shared repository:
 
 - No `Work:` line in a pull request body unless the pull request resolves a
   work item that lives in that repository.
@@ -261,8 +269,18 @@ Reusable skill procedures name roles; operator policy owns preferred entries.
 
 Cheap, standard, and deep changes require one completed independent local review.
 Skip requires none; planning and challenged reviews retain their minimum of one.
-Tier selection still follows repository policy, without adding automatic reviewers.
-Complete the local review before any explicitly requested Copilot escalation.
+Tier selection still follows repository policy, without adding automatic local reviewers.
+Complete local review before any Copilot request.
+`copilot_review.automatic_deep` can select the `deep` tier for remote review during shipping.
+The value defaults to `false`.
+Automatic review runs once per pull request after the local review and acknowledgement step.
+Later pushes still require exact-head local review and CI.
+A completed Copilot review must cover the exact merge head.
+Request an explicit later-head review only when the automatic review is stale.
+If that request cannot be recorded, a manual merge can abandon the latest request basis.
+An exact-head receipt replaces the latest prior receipt as that basis.
+Only submitted, non-pending reviews mark matching request heads complete.
+`false` keeps Copilot explicit-only.
 
     bills:
       anthropic: { cost: subscription }

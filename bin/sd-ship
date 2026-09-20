@@ -19,6 +19,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 
 import sd_lib
@@ -57,6 +58,11 @@ REVIEW_CAPTURE_DEPTH = 100
 #: scan off a body of unbounded length. A body of exactly this many bytes is
 #: read; one more is refused, and the refusal says so.
 REVIEW_CAPTURE_BYTES = 2_000_000
+#: One automatic request plus two explicit later-head requests bound remote
+#: review cost without making Copilot unavailable when a risky fix warrants it.
+COPILOT_REVIEW_LIMIT = 3
+COPILOT_MATERIALIZATION_ATTEMPTS = 3
+COPILOT_MATERIALIZATION_INTERVAL_SECONDS = 5
 #: What a decoded value is called when the receipt refuses it for not being an
 #: object. JSON's names, not Python's: the reader is looking at a review's
 #: output. `bool` is looked up by exact type, so it does not fall into `int`.
@@ -350,6 +356,297 @@ class Ship(SharedReview):
                     warnings.append(f"commit {commit} has no Needed-by trailer; delivery continues")
         return warnings
 
+    def copilot_entries(self) -> list[dict]:
+        entries = self.state.get("copilot_reviews") or []
+        if (not isinstance(entries, list)
+                or any(not isinstance(entry, dict)
+                       or type(entry.get("pull")) is not int or entry["pull"] <= 0
+                       or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", str(entry.get("head") or ""))
+                       or entry.get("selection") not in ("automatic", "explicit")
+                       or entry.get("status") not in ("requested", "pending", "completed")
+                       for entry in entries)):
+            raise Refusal("Copilot review receipt is malformed")
+        return [dict(entry) for entry in entries]
+
+    def copilot_abandonments(self) -> list[dict]:
+        entries = self.state.get("copilot_review_abandonments") or []
+        if (not isinstance(entries, list)
+                or any(not isinstance(entry, dict)
+                       or type(entry.get("pull")) is not int or entry["pull"] <= 0
+                       or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", str(entry.get("head") or ""))
+                       or not re.fullmatch(r"[0-9a-f]{64}", str(entry.get("request_digest") or ""))
+                       or not str(entry.get("reason") or "").strip()
+                       or not str(entry.get("abandoned_at") or "").strip()
+                       for entry in entries)):
+            raise Refusal("Copilot review abandonment receipt is malformed")
+        return [dict(entry) for entry in entries]
+
+    @staticmethod
+    def copilot_abandonment_basis(entries: list[dict], head: str) -> list[dict]:
+        exact = [entry for entry in entries if entry["head"] == head]
+        if exact:
+            return exact
+        if entries:
+            return [entries[-1]]
+        raise Refusal("there is no locally recorded Copilot review request for this pull request to abandon")
+
+    @classmethod
+    def copilot_abandonment_digest(cls, entries: list[dict], head: str) -> str:
+        basis = cls.copilot_abandonment_basis(entries, head)
+        identity = [{key: entry.get(key) for key in ("pull", "head", "selection", "requested_at")}
+                    for entry in basis]
+        return digest(identity)
+
+    def abandon_copilot_review(self, number: int, head: str) -> dict | None:
+        supplied = self.args.abandon_copilot_review
+        if supplied is None:
+            return None
+        reason = supplied.strip()
+        if not reason:
+            raise Refusal("--abandon-copilot-review requires a nonempty reason")
+        requests = [entry for entry in self.copilot_entries() if entry["pull"] == number]
+        request_digest = self.copilot_abandonment_digest(requests, head)
+        abandonments = self.copilot_abandonments()
+        existing = next((entry for entry in reversed(abandonments)
+                         if entry["pull"] == number and entry["head"] == head
+                         and entry["request_digest"] == request_digest), None)
+        if existing is not None:
+            if existing["reason"] != reason:
+                raise Refusal("the current Copilot review request already has a different abandonment reason")
+            return existing
+        entry = {"pull": number, "head": head, "request_digest": request_digest,
+                 "reason": reason, "abandoned_at": moment()}
+        self.save(copilot_review_abandonments=[*abandonments, entry])
+        return entry
+
+    def automatic_copilot_review(self) -> bool:
+        """Whether any retained full-branch pass selected remote review."""
+        for review_pass in self.history.native(self.state):
+            report = review_pass.get("report") or {}
+            remote = report.get("remote_reviews")
+            copilot = remote.get("copilot") if isinstance(remote, dict) else None
+            if isinstance(copilot, dict) and copilot.get("automatic") is True:
+                return True
+        return False
+
+    def persist_copilot_direction(self) -> None:
+        suppressed = self.state.get("copilot_review_suppressed", False)
+        if type(suppressed) is not bool:
+            raise Refusal("Copilot review suppression receipt is malformed")
+        if self.args.copilot_review == "skip" and not suppressed:
+            self.save(copilot_review_suppressed=True)
+
+    def clear_copilot_suppression(self) -> None:
+        suppressed = self.state.get("copilot_review_suppressed", False)
+        if type(suppressed) is not bool:
+            raise Refusal("Copilot review suppression receipt is malformed")
+        if self.args.copilot_review == "request" and suppressed:
+            self.save(copilot_review_suppressed=False)
+
+    def copilot_selection(self, pull: dict, mode: str) -> tuple[str, bool, dict | None]:
+        selection = self.args.copilot_review
+        suppressed = self.state.get("copilot_review_suppressed", False)
+        if type(suppressed) is not bool:
+            raise Refusal("Copilot review suppression receipt is malformed")
+        if selection == "skip":
+            return selection, False, {"decision": "skipped", "reason": "task-scoped suppression"}
+        if selection == "auto" and suppressed:
+            return selection, False, {"decision": "skipped", "reason": "task-scoped suppression"}
+        automatic = selection == "auto" and self.automatic_copilot_review()
+        if selection == "auto" and not automatic:
+            return selection, automatic, {
+                "decision": "not_selected", "reason": "review tier is not configured for Copilot"}
+        if mode != "full":
+            if selection == "request":
+                raise Refusal("explicit Copilot review requires a full-owned repository")
+            return selection, automatic, {"decision": "skipped", "reason": f"repository mode is {mode}"}
+        if pull.get("draft") is not False and automatic:
+            return selection, automatic, {
+                "decision": "skipped", "reason": "automatic Copilot review excludes drafts"}
+        return selection, automatic, None
+
+    @staticmethod
+    def require_copilot_capacity(entries: list[dict]) -> None:
+        if len(entries) >= COPILOT_REVIEW_LIMIT:
+            raise Refusal(
+                f"Copilot review limit of {COPILOT_REVIEW_LIMIT} requests per pull request is reached",
+                code="copilot_review_limit", boundary="review", state="operator_decision",
+                next_action="Use the existing history, or explicitly abandon its wait during an authorized manual merge.",
+            )
+
+    def record_copilot_request(self, entries: list[dict], number: int, head: str,
+                               selection: str, status: str, decision: str) -> dict:
+        entry = {
+            "pull": number,
+            "head": head,
+            "selection": "explicit" if selection == "request" else "automatic",
+            "status": status,
+            "requested_at": moment(),
+        }
+        self.save(copilot_reviews=[*entries, entry])
+        return {**entry, "decision": decision}
+
+    def reconcile_copilot_request(self, entries: list[dict], pull_entries: list[dict],
+                                  existing: dict, number: int, head: str,
+                                  selection: str, status: str) -> dict:
+        if selection == "request" and status == "absent":
+            self.require_copilot_capacity(pull_entries)
+            self.api.request_copilot_review(number)
+            return self.record_copilot_request(
+                entries, number, head, selection, "requested", "recovered")
+        if existing["status"] != status and status != "absent":
+            index = entries.index(existing)
+            entries[index] = {**existing, "status": status}
+            self.save(copilot_reviews=entries)
+            existing = entries[index]
+        return {**existing, "decision": "already_recorded"}
+
+    def prepare_copilot_review(self, number: int, pull: dict, head: str, mode: str) -> dict:
+        selection, automatic, decision = self.copilot_selection(pull, mode)
+        if decision is not None:
+            return decision
+
+        entries = self.copilot_entries()
+        pull_entries = [entry for entry in entries if entry["pull"] == number]
+        if automatic and pull_entries:
+            return {**pull_entries[-1], "decision": "not_repeated"}
+        existing = next((entry for entry in reversed(pull_entries) if entry["head"] == head), None)
+        if existing is None:
+            self.require_copilot_capacity(pull_entries)
+        reviews = self.api.pages(f"{self.api.prefix}/pulls/{number}/reviews")
+        status = self.api.copilot_review_status(pull, reviews, head)
+        if existing is not None:
+            result = self.reconcile_copilot_request(
+                entries, pull_entries, existing, number, head, selection, status)
+            self.clear_copilot_suppression()
+            return result
+
+        if status == "absent":
+            try:
+                self.api.request_copilot_review(number)
+            except Refusal as error:
+                if automatic:
+                    return {"decision": "request_failed", "selection": "automatic",
+                            "warning": f"automatic Copilot review request failed: {error}"}
+                raise
+            status = "requested"
+        result = self.record_copilot_request(entries, number, head, selection, status, "recorded")
+        self.clear_copilot_suppression()
+        return result
+
+    def copilot_reviewed_head(self, reviews: list[dict], merge_head: str) -> str | None:
+        completed = [review for review in reviews
+                     if bool(review.get("submitted_at"))
+                     and str(review.get("state") or "").upper() not in ("", "PENDING")]
+        if not completed:
+            return None
+        candidate = str(completed[-1].get("commit_id") or "")
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", candidate):
+            raise Refusal("Latest completed Copilot review has no valid commit ID")
+        try:
+            git(self.root, "cat-file", "-e", f"{candidate}^{{commit}}")
+        except Refusal:
+            raise Refusal(
+                "Latest Copilot-reviewed head is unavailable in local Git history",
+                code="copilot_review_stale", boundary="review", state="operator_decision",
+                next_action="Fetch the reviewed history or request one explicit review for the current branch.",
+            ) from None
+        if candidate != merge_head:
+            try:
+                git(self.root, "merge-base", "--is-ancestor", candidate, merge_head)
+            except Refusal:
+                raise Refusal(
+                    "Latest Copilot-reviewed head is not an ancestor of the merge head",
+                    code="copilot_review_stale", boundary="review", state="operator_decision",
+                    next_action="Request one explicit Copilot review for the current branch, then retry merge.",
+                ) from None
+            raise Refusal(
+                "Latest Copilot-reviewed head is not the exact merge head",
+                code="copilot_review_stale", boundary="review", state="operator_decision",
+                next_action="Request one explicit Copilot review for the current branch, then retry merge.",
+            ) from None
+        return candidate
+
+    def stable_copilot_material(self, number: int, pull: dict, head: str,
+                                *, required: bool) -> tuple[list, list] | None:
+        previous = ""
+        for attempt in range(COPILOT_MATERIALIZATION_ATTEMPTS):
+            reviews = self.api.copilot_reviews(
+                self.api.pages(f"{self.api.prefix}/pulls/{number}/reviews"))
+            comments = self.api.copilot_comments(
+                self.api.pages(f"{self.api.prefix}/pulls/{number}/comments"))
+            if not required and not (reviews or comments):
+                return None
+            reviewed_head = self.copilot_reviewed_head(reviews, head) if required else None
+            if required and reviewed_head is None:
+                raise Refusal(
+                    f"Copilot review has not completed for the exact merge head {head}",
+                    code="copilot_review_pending", boundary="review", state="retryable_failure",
+                    next_action="Wait for the requested Copilot review, then retry merge.",
+                )
+            current = digest({"reviewed_head": reviewed_head, "reviews": reviews, "comments": comments})
+            if attempt + 1 == COPILOT_MATERIALIZATION_ATTEMPTS:
+                if current == previous:
+                    return reviews, comments
+                break
+            previous = current
+            time.sleep(COPILOT_MATERIALIZATION_INTERVAL_SECONDS)
+        raise Refusal(
+            "Copilot review material did not stabilize",
+            code="copilot_review_materializing", boundary="review", state="retryable_failure",
+            next_action="Wait for GitHub to finish publishing review comments, then retry merge.",
+        )
+
+    def require_copilot_clearance(self, number: int, pull: dict, head: str) -> None:
+        entries = [entry for entry in self.copilot_entries() if entry["pull"] == number]
+        request_digest = self.copilot_abandonment_digest(entries, head) if entries else None
+        abandoned = any(entry["pull"] == number and entry["head"] == head
+                        and entry["request_digest"] == request_digest
+                        for entry in self.copilot_abandonments())
+        material = self.stable_copilot_material(
+            number, pull, head, required=bool(entries) and not abandoned)
+        if material is None:
+            return
+        reviews, comments = material
+        self.record_copilot_completion(entries, reviews)
+        try:
+            ack = sd_lib.sibling("sd_review_ack_ship_gate", "sd-review-ack")
+            report = ack.review_state(
+                self.root,
+                {number: {"reviews": reviews, "comments": comments, "pull": pull}},
+                head,
+            )
+        except (OSError, SyntaxError, TypeError, sd_lib.ConfigError, ValueError) as error:
+            raise Refusal(f"Copilot finding disposition could not be verified: {error}") from None
+        if report.get("store_error") or report.get("library_error"):
+            raise Refusal("Copilot finding disposition evidence is unreadable")
+        unresolved = report.get("unsatisfied") or []
+        if unresolved:
+            ids = ", ".join(str(row.get("id") or "unknown") for row in unresolved[:3])
+            extra = "" if len(unresolved) <= 3 else f" and {len(unresolved) - 3} more"
+            raise Refusal(
+                f"{len(unresolved)} pull-request review finding(s) remain unacknowledged: {ids}{extra}",
+                code="review_findings_open", boundary="review", state="operator_decision",
+                next_action=f"Run sd-review-ack --pr {number}, disposition each finding, then retry merge.",
+            )
+
+    def record_copilot_completion(self, entries: list[dict], reviews: list[dict]) -> None:
+        completed_heads = {
+            str(review.get("commit_id") or "") for review in reviews
+            if bool(review.get("submitted_at"))
+            and str(review.get("state") or "").upper() not in ("", "PENDING")
+        }
+        completed_receipts = {(entry["pull"], entry["head"]) for entry in entries
+                              if entry["head"] in completed_heads}
+        if not completed_receipts:
+            return
+        all_entries = self.copilot_entries()
+        updated = [{**entry, "status": "completed"}
+                   if (entry["pull"], entry["head"]) in completed_receipts else entry
+                   for entry in all_entries]
+        if updated != all_entries:
+            self.save(copilot_reviews=updated)
+
     def prepare(self) -> dict:
         if self.state.get("phase") in ("merged", "merge_dispatch"):
             return self.reconcile()
@@ -372,16 +669,19 @@ class Ship(SharedReview):
             raise Refusal("provide a final --title; wip titles never reach the default branch")
         body, deliver, claim, local_work = self.publication_claim()
         mode = self.resolve_mode()
+        if self.args.copilot_review == "request" and mode != "full":
+            raise Refusal("explicit Copilot review requires a full-owned repository")
         if not self.args.no_item and (mode != "guest" or local_work) and f"Work: sd:{self.args.item}" not in body:
             body += f"\n\nWork: sd:{self.args.item}\n"
-        if not self.state:
-            self.save(repository=self.repository, branch=self.branch, item=self.args.item, phase="new")
         if self.state.get("pull_request") and (self.state.get("title") != title
                                                or (not self.args.no_item and self.state.get("deliver") != deliver)):
             raise Refusal("existing PR delivery claim or title differs; reconcile the prepared scope first")
+        self.assert_scope()
+        if not self.state:
+            self.save(repository=self.repository, branch=self.branch, item=self.args.item, phase="new")
+        self.persist_copilot_direction()
         fields = {} if self.args.no_item else {"deliver": deliver, "acceptance": claim}
         self.save(title=title, body=body, base=base, **fields)
-        self.assert_scope()
         # Rules 5 and 8 read the pull request body, and the body is built by
         # now. Without it the rules report themselves not run and CI is the
         # first to check the `Work:` line, which the skill said happened
@@ -443,7 +743,10 @@ class Ship(SharedReview):
             raise Refusal("GitHub pull-request URL does not match the prepared repository")
         self.save(pull_request=reference, phase="ready_to_send")
         self.save(warnings=list(self.state.get("warnings") or []) + self.answer_review(number, head))
-        return self.result("ready_to_send")
+        copilot = self.prepare_copilot_review(number, pull, head, mode)
+        if copilot.get("warning"):
+            self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
+        return self.result("ready_to_send", copilot_review=copilot)
 
     def answer_review(self, number: int, head: str) -> list[str]:
         """Record the review findings this push answers, and never block on it.
@@ -588,6 +891,10 @@ class Ship(SharedReview):
                 body += f"Delivers: sd:{self.args.item}\n"
         return body
 
+    def require_copilot_abandonment_authority(self) -> None:
+        if self.args.abandon_copilot_review is not None and not self.args.manual:
+            raise Refusal("--abandon-copilot-review requires explicit manual merge authority")
+
     def merge(self) -> dict:
         if not self.state.get("pull_request"):
             raise Refusal("prepare this branch before merging", code="prepare_required", state="operator_decision",
@@ -598,6 +905,7 @@ class Ship(SharedReview):
         head = self.args.expected_head
         if not head or current_head(self.root) != head:
             raise Refusal("--expected-head must name the current exact reviewed commit")
+        self.require_copilot_abandonment_authority()
         self.check_review(head)
         self.merge_authority(head)
         # The one validated reader of the `mode:` line, as `merge_ownership`
@@ -617,6 +925,8 @@ class Ship(SharedReview):
         protection = self.api.protection(base)
         observed = self.api.pull(observed["number"])
         self.api.ready(observed, head, base, protection)
+        self.abandon_copilot_review(observed["number"], head)
+        self.require_copilot_clearance(observed["number"], observed, head)
         self.save(phase="ci_passed")
         body = self.squash_body()
         # Preserve actual authorship through the squash, including its vendor
@@ -803,6 +1113,10 @@ def parser():
             action.add_argument("--body-file", type=pathlib.Path)
             action.add_argument("--deliver", action="store_true", default=None)
             action.add_argument("--acceptance-file", type=pathlib.Path)
+            action.add_argument(
+                "--copilot-review", choices=("auto", "request", "skip"), default="auto",
+                help="auto uses repository high-value tiers; request and skip require explicit task direction",
+            )
         if name == "merge":
             action.add_argument("--expected-head", required=True)
             authority = action.add_mutually_exclusive_group()
@@ -810,6 +1124,8 @@ def parser():
             authority.add_argument("--manual", action="store_true")
             action.add_argument("--watch", action="store_true")
             action.add_argument("--wait-seconds", type=int, default=900)
+            action.add_argument("--abandon-copilot-review", metavar="REASON",
+                                help="stop waiting for the locally requested Copilot review on this exact PR and head")
     for name in ("review", "verify-review", "adjudicate"):
         action = commands.add_parser(name)
         identity_flags(action)
