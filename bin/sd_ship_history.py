@@ -199,34 +199,69 @@ class ItemHistory(ReviewHistory):
         return prior
 
     def _validate_coverage(self, state: dict, report: dict) -> None:
+        """Each stored pass checked by what it says it is, against its own predecessor.
+
+        One walk, not three rules chosen by counting. A pass carries what it
+        was: an explicit request, a retry of the pass before it, or an
+        automatic verification of it. Deciding from the count instead made two
+        defects that only a longer chain exposes -- a receipt written under a
+        lower cap read as automatic, and a stale link in the middle that a
+        check on the last pair alone can never see.
+        """
         passes = self.native(state)
-        if passes and (passes[-1].get("additional_review_request")
-                       or len(passes) > AUTOMATIC_CODE_REVIEW_PASSES):
-            self.validate_requests(state)
-            full_branch_coverage(report, self.aggregate(state, before_last=True))
-        elif len(passes) >= 2 and passes[-1].get("retry"):
-            self.validate_retry(passes, report)
-        else:
-            # Every automatic pass but the first verifies the head its
-            # predecessor reviewed, so the chain is checked link by link. A
-            # pass may be incomplete only where the next one retries it.
-            for index, entry in enumerate(passes[:-1]):
-                if not passes[index + 1].get("retry") and not completed_depth(entry.get("report") or {}):
-                    raise Refusal("the original branch never completed the requested local review depth")
-            if len(passes) == 1 and not completed_depth(passes[0].get("report") or {}):
+        if not passes:
+            return
+        self.validate_requests(state)
+        # The checkpoint is read before the walk, not accumulated during it: a
+        # full-branch review supersedes what came *before* it, so a forward
+        # scan that has not reached it yet would refuse its own predecessors.
+        # Only a successful one counts; a failed or reportless pass covers
+        # nothing, and the pass that renews it is where the report arrives.
+        covered = [index for index, entry in enumerate(passes)
+                   if entry.get("additional_review_request")
+                   and completed_depth(self.stored_report(passes, index, report))]
+        checkpoint = covered[-1] if covered else -1
+        for index in range(len(passes)):
+            self.validate_entry(passes, index, self.stored_report(passes, index, report), checkpoint)
+
+    @staticmethod
+    def stored_report(passes: list[dict], index: int, report: dict) -> dict:
+        """The last pass's report is the one freshly read; earlier ones are stored."""
+        return report if index == len(passes) - 1 else (passes[index].get("report") or {})
+
+    def validate_entry(self, passes: list[dict], index: int, current: dict, checkpoint: int) -> None:
+        """One stored pass against its predecessor, by what the entry says it is."""
+        entry = passes[index]
+        if entry.get("additional_review_request"):
+            # The pass being read now is always checked, as it always was.
+            if index == len(passes) - 1 or completed_depth(current):
+                full_branch_coverage(current, self.aggregate_prefix(passes[:index]))
+            return
+        if entry.get("retry"):
+            if index == 0:
+                raise Refusal("a retry has no preceding review to resume")
+            self.validate_retry(passes[:index + 1], current)
+            return
+        if index <= checkpoint:
+            return
+        if index == 0:
+            # The first pass may be incomplete only where the next one
+            # retries it; every later pass is reached as a predecessor.
+            retried = len(passes) > 1 and bool(passes[1].get("retry"))
+            if not retried and not completed_depth(current):
                 raise Refusal("the original branch never completed the requested local review depth")
-            # Every link is checked, not only the last one. One final check
-            # sees a stale digest in the middle of a five-pass chain as
-            # nothing at all, because it never reads the pair that carries it.
-            for index in range(1, len(passes)):
-                following = passes[index]
-                if following.get("retry") or following.get("additional_review_request"):
-                    continue
-                # `report` is the last pass's own report, freshly read; every
-                # earlier link is read from the entry that stored it.
-                verified = report if index == len(passes) - 1 else (following.get("report") or {})
-                if not verification_link(passes[index - 1], verified):
-                    raise Refusal("fix verification does not continue the initially reviewed head")
+            return
+        previous = passes[index - 1]
+        if index - 1 > checkpoint and not completed_depth(previous.get("report") or {}):
+            raise Refusal("the original branch never completed the requested local review depth")
+        if not verification_link(previous, current):
+            raise Refusal("fix verification does not continue the initially reviewed head")
+
+    def aggregate_prefix(self, entries: list[dict]) -> dict:
+        """The history a full-branch pass at this point resumes."""
+        if not entries:
+            raise Refusal("this review history has no records to aggregate")
+        return review_history(entries)
 
     def validate_retry(self, passes: list[dict], report: dict) -> None:
         """The retry resumes the pass before it, whichever pass that is."""

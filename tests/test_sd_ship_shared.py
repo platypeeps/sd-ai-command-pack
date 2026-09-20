@@ -273,3 +273,42 @@ class HistoryChainTests(unittest.TestCase):
         state["passes"][-1]["report"] = broken
         with self.assertRaisesRegex(ship.Refusal, "full-branch coverage does not match"):
             ItemHistory()._validate_coverage(state, broken)
+
+    def test_an_automatic_verification_after_a_full_review_needs_no_earlier_completion(self):
+        base = "0" * 40
+        incomplete = {"status": "clean", "requested_reviews": 2, "completed_reviews": 1,
+                      "authorship_base": base, "subject": {"base": base, "head": "a" * 40}}
+        passes = [{"head": "a" * 40, "report": incomplete}, {"head": "b" * 40, "report": incomplete}]
+        full = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                "authorship_base": base, "subject": {"base": base, "head": "c" * 40},
+                "resume_report_digest": digest(review_history(passes))}
+        checkpoint = {"head": "c" * 40, "report": full,
+                      "additional_review_request": {"head": "c" * 40, "reason": "operator asked",
+                                                    "allowed_passes": 1, "prior_history_digest": digest(passes)}}
+        verification = self._complete("c" * 40, "d" * 40, checkpoint)
+        state = {"passes": [*passes, checkpoint, {"head": "d" * 40, "report": verification}]}
+        # The full review covered the whole branch, so the two incomplete
+        # passes it superseded cannot hold the verification after it.
+        self.assertIsNone(ItemHistory()._validate_coverage(state, verification))
+        broken = dict(verification, verification_report_digest=digest({"not": full}))
+        state["passes"][-1]["report"] = broken
+        with self.assertRaisesRegex(ship.Refusal, "does not continue"):
+            ItemHistory()._validate_coverage(state, broken)
+
+    def test_a_stale_resume_link_on_an_intermediate_retry_is_refused(self):
+        base = "0" * 40
+        incomplete = {"status": "clean", "requested_reviews": 2, "completed_reviews": 1,
+                      "authorship_base": base, "subject": {"base": base, "head": "a" * 40}}
+        first = {"head": "a" * 40, "report": incomplete}
+        resumed = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                   "authorship_base": base, "subject": {"base": base, "head": "b" * 40},
+                   "resume_report_digest": digest(incomplete)}
+        retry = {"head": "b" * 40, "report": resumed, "retry": True}
+        verification = self._complete("b" * 40, "c" * 40, retry)
+        state = {"passes": [first, retry, {"head": "c" * 40, "report": verification}]}
+        self.assertIsNone(ItemHistory()._validate_coverage(state, verification))
+        # Mutating the report the retry resumed leaves the retry's own
+        # resume link stale, two entries back from the report read now.
+        state["passes"][0]["report"] = dict(incomplete, status="mutated after the fact")
+        with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
+            ItemHistory()._validate_coverage(state, verification)
