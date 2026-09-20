@@ -91,19 +91,20 @@ class Destination(NamedTuple):
     what: str
     #: How a report and a status row name the container, in words.
     noun: str
-    #: True when a designation must name the container itself. Notion does not:
-    #: it has a default folder per scope. Drive does: no folder was ever named
-    #: as its default, and inventing one would put a document somewhere nobody
-    #: chose.
-    needs_where: bool = True
+    #: The container a designation that names none falls back to, as a format
+    #: string over the repo name. Every destination has one, so no designation
+    #: has to name a container to be valid. Notion resolves its own per scope
+    #: in `notion_target`, so its entry here is empty.
+    default: str = ""
 
 
 #: Adding a destination is a row here plus a drain step in the contract. It is
 #: deliberately not open-ended: an unknown key in a DOCS entry is a typo, and a
 #: table that accepted anything would queue a mirror to a place nothing drains.
 DESTINATIONS = (
-    Destination("notion", "space", "page", "Notion folder", needs_where=False),
-    Destination("drive", "folder", "file", "Drive folder"),
+    Destination("notion", "space", "page", "Notion folder"),
+    Destination("drive", "folder", "file", "Drive folder",
+                default=BRIEFS + "/%s"),
 )
 
 #: Where a Notion mirror goes when the designation names no space, as
@@ -220,7 +221,9 @@ def notion_target(raw: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def mirror_targets(cfg: dict[str, Any]) -> tuple[list[dict[str, str]], list[str]]:
+def mirror_targets(
+    cfg: dict[str, Any], repo: Path
+) -> tuple[list[dict[str, str]], list[str]]:
     """The outward destinations this DOCS entry designates, and what was wrong.
 
     A document publishes to the dashboard and to Obsidian whatever this
@@ -230,6 +233,11 @@ def mirror_targets(cfg: dict[str, Any]) -> tuple[list[dict[str, str]], list[str]
 
     Returns a list because a document may be designated for several places at
     once. `notion=` and `drive=` on one entry are two mirrors, not a choice.
+
+    A designation that names no container gets its destination's default:
+    `Briefs/<repo>` for Drive, the per-scope folder for Notion. Both are the
+    shape the vault already uses, so a reader who knows where one brief is
+    knows where all of them are, whichever copy they found first.
 
     Problems are returned rather than raised, and returned *per destination*.
     A malformed designation is the user's to fix, and one bad key must not cost
@@ -255,10 +263,9 @@ def mirror_targets(cfg: dict[str, Any]) -> tuple[list[dict[str, str]], list[str]
         if dest.name == "notion":
             targets.append(notion_target(raw))
             continue
-        where = str(raw.get(dest.where, "")).strip()
-        if not where and dest.needs_where:
-            problems.append("%s= needs a %s" % (dest.name, dest.where))
-            continue
+        # Notion returned above, so this is the destination whose default is
+        # a path the drain resolves rather than a container it is handed.
+        where = str(raw.get(dest.where, "")).strip() or dest.default % repo.name
         targets.append({
             "destination": dest.name,
             dest.where: where,
@@ -371,7 +378,7 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     reports: list[str] = []
     wanted: list[tuple[dict[str, Any], dict[str, str]]] = []
     for cfg in docs:
-        targets, problems = mirror_targets(cfg)
+        targets, problems = mirror_targets(cfg, repo)
         reports += ["mirror: %s in %s" % (p, cfg.get("out", "?")) for p in problems]
         wanted += [(cfg, target) for target in targets]
     if not wanted:
