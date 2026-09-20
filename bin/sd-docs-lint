@@ -25,6 +25,11 @@ Eight rules (each past the fifth arrived with a decision record, not a patch):
                     `.github/copilot-instructions.md` tabulates carries that
                     class's scope line in the pull request body. The classes
                     are read from that file, never restated here.
+Rule 6 carries an optional second reading, off unless `JEV_SD_DOCS_LINT=1`
+and a `jev` on PATH that answers: a model is asked whether each cited
+passage still supports the sentence citing it, which a comparison of bytes
+cannot ask. It prints notes and never fails.
+
 Rules 1 to 4, 6 and 7 read the tree. Rules 5 and 8 need the pull request body,
 so they run only when `--pr-body` supplies one and report themselves as not run
 otherwise. Rule 8 also needs the changed paths: `--changed` lists them, and
@@ -41,10 +46,14 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import json
 import os
 import pathlib
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 
 _BIN = str(pathlib.Path(__file__).resolve().parent)
 if _BIN not in sys.path:
@@ -919,6 +928,238 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
         report.note(f"rule 6 not recorded: {line}")
 
 
+# Rule 6 asks whether the recorded text is still at the recorded line. That is
+# the whole of what a comparison of bytes can ask, and it catches a citation
+# whose target moved. It cannot catch the other drift. The snippet is
+# byte-identical, the rule passes, and the sentence doing the citing now claims
+# something the cited passage no longer says. Rule 6 reports that clean
+# forever, which is the same fail-open shape the rest of this file keeps
+# closing -- a check that runs, prints a number, and was never able to see the
+# thing it is trusted for.
+#
+# So a second reading, by a model, off unless a run asks for it. It is
+# advisory and it is advisory deliberately: Jev is experimental, nothing here
+# may depend on it, and a gate that turns red on a model's opinion is a gate
+# people learn to re-run until it passes. This prints notes. It never fails,
+# never changes an exit code, and a run without the opt-in is byte-for-byte
+# the run there was before it existed.
+#
+# Enabling it sends prose off this machine. `docs/work` in a private
+# repository is private prose, so there is no default that turns this on and
+# no configuration file that can: the opt-in is an environment variable, set
+# per run by whoever is standing there.
+JEV_OPT_IN = "JEV_SD_DOCS_LINT"
+# The one reason that prints nothing. Every other way this pass declines is a
+# run that asked for it and did not get it, and saying so is the whole of how
+# a reader tells "found nothing" from "never looked". Nobody asked is neither:
+# a note on every run of a linter that nearly nobody opts into would be a line
+# of noise in every pull request in both repositories, forever. So a run
+# without the opt-in prints exactly what it printed before this existed.
+NOT_ASKED = "not asked"
+CLAIM_CHARS = 400
+EVIDENCE_CHARS = 700
+EVIDENCE_WINDOW = 3
+CLAIM_BATCH = 12
+SUPPORT_FLOOR = 0.5
+CLAIM_INSTRUCTIONS = (
+    "The passage in `citations.{key}.evidence` is cited as the source for the "
+    "statement in `citations.{key}.claim`. Does the passage support that "
+    "statement as the statement is written? Judge support by this passage "
+    "alone, not whether the statement is true somewhere else."
+)
+
+
+def jev_command() -> tuple[str, str]:
+    """The `jev` to call and an empty reason, or an empty pair and why not.
+
+    The resolved path travels rather than the name, and the two callers share
+    one lookup. Resolving twice would let the batch call a different `jev`
+    from the one that answered `enabled` -- a PATH that changed underneath is
+    unlikely and the failure it makes is unreadable, which is the combination
+    worth spending a return value on.
+
+    Three gates in the order that costs least. The opt-in is a string
+    comparison, `which` is a path walk, and `jev enabled` reads a file and
+    exits 3 rather than calling anything. None of them reaches the network, so
+    a run that did not ask for this pays nothing for its being here. A missing
+    `jev` is the ordinary case and not an error: it lives in a private
+    repository and most checkouts of this one will never have it.
+    """
+    if os.environ.get(JEV_OPT_IN) != "1":
+        return "", NOT_ASKED
+    found = shutil.which("jev")
+    if found is None:
+        return "", "jev is not on PATH"
+    try:
+        probe = subprocess.run(  # fixed argv, no shell
+            [found, "enabled"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        return "", f"jev enabled did not run: {error}"
+    if probe.returncode != 0:
+        return "", "jev enabled reports it cannot answer on this machine"
+    return found, ""
+
+
+def read_span(path: pathlib.Path, start: int, window: int, cap: int) -> str:
+    """`window` lines from `start`, collapsed to one line and capped.
+
+    Capped rather than sent whole, because what this function returns is what
+    leaves the machine. A citation names a line, so a window of a few lines
+    around it is the evidence; the rest of the document is not being judged
+    and has no business travelling.
+    """
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    span = lines[max(start - 1, 0):start - 1 + window]
+    return " ".join(" ".join(span).split())[:cap]
+
+
+def claim_case(item: pathlib.Path, work_root: pathlib.Path, row: str) -> dict[str, str] | None:
+    """One manifest row as the claim it makes and the evidence it points at.
+
+    Built from the recording rather than from a second walk of the pages, so
+    this pass and rule 6 cannot come to disagree about which citations exist
+    -- the same argument `citation_survey` makes for having one walk.
+
+    What leaves the machine is two capped passages of prose under the keys
+    `claim` and `evidence`, and nothing else: no path, no item name, no
+    repository name, and not the citation marker either. The passages are
+    prose and a sentence may name a file of its own accord; that is the limit
+    of the promise, and it is the reason there is no default that turns this
+    pass on in a private checkout.
+    """
+    source, _, relative, start, _ = row.split("\t")
+    page, _, number = source.rpartition(":")
+    # The citation marker itself comes out of the claim. It names a file and a
+    # line, which is the one thing this pass has no reason to send, and the
+    # question is about what the sentence asserts rather than about where the
+    # sentence says to look. It is prose, so no promise can be made that a
+    # file name never appears inside it -- a sentence is free to name one --
+    # but the marker is put there by the citation and is taken back out.
+    claim = CITATION_RE.sub("[cited]", read_span(item / page, int(number), 1, CLAIM_CHARS))
+    evidence = read_span(work_root.resolve() / relative, int(start), EVIDENCE_WINDOW, EVIDENCE_CHARS)
+    if not claim or not evidence:
+        return None
+    return {"claim": claim, "evidence": evidence}
+
+
+def collect_claims(work_root: pathlib.Path) -> tuple[dict[str, dict[str, str]], dict[str, str]]:
+    """Every recorded citation as a case, and where each case came from.
+
+    Two dictionaries on purpose. The cases travel and are keyed `c1`, `c2`,
+    so the request carries no name of ours; the origins stay here and are what
+    a note is written from. Only an item that has a recording is read: an item
+    with none is rule 6's failure to report, not this pass's to guess at.
+    """
+    cases: dict[str, dict[str, str]] = {}
+    origins: dict[str, str] = {}
+    for item in item_directories(work_root):
+        if "archive" in item.parts or not (item / CITATION_MANIFEST).is_file():
+            continue
+        rows, _ = citation_survey(item, work_root)
+        for row in rows:
+            case = claim_case(item, work_root, row)
+            if case is None:
+                continue
+            key = f"c{len(cases) + 1}"
+            cases[key] = case
+            source, citation = row.split("\t")[:2]
+            origins[key] = f"{item.name}/{source} `{citation}`"
+    return cases, origins
+
+
+def ask_claims(command: str, cases: dict[str, dict[str, str]]) -> dict[str, dict]:
+    """One request for a whole batch, and an empty answer set when it failed.
+
+    Independent questions over one state run in parallel, which is why a batch
+    is one call and not one call per citation. `--fallback` is what keeps a
+    failure from becoming a traceback: Jev switched off, unkeyed, timing out
+    or refusing prints `{}`, exits 0, and says why on stderr, so this degrades
+    to having nothing to say rather than to taking the linter down with it.
+    """
+    questions = {
+        key: {"type": "noul", "instructions": CLAIM_INSTRUCTIONS.format(key=key)}
+        for key in cases
+    }
+    with tempfile.TemporaryDirectory() as box:
+        state = pathlib.Path(box) / "state.json"
+        state.write_text(json.dumps({"citations": cases}), encoding="utf-8")
+        try:
+            done = subprocess.run(  # fixed argv, no shell
+                [command, "ask", "--questions", "-", "--state", str(state),
+                 "--state-format", "json", "--fallback", "{}"],
+                input=json.dumps(questions), capture_output=True, text=True, timeout=120,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return {}
+    if done.returncode != 0:
+        return {}
+    try:
+        answers = json.loads(done.stdout).get("answers", {})
+    except (json.JSONDecodeError, AttributeError):
+        return {}
+    return answers if isinstance(answers, dict) else {}
+
+
+def check_claim_support(work_root: pathlib.Path, report: Report) -> None:
+    """Rule 6's optional second reading: does the evidence still say it?
+
+    Notes only, and a note in every outcome a run asked for -- including the
+    ones where nothing ran. A pass that can be silently absent is a pass
+    nobody can tell apart from a pass that found nothing, and this file has
+    already paid for that mistake twice: rule 6 over an unrecorded item, rule
+    7 over no references at all. So a run that set the opt-in is told why it
+    got no answers as plainly as it would be told the answers. A run that set
+    nothing is told nothing, which is `NOT_ASKED` above.
+
+    A citation Jev did not answer for is passed over rather than reported: the
+    request may have been dropped, and an unanswered question is not evidence
+    of drift. So the closing note counts answers and not citations, and says
+    both numbers. It said only the citations once, and a batch that came back
+    with nothing at all printed `read 2 citation(s), 0 under 0.5` -- the same
+    line two confident answers print. That was found by running this against
+    the live service with a citation built to contradict its source and
+    watching it report clean; `jev ask` had no `--fallback` and the call was
+    failing on its arguments. Two bugs, and the one that mattered was this
+    line, because it is the one that would have hidden the next.
+    """
+    command, reason = jev_command()
+    if reason == NOT_ASKED:
+        return
+    if reason:
+        report.note(f"rule 6 claim support: not run ({reason})")
+        return
+    cases, origins = collect_claims(work_root)
+    if not cases:
+        report.note("rule 6 claim support: no recorded citation to read")
+        return
+    keys = list(cases)
+    weak = 0
+    answered = 0
+    for start in range(0, len(keys), CLAIM_BATCH):
+        batch = keys[start:start + CLAIM_BATCH]
+        answers = ask_claims(command, {key: cases[key] for key in batch})
+        for key in batch:
+            support = answers.get(key, {}).get("noul")
+            if not isinstance(support, (int, float)):
+                continue
+            answered += 1
+            if support >= SUPPORT_FLOOR:
+                continue
+            weak += 1
+            report.note(
+                f"rule 6 claim support: {origins[key]} reads {support:.2f} -- the cited "
+                "passage may no longer support the sentence citing it"
+            )
+    report.note(
+        f"rule 6 claim support: {answered} of {len(cases)} recorded citation(s) answered, "
+        f"{weak} under {SUPPORT_FLOOR}; advisory, no failure"
+    )
+
+
 # A metavariable makes a token a pattern rather than a path. Skipping on the
 # metavariable itself, and not on a list of known template strings, is what
 # keeps the escape a property of the rule: a new template invents no new
@@ -1184,6 +1425,7 @@ def run(
     check_pr_link(repo, work_root, pr_body, report)
     check_pr_scope(repo, pr_body, changed, report)
     check_citations(work_root, report)
+    check_claim_support(work_root, report)
     check_work_references(repo, work_dir, report)
     return report
 

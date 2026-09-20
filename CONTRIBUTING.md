@@ -133,6 +133,26 @@ python3 tests/test_doc_citations.py --repoint --apply
 The repair tool matches anchored text. It refuses ambiguous or missing matches.
 Do not replace line numbers without checking their targets.
 
+#### The optional claim-support reading
+
+Rule 6 compares recorded text against the cited line.
+It cannot tell whether that passage still supports the sentence citing it.
+
+An optional second reading asks a model that question:
+
+```bash
+JEV_SD_DOCS_LINT=1 make docs-lint
+```
+
+It needs `jev` on `PATH`. `jev` ships in a private companion repository, so
+most checkouts do not have it, and a run without it is a run without this
+pass. The pass prints notes only. It never fails a run and never changes an
+exit code. A run that leaves the opt-in unset prints nothing about it at all.
+
+Enabling it sends the citing sentence and the cited passage to a third-party
+service. Both are capped, and neither carries a path, an item name, or the
+citation marker. Leave the opt-in unset when `docs/work` is private.
+
 ### Permissions
 
 Put machine-specific rules in ignored `.claude/settings.local.json`.
