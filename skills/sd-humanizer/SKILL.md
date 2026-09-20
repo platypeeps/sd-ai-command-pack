@@ -395,9 +395,10 @@ file before scoring anything. What follows is only how this skill uses it.
 **Run it when all three hold.** The mode is pasted text or file, the user
 asked for prose scores in this session, and `jev enabled` exits `0`. Otherwise
 skip the pass. Embedded mode never scores, because it reports no numbers.
-Say nothing when the user never asked, and say so in one sentence when the
-user asked and `jev` cannot answer here. A reader without `jev` still gets the
-whole loop above.
+Say nothing when the user never asked. In pasted-text and file modes, say so
+in one sentence when the user asked and `jev` cannot answer here. Embedded
+mode reports neither the scores nor their absence, because it outputs prose
+only. A reader without `jev` still gets the whole loop above.
 
 **Score twice, before and after.** Score the source text, run the loop, then
 score the final rewrite. A dimension that dropped is evidence the edit landed.
