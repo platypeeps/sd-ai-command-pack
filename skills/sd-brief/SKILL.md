@@ -13,9 +13,10 @@ breadth plus recency over known topics; depth on a single question is
 Source quality and dating rules live in `references/source-standards.md`.
 
 When the deliverable is a finished document, apply
-`references/publication-contract.md`: it publishes to the dashboard's
-Documents tab by default, and reaches an outward destination — Notion, Google
-Drive — only where the user designated that document for it.
+`references/publication-contract.md`: it publishes to the Obsidian
+vault and the dashboard's Documents tab by default, and reaches an
+outward destination — Notion, Google Drive — only where the user designated that
+document for it.
 
 ## When to use
 

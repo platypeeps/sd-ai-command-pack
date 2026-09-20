@@ -87,7 +87,7 @@ that cannot run has not passed.
 | `40-docs/` | `PRD-` `DESIGN-` `PLAN-` `SPIKE-` `SURVEY-` `DISCOVERY-` `BENCHMARK-` `DECK-` `OUTREACH-` |
 | `90-scratch/` | Throwaway and superseded. Never cited. |
 | `assets/` | Images the docs reference |
-| `build/` | Rendered HTML. Generated — never hand-edit. Gitignored. |
+| `docs/dashboard/` | Rendered HTML, served by the dashboard. Generated — never hand-edit. Gitignored. |
 | `vendor/` | Third-party clones. Gitignored. |
 
 Use only the directories the repo needs; do not invent new ones. The numbers are
@@ -179,17 +179,17 @@ skip links sibling notion drive`. The visual identity is shared and lives in the
 renderer, so
 every repo renders the same way.
 
-Two forms are written per document. `build/<name>.html` is standalone, opens
-with `file://`, and is the form the dashboard's Documents tab lists and serves
-— the published form, not merely a local one.
-`build/artifact/<name>.html` is content only — the renderer still emits it, but
-nothing consumes it, because research is not published as artifacts (see
-Publishing). Add or edit pages in `research.conf.py`, never by editing generated
-files.
+One form is written per document. `docs/dashboard/<name>.html` is standalone,
+opens with `file://`, and is the form the dashboard's Documents tab lists and
+serves — the published form, not merely a local one. The content-only
+`build/artifact/` form is gone: nothing consumed it, and the dashboard folder's
+contract is that everything in it is published. Add or edit pages in
+`research.conf.py`, never by editing generated files.
 
-Rendering ends by registering `build/` with the dashboard and queueing a sync
-for every document that designates an outward destination. Both steps are
-idempotent. See Publishing, and `references/publication-contract.md`.
+Rendering ends by writing each document's Markdown into the Obsidian vault,
+registering `docs/dashboard/` with the dashboard, and queueing a sync for every
+document that designates an outward destination. Every step is idempotent. See
+Publishing, and `references/publication-contract.md`.
 
 Verify links before publishing:
 
@@ -340,12 +340,18 @@ map, brief, report and survey had a Notion page. That is now the exception
 rather than the rule: an outward destination is outward-facing, so a document
 reaches one only when the user designates it and names the container.
 
-### The dashboard is the default
+### Obsidian and the dashboard are the defaults
 
-`sd-research-kit render` ends by registering `build/` with the local
-dashboard's Documents tab, and the tab lists and serves `build/<name>.html`.
-That standalone form is therefore the published form, not merely a local
-reading form. Registration is one line in the dashboard's `documents.conf`,
+`sd-research-kit render` ends by writing each document's Markdown into
+`$OBSIDIAN_VAULT/Briefs/<repo>/<name>.md`. That vault copy is where the document
+lives; everything else is a duplicate of it in another format. The note carries
+frontmatter naming the source repo, path and revision, so a reader knows which
+checkout owns it and that the note is not the place to edit.
+
+`render` also registers `docs/dashboard/` with the local dashboard's Documents
+tab, and the tab lists and serves **everything it finds there**. That folder is
+gitignored — it is regenerated on every commit — and `render` adds the ignore
+entry itself. Registration is one line in the dashboard's `documents.conf`,
 written once and idempotent; the dashboard reads that file and never writes it,
 so the repo keeps owning its own output.
 
@@ -365,22 +371,33 @@ The user designates a document and names its container at that time. Record it
 in that document's `DOCS` entry, where the document is already described:
 
 ```python
-notion=dict(space="Research", page="https://www.notion.so/...")
+notion=dict()                    # private space, Briefs folder
+notion=dict(team=True)           # R&D team space, R&D Briefs folder
 drive=dict(folder="Research deliverables", file="https://docs.google.com/document/d/...")
 ```
 
-| Destination | Key | Container (required) | Existing page or file (optional) |
+| Destination | Key | Container | Existing page or file (optional) |
 | --- | --- | --- | --- |
-| Notion | `notion=` | `space=` | `page=` |
-| Google Drive | `drive=` | `folder=` | `file=` |
+| Notion | `notion=` | defaulted per scope; `space=` overrides the folder | `page=` |
+| Google Drive | `drive=` | `folder=`, required | `file=` |
 
 Both keys on one entry are two mirrors, not a choice. Until one of these keys
-exists, the document publishes to the dashboard and nowhere else. Do not infer a
-target from a title, a folder or a neighbouring document.
+exists, the document publishes locally and nowhere else. Do not infer a target
+from a title, a folder or a neighbouring document.
 
-The container is required; the page or file is not. Without it the drain creates
-the page or file and the designation is amended with the id it got. With it the
-drain updates that one, which is what stops a re-render leaving a second copy
+**A Notion mirror is private unless it asks for the team.** `notion=dict()`
+goes to the private space's `Briefs` folder; `notion=dict(team=True)` goes to
+the R&D team space's `R&D Briefs` folder. Private is the default because the two
+mistakes are not symmetric: a brief the team cannot see is repaired by adding
+`team=True` and draining again, and a private brief in a shared team space has
+already been read. `space=` overrides the folder, never the scope.
+
+A Drive folder is required and has no default; inventing one would put a
+document somewhere nobody chose.
+
+The page or file is optional everywhere. Without it the drain creates the page
+or file and the designation is amended with the id it got. With it the drain
+updates that one, which is what stops a re-render leaving a second copy
 behind.
 
 Recording it in `research.conf.py` is what makes the mirror machine-readable.
@@ -395,9 +412,13 @@ Instead it writes a sync request per designated document per destination under
 `~/.claude/pending-mirror-syncs/`, naming the destination, the document, its
 container, the page or file to update and the source revision.
 
-An agent session drains that queue through the connector the request names: the
-Notion connector for `destination: notion`, the Google Workspace connector for
-`destination: drive`. One request file per document per destination, so a
+An agent session drains that queue through the connector the request names, in
+that destination's native format: the Notion connector for
+`destination: notion`, as Notion blocks; the Google Workspace connector for
+`destination: drive`, as a native Google Doc. A Notion request also carries a
+`scope`, `private` or `team`, and a `private` request never reaches the team
+space whatever its folder is called. The source for every mirror is the
+Markdown, never the rendered HTML. One request file per document per destination, so a
 re-render replaces the pending request rather than queueing a second one; a
 request that is never drained stays on disk. `references/publication-contract.md`
 says how the status report surfaces one.
@@ -439,8 +460,8 @@ shared Drive folder either, and designating one does not lift the restriction.
 ### Artifacts
 
 Research is still not published as artifacts — the hosted single-page surface
-the renderer's `build/artifact/` form was written for. Pages published as
-artifacts before 2026-08-27 stay where they are as historical record.
+the renderer's retired `build/artifact/` form was written for. Pages published
+as artifacts before 2026-08-27 stay where they are as historical record.
 
 ## Style
 

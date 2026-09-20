@@ -106,19 +106,32 @@ this pack and everything installed from it. Read it before deciding where a
 document goes; the short form is here so that nobody has to guess whether one
 exists.
 
-**Publication is the default, not a request.** A finished document is published
-to the local dashboard's **Documents** tab. A document nobody can find was not
-delivered, and a skill that ends by naming a path in a build directory has not
-finished. Working state -- ledgers, receipts, handoff packets, monitor state --
-is not a finished document and does not publish.
+**Publication is the default, not a request.** A finished document is written
+into the Obsidian vault as Markdown, under `Briefs/<repo>/`, and published to
+the local dashboard's **Documents** tab as HTML from `docs/dashboard/`. A
+document nobody can find was not delivered, and a skill that ends by naming a
+path in a build directory has not finished. Working state -- ledgers, receipts,
+handoff packets, monitor state -- is not a finished document and does not
+publish.
+
+**The document lives in Obsidian; the rest are duplicates.** Each copy is in the
+format its destination reads natively: Markdown in the vault, HTML on the
+dashboard, Notion blocks in Notion, a native Google Doc in Drive. A copy in the
+wrong format is a copy nobody can use where it landed.
 
 **An outward destination is opt-in, per document.** Notion and Google Drive are
-mirrors, not defaults. The user designates a document and names its container at
-that time; it is recorded in that document's `notion=` or `drive=` key in
-`research.conf.py`. Nothing infers a target, and both keys on one entry are two
-mirrors rather than a choice. A render enqueues each sync under
-`~/.claude/pending-mirror-syncs/` and an agent session drains it, because
-rendering runs in a git hook and in CI, and neither can reach an MCP server.
+mirrors, not defaults. The user designates a document; it is recorded in that
+document's `notion=` or `drive=` key in `research.conf.py`. Nothing infers a
+target, and both keys on one entry are two mirrors rather than a choice. A
+render enqueues each sync under `~/.claude/pending-mirror-syncs/` and an agent
+session drains it, because rendering runs in a git hook and in CI, and neither
+can reach an MCP server.
+
+**A Notion mirror is private unless it asks for the team.** `notion=dict()` goes
+to the private space's `Briefs` folder; `notion=dict(team=True)` goes to the R&D
+team space's `R&D Briefs` folder. Private is the default because a brief the
+team cannot see is repaired by draining again, and a private brief in a shared
+space has already been read.
 
 **A published page carries its own resources.** The Documents tab serves under
 `default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`.

@@ -18,7 +18,7 @@ shared template`, with the reason.
 | `30-brief/` | `BRIEF-*` argued positions · `REVIEW-*` assessments · `SUMMARY-*` condensations |
 | `40-docs/` | `PRD-` `DESIGN-` `PLAN-` `SPIKE-` `DISCOVERY-` `BENCHMARK-` `DECK-` `OUTREACH-` |
 | `90-scratch/` | Throwaway and superseded. Never cited. |
-| `build/` | Rendered HTML. Generated — never hand-edit. Gitignored. |
+| `docs/dashboard/` | Rendered HTML, served by the dashboard. Generated — never hand-edit. Gitignored. |
 | `vendor/` | Third-party clones. Gitignored. |
 
 Use only the directories this repo needs; do not invent new ones.
@@ -64,10 +64,11 @@ The renderer strips everything above `---` and builds the masthead from
 sd-research-kit render
 ```
 
-Writes `build/<name>.html` — standalone, opens with `file://`. That is a local
-reading form, not a publishing surface. (`build/artifact/<name>.html` is still
-emitted, but nothing consumes it: research is not published as artifacts.) Add or
-edit pages in `research.conf.py`, never by editing generated files.
+Writes `docs/dashboard/<name>.html` — standalone, opens with `file://`, and
+served by the dashboard's Documents tab. `render` also writes each document's
+Markdown into `$OBSIDIAN_VAULT/Briefs/<repo>/`, which is where the document
+lives. Add or edit pages in `research.conf.py`, never by editing generated
+files.
 
 ## Adversarial review before publishing
 
