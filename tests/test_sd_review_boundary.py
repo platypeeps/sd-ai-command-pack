@@ -421,11 +421,23 @@ class LineBudgetTests(unittest.TestCase):
         # for deep changes. Lower tiers remain explicit-only. The route report
         # carries the selection into shipping after local review. Complexity
         # limits and shared-core classification remain unchanged.
+        #
+        # 2620 -> 2826 admits the optional Jev tier reading. The number is the
+        # argument, not the feature's size: the lane measured exactly 2620
+        # before it, and 2636 with `bin/sd_jev.py` deleted outright, so the
+        # sixteen lines that call it bust the ratchet on their own. A cap
+        # sitting on its own floor refuses every change to the lane equally,
+        # which is a stuck ratchet rather than a budget. This raise is its own
+        # commit, before the one that spends it, because the rule the file
+        # below states is that a cap is never raised in the change that busts
+        # it -- and a raise nobody can read separately is the failure that rule
+        # exists to prevent. Shared-core classification and the complexity
+        # ceilings are unchanged; `sd_route` stays outside the lane and pure.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2620,
+            2826,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
