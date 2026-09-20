@@ -132,7 +132,7 @@ in `research.conf.py`:
 
 | Destination | Key | Container | Existing page or file (optional) |
 | --- | --- | --- | --- |
-| Notion | `notion=` | defaulted per scope; `space=` overrides the folder | `page=` |
+| Notion | `notion=` | a page id per scope; `space=` overrides the folder | `page=` |
 | Google Drive | `drive=` | defaults to `Briefs/<repo>`; `folder=` overrides | `file=` |
 
     notion=dict()                    # private space, Briefs folder
@@ -157,6 +157,18 @@ one.
 `space=` overrides the folder, never the scope: naming a folder says where
 inside a space, not which space. A document that must reach the team says so
 with `team=True` and nothing else does it.
+
+**Each default folder is pinned by its Notion page id, not by its name.** Both
+folders have been renamed once already, and a name lookup that finds nothing
+returns an empty result rather than an error — so a rename would have moved
+every default mirror to nowhere and told no one. The names above are labels a
+message prints. Renaming either folder in Notion changes what a report calls it
+and not where a document lands.
+
+A `space=` override written as a page id or a page URL is pinned the same way.
+Written as a plain name it cannot be, so the request says which of the two it
+is: `resolve: "id"` with the folder in `space_id`, or `resolve: "name"` with
+`space_id` empty and the name in `space`.
 
 ### A Drive mirror lands beside its siblings
 
@@ -207,7 +219,9 @@ Draining is four steps per request, and the order matters:
 1. Read the request. It names the destination, the document, its Markdown,
    rendered and source paths, its container, the page or file to update and the
    revision the render was made from. A Notion request also names its `scope`,
-   `private` or `team`.
+   `private` or `team`, and how its container was resolved: `resolve: "id"`
+   with the folder's page id in `space_id`, or `resolve: "name"` with the
+   folder's name in `space`.
 2. Check the document's handling restrictions first. One that may not be shared
    externally is not mirrored to a shared destination, and designating it did
    not lift that. Report it and leave the request in place.
@@ -215,9 +229,14 @@ Draining is four steps per request, and the order matters:
    format**, updating the page or file the request names rather than creating a
    second one:
 
-   - `notion` — the Notion connector, as Notion blocks. Honour `scope`: a
-     `private` request goes to your private space and never to the team space,
-     whatever the folder is called.
+   - `notion` — the Notion connector, as Notion blocks. With `resolve: "id"`,
+     write under the page `space_id` names and never search for the folder by
+     name: `space` is a label, and the folder it labels has been renamed
+     before. With `resolve: "name"`, look the folder up by name, and treat a
+     lookup that finds nothing as a failure to report rather than an empty
+     result — do not create a folder to make the name resolve. Honour `scope`
+     either way: a `private` request goes to your private space and never to
+     the team space, whatever the folder is called.
    - `drive` — the Google Workspace connector, as a native Google Doc. Not an
      uploaded `.md` or `.html` file: the point of the mirror is that someone can
      read and comment on it in place. Import the Markdown so headings, tables

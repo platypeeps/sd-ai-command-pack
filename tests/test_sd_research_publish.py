@@ -174,6 +174,57 @@ class MirrorTargetTests(unittest.TestCase):
             {"notion": dict(space="Archive", team=True)}, REPO)
         self.assertEqual(target["scope"], "team")
 
+    def test_a_notion_default_is_pinned_by_page_id_not_by_folder_name(self) -> None:
+        """The folder is resolved by id, and the name is only ever printed.
+
+        A name lookup that finds nothing returns an empty result rather than an
+        error, so a rename moved every default mirror to nowhere and said so to
+        nobody. Both folders have been renamed once already."""
+        (private,), _ = PUBLISH.mirror_targets({"notion": {}}, REPO)
+        self.assertEqual(
+            private["space_id"], "3c9f52b1-5782-81a7-a466-fb0e2df4d928")
+        self.assertEqual(private["resolve"], "id")
+        (team,), _ = PUBLISH.mirror_targets({"notion": dict(team=True)}, REPO)
+        self.assertEqual(
+            team["space_id"], "3cff52b1-5782-806a-acb0-ca0c8f41524b")
+        self.assertEqual(team["resolve"], "id")
+
+    def test_renaming_the_folder_in_notion_is_cosmetic(self) -> None:
+        """After a rename the label changes and the folder does not."""
+        before = [PUBLISH.mirror_targets({"notion": dict(team=flag)}, REPO)[0][0]
+                  for flag in (False, True)]
+        original = PUBLISH.NOTION_SCOPES
+        self.addCleanup(setattr, PUBLISH, "NOTION_SCOPES", original)
+        PUBLISH.NOTION_SCOPES = {
+            flag: scope._replace(label=scope.label + " 2026",
+                                 phrase=scope.phrase + " 2026")
+            for flag, scope in original.items()
+        }
+        after = [PUBLISH.mirror_targets({"notion": dict(team=flag)}, REPO)[0][0]
+                 for flag in (False, True)]
+        for was, now in zip(before, after, strict=True):
+            self.assertEqual(was["space_id"], now["space_id"])
+            self.assertEqual(now["resolve"], "id")
+            self.assertNotEqual(was["space"], now["space"])
+
+    def test_an_override_resolves_by_id_whenever_it_names_one(self) -> None:
+        """`space=` may be an id or a page URL, and then it is rename-proof.
+
+        A plain name is not, so the request says `name` rather than implying a
+        resolution it did not make."""
+        for written in ("3cff52b1-5782-806a-acb0-ca0c8f41524b",
+                        "https://www.notion.so/Old-Name-"
+                        "3cff52b15782806aacb0ca0c8f41524b"):
+            with self.subTest(written):
+                (target,), _ = PUBLISH.mirror_targets(
+                    {"notion": dict(space=written)}, REPO)
+                self.assertEqual(target["resolve"], "id")
+                self.assertTrue(target["space_id"].endswith("524b"))
+        (named,), _ = PUBLISH.mirror_targets(
+            {"notion": dict(space="Archive")}, REPO)
+        self.assertEqual(named["space_id"], "")
+        self.assertEqual(named["resolve"], "name")
+
     def test_a_non_dict_is_refused(self) -> None:
         for key in ("notion", "drive"):
             with self.subTest(key):
@@ -243,6 +294,16 @@ class EnqueueTests(Fixture):
         self.assertEqual(request["space"], "Research")
         self.assertEqual(request["page"], "https://notion.so/a")
         self.assertEqual(request["document"], "a")
+
+    def test_a_default_notion_request_carries_the_folder_id(self) -> None:
+        """The drain reads `space_id`, so the id has to reach the file."""
+        PUBLISH.enqueue(self.repo, [dict(
+            src="10-x/a.md", out="a", title="A", notion=dict(team=True))])
+        request = json.loads(
+            (PUBLISH.QUEUE / "my-research.a.notion.json").read_text())
+        self.assertEqual(
+            request["space_id"], "3cff52b1-5782-806a-acb0-ca0c8f41524b")
+        self.assertEqual(request["resolve"], "id")
 
     def test_a_drive_designation_queues_a_drive_request(self) -> None:
         PUBLISH.enqueue(self.repo, [dict(

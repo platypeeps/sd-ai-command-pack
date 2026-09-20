@@ -379,7 +379,7 @@ drive=dict(folder="Research deliverables", file="https://docs.google.com/d/...")
 
 | Destination | Key | Container | Existing page or file (optional) |
 | --- | --- | --- | --- |
-| Notion | `notion=` | defaulted per scope; `space=` overrides the folder | `page=` |
+| Notion | `notion=` | a page id per scope; `space=` overrides the folder | `page=` |
 | Google Drive | `drive=` | defaults to `Briefs/<repo>`; `folder=` overrides | `file=` |
 
 Both keys on one entry are two mirrors, not a choice. Until one of these keys
@@ -392,6 +392,15 @@ the R&D team space's `R&D Briefs` folder. Private is the default because the two
 mistakes are not symmetric: a brief the team cannot see is repaired by adding
 `team=True` and draining again, and a private brief in a shared team space has
 already been read. `space=` overrides the folder, never the scope.
+
+**Each default folder is pinned by its Notion page id.** The names above are
+labels a message prints. A name lookup that finds nothing returns an empty
+result rather than an error, and both folders have been renamed once already,
+so a rename would have moved every default mirror to nowhere in silence.
+Renaming either folder in Notion is now cosmetic. A `space=` override written
+as a page id or page URL is pinned the same way; written as a plain name it is
+not, and the request says which by carrying `resolve: "id"` with `space_id` or
+`resolve: "name"` with the name in `space`.
 
 **A Drive mirror lands beside its siblings.** `drive=dict()` goes to
 `Briefs/<repo>` in My Drive, the same shape the vault uses, so the two copies
@@ -425,7 +434,9 @@ that destination's native format: the Notion connector for
 `destination: notion`, as Notion blocks; the Google Workspace connector for
 `destination: drive`, as a native Google Doc. A Notion request also carries a
 `scope`, `private` or `team`, and a `private` request never reaches the team
-space whatever its folder is called. The source for every mirror is the
+space whatever its folder is called. It carries `resolve` too: with `id`, write
+under the page `space_id` names and never search by name; with `name`, a lookup
+that finds nothing is a failure to report, not a folder to create. The source for every mirror is the
 Markdown, never the rendered HTML. One request file per document per destination, so a
 re-render replaces the pending request rather than queueing a second one; a
 request that is never drained stays on disk. `references/publication-contract.md`

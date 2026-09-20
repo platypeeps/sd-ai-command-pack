@@ -102,13 +102,39 @@ class Destination(NamedTuple):
 #: deliberately not open-ended: an unknown key in a DOCS entry is a typo, and a
 #: table that accepted anything would queue a mirror to a place nothing drains.
 DESTINATIONS = (
+    # `space` is the key a designation writes, and the label a request carries.
+    # The container a Notion drain resolves is `space_id`, set by
+    # `notion_target`; this row never resolves one.
     Destination("notion", "space", "page", "Notion folder"),
     Destination("drive", "folder", "file", "Drive folder",
                 default=BRIEFS + "/%s"),
 )
 
-#: Where a Notion mirror goes when the designation names no space, as
-#: `(scope, folder, phrase)`.
+class NotionScope(NamedTuple):
+    """One Notion default destination, pinned by page id.
+
+    `page_id` resolves the folder; `label` is what that folder happens to be
+    called today and is only ever printed. They are separate fields because
+    they answer different questions, and the name answers neither reliably.
+    """
+
+    #: `private` or `team`: which Notion space the mirror may reach.
+    scope: str
+    #: The folder's Notion page id. This is what a drain resolves.
+    page_id: str
+    #: What the folder is called today, for messages. Nothing looks a folder
+    #: up by it.
+    label: str
+    #: How a report and a status row name the folder, in words.
+    phrase: str
+
+
+#: Where a Notion mirror goes when the designation names no folder.
+#:
+#: Pinned by page id and not by folder name. A name lookup that finds nothing
+#: returns an empty result rather than an error, so a rename moved every
+#: default mirror to nowhere and told no one. Both of these folders have been
+#: renamed once already. By id a rename is cosmetic.
 #:
 #: Private is the default and the team space is the opt-in, because the two
 #: mistakes are not symmetric. A brief the team cannot see is repaired by
@@ -116,9 +142,29 @@ DESTINATIONS = (
 #: space has already been seen by the team, and deleting it does not undo that.
 #: So the direction that is recoverable is the one that happens by accident.
 NOTION_SCOPES = {
-    False: ("private", BRIEFS, "the private %s folder" % BRIEFS),
-    True: ("team", "R&D Briefs", "the R&D Briefs folder in the R&D team space"),
+    False: NotionScope(
+        "private", "3c9f52b1-5782-81a7-a466-fb0e2df4d928", BRIEFS,
+        "the private %s folder" % BRIEFS),
+    True: NotionScope(
+        "team", "3cff52b1-5782-806a-acb0-ca0c8f41524b", "R&D Briefs",
+        "the R&D Briefs folder in the R&D team space"),
 }
+
+#: A Notion page id, bare or at the end of a page URL: 32 hex digits, dashed
+#: or not. `space=` may be written either way, so overriding the folder does
+#: not cost the designation its id resolution.
+NOTION_ID = re.compile(
+    r"(?:^|[/-])([0-9a-fA-F]{8}-?(?:[0-9a-fA-F]{4}-?){3}[0-9a-fA-F]{12})$")
+
+
+def notion_id(value: str) -> str:
+    """The Notion page id `value` names, or `""` when it names none.
+
+    Returned verbatim rather than normalised: the id goes to a connector, and
+    rewriting the user's spelling of it is a second thing that can be wrong.
+    """
+    found = NOTION_ID.search(value.strip().rstrip("/").split("?")[0])
+    return found.group(1) if found else ""
 
 #: The dashboard builds a URL from the key, so the key is what a URL may carry.
 #: Mirrored from `sd_dashboard/documents.py`, which rejects anything else.
@@ -207,15 +253,26 @@ def notion_target(raw: dict[str, Any]) -> dict[str, str]:
     `NOTION_SCOPES` for why that direction is the one that must be asked for.
     An explicit `space=` overrides the folder but never the scope: naming a
     folder says where inside a space, not which space.
+
+    The folder is carried as `space_id`, a Notion page id, and `resolve` says
+    how it was arrived at. `id` is every default and any `space=` written as an
+    id or a page URL; a rename cannot touch those. `name` is a `space=` written
+    as a plain name, which no id can be derived from -- there the drain does
+    look the folder up by name, and the contract makes an empty lookup a
+    failure to report rather than a folder to create.
     """
-    scope, folder, phrase = NOTION_SCOPES[bool(raw.get("team"))]
+    scope, page_id, label, phrase = NOTION_SCOPES[bool(raw.get("team"))]
     named = str(raw.get("space", "")).strip()
-    if named and named != folder:
+    if named and named != label:
+        override = notion_id(named)
+        page_id = override
         phrase = "the %s folder in your %s space" % (named, scope)
     return {
         "destination": "notion",
         "scope": scope,
-        "space": named or folder,
+        "space_id": page_id,
+        "resolve": "id" if page_id else "name",
+        "space": named or label,
         "page": str(raw.get("page", "")).strip(),
         "target": phrase,
     }
