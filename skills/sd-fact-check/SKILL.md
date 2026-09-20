@@ -39,6 +39,9 @@ reading or searching.
   current date and print it in the audit so the time boundary is visible.
 - `format=ledger|memo` — default `ledger`; `memo` adds a forwardable summary but
   retains the complete claim ledger.
+- `jev=on|off` — default `off`; opt in to the optional typed verdict pass in
+  `## Optional typed verdicts`. Off, absent, or unavailable, the audit runs
+  exactly as described here.
 
 ## Workflow
 
@@ -114,6 +117,126 @@ scope, the verdict ladder, or the `## Final report` contract.
   a dispatched sub-agent. When it is already running as a dispatched sub-agent,
   run the units inline in its own context rather than dispatching further — do
   not spawn another layer.
+
+## Optional typed verdicts
+
+This section is optional and off by default. Skip it unless the invocation
+passes `jev=on` **and** `jev enabled` exits `0`. Both conditions are required;
+either one absent means this section does not run and the audit is unchanged.
+
+`jev` is a shell command that asks a System One model one narrow typed question
+about supplied state. It is not part of this skill and is absent on most
+machines. Without it the audit is complete: the workflow above assigns every
+verdict on its own, and nothing in this section changes the scope, the verdict
+ladder, or the `## Final report` contract.
+
+### Why a typed question fits here
+
+Step 6 ends in one of five named verdicts per claim. That is a fixed-set
+classification over an evidence span, so a `choice` question returns the same
+vocabulary as a typed answer with a confidence attached. Use it as a second
+reading that flags disagreement. It never assigns a verdict.
+
+### Before the first call
+
+- Run `jev enabled`. It exits `0` when the command can answer here and `3` when
+  it cannot. It calls nothing and costs nothing, so it is safe to run first.
+- Confirm the claim and its evidence span may leave the machine. Every call is
+  a network request to a third party. Skip this pass for confidential,
+  embargoed, or personal material.
+- Send the claim text, the as-of date, and the evidence span, and nothing else.
+  No file path, locator, internal URL, host name, repository name, or
+  credential belongs in the state. The question does not need them.
+- Ask once per claim, after step 5 gathers the evidence and before step 6
+  writes the verdict.
+
+### The criteria
+
+Each criterion describes one concrete situation and stands on its own. The
+model reads these descriptions and not this page, so none of them refers to
+another criterion or to the workflow above. Keep them in a scratch JSON
+file of their own, outside the audited material:
+
+```json
+{
+  "supported": "The evidence states the claim as written, or directly implies that it is true.",
+  "partially_supported": "The evidence supports a narrower or qualified version of the claim, but not its full scope, magnitude, or certainty.",
+  "unverified": "The evidence does not address what the claim asserts, either way, so nothing in it settles the claim.",
+  "contradicted": "The evidence states the opposite of the claim, or implies that the claim is false.",
+  "outdated": "The evidence shows the claim held at an earlier date, and that a later fact replaced it before the as-of date.",
+  "not_a_factual_claim": "The text is an opinion, a value judgment, a prediction, or rhetoric, so no evidence could settle it."
+}
+```
+
+The first five names carry the five verdicts of step 6, spelled with
+underscores. `not_a_factual_claim` is the no-match option: it catches an input
+the five verdicts cannot describe, so the model never forces one of them onto
+an opinion or a prediction.
+
+Pass that file as `@criteria.json`. The inline `--criteria 'name=text,...'`
+form splits entries on commas and on the first `=` of each entry, so these
+descriptions cannot be written inline.
+
+### The call
+
+State is the claim and its span, one claim per call:
+
+```json
+{
+  "claim": "<exact original wording>",
+  "as_of": "<audit date>",
+  "evidence": "<the evidence span read for this claim>"
+}
+```
+
+```sh
+jev choice 'How does the evidence relate to the claim as written?' \
+    --state claim.json --state-format json \
+    --criteria @criteria.json \
+    --unsure-below 0.8 --fallback not_asked
+```
+
+`--fallback not_asked` prints `not_asked` and exits `0` when the command is
+switched off, unkeyed, or failing, and writes the reason to stderr. A failed
+call is therefore never a stalled audit.
+
+The token is deliberately not `unsure`. `--unsure-below` prints `unsure` for a
+real answer under the threshold, so reusing that word would make a pass that
+judged nothing read exactly like a pass that judged every claim and was
+uncertain about all of them. Exit `0` does not mean the model judged anything
+either, because a fallback also exits `0`. Read the printed name, not the exit
+status.
+
+### What the answer changes
+
+The command prints one criterion name, or `unsure` when its confidence is under
+`0.8`. Confidence is the shape of the distribution: one peak is high, spread
+across several names is low.
+
+- Answer `unsure`: ignore it. Assign the verdict from the evidence, as step 6
+  already requires.
+- Answer equal to the verdict you reached: change nothing. It is corroboration
+  and not evidence.
+- Answer different from the verdict you reached: re-read the evidence span
+  once, then write the verdict the evidence supports. A disagreement prompts a
+  second look and decides nothing.
+- Answer `not_a_factual_claim`: check whether the item belongs under
+  **Non-fact-checkable items** instead of the claim ledger. Decide from the
+  wording of the claim, not from this answer.
+- Answer `not_asked`: the call reached no judgment. It is neither a verdict nor
+  a low-confidence answer. Record nothing from it and assign the verdict from
+  the evidence, as step 6 already requires.
+
+Count the claims sent and the claims answered. A `not_asked` claim was sent and
+not answered. When the two counts differ, say so once in the session response,
+outside the deliverable, and give both numbers. When nothing comes back
+answered, stop the pass for this audit instead of calling once per remaining
+claim.
+
+You own every verdict. A probability is not evidence, so never cite this
+command or its output in the claim ledger, a rationale, a confidence value, an
+evidence column, or the methodology section. The delivered report is
+byte-for-byte the report this skill would produce with the pass switched off.
 
 ## Safety rules
 
