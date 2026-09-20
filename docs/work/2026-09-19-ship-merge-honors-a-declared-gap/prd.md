@@ -354,9 +354,28 @@ promoted `planning → ready`.
   `paths`, `paths-ignore`, `branches`, `branches-ignore`, or a `types` list
   without `synchronize` runs for some pull requests and not others, so a
   documentation-only change stayed blocked on a source-only workflow GitHub
-  never scheduled. Fixed: `sd_lib.pull_request_filters` names the filters
-  and such a workflow is not expected; when it did run at the head,
-  `every_check`'s check-run loop still holds it to green. Two tests, one
-  of them the failing filtered run.
+  never scheduled. First fix: such a workflow was not expected at all.
 - Development code review point: one automatic pass spent; the fix gets
   one verification pass (the cap row's "plus one").
+
+### 2026-09-19 — verification pass, two blocking findings, both fixed
+
+- `source:bin/sd_ship_remote.py::expected_workflows` (high): the first fix
+  dropped every filtered workflow, including Tests under
+  `branches: [main]` on a merge into main. Fixed the other way round:
+  `sd_lib.pull_request_trigger_applies` evaluates the filter the way GitHub
+  does — `github_glob` (`*` stops at `/`, `**` does not, `?`, `[...]`,
+  `+`), `github_filter_matches` with the last matching pattern winning and
+  `!` deselecting, `branches`/`branches-ignore` against the base,
+  `paths`/`paths-ignore` against `git diff --name-only origin/<base>...<head>`
+  after a fetch, `types` without `synchronize` as "never fires on a push".
+  A pattern this cannot read, both `paths` keys at once, or an empty diff
+  leave the workflow expected: uncertainty refuses, it does not merge.
+  Five fixtures each way, a failing run of an unexpected workflow, and
+  `FilterSemantics` on the pure functions.
+- `source:bin/sd_lib.py::workflow_triggers` (medium): the single-event
+  form `on: pull_request` read as no trigger and refused every merge under
+  the declaration. Fixed: an inline scalar is that one event. Two spellings
+  and a `workflow_dispatch`-only workflow beside the gate.
+- The cap row is spent. A further finding on this branch is the owner's
+  call, not an automatic pass.

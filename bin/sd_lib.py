@@ -2361,6 +2361,8 @@ def workflow_triggers(lines: list[str]) -> set[str]:
         parsed = yaml_sequence(yaml_children(lines, offset), inline)
         if parsed:
             return set(parsed)
+        if inline:  # `on: pull_request`, the single-event form
+            return {yaml_scalar(inline)}
         return {name for _, name, _ in yaml_entries(yaml_children(lines, offset))}
     return set()
 
@@ -2372,25 +2374,108 @@ def workflow_triggers(lines: list[str]) -> set[str]:
 EVENT_NAME_RE = re.compile(r"^[a-z][a-z_]*$")
 
 #: The keys under `on.pull_request` that make a workflow run for some pull
-#: requests and not others: GitHub skips it when the diff, the base branch or
-#: the activity type is outside the filter, and no run at the head is then a
-#: fact about the filter rather than about the commit. A `types` list is a
-#: filter when it leaves out `synchronize`, the activity that follows a push.
-PULL_REQUEST_FILTERS = ("paths", "paths-ignore", "branches", "branches-ignore")
+#: requests and not others. GitHub skips it when the base branch, the changed
+#: paths or the activity type fall outside the filter, so whether a run is
+#: owed at a head is a question about this pull request, answered by
+#: `pull_request_trigger_applies` below and not by the file alone.
+PULL_REQUEST_FILTERS = ("branches", "branches-ignore", "paths", "paths-ignore", "types")
 
 
-def pull_request_filters(lines: list[str]) -> list[str]:
-    """The filter keys under `on.pull_request`, empty for an unconditional trigger."""
+def pull_request_filters(lines: list[str]) -> dict[str, list[str]]:
+    """The filter lists under `on.pull_request`, keyed by filter; empty when unconditional."""
     for offset, key, _ in yaml_entries(lines):
         if key not in ("on", "true"):
             continue
         block = yaml_sub(yaml_children(lines, offset), "pull_request")
-        found = [name for _, name, _ in yaml_entries(block) if name in PULL_REQUEST_FILTERS]
-        for entry_offset, name, inline in yaml_entries(block):
-            if name == "types" and "synchronize" not in yaml_sequence(yaml_children(block, entry_offset), inline):
-                found.append("types")
-        return found
-    return []
+        return {name: yaml_sequence(yaml_children(block, entry_offset), inline)
+                for entry_offset, name, inline in yaml_entries(block) if name in PULL_REQUEST_FILTERS}
+    return {}
+
+
+def github_glob(pattern: str) -> re.Pattern[str] | None:
+    """A filter pattern as GitHub matches it, or `None` for one this cannot read.
+
+    `*` stops at `/`, `**` does not, `?` is one character, `[...]` is a
+    class, `+` repeats the character before it. A leading `!` is the
+    caller's to strip. Anything else in the pattern is literal.
+    """
+    out: list[str] = []
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if pattern.startswith("**", index):
+            out.append(".*")
+            index += 2
+        elif char == "*":
+            out.append("[^/]*")
+            index += 1
+        elif char == "?":
+            out.append("[^/]")
+            index += 1
+        elif char == "[":
+            close = pattern.find("]", index + 1)
+            if close < 0:
+                return None
+            out.append("[" + pattern[index + 1:close].replace("\\", "\\\\") + "]")
+            index = close + 1
+        elif char == "+":
+            if not out:
+                return None
+            out.append("+")
+            index += 1
+        else:
+            out.append(re.escape(char))
+            index += 1
+    try:
+        return re.compile("".join(out) + r"\Z")
+    except re.error:
+        return None
+
+
+def github_filter_matches(patterns: list[str], candidate: str) -> bool | None:
+    """Whether `candidate` is selected by `patterns` in GitHub's order, or `None`.
+
+    A positive pattern selects, a later `!pattern` deselects, and the last
+    word wins, as the workflow-syntax reference states it. `None` means one
+    pattern could not be read, and the caller must not treat that as "no".
+    """
+    selected = False
+    for pattern in patterns:
+        negated = pattern.startswith("!")
+        compiled = github_glob(pattern[1:] if negated else pattern)
+        if compiled is None:
+            return None
+        if compiled.match(candidate):
+            selected = not negated
+    return selected
+
+
+def pull_request_trigger_applies(filters: dict[str, list[str]], base: str, changed: list[str]) -> bool:
+    """Whether GitHub schedules an `on.pull_request` trigger under `filters` for
+    a pull request into `base` that changed `changed`.
+
+    Uncertain answers say yes: a pattern this cannot read, or both `paths`
+    and `paths-ignore` (which GitHub refuses), leave the workflow expected,
+    and a merge missing its run refuses. The other way round is the hole.
+    `types` is the one filter that does not depend on the pull request: a
+    list without `synchronize` never fires on a push, so no head after the
+    first is validated by it, and the workflow is not one this can wait for.
+    """
+    if "types" in filters and "synchronize" not in filters["types"]:
+        return False
+    if "branches" in filters and github_filter_matches(filters["branches"], base) is False:
+        return False
+    if "branches-ignore" in filters and github_filter_matches(filters["branches-ignore"], base) is True:
+        return False
+    if "paths" in filters and "paths-ignore" not in filters:
+        answers = [github_filter_matches(filters["paths"], path) for path in changed]
+        if changed and all(answer is False for answer in answers):
+            return False
+    if "paths-ignore" in filters and "paths" not in filters:
+        answers = [github_filter_matches(filters["paths-ignore"], path) for path in changed]
+        if changed and all(answer is True for answer in answers):
+            return False
+    return True
 
 
 #: Where a repository records that it has looked at a protection state and
