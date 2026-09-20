@@ -390,6 +390,13 @@ class Ship(SharedReview):
             return [entries[-1]]
         raise Refusal("there is no locally recorded Copilot review request for this pull request to abandon")
 
+    @classmethod
+    def copilot_abandonment_digest(cls, entries: list[dict], head: str) -> str:
+        basis = cls.copilot_abandonment_basis(entries, head)
+        identity = [{key: entry.get(key) for key in ("pull", "head", "selection", "requested_at")}
+                    for entry in basis]
+        return digest(identity)
+
     def abandon_copilot_review(self, number: int, head: str) -> dict | None:
         supplied = self.args.abandon_copilot_review
         if supplied is None:
@@ -398,7 +405,7 @@ class Ship(SharedReview):
         if not reason:
             raise Refusal("--abandon-copilot-review requires a nonempty reason")
         requests = [entry for entry in self.copilot_entries() if entry["pull"] == number]
-        request_digest = digest(self.copilot_abandonment_basis(requests, head))
+        request_digest = self.copilot_abandonment_digest(requests, head)
         abandonments = self.copilot_abandonments()
         existing = next((entry for entry in reversed(abandonments)
                          if entry["pull"] == number and entry["head"] == head
@@ -592,8 +599,7 @@ class Ship(SharedReview):
 
     def require_copilot_clearance(self, number: int, pull: dict, head: str) -> None:
         entries = [entry for entry in self.copilot_entries() if entry["pull"] == number]
-        basis = self.copilot_abandonment_basis(entries, head) if entries else []
-        request_digest = digest(basis) if basis else None
+        request_digest = self.copilot_abandonment_digest(entries, head) if entries else None
         abandoned = any(entry["pull"] == number and entry["head"] == head
                         and entry["request_digest"] == request_digest
                         for entry in self.copilot_abandonments())

@@ -717,6 +717,24 @@ roles:
             with patch.object(ship.time, "sleep"):
                 self.merge("--abandon-copilot-review", "provider result is no longer required")
 
+    def test_completion_during_failed_merge_does_not_duplicate_abandonment(self):
+        self.enable_automatic_copilot()
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.double.review_payload["reviews"] = [{
+            "user": {"login": "Copilot"}, "commit_id": head, "state": "COMMENTED",
+            "submitted_at": "2026-09-19T20:00:00Z",
+            "body": "| File | Summary |\n|---|---|\n| `src.py` | Moderate finding (2 votes): verify. |\n",
+        }]
+        reason = "provider result is no longer required"
+        for _ in range(2):
+            with self.assertRaisesRegex(ship.Refusal, "remain unacknowledged"):
+                with patch.object(ship.time, "sleep"):
+                    self.merge("--abandon-copilot-review", reason)
+            state = self.operation().state
+            self.assertEqual(state["copilot_reviews"][0]["status"], "completed")
+            self.assertEqual(len(state["copilot_review_abandonments"]), 1)
+
     def test_later_head_can_abandon_the_latest_request_after_dispatch_failure(self):
         self.enable_automatic_copilot()
         self.prepare()
@@ -758,7 +776,8 @@ roles:
         state = self.operation().state
         abandonment = state["copilot_review_abandonments"][0]
         self.assertEqual(abandonment["head"], head)
-        self.assertEqual(abandonment["request_digest"], ship.digest([state["copilot_reviews"][-1]]))
+        self.assertEqual(abandonment["request_digest"], self.operation().copilot_abandonment_digest(
+            state["copilot_reviews"], head))
 
     def test_abandonment_refuses_without_a_local_request_receipt(self):
         self.prepare()

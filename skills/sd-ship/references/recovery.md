@@ -42,6 +42,7 @@ Otherwise, it binds the latest receipt for that pull request.
 This fallback permits recovery after a later-head request reaches the cap or its transport fails.
 No local receipt means there is nothing to abandon, and the command refuses.
 It preserves all request receipts and appends a separate abandonment receipt.
+Receipt status changes do not change the abandonment identity or add another decision.
 A later head or a new exact-head receipt needs a new decision.
 Submitted, non-pending review evidence marks only matching receipt heads completed.
 This completion update also applies when the wait was abandoned.
