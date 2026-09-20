@@ -22,13 +22,45 @@ roles:
 """
 
 
-class ProviderPreflight(ReviewFixture):
+#: A registry of `url` entries whose credential rule is the subject, not their
+#: protocol. `local` takes the loopback exemption, `keyed` and `remote` hold
+#: one half of it each, so the three rows cover every branch of the preflight
+#: predicate rather than one row and a restatement of the other two.
+CREDENTIAL_REGISTRY = """
+bills:
+  fixture: { cost: subscription }
+providers:
+  local: { url: "http://localhost:8084/v1", model: fixture-local, vendor: localvendor, bill: fixture, roles: [reviewer], env: [] }
+  keyed: { url: "http://localhost:8084/v1", model: fixture-keyed, vendor: keyedvendor, bill: fixture, roles: [reviewer], env: [LOCAL_KEY] }
+  remote: { url: "https://remote.invalid/v1", model: fixture-remote, vendor: remotevendor, bill: fixture, roles: [reviewer], env: [] }
+  author: { start: "fixture-author", vendor: other, bill: fixture, reader: codex-json, roles: [author, reviewer], env: [] }
+roles:
+  author: [author]
+  reviewer: [local, keyed, remote, author]
+"""
+
+
+class PreflightFixture(ReviewFixture):
+    """The repository, registry and consent every probe below runs against.
+
+    The registry, the consent line, the probed entry and the environment are
+    class attributes so a second registry needs a second class rather than a
+    second copy of this setup. A subclass that changed them by overriding
+    `setUp` would inherit this class's tests too and run them against the
+    wrong registry.
+    """
+
+    registry = REGISTRY
+    reviewers = "minimax@minimax.invalid, kimi@kimi.invalid, author@fixture-author"
+    probed = "minimax"
+    probe_environment: dict[str, str] = {"KEY": "secret-key-marker"}
+
     def setUp(self):
         super().setUp()
         self.registry_path = self.registry_home / ".local/share/sd/providers.yaml"
-        self.registry_path.write_text(REGISTRY)
+        self.registry_path.write_text(self.registry)
         self.root = self.make_repo()
-        self.consent("minimax@minimax.invalid, kimi@kimi.invalid, author@fixture-author")
+        self.consent(self.reviewers)
         subprocess.run(["git", "checkout", "-qb", "fixture"], cwd=self.root, check=True, capture_output=True)
         (self.root / "private.py").write_text('private_source = "never-transmit-marker"\n')
         self.commit("human")
@@ -46,12 +78,15 @@ class ProviderPreflight(ReviewFixture):
                        cwd=self.root, check=True, capture_output=True)
 
     def probe(self, **values):
-        overrides = {"preflight": True, "provider": "minimax", **values}
+        overrides = {"preflight": True, "provider": self.probed, **values}
         with mock.patch.object(sd_review, "local_conventions", side_effect=AssertionError("private conventions read")), mock.patch.object(
             sd_review, "review_material", side_effect=AssertionError("private source read")
         ):
             return sd_review.review(self.root, namespace(**overrides), self.runner,
-                                    self.environment(KEY="secret-key-marker"), client=self.client)
+                                    self.environment(**self.probe_environment), client=self.client)
+
+
+class ProviderPreflight(PreflightFixture):
 
     def test_one_selected_probe_is_distinct_from_review_and_sends_no_repository(self):
         before = {str(p.relative_to(self.tmp)): hashlib.sha256(p.read_bytes()).hexdigest()
@@ -174,3 +209,67 @@ class ProviderPreflight(ReviewFixture):
             code = sd_review.main(["--preflight", "--provider", "minimax", "--explain", "--json"])
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(output.getvalue())["operation"], "provider_preflight")
+
+
+class PreflightCredentialRule(PreflightFixture):
+    """Who the probe may call without a key, asserted through the probe.
+
+    `--preflight` carries its own credential test, beside the one
+    `sd_registry.chat_completion` applies to a review. The transport's copy
+    is pinned in `tests/test_sd_registry.py`; this one was not pinned at all,
+    so the pair could disagree and the probe would refuse an entry the review
+    it rehearses would have called -- which is the one thing a rehearsal must
+    not do.
+
+    The exemption is deliberate and knowingly accepted: a server on loopback
+    is already restricted to processes running as this user, and the registry
+    has no way to spell "this recipient authenticates nobody". It is also
+    narrow. Loopback AND no declared variable, because each half alone opens
+    a hole, and the three entries here hold the exemption and both halves.
+    """
+
+    registry = CREDENTIAL_REGISTRY
+    reviewers = "local@localhost:8084, keyed@localhost:8084, remote@remote.invalid, author@fixture-author"
+    probed = "local"
+    probe_environment: dict[str, str] = {}
+
+    def test_a_loopback_entry_declaring_no_variable_probes_without_a_key(self):
+        """No key is exported at all, and the probe still reaches the client."""
+        result = self.probe()
+        self.assertIsNone(result["probe_refusal"])
+        self.assertEqual(result["status"], "preflight_passed")
+        self.assertEqual(result["probe_calls"], 1)
+        self.assertEqual([row["provider"] for row in self.client.sent], ["local"])
+        self.assertNotIn("LOCAL_KEY", self.client.sent[0]["env"])
+
+    def test_a_loopback_entry_that_declares_a_variable_still_needs_its_value(self):
+        """Half one. A server configured to check a key is not called without one."""
+        result = self.probe(provider="keyed")
+        self.assertEqual(result["status"], "preflight_failed")
+        self.assertEqual(result["probe_refusal"], "keyed has no declared credential value")
+        self.assertEqual((result["probe_calls"], self.client.sent), (0, []))
+
+    def test_a_public_entry_that_declares_no_variable_is_still_refused(self):
+        """Half two. Declaring nothing is not a licence to call the internet."""
+        result = self.probe(provider="remote")
+        self.assertEqual(result["status"], "preflight_failed")
+        self.assertEqual(result["probe_refusal"], "remote has no declared credential value")
+        self.assertEqual((result["probe_calls"], self.client.sent), (0, []))
+
+    def test_the_declared_value_is_read_and_the_probe_then_runs(self):
+        """The refusal is the missing value, not the declaration."""
+        self.probe_environment = {"LOCAL_KEY": "local-secret-marker"}
+        result = self.probe(provider="keyed")
+        self.assertIsNone(result["probe_refusal"])
+        self.assertEqual(result["status"], "preflight_passed")
+        self.assertEqual([row["provider"] for row in self.client.sent], ["keyed"])
+
+    def test_explain_reports_the_same_refusal_without_dispatching(self):
+        """`--explain` is the page an operator reads before spending anything."""
+        for name, refusal in (("local", None), ("keyed", "keyed has no declared credential value"),
+                              ("remote", "remote has no declared credential value")):
+            with self.subTest(provider=name):
+                self.client.sent.clear()
+                result = self.probe(provider=name, explain=True)
+                self.assertEqual(result["probe_refusal"], refusal)
+                self.assertEqual((result["probe_calls"], self.client.sent), (0, []))
