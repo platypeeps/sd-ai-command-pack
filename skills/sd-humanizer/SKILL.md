@@ -20,6 +20,13 @@ When given text to humanize:
 
 How you're invoked changes what you deliver (see Invocation Modes). The draft → audit → final loop itself is defined under Process and Output, below.
 
+The loop judges by eye, so it tells you a rewrite reads better without showing
+that it is. When the user asks for prose scores and `jev` is available,
+`references/prose-score-dimensions.md` scores the source and the rewrite on
+the same dimensions, and the difference is the evidence. That pass is
+optional and off by default; without it this skill behaves exactly as it does
+above.
+
 ## Voice Calibration
 
 If the user provides a writing sample (their own previous writing), analyze it before rewriting:
@@ -379,6 +386,57 @@ When you see these, lean toward leaving the prose alone — they are evidence of
 - **Genuine asides, parentheticals, or self-corrections.** "(I keep wanting to say 'almost' here, but it really was certain.)" Models rarely interrupt themselves like this.
 - **Edits made before November 30, 2022.** ChatGPT's public launch. Anything older than that is, with very rare exceptions, not AI-written.
 
+## OPTIONAL SCORES
+
+The dimensions, the levels, the single request that runs them in parallel, and
+the privacy rule all live in `references/prose-score-dimensions.md`. Read that
+file before scoring anything. What follows is only how this skill uses it.
+
+**Run it when both hold.** The user asked for prose scores in this session,
+and `jev enabled` exits `0`. Otherwise skip the pass. Say nothing when the
+user never asked, and say so in one sentence when the user asked and `jev`
+cannot answer here. A reader without `jev` still gets the whole loop above.
+
+**Score twice, before and after.** Score the source text, run the loop, then
+score the final rewrite. A dimension that dropped is evidence the edit landed.
+A dimension that held is a pattern you looked at and did not fix, which is
+worth one line in the summary. Scoring only the rewrite proves nothing,
+because there is nothing to compare it against.
+
+**The scored dimensions map onto the patterns above.** `hedging` reads §24,
+`filler` reads §23, `passive_actor` reads §13, `signposting` reads §28,
+`puffery` reads §1 and §4, and `overload` reads §3's trailing participles.
+The model scores the whole draft on each, not individual sentences.
+
+**Do not hand the model a job a `grep` already does.** The watched-word lists
+in §§1 to 33 are literal matches, and so are em dashes, en dashes, curly
+quotes, emoji, bold runs, and heading capitalization. Count those. The model
+judges what counting cannot reach: whether a watched word is being used or
+quoted, whether a hedge names a real limit, whether a passive hides an actor
+the reader needs, and whether a long sentence carries one idea.
+
+**Report the raw numbers.** Give each dimension's score and confidence for
+both passes, and keep any weighting separate from them, so a reader can apply
+their own threshold to the same numbers. A single blended verdict throws away
+the part that cost something to produce.
+
+**Count the answers, not the questions.** Say how many dimensions answered and
+how many were asked, as two numbers, and name any that did not come back. A
+line counting what you sent reads identically whether every dimension answered
+or none did, and that is how a pass that quietly stopped working keeps looking
+fine. A missing dimension is missing, never a zero: zero on `hedging` means
+the draft hedges nothing.
+
+**Never score a confidential draft.** Every scored call posts the text to a
+third party. Run the loop without scores on an embargoed draft, a draft naming
+a customer, or anything carrying a secret, and say in the summary that scoring
+was withheld. Send the draft text alone: no file path, no repository name, no
+credential.
+
+**Voice outranks the scores.** A writing sample the user supplied still beats
+every rule in this skill, and a score is a rule. Do not flatten an author's
+habits to move a number.
+
 ---
 
 ## Invocation Modes
@@ -400,8 +458,9 @@ Report a short change summary. Do not paste the full rewrite into the conversati
 2. Write a **draft rewrite**. Check that it reads naturally aloud, varies sentence length, prefers specific details and simple constructions (is/are/has), and keeps the appropriate register.
 3. Ask two questions: **"What makes the below so obviously AI generated?"** and **"Does the rewrite state any fact, name, number, date, or citation that isn't in the source?"** Answer briefly. A fabrication is a defect even when it sounds more human than the vague original.
 4. Revise into a **final rewrite** that addresses them and contains no em or en dashes (see §14).
+5. Score the source and the final rewrite only when the user asked for scores and `jev enabled` exits `0` (see OPTIONAL SCORES). Report both sets of raw numbers. Skip this step otherwise.
 
-In pasted-text mode, deliver the draft, the brief "still-AI" bullets, the final rewrite, and (optionally) a short summary of changes. In file and embedded modes, run the same loop but deliver only what the mode calls for (see Invocation Modes).
+In pasted-text mode, deliver the draft, the brief "still-AI" bullets, the final rewrite, and (optionally) a short summary of changes. In file and embedded modes, run the same loop but deliver only what the mode calls for (see Invocation Modes). Scores, where they ran, go in the summary in pasted-text and file modes; embedded mode outputs prose only, so they are omitted there.
 
 ## Reference
 
