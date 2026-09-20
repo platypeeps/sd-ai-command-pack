@@ -1322,6 +1322,22 @@ def write_local_block(
 
 
 def path_is_tracked(repo: Path, relative: str) -> bool:
+    """Whether git reports `relative` as tracked in `repo`.
+
+    The two ways this can fail to get an answer are not the same answer.
+
+    **No git at all is `False`.** `--repo` is about the local config file and
+    not about git; a machine without the binary, like a directory that is not
+    a repository, has nothing tracked, so the caller's refusal cannot fire and
+    should not.
+
+    **A git that will not finish is neither.** The bound exists so a hung read
+    cannot hang an install, and the install still has to not act on what the
+    read never said: the one caller writes a file unless this says tracked, so
+    a timeout read as `False` would let it overwrite a tracked
+    `CLAUDE.local.md` -- the exact edit the check is there to prevent. It
+    stops instead, and says which read it could not finish.
+    """
     try:
         done = subprocess.run(  # nosec B603 - fixed argv, no shell
             ["git", "-C", str(repo), "ls-files", "--error-unmatch", "--", relative],
@@ -1329,8 +1345,13 @@ def path_is_tracked(repo: Path, relative: str) -> bool:
             timeout=GIT_TIMEOUT,
             check=False,
         )
-    except (OSError, subprocess.SubprocessError):
+    except OSError:
         return False
+    except subprocess.SubprocessError as error:
+        raise SystemExit(
+            f"error: git could not say whether {relative} is tracked in {repo} "
+            f"({error}); refusing to write it without that answer."
+        ) from error
     return done.returncode == 0
 
 

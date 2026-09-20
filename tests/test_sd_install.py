@@ -2138,6 +2138,23 @@ class RepoCommandTests(InstallerHarness):
         with unittest.mock.patch("subprocess.run", side_effect=OSError("no git")):
             self.assertFalse(sd_install.path_is_tracked(self.home, "anything"))
 
+    def test_a_git_that_will_not_answer_stops_the_write(self):
+        """The bound must not turn "cannot say" into "not tracked".
+
+        `write_local_block` writes unless the check says tracked, so a
+        timeout answered `False` would overwrite a tracked `CLAUDE.local.md`
+        -- the one edit the check exists to prevent. A missing binary is the
+        other case and stays `False`, which the test above holds.
+        """
+        repo = self.home / "checkout"
+        repo.mkdir()
+        expired = subprocess.TimeoutExpired(["git"], sd_install.GIT_TIMEOUT)
+        with unittest.mock.patch("subprocess.run", side_effect=expired):
+            with self.assertRaises(SystemExit) as caught:
+                sd_install.write_local_block(repo)
+        self.assertIn("could not say whether", str(caught.exception))
+        self.assertFalse((repo / sd_install.LOCAL_BLOCK_FILE).exists())
+
 
 class UninstallEdgeCaseTests(InstallerHarness):
     def test_a_dry_run_uninstall_removes_nothing(self):
