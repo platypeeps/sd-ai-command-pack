@@ -434,9 +434,10 @@ the Mezmo blog's gate, and a brief placed in it would read as cleared for
 publication.
 
 The page or file is optional everywhere. Without it the drain creates the page
-or file and the designation is amended with the id it got. With it the drain
-updates that one, which is what stops a re-render leaving a second copy
-behind.
+or file and writes the id it got back into the designation, before it deletes
+the request. With it the drain updates that one, which is what stops a re-render
+leaving a second copy behind. `references/publication-contract.md` holds the
+drain's step order, and this page states no second version of it.
 
 Recording it in `research.conf.py` is what makes the mirror machine-readable.
 The README's **Notion pages** table stays, for the human reader, but it is no

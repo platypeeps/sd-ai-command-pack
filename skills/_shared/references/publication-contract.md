@@ -214,9 +214,11 @@ and is not this default. That folder is the Mezmo blog's gate: a piece sitting
 in it has cleared every publishing check. A brief mirrored into it would read as
 approved for publication, which no designation here claims.
 
-The page or file is optional at every destination: absent, the drain creates it
-and the designation can be amended with the id it got; present, the drain
-updates that one rather than leaving a fresh copy behind on every render.
+The page or file is optional at every destination. Absent, the drain creates it
+and writes the id back into the designation, which step 4 of the drain requires.
+Present, the drain updates that one rather than leaving a fresh copy behind on
+every render. The two halves are one mechanism: the write-back is what lets the
+next render's request name a page, and naming one is what stops a second copy.
 
 Recording the target makes it machine-readable for the first time. Before this,
 the page title and parent lived in no file the kit read, so verifying a mirror
@@ -249,7 +251,7 @@ This makes the mirror reliable without giving a hook a long-lived write
 credential to a shared space. It also keeps the outward-facing step in a place
 where a person is present.
 
-Draining is four steps per request, and the order matters:
+Draining is five steps per request, and the order matters:
 
 1. Read the request. It names the destination, the document, its Markdown,
    rendered and source paths, its container, the page or file to update and the
@@ -285,9 +287,21 @@ Draining is four steps per request, and the order matters:
    Never convert a document into a format its destination does not read
    natively. The source for every mirror is the Markdown, not the rendered
    HTML.
-4. Delete the request file. Deleting it is what records that the mirror is
+4. Record the id, when step 3 created the page or file rather than updating
+   one. Write it into that document's designation, as `page=` for Notion and
+   `file=` for Drive; in a research repo that designation lives in
+   `research.conf.py`. A request that already named a page or file created
+   nothing, so it has nothing to record here.
+
+   Before the delete, and not after. An id recorded nowhere cannot reach the
+   next request, so the next render enqueues a create again and the next drain
+   leaves a second copy beside the first. That duplicate is silent: both copies
+   carry the same title and the same content, so nothing reads as wrong and no
+   reader can tell which one is stale. The write-back is the only step that
+   makes a mirror updatable rather than repeatable.
+5. Delete the request file. Deleting it is what records that the mirror is
    current; a request left behind says the sync still owes work, which is the
-   safe thing for it to say if step 3 half-finished.
+   safe thing for it to say if step 3 or step 4 half-finished.
 
 Never drain a request into a container the request does not name, never create a
 page or file in a container the user has not named for that document, and never
