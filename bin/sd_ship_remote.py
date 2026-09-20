@@ -288,7 +288,9 @@ class GitHub:
                 continue
             lines = sd_lib.yaml_lines(git(self.root, "show", f"{head}:{path}"))
             triggers = sd_lib.workflow_triggers(lines)
+            block = sd_lib.workflow_trigger_block(lines)
             unresolved = sorted(name for name in triggers if not sd_lib.EVENT_NAME_RE.match(name))
+            unresolved += sorted(line.strip() for line in sd_lib.yaml_unreadable(block or []))
             if not triggers or unresolved:
                 raise Refusal(f"{path} at {head[:12]}: could not read its triggers"
                               + (f" ({', '.join(repr(name) for name in unresolved)})" if unresolved else "")
@@ -332,6 +334,10 @@ class GitHub:
                 raise Refusal(f"workflow {name} ({path}) has no successful pull_request run on {head}", code="ci_missing",
                               next_action="Run the workflow for this exact head, then retry merge.", boundary="ci", state="retryable_failure")
 
+    def commits_behind(self, base: str, head: str) -> int | None:
+        """How many commits of `base` are missing from `head`, GitHub's count."""
+        return self.api(f"{self.prefix}/compare/{quote(base, safe='')}...{head}").get("behind_by")
+
     def ready(self, pull: dict, head: str, base: str, protection: dict) -> None:
         if pull.get("merged") is True or pull.get("state") != "open" or pull.get("draft") is not False:
             raise Refusal("pull request is not open and ready")
@@ -341,8 +347,7 @@ class GitHub:
             raise Refusal("pull request comes from a different repository")
         if pull.get("mergeable") is not True or pull.get("mergeable_state") != "clean":
             raise Refusal("GitHub has not confirmed all required merge rules are satisfied")
-        comparison = self.api(f"{self.prefix}/compare/{quote(base, safe='')}...{head}")
-        if comparison.get("behind_by") != 0:
+        if self.commits_behind(base, head) != 0:
             raise Refusal("the reviewed branch is behind the current default branch")
         if "declared_gap" in protection:
             self.every_check(head)

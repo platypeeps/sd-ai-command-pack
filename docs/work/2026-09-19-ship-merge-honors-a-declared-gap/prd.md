@@ -405,3 +405,22 @@ fix that answered Copilot's citation finding on #1086.
 - The external-check finding is restated and rebutted again on the same
   ground as the ship-lane pass: requirement 2's last sentence, and the
   protection object the owner declined.
+
+### 2026-09-20 — verification pass, two more findings, both fixed
+
+- `source:bin/sd_lib.py::yaml_unreadable` (high): `pull_request :`, with a
+  space before the colon, read as no key while `push:` beside it parsed, so
+  the block looked complete and the workflow left the expected set. Fixed
+  twice over: the key pattern allows space before the colon, and
+  `expected_workflows` now asks `yaml_unreadable` for the lines of the
+  `on:` block this reader could not parse and refuses on any, instead of
+  acting on what it did read. Two fixtures.
+- `source:bin/sd-ship::Ship.still_gated` (high): `strict` protection kept
+  the branch up to date and GitHub refused a stale merge server-side; under
+  the declared gap nothing does, and another lane on this account can
+  advance the base between `ready`'s `behind_by == 0` and the `PUT`. Fixed:
+  the freshness read is repeated in `still_gated` under the declaration,
+  refusing `base_moved`. One fixture whose second `compare` answers
+  `behind_by: 3`.
+- The external-check finding is restated a third time and rebutted on the
+  same ground.

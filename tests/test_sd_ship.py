@@ -2985,6 +2985,43 @@ class DeclaredGapCase(unittest.TestCase):
                 self.double.workflow_runs = [self.run_record(".github/workflows/sd-review-route.yml")]
                 self.refuse(r"workflow Tests \(\.github/workflows/tests\.yml\) has no successful pull_request run", "ci_missing")
 
+    def test_a_space_before_the_colon_is_still_that_key(self):
+        """Verification pass: `pull_request :` read as no key while `push:`
+        beside it parsed, so the block looked complete."""
+        self.declare(workflows={"tests.yml": self.TESTS.replace(
+            "on:\n  pull_request:\n  push:\n    branches: [main]\n",
+            "on:\n  push:\n    branches: [main]\n  pull_request :\n"), "sd-review-route.yml": self.ROUTE})
+        self.prepare()
+        next(iter(self.remote.pull_requests.values())).checks = [self.check("route")]
+        self.double.workflow_runs = [self.run_record(".github/workflows/sd-review-route.yml")]
+        self.refuse(r"workflow Tests \(\.github/workflows/tests\.yml\) has no successful pull_request run", "ci_missing")
+
+    def test_a_line_in_the_trigger_block_this_cannot_read_refuses(self):
+        """A sibling that parses must not make an unreadable line invisible."""
+        self.declare(workflows={"tests.yml": self.TESTS.replace(
+            "on:\n  pull_request:\n  push:\n    branches: [main]\n",
+            "on:\n  push:\n  ?  [a, b]\n"), "sd-review-route.yml": self.ROUTE})
+        self.green()
+        self.refuse(r"tests\.yml at [0-9a-f]{12}: could not read its triggers \('\?  \[a, b\]'\)", "ci_missing")
+
+    def test_the_base_advancing_before_the_put_refuses(self):
+        """Under the declared gap nothing server-side keeps the branch fresh,
+        so the freshness `ready` read is read again before the dispatch."""
+        self.declare()
+        self.green()
+        seen = {"count": 0}
+        double = self.double
+        saved = double._route
+
+        def route(method, path, body):
+            if method == "GET" and "/compare/" in path:
+                seen["count"] += 1
+                if seen["count"] >= 2:
+                    return 200, {"behind_by": 3, "ahead_by": 1, "status": "diverged"}
+            return saved(method, path, body)
+        double._route = route
+        self.refuse("default branch advanced after the readiness check", "base_moved")
+
     def test_the_single_event_form_is_read(self):
         """Codex on the verification pass: `on: pull_request` returned no
         trigger and refused every merge under the declaration."""

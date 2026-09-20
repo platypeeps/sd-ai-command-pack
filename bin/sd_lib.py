@@ -2246,7 +2246,7 @@ def display_value(value: Any) -> bool:
 #: `pull_request:`, and a reader that matched only the bare form dropped
 #: the entry while its unquoted siblings still parsed -- a workflow that
 #: silently stopped being expected (sd:1110 post-cap review).
-YAML_KEY_RE = re.compile(r"^(?P<indent>\s*)(?:\"(?P<dquoted>[^\"]+)\"|'(?P<squoted>[^']+)'|(?P<bare>[A-Za-z_][A-Za-z0-9_.\-]*)):\s*(?P<value>.*?)\s*$")
+YAML_KEY_RE = re.compile(r"^(?P<indent>\s*)(?:\"(?P<dquoted>[^\"]+)\"|'(?P<squoted>[^']+)'|(?P<bare>[A-Za-z_][A-Za-z0-9_.\-]*))[ \t]*:\s*(?P<value>.*?)\s*$")
 
 
 def yaml_key(match: re.Match[str]) -> str:
@@ -2360,6 +2360,29 @@ def yaml_sequence(lines: list[str], inline: str) -> list[str]:
         for line in lines
         if yaml_indent(line) == base and (match := YAML_ITEM_RE.match(line))
     ]
+
+
+def yaml_unreadable(lines: list[str]) -> list[str]:
+    """The lines at this block's top indent that are neither a key nor an item.
+
+    A partial reader's real danger is not the line it cannot parse; it is
+    that the line's siblings parse, so the block looks complete and the
+    missing entry is invisible. A caller deciding a merge asks this and
+    refuses, rather than acting on what it did read (sd:1110 review).
+    """
+    if not lines:
+        return []
+    base = yaml_indent(lines[0])
+    return [line for line in lines if yaml_indent(line) == base
+            and not YAML_KEY_RE.match(line) and not YAML_ITEM_RE.match(line)]
+
+
+def workflow_trigger_block(lines: list[str]) -> list[str] | None:
+    """The children of the workflow's `on:` key, or `None` when it has none."""
+    for offset, key, _ in yaml_entries(lines):
+        if key in ("on", "true"):  # a YAML 1.1 loader would fold `on` to true
+            return yaml_children(lines, offset)
+    return None
 
 
 def workflow_triggers(lines: list[str]) -> set[str]:
