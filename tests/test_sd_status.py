@@ -5357,12 +5357,23 @@ class MirrorSyncPendingTests(InventoryFixture):
         path.write_text(json.dumps(body), encoding="utf-8")
         return path
 
-    def queued(self, queue: pathlib.Path) -> list[dict[str, Any]]:
-        rows = status.actionable_inventory(
+    def queued(
+        self, queue: pathlib.Path, legacy: pathlib.Path | None = None,
+    ) -> list[dict[str, Any]]:
+        """Rows for these two queues, and for no directory outside the test.
+
+        Both variables are always set. Leaving the legacy one unset would let
+        the default reach `~/.claude/`, so a developer holding a real stranded
+        queue would see this test report their own pending mirrors.
+        """
+        return self.by_check(status.actionable_inventory(
             self.repo, self.sections(), self.TODAY,
-            environ={status.MIRROR_QUEUE: str(queue)},
-        ).rows
-        return self.by_check(rows, "mirror-sync-pending")
+            environ={
+                status.MIRROR_QUEUE: str(queue),
+                status.LEGACY_MIRROR_QUEUE: str(
+                    legacy if legacy is not None else queue / "absent"),
+            },
+        ).rows, "mirror-sync-pending")
 
     def test_a_queued_mirror_for_this_repository_is_a_row(self) -> None:
         queue = self.queue()
@@ -5384,6 +5395,48 @@ class MirrorSyncPendingTests(InventoryFixture):
         row, = self.queued(queue)
         self.assertEqual(row["check"], "mirror-sync-pending")
         self.assertIn("the Deliverables Drive folder", row["detail"])
+
+    def test_a_request_under_the_queue_s_former_name_is_still_a_row(
+            self) -> None:
+        """The rename must not hide work the upgrade left behind.
+
+        A machine that rendered before the queue was renamed holds requests
+        under the old name. Reading only the new one makes them durable and
+        invisible, which is the condition this whole class exists to end."""
+        queue = self.queue()
+        legacy = self.queue()
+        self.request(legacy, "widget.delivery.notion.json")
+        rows = self.queued(queue, legacy)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["key"], "widget.delivery.notion.json")
+
+    def test_both_queues_report_together(self) -> None:
+        """A migration may be half done, or not started. Either way every
+        request owed is a row, wherever it is sitting."""
+        queue = self.queue()
+        legacy = self.queue()
+        self.request(queue, "widget.delivery.drive.json",
+                     destination="drive", target="the Deliverables Drive folder")
+        self.request(legacy, "widget.delivery.notion.json")
+        rows = self.queued(queue, legacy)
+        self.assertEqual(
+            sorted(row["key"] for row in rows),
+            ["widget.delivery.drive.json", "widget.delivery.notion.json"])
+
+    def test_one_directory_under_both_names_is_read_once(self) -> None:
+        """A machine that pointed the old variable at the new directory has
+        one queue, not two, and one request there is one piece of work."""
+        queue = self.queue()
+        self.request(queue, "widget.delivery.notion.json")
+        self.assertEqual(len(self.queued(queue, queue)), 1)
+
+    def test_looking_creates_neither_directory(self) -> None:
+        """A report that provisions a queue would invent the work it reports."""
+        held = tempfile.TemporaryDirectory()
+        self.addCleanup(held.cleanup)
+        root = pathlib.Path(held.name)
+        self.assertEqual(self.queued(root / "current", root / "legacy"), [])
+        self.assertEqual(sorted(p.name for p in root.iterdir()), [])
 
     def test_one_document_designated_twice_is_two_rows(self) -> None:
         """Either mirror can drain while the other waits, so each is its own

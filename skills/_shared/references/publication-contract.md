@@ -225,6 +225,13 @@ One queue carries every destination, and `bin/sd-status` reports a pending
 request as `mirror-sync-pending`. A document designated for two places is two
 requests, and either can drain while the other waits.
 
+That queue was once `~/.claude/pending-notion-syncs`, before one queue carried
+every destination. A render moves anything left there into the current queue,
+and the status report covers both names, so the rename costs no request its
+row either side of the move. Neither directory is created by looking, an
+emptied one is left standing rather than swept, and a request moves verbatim
+rather than being rewritten to a schema it was not written under.
+
 This makes the mirror reliable without giving a hook a long-lived write
 credential to a shared space. It also keeps the outward-facing step in a place
 where a person is present.

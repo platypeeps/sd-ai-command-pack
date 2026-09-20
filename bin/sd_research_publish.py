@@ -55,6 +55,15 @@ QUEUE = Path(
     os.environ.get("SD_MIRROR_QUEUE", "~/.claude/pending-mirror-syncs")
 ).expanduser()
 
+#: What `QUEUE` was called before one queue carried every destination. A
+#: machine that rendered between the queue landing and the rename holds
+#: requests here, and nothing has read this path since -- so the upgrade left
+#: them durable and invisible, which is the one thing a durable queue must
+#: never be. `migrate_legacy_queue` empties it; nothing writes it.
+LEGACY_QUEUE = Path(
+    os.environ.get("SD_NOTION_QUEUE", "~/.claude/pending-notion-syncs")
+).expanduser()
+
 
 #: The vault the Obsidian copy is written into, and the folder inside it that
 #: holds briefs. `$OBSIDIAN_VAULT` is the same variable `bin/sd`'s vault driver
@@ -479,6 +488,63 @@ def ignore_dashboard(repo: Path) -> str:
     return "gitignore: added docs/dashboard/"
 
 
+def migrate_legacy_queue() -> list[str]:
+    """Move any request left under the queue's former name into `QUEUE`.
+
+    Migration rather than reading both for ever. Two directories mean every
+    reader has to know both names, and a reader written later knows one -- the
+    defect being closed here is exactly that. Moving once leaves one queue,
+    and this function then finds nothing and says nothing on every later run.
+
+    Nothing is created by looking. A machine that never used the old name has
+    no legacy directory, and this neither makes one nor makes `QUEUE` to
+    receive an empty migration.
+
+    The emptied directory is left standing. Removing it would buy tidiness at
+    the price of a new deletion path, and `tests/test_archive_untouched.py`
+    enumerates and freezes every one under `bin/` precisely so that no new
+    sweep appears for a reason that small. An empty directory strands nothing:
+    the requests were what was stranded, and they have moved.
+
+    The current queue wins a name collision. Both directories hold one request
+    per document per destination under the same filename, and the rename is
+    what stopped the old name being written -- so a file in `QUEUE` was
+    written after its legacy twin, and keeping the older one would replace a
+    current request with a stale revision.
+
+    The requests move verbatim. An old request may predate a field a reader
+    now expects; `bin/sd-status` already falls back for the one it reads, and
+    rewriting somebody's queued work to a schema it was not written under is a
+    worse answer than handing it over as it stands.
+    """
+    if not LEGACY_QUEUE.is_dir() or LEGACY_QUEUE == QUEUE:
+        return []
+    try:
+        found = sorted(LEGACY_QUEUE.glob("*.json"))
+    except OSError as problem:
+        return ["mirror: cannot read %s (%s)" % (LEGACY_QUEUE, problem)]
+
+    reports: list[str] = []
+    moved = 0
+    for path in found:
+        target = QUEUE / path.name
+        try:
+            if target.exists():
+                path.unlink()
+                continue
+            QUEUE.mkdir(parents=True, exist_ok=True)
+            path.replace(target)
+        except OSError as problem:
+            reports.append(
+                "mirror: cannot migrate %s (%s)" % (path.name, problem))
+            continue
+        moved += 1
+    if moved:
+        reports.append(
+            "mirror: migrated %d request(s) from %s" % (moved, LEGACY_QUEUE))
+    return reports
+
+
 def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     """Write one sync request per document per designated destination."""
     reports: list[str] = []
@@ -523,6 +589,11 @@ def publish(repo: Path, project: str, docs: list[dict[str, Any]]) -> list[str]:
     reports = write_obsidian(repo, docs)
     reports.append(ignore_dashboard(repo))
     reports.append(register_root(repo, project or repo.name, repo / DASHBOARD_DIR))
+    # Before enqueueing, and here rather than inside `enqueue`: a repo that
+    # designates nothing still runs on the machine holding the stranded queue,
+    # and `enqueue` returns before touching the directory when it has no
+    # request of its own to write.
+    reports += migrate_legacy_queue()
     reports += enqueue(repo, docs)
     return reports
 

@@ -148,6 +148,21 @@
   folder itself, beside the per-repo pages already there. `mirror_targets`
   claimed both defaults were the shape the vault uses, which was true of one of
   them.
+- **A queue left under the mirror queue's former name is no longer stranded.**
+  `~/.claude/pending-notion-syncs` was the queue from the first render that
+  enqueued until one queue carried every destination, and nothing has read that
+  path since the rename — so a machine that rendered in that window holds
+  requests that are durable and invisible, which is the one thing a durable
+  queue must never be. A render now migrates them into the current queue, and
+  `bin/sd-status` reports requests in either, so
+  the rename costs no request its row before the migrating render happens.
+  Migration rather than permanent dual-reading: two directories mean every
+  reader has to know both names, and the reader written later knows one, which
+  is the defect itself. `SD_NOTION_QUEUE` names the old directory where it
+  moved. Neither directory is created by looking, an emptied one is left
+  standing rather than swept, the current queue wins a name collision because
+  the rename is what stopped the old name being written, and a request moves
+  verbatim.
 - **A copied Notion link resolves to its page id.** `notion_id` stripped the
   query string but not the fragment, so a `space=` ending in `#<block id>`
   yielded no id at all — which read as a folder name and sent the drain looking
