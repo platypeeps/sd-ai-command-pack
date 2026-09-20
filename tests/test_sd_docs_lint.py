@@ -2079,8 +2079,18 @@ class Rule6ClaimSupportTests(LintFixture):
         return item
 
     def test_an_unasked_run_says_nothing_at_all(self) -> None:
+        """Nobody asked, stated by the fixture rather than inherited.
+
+        `patch.dict` adds to the environment it patches and removes nothing.
+        A shell that exports the opt-in -- this pack's maintainer exports it
+        -- therefore ran the pass in the one test whose subject is not
+        running it, and the linter took the blame for the shell.
+        """
         self.recorded_item()
-        with mock.patch.dict(os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}):
+        unasked = {name: value for name, value in os.environ.items() if name != lint.JEV_OPT_IN}
+        unasked["PATH"] = f"{self.bin}{os.pathsep}{os.environ['PATH']}"
+        with mock.patch.dict(os.environ, unasked, clear=True):
+            self.assertNotIn(lint.JEV_OPT_IN, os.environ)
             self.assertNotIn("claim support", self.notes())
 
     def test_asking_without_jev_on_path_is_said_out_loud(self) -> None:

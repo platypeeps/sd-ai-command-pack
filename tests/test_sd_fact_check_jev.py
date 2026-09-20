@@ -139,6 +139,12 @@ class TheCriteriaCarryTheVerdictVocabulary(unittest.TestCase):
         whose option order this page does not control, and a description
         naming a sibling makes two criteria one. Both read as separation on
         the page and neither separates anything in the request.
+
+        Both spellings of a sibling are rejected. The ledger spells the names
+        with underscores, and prose naming one spells it with spaces: a check
+        that read the underscored form alone let "partially supported" name a
+        sibling in plain English and pass. The name is what a reader reads,
+        not the punctuation it is stored under.
         """
 
         names = set(criteria())
@@ -149,7 +155,8 @@ class TheCriteriaCarryTheVerdictVocabulary(unittest.TestCase):
                                "step 6", "this skill"):
                     self.assertNotIn(phrase, lowered, description)
                 for sibling in names - {name}:
-                    self.assertNotIn(sibling, lowered, description)
+                    for spelling in {sibling, sibling.replace("_", " ")}:
+                        self.assertNotIn(spelling, lowered, description)
 
 
 class ThePassIsOffByDefault(unittest.TestCase):
