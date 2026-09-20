@@ -123,17 +123,36 @@
 
 ### Fixed
 
-- **A Notion default folder is pinned by page id, not by its name.**
+- **A Notion default folder is a configured page id, not a folder name.**
   `NOTION_SCOPES` held `Briefs` and `R&D Briefs` as lookup keys, and the owner
   has since renamed both folders. A name lookup that finds nothing returns an
   empty result rather than an error, so the next rename would have sent every
-  default mirror nowhere and said so to no one. Each scope now carries the
-  folder's page id; the name survives only as a label a report prints, and
-  renaming either folder is cosmetic. A request carries `space_id` and
-  `resolve`, so a drain knows whether its container was resolved by id or by
-  name. A `space=` override written as a page id or page URL is pinned the same
-  way; written as a plain name it says `resolve: "name"`, and the contract makes
-  an empty lookup a failure to report rather than a folder to create.
+  default mirror nowhere and said so to no one. Each scope now names an
+  environment variable instead — `SD_NOTION_PRIVATE_FOLDER` and
+  `SD_NOTION_TEAM_FOLDER`, beside `OBSIDIAN_VAULT` — holding that operator's
+  folder page id. Per operator and not shipped, because a page id belongs to
+  one Notion account and a default in the source would mirror another
+  operator's brief into a page they do not own. An unset variable, or one
+  holding a folder name rather than an id, refuses that mirror, names the
+  variable to set and queues nothing; the local copies are written either way.
+  A request carries
+  `space_id` and `resolve`, so a drain knows whether its container came from an
+  id or a name. A `space=` override written as a page id or page URL is pinned
+  the same way; written as a plain name it says `resolve: "name"`, and the
+  contract makes an empty lookup a failure to report rather than a folder to
+  create.
+- **A Notion default names the repo, the way a Drive default does.** The
+  request carries `subfolder`, and the drain creates the repo's page under the
+  configured folder when it is missing. Notion's default stopped at the folder
+  while Drive's was already `Briefs/<repo>`, so a drained brief landed in the
+  folder itself, beside the per-repo pages already there. `mirror_targets`
+  claimed both defaults were the shape the vault uses, which was true of one of
+  them.
+- **A copied Notion link resolves to its page id.** `notion_id` stripped the
+  query string but not the fragment, so a `space=` ending in `#<block id>`
+  yielded no id at all — which read as a folder name and sent the drain looking
+  for a folder called `https://...`. The id is read off the URL path, so a
+  query string and a fragment are both gone before it is looked for.
 - **A rendered research page no longer loads anything over the network.** The
   renderer emitted three Google Fonts `<link>` tags, which the Documents tab's
   `default-src 'none'` blocks: every served page would have fallen back to

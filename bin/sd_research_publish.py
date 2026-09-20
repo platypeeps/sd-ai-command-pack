@@ -34,6 +34,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, NamedTuple
+from urllib.parse import urlsplit
 
 from sd_lib import git_output
 
@@ -111,30 +112,33 @@ DESTINATIONS = (
 )
 
 class NotionScope(NamedTuple):
-    """One Notion default destination, pinned by page id.
+    """One Notion default destination: the setting that names it, in words.
 
-    `page_id` resolves the folder; `label` is what that folder happens to be
-    called today and is only ever printed. They are separate fields because
-    they answer different questions, and the name answers neither reliably.
+    The folder itself is neither a name nor an id written here. A name cannot
+    be: a lookup that finds nothing returns an empty result rather than an
+    error, so a rename would move every default mirror to nowhere and tell no
+    one -- and both of this maintainer's folders have been renamed once
+    already. An id cannot be either: a page id belongs to one Notion account,
+    and a default shipped in this file would send another operator's brief to
+    a page they do not own. So the id is the operator's to configure, and this
+    table holds the key it is configured under.
     """
 
     #: `private` or `team`: which Notion space the mirror may reach.
     scope: str
-    #: The folder's Notion page id. This is what a drain resolves.
-    page_id: str
-    #: What the folder is called today, for messages. Nothing looks a folder
-    #: up by it.
-    label: str
-    #: How a report and a status row name the folder, in words.
+    #: The environment variable holding this operator's folder page id.
+    #: Beside `OBSIDIAN_VAULT`, `SD_DASHBOARD_HOME` and `SD_MIRROR_QUEUE`,
+    #: which is where this module's other per-machine destinations live. Not
+    #: `sd config`: that namespace holds standing authorization, and a folder
+    #: is a destination rather than a permission.
+    setting: str
+    #: How a report and a status row name the folder, over the repo name. The
+    #: configured folder's own name is not knowable here, and guessing one
+    #: would print a label no operator's Notion has to agree with.
     phrase: str
 
 
 #: Where a Notion mirror goes when the designation names no folder.
-#:
-#: Pinned by page id and not by folder name. A name lookup that finds nothing
-#: returns an empty result rather than an error, so a rename moved every
-#: default mirror to nowhere and told no one. Both of these folders have been
-#: renamed once already. By id a rename is cosmetic.
 #:
 #: Private is the default and the team space is the opt-in, because the two
 #: mistakes are not symmetric. A brief the team cannot see is repaired by
@@ -142,17 +146,20 @@ class NotionScope(NamedTuple):
 #: space has already been seen by the team, and deleting it does not undo that.
 #: So the direction that is recoverable is the one that happens by accident.
 NOTION_SCOPES = {
-    False: NotionScope(
-        "private", "3c9f52b1-5782-81a7-a466-fb0e2df4d928", BRIEFS,
-        "the private %s folder" % BRIEFS),
-    True: NotionScope(
-        "team", "3cff52b1-5782-806a-acb0-ca0c8f41524b", "R&D Briefs",
-        "the R&D Briefs folder in the R&D team space"),
+    False: NotionScope("private", "SD_NOTION_PRIVATE_FOLDER",
+                       "your private Notion briefs folder, under %s"),
+    True: NotionScope("team", "SD_NOTION_TEAM_FOLDER",
+                      "your team Notion briefs folder, under %s"),
 }
 
-#: A Notion page id, bare or at the end of a page URL: 32 hex digits, dashed
-#: or not. `space=` may be written either way, so overriding the folder does
-#: not cost the designation its id resolution.
+#: The environment the folder settings are read out of. A module attribute for
+#: the same reason `QUEUE` and `VAULT` are: a test points it at a fixture
+#: rather than at the machine running the test.
+ENVIRON: dict[str, str] = dict(os.environ)
+
+#: A Notion page id: 32 hex digits, dashed or not, alone or ending a page's
+#: URL path. `space=` may be written either way, and so may the configured
+#: default, so naming a folder never costs the designation its id resolution.
 NOTION_ID = re.compile(
     r"(?:^|[/-])([0-9a-fA-F]{8}-?(?:[0-9a-fA-F]{4}-?){3}[0-9a-fA-F]{12})$")
 
@@ -160,10 +167,16 @@ NOTION_ID = re.compile(
 def notion_id(value: str) -> str:
     """The Notion page id `value` names, or `""` when it names none.
 
+    Read off the URL *path*, so a query string and a fragment are both gone
+    before the id is looked for. A copied link often carries `#<block id>`,
+    and matching against the whole link found no id at all -- which read as
+    "this is a folder name" and sent the drain looking for a folder called
+    `https://...`.
+
     Returned verbatim rather than normalised: the id goes to a connector, and
-    rewriting the user's spelling of it is a second thing that can be wrong.
+    rewriting the operator's spelling of it is a second thing that can be wrong.
     """
-    found = NOTION_ID.search(value.strip().rstrip("/").split("?")[0])
+    found = NOTION_ID.search(urlsplit(value.strip()).path.rstrip("/"))
     return found.group(1) if found else ""
 
 #: The dashboard builds a URL from the key, so the key is what a URL may carry.
@@ -246,36 +259,65 @@ def revision(repo: Path) -> str:
     return git_output(["rev-parse", "HEAD"], repo) or "unknown"
 
 
-def notion_target(raw: dict[str, Any]) -> dict[str, str]:
-    """One Notion designation resolved to a folder, a scope and a phrase.
+def notion_target(
+    raw: dict[str, Any], repo: Path
+) -> tuple[dict[str, str] | None, str]:
+    """One Notion designation resolved to a container, or what was missing.
 
     `team=True` is the only way a brief reaches the shared space; see
     `NOTION_SCOPES` for why that direction is the one that must be asked for.
     An explicit `space=` overrides the folder but never the scope: naming a
     folder says where inside a space, not which space.
 
-    The folder is carried as `space_id`, a Notion page id, and `resolve` says
-    how it was arrived at. `id` is every default and any `space=` written as an
-    id or a page URL; a rename cannot touch those. `name` is a `space=` written
-    as a plain name, which no id can be derived from -- there the drain does
-    look the folder up by name, and the contract makes an empty lookup a
-    failure to report rather than a folder to create.
+    The container is carried as `space_id`, a Notion page id, and `resolve`
+    says how it was arrived at. `id` is every configured default and any
+    `space=` written as an id or a page URL; a rename cannot touch those.
+    `name` is a `space=` written as a plain name, which no id can be derived
+    from -- there the drain does look the folder up by name, and the contract
+    makes an empty lookup a failure to report rather than a folder to create.
+
+    A default also carries `subfolder`, the repo's own page under that folder,
+    the way a Drive default carries `Briefs/<repo>`. An explicit `space=` does
+    not: naming a container says where the document goes, and appending to
+    what the user named would put it somewhere they did not ask for.
+
+    A default with nothing configured returns no target and says so, naming
+    the variable to set. Falling back would mirror the document into whichever
+    page this file happened to name, which is another account's page on every
+    machine but one. A setting that is not a page id is not configured: an
+    operator who pasted a folder's name has not named a folder this can reach.
     """
-    scope, page_id, label, phrase = NOTION_SCOPES[bool(raw.get("team"))]
+    scope, setting, phrase = NOTION_SCOPES[bool(raw.get("team"))]
     named = str(raw.get("space", "")).strip()
-    if named and named != label:
+    if named:
         override = notion_id(named)
-        page_id = override
-        phrase = "the %s folder in your %s space" % (named, scope)
+        return {
+            "destination": "notion",
+            "scope": scope,
+            "space_id": override,
+            "resolve": "id" if override else "name",
+            "space": "" if override else named,
+            "subfolder": "",
+            "page": str(raw.get("page", "")).strip(),
+            "target": "the %s folder in your %s space" % (named, scope),
+        }, ""
+
+    configured = notion_id(str(ENVIRON.get(setting, "")))
+    if not configured:
+        return None, (
+            "notion= has no %s folder configured: set %s to the Notion page "
+            "id of that folder, or name one with space=" % (scope, setting)
+        )
     return {
         "destination": "notion",
         "scope": scope,
-        "space_id": page_id,
-        "resolve": "id" if page_id else "name",
-        "space": named or label,
+        "space_id": configured,
+        "resolve": "id",
+        "space": "",
+        "subfolder": repo.name,
         "page": str(raw.get("page", "")).strip(),
-        "target": phrase,
-    }
+        "target": phrase % repo.name,
+    }, ""
 
 
 def mirror_targets(
@@ -291,10 +333,13 @@ def mirror_targets(
     Returns a list because a document may be designated for several places at
     once. `notion=` and `drive=` on one entry are two mirrors, not a choice.
 
-    A designation that names no container gets its destination's default:
-    `Briefs/<repo>` for Drive, the per-scope folder for Notion. Both are the
-    shape the vault already uses, so a reader who knows where one brief is
-    knows where all of them are, whichever copy they found first.
+    A designation that names no container gets its destination's default, and
+    both defaults name the repo: `Briefs/<repo>` for Drive, and for Notion the
+    repo's own page under the configured briefs folder. That is the shape the
+    vault already uses, so a reader who knows where one brief is knows where
+    all of them are, whichever copy they found first. Notion's default used to
+    stop at the folder, which dropped every repo's briefs into one page
+    alongside the per-repo pages already there.
 
     Problems are returned rather than raised, and returned *per destination*.
     A malformed designation is the user's to fix, and one bad key must not cost
@@ -318,7 +363,11 @@ def mirror_targets(
             )
             continue
         if dest.name == "notion":
-            targets.append(notion_target(raw))
+            target, problem = notion_target(raw, repo)
+            if target is None:
+                problems.append(problem)
+            else:
+                targets.append(target)
             continue
         # Notion returned above, so this is the destination whose default is
         # a path the drain resolves rather than a container it is handed.

@@ -128,11 +128,13 @@ session drains it, because rendering runs in a git hook and in CI, and neither
 can reach an MCP server.
 
 **A Notion mirror is private unless it asks for the team.** `notion=dict()` goes
-to the private space's `Briefs` folder; `notion=dict(team=True)` goes to the R&D
-team space's `R&D Briefs` folder. Private is the default because a brief the
-team cannot see is repaired by draining again, and a private brief in a shared
-space has already been read. Both folders are pinned by Notion page id, so
-those names are labels and renaming either one moves no document.
+to the folder `$SD_NOTION_PRIVATE_FOLDER` names; `notion=dict(team=True)` goes
+to the one `$SD_NOTION_TEAM_FOLDER` names. Private is the default because a
+brief the team cannot see is repaired by draining again, and a private brief in
+a shared space has already been read. Both hold a Notion page id, so renaming
+either folder moves no document, and an unset one refuses the mirror rather than
+guessing a page. The document lands in the repo's own page under that folder,
+the shape the vault uses.
 
 **A published page carries its own resources.** The Documents tab serves under
 `default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`.

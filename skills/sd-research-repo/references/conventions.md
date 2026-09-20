@@ -371,15 +371,15 @@ The user designates a document and names its container at that time. Record it
 in that document's `DOCS` entry, where the document is already described:
 
 ```python
-notion=dict()                    # private space, Briefs folder
-notion=dict(team=True)           # R&D team space, R&D Briefs folder
+notion=dict()                    # private briefs folder, <repo> page
+notion=dict(team=True)           # team briefs folder, <repo> page
 drive=dict()                     # My Drive, Briefs/<repo> folder
 drive=dict(folder="Research deliverables", file="https://docs.google.com/d/...")
 ```
 
 | Destination | Key | Container | Existing page or file (optional) |
 | --- | --- | --- | --- |
-| Notion | `notion=` | a page id per scope; `space=` overrides the folder | `page=` |
+| Notion | `notion=` | a configured page id per scope, `<folder>/<repo>`; `space=` overrides it | `page=` |
 | Google Drive | `drive=` | defaults to `Briefs/<repo>`; `folder=` overrides | `file=` |
 
 Both keys on one entry are two mirrors, not a choice. Until one of these keys
@@ -387,20 +387,36 @@ exists, the document publishes locally and nowhere else. Do not infer a target
 from a title, a folder or a neighbouring document.
 
 **A Notion mirror is private unless it asks for the team.** `notion=dict()`
-goes to the private space's `Briefs` folder; `notion=dict(team=True)` goes to
-the R&D team space's `R&D Briefs` folder. Private is the default because the two
-mistakes are not symmetric: a brief the team cannot see is repaired by adding
-`team=True` and draining again, and a private brief in a shared team space has
-already been read. `space=` overrides the folder, never the scope.
+goes to the folder `$SD_NOTION_PRIVATE_FOLDER` names;
+`notion=dict(team=True)` goes to the one `$SD_NOTION_TEAM_FOLDER` names.
+Private is the default because the two mistakes are not symmetric: a
+brief the team cannot see is repaired by adding `team=True` and draining again,
+and a private brief in a shared team space has already been read. `space=`
+overrides the folder, never the scope.
 
-**Each default folder is pinned by its Notion page id.** The names above are
-labels a message prints. A name lookup that finds nothing returns an empty
-result rather than an error, and both folders have been renamed once already,
-so a rename would have moved every default mirror to nowhere in silence.
-Renaming either folder in Notion is now cosmetic. A `space=` override written
-as a page id or page URL is pinned the same way; written as a plain name it is
-not, and the request says which by carrying `resolve: "id"` with `space_id` or
-`resolve: "name"` with the name in `space`.
+**Each default folder is a configured page id.** Set it per operator, beside
+`$OBSIDIAN_VAULT`:
+
+```sh
+SD_NOTION_PRIVATE_FOLDER=<notion page id>
+SD_NOTION_TEAM_FOLDER=<notion page id>
+```
+
+A page id and not a folder name, because a name lookup that finds nothing
+returns an empty result rather than an error, so a rename would move every
+default mirror to nowhere in silence. Configured and not shipped, because a
+page id belongs to one Notion account. A page URL works in place of a bare id.
+An unset variable, or one holding a name rather than an id, refuses that mirror
+and names the variable to set; the local copies are written either way.
+
+**A default lands in the repo's own page under that folder**, the way a Drive
+default lands in `Briefs/<repo>`. The request names the repo in `subfolder`,
+and the drain creates that page when it is missing.
+
+A `space=` override written as a page id or page URL is pinned by id too, and
+it replaces the whole container, so no `subfolder` is appended to it. Written
+as a plain name it cannot be pinned, and the request says which by carrying
+`resolve: "id"` with `space_id` or `resolve: "name"` with the name in `space`.
 
 **A Drive mirror lands beside its siblings.** `drive=dict()` goes to
 `Briefs/<repo>` in My Drive, the same shape the vault uses, so the two copies
@@ -436,7 +452,9 @@ that destination's native format: the Notion connector for
 `scope`, `private` or `team`, and a `private` request never reaches the team
 space whatever its folder is called. It carries `resolve` too: with `id`, write
 under the page `space_id` names and never search by name; with `name`, a lookup
-that finds nothing is a failure to report, not a folder to create. The source for every mirror is the
+that finds nothing is a failure to report, not a folder to create. Where it
+names a `subfolder`, the document goes in that page under the container, which
+the drain creates when it is missing. The source for every mirror is the
 Markdown, never the rendered HTML. One request file per document per destination, so a
 re-render replaces the pending request rather than queueing a second one; a
 request that is never drained stays on disk. `references/publication-contract.md`
