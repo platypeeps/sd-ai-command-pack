@@ -458,11 +458,22 @@ class LineBudgetTests(unittest.TestCase):
         # editor of that function needs them. This raise is its own commit,
         # before the one that spends it. Shared-core classification and the
         # complexity ceilings are unchanged.
+        # 2892 -> 2928 answers two critical review findings on `agy-json`.
+        # Twenty-two lines move the reader from `--output-format json` to
+        # `stream-json`, because the `init` frame is the one surface that
+        # names the model that answered, and a substituted model defeats the
+        # independence guard below the registry. Frame reassembly replaces a
+        # single `json.loads`, and a mismatch refuses. The remaining fourteen
+        # record what could not be fixed: the transcript is retained by the
+        # vendor, keyed by `conversation_id`, and nothing local deletes it, so
+        # the limit is written where the operator enabling the entry will read
+        # it. This raise is its own commit, before the one that spends it.
+        # Shared-core classification and the complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2892,
+            2928,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
