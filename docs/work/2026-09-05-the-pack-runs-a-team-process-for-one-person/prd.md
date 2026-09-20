@@ -1148,8 +1148,8 @@ log, not here.
   (cut by 31(b2): four declaring sites gone, and a `RETIRED_POLICY_KEYS` row
   in their place); the unreachable gito and kimi argv branches and their
   `except Refusal` (both gone, so no line is left to cite); the constant
-  `posted` key and its grep test (both gone; `posted` survives only as a
-  report field); the second `BACKENDS` table
+  `posted` key and its grep test (still pending: `bin/sd-review:1502`,
+  `tests/test_sd_review_boundary.py:214`); the second `BACKENDS` table
   (`source:bin/sd-status::BACKENDS`), derived from the registry instead;
   `RESIDUE` and `residue_section`
   (`source:bin/sd-status::residue_section`) after one clean fleet run;
@@ -5643,11 +5643,13 @@ targets and found eleven that were not: `--stash-ref` cited into a handoff
 error path, the deletion-verb sites cited into hook cleanup, `read_paths`
 cited as `shared_references`, `install_hook`/`remove_hook` cited into
 metadata parsing, the planning-selection bullet still describing a `ready`
-candidate, and cut argv branches cited into trailer constants.
+candidate, and cut argv branches cited into trailer constants. Codex's read of the fix
+caught one over-claim: the constant `posted` key and its grep test are still
+pending, and the entry now says so and cites both.
 
 Each is repaired at the claim, not the number: a symbol that still exists is
 cited as `source:<path>::<symbol>`; a cut symbol says so and carries no line;
 a line that must stay a line points at the code the sentence describes. The
 requirement bullet now states the `planning`/`in_progress` contract. The
-ratchet falls to 35 and 52.
+ratchet falls to 35 and 54.
 
