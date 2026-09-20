@@ -1095,6 +1095,8 @@ CLASSES = (
           ("merged_pull_requests",), newest_first=True, pending_cap=MERGED_PENDING_CAP),
     Class("open-step", "s", False, 70, "- [ ] in item docs",
           "an unchecked box on an item nobody has closed"),
+    Class("notion-sync-pending", "n", False, 75, "~/.claude/pending-notion-syncs/",
+          "a published document whose designated Notion mirror is not written yet"),
     Class("unmerged-branch", "b", False, 80, "origin heads",
           "a branch on origin with no open pull request carrying it"),
     Class("parked-concern", "c", False, 90, "## Review ledger",
@@ -1247,6 +1249,7 @@ def actionable_inventory(
     root: pathlib.Path,
     sections: dict[str, Any],
     today: datetime.date | None = None,
+    environ: dict[str, str] | None = None,
 ) -> Inventory:
     """Every addressable row this repository carries, ranked.
 
@@ -1272,6 +1275,10 @@ def actionable_inventory(
     rather than in the renderers.
     """
     day = today or datetime.date.today()
+    # Defaulted rather than required: every existing caller passes three
+    # arguments, and the one producer that reads the environment reads one
+    # variable that is absent on almost every machine.
+    env = environ if environ is not None else dict(os.environ)
     work = sections.get("work") or {}
     source = work.get("status_source")
     if source is None:
@@ -1295,6 +1302,7 @@ def actionable_inventory(
     rows += _branch_rows(root, pulls, protection)
     rows += _marker_rows(root)
     rows += _tool_rows(root)
+    rows += _notion_rows(root, day, env)
     rows += _concern_rows(root)
     rows += _accepted_rows(protection)
     _mark_unasked(sections, unchecked)
@@ -2929,6 +2937,72 @@ def _tool_rows(root: pathlib.Path) -> list[dict[str, Any]]:
     return rows
 
 
+#: Where `sd_research_publish` leaves a sync request. Read here, never written:
+#: this tool derives and stores nothing, and draining is the agent's job.
+#: The same environment variable the writer honours, so a test can point both
+#: at one directory and a machine that moved the queue moves it once.
+NOTION_QUEUE = "SD_NOTION_QUEUE"
+NOTION_QUEUE_DEFAULT = "~/.claude/pending-notion-syncs"
+
+
+def _notion_rows(
+    root: pathlib.Path, day: datetime.date, environ: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Queued Notion mirrors this repository's renders asked for.
+
+    A render cannot call Notion -- it runs in a git hook and in CI, neither of
+    which reaches an MCP server -- so it enqueues and an agent session drains.
+    Without this class the queue is durable and invisible, which is the worst
+    of both: the request keeps saying work is owed and nothing ever says so.
+    `skills/_shared/references/publication-contract.md` is the contract.
+
+    Scoped to this repository, because that is what this tool reports on. The
+    queue is machine-wide and every request names the repo it came from, so a
+    request belonging to another checkout is another checkout's row. A request
+    whose repository no longer exists is nobody's row and stays on disk; that
+    is a queue nobody drains rather than a status this tool can speak to.
+
+    Not abnormal. A queued mirror is work outstanding, not a defect, and the
+    banner is for things that are wrong. Age carries the urgency instead: rows
+    of a class sort oldest first, so a request that has sat for a fortnight
+    leads the ones written this morning.
+    """
+    queue = pathlib.Path(
+        environ.get(NOTION_QUEUE) or NOTION_QUEUE_DEFAULT).expanduser()
+    if not queue.is_dir():
+        return []
+    rows: list[dict[str, Any]] = []
+    for path in sorted(queue.glob("*.json")):
+        try:
+            request = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            # An unreadable request is not this tool's to diagnose, and a row
+            # saying so would fire every run until somebody deleted a file
+            # this tool is not allowed to delete.
+            continue
+        if not isinstance(request, dict):
+            continue
+        try:
+            named = pathlib.Path(str(request.get("repo", ""))).resolve()
+        except OSError:
+            continue
+        if named != root.resolve():
+            continue
+        document = str(request.get("document") or path.stem)
+        space = str(request.get("space") or "an unnamed space")
+        try:
+            age = (day - datetime.date.fromtimestamp(path.stat().st_mtime)).days
+        except (OSError, OverflowError, ValueError):
+            age = 0
+        rows.append(_row(
+            "notion-sync-pending", path.name, document,
+            f"{document} is queued for the {space} Notion space and not mirrored yet",
+            f"drain it with sd-research-repo stage=publish, or delete {path}",
+            age_days=max(age, 0),
+        ))
+    return rows
+
+
 # --------------------------------------------------------------------------
 # Assembly and output
 # --------------------------------------------------------------------------
@@ -2957,7 +3031,7 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "jira": jira_section(),
         "contributions": contributions_section(root),
     }
-    inventory = actionable_inventory(root, result)
+    inventory = actionable_inventory(root, result, environ=environ)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
     result["abnormalities"] = banner(inventory)
     # `actions` is the uncapped list and `pending` is the first ten of it after
