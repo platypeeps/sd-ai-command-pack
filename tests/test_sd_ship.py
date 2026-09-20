@@ -1754,7 +1754,12 @@ roles:
         report = state["passes"][1]["report"]
         self.assertIn("src.py", report["subject"]["paths"])
         self.assertEqual(report["subject"]["base"], report["authorship_base"])
-        self.assertEqual(report["resume_report_digest"], ship.digest(first["report"]))
+        # The aggregate, not the first pass's report on its own. That pass
+        # completed no review, so it superseded nothing and the retry resumes
+        # everything before it. The two carry the same findings here; what
+        # changed is which object is the evidence's identity.
+        self.assertEqual(report["resume_report_digest"],
+                         ship.digest(ship.review_history([first])))
         self.assertEqual(self.merge()["phase"], "merged")
 
     def test_missing_receipt_retry_is_explicit_and_never_rolls_back_spent_pass(self):

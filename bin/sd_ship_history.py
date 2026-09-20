@@ -39,7 +39,14 @@ def timeout_evidence(entry: dict) -> dict | None:
 
 
 def reservation(entry: dict) -> bool:
-    """A pass that stored no report verified nothing, whatever ended it.
+    """A pass that verified nothing does not supersede the evidence before it.
+
+    There are two ways to verify nothing, and only one of them is visible. A
+    pass may store no report at all. It may also store one in which no
+    reviewer completed the requested depth -- and that one looks like
+    evidence. A failed verification emits a report whose findings list is
+    empty, so reading it as the latest word drops every blocker the completed
+    review before it found, and the retry is handed nothing to resume.
 
     Written once because the dispatcher that supplies a retry's prior evidence
     and the validator that checks it have to give the same answer. Two copies
@@ -47,7 +54,8 @@ def reservation(entry: dict) -> bool:
     attempt that died leaving nothing parseable, the other was not, and the
     live retry path refused evidence it had just been handed.
     """
-    return not (entry.get("report") or {})
+    report = entry.get("report") or {}
+    return not report or not completed_depth(report)
 
 
 def review_history(passes: list[dict]) -> dict:
@@ -271,7 +279,7 @@ class ItemHistory(ReviewHistory):
             # instead of one, and has no resume link to compare; the attempt
             # that follows it resumes the same incomplete review.
             if current:
-                self.validate_retry(passes[:index + 1], current)
+                self.validate_retry(passes[:index + 1], current, live=index == len(passes) - 1)
             return
         if index == 0:
             # The first pass may be incomplete only where the next one
@@ -292,16 +300,25 @@ class ItemHistory(ReviewHistory):
             raise Refusal("this review history has no records to aggregate")
         return review_history(entries)
 
-    def validate_retry(self, passes: list[dict], report: dict) -> None:
+    def validate_retry(self, passes: list[dict], report: dict, live: bool = True) -> None:
         """The retry resumes the pass before it, whichever pass that is."""
         preceding = passes[-2]
         incomplete = preceding.get("report") or {}
-        # A reservation has no report of its own, and what came before it still
-        # has to be carried: aggregating the prefix keeps an earlier pass's
-        # blockers in the evidence the retry must resume. The same predicate
-        # the dispatcher uses, so the evidence asked for here is the evidence
-        # it was handed.
+        # A reservation verified nothing, and what came before it still has to
+        # be carried: aggregating the prefix keeps an earlier pass's blockers
+        # in the evidence the retry must resume. The same predicate the
+        # dispatcher uses, so the evidence asked for here is the evidence it
+        # was handed.
         prior = review_history(passes[:-1]) if reservation(preceding) else incomplete
+        accepted = {digest(prior) if prior else None}
+        if not live:
+            # A stored pass was written under the rule in force when it ran,
+            # which carried the preceding report's own digest. The aggregate is
+            # a superset of that evidence rather than a contradiction of it, so
+            # widening the rule does not retroactively invalidate a receipt
+            # that was checked once and passed. Only the pass being read now
+            # has to carry the aggregate.
+            accepted.add(digest(incomplete) if incomplete else None)
         if (completed_depth(incomplete) or report.get("subject", {}).get("base") != report.get("authorship_base")
-                or report.get("resume_report_digest") != (digest(prior) if prior else None)):
+                or report.get("resume_report_digest") not in accepted):
             raise Refusal("retry must complete the full branch and retain the incomplete review evidence")
