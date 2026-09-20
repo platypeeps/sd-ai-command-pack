@@ -652,12 +652,12 @@ class StandingAuthorizationInventory(unittest.TestCase):
                     self.assertIn(f"sd.{key}", text)
         ship = (REPO_ROOT / "skills/sd-ship/SKILL.md").read_text()
         review = (REPO_ROOT / "skills/sd-review/SKILL.md").read_text()
-        self.assertIn("sd.merge_authorization", ship)
+        self.assertIn("sd.assistant_merge", ship)
         self.assertIn("explicitly say wait", ship)
         self.assertIn("sd.external_reviews", review)
         self.assertNotIn("- No merge. The loop stops", WORKFLOW.read_text())
         self.assertNotIn("external_reviews", sd_install.DEFAULT_BLOCK_BODY)
-        self.assertNotIn("merge_authorization", sd_install.DEFAULT_BLOCK_BODY)
+        self.assertNotIn("assistant_merge", sd_install.DEFAULT_BLOCK_BODY)
 
 
 if __name__ == "__main__":

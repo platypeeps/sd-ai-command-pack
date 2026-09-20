@@ -1052,7 +1052,9 @@ def config_get(args: argparse.Namespace) -> int:
         raise Refusal(
             f"{prefix} declares no config key {key!r}"
             f" -- declared: {', '.join(sorted(declared))}")
-    value = settings(sd_lib.machine_config(), prefix).get(key)
+    stored = settings(sd_lib.machine_config(), prefix)
+    name = sd_lib.stored_name(stored, key) if prefix == "sd" else (key if key in stored else None)
+    value = stored.get(name) if name else None
     if value in (None, ""):
         # The remedy matters more than the diagnosis, and this is inherited
         # rather than invented: the skills calling this are told to stop and
@@ -1089,7 +1091,12 @@ def config_set(args: argparse.Namespace) -> int:
     if stored is not None and not isinstance(stored, dict):
         raise Refusal(f"machine config `{SETTINGS_KEY}` is not an object")
     mine = dict(settings(config, prefix))
-    was = mine.get(key)
+    # The pre-rename name is what `was` reports and what the write clears, so
+    # a machine that carried it ends this command holding one name and not two.
+    name = sd_lib.stored_name(mine, key) if prefix == "sd" else key
+    was = mine.get(name) if name else None
+    if prefix == "sd":
+        mine.pop(sd_lib.RENAMED_CORE_KEYS.get(key, ""), None)
     mine[key] = value
     config[SETTINGS_KEY] = {**(stored or {}), prefix: mine}
     write_config(config, config_path)
@@ -1103,9 +1110,14 @@ def config_unset(args: argparse.Namespace) -> int:
     config_path = sd_lib.machine_config_path()
     config = sd_lib.machine_config(config_path)
     mine = dict(settings(config, prefix))
-    if key not in mine:
+    name = sd_lib.stored_name(mine, key) if prefix == "sd" else (key if key in mine else None)
+    if name is None:
         raise Refusal(f"{args.key} is not set")
-    del mine[key]
+    # Both names go, not just the one that answered: leaving the other behind
+    # would make the next `get` report a setting the operator just removed.
+    mine.pop(key, None)
+    if prefix == "sd":
+        mine.pop(sd_lib.RENAMED_CORE_KEYS.get(key, ""), None)
     held = config.get(SETTINGS_KEY)
     stored = dict(held) if isinstance(held, dict) else {}
     # An emptied namespace is removed rather than left as `{}`. The config is
@@ -1133,7 +1145,13 @@ def config_list(args: argparse.Namespace) -> int:
     """
 
     declared, _ = declared_config(args.prefix)
-    stored = settings(sd_lib.machine_config(), args.prefix)
+    held = settings(sd_lib.machine_config(), args.prefix)
+    # Read through the pre-rename names, so a machine that has not been
+    # rewritten lists the value it is actually acting on. `unread` below still
+    # reports the old name, which is how the operator learns it is going away.
+    stored = ({key: held[name] for key in declared
+               if (name := sd_lib.stored_name(held, key)) is not None}
+              if args.prefix == "sd" else held)
     if args.json:
         json.dump(
             {key: {**spec, "value": stored.get(key)} for key, spec in sorted(declared.items())},
@@ -1144,7 +1162,7 @@ def config_list(args: argparse.Namespace) -> int:
     for key, spec in sorted(declared.items()):
         print(f"{key:<{width}}  {stored.get(key) or '(unset)'}")
         print(f"{'':<{width}}  {spec['description']}")
-    unread = sorted(set(stored) - set(declared))
+    unread = sorted(set(held) - set(declared))
     if unread:
         # A key the manifest stopped declaring. Reported rather than deleted:
         # the plugin may be mid-rename, and this command does not get to

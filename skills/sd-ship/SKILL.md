@@ -13,7 +13,7 @@ Use STE-Concise; report delivery state, decisive checks, blockers, and retained 
 
 ## Standing permission
 
-Read `sd config get sd.merge_authorization` before relying on standing permission.
+Read `sd config get sd.assistant_merge` before relying on standing permission.
 `controlled` permits active, in-scope PR delivery in user-controlled repositories, unless they explicitly say wait.
 `ask`, or no setting, requires task-specific permission.
 Installation grants no permission.

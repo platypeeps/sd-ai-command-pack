@@ -187,7 +187,7 @@ In a shared repository:
   repository asked for them.
 - No merge without task-specific or standing operator permission. Shared contributors
   do not revoke that permission. The assistant reads the permission, not
-  `sd-ship`, which never consults `sd.merge_authorization`. Existing ownership and protection gates still
+  `sd-ship`, which never consults `sd.assistant_merge`. Existing ownership and protection gates still
   decide whether the pack can execute it; a refusal remains a stop.
 - No issue filed. `sd-suggest` writes a row everywhere; `sd suggest publish`
   files one when you run it, to the destination you name with `--to`.
@@ -259,8 +259,8 @@ same branch offered upstream is refused. A lowered run leaves a note on the
 item saying which answer lowered it, once per item and remote however many
 runs it takes, and `sd-status` names the planning artifacts the shared tree
 was already carrying, which are yours to move. Mode never decides merging.
-`merge: auto` is a per-repository policy you set once on the dashboard, off by
-default, and nothing derives it. It is necessary, not sufficient: every merge
+`runner_merge: auto` is a per-repository policy you set once with
+`sd-db.sh repo runner-merge <path> auto`, off by default, and nothing derives it. It is necessary, not sufficient: every merge
 asks the same three questions again, one function for both gates, and a no
 suspends it with the reason shown.
 
@@ -423,9 +423,11 @@ The reserved `sd` namespace declares two settings:
 - `sd.external_reviews`: `configured` permits private code and scoped review context to eligible configured providers.
   It includes future registry entries; registry configuration chooses capability, while this explicit operator grant authorizes transmission.
   `deny` vetoes all local allowances. Absence supplies no standing grant.
-- `sd.merge_authorization`: `controlled` permits assistant merges for active, in-scope PR work in repositories the user controls.
+- `sd.assistant_merge`: `controlled` permits assistant merges for active, in-scope PR work in repositories the user controls.
   An explicit instruction to wait wins. `ask`, or absence, requires task-specific permission.
   `sd config` validates and stores the value; the assistant reads it, and `sd-ship` does not.
+  It was `sd.merge_authorization` until 1.1.0, which still reads that name; 1.2.0 stops.
+  It is the assistant's grant, where `repo.runner_merge` in the one database is the runner's.
   Shared contributors do not revoke permission, but the current sole-operator ownership gate may still refuse execution.
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.

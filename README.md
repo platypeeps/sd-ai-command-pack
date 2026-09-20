@@ -128,7 +128,7 @@ After that operator explicitly grants permission, record it through the existing
 
 ```sh
 sd config set sd.external_reviews configured
-sd config set sd.merge_authorization controlled
+sd config set sd.assistant_merge controlled
 ```
 
 These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOME` overrides the configuration root.

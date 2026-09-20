@@ -1496,7 +1496,7 @@ roles:
         self.prepare()
         operation = self.operation()
         head = _git(self.root, "rev-parse", "HEAD")
-        config.write_text('{"config":{"sd":{"external_reviews":"configured","merge_authorization":"controlled"}},"unrelated":1}')
+        config.write_text('{"config":{"sd":{"external_reviews":"configured","assistant_merge":"controlled"}},"unrelated":1}')
         operation.check_review(head)
         config.write_text('{"config":{"sd":{"external_reviews":"deny"}}}')
         with self.assertRaisesRegex(ship.Refusal, "policy changed"):

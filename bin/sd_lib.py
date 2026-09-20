@@ -28,9 +28,35 @@ CONFIG_RELATIVE_PATH = pathlib.Path("sd-ai-command-pack") / "config.json"
 CORE_CONFIG = {
     "external_reviews": {"pattern": "configured|deny",
                          "description": "Standing private-code/context review authorization; unset uses local consent."},
-    "merge_authorization": {"pattern": "controlled|ask",
-                            "description": "Assistant merge permission for active controlled-repo work; unset asks, explicit wait wins."},
+    "assistant_merge": {"pattern": "controlled|ask",
+                        "description": "Assistant merge permission for active controlled-repo work; unset asks, explicit wait wins."},
 }
+
+#: `{current name: the name it was stored under before 1.1.0}`. A rename must
+#: not orphan a grant a machine already recorded, and this checkout cannot
+#: reach the machines that recorded one, so the old name is *read* rather than
+#: migrated: nothing has to have run, and an operator who rolls back to 1.0.0
+#: finds the file they left. `sd config set` and `unset` clear the old name as
+#: they write, so the two never disagree.
+#:
+#: Deprecated, not permanent. 1.1.0 reads these; 1.2.0 removes this map and
+#: the old names stop resolving. `sd config list sd` already names a stored
+#: key the declarations dropped, which is how a machine still holding one
+#: finds out.
+RENAMED_CORE_KEYS = {"assistant_merge": "merge_authorization"}
+
+
+def stored_name(stored: dict, key: str) -> str | None:
+    """The name `stored` actually holds one declared key under, or `None`.
+
+    The current name wins whenever it is present, so a file carrying both --
+    written by 1.0.0 and then set by 1.1.0 before the clearing landed --
+    reads the one the operator set last.
+    """
+    if key in stored:
+        return key
+    former = RENAMED_CORE_KEYS.get(key)
+    return former if former is not None and former in stored else None
 
 WORK_DIR = "docs/work"
 ARCHIVE_DIR = "archive"
@@ -279,8 +305,11 @@ def core_setting(key: str, environ: dict[str, str] | None = None) -> str | None:
     mine = config.get("sd", {}) if isinstance(config, dict) else None
     if not isinstance(mine, dict):
         raise ConfigError("machine config config.sd must be an object")
-    value = mine.get(key)
-    if key in mine and (not isinstance(value, str) or not re.fullmatch(CORE_CONFIG[key]["pattern"], value)):
+    name = stored_name(mine, key)
+    if name is None:
+        return None
+    value = mine[name]
+    if not isinstance(value, str) or not re.fullmatch(CORE_CONFIG[key]["pattern"], value):
         raise ConfigError(f"invalid sd.{key} policy")
     return value
 

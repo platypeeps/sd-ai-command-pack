@@ -32,9 +32,9 @@ Do not request confirmation solely because an in-scope operation targets either 
 Read each repository's instructions and preserve its existing work before making changes.
 This scope exception does not authorize unrelated work or remove specific approval requirements for destructive actions or upstream Trellis PRs.
 External review uses the operator's standing machine policy, with local restrictions and existing spending limits.
-Read `sd config get sd.external_reviews` and `sd config get sd.merge_authorization`; these settings are never granted by installation.
-`sd.merge_authorization` is read by the assistant, not by `sd-ship`; the tool merges whatever the gates let through, and the setting decides whether to ask it to.
-With `controlled` merge authorization, finish active in-scope PR work through existing gates unless the user explicitly says wait.
+Read `sd config get sd.external_reviews` and `sd config get sd.assistant_merge`; these settings are never granted by installation.
+`sd.assistant_merge` is read by the assistant, not by `sd-ship`; the tool merges whatever the gates let through, and the setting decides whether to ask it to.
+With `sd.assistant_merge` at `controlled`, finish active in-scope PR work through existing gates unless the user explicitly says wait.
 Shared contributors do not revoke user permission, but existing ownership gates still apply; do not bypass a refusal.
 
 ## Contributor Entry Points
