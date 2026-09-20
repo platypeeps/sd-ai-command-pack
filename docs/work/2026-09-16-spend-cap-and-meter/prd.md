@@ -174,7 +174,13 @@ Unasserted halves are named in their rows and are not planned here.
   decision 3071 records the owner naming MiniMax for the task, which is the
   explicit request `.claude/rules/sd-operator-defaults.md` asks for. Status
   moved `blocked` to `done` at 3072.
-- 2026-09-20 closed. Every acceptance criterion below carries a test that
-  holds today; the closeout re-ran the two owning modules rather than trusting
-  the merge-time record. Requirement 5 stays open by its own text and is not
-  an acceptance criterion, so it closes nothing here.
+- 2026-09-20 closed. The eight criteria above `grep` each name a test, and
+  the closeout re-ran the two modules that own them rather than trusting the
+  merge-time record: `tests.test_sd_review_meter tests.test_sd_review_ledger`
+  gives `Ran 49 tests` / `OK`. The last two are not tests and were run as
+  what they are. `git grep -ln token_plan -- bin tests` lists
+  `bin/sd_registry.py`, `tests/test_sd_registry.py` and
+  `tests/test_sd_review_meter.py`, so the count is 3 rather than 0.
+  `bin/sd-docs-lint` ends `sd-docs-lint: clean`, and `make check` returned
+  rc 0 on this branch. Requirement 5 stays open by its own text and is not an
+  acceptance criterion, so it closes nothing here.
