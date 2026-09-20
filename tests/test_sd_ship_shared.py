@@ -334,3 +334,32 @@ class HistoryChainTests(unittest.TestCase):
         state["passes"][-1]["report"] = broken
         with self.assertRaisesRegex(ship.Refusal, "retain the incomplete review evidence"):
             ItemHistory()._validate_coverage(state, broken)
+
+    def test_an_automatic_verification_that_produced_no_report_is_resumed_not_refused(self):
+        """A reservation is not a verification, whatever the next pass calls itself.
+
+        Reported against the cap raise: the reportless exemption reached only
+        entries marked `retry`, so a verification that timed out was read as a
+        stale link and refused the recovery that follows it. The chain is only
+        long enough to hold one once the cap allows five.
+        """
+        base = "0" * 40
+        complete = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                    "authorship_base": base, "subject": {"base": base, "head": "a" * 40}}
+        first = {"head": "a" * 40, "report": complete}
+        # No `retry` key: this reserved an automatic verification and timed out.
+        timed_out = {"head": "b" * 40,
+                     "execution_error": {"kind": "watchdog_expired", "stage": "execution",
+                                         "captured_report": {"scope": "branch", "findings": [],
+                                                             "authored_with": [],
+                                                             "subject": {"head": "b" * 40}}}}
+        resumed = {"status": "clean", "requested_reviews": 1, "completed_reviews": 1,
+                   "authorship_base": base, "subject": {"base": base, "head": "c" * 40},
+                   "resume_report_digest": digest(review_history([first, timed_out]))}
+        state = {"passes": [first, timed_out, {"head": "c" * 40, "report": resumed, "retry": True}]}
+        self.assertIsNone(ItemHistory()._validate_coverage(state, resumed))
+        # The exemption is the captured evidence, not the absent report: strip
+        # the evidence and the same reservation is refused again.
+        del state["passes"][1]["execution_error"]
+        with self.assertRaisesRegex(ship.Refusal, "does not continue the initially reviewed head"):
+            ItemHistory()._validate_coverage(state, resumed)

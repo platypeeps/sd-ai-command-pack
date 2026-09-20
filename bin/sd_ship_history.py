@@ -241,6 +241,14 @@ class ItemHistory(ReviewHistory):
             # A full-branch review covers everything before it, including an
             # attempt that never produced a report to check.
             return
+        if not current and timeout_evidence(entry) is not None:
+            # A reservation that produced no report verified nothing, and has
+            # no base of its own to compare. Its evidence is the captured
+            # timeout, and the pass that follows resumes the same incomplete
+            # review, which is where the link is checked. Reading it as a
+            # verification asked it for a report it never had -- a defect only
+            # a chain long enough to hold one reaches.
+            return
         if entry.get("retry"):
             if index == 0:
                 raise Refusal("a retry has no preceding review to resume")
