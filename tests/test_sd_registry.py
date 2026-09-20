@@ -1639,3 +1639,59 @@ class TheMeterEnvField(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LoopbackNeedsNoCredentialTests(unittest.TestCase):
+    """sd:1145 -- a locally hosted server authenticates nobody.
+
+    The registry has no way to spell "this recipient wants no key", so the
+    credential rule kept every loopback entry unreachable and the only way
+    round it was a placeholder variable: a secret in name only, and one more
+    thing to keep exported. The exemption is deliberately narrow -- loopback
+    AND no declared variable -- because each half alone is a hole.
+    """
+
+    def entry(self, url, env=()):
+        return sd_registry.Provider(
+            name="local", url=url, start=None, model="m", vendor="v", bill="b",
+            roles=("reviewer",), ranks={}, reader=None, max_tokens=16, env=tuple(env),
+            price=None, enabled=True, reason=None, thinking=None, reasoning_effort=None)
+
+    def test_a_loopback_entry_with_no_variable_is_called_without_a_key(self):
+        sent = {}
+
+        def opener(request, timeout=None):
+            sent["headers"] = dict(request.headers)
+            raise OSError("no server, and the headers are what this asserts")
+
+        with unittest.mock.patch.object(sd_registry, "_OPENER", types.SimpleNamespace(open=opener)):
+            code, _, detail, launched, _ = sd_registry.chat_completion(
+                self.entry("http://localhost:8084/v1"), "p", {}, 5)
+        # It reached the transport rather than being refused before it.
+        self.assertIn("no server", detail)
+        self.assertNotIn("Authorization", sent["headers"])
+        self.assertNotIn("Authorization".lower().capitalize(), sent["headers"])
+
+    def test_a_public_entry_with_no_variable_is_still_refused(self):
+        """The half that would be a hole: no key, but not this machine."""
+        code, _, detail, launched, _ = sd_registry.chat_completion(
+            self.entry("https://api.example.com/v1"), "p", {}, 5)
+        self.assertEqual((code, launched), (1, False))
+        self.assertIn("has no value for any key", detail)
+
+    def test_a_loopback_entry_that_declares_a_variable_still_needs_its_value(self):
+        """The other half: a server configured to check a key gets one."""
+        code, _, detail, launched, _ = sd_registry.chat_completion(
+            self.entry("http://localhost:8084/v1", ("LOCAL_KEY",)), "p", {}, 5)
+        self.assertEqual((code, launched), (1, False))
+        self.assertIn("has no value for LOCAL_KEY", detail)
+
+    def test_loopback_refuses_a_public_name_that_merely_starts_with_127(self):
+        for host in ("127.evil.com", "127.0.0.1.evil.com", "127.1", "localhost.evil.com"):
+            with self.subTest(host=host):
+                self.assertFalse(sd_registry.loopback(self.entry(f"http://{host}/v1")))
+
+    def test_loopback_accepts_the_real_local_addresses(self):
+        for host in ("localhost", "127.0.0.1", "[::1]", "127.0.0.2"):
+            with self.subTest(host=host):
+                self.assertTrue(sd_registry.loopback(self.entry(f"http://{host}/v1")))
