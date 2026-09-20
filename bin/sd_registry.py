@@ -281,7 +281,9 @@ def _adapt(registry: Any, meter_envs: Mapping[str, str | None] | None = None) ->
             refuse_unbounded(provider.name, provider.bill, provider.max_tokens, dict(provider.price), Path(registry.path))
         # A row can carry a model the file does not, so the vendor claim is
         # checked on what was merged rather than on what was written.
-        mismatch = refuse_vendor_model(provider.name, provider.vendor, provider.model, provider.start)
+        mismatch = refuse_vendor_model(
+            provider.name, provider.vendor, provider.model, provider.start, provider.reader
+        )
         if mismatch is not None:
             raise RegistryError(f"{registry.path}: {mismatch}")
     return Registry(
@@ -672,6 +674,17 @@ MODEL_VENDORS: tuple[tuple[str, str], ...] = (
 )
 
 
+#: Readers whose command serves more than one vendor's models. An entry on
+#: one of these must pin a model. Keyed on the reader rather than on the
+#: program, because the reader names a protocol this build implemented and
+#: knew the answer for, while the first word of a `start` line is a string the
+#: operator controls: a wrapper would evade a program list and an unrelated
+#: `agy-lint` would trip it. `codex-json` and `claude-json` are outside this
+#: set today because each command serves its own vendor; if either gains
+#: model selection across vendors, add it here and pin models in the entries.
+MULTIVENDOR_READERS: frozenset[str] = frozenset({"agy-json"})
+
+
 def model_vendor(model: str | None) -> str | None:
     """Return the vendor a model name identifies, or None for no opinion."""
     name = (model or "").strip().lower()
@@ -702,7 +715,7 @@ def declared_models(model: str | None, start: str | None) -> tuple[str, ...]:
 
 
 def refuse_vendor_model(
-    name: str, vendor: str, model: str | None, start: str | None
+    name: str, vendor: str, model: str | None, start: str | None, reader: str | None
 ) -> str | None:
     """Refuse an entry whose vendor disagrees with the model it runs.
 
@@ -712,8 +725,25 @@ def refuse_vendor_model(
     the branch's authorship trailers, so an entry declaring one vendor while
     running another's model would let the author's own model review the
     author's own work, and the guard would report the review as independent.
+
+    An entry that pins no model reaches the same place by saying nothing, so
+    the two are refused together: this is one function on purpose, because
+    every caller that wants the claim checked wants it checkable first.
     """
-    for pinned in declared_models(model, start):
+    pinned_models = declared_models(model, start)
+    if not pinned_models and reader in MULTIVENDOR_READERS:
+        return (
+            f"provider {name!r} declares vendor {vendor!r} and reads back as "
+            f"{reader!r}, but pins no model. A vendor is matched against the "
+            f"branch's authorship trailers to keep a reviewer independent of "
+            f"the author, and that command serves several vendors' models, so "
+            f"the claim here is about a model nothing names. The choice falls "
+            f"to the command's own configuration, which this file cannot read: "
+            f"repoint that default at another vendor's model and this entry "
+            f"reviews its own vendor's work, reported as independent. Give the "
+            f"entry a 'model'."
+        )
+    for pinned in pinned_models:
         actual = model_vendor(pinned)
         if actual is not None and actual != vendor:
             return (
@@ -815,7 +845,7 @@ def _provider(
             f"padding or a capital could never match, and the entry would "
             f"review work its own vendor wrote. Write it lower case."
         )
-    mismatch = refuse_vendor_model(name, vendor, body.get("model"), start)
+    mismatch = refuse_vendor_model(name, vendor, body.get("model"), start, body.get("reader"))
     if mismatch is not None:
         raise RegistryError(f"{path}: {mismatch}")
 
@@ -1540,7 +1570,7 @@ def _reviewer_candidate(
         # used, and an entry that would defeat it should say so rather than
         # report whichever unrelated refusal happened to be tested first.
         refusal = refuse_vendor_model(
-            provider.name, provider.vendor, provider.model, provider.start
+            provider.name, provider.vendor, provider.model, provider.start, provider.reader
         )
     if refusal is None:
         refusal = refuse_allowance(provider, consent.get(provider.name))

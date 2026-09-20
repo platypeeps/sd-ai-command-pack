@@ -40,8 +40,11 @@ roles:
 """
 
 
-def registry_text(vendor: str = "google", model: str = "gemini-3.1-pro-high", start: str = "agy") -> str:
-    return AGY.replace("MODEL", model).replace("VENDOR", vendor).replace('"agy"', f'"{start}"')
+def registry_text(vendor: str = "google", model: str | None = "gemini-3.1-pro-high",
+                  start: str = "agy", reader: str = "agy-json") -> str:
+    text = AGY.replace("VENDOR", vendor).replace('"agy"', f'"{start}"')
+    text = text.replace("reader: agy-json", f"reader: {reader}")
+    return text.replace("model: MODEL, ", "") if model is None else text.replace("MODEL", model)
 
 
 def written(text: str) -> pathlib.Path:
@@ -148,6 +151,19 @@ class TheEnvelopeIsReadBack(unittest.TestCase):
                 result, parsed = self.answer(stdout)
                 self.assertNotEqual((result, parsed), (None, None))
 
+    def test_a_denied_tool_run_is_not_read_as_a_clean_review(self) -> None:
+        """Observed: `agy` reports SUCCESS when a tool was auto-denied.
+
+        The response is empty and no schema key is written, so reading
+        `status` alone would turn a session that did nothing into a clean bill.
+        """
+        result, parsed = self.answer(json.dumps(
+            {"conversation_id": "x", "status": "SUCCESS", "response": "",
+             "denied_actions": [{"action": "write_file", "display_name": "WriteToFile"}],
+             "usage": {"total_tokens": 1}}))
+        self.assertEqual(result.exit_code, 0)
+        self.assertIsNone(parsed)
+
     def test_an_oversized_response_becomes_a_blocker(self) -> None:
         _result, parsed = self.answer("x" * (sd_review.MAX_OUTPUT_BYTES + 1))
         self.assertEqual(parsed.error, "response exceeds the declared byte limit")
@@ -193,6 +209,39 @@ class TheVendorMustMatchTheModel(unittest.TestCase):
             self.read(registry_text(start="agy --model claude-sonnet-4-6"))
         self.assertIn("claude-sonnet-4-6", str(caught.exception))
 
+    def test_an_entry_pinning_no_model_is_refused(self) -> None:
+        """The defeat reached by omitting a key rather than by lying in one.
+
+        `agy` picks its own default when no `--model` is given, and that
+        default is configuration this registry cannot read. An operator who
+        repoints it at an Anthropic model turns a `vendor: google` entry into
+        an Anthropic reviewer, with the guard still reporting independence.
+        """
+        with self.assertRaises(sd_registry.RegistryError) as caught:
+            self.read(registry_text(model=None))
+        message = str(caught.exception)
+        self.assertIn("pins no model", message)
+        self.assertIn("independent", message)
+        self.assertIn("cannot read", message)
+
+    def test_a_start_line_model_satisfies_the_requirement(self) -> None:
+        """`declared_models` reads both, so either place pins the entry."""
+        registry = self.read(registry_text(model=None, start="agy --model gemini-3.1-pro-high"))
+        self.assertIsNone(registry.providers["agy"].model)
+
+    def test_the_requirement_is_keyed_on_the_reader_not_on_every_entry(self) -> None:
+        """`claude -p` pins no model in the shipped registry and must not have to."""
+        registry = self.read(registry_text(vendor="anthropic", model=None, reader="claude-json"))
+        self.assertIsNone(registry.providers["agy"].model)
+        self.assertNotIn("claude-json", sd_registry.MULTIVENDOR_READERS)
+
+    def test_the_chain_refuses_a_missing_model_where_no_file_was_parsed(self) -> None:
+        candidate = sd_registry._reviewer_candidate(
+            provider(model=None), consent={}, author_vendors=(),
+            capped_bills={}, readers=sd_review.READERS)
+        self.assertFalse(candidate.eligible)
+        self.assertIn("pins no model", candidate.reason)
+
     def test_an_unfamiliar_model_name_draws_no_conclusion(self) -> None:
         registry = self.read(registry_text(vendor="moonshot", model="kimi-k3"))
         self.assertEqual(registry.providers["agy"].model, "kimi-k3")
@@ -210,7 +259,8 @@ class TheVendorMustMatchTheModel(unittest.TestCase):
         self.assertIn("anthropic", candidate.reason)
 
     def test_a_matching_entry_is_not_refused_by_the_same_check(self) -> None:
-        self.assertIsNone(sd_registry.refuse_vendor_model("agy", "google", "gemini-3.1-pro-high", "agy"))
+        self.assertIsNone(
+            sd_registry.refuse_vendor_model("agy", "google", "gemini-3.1-pro-high", "agy", "agy-json"))
 
 
 class TheBillCannotBeCapped(unittest.TestCase):
