@@ -26,6 +26,7 @@ if _BIN not in sys.path:
     sys.path.insert(0, _BIN)
 
 import sd_check_receipts  # noqa: E402
+import sd_jev  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_registry  # noqa: E402
 import sd_review_material  # noqa: E402
@@ -1331,6 +1332,17 @@ def review(
     if subject.scope == "planning" and (refusal := sd_lib.guest_artifact_refusal(root, subject.paths)):
         raise UsageError(refusal)
     plan = sd_route.route(subject.paths, subject.lines, args.draft, policy)
+    # Optional and experimental, and off unless the operator asked for it and a
+    # `jev` on PATH answered; otherwise this returns the routed tier untouched and
+    # no record, and the result below is byte-for-byte what it was. `bin/sd_jev.py`
+    # owns the contract and says exactly what leaves the machine.
+    jev_choice, jev_reading = sd_jev.jev_tier(
+        plan.tier, policy["tier_order"], subject.paths, subject.lines, plan.reason, env)
+    if jev_reading is not None:
+        plan = plan._replace(
+            tier=jev_choice,
+            depth=sd_route.TIER_DEPTH.get(jev_choice, sd_route.DEFAULT_DEPTH),
+            reason=f"{plan.reason}; Jev read the diff and chose tier {jev_choice}")
     # Read from the home this run was handed, not from the process's, so a run
     # given a different environment reads that operator's pins. A missing
     # registry reports rather than raises; `read_or_report` says why.
@@ -1508,6 +1520,10 @@ def review(
         "explain_only": bool(args.explain),
         "dry_run": bool(args.dry_run),
     }
+    if jev_reading is not None:
+        # Present only when a reading was actually taken, so its absence is the
+        # old output rather than a new key saying nothing happened.
+        result["jev"] = jev_reading
 
     if preflight:
         return provider_preflight(result, chosen, root, subject, runner, env, args, client, ledger)

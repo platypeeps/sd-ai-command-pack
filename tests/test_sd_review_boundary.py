@@ -172,6 +172,11 @@ class NeverPostsTests(unittest.TestCase):
             # `gh` and posting-fragment assertions above cover the entry point
             # that would have to do the posting.
             "sd_registry",
+            # The optional Jev tier reading. It runs one bounded local command
+            # and only when an explicit opt-in is set, so it widens the
+            # allow-list by a subprocess and not by a way out to GitHub; the
+            # never-posts assertions below cover it like the rest of the lane.
+            "sd_jev",
             # Focused local readers; only sd-check explicitly calls receipt writers.
             "sd_check_receipts",
             "sd_review_material",
