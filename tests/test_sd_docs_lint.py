@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import pathlib
 import re
@@ -2016,6 +2017,157 @@ class WorkDirSpellingTests(LintFixture):
         self.git("add", "-A")
         with in_directory(self.repo):
             self.assertEqual(lint.main(["--work-dir", str(self.work)]), 0)
+
+
+JEV_STUB = """#!/usr/bin/env python3
+import json
+import os
+import shutil
+import sys
+
+verb = sys.argv[1] if len(sys.argv) > 1 else ""
+if verb == "enabled":
+    raise SystemExit(int(os.environ.get("JEV_STUB_ENABLED", "0")))
+state = sys.argv[sys.argv.index("--state") + 1]
+capture = os.environ.get("JEV_STUB_CAPTURE")
+if capture:
+    shutil.copyfile(state, capture)
+questions = json.loads(sys.stdin.read())
+if os.environ.get("JEV_STUB_FAIL") == "1":
+    sys.stdout.write("not json at all\\n")
+    raise SystemExit(1)
+noul = float(os.environ.get("JEV_STUB_NOUL", "0.9"))
+answers = {key: {"noul": noul} for key in questions}
+sys.stdout.write(json.dumps({"model": "stub", "answers": answers}))
+"""
+
+
+class Rule6ClaimSupportTests(LintFixture):
+    """The optional second reading of rule 6, which asks a model a question.
+
+    Every test here runs against a stub on PATH and never against the real
+    command: a suite that reaches a paid endpoint is a suite that fails when
+    somebody else's invoice does, and none of what is being tested here is
+    the model's judgment. What is being tested is that the linter behaves the
+    same whatever the model says, and says what it was told.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.bin = self.repo / "stub-bin"
+        self.bin.mkdir()
+        stub = self.bin / "jev"
+        stub.write_text(JEV_STUB, encoding="utf-8")
+        stub.chmod(0o755)
+        self.capture = self.repo / "sent.json"
+
+    @contextlib.contextmanager
+    def jev(self, **extra: str):
+        """The stub on PATH, the opt-in set, and nothing left behind."""
+        environment = {
+            "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
+            "JEV_SD_DOCS_LINT": "1",
+            "JEV_STUB_CAPTURE": str(self.capture),
+            **extra,
+        }
+        with mock.patch.dict(os.environ, environment):
+            yield
+
+    def recorded_item(self) -> pathlib.Path:
+        item = self.cited_item()
+        lint.write_citation_manifest(item, self.work)
+        return item
+
+    def test_an_unasked_run_says_nothing_at_all(self) -> None:
+        self.recorded_item()
+        with mock.patch.dict(os.environ, {"PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}"}):
+            self.assertNotIn("claim support", self.notes())
+
+    def test_asking_without_jev_on_path_is_said_out_loud(self) -> None:
+        """A PATH with git on it and no jev, which is every checkout but one.
+
+        git is symlinked in rather than the real PATH being kept, because the
+        operator running this suite has `jev` on theirs: a test that removed
+        nothing would pass by finding the real command, and a test that
+        removed everything would fail on `git` before reaching the question.
+        """
+        self.recorded_item()
+        gitless = self.repo / "git-only-bin"
+        gitless.mkdir()
+        (gitless / "git").symlink_to(shutil.which("git"))
+        with mock.patch.dict(os.environ, {"PATH": str(gitless), "JEV_SD_DOCS_LINT": "1"}):
+            self.assertIn("not run (jev is not on PATH)", self.notes())
+
+    def test_a_switched_off_jev_is_named_and_asked_nothing(self) -> None:
+        self.recorded_item()
+        with self.jev(JEV_STUB_ENABLED="3"):
+            notes = self.notes()
+        self.assertIn("not run (jev enabled reports it cannot answer", notes)
+        self.assertFalse(self.capture.exists(), "a switched-off jev was sent a request")
+
+    def test_a_weak_answer_is_a_note_and_never_a_failure(self) -> None:
+        self.recorded_item()
+        with self.jev(JEV_STUB_NOUL="0.10"):
+            report = self.run_lint()
+        joined = "\n".join(report.notes)
+        self.assertIn("`prd.md:3`", joined)
+        self.assertIn("0.10", joined)
+        self.assertIn("1 of 1 recorded citation(s) answered, 1 under 0.5", joined)
+        self.assertEqual(report.failures, [])
+
+    def test_a_confident_answer_is_counted_and_not_named(self) -> None:
+        self.recorded_item()
+        with self.jev(JEV_STUB_NOUL="0.95"):
+            report = self.run_lint()
+        joined = "\n".join(report.notes)
+        self.assertIn("1 of 1 recorded citation(s) answered, 0 under 0.5", joined)
+        self.assertNotIn("may no longer support", joined)
+        self.assertEqual(report.failures, [])
+
+    def test_a_broken_jev_changes_neither_the_notes_nor_the_verdict(self) -> None:
+        self.recorded_item()
+        with self.jev(JEV_STUB_FAIL="1"):
+            report = self.run_lint()
+        # `0 of 1 ... answered`, not `1 ... 0 under the floor`. A pass that
+        # answered nothing and a pass that answered confidently printed the
+        # same line until this test was written, which is the whole of how a
+        # dead check goes on reading clean.
+        self.assertIn("0 of 1 recorded citation(s) answered", "\n".join(report.notes))
+        self.assertEqual(report.failures, [])
+
+    def test_only_the_two_passages_leave_the_machine(self) -> None:
+        """The payload cap, asserted against what the stub was handed.
+
+        A cap documented in a docstring is a cap nobody re-checks. This reads
+        the bytes the command received and refuses every name the linter knows
+        -- the item directory, the two file names, the absolute root -- so a
+        later edit that widens the state fails here rather than in somebody's
+        outbound traffic.
+        """
+        item = self.recorded_item()
+        with self.jev():
+            self.run_lint()
+        sent = self.capture.read_text(encoding="utf-8")
+        for forbidden in (item.name, "prd.md:3", "design.md", str(self.repo), "docs/work"):
+            self.assertNotIn(forbidden, sent, f"{forbidden!r} left the machine")
+        payload = json.loads(sent)
+        self.assertEqual(list(payload), ["citations"])
+        self.assertEqual(list(payload["citations"]), ["c1"])
+        self.assertEqual(sorted(payload["citations"]["c1"]), ["claim", "evidence"])
+
+    def test_a_long_passage_is_capped_before_it_is_sent(self) -> None:
+        item = self.cited_item()
+        (item / "prd.md").write_text(
+            "---\ntitle: A cited item\ndate: 2026-08-29\nstatus: planning\n---\n"
+            + "ladder " * 400 + "\n",
+            encoding="utf-8",
+        )
+        lint.write_citation_manifest(item, self.work)
+        with self.jev():
+            self.run_lint()
+        payload = json.loads(self.capture.read_text(encoding="utf-8"))
+        self.assertLessEqual(len(payload["citations"]["c1"]["evidence"]), lint.EVIDENCE_CHARS)
+        self.assertLessEqual(len(payload["citations"]["c1"]["claim"]), lint.CLAIM_CHARS)
 
 
 if __name__ == "__main__":
