@@ -132,8 +132,14 @@ records the differences that are on purpose. Both are in
    in `~/.claude/pending-mirror-syncs/`. Drain it: read each JSON file, mirror
    that document to the container the request names — through the Notion
    connector for `destination: notion`, the Google Workspace connector for
-   `destination: drive` — in the shape `references/conventions.md` gives,
-   record the page or file in the repo's README table, then delete the request
+   `destination: drive` — in the shape `references/conventions.md` gives.
+   A request that names an existing page or file updates that one. A request
+   that names none creates one, and the created id goes back into the
+   designation. Write it into that document's `notion=` or `drive=` entry in
+   `research.conf.py`, as `page=` for Notion and `file=` for Drive. Do that
+   before deleting the request file. Skip the write-back and the next render
+   queues another create, so the drain leaves a second external copy. Then
+   record the page or file in the repo's README table and delete the request
    file. A request whose handling restrictions forbid an external mirror is
    reported and left in place, never drained.
 9. Report what was done, what was verified, and what was not.

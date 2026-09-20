@@ -179,7 +179,7 @@ TEMPLATE = os.path.join(
 SLOT = re.compile(r"<[^<>\n]+>")
 
 # What a repo legitimately writes where the template describes a value: the
-# Notion folder URL, the absolute path of a document, a `file:///` link. These
+# mirror folder URL, the absolute path of a document, a `file:///` link. These
 # are the only substitutions the template invites that are not `<...>` slots,
 # and they are recognisable as values rather than as prose.
 LOCAL_VALUE = re.compile(r"https?://\S+|file:///\S+|/(?:Users|home|opt|srv|var|mnt)/\S+")
@@ -487,8 +487,9 @@ def main_document(repo, docs):
 
     This checks the half of the convention that is inside the checkout: the
     Markdown H1, and the `title`/`h1` the config renders it under. The README's
-    entry link and the Notion page title are the other half, they are in no
-    file this kit reads, and they stay in the checklist -- which is why the ok
+    entry link and the title of any designated mirror, Notion or Drive, are the
+    other half, they are in no file this kit reads, and they stay in the
+    checklist -- which is why the ok
     line names what it covered instead of reporting a bare pass. A check that
     printed `ok` after reading two of the four surfaces would manufacture the
     confidence it exists to earn.
@@ -529,7 +530,7 @@ def main_document(repo, docs):
               f"({', '.join(sorted(carriers))}) -- exactly one may")
         return bad + 1
     print(f"  ok   main document: {carriers[0]}, H1 and rendered title. Its "
-          "README link and Notion title are the checklist's half")
+          "README link and any mirror title are the checklist's half")
     return bad
 
 
@@ -612,10 +613,11 @@ The half no script can do — work it before publishing, per document:
        you happen to know?
     7. Look for the load-bearing thing left implicit — the assumption doing the
        work that the document never states.
-    8. Check the Notion mirror matches the source after the update, and that
-       handling restrictions survived the mirror. Include the main document's
+    8. Check each drained mirror matches the source, and that handling
+       restrictions survived the mirror. A document with no `notion=` or
+       `drive=` key has no mirror to check. Include the main document's
        other two surfaces, which no check above reaches: the README's entry
-       link and table, and the Notion page title and parent. `review` read its
+       link and table, and any mirror's title and container. `review` read its
        H1 and rendered title and said so; these two nothing read.
 
   The second reader
@@ -694,7 +696,7 @@ def init_main() -> int:
     with open(local_copy, "w", encoding="utf-8") as handle:
         handle.write(text)
     print(f"wrote CLAUDE.md from {TEMPLATE}")
-    print("  Fill in the `<...>` slots and the Notion folder URL, then run "
+    print("  Fill in the `<...>` slots and any mirror folder URL, then run "
           "`sd-research-kit review`.")
     return 0
 

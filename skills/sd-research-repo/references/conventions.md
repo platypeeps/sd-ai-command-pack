@@ -370,14 +370,16 @@ handoff packets. Publish what a reader is meant to read.
 
 ### Outward destinations are per document
 
-The user designates a document and names its container at that time. Record it
-in that document's `DOCS` entry, where the document is already described:
+The user designates a document. Each destination has a default container, so
+the designation alone is enough; the user names a container only to override
+the default. Record the designation in that document's `DOCS` entry, where the
+document is already described:
 
 ```python
 notion=dict()                    # private briefs folder, <repo> page
 notion=dict(team=True)           # team briefs folder, <repo> page
 drive=dict()                     # My Drive, Briefs/<repo> folder
-drive=dict(folder="Research deliverables", file="https://docs.google.com/d/...")
+drive=dict(folder="Research deliverables", file="https://docs.google.com/document/d/...")
 ```
 
 | Destination | Key | Container | Existing page or file (optional) |
