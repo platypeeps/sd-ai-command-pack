@@ -255,12 +255,37 @@ jobs:
       # it at review start; nothing on main at this commit imports it, so
       # this bump changes no result here. Migration-free: `SCHEMA_VERSION`
       # 9 at both pins.
+      #
+      # `341c5f2c` is **the first pin here that carries a migration**, and the
+      # first bump this repository's own tests demanded rather than tolerated.
+      # System #458 renames `repo.merge_policy` to `repo.runner_merge` and
+      # takes `SCHEMA_VERSION` 9 -> 10 (`010_runner_merge.sql`). `upsert_repo`
+      # renames the keyword with the column, so the three `upsert_repo` calls
+      # and the one `SELECT` in `tests/test_sd_ship.py` and
+      # `tests/test_guest_artifact_refusal.py` cannot say both spellings: the
+      # pin and those four sites move in one commit or one of the two
+      # environments is red. Before this, `main` was green here on the old
+      # spelling and red on every developer machine whose database had been
+      # migrated -- the pin hiding a break rather than a bump causing one.
+      #
+      # #458 also moves a dict key on a function this repository calls:
+      # `sd_db.runner.merge_authority` returns `runner_merge` where it
+      # returned `merge_policy`. `bin/sd-ship:869` reads `work_path` and
+      # `item` off that dict and neither spelling appears anywhere in `bin/`,
+      # so nothing here observes it -- but the rename is a column, a keyword
+      # and a returned key, not the first two alone.
+      #
+      # Of the other two `sd_db` commits in `55c4d691..341c5f2c`, #471 widens
+      # `sd_db.calls` to a loopback entry that declares no key variable and
+      # #453 touches `sd_db.backup`; no pack test constructs either. Nothing
+      # under `local-sd-db` changes between this commit and system `main`, so
+      # this is the newest `sd_db` there is, not a point chosen inside it.
       - name: Check out the system checkout, for sd_db
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: platypeeps/system
-          # Provider-policy membership requires the shared library from system #451.
-          ref: 55c4d69168cfa873d57bf063275e2f1a22c5a8e6
+          # `repo.runner_merge` needs schema 10, from system #458.
+          ref: 341c5f2cf5809236e11cf648ef8bec3c98033164
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false
