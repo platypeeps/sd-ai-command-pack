@@ -123,6 +123,11 @@ DESTINATIONS = (
                 default=BRIEFS + "/%s"),
 )
 
+#: The row a request's `destination` field names. Derived rather than written
+#: twice, so a destination added to the table above is reachable from a queued
+#: request without anything else being remembered.
+BY_NAME = {dest.name: dest for dest in DESTINATIONS}
+
 class NotionScope(NamedTuple):
     """One Notion default destination: the setting that names it, in words.
 
@@ -585,6 +590,43 @@ def migrate_legacy_queue() -> list[str]:
     return reports
 
 
+def recorded(path: Path, target: dict[str, str], what: str) -> str:
+    """The page or file id a request already sitting at `path` records.
+
+    The contract calls the request the durable record, and the drain's step 4
+    is what makes it one: the id goes into the request the moment the
+    destination returns it, before the designation is amended. A render
+    between those two steps overwrote the request, and the id was then written
+    nowhere -- so the next drain enqueued a create and left a second page
+    carrying the same title. That is the duplicate steps 4 and 5 exist to
+    prevent, arriving by the one route neither of them watches.
+
+    So a render carries the recorded id forward. It never invents one: an
+    absent, unreadable or half-written request records nothing, and the drain
+    falls back to adopting by title, which is what it does for a page it has
+    never seen.
+
+    Carried only while the *container* still matches. A page id belongs to the
+    folder it was created under, so a designation moved to another folder --
+    or to the other Notion scope -- has made the recorded page the wrong one,
+    and the drain must resolve the new container afresh. Every field of the
+    target except the id itself is compared, which is the whole container and
+    nothing about the document: a renamed document keeps its page, and a
+    rename is exactly when the recorded id is the only thing that still finds
+    it.
+    """
+    try:
+        pending = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(pending, dict):
+        return ""
+    if any(pending.get(field) != value
+           for field, value in target.items() if field != what):
+        return ""
+    return str(pending.get(what, "")).strip()
+
+
 def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     """Write one sync request per document per designated destination."""
     reports: list[str] = []
@@ -614,8 +656,15 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
         }
         request.update(target)
         path = QUEUE / ("%s.%s.%s.json" % (key, out or "doc", target["destination"]))
+        # The designation is the answer where it gives one; the queue records
+        # what a drain did, and never overrides what the document says.
+        what = BY_NAME[target["destination"]].what
+        carried = "" if request[what] else recorded(path, target, what)
+        request[what] = request[what] or carried
         path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
-        reports.append("mirror: queued %s -> %s" % (out, target["target"]))
+        reports.append("mirror: queued %s -> %s%s" % (
+            out, target["target"],
+            ", updating the %s already recorded" % what if carried else ""))
     return reports
 
 

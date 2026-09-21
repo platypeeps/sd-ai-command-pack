@@ -475,6 +475,91 @@ class EnqueueTests(Fixture):
         PUBLISH.enqueue(self.repo, self.docs())
         self.assertEqual(len(list(PUBLISH.QUEUE.iterdir())), 1)
 
+    def drained(self, name: str, **fields: str) -> Path:
+        """One queued request amended the way a drain's step 4 amends it."""
+        path = PUBLISH.QUEUE / name
+        request = json.loads(path.read_text(encoding="utf-8"))
+        request.update(fields)
+        path.write_text(json.dumps(request) + "\n", encoding="utf-8")
+        return path
+
+    def test_a_re_render_keeps_an_id_the_drain_recorded(self) -> None:
+        """The request is the durable record, so a render must not erase it.
+
+        A drain that writes the id into the request and stops before amending
+        `research.conf.py` leaves the only record of the created page in the
+        queue. The post-commit hook renders on the next commit, and a render
+        that overwrote the request there would drop the id -- after which the
+        next drain creates a second page carrying the same title.
+        """
+        doc = dict(src="10-x/a.md", out="a", title="A", notion=dict())
+        PUBLISH.enqueue(self.repo, [doc])
+        path = self.drained("my-research.a.notion.json",
+                            page="3e1f52b1-5782-8145-9c00-e9779a77804f")
+
+        PUBLISH.enqueue(self.repo, [doc])
+        self.assertEqual(
+            json.loads(path.read_text())["page"],
+            "3e1f52b1-5782-8145-9c00-e9779a77804f",
+        )
+
+    def test_a_re_render_keeps_a_drive_file_the_drain_recorded(self) -> None:
+        """Both destinations carry the id in the field their table names, so
+        neither depends on the other having been thought about."""
+        doc = dict(src="10-x/a.md", out="a", title="A", drive=dict())
+        PUBLISH.enqueue(self.repo, [doc])
+        path = self.drained("my-research.a.drive.json", file="1AbCdEf")
+
+        PUBLISH.enqueue(self.repo, [doc])
+        self.assertEqual(json.loads(path.read_text())["file"], "1AbCdEf")
+
+    def test_a_carried_id_survives_a_renamed_document(self) -> None:
+        """The title is what an undesignated drain adopts by, so a rename is
+        exactly when the recorded id is the only thing that finds the page."""
+        PUBLISH.enqueue(self.repo, [dict(out="a", title="A", notion=dict())])
+        path = self.drained("my-research.a.notion.json", page="page-id")
+
+        PUBLISH.enqueue(
+            self.repo, [dict(out="a", title="A renamed", notion=dict())])
+        wrote = json.loads(path.read_text())
+        self.assertEqual(wrote["page"], "page-id")
+        self.assertEqual(wrote["title"], "A renamed")
+
+    def test_the_designation_wins_over_a_carried_id(self) -> None:
+        """A `page=` the user wrote is the answer. The queue is a record of
+        what a drain did, never an override of what the document says."""
+        PUBLISH.enqueue(self.repo, [dict(out="a", title="A", notion=dict())])
+        path = self.drained("my-research.a.notion.json", page="stale")
+
+        PUBLISH.enqueue(
+            self.repo, [dict(out="a", title="A", notion=dict(page="named"))])
+        self.assertEqual(json.loads(path.read_text())["page"], "named")
+
+    def test_a_carried_id_is_dropped_when_the_container_changes(self) -> None:
+        """A page id belongs to the container it was created under. Moving the
+        designation to the team folder makes the recorded page the wrong one,
+        so the request names none and the drain resolves it afresh."""
+        PUBLISH.enqueue(self.repo, [dict(out="a", title="A", notion=dict())])
+        path = self.drained("my-research.a.notion.json", page="private-page")
+
+        PUBLISH.enqueue(
+            self.repo, [dict(out="a", title="A", notion=dict(team=True))])
+        wrote = json.loads(path.read_text())
+        self.assertEqual(wrote["page"], "")
+        self.assertEqual(wrote["space_id"], TEAM_FOLDER)
+
+    def test_an_unreadable_pending_request_carries_nothing(self) -> None:
+        """A truncated or hand-edited request records nothing. It is replaced
+        and reported as queued, and the drain adopts by title instead."""
+        PUBLISH.enqueue(self.repo, [dict(out="a", title="A", notion=dict())])
+        path = PUBLISH.QUEUE / "my-research.a.notion.json"
+        path.write_text("{not json", encoding="utf-8")
+
+        said = PUBLISH.enqueue(
+            self.repo, [dict(out="a", title="A", notion=dict())])
+        self.assertEqual(json.loads(path.read_text())["page"], "")
+        self.assertTrue(any("queued a" in line for line in said), said)
+
     def test_nothing_designated_writes_no_queue_at_all(self) -> None:
         PUBLISH.enqueue(self.repo, [dict(src="x.md", out="b", title="B")])
         self.assertFalse(PUBLISH.QUEUE.exists())
