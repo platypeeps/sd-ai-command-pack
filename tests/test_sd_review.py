@@ -412,6 +412,17 @@ class ReaderTests(ReviewFixture):
         self.assertEqual(argv[:3], ["wrapped", "codex", "exec"])
         self.assertIn("--sandbox", argv)
 
+    def test_skill_instructions_are_suppressed_like_project_instructions(self) -> None:
+        """A committed `.agents/skills/<name>/SKILL.md` writes into the
+        reviewing model's context on every run unless this key is set, and no
+        `--enable`/`--disable` feature flag reaches skills. Lose the key and
+        the checkout under review instructs its own reviewer again (C-40)."""
+
+        argv = sd_review.codex_argv(pathlib.Path("/repo"), pathlib.Path("/work"))
+        self.assertIn("skills.include_instructions=false", argv)
+        # A `-c` value, not a bare word: misplaced, codex reads it as a prompt.
+        self.assertEqual(argv[argv.index("skills.include_instructions=false") - 1], "-c")
+
 
 class SubjectTests(ReviewFixture):
     def test_worktree_scope_sees_modified_and_untracked_files(self) -> None:

@@ -103,7 +103,8 @@ class InstructionArgumentContracts(ReviewFixture):
             "Review synthetic material", runner, self.environment(), 5, self.chatgpt_home())
         self.assertEqual(outcome.status, sd_review.CLEAN)
         argv = runner.calls[0]["argv"]
-        for flag in ("--ignore-user-config", "--ignore-rules", "--ephemeral", "project_doc_max_bytes=0"):
+        for flag in ("--ignore-user-config", "--ignore-rules", "--ephemeral",
+                     "project_doc_max_bytes=0", "skills.include_instructions=false"):
             self.assertIn(flag, argv)
         self.assertEqual(argv[argv.index("--sandbox") + 1], "read-only")
         self.assertEqual(runner.calls[0]["stdin"], "Review synthetic material")
