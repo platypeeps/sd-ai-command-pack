@@ -339,9 +339,10 @@ second page and the first is orphaned. Rename a mirrored document and check its
 mirror by hand. A destination that creates a page and returns an error instead
 of an id lands in the first row and recovers there.
 
-Never drain a request into a container the request does not name, never create a
-page or file in a container the user has not named for that document, and never
-drain a request to a destination other than the one it names.
+Never drain a request into a container it does not resolve to, never create a
+page or file outside that container -- the one the document names, or the
+configured default for its destination when the document names none -- and
+never drain a request to a destination other than the one it names.
 
 ## Order
 
