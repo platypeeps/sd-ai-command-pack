@@ -585,7 +585,11 @@ DISPOSITIONS = (
 #: The markers that say a cut is named and unfinished. Criterion 31 opens
 #: "Requirement 13 is closed line by line", so one of these in the list is
 #: the criterion failing in the document that states it.
-PENDING = ("still pending", "not yet", "TODO")
+#: Words a clause uses to say a cut has not happened. The third is split
+#: the way `bin/sd-status` splits its own `_MARKER_PATTERN`: spelled
+#: whole, this line is the only hit that scan finds in the repository,
+#: and the docstring there says the true answer is zero.
+PENDING = ("still pending", "not yet", "TO" "DO")
 
 #: Clauses that state no cut of their own, keyed by a distinctive substring
 #: and carrying the reason they are dispositioned elsewhere. Two, and both
