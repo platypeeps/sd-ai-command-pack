@@ -72,7 +72,35 @@ jobs:
       # this suite's library underneath it. It moves when this pack starts
       # using something the old pin does not carry, and only then: the suite
       # fails on a skip, so a capability the library lacks is a red run here
-      # rather than a quietly unexercised test. It last moved for sd:719
+      # rather than a quietly unexercised test.
+      #
+      # It last moved to system main `7c91e3d`, for parity rather than for
+      # capability, and this time parity had already been lost: the operator's
+      # venv was installed from system main and the pin was not, so the suite
+      # was not running the library the operator runs. It showed up as 28
+      # local errors -- `upsert_repo() got an unexpected keyword argument
+      # 'merge_policy'` -- that were green here, which is the failure this pin
+      # exists to prevent, inverted. A red local run and a green remote one
+      # says nothing about the code.
+      #
+      # `55c4d691..7c91e3d` is 36 commits and 3 of them touch `local-sd-db`.
+      # **It is not migration-free**, the first move here that is not:
+      # `SCHEMA_VERSION` goes 9 to 10 and `010_runner_merge.sql` runs
+      # `ALTER TABLE repo RENAME COLUMN merge_policy TO runner_merge` (sd-db
+      # #458, `341c5f2`). The rename reaches this suite, which is why the move
+      # carries five call sites with it: four in
+      # `tests/test_guest_artifact_refusal.py` and one in
+      # `tests/test_sd_ship.py`. Nothing in `bin/` writes either name.
+      #
+      # The other two are #471 (`76c2c81`, `calls.py`: a loopback entry that
+      # declares no key variable is now callable) and #453 (`ebb6774`,
+      # `backup.py` and the backup job). `bin/sd-review` and
+      # `bin/sd_registry.py` do use `sd_db.calls.call`, so #471 is the one to
+      # watch: it widens what counts as callable and narrows nothing, and
+      # `tests/test_sd_review_boundary.py` and `tests/test_sd_review_ledger.py`
+      # run against it here. Nothing in this pack reaches `backup`.
+      #
+      # Before that it moved for sd:719
       # (system main after #411, `4b240d28`), the one exception so far to
       # that rule: no pack test is red at `9d86f092` and green here, and
       # nothing in `bin/` imports what the range adds (`ledger`, the
@@ -260,7 +288,7 @@ jobs:
         with:
           repository: platypeeps/system
           # Provider-policy membership requires the shared library from system #451.
-          ref: 55c4d69168cfa873d57bf063275e2f1a22c5a8e6
+          ref: 7c91e3d899d6087d44d9570f26fdcd5cbd79a6b4
           token: ${{ secrets.SYSTEM_REPO_TOKEN }}
           path: system-checkout
           persist-credentials: false
