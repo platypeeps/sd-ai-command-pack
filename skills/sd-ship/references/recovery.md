@@ -55,7 +55,7 @@ paragraph, in any order:
 
 ```
 Closes: sd:788
-Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Co-Authored-By: <the attribution line this machine appends>
 ```
 
 This page issues no merge. When one happens outside this wrapper, the squash
