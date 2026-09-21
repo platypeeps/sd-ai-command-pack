@@ -2063,10 +2063,13 @@ class Rule6ClaimSupportTests(LintFixture):
 
     @contextlib.contextmanager
     def jev(self, **extra: str):
-        """The stub on PATH, the opt-in set, and nothing left behind."""
+        """The stub on PATH and nothing left behind.
+
+        The switch is not set: unset means on, so a fixture that set it would
+        no longer be testing the path every run takes.
+        """
         environment = {
             "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
-            "JEV_SD_DOCS_LINT": "1",
             "JEV_STUB_CAPTURE": str(self.capture),
             **extra,
         }
@@ -2078,23 +2081,46 @@ class Rule6ClaimSupportTests(LintFixture):
         lint.write_citation_manifest(item, self.work)
         return item
 
-    def test_an_unasked_run_says_nothing_at_all(self) -> None:
-        """Nobody asked, stated by the fixture rather than inherited.
+    def test_an_unset_switch_takes_the_reading(self) -> None:
+        """The flip. This case used to assert the opposite -- that a run with
+        nothing set said nothing at all -- and it is the one whose inversion
+        is the change."""
 
-        `patch.dict` adds to the environment it patches and removes nothing.
-        A shell that exports the opt-in -- this pack's maintainer exports it
-        -- therefore ran the pass in the one test whose subject is not
-        running it, and the linter took the blame for the shell.
+        self.recorded_item()
+        with self.jev():
+            self.assertIn("claim support", self.notes())
+        self.assertTrue(self.capture.exists(), "an unset switch took no reading")
+
+    def test_the_switch_off_says_nothing_and_sends_nothing(self) -> None:
+        """Silence, not a note: the operator asked for silence.
+
+        `patch.dict` adds to the environment it patches and removes nothing,
+        so the switch is stated by the fixture rather than inherited.
         """
         self.recorded_item()
-        unasked = {name: value for name, value in os.environ.items() if name != lint.JEV_OPT_IN}
-        unasked["PATH"] = f"{self.bin}{os.pathsep}{os.environ['PATH']}"
-        with mock.patch.dict(os.environ, unasked, clear=True):
-            self.assertNotIn(lint.JEV_OPT_IN, os.environ)
+        with self.jev(JEV_SD_DOCS_LINT="0"):
             self.assertNotIn("claim support", self.notes())
+        self.assertFalse(self.capture.exists(), "a switched-off run sent a request")
 
-    def test_asking_without_jev_on_path_is_said_out_loud(self) -> None:
+    def test_every_off_word_switches_it_off(self) -> None:
+        self.recorded_item()
+        for word in lint.sd_lib.JEV_FLAG_OFF:
+            for value in (word, word.upper(), f" {word} "):
+                with self.subTest(value=value):
+                    self.assertTrue(lint.sd_lib.jev_stage_off(value))
+        for value in (None, "", "1", "true", "yes", "offf"):
+            with self.subTest(value=value):
+                self.assertFalse(lint.sd_lib.jev_stage_off(value),
+                                 "a typo must not be an outage")
+
+    def test_no_jev_on_path_says_nothing_either(self) -> None:
         """A PATH with git on it and no jev, which is every checkout but one.
+
+        Silent, and that is the half of this flip worth reviewing. `jev` is
+        absent from nearly every checkout, so a note here would be a line of
+        noise in every pull request in both repositories, forever -- which is
+        the exact cost `NOT_ASKED` was created to avoid. The flip must not
+        reintroduce it by turning "nobody opted in" into "nobody has jev".
 
         git is symlinked in rather than the real PATH being kept, because the
         operator running this suite has `jev` on theirs: a test that removed
@@ -2105,10 +2131,14 @@ class Rule6ClaimSupportTests(LintFixture):
         gitless = self.repo / "git-only-bin"
         gitless.mkdir()
         (gitless / "git").symlink_to(shutil.which("git"))
-        with mock.patch.dict(os.environ, {"PATH": str(gitless), "JEV_SD_DOCS_LINT": "1"}):
-            self.assertIn("not run (jev is not on PATH)", self.notes())
+        with mock.patch.dict(os.environ, {"PATH": str(gitless)}):
+            self.assertNotIn("claim support", self.notes())
 
-    def test_a_switched_off_jev_is_named_and_asked_nothing(self) -> None:
+    def test_a_jev_that_cannot_answer_is_named_and_asked_nothing(self) -> None:
+        """Loud, unlike the two above. A `jev` that is present and declines is
+        a machine that could have had the reading: unkeyed, or `jev off`. That
+        is worth one line, and it is bounded -- one run, one note."""
+
         self.recorded_item()
         with self.jev(JEV_STUB_ENABLED="3"):
             notes = self.notes()

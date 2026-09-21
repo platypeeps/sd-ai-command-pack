@@ -83,38 +83,61 @@ class JevTierTests(ReviewFixture):
                                       self.chatgpt_home(), FakeClient())
         return json.dumps(result, indent=2, sort_keys=True), noise.getvalue()
 
-    def test_without_the_opt_in_a_present_jev_is_never_reached(self):
+    def test_a_present_jev_is_reached_with_nothing_set(self):
+        """Unset means on. This is the flip, and it inverts the case that was
+        here before: the same fixture used to assert jev was never called."""
+
         root = self.prepare()
         baseline, quiet = self.run_review(root)
-        record = self.install_stub()
-        same, still_quiet = self.run_review(root)
-        self.assertEqual(same, baseline)
+        record = self.install_stub(answer="standard")
+        _, still_quiet = self.run_review(root)
         self.assertEqual((quiet, still_quiet), ("", ""))
         self.assertNotIn("jev", json.loads(baseline))
-        self.assertFalse(record.exists(), "a run without the opt-in called jev anyway")
+        self.assertTrue(record.exists(), "an unset switch did not reach jev")
 
-    def test_the_opt_in_alone_changes_nothing_when_no_jev_is_on_path(self):
+    def test_no_jev_on_path_changes_nothing_and_says_nothing(self):
+        """Silence is the point. `jev` ships in a private companion repository
+        and most machines do not have it, so announcing its absence would put
+        a line in every review on every one of them, forever."""
+
         root = self.prepare()
         baseline, _ = self.run_review(root)
-        same, said = self.run_review(root, **{sd_jev.OPT_IN: "1"})
+        same, said = self.run_review(root)
         self.assertEqual(same, baseline)
-        self.assertIn(f"no {sd_jev.COMMAND} on PATH", said)
-        self.assertIn("keeping the routed tier standard", said)
+        self.assertEqual(said, "")
 
-    def test_a_jev_that_cannot_answer_leaves_the_review_where_it_was(self):
+    def test_a_jev_that_cannot_answer_is_silent_too(self):
+        """Exit 3 is `cannot answer on this machine` -- unkeyed, or `jev off`.
+        That is the same not-configured case as an absent binary, and it is
+        the ordinary state of a machine that merely cloned the companion."""
+
         root = self.prepare()
         baseline, _ = self.run_review(root)
         record = self.install_stub(gate=3)
-        same, said = self.run_review(root, **{sd_jev.OPT_IN: "1"})
+        same, said = self.run_review(root)
         self.assertEqual(same, baseline)
-        self.assertIn("exited 3", said)
+        self.assertEqual(said, "")
         self.assertFalse(record.exists(), "the judgment ran although the gate refused")
+
+    def test_a_gate_that_fails_some_other_way_is_loud(self):
+        """The other side of the rule above. 3 is not configured; anything
+        else is broken, and a lane that quietly stops running is the defect
+        this repository has already been bitten by."""
+
+        root = self.prepare()
+        baseline, _ = self.run_review(root)
+        record = self.install_stub(gate=2)
+        same, said = self.run_review(root)
+        self.assertEqual(same, baseline)
+        self.assertIn("exited 2", said)
+        self.assertIn("keeping the routed tier standard", said)
+        self.assertFalse(record.exists())
 
     def test_a_failing_judgment_leaves_the_review_where_it_was(self):
         root = self.prepare()
         baseline, _ = self.run_review(root)
         self.install_stub(answer="deep", code=1)
-        same, said = self.run_review(root, **{sd_jev.OPT_IN: "1"})
+        same, said = self.run_review(root)
         self.assertEqual(same, baseline)
         self.assertIn("exited 1", said)
 
@@ -122,25 +145,53 @@ class JevTierTests(ReviewFixture):
         root = self.prepare()
         baseline, _ = self.run_review(root)
         self.install_stub(answer="thorough")
-        same, said = self.run_review(root, **{sd_jev.OPT_IN: "1"})
+        same, said = self.run_review(root)
         self.assertEqual(same, baseline)
         self.assertIn("'thorough' is not one of", said)
 
-    def test_a_value_other_than_one_is_not_an_opt_in(self):
+    def test_every_off_word_switches_the_stage_off(self):
         root = self.prepare()
         baseline, _ = self.run_review(root)
         record = self.install_stub()
-        for value in ("true", "yes", "0", ""):
-            same, said = self.run_review(root, **{sd_jev.OPT_IN: value})
-            self.assertEqual(same, baseline, f"{sd_jev.OPT_IN}={value!r} took a reading")
-            self.assertEqual(said, "")
+        for word in sd_jev.sd_lib.JEV_FLAG_OFF:
+            for value in (word, word.upper(), f"  {word} "):
+                with self.subTest(value=value):
+                    same, said = self.run_review(root, **{sd_jev.STAGE: value})
+                    self.assertEqual(same, baseline,
+                                     f"{sd_jev.STAGE}={value!r} took a reading")
+                    self.assertEqual(said, "")
         self.assertFalse(record.exists())
+
+    def test_a_word_that_is_not_an_off_word_leaves_the_stage_on(self):
+        """Including the `1` this gate used to require: a typo is not an
+        outage. `read_flag`'s rule in `jev.py`, which `JEV_FLAG_OFF` is
+        copied from, and the reason the copy is pinned word for word below."""
+
+        root = self.prepare()
+        self.install_stub(answer="deep")
+        for value in ("1", "true", "yes", "", "of", "offf"):
+            with self.subTest(value=value):
+                moved = json.loads(self.run_review(root, **{sd_jev.STAGE: value})[0])
+                self.assertEqual(moved["route"]["tier"], "deep",
+                                 f"{sd_jev.STAGE}={value!r} switched the stage off")
+
+    def test_the_off_word_vocabulary_matches_the_one_it_was_copied_from(self):
+        """`jev` is private and this repository is public, so `JEV_FLAG_OFF`
+        is a copy and not an import. Two copies drift; this pins the words so
+        the drift is a failure here rather than a stage that stops running
+        there. One definition serves both gates in this repository, in
+        `sd_lib`, which is why this pins it there and not per caller.
+        """
+
+        self.assertEqual(sd_jev.sd_lib.JEV_FLAG_OFF,
+                         ("0", "off", "false", "no", "disabled"))
+        self.assertFalse(sd_jev.sd_lib.jev_stage_off(None), "unset must mean on")
 
     def test_an_answered_reading_moves_the_tier_and_records_that_it_did(self):
         root = self.prepare()
         baseline = json.loads(self.run_review(root)[0])
         self.install_stub(answer="deep")
-        moved = json.loads(self.run_review(root, **{sd_jev.OPT_IN: "1"})[0])
+        moved = json.loads(self.run_review(root)[0])
         self.assertEqual(baseline["route"]["tier"], "standard")
         self.assertEqual(moved["route"]["tier"], "deep")
         self.assertEqual(moved["jev"], {"routed_tier": "standard", "tier": "deep",
@@ -155,7 +206,7 @@ class JevTierTests(ReviewFixture):
     def test_an_answer_that_agrees_with_the_routing_still_records_the_reading(self):
         root = self.prepare()
         self.install_stub(answer="standard")
-        held = json.loads(self.run_review(root, **{sd_jev.OPT_IN: "1"})[0])
+        held = json.loads(self.run_review(root)[0])
         self.assertEqual(held["route"]["tier"], "standard")
         self.assertEqual(held["jev"]["moved"], False)
 
@@ -165,7 +216,7 @@ class JevTierTests(ReviewFixture):
         root = self.prepare()
         baseline, _ = self.run_review(root)
         self.install_stub(answer=sd_jev.FALLBACK, code=0)
-        same, said = self.run_review(root, **{sd_jev.OPT_IN: "1"})
+        same, said = self.run_review(root)
         self.assertEqual(same, baseline)
         self.assertIn("Jev judged nothing", said)
         self.assertIn("no key on this machine", said)
@@ -179,14 +230,14 @@ class JevTierTests(ReviewFixture):
         root = self.prepare()
         baseline, _ = self.run_review(root)
         self.install_stub(answer=sd_jev.UNSURE)
-        same, said = self.run_review(root, **{sd_jev.OPT_IN: "1"})
+        same, said = self.run_review(root)
         self.assertEqual(same, baseline)
         self.assertIn(f"unsure below {sd_jev.UNSURE_BELOW}", said)
 
     def test_the_call_carries_the_diff_shape_and_nothing_private(self):
         root = self.prepare()
         record = self.install_stub()
-        self.run_review(root, **{sd_jev.OPT_IN: "1"})
+        self.run_review(root)
         sent = json.loads(record.read_text())
         argv, state = sent["argv"], sent["state"]
         self.assertEqual(argv[0], "choice")
@@ -222,7 +273,7 @@ class JevTierTests(ReviewFixture):
 
     def test_a_command_that_cannot_be_executed_is_a_declined_reading(self):
         note = io.StringIO()
-        env = {sd_jev.OPT_IN: "1", "PATH": str(self.tool_bin)}
+        env = {"PATH": str(self.tool_bin)}
         broken = self.tool_bin / sd_jev.COMMAND
         broken.write_text("not an executable\n")
         broken.chmod(0o700)
