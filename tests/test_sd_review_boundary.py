@@ -499,11 +499,24 @@ class LineBudgetTests(unittest.TestCase):
         # rather than argued for in advance. It was still argued for -- the
         # commit before this one gives back nine lines of duplicated prose and
         # one import idiom, and ten is what the change itself costs.
+        #
+        # 2942 -> 2966 pays for the control that closes C-40, which is twenty-
+        # two lines of comment and two of argv. The flag is one `-c` pair; the
+        # comment is the change. Two things look like the control and are not:
+        # `--enable skip_host_skill_discovery` and `--disable skill_search`
+        # were each measured and each left the prompt byte-identical with both
+        # canaries still emitted. Unrecorded, the next hardening pass buys that
+        # measurement again. The rest names the two discovery roots, says
+        # `--ignore-user-config` reaches neither `$HOME` one, and marks the two
+        # limits the key does not carry -- it is a zero rather than an
+        # allow-list, and it suppresses injection rather than reading. This
+        # raise is its own commit, before the one that spends it. Shared-core
+        # classification and the complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2942,
+            2966,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
