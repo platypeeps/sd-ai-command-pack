@@ -27,7 +27,8 @@ Pack consent does not grant runtime execution approval.
 
 Explanation keeps `status: explained` and adds a `readiness` object.
 Its `status` is `ready` or `blocked`; blockers name `code`, `boundary`, `provider`, and `next_action`.
-The probe makes no check, provider, or quota calls and performs no durable write.
+Explanation makes no check, review, or quota call and performs no durable write.
+On a ready `codex-json` lane it starts one local process, the skill-suppression probe below.
 `runtime_approval: not_observable` means the agent must still satisfy its execution permissions.
 A ready result does not prove remote service health or OS isolation.
 
@@ -138,6 +139,20 @@ It saves no session.
 Its temporary review file contains the exact diff and required untracked or planning contents.
 URL providers receive equivalent material in the request.
 Neither these arguments nor protocol fixtures prove OS read confinement.
+
+## The skill-suppression key is measured, not assumed
+
+The `codex-json` argv carries `-c skills.include_instructions=false`.
+A build that does not know the key ignores it and exits 0.
+So `sd-review` probes the binary with its `debug prompt-input` subcommand, offline, at about 1.4 seconds.
+Read `codex_skill_suppression` in `--explain --json`, beside `codex_preflight`.
+Its `state` is `suppressed`, `unsuppressed`, `unknown`, or `not_probed`.
+The probe keeps the entry's start line whole and replaces its final `exec`.
+Only a render in the measured shape, a list of `message` items, counts as an answer.
+`unknown` means the binary could not be asked; never read it as either answer.
+`not_probed` means no `codex-json` process started, and the `reason` says why.
+An actual `codex-json` run carries its own measurement in that outcome's `diagnostic.skill_suppression`.
+An inert key warns and never refuses; decide whether to review on that binary.
 
 ## Policy
 

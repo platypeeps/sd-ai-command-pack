@@ -79,6 +79,18 @@ CODEX_ANSWER_FILE = "codex-answer.json"
 # it is excluded unless the registry declares it; its auth.json field is checked.
 CODEX_METERED_ENV = ("CODEX_API_KEY", "CODEX_ACCESS_TOKEN")
 
+# What one probe of `skills.include_instructions=false` establishes (sd:1248).
+# Three answers, because "cannot tell" is neither of the other two: a build
+# without `codex debug prompt-input` cannot be asked, and reporting that as
+# either answer is the false operator belief the probe exists to remove.
+# `not_probed` is not an answer at all, and is never reported as one.
+SKILLS_SUPPRESSED, SKILLS_UNSUPPRESSED = "suppressed", "unsuppressed"
+SKILLS_UNKNOWN, SKILLS_NOT_PROBED = "unknown", "not_probed"
+#: The block the probe renders when skill instructions load, and the slack
+#: around its measured 1.44s.
+SKILLS_BLOCK_MARKER = "<skills_instructions>"
+SKILL_PROBE_TIMEOUT_SECONDS = 120
+
 RATE_LIMIT_MARKERS = (
     "rate limit",
     "rate-limit",
@@ -472,6 +484,114 @@ def codex_preflight_state(home: pathlib.Path | None = None) -> dict[str, Any]:
     return {"ok": True, "auth_file": str(path), "reason": ""}
 
 
+# Codex skill suppression, probed rather than assumed (sd:1248)
+
+
+def skills_report(state: str, probe: str, reason: str) -> dict[str, Any]:
+    """The probe's answer, shaped like the auth preflight above: a state and a
+    reason a reader can check. `probe` is the command that ran, or empty."""
+
+    return {"state": state, "probe": probe, "reason": reason}
+
+
+def codex_skill_probe_argv(start: str) -> list[str]:
+    """The probe's argv, which is deliberately not the lane's.
+
+    `codex debug prompt-input` renders the model-visible prompt input as JSON.
+    Measured on codex-cli 0.155.1 here: exit 0 in 1.44s, no API call, nothing
+    billed. The entry's `start` line is kept whole up to its `exec`, and that
+    one word is replaced: `python3 -m wrapper exec` probes `python3 -m wrapper
+    debug prompt-input`, so a launcher that speaks `codex-json` is probed as
+    it launches, not whatever `codex` on PATH happens to be. A start line
+    that does not end in `exec` derives no probe and reports `not_probed`.
+
+    `--ignore-user-config` is absent because this subcommand rejects it:
+    `unexpected argument '--ignore-user-config' found`, exit 2. So the probe
+    answers one question -- does this binary honour
+    `skills.include_instructions` -- and says nothing about the lane's wider
+    confinement. `project_doc_max_bytes=0` is the lane's own, kept here so the
+    probe reads no project document either.
+    """
+
+    launcher = shlex.split(start)
+    if not launcher or launcher[-1] != "exec":
+        return []
+    return [*launcher[:-1], "debug", "prompt-input", "-c", "project_doc_max_bytes=0",
+            "-c", "skills.include_instructions=false"]
+
+
+def rendered_prompt_text(stdout: str) -> str | None:
+    """The text of a `debug prompt-input` render, or None when stdout is not
+    one. Measured on 0.155.1: a JSON list of `message` items, each with a
+    `content` list whose parts hold `text`, and the block sits in one part."""
+
+    try:
+        items = json.loads(stdout)
+    except ValueError:
+        return None
+    if not isinstance(items, list) or not items:
+        return None
+    texts: list[str] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "message" or not isinstance(item.get("content"), list):
+            return None
+        texts.extend(part["text"] for part in item["content"]
+                     if isinstance(part, dict) and isinstance(part.get("text"), str))
+    return "\n".join(texts) if texts else None
+
+
+def codex_skill_state(provider: sd_registry.Provider, root: pathlib.Path, runner: Runner,
+                      env: Mapping[str, str], home: pathlib.Path,
+                      timeout: int = SKILL_PROBE_TIMEOUT_SECONDS) -> dict[str, Any]:
+    """Ask this binary whether `skills.include_instructions=false` took effect.
+
+    A build that does not know the key ignores it and exits 0, measured on
+    0.155.1 with `-c skills.totally_unknown_key_xyz=false`. So the argv proves
+    nothing, and an operator who reads it believes a control that may not
+    exist (sd:1248).
+
+    The key took effect if and only if `<skills_instructions>` is absent from
+    the rendered prompt: present without the key at 76,416 bytes, absent with
+    it at 35,741, both measured here on 0.155.1.
+
+    The answer is a warning and never a refusal. An inert key leaves the lane
+    as it behaved before the key existed, so refusing would block a review
+    over a hardening flag. One limit: a build with no skill in any root prints
+    no block either, and for this run both mean the same thing -- no `SKILL.md`
+    body reaches the reviewing model on this argv.
+    """
+
+    argv = codex_skill_probe_argv(provider.start or "")
+    if not argv:
+        return skills_report(SKILLS_NOT_PROBED, "", f"{provider.name} names no program to probe"
+                             if not (provider.start or "").strip() else
+                             f"{provider.name} starts with {provider.start!r}, which does not end in "
+                             "`exec`, so no probe command derives from it")
+    # The lane's own child environment, including the `CODEX_HOME` the preflight
+    # read: the skill roots are read from that home, so another home would
+    # answer about another run.
+    child = child_environment(sd_registry.provider_environment(provider, env), provider.env)
+    child["CODEX_HOME"] = str(home)
+    printable = shlex.join(argv)
+    result = runner(argv, child, root, timeout)
+    if not result.launched or result.exit_code != 0:
+        return skills_report(SKILLS_UNKNOWN, printable, f"the probe exited {result.exit_code}, so this "
+                             "build cannot be asked whether the key took effect: "
+                             + " ".join((result.stderr or "").split())[:200])
+    rendered = rendered_prompt_text(result.stdout)
+    if rendered is None:
+        # A help page or `[]` on exit 0 is not a render, and a marker missing
+        # from it is not evidence; read as suppressed, it would hide the warning.
+        return skills_report(SKILLS_UNKNOWN, printable, "the probe exited 0 and rendered no prompt "
+                             "input list, so this build cannot be asked whether the key took effect")
+    if SKILLS_BLOCK_MARKER in rendered:
+        return skills_report(SKILLS_UNSUPPRESSED, printable, f"the rendered prompt still carries "
+                             f"{SKILLS_BLOCK_MARKER}, so this build ignores the key and every SKILL.md "
+                             "body reaches the reviewing model")
+    return skills_report(SKILLS_SUPPRESSED, printable, f"the rendered prompt carries no "
+                         f"{SKILLS_BLOCK_MARKER}, so the key took effect on this build")
+
+
 # The runner seam
 
 
@@ -642,9 +762,12 @@ def codex_argv(
         # `SkillConfig` serializes only `bundled`, `include_instructions` and
         # `max_context_tokens`, none of which names a source. And it suppresses
         # automatic injection, not reading -- under `--sandbox read-only` the
-        # model may still `cat` a `SKILL.md`. C-40 names the injection. Whether
-        # bundled skills go too is unverified: none ship on the machine
-        # measured, so the empty catalog settles nothing there.
+        # model may still `cat` a `SKILL.md`. C-40 names the injection.
+        # Bundled skills go too, measured rather than assumed: with `CODEX_HOME`
+        # an empty directory, 0.155.1 materializes its own `skills/.system`
+        # root and lists `imagegen` from it, and the key removes that block as
+        # well (32,748 bytes to 10,388). A build can ignore this key in silence,
+        # so `codex_skill_state` asks it rather than trusting this argv.
         "-c",
         "skills.include_instructions=false",
         "--output-schema",
@@ -1108,8 +1231,13 @@ def run_provider(
     codex_auth_home: pathlib.Path | None = None,
     client: sd_registry.Client | None = None,
     ledger: Ledger | None = None,
+    skills: Mapping[str, Any] | None = None,
 ) -> Outcome:
-    """Run one registry entry on the resolved subject, and report an outcome."""
+    """Run one registry entry on the resolved subject, and report an outcome.
+
+    `skills` is what `codex_skill_state` measured about this binary. It rides
+    the codex diagnostic, so a run under an inert suppression key says so in
+    its own outcome and not only in a plan the reader saw earlier."""
 
     # First, because the rest of this function is about starting a session and
     # reading it back. `refuse_environment` speaks of what a spawned session
@@ -1218,7 +1346,8 @@ def run_provider(
             result, parsed = claude_answer(result)
     return _answer(provider.name, result, parsed, argv, removed)._replace(diagnostic=(
         {"prompt_transport": "stdin", "prompt_bytes": len(prompt.encode()),
-         "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest()} if codex else None))
+         "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+         "skill_suppression": dict(skills) if skills is not None else None} if codex else None))
 
 
 # Disposition -- local, and only local
@@ -1559,9 +1688,18 @@ def review(
                            for provider in meter_candidates}
     if input_manifest["status"] != "unreadable":
         input_manifest = sd_review_material.input_manifest(inventory, prompt, transport_overheads, MAX_OUTPUT_BYTES, context)
-    auth = (codex_preflight_state(codex_auth_home or codex_home(env))
-            if any(provider.reader == "codex-json" for provider in meter_candidates)
+    codex_entry = next((provider for provider in meter_candidates if provider.reader == "codex-json"), None)
+    auth_home = codex_auth_home or codex_home(env)
+    auth = (codex_preflight_state(auth_home) if codex_entry is not None
             else {"ok": None, "auth_file": "", "reason": "not selected"})
+    # The probe starts a local process, so it runs at two points: under
+    # `--explain` on a ready lane, the surface `sd-operator-defaults.md` sends
+    # the operator to, and immediately before a codex dispatch. Every other
+    # mode keeps the property its own tests assert -- a blocked readiness, a
+    # failed gate and a dry run start nothing -- and reports `not_probed`.
+    skills = skills_report(SKILLS_NOT_PROBED, "", "no codex-json entry is selected" if codex_entry is None
+                           else "the codex auth preflight refused, so no codex process started" if not auth["ok"]
+                           else "no codex process started here; see --explain on a ready lane")
     local_ready = sd_review_readiness.review_readiness(
         {"requested_reviews": depth, "codex_preflight": auth, "input_manifest": input_manifest, "repo": str(root)},
         meter_candidates, env)["status"] == "ready"
@@ -1636,6 +1774,7 @@ def review(
         "ledger_fault": ledger.fault,
         "meter_faults": meter_faults,
         "codex_preflight": auth,
+        "codex_skill_suppression": skills,
         "input_manifest": input_manifest,
         "local_block_prepended": prepended,
         "scrubbed_env_names": list(scrubbed_names(env)),
@@ -1659,6 +1798,9 @@ def review(
         raise Refusal("review timing inputs changed; explain again before dispatch")
     result["readiness"] = sd_review_readiness.review_readiness(result, chosen, env)
     if args.explain:
+        # A blocked lane starts nothing, so the probe waits for a ready one.
+        if codex_entry is not None and auth["ok"] and result["readiness"]["status"] == "ready":
+            result["codex_skill_suppression"] = codex_skill_state(codex_entry, root, runner, env, auth_home)
         result["status"] = "explained"
         return result
 
@@ -1697,8 +1839,12 @@ def review(
     for provider in chosen:
         if len(reviewed) >= depth:
             break
+        # Measured against the binary about to run, so each entry answers for
+        # itself. The result key carries the last; each outcome carries its own.
+        if provider.reader == "codex-json" and auth["ok"]:
+            skills = result["codex_skill_suppression"] = codex_skill_state(provider, root, runner, env, auth_home)
         outcome = run_provider(provider, root, subject, prompt, runner, env, args.timeout,
-                               codex_auth_home, client, ledger)
+                               codex_auth_home, client, ledger, skills)
         outcomes.append(outcome)
         if outcome.status in (CLEAN, FINDINGS):
             reviewed.append(outcome.backend)
@@ -1817,6 +1963,7 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     if result.get("fallback_candidates"):
         write(f"  fallbacks   {', '.join(result['fallback_candidates'])}\n")
     write(f"  authored    {result['authored_with_report']}\n")
+    skills = result.get("codex_skill_suppression") or skills_report(SKILLS_NOT_PROBED, "", "not reported")
     if reachable and result["codex_preflight"]["ok"] is not None:
         preflight = result["codex_preflight"]
         state = "ok (ChatGPT subscription)" if preflight["ok"] else f"would refuse: {preflight['reason']}"
@@ -1824,6 +1971,9 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
         scrubbed = result["scrubbed_env_names"]
         present = ", ".join(scrubbed) if scrubbed else "no metered codex variables present"
         write(f"  env scrub   {present} (names only; values are never read or printed)\n")
+        # Printed for `not_probed` too, because a reader who cannot see that
+        # the probe was skipped reads the argv and believes the key took hold.
+        write(f"  skill probe {skills['state']}; {skills['reason']}\n")
     if result.get("readiness"):
         write(f"  readiness   {result['readiness']['status']}; runtime approval: not observable\n")
         for blocked in result["readiness"]["blockers"]:
@@ -1846,7 +1996,10 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
                 write(f"  {mark} {row['provider']:<12} {row['vendor']:<10} {row['bill']}\n")
                 if not row["eligible"]:
                     write(f"      passed over: {row['reason']}\n")
-        write("\nsd-review: explain only, nothing ran\n")
+        # The probe starts a local process, so a run that took it does not get
+        # to say nothing ran. Each mode reports what it actually started.
+        write("\nsd-review: explain only, nothing ran\n" if skills["state"] == SKILLS_NOT_PROBED
+              else "\nsd-review: explain only; the codex skill probe ran, no review\n")
         return
 
     if result.get("dry_run"):
@@ -1856,7 +2009,8 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
                 write(f"  {planned['backend']}: not run -- {planned['reason']}\n")
                 continue
             write(f"  {planned['backend']}: {' '.join(planned['argv']) or planned['endpoint']}\n")
-        write("\nsd-review: dry run, nothing executed\n")
+        write("\nsd-review: dry run, nothing executed\n" if skills["state"] == SKILLS_NOT_PROBED
+              else "\nsd-review: dry run; the codex skill probe ran, nothing else executed\n")
         return
 
     check = result.get("check")
@@ -1869,6 +2023,12 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
     write("\noutcomes:\n")
     for outcome in result["outcomes"]:
         write(f"  {outcome['backend']:<12} {outcome['status']:<12} {outcome['detail']}\n")
+        # A warning, not a refusal: an inert key leaves this lane exactly as it
+        # behaved before the key existed, and blocking the review would be the
+        # larger harm. The line names the entry that actually ran under it.
+        measured = (outcome.get("diagnostic") or {}).get("skill_suppression") or {}
+        if measured.get("state") in (SKILLS_UNSUPPRESSED, SKILLS_UNKNOWN):
+            write(f"  warning: {outcome['backend']} skill instructions {measured['state']}; {measured['reason']}\n")
     write(f"  completed   {result['completed_reviews']}/{result['requested_reviews']} reviews"
           f" ({', '.join(result['reviewed_by']) or 'none'})\n")
 

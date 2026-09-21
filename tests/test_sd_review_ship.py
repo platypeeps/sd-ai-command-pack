@@ -8,7 +8,13 @@ import pwd
 import subprocess
 from unittest.mock import patch
 
-from tests.test_sd_review import FakeRunner, ReviewFixture, namespace, sd_review
+from tests.test_sd_review import (
+    FakeRunner,
+    ReviewFixture,
+    codex_sessions,
+    namespace,
+    sd_review,
+)
 
 
 class FixReviewTests(ReviewFixture):
@@ -189,7 +195,7 @@ class FixReviewTests(ReviewFixture):
         runner = FakeRunner()
         sd_review.review(root, namespace(scope="branch", resume_report=str(report)), runner,
                          self.environment(), self.chatgpt_home())
-        prompt = next(call["stdin"] for call in runner.calls if call["argv"][0] == "codex")
+        prompt = next(call["stdin"] for call in codex_sessions(runner))
         self.assertIn("[file absent at current HEAD]", prompt)
         recovered, _ = json.JSONDecoder().raw_decode(prompt.split("Prior findings:\n", 1)[1])
         self.assertEqual(recovered, findings)
@@ -227,7 +233,7 @@ class FixReviewTests(ReviewFixture):
                 result = sd_review.review(root, namespace(scope="branch", **kwargs), runner,
                                           self.environment(), self.chatgpt_home())
                 self.assertEqual(result["status"], "clean")
-                prompts = [call["stdin"] for call in runner.calls if call["argv"][0] == "codex"]
+                prompts = [call["stdin"] for call in codex_sessions(runner)]
                 self.assertEqual(len(prompts), 1)
                 self.assertIn("Prior findings:\n" + evidence, prompts[0])
                 recovered, _ = json.JSONDecoder().raw_decode(prompts[0].split("Prior findings:\n", 1)[1])

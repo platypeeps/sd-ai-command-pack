@@ -1,4 +1,11 @@
-"""Explanation and early refusal perform no provider, meter, gate, or writes."""
+"""Explanation and early refusal perform no review, meter, gate, or writes.
+
+One local process is allowed and named here: `codex debug prompt-input`, the
+skill-suppression probe (sd:1248). It renders a prompt offline, asks no API,
+and bills nothing -- measured on codex-cli 0.155.1, which answers it with
+`CODEX_HOME` pointed at an empty directory and no login at all. Every
+assertion below names that call rather than relaxing to "some calls".
+"""
 
 from __future__ import annotations
 
@@ -40,7 +47,7 @@ class ReadinessTests(ReviewFixture):
             result = sd_review.review(root, namespace(explain=True, **options), runner,
                                       self.environment(), self.chatgpt_home(), client=client,
                                       meter=lambda *args: self.fail("no quota calls"))
-        self.assertEqual(runner.calls, [])
+        self.assert_no_session_started(runner)
         self.assertEqual(client.sent, [])
         self.assertEqual(result["status"], "explained")
         self.assertEqual(result["readiness"]["runtime_approval"], "not_observable")
@@ -58,6 +65,8 @@ class ReadinessTests(ReviewFixture):
         result = sd_review.review(root, namespace(), runner, self.environment(PATH="/nonexistent"), self.chatgpt_home())
         self.assertEqual(result["readiness"]["status"], "blocked")
         self.assertEqual({row["code"] for row in result["readiness"]["blockers"]}, {"executable_missing"})
+        # Blocked readiness dispatches nothing, so not even the skill probe
+        # runs: it is taken under `--explain` and before a codex dispatch.
         self.assertEqual(runner.calls, [])
         self.assertIsNone(result["check"])
 

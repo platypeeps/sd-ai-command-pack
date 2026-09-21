@@ -512,11 +512,42 @@ class LineBudgetTests(unittest.TestCase):
         # allow-list, and it suppresses injection rather than reading. This
         # raise is its own commit, before the one that spends it. Shared-core
         # classification and the complexity ceilings are unchanged.
+        #
+        # 2966 -> 3095 buys the measurement the C-40 flag above cannot carry.
+        # sd:1248: a codex build that does not know
+        # `skills.include_instructions` ignores it and exits 0 -- measured on
+        # 0.155.1 with `-c skills.totally_unknown_key_xyz=false` -- so the argv
+        # establishes nothing, and the operator who reads it believes a control
+        # that may not exist. `codex_skill_state` asks the binary instead: one
+        # offline `codex debug prompt-input`, 1.44s, and the key took effect if
+        # and only if `<skills_instructions>` is absent from the rendered
+        # prompt. The 129 lines are that function, its argv builder, the two
+        # points the probe runs at, and the report on the result and in the
+        # codex outcome. About half are the comments this lane's convention
+        # requires: which flags the probe cannot carry and why, what each
+        # number was measured on, and why an inert key warns instead of
+        # refusing. A version gate was rejected, because the registry treats
+        # `codex-json` as a protocol: a fork that speaks it is a different
+        # entry, not an older binary. This raise is its own commit, before the
+        # one that spends it. Shared-core classification and the complexity
+        # ceilings are unchanged.
+        #
+        # 3095 -> 3126 pays for two defects the codex review of sd:1248 found
+        # in that probe. It read any exit-0 stdout without the marker as
+        # `suppressed`, so a wrapper's help page passed as proof; now the
+        # stdout must parse as the render measured on 0.155.1, a list of
+        # `message` items with text parts, or the answer is `unknown`. And it
+        # kept only the first token of the entry's start line, so `python3 -m
+        # wrapper exec` probed the interpreter; now the line is kept whole up
+        # to its `exec`. The 31 lines are the render parser and the two
+        # reasons. This raise is its own commit, before the one that spends
+        # it. Shared-core classification and the complexity ceilings are
+        # unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2966,
+            3126,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

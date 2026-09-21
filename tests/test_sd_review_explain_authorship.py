@@ -31,7 +31,7 @@ class AdvisoryAuthorshipTests(ReviewFixture):
         runner, client = FakeRunner(), Mock(side_effect=AssertionError("URL provider must not run"))
         result = sd_review.review(root, namespace(scope="pr", explain=True, **kwargs), runner,
                                   self.environment(), self.chatgpt_home(), client=client)
-        self.assertEqual(runner.calls, [])
+        self.assert_no_session_started(runner)
         client.assert_not_called()
         return result
 

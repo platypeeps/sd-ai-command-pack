@@ -75,7 +75,43 @@ class FakeRunner:
         answer = self.answers.get(program, self.default)
         if callable(answer):
             return answer(argv, env, cwd, timeout)
+        # The skill probe (sd:1248) reads a render, not a findings document,
+        # so the unscripted default is not its answer: an unscripted probe
+        # gets the measured shape with no block. A scripted answer, callable
+        # or not, keeps control of what the probe sees.
+        if program not in self.answers and list(argv[1:3]) == SKILL_PROBE_WORDS:
+            return sd_review.Completed(0, PROMPT_INPUT_SUPPRESSED, "")
         return answer
+
+
+#: The skill-suppression probe's argv, by the two words that identify it.
+SKILL_PROBE_WORDS = ["debug", "prompt-input"]
+
+
+def prompt_input(*texts: str) -> str:
+    """One `codex debug prompt-input` render in the shape measured on 0.155.1:
+    a list of `message` items, each with a `content` list of text parts."""
+
+    return json.dumps([{"type": "message", "role": "developer",
+                        "content": [{"type": "input_text", "text": text}]} for text in texts])
+
+
+#: A render with skill instructions loaded, and one with the key in effect.
+PROMPT_INPUT_LOADED = prompt_input("<skills_instructions>\n## Skills", "<permissions instructions>")
+PROMPT_INPUT_SUPPRESSED = prompt_input("<permissions instructions>")
+
+
+def codex_sessions(runner: Any) -> list[dict[str, Any]]:
+    """The codex calls that are review sessions, not the skill probe.
+
+    `codex debug prompt-input` (sd:1248) runs the same program under the same
+    name, so a test that filtered on `argv[0] == "codex"` saw one call before
+    it existed and sees two after. Filtering here rather than in each test
+    keeps one definition of what a review session is.
+    """
+
+    return [call for call in runner.calls
+            if call["argv"][0] == "codex" and call["argv"][1:3] != SKILL_PROBE_WORDS]
 
 
 def chat_answer(content: str, **extra: Any) -> tuple[int, str, str, bool]:
@@ -174,6 +210,18 @@ class ReviewFixture(unittest.TestCase):
         (self.registry_home / ".local" / "share" / "sd" / "providers.yaml").write_text(
             FIXTURE_REGISTRY, encoding="utf-8"
         )
+
+    def assert_no_session_started(self, runner: Any) -> None:
+        """No review session ran. At most the skill-suppression probe did.
+
+        `--explain` starts one local process on a ready `codex-json` lane:
+        `debug prompt-input`, which renders a prompt offline and bills nothing
+        (sd:1248). Named here rather than relaxed to "some calls", so a second
+        process arriving under `--explain` still fails every caller.
+        """
+
+        started = [call["argv"][1:3] for call in runner.calls]
+        self.assertIn(started, ([], [SKILL_PROBE_WORDS]), started)
 
     def environment(self, **extra: str) -> dict[str, str]:
         """An environment whose HOME is the fixture's, so the run reads the
@@ -797,13 +845,14 @@ class PipelineTests(ReviewFixture):
         )
         self.assertEqual(sd_review.STATUS_EXIT["rate_limited"], sd_review.EXIT_RATE_LIMITED)
 
-    def test_explain_runs_nothing(self) -> None:
+    def test_explain_runs_no_review_and_only_the_skill_probe(self) -> None:
         root = self.make_repo()
         self.prepare(root)
         runner = FakeRunner()
         result = self.run_review(root, runner, explain=True)
         self.assertEqual(result["status"], "explained")
-        self.assertEqual(runner.calls, [])
+        self.assert_no_session_started(runner)
+        self.assertEqual([call["argv"][1:3] for call in runner.calls], [SKILL_PROBE_WORDS])
         self.assertTrue(result["route"]["reason"])
 
     def test_dry_run_prints_argv_and_runs_nothing(self) -> None:
@@ -952,7 +1001,10 @@ class TheExplainRenderTests(ReviewFixture):
         self.assertIn("reviewer chain", text)
         self.assertIn("use codex", " ".join(text.split()))
         self.assertIn("second", text)
-        self.assertIn("explain only, nothing ran", text)
+        # This lane is ready, so the skill probe ran and the footer says so
+        # rather than claiming nothing started.
+        self.assertIn("skill probe suppressed;", text)
+        self.assertIn("explain only; the codex skill probe ran, no review", text)
 
     def test_a_real_run_does_not_print_the_explain_footer(self) -> None:
         """A run that reviews must not claim it explained. This is the half of
