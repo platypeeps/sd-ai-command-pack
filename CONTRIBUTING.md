@@ -153,11 +153,23 @@ fails a run and never changes an exit code.
 
 Taking the reading sends the citing sentence and the cited passage to a
 third-party model. Both are capped, and neither carries a path, an item name,
-or the citation marker. Switch it off for a checkout whose `docs/work` must
-not leave the machine:
+or the citation marker.
+
+**Read `docs/work` there as "the checkout you are standing in", not "this
+one".** `sd-docs-lint` picks its repository from the working directory, and
+the pass walks every recorded citation under that repository's `docs/work` —
+not only the ones a change touched. So a private consumer repo that runs this
+binary from its own root takes the reading over its own prose. `make
+docs-lint` above is the command that names the pass; the ones that will
+actually surprise you are **`make check`**, which wires it into the pre-merge
+gate, and **`sd-ship`**, which lints at delivery. The payload is the same
+either way; what the flip changed is which repositories take the reading and
+how often.
+
+Switch it off for a checkout whose `docs/work` must not leave the machine:
 
 ```bash
-JEV_SD_DOCS_LINT=0 make docs-lint    # or export it once
+JEV_SD_DOCS_LINT=0 make check    # or export it once, for every invocation
 ```
 
 `0`, `off`, `false`, `no` and `disabled` all switch it off, in any case.
@@ -165,6 +177,26 @@ Anything else leaves it on, including the `1` this used to require: a typo is
 not an outage. The switch only ever subtracts — it cannot make a reading
 happen that `jev` itself declines, so a machine with no key behaves exactly
 like one with the switch off.
+
+#### The optional review-tier reading
+
+`bin/sd-review` takes a second reading of the same shape, and it was
+undocumented here until review said so. `sd_route.route` decides the tier and
+keeps the decision; the reading is a second opinion over a diff shape the
+policy's globs cannot see, and it is taken wherever `jev` says it can answer.
+
+What leaves the machine: the tier names this repository's own policy declares
+with a fixed description of each, the repository-relative paths the change
+touches (capped, then a count), the number of lines it moves, and the routing
+reason. No file contents, no diff, no code.
+
+```bash
+JEV_SD_REVIEW=0 sd-review --scope branch    # or export it once
+```
+
+The same vocabulary and the same subtract-only rule apply. It prints nothing
+on the path where it works; the note naming this switch appears only when the
+reading was attempted and failed.
 
 ### Permissions
 
