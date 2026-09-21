@@ -531,11 +531,23 @@ class LineBudgetTests(unittest.TestCase):
         # entry, not an older binary. This raise is its own commit, before the
         # one that spends it. Shared-core classification and the complexity
         # ceilings are unchanged.
+        #
+        # 3095 -> 3126 pays for two defects the codex review of sd:1248 found
+        # in that probe. It read any exit-0 stdout without the marker as
+        # `suppressed`, so a wrapper's help page passed as proof; now the
+        # stdout must parse as the render measured on 0.155.1, a list of
+        # `message` items with text parts, or the answer is `unknown`. And it
+        # kept only the first token of the entry's start line, so `python3 -m
+        # wrapper exec` probed the interpreter; now the line is kept whole up
+        # to its `exec`. The 31 lines are the render parser and the two
+        # reasons. This raise is its own commit, before the one that spends
+        # it. Shared-core classification and the complexity ceilings are
+        # unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3095,
+            3126,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
