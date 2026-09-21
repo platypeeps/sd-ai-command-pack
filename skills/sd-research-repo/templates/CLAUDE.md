@@ -27,14 +27,15 @@ Use only the directories this repo needs; do not invent new ones.
 
 Choose exactly one main document titled `START HERE — <descriptive project or decision title>`.
 Apply this during setup and the next update to an existing project.
-Match its Markdown H1, `research.conf.py` `title` and `h1`, and Notion page title.
-Link the Notion mirror near the README's top; use the source link until publication.
-Identify it in the README table and Notion parent page.
-Keep the source filename and existing Notion page identity.
+Match its Markdown H1 to the `research.conf.py` `title` and `h1`.
+A designated mirror carries the same title, in Notion or in Drive.
+Link that mirror near the README's top; use the source link until a mirror exists.
+Identify the main document in the README table.
+Keep the source filename and any existing mirror page or file identity.
 For multiple tracks, choose an overview that directs readers to each track.
 
 Before publishing, check the configured documents for missing, duplicate, or mismatched main-document titles.
-Read back the Notion title and entry links after publication.
+Read back the mirror title and entry links after each drain.
 Follow the full standard's **Main document — START HERE** section.
 
 ## Documents
@@ -96,8 +97,8 @@ The product — read what the reader gets, not what you meant:
 
 6. Read the rendered page cold. Does the conclusion follow from what is on the page?
 7. Find the load-bearing assumption the document never states.
-8. After mirroring, check Notion against the source, and that handling restrictions survived
-   the mirror.
+8. After a drain, check each mirror against the source, and that handling restrictions
+   survived the mirror.
 
 This pass is the research flow's review point *after the brief and decisions*; the pass over
 the final product before the send box is the second point. Both caps live in the
@@ -133,15 +134,31 @@ was rejected and why. A review that found nothing says what it checked. If that 
 missing or not logged in (the availability check in the printed checklist reports it), say
 that in Status: "no independent pass" is a stated gap.
 
-## Publishing — Notion, not artifacts
+## Publishing — local by default, mirrors on request
 
 **Do not publish research as an artifact** — the hosted single-page surface `build/artifact/`
-was written for. Notion is the publishing surface.
+was written for.
 
-Every overview, map, brief, report, and survey in this repo has a Notion page under
-the repo's own Notion folder — put its URL here when the repo is set up — kept in sync when the source
-document changes. The markdown file is the source of truth; Notion is the readable,
-shareable mirror. `90-scratch/` is not mirrored.
+`sd-research-kit render` publishes every overview, map, brief, report, and survey twice.
+Both copies are local: Markdown in the Obsidian vault, HTML on the dashboard's Documents
+tab. That is the whole of publication for most documents. `90-scratch/` is not published.
+
+An outward mirror is opt-in, per document. The user designates a document. Record the
+designation as a `notion=` or `drive=` key in that document's `research.conf.py` entry.
+Nothing infers a target from a title, a folder, or a neighbouring document. The markdown
+file stays the source of truth; a mirror is the readable, shareable copy. By default a
+designated document mirrors into this repo's own page or folder at that destination — put
+its URL here when the repo designates one. Each destination has its own default: the
+configured briefs folder for Notion, `Briefs/<repo>` in My Drive for Drive. A per-document
+`space=` or `folder=` overrides that default. Each mirror stays in sync when the source
+document changes.
+
+`render` queues one sync request per designated document under
+`~/.claude/pending-mirror-syncs/`, and an agent session drains it. A drain that creates a
+page or file writes the new id back into that document's entry. Use `page=` for Notion and
+`file=` for Drive. Without that write-back the next drain creates a second copy. A
+write-back that fails leaves the request in place and is reported, so the queue still says
+the work is owed.
 
 Mirror shape — full content minus the H1, opening with a pointer back to the file:
 
@@ -155,9 +172,9 @@ Mirror shape — full content minus the H1, opening with a pointer back to the f
 ## 1. First section
 ```
 
-Give each page an icon and keep it stable across updates — a changed icon reads as a
-different page. Record every page in the README's **Notion pages** table: document,
-page title, URL.
+Give each Notion page an icon and keep it stable across updates — a changed icon reads as a
+different page. Record every mirror in the README's **Notion pages** table, Drive included:
+document, destination, title, URL.
 
 ## Style
 

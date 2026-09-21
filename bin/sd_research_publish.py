@@ -90,9 +90,10 @@ class Destination(NamedTuple):
     render performs itself, so neither takes a queue, a connector or a drain.
     This table is what leaves the machine.
 
-    `what` is optional: absent, the drain creates the page or file and the
-    designation can be amended with the id it got; present, the drain updates
-    that one rather than creating a second copy on every render.
+    `what` is optional: absent, the drain creates the page or file and writes
+    the id it got back into the designation, which the contract's drain step 4
+    requires; present, the drain updates that one rather than creating a second
+    copy on every render.
     """
 
     #: The DOCS key the user writes, and the `destination` field of a request.

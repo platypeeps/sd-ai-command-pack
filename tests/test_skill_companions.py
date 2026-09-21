@@ -234,6 +234,112 @@ class RepositoryInvariantTests(unittest.TestCase):
         self.assertEqual(sd_install.missing_citations(surfaces), [])
 
 
+class PublicationContractDrainTests(unittest.TestCase):
+    """The shared drain procedure's step order, pinned where it is stated.
+
+    `skills/_shared/references/publication-contract.md` binds the pack and
+    everything installed from it, and nothing read it. The duplicate-page bug
+    of #1107 is what an unpinned procedure costs: the research-repo skill grew
+    a write-back step, the contract kept the four-step form ending at the
+    delete, and an agent that read the contract instead of the skill went on
+    creating a second page on every render.
+
+    What is pinned is the order, not the prose: the id is recorded before the
+    request is deleted. Reword any step freely; move the delete above a write
+    and this fails.
+    """
+
+    #: `Draining is <word> steps per request` -- the count the prose claims.
+    COUNTS = {"three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8}
+
+    def setUp(self) -> None:
+        self.contract = (
+            REPO_ROOT / "skills" / "_shared" / "references"
+            / "publication-contract.md"
+        ).read_text(encoding="utf-8")
+        self.steps = self.drain_steps()
+
+    def drain_steps(self) -> list[str]:
+        """The numbered drain steps, each as one string.
+
+        Parsed from the document rather than counted by hand, so a step added
+        without a number, or numbered out of order, is a failure here rather
+        than a list that silently disagrees with itself.
+        """
+
+        head = re.search(r"Draining is (\w+) steps per request", self.contract)
+        self.assertIsNotNone(head, "the drain procedure's opening line moved")
+        self.claimed = self.COUNTS.get(head.group(1))
+        self.assertIsNotNone(self.claimed, f"unknown count {head.group(1)!r}")
+        body = self.contract[head.end():]
+        # The list ends at the first line that starts flush left and is not a
+        # step: an unindented paragraph, a heading, or a table.
+        steps: list[str] = []
+        current: list[str] = []
+        for line in body.splitlines():
+            start = re.match(r"^(\d+)\. (.*)$", line)
+            if start:
+                if current:
+                    steps.append("\n".join(current))
+                self.assertEqual(
+                    int(start.group(1)), len(steps) + 1,
+                    f"step {start.group(1)} follows {len(steps)} step(s)")
+                current = [start.group(2)]
+            elif current and (not line.strip() or line.startswith(" ")):
+                current.append(line)
+            elif current:
+                steps.append("\n".join(current))
+                break
+        else:  # pragma: no cover - the file always has trailing prose
+            if current:
+                steps.append("\n".join(current))
+        self.assertTrue(steps, "no numbered drain steps found")
+        return steps
+
+    def test_the_step_count_matches_the_steps(self) -> None:
+        self.assertEqual(len(self.steps), self.claimed)
+
+    def test_the_id_is_recorded_before_the_request_is_deleted(self) -> None:
+        """The defect this contract shipped with, as a check.
+
+        A drain that deletes the request before recording the created id has
+        thrown away the only durable trace of that page, and the next render
+        enqueues another create.
+        """
+
+        deletes = [i for i, step in enumerate(self.steps)
+                   if re.search(r"[Dd]elete the request file", step)]
+        self.assertEqual(len(deletes), 1, "one step deletes the request")
+        records = [i for i, step in enumerate(self.steps)
+                   if "page=" in step and "file=" in step]
+        self.assertTrue(records, "no step records the created id")
+        self.assertLess(
+            max(records), deletes[0],
+            "the drain deletes the request before recording the id it created")
+
+    def test_the_delete_is_the_last_step(self) -> None:
+        self.assertRegex(self.steps[-1], r"[Dd]elete the request file")
+
+    def test_the_recording_step_names_both_destinations(self) -> None:
+        """A write-back stated for one destination leaves the other duplicating."""
+
+        recording = "\n".join(
+            step for step in self.steps if "page=" in step or "file=" in step)
+        self.assertIn("page=", recording)
+        self.assertIn("file=", recording)
+
+    def test_the_skill_states_the_same_order(self) -> None:
+        """The skill is shorter than the contract, never differently ordered."""
+
+        skill = (REPO_ROOT / "skills" / "sd-research-repo" / "SKILL.md").read_text(
+            encoding="utf-8")
+        records = skill.find("`page=`")
+        deletes = skill.lower().find("delete the request only after")
+        self.assertNotEqual(records, -1, "the skill states no write-back")
+        self.assertNotEqual(deletes, -1, "the skill does not order the delete last")
+        self.assertLess(records, deletes)
+
+
 class WorkflowReferenceTests(unittest.TestCase):
     """Checkout-qualified procedures stay reachable from every rendered layout."""
 

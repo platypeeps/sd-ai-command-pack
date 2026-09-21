@@ -338,7 +338,9 @@ it.
 **Superseded 2026-09-20.** Before this date the standard said every overview,
 map, brief, report and survey had a Notion page. That is now the exception
 rather than the rule: an outward destination is outward-facing, so a document
-reaches one only when the user designates it and names the container.
+reaches one only when the user designates it. The designation alone is enough,
+because each destination has a default container; naming one overrides that
+default.
 
 ### Obsidian and the dashboard are the defaults
 
@@ -370,14 +372,16 @@ handoff packets. Publish what a reader is meant to read.
 
 ### Outward destinations are per document
 
-The user designates a document and names its container at that time. Record it
-in that document's `DOCS` entry, where the document is already described:
+The user designates a document. Each destination has a default container, so
+the designation alone is enough; the user names a container only to override
+the default. Record the designation in that document's `DOCS` entry, where the
+document is already described:
 
 ```python
 notion=dict()                    # private briefs folder, <repo> page
 notion=dict(team=True)           # team briefs folder, <repo> page
 drive=dict()                     # My Drive, Briefs/<repo> folder
-drive=dict(folder="Research deliverables", file="https://docs.google.com/d/...")
+drive=dict(folder="Research deliverables", file="https://docs.google.com/document/d/...")
 ```
 
 | Destination | Key | Container | Existing page or file (optional) |
@@ -388,6 +392,11 @@ drive=dict(folder="Research deliverables", file="https://docs.google.com/d/...")
 Both keys on one entry are two mirrors, not a choice. Until one of these keys
 exists, the document publishes locally and nowhere else. Do not infer a target
 from a title, a folder or a neighbouring document.
+
+`notion=True` is the same designation as `notion=dict()`, written shorter, and
+a write-back amends it into `notion=dict(page="<id>")`. `None` and `False` are
+the off position: they designate nothing, enqueue nothing, and never receive a
+written-back id.
 
 **A Notion mirror is private unless it asks for the team.** `notion=dict()`
 goes to the folder `$SD_NOTION_PRIVATE_FOLDER` names;
@@ -432,9 +441,10 @@ the Mezmo blog's gate, and a brief placed in it would read as cleared for
 publication.
 
 The page or file is optional everywhere. Without it the drain creates the page
-or file and the designation is amended with the id it got. With it the drain
-updates that one, which is what stops a re-render leaving a second copy
-behind.
+or file and writes the id it got back into the designation, before it deletes
+the request. With it the drain updates that one, which is what stops a re-render
+leaving a second copy behind. `references/publication-contract.md` holds the
+drain's step order, and this page states no second version of it.
 
 Recording it in `research.conf.py` is what makes the mirror machine-readable.
 The README's **Notion pages** table stays, for the human reader, but it is no
