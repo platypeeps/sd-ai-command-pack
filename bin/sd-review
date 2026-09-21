@@ -503,6 +503,7 @@ def subprocess_runner(
             env=dict(env),
             capture_output=True,
             input=input_text,
+            stdin=subprocess.DEVNULL if input_text is None else None,
             text=True,
             timeout=timeout,
             check=False,
