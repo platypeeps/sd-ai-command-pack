@@ -5,11 +5,6 @@ stays the decision: this module is a second opinion over a diff shape the
 policy's globs cannot see. It is experimental and additive. No output changes
 unless a `jev` on `PATH` says it can answer on this machine.
 
-It used to need an explicit `JEV_SD_REVIEW=1`, and that is the
-defaulted-to-off failure: a machine with `jev` installed and keyed ran none of
-this, because it also needed an export nobody had written. The variable now
-only ever *subtracts* -- see `STAGE`.
-
 `jev` lives in a private companion repository and is absent on most machines.
 Absence is the ordinary case and not a fault, so it is silent: a module that
 announced a missing optional companion would put a line in every review on
@@ -42,20 +37,17 @@ code and findings are not this module's to change.
 from __future__ import annotations
 
 import json
-import pathlib
 import shutil
 import subprocess
 import sys
 from typing import Any, Mapping, Sequence, TextIO
 
-_BIN = str(pathlib.Path(__file__).resolve().parent)
-if _BIN not in sys.path:
-    sys.path.insert(0, _BIN)
+import sd_lib
 
-import sd_lib  # noqa: E402
-
-#: This stage's switch. **Unset means on.** It only ever subtracts: setting it
-#: cannot make a reading happen that `jev` itself would decline.
+#: This stage's switch. **Unset means on**, and it only ever subtracts: setting
+#: it cannot make a reading happen that `jev` itself would decline. It used to
+#: have to be `1`, which is the defaulted-to-off failure -- a keyed machine ran
+#: none of this, for want of an export nobody had written.
 STAGE = "JEV_SD_REVIEW"
 
 #: Resolved on the ``PATH`` of the environment the run was handed, never from a
@@ -119,10 +111,8 @@ def jev_tier(
     if binary is None:
         return tier, None
     gate = _jev_run([binary, "enabled"], env)
-    # 3 is "cannot answer on this machine" -- unkeyed, or `jev off`. That is
-    # the same not-configured case as an absent binary, and it is the ordinary
-    # state of a machine that merely has the companion repository cloned, so
-    # it is silent too. The code is the one `local-health-check` reads.
+    # 3 is "cannot answer here" -- unkeyed, or `jev off`: the same
+    # not-configured case as an absent binary, and silent for the same reason.
     if gate.returncode == 3:
         return tier, None
     if gate.returncode != 0:
