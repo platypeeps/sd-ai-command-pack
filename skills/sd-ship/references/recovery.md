@@ -49,14 +49,21 @@ attribution line ends the trailer block, so the final paragraph is the
 attribution alone and `Closes:` sits one paragraph above it. Writing the body
 by hand moves the mistake; it does not remove it.
 
-Contiguous means no blank line anywhere in the block. `Closes:`, `Delivers:`
-and `Co-Authored-By:` are all trailers and all belong in the same final
-paragraph, in any order:
+The block is a paragraph of its own, and both halves of that matter. A blank
+line goes **before** it and none **inside** it. `Closes:`, `Delivers:` and
+`Co-Authored-By:` are all trailers and all belong in it, in any order:
 
 ```
+...the last line of the prose.
+
 Closes: sd:788
 Co-Authored-By: <the attribution line this machine appends>
 ```
+
+Removing the blank line fails as surely as leaving one in the middle: a
+single trailer line hanging off the end of a prose paragraph is part of that
+paragraph, not a block. That one has happened too, at `efa996d6`, by a writer
+who had just read this section and over-corrected.
 
 This page issues no merge. When one happens outside this wrapper, the squash
 body has to be supplied explicitly -- `--subject` and `--body-file` rather
