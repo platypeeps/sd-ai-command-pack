@@ -89,6 +89,9 @@ class JudgmentIsOptional(unittest.TestCase):
         self.assertIn("jev enabled", body, "the availability probe is missing")
         self.assertRegex(body, r"[Ee]xit 3", "exit 3 is not named as unavailable")
         self.assertRegex(body, r"off by default")
+        self.assertIn("`not checked`", body,
+                      "an unrun probe must be recorded as `not checked`, not as "
+                      "the `not run` that an unavailable command produces")
 
     def test_an_unavailable_command_changes_nothing(self):
         body = judgment_steps()
@@ -171,7 +174,8 @@ class TheJudgmentIsReported(unittest.TestCase):
         report = section("Final report")
         self.assertRegex(report, r"\*\*Destination-fit judgment\*\*",
                          "the report lost its judgment bullet")
-        for part in ("judge mode", "fit score", "faithfulness probability", "`not run`"):
+        for part in ("judge mode", "fit score", "faithfulness probability",
+                     "`not run`", "`not checked`"):
             with self.subTest(part=part):
                 self.assertIn(part, report)
 
