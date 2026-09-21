@@ -395,6 +395,14 @@ jobs:
       # checkout is the merge ref, and a checkout on main diffs to nothing and
       # passes, which is how the #1024 request was misread as a false positive.
       # A push to main has no body and runs the tree rules alone, as before.
+      #
+      # `PR_BODY` comes from the stored event payload, and `on: pull_request`
+      # with no `types:` fires on `opened`, `synchronize` and `reopened` --
+      # not on `edited`. So a body that fails rule 5 or rule 8 cannot be
+      # cleared by editing it: the edit fires no event, and a re-run replays
+      # the payload the first run saw, body and all. Push a commit or reopen
+      # the pull request. Adding `edited` to the trigger would re-run this
+      # whole workflow on every body tweak, which is why it is not here.
       - name: Docs lint (docs/work, docs/spec, docs/decisions)
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
