@@ -548,6 +548,44 @@ class EnqueueTests(Fixture):
         self.assertEqual(wrote["page"], "")
         self.assertEqual(wrote["space_id"], TEAM_FOLDER)
 
+    def test_a_rewritten_folder_url_still_carries_the_id(self) -> None:
+        """The container is the folder, not how it was spelled. A page URL
+        replaced by its bare id names one `space_id`, so the recorded page is
+        still the right page and dropping it would create a second."""
+        url = "https://notion.so/Research-%s" % PRIVATE_FOLDER
+        PUBLISH.enqueue(
+            self.repo, [dict(out="a", title="A", notion=dict(space=url))])
+        path = self.drained("my-research.a.notion.json", page="page-id")
+
+        PUBLISH.enqueue(self.repo, [dict(
+            out="a", title="A", notion=dict(space=PRIVATE_FOLDER))])
+        self.assertEqual(json.loads(path.read_text())["page"], "page-id")
+
+    def test_another_repo_of_the_same_name_carries_nothing(self) -> None:
+        """The queue key is the repo's basename, so two checkouts called
+        `research` share a request path and a default container. Adopting
+        across that would hand one repo's brief the other's page."""
+        doc = [dict(out="report", title="Report", notion=dict())]
+        mine = self.root / "mine" / "research"
+        theirs = self.root / "theirs" / "research"
+        PUBLISH.enqueue(mine, doc)
+        path = self.drained("research.report.notion.json", page="mine")
+
+        PUBLISH.enqueue(theirs, doc)
+        wrote = json.loads(path.read_text())
+        self.assertEqual(wrote["page"], "")
+        self.assertEqual(wrote["repo"], str(theirs))
+
+    def test_another_document_of_the_same_name_carries_nothing(self) -> None:
+        """`document` is compared for the same reason `repo` is: neither is
+        implied by a request path that a rename or a collision can reuse."""
+        PUBLISH.enqueue(self.repo, [dict(out="a", title="A", notion=dict())])
+        path = self.drained("my-research.a.notion.json",
+                            page="a-page", document="was-something-else")
+
+        PUBLISH.enqueue(self.repo, [dict(out="a", title="A", notion=dict())])
+        self.assertEqual(json.loads(path.read_text())["page"], "")
+
     def test_an_unreadable_pending_request_carries_nothing(self) -> None:
         """A truncated or hand-edited request records nothing. It is replaced
         and reported as queued, and the drain adopts by title instead."""

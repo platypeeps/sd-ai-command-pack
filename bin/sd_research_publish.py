@@ -590,7 +590,39 @@ def migrate_legacy_queue() -> list[str]:
     return reports
 
 
-def recorded(path: Path, target: dict[str, str], what: str) -> str:
+def mirror_identity(
+    request: dict[str, Any], target: dict[str, str], what: str
+) -> dict[str, Any]:
+    """What a recorded page or file id belongs to.
+
+    The repository and the document, because the queue filename does not say
+    either one: it is keyed on the repo's *basename*, so two checkouts both
+    called `research` share a path, and both may designate a document called
+    `report` into the same default folder. Adopting across that would hand one
+    repository's brief the other's page and overwrite it on the next drain.
+
+    Then the container the id was created under, taken from the target so that
+    a destination added to `DESTINATIONS` carries its own container fields
+    here without anything being remembered.
+
+    Two fields of the target are left out. `what` is the id itself, which is
+    what is being looked up. `target` is display text: a Notion folder written
+    as a page URL and the same folder written as its bare id resolve to one
+    `space_id` and differ only in the wording, and dropping a recorded id over
+    a spelling is the duplicate this function exists to prevent. `revision`
+    and `title` are not here either -- the revision changes on every render,
+    and a renamed document keeps its page, which is exactly when the recorded
+    id is the only thing that still finds it.
+    """
+    fields: dict[str, Any] = {
+        field: request.get(field) for field in ("repo", "document")
+    }
+    fields.update({field: value for field, value in target.items()
+                   if field not in (what, "target")})
+    return fields
+
+
+def recorded(path: Path, wanted: dict[str, Any], what: str) -> str:
     """The page or file id a request already sitting at `path` records.
 
     The contract calls the request the durable record, and the drain's step 4
@@ -601,19 +633,12 @@ def recorded(path: Path, target: dict[str, str], what: str) -> str:
     carrying the same title. That is the duplicate steps 4 and 5 exist to
     prevent, arriving by the one route neither of them watches.
 
-    So a render carries the recorded id forward. It never invents one: an
-    absent, unreadable or half-written request records nothing, and the drain
-    falls back to adopting by title, which is what it does for a page it has
-    never seen.
-
-    Carried only while the *container* still matches. A page id belongs to the
-    folder it was created under, so a designation moved to another folder --
-    or to the other Notion scope -- has made the recorded page the wrong one,
-    and the drain must resolve the new container afresh. Every field of the
-    target except the id itself is compared, which is the whole container and
-    nothing about the document: a renamed document keeps its page, and a
-    rename is exactly when the recorded id is the only thing that still finds
-    it.
+    So a render carries the recorded id forward, while the request still names
+    the same document in the same repository in the same container -- see
+    `mirror_identity`. It never invents one: an absent, unreadable,
+    half-written or differently-addressed request records nothing, and the
+    drain falls back to adopting by title, which is what it does for a page it
+    has never seen.
     """
     try:
         pending = json.loads(path.read_text(encoding="utf-8"))
@@ -621,8 +646,7 @@ def recorded(path: Path, target: dict[str, str], what: str) -> str:
         return ""
     if not isinstance(pending, dict):
         return ""
-    if any(pending.get(field) != value
-           for field, value in target.items() if field != what):
+    if any(pending.get(field) != value for field, value in wanted.items()):
         return ""
     return str(pending.get(what, "")).strip()
 
@@ -659,7 +683,8 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
         # The designation is the answer where it gives one; the queue records
         # what a drain did, and never overrides what the document says.
         what = BY_NAME[target["destination"]].what
-        carried = "" if request[what] else recorded(path, target, what)
+        carried = "" if request[what] else recorded(
+            path, mirror_identity(request, target, what), what)
         request[what] = request[what] or carried
         path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
         reports.append("mirror: queued %s -> %s%s" % (
