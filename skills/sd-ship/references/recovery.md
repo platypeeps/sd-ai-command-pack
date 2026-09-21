@@ -40,13 +40,37 @@ trailer is not in it, the merge took the other path.
 
 Do not rewrite the merge commit -- it is on the default branch. Record the
 trailer on a later commit instead, contiguous in its own trailer block, and
-say in that commit which merge it is recording. This has happened twice:
-sd:5 at `193d8e87`, and sd:788 at `d115b665`.
+say in that commit which merge it is recording. This has happened three
+times: sd:5 at `193d8e87`, and sd:788 at `d115b665` and again at `745a99fa`.
+
+The third one is the instructive one, because the body *was* supplied
+explicitly and the trailer still did not survive. A blank line before the
+attribution line ends the trailer block, so the final paragraph is the
+attribution alone and `Closes:` sits one paragraph above it. Writing the body
+by hand moves the mistake; it does not remove it.
+
+The block is a paragraph of its own, and both halves of that matter. A blank
+line goes **before** it and none **inside** it. `Closes:`, `Delivers:` and
+`Co-Authored-By:` are all trailers and all belong in it, in any order:
+
+```
+...the last line of the prose.
+
+Closes: sd:788
+Co-Authored-By: <the attribution line this machine appends>
+```
+
+Removing the blank line fails as surely as leaving one in the middle: a
+single trailer line hanging off the end of a prose paragraph is part of that
+paragraph, not a block. That one has happened too, at `efa996d6`, by a writer
+who had just read this section and over-corrected.
 
 This page issues no merge. When one happens outside this wrapper, the squash
 body has to be supplied explicitly -- `--subject` and `--body-file` rather
-than the composed default -- with the trailer block last, and the merged
-commit's last paragraph read afterwards.
+than the composed default -- with one contiguous trailer block last, and the
+merged commit's last paragraph read afterwards. `git interpret-trailers
+--parse` on the merged commit answers it in one line; if `Closes:` is not in
+its output, the trailer did not land.
 
 ## Copilot request recovery
 
