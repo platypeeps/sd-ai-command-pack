@@ -2706,3 +2706,38 @@ def acknowledgement_problems(label: str, entry: Any) -> list[str]:
             for fact in sorted(set(state) - set(ACKNOWLEDGED_FACTS))
         )
     return problems
+
+
+# --------------------------------------------------------------------------
+# The Jev stage switch, shared by every gate in this repository
+#
+# Last in the file rather than beside the other small helpers, because work
+# items cite this one by `path:line`: inserting thirty lines at the top moved
+# every citation below them, and `test_doc_citations` measured one falling out
+# of the symbol it named. Append here and nothing above can move.
+# --------------------------------------------------------------------------
+
+#: The words that switch a Jev stage off, in any case. Anything else leaves it
+#: on, including the ``1`` these gates used to require -- a typo is not an
+#: outage.
+#:
+#: This vocabulary is `jev.py`'s `FLAG_OFF`, copied rather than imported: `jev`
+#: ships in a private companion repository and this one is public, so there is
+#: nothing to import from. Two copies drift, so the words are pinned by
+#: `tests/test_sd_review_jev.py` and named here to be grepped for.
+JEV_FLAG_OFF = ("0", "off", "false", "no", "disabled")
+
+
+def jev_stage_off(value: str | None) -> bool:
+    """Whether a stage variable has been used to switch its Jev reading off.
+
+    Unset means on, and so does any word outside `JEV_FLAG_OFF`. The variable
+    only ever subtracts: setting it cannot make a reading happen that `jev`
+    itself would decline.
+
+    One definition, reached by both gates. Two of these lived in `bin/` for
+    the length of one rejected commit, and the dead-code check refused it:
+    a name defined twice is a name its evidence can no longer count.
+    """
+
+    return value is not None and value.strip().lower() in JEV_FLAG_OFF

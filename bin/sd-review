@@ -1434,10 +1434,11 @@ def review(
     if subject.scope == "planning" and (refusal := sd_lib.guest_artifact_refusal(root, subject.paths)):
         raise UsageError(refusal)
     plan = sd_route.route(subject.paths, subject.lines, args.draft, policy)
-    # Optional and experimental, and off unless the operator asked for it and a
-    # `jev` on PATH answered; otherwise this returns the routed tier untouched and
-    # no record, and the result below is byte-for-byte what it was. `bin/sd_jev.py`
-    # owns the contract and says exactly what leaves the machine.
+    # Optional and experimental, and on wherever a `jev` on PATH says it can
+    # answer -- `JEV_SD_REVIEW=0` switches it off. Without one this returns the
+    # routed tier untouched and no record, silently, and the result below is
+    # byte-for-byte what it was. `bin/sd_jev.py` owns the contract and says
+    # exactly what leaves the machine, and which failures are loud.
     jev_choice, jev_reading = sd_jev.jev_tier(
         plan.tier, policy["tier_order"], subject.paths, subject.lines, plan.reason, env)
     if jev_reading is not None:

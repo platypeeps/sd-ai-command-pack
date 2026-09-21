@@ -1,16 +1,17 @@
-"""An optional Jev reading of the review tier, off unless asked for twice.
+"""An optional Jev reading of the review tier, on wherever Jev can answer.
 
 `sd_route.route` decides the tier from the policy and the changed paths, and it
-stays the decision: this module is a second opinion that the operator has to ask
-for, over a diff shape the policy's globs cannot see. It is experimental and
-additive. Nothing here runs, and no output changes, unless **both** an explicit
-opt-in is set and a `jev` on `PATH` says it can answer.
+stays the decision: this module is a second opinion over a diff shape the
+policy's globs cannot see. It is experimental and additive. No output changes
+unless a `jev` on `PATH` says it can answer on this machine.
 
 `jev` lives in a private companion repository and is absent on most machines.
-Absence is the ordinary case, not a fault: with no opt-in this module returns
-before it looks for anything. Having been asked and not being able to answer is
-different, and says so on stderr rather than passing quietly -- an operator who
-set the variable is owed the reason the reading was not taken.
+Absence is the ordinary case and not a fault, so it is silent: a module that
+announced a missing optional companion would put a line in every review on
+every machine that does not have it, forever. `jev enabled` exiting 3 is the
+same case -- unkeyed, or switched off machine-wide -- and is equally silent.
+Any other failure is loud on stderr, because a lane that quietly stops running
+is the defect this rule exists to prevent.
 
 **What leaves the machine**, and only when the reading is taken: the tier names
 the repository's own policy declares and a fixed description of each one, the
@@ -41,9 +42,13 @@ import subprocess
 import sys
 from typing import Any, Mapping, Sequence, TextIO
 
-#: The opt-in, which is exactly ``1``. ``true``, ``yes`` and ``0`` are off, so
-#: that a half-remembered value fails closed rather than enabling a call.
-OPT_IN = "JEV_SD_REVIEW"
+import sd_lib
+
+#: This stage's switch. **Unset means on**, and it only ever subtracts: setting
+#: it cannot make a reading happen that `jev` itself would decline. It used to
+#: have to be `1`, which is the defaulted-to-off failure -- a keyed machine ran
+#: none of this, for want of an export nobody had written.
+STAGE = "JEV_SD_REVIEW"
 
 #: Resolved on the ``PATH`` of the environment the run was handed, never from a
 #: path written down here: this repository is public and has no fixed relative
@@ -100,12 +105,16 @@ def jev_tier(
     """
 
     note = sys.stderr if stream is None else stream
-    if env.get(OPT_IN) != "1":
+    if sd_lib.jev_stage_off(env.get(STAGE)):
         return tier, None
     binary = shutil.which(COMMAND, path=env.get("PATH"))
     if binary is None:
-        return _jev_declined(tier, note, f"no {COMMAND} on PATH")
+        return tier, None
     gate = _jev_run([binary, "enabled"], env)
+    # 3 is "cannot answer here" -- unkeyed, or `jev off`: the same
+    # not-configured case as an absent binary, and silent for the same reason.
+    if gate.returncode == 3:
+        return tier, None
     if gate.returncode != 0:
         return _jev_declined(tier, note, f"`{COMMAND} enabled` exited {gate.returncode}")
     options = [str(name) for name in order]
@@ -137,8 +146,8 @@ def _jev_fallback(options: Sequence[str]) -> str:
 def _jev_declined(tier: str, stream: TextIO, why: str) -> tuple[str, None]:
     """Keep the routed tier and say why the reading the operator asked for failed."""
 
-    stream.write(f"sd-review: {OPT_IN}=1 but no Jev tier reading was taken: {why}; "
-                 f"keeping the routed tier {tier}\n")
+    stream.write(f"sd-review: no Jev tier reading was taken: {why}; "
+                 f"keeping the routed tier {tier} (set {STAGE}=0 to stop asking)\n")
     return tier, None
 
 

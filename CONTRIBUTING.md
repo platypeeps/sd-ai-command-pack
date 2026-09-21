@@ -138,20 +138,33 @@ Do not replace line numbers without checking their targets.
 Rule 6 compares recorded text against the cited line.
 It cannot tell whether that passage still supports the sentence citing it.
 
-An optional second reading asks a model that question:
+A second reading asks a model that question, and it is taken wherever it can
+be:
 
 ```bash
-JEV_SD_DOCS_LINT=1 make docs-lint
+make docs-lint
 ```
 
 It needs `jev` on `PATH`. `jev` ships in a private companion repository, so
 most checkouts do not have it, and a run without it is a run without this
-pass. The pass prints notes only. It never fails a run and never changes an
-exit code. A run that leaves the opt-in unset prints nothing about it at all.
+pass — silently, because announcing a missing optional companion would put a
+line in every pull request here forever. The pass prints notes only. It never
+fails a run and never changes an exit code.
 
-Enabling it sends the citing sentence and the cited passage to a third-party
-service. Both are capped, and neither carries a path, an item name, or the
-citation marker. Leave the opt-in unset when `docs/work` is private.
+Taking the reading sends the citing sentence and the cited passage to a
+third-party model. Both are capped, and neither carries a path, an item name,
+or the citation marker. Switch it off for a checkout whose `docs/work` must
+not leave the machine:
+
+```bash
+JEV_SD_DOCS_LINT=0 make docs-lint    # or export it once
+```
+
+`0`, `off`, `false`, `no` and `disabled` all switch it off, in any case.
+Anything else leaves it on, including the `1` this used to require: a typo is
+not an outage. The switch only ever subtracts — it cannot make a reading
+happen that `jev` itself declines, so a machine with no key behaves exactly
+like one with the switch off.
 
 ### Permissions
 
