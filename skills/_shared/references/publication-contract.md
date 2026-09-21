@@ -304,6 +304,23 @@ Draining is six steps per request, and the order matters:
    exists to prevent: the next render enqueues a create again, and the next
    drain makes a second copy. Both copies carry the same title and the same
    content, so nothing reads as wrong and no reader can tell which is stale.
+
+   **A re-render carries a recorded id forward rather than overwriting it.**
+   A render rewrites the request for every designated document, and the
+   post-commit hook renders on every commit touching a document — so without
+   this, any commit landing between step 4 and step 5 erased the only record
+   of the created page, and the gap step 4 exists to close reopened by the
+   one route neither step watches. An id is carried only while the request
+   still names the same document, in the same repository, in the same
+   container. A page id belongs to the folder it was created under, so a
+   designation moved to another folder, or to the other Notion scope, drops it
+   and the drain resolves the new container afresh. The document and the
+   repository are compared because the queue filename says neither: it is keyed
+   on a repository's basename, and two checkouts of that name may designate a
+   document of the same name into the same default folder. How the container
+   was *spelled* is not compared — a folder written as a page URL and the same
+   folder written as its bare id are one container — and neither is the
+   document's title, since a renamed document keeps its page.
 5. Write the id into the document's designation, as `page=` for Notion and
    `file=` for Drive. In a research repo that designation is a key on the
    document's `research.conf.py` entry, and it is what the *next render* reads
@@ -333,11 +350,18 @@ procedure whose failure mode is the bug it prevents is not a fix.
 | step 4, before step 5 | id in the request, not in the designation | updates that page, retries step 5 |
 | step 5, before step 6 | id recorded in both | updates that page, deletes the request |
 
+Every row survives a render in between, because a render carries a recorded id
+forward under step 4 rather than overwriting the request.
+
 One state is not covered: a page created in step 3 whose title then changes
-before the next drain runs. Nothing matches it, so the next drain creates a
-second page and the first is orphaned. Rename a mirrored document and check its
-mirror by hand. A destination that creates a page and returns an error instead
-of an id lands in the first row and recovers there.
+before the next drain runs, *and* whose id reached neither the request nor the
+designation. Nothing matches it, so the next drain creates a second page and
+the first is orphaned. That is the first row of the table and a rename
+together; a rename alone is covered, since a carried id finds the page
+whatever it is now called. A destination that creates a page and returns an
+error instead of an id lands in the first row and recovers there — by title,
+so rename a mirrored document whose drain errored and check its mirror by
+hand.
 
 Never drain a request into a container it does not resolve to, never create a
 page or file outside that container -- the one the document names, or the
