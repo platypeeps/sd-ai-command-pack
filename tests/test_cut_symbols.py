@@ -624,7 +624,7 @@ def requirement_13_cut_clauses() -> list[str]:
     no lines of its own, it is one wrapped bullet, and the semicolon is the
     delimiter the author used.
     """
-    found = [path for path in sorted((REPO_ROOT / "docs" / "work").glob("*/prd.md"))
+    found = [path for path in sorted((REPO_ROOT / "docs" / "work").rglob("prd.md"))
              if REQUIREMENT_13 in path.read_text(encoding="utf-8")]
     if len(found) != 1:
         raise AssertionError(f"{len(found)} prd.md carry {REQUIREMENT_13!r}")
