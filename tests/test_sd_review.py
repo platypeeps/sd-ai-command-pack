@@ -1059,7 +1059,7 @@ class DepthCountsProvidersThatCanAnswerTests(ReviewFixture):
         `run_provider` does not implement would mark an entry eligible and then
         refuse it at the run, which is the hole this closes reopened."""
 
-        self.assertEqual(sd_review.READERS, ("codex-json", "claude-json"))
+        self.assertEqual(sd_review.READERS, ("codex-json", "claude-json", "agy-json"))
 
 
 class AnEmptyChainThatWantedReviewersTests(ReviewFixture):

@@ -345,6 +345,19 @@ class ClaudeReaderTests(ReviewFixture):
                     "type": "result", "subtype": "error_during_execution", "is_error": True, **fields}), ""))
                 self.assertEqual(sd_review._answer("claude", result, parsed).status, sd_review.UNAVAILABLE)
 
+    def test_an_integer_past_the_parser_limit_is_not_a_crash(self) -> None:
+        """`json.loads` raises a bare `ValueError` for a huge integer literal.
+
+        `JSONDecodeError` subclasses it, so the narrower clause this reader
+        used to carry let the base class through as an unhandled exception.
+        Both spawned readers parsed their envelope that way.
+        """
+        envelope = ('{"type": "result", "subtype": "success", "is_error": false, '
+                    '"structured_output": {"findings": [{"line": ' + "9" * 5000 + "}]}}")
+        result, parsed = sd_review.claude_answer(sd_review.Completed(0, envelope, ""))
+        self.assertIsNone(parsed)
+        self.assertEqual(result.exit_code, 0)
+
     def test_quota_metadata_does_not_discard_adverse_findings(self) -> None:
         result, parsed = sd_review.claude_answer(sd_review.Completed(0, json.dumps({
             "type": "result", "subtype": "success", "is_error": True, "api_error_status": 429,
@@ -407,7 +420,10 @@ class SchemaAcrossTransportsTests(ReviewFixture):
             url="https://fixture.example/v1" if transport == "url" else None,
             reader=None if transport == "url" else transport)
         envelope = ({"type": "result", "subtype": "success", "is_error": False,
-                     "structured_output": payload} if transport == "claude-json" else payload)
+                     "structured_output": payload} if transport == "claude-json" else
+                    {"event": "result", "result": {"status": "SUCCESS", "response": "",
+                                                   "structured_output": payload}}
+                    if transport == "agy-json" else payload)
         client = FakeClient(default=(0, json.dumps({"choices": [{"message": {"content": json.dumps(payload)}}]}), "", True))
         return sd_review.run_provider(provider, self.tmp,
             sd_review.Subject("worktree", "HEAD", "worktree", (), 0, ""), "review",
