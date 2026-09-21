@@ -606,7 +606,7 @@ URL_OUTPUT_CONTRACT = (
 def codex_argv(
     root: pathlib.Path, workdir: pathlib.Path, start: str = "codex exec"
 ) -> list[str]:
-    """Request read-only execution and suppress user configuration, rules, persistence, and project instructions.
+    """Request read-only execution and suppress user configuration, rules, persistence, project instructions, and skill instructions.
     These flags alone do not establish filesystem read confinement."""
 
     return [
@@ -623,6 +623,30 @@ def codex_argv(
         str(root),
         "-c",
         "project_doc_max_bytes=0",
+        # The other static instruction surface. `skills.include_instructions`
+        # false stops codex loading any `SKILL.md` body, so a committed skill
+        # stops writing into the reviewing model's context merely by existing:
+        # the control C-40 was parked waiting for, new in codex-cli 0.155.1.
+        # Measured there with a planted skill in each discovery root: 11,464
+        # prompt tokens fall to ~5,700, neither canary token is emitted, and
+        # the run reports no skills in its catalog. The roots are
+        # `.agents/skills` and `.codex/skills`, read repository-local and under
+        # `$HOME` alike, and `--ignore-user-config` covers neither `$HOME` one,
+        # so the operator's own skills load into every review without this key.
+        # `--enable`/`--disable` do not reach it: `codex features list` has no
+        # `skills` flag, and both its skill-adjacent entries were tried --
+        # `skip_host_skill_discovery` enabled and `skill_search` disabled each
+        # left the prompt byte-identical with both canaries still emitted.
+        # Two limits. It is a zero, not an allow-list: every skill goes,
+        # including one a reviewer was meant to have, because this build's
+        # `SkillConfig` serializes only `bundled`, `include_instructions` and
+        # `max_context_tokens`, none of which names a source. And it suppresses
+        # automatic injection, not reading -- under `--sandbox read-only` the
+        # model may still `cat` a `SKILL.md`. C-40 names the injection. Whether
+        # bundled skills go too is unverified: none ship on the machine
+        # measured, so the empty catalog settles nothing there.
+        "-c",
+        "skills.include_instructions=false",
         "--output-schema",
         str(workdir / CODEX_SCHEMA_FILE),
         "--output-last-message",
