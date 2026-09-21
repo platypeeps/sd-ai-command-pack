@@ -953,6 +953,22 @@ class Rows:
         row = self.item(item_dir)
         return row is not None and self._completion_read(row) is not None
 
+    def identity(self, item_dir: pathlib.Path) -> str:
+        """`sd:<id>` for this folder's row, or `""` when no row answers.
+
+        The spelling every writer in the pack uses: `bin/sd-ship` puts
+        `Delivers: sd:<id>` on the squash and `sd work deliver` refuses a
+        commit that carries anything else. A reader that asks git for the
+        folder's name asks for a string nothing writes.
+        """
+        if not self.opened:
+            return ""
+        try:
+            row = self.item(item_dir)
+        except Exception:  # noqa: BLE001 - a read that failed named nothing
+            return ""
+        return f"sd:{row['id']}" if row is not None else ""
+
     def close(self) -> None:
         if self._connection is not None:
             self._connection.close()
@@ -1085,10 +1101,25 @@ def _from_row(
             f"the line is stale"
         )
     recorded = statuses.rows is not None and statuses.rows.completed(item_dir)
-    if said == "done" and not recorded and delivered(statuses.root, item_dir.name) != YES:
+    # Both spellings, because both are written. `sd-ship` writes
+    # `Delivers: sd:<id>` and `sd work deliver` accepts nothing else, so the
+    # id is what a checkout holding the row must ask for; asking by the folder
+    # name alone asked for a string no writer emits, and the clause could
+    # never clear -- permanently false on any row a completion record cannot
+    # reach, such as a `followup` row, which `sd work relink` refuses to give
+    # a path. The folder name stays beside it: `main` carries two trailers in
+    # that form, and it is the only spelling a database-free checkout can
+    # resolve, which is why `_from_git` asks by it.
+    wanted = tuple(dict.fromkeys(
+        name for name in
+        ((statuses.rows.identity(item_dir) if statuses.rows else ""), item_dir.name)
+        if name
+    ))
+    if said == "done" and not recorded and delivered(statuses.root, wanted) != YES:
+        carries = " or ".join(f"{DELIVERS_TRAILER} {name}" for name in wanted)
         problems.append(
-            f"{prd}: the row is done and no commit carries {DELIVERS_TRAILER} or "
-            f"{CLOSES_TRAILER} for {item_dir.name}; the item is unmarked"
+            f"{prd}: the row is done and no commit carries {carries}, nor the "
+            f"same value after {CLOSES_TRAILER}; the item is unmarked"
         )
     return StatusReport(said, False, tuple(problems))
 
@@ -2043,18 +2074,35 @@ class Answer(str):
         return answer
 
 
-def _closes(message: str, item: str) -> bool:
+def _spellings(item: "str | tuple[str, ...]") -> tuple[str, ...]:
+    """The one name a caller asks about, or the several it accepts.
+
+    A bare string stays one name. Membership on a string is a substring test,
+    so `sd:78` would close `sd:788`; normalising here is what keeps every
+    comparison below an equality against a whole trailer value.
+    """
+    return (item,) if isinstance(item, str) else tuple(item)
+
+
+def _closes(message: str, item: "str | tuple[str, ...]") -> bool:
     """True when this message's trailer block -- its last paragraph, which is
     what makes a trailer a trailer -- closes `item`. Reading the whole message
-    would let a commit that quoted a trailer close the item it named."""
+    would let a commit that quoted a trailer close the item it named.
+
+    `item` may be several spellings of one item, and any one of them closes
+    it. The id `sd-ship` writes, `Delivers: sd:<id>`, and the folder name a
+    database-free checkout has to ask by are the same item said two ways, and
+    `main` carries both forms.
+    """
+    wanted = _spellings(item)
     for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
         name, _, value = line.rstrip().partition(" ")
-        if name in (DELIVERS_TRAILER, CLOSES_TRAILER) and value.strip() == item:
+        if name in (DELIVERS_TRAILER, CLOSES_TRAILER) and value.strip() in wanted:
             return True
     return False
 
 
-def _closed_by(root: pathlib.Path, ref: str, item: str) -> bool:
+def _closed_by(root: pathlib.Path, ref: str, item: "str | tuple[str, ...]") -> bool:
     """Whether a commit reachable from `ref` closes `item`; a ref git cannot
     resolve closes nothing. `--grep` only narrows the walk; `_closes` decides."""
     grep = f"{DELIVERS_TRAILER}|{CLOSES_TRAILER}"
@@ -2081,12 +2129,13 @@ def upstream(root: pathlib.Path) -> tuple[str, str]:
     return remote, "main"
 
 
-def delivered(root: pathlib.Path, item: str) -> Answer:
+def delivered(root: pathlib.Path, item: "str | tuple[str, ...]") -> Answer:
     """`yes`, `no` or `unknown`: is `item` delivered, asked of git and nothing else.
 
     `yes` when a commit reachable from the remote's default branch as just
     fetched, from the checkout's branch as just fetched from its upstream, or
-    from `HEAD`, carries `Delivers: <item>` or `Closes: <item>`. `no` when
+    from `HEAD`, carries `Delivers: <item>` or `Closes: <item>`; `item` may be
+    a tuple of spellings, any one of which answers for it. `no` when
     none does *and* the history is whole *and* it is current; `unknown` when
     it is neither, because a shallow clone's trailer may sit past the boundary
     and a clone retained while another machine delivered or cancelled the item

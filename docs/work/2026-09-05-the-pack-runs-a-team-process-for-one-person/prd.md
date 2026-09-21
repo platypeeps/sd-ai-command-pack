@@ -4951,11 +4951,12 @@ from a number the operator types.
     takes arbitrary `git` argv behind a fixed-argv call, a timeout, no shell and
     a failure-is-None contract, and has **30 call sites** across seven files.
   - The *network* git policy is built. `git fetch` already runs through that
-    same helper at `bin/sd_lib.py:1343` and `:1349`, and its failure is already
-    turned into an operator-readable `Answer(UNKNOWN, "git fetch <remote> <ref>")`
-    rather than a traceback.
-  - The *mutating* git policy is built. `git commit` runs at
-    `bin/sd_lib.py:1227` with a `TrailerError` that carries git's own stderr.
+    same helper in `delivered` (`source:bin/sd_lib.py::delivered`), and its
+    failure is already turned into an operator-readable
+    `Answer(UNKNOWN, "git fetch <remote> <ref>")` rather than a traceback.
+  - The *mutating* git policy is built. `git commit` runs in `attribute`
+    (`source:bin/sd_lib.py::attribute`) with a `TrailerError` that carries
+    git's own stderr.
     R11-D42's "no `git push` exists anywhere in `bin/`" was true and incomplete:
     write-side git is not new, only the remote half of it is.
   - The test harness is built. `tests/test_sd_pr_state.py:41-62` and `:147-161`

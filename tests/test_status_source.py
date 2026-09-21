@@ -1119,3 +1119,106 @@ class ATaskKeyedFolder(Fixture):
         said, trouble = rows.status(self.item)
         self.assertEqual(said, "")
         self.assertIn(f"holds no docs/work row for {self.identity()}", trouble)
+
+
+class TheUnmarkedCheckAsksTheIdEveryWriterWrites(Fixture):
+    """sd:1113. The `unmarked` clause asked git for a string nobody writes.
+
+    `bin/sd-ship` puts `Delivers: sd:<id>` on the squash and `sd work deliver`
+    refuses a commit carrying anything else, so the id is the pack's spelling.
+    The clause asked by the folder's name instead, so on a checkout with a row
+    it could never clear and the warning was permanent. The folder name is
+    still asked beside it: `main` carries two trailers in that form and a
+    database-free checkout has no id to ask by.
+    """
+
+    def row_id(self, name: str = ITEM) -> int:
+        row = sd_db.writes.item_by_external(
+            self._connection, sd_lib.ITEM_ROW_SOURCE, self.identity(name)
+        )
+        self.assertIsNotNone(row, "the fixture seeded a row")
+        return int(row["id"])
+
+    def delivering(self, *trailers: str) -> None:
+        self.marker("row")
+        self.write(prd(None))
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", merge_message(*trailers))
+
+    def unmarked(self) -> list[str]:
+        return [p for p in self.only().inconsistencies if "unmarked" in p]
+
+    def test_the_id_form_clears_the_check(self) -> None:
+        """The trailer `sd-ship` actually writes. This is the whole defect:
+        before the fix the item was reported unmarked with the trailer there."""
+        self.seed("done")
+        number = self.row_id()
+        self.delivering(f"Item: sd:{number}", f"Delivers: sd:{number}")
+        self.assertEqual(self.only().status, "done")
+        self.assertEqual(self.unmarked(), [])
+
+    def test_the_folder_name_still_clears_the_check(self) -> None:
+        """Two commits on `main` carry that form, and it is the only spelling
+        a database-free checkout can resolve."""
+        self.seed("done")
+        self.delivering(f"Closes: {ITEM}")
+        self.assertEqual(self.unmarked(), [])
+
+    def test_the_message_names_both_values_it_looked_for(self) -> None:
+        """A reader told to search for a string that is not there searches for
+        an hour. The finding spells each value it asked git about."""
+        self.seed("done")
+        number = self.row_id()
+        self.delivering(f"Item: sd:{number}")
+        found = self.unmarked()
+        self.assertEqual(len(found), 1, self.only().inconsistencies)
+        self.assertIn(f"Delivers: sd:{number}", found[0])
+        self.assertIn(f"Delivers: {ITEM}", found[0])
+        self.assertIn("Closes:", found[0])
+
+    def test_a_near_miss_id_closes_nothing(self) -> None:
+        """`sd:78` must not close `sd:788`: the several spellings are matched
+        whole, never by membership in a string."""
+        self.seed("done")
+        number = self.row_id()
+        self.delivering(f"Delivers: sd:{number}9")
+        self.assertEqual(len(self.unmarked()), 1, self.only().inconsistencies)
+
+
+class AFollowupRowIsClearedByItsTrailerAlone(Fixture):
+    """sd:1113. A row whose `kind` is not `work` has no other way to clear.
+
+    `completion_record` is read off the row `item_for_artifact` finds by path,
+    and `sd work relink` refuses to give a `followup` row a path -- "this
+    operation is for work items". So the trailer clause is the only clause
+    that can ever mark such an item, and asking it by the folder's name left
+    the item permanently unmarked. Row 788 is the live instance.
+    """
+
+    named = ATaskKeyedFolder.named
+    row = ATaskKeyedFolder.row
+
+    def delivering(self, number: int, *trailers: str) -> None:
+        self.named(f"sd:{number}", status=None)
+        self.git("add", "-A")
+        self.git("commit", "-q", "-m", merge_message(*trailers))
+
+    def unmarked(self) -> list[str]:
+        return [p for p in self.only().inconsistencies if "unmarked" in p]
+
+    def test_a_done_followup_row_is_marked_by_the_id_trailer(self) -> None:
+        self.marker("row")
+        number = self.row("followup", "done")
+        self.delivering(number, f"Delivers: sd:{number}")
+        item = self.only()
+        self.assertEqual(item.status, "done")
+        self.assertEqual(self.unmarked(), [], item.inconsistencies)
+
+    def test_without_the_trailer_the_followup_row_is_still_unmarked(self) -> None:
+        """The clause has to keep finding the real case: no trailer, no mark."""
+        self.marker("row")
+        number = self.row("followup", "done")
+        self.delivering(number, f"Item: sd:{number}")
+        found = self.unmarked()
+        self.assertEqual(len(found), 1, self.only().inconsistencies)
+        self.assertIn(f"Delivers: sd:{number}", found[0])
