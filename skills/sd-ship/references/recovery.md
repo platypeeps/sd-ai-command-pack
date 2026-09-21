@@ -40,13 +40,30 @@ trailer is not in it, the merge took the other path.
 
 Do not rewrite the merge commit -- it is on the default branch. Record the
 trailer on a later commit instead, contiguous in its own trailer block, and
-say in that commit which merge it is recording. This has happened twice:
-sd:5 at `193d8e87`, and sd:788 at `d115b665`.
+say in that commit which merge it is recording. This has happened three
+times: sd:5 at `193d8e87`, and sd:788 at `d115b665` and again at `745a99fa`.
+
+The third one is the instructive one, because the body *was* supplied
+explicitly and the trailer still did not survive. A blank line before the
+attribution line ends the trailer block, so the final paragraph is the
+attribution alone and `Closes:` sits one paragraph above it. Writing the body
+by hand moves the mistake; it does not remove it.
+
+Contiguous means no blank line anywhere in the block. `Closes:`, `Delivers:`
+and `Co-Authored-By:` are all trailers and all belong in the same final
+paragraph, in any order:
+
+```
+Closes: sd:788
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+```
 
 This page issues no merge. When one happens outside this wrapper, the squash
 body has to be supplied explicitly -- `--subject` and `--body-file` rather
-than the composed default -- with the trailer block last, and the merged
-commit's last paragraph read afterwards.
+than the composed default -- with one contiguous trailer block last, and the
+merged commit's last paragraph read afterwards. `git interpret-trailers
+--parse` on the merged commit answers it in one line; if `Closes:` is not in
+its output, the trailer did not land.
 
 ## Copilot request recovery
 
