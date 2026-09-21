@@ -185,18 +185,31 @@ undocumented here until review said so. `sd_route.route` decides the tier and
 keeps the decision; the reading is a second opinion over a diff shape the
 policy's globs cannot see, and it is taken wherever `jev` says it can answer.
 
-What leaves the machine: the tier names this repository's own policy declares
-with a fixed description of each, the repository-relative paths the change
-touches (capped, then a count), the number of lines it moves, and the routing
-reason. No file contents, no diff, no code.
+What leaves the machine: the tier names, the repository-relative paths the
+change touches (capped, then a count), the number of lines it moves, and the
+routing reason `sd_route` composed. **No file contents, no diff, no code**, and
+no absolute path, repository name, branch, author or commit message.
+
+**The tier names are the running checkout's, not this one's — same rule as
+above, and it bites harder here.** `load_policy` reads the policy out of the
+repository the command runs in, and `sd-review` hands that policy's
+`tier_order` straight to the reading. The four standard tiers carry a fixed
+description; **a tier a repository invented is sent as a bare name, with
+nothing to say what it means.** So a private repo that declares a tier called
+`embargo-legal` sends that string to a third-party model, and the name is the
+whole of what arrives. Name your tiers as though they leave the machine,
+because they do.
 
 ```bash
 JEV_SD_REVIEW=0 sd-review --scope branch    # or export it once
 ```
 
-The same vocabulary and the same subtract-only rule apply. It prints nothing
-on the path where it works; the note naming this switch appears only when the
-reading was attempted and failed.
+The same vocabulary and the same subtract-only rule apply. **It prints no
+*note*, which is not the same as changing nothing**: on the path where the
+reading works, the result object gains a `jev` key, the routing reason gains a
+clause, and the tier itself may move — that is the point of taking it. The
+note naming this switch appears only when the reading was attempted and
+failed.
 
 ### Permissions
 

@@ -111,7 +111,10 @@ def jev_tier(
     if binary is None:
         return tier, None
     gate = _jev_run([binary, "enabled"], env)
-    # 3 is "cannot answer here" -- unkeyed, or `jev off`: the same
+    # 3 is "cannot answer here" and nothing narrower. `jev` collapses every
+    # reason into it on purpose -- switched off, no key, a key still set to
+    # the example placeholder, an unparsable timeout or retry count -- so do
+    # not read it as one of them. It is the same
     # not-configured case as an absent binary, and silent for the same reason.
     if gate.returncode == 3:
         return tier, None
