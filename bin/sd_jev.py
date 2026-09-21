@@ -9,16 +9,18 @@ unless a `jev` on `PATH` says it can answer on this machine.
 Absence is the ordinary case and not a fault, so it is silent: a module that
 announced a missing optional companion would put a line in every review on
 every machine that does not have it, forever. `jev enabled` exiting 3 is the
-same case -- unkeyed, or switched off machine-wide -- and is equally silent.
+same not-configured case, however `jev` reached it, and is equally silent.
 Any other failure is loud on stderr, because a lane that quietly stops running
 is the defect this rule exists to prevent.
 
 **What leaves the machine**, and only when the reading is taken: the tier names
-the repository's own policy declares and a fixed description of each one, the
-repository-relative paths the change touches (at most `MAX_PATHS` of them, then
-a count), the number of lines the change moves, and the routing reason
-`sd_route` composed from those same inputs. No absolute path, no repository or
-branch name, no author, no commit message, no file contents and no diff text.
+the *running* checkout's policy declares -- the four standard ones with a fixed
+description, any tier a repository invented as a bare name, so that name is the
+whole of what arrives -- the repository-relative paths the change touches (at
+most `MAX_PATHS` of them, then a count), the number of lines the change moves,
+and the routing reason `sd_route` composed from those same inputs. No absolute
+path, no repository or branch name, no author, no commit message, no file
+contents and no diff text.
 
 **Exit 0 is not an answer.** `--fallback` prints what it was given and exits 0
 whenever Jev is switched off, unkeyed or failing, so the exit code alone cannot
@@ -111,8 +113,10 @@ def jev_tier(
     if binary is None:
         return tier, None
     gate = _jev_run([binary, "enabled"], env)
-    # 3 is "cannot answer here" -- unkeyed, or `jev off`: the same
-    # not-configured case as an absent binary, and silent for the same reason.
+    # 3 is "cannot answer here" and nothing narrower: `jev` collapses switched
+    # off, no key, a placeholder key and a malformed timeout into this one code
+    # on purpose. The same not-configured case as an absent binary, and silent
+    # for the same reason.
     if gate.returncode == 3:
         return tier, None
     if gate.returncode != 0:
