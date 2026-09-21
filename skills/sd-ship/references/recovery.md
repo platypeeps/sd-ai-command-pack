@@ -23,6 +23,30 @@ A run killed after the push and a refused merge both leave the default branch un
 The row is not `done`, its directory stays untouched, and planning and review continue picking the item.
 Resume the existing publication sequence rather than claiming delivery.
 
+### A merge outside this wrapper can demote the trailer
+
+`sd-ship merge` composes the squash body itself and keeps the trailer block
+last and contiguous. The GitHub web UI and `gh pr merge` do not: they append
+the attribution paragraph after whatever the body ends with, so a `Delivers:`
+or `Closes:` line written above it stops being a trailer.
+
+Git reads the final paragraph and nothing else, so a demoted trailer and an
+absent one look identical to every reader downstream. `sd work deliver`
+refuses the commit, the unmarked check reports the item, and the code is
+already on the default branch. Nothing is wrong except the evidence.
+
+Confirm it before repairing it: read the merge commit's last paragraph. If the
+trailer is not in it, the merge took the other path.
+
+Do not rewrite the merge commit -- it is on the default branch. Record the
+trailer on a later commit instead, contiguous in its own trailer block, and
+say in that commit which merge it is recording. This has happened twice:
+sd:5 at `193d8e87`, and sd:788 at `d115b665`.
+
+When you must merge outside this wrapper, pass the squash body explicitly
+(`gh pr merge --subject ... --body-file ...`) with the trailer block last, and
+check the merged commit's last paragraph afterwards.
+
 ## Copilot request recovery
 
 A successful local Copilot request remains a merge gate.
