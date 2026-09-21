@@ -75,11 +75,30 @@ class FakeRunner:
         answer = self.answers.get(program, self.default)
         if callable(answer):
             return answer(argv, env, cwd, timeout)
+        # The skill probe (sd:1248) reads a render, not a findings document,
+        # so the unscripted default is not its answer: an unscripted probe
+        # gets the measured shape with no block. A scripted answer, callable
+        # or not, keeps control of what the probe sees.
+        if program not in self.answers and list(argv[1:3]) == SKILL_PROBE_WORDS:
+            return sd_review.Completed(0, PROMPT_INPUT_SUPPRESSED, "")
         return answer
 
 
 #: The skill-suppression probe's argv, by the two words that identify it.
 SKILL_PROBE_WORDS = ["debug", "prompt-input"]
+
+
+def prompt_input(*texts: str) -> str:
+    """One `codex debug prompt-input` render in the shape measured on 0.155.1:
+    a list of `message` items, each with a `content` list of text parts."""
+
+    return json.dumps([{"type": "message", "role": "developer",
+                        "content": [{"type": "input_text", "text": text}]} for text in texts])
+
+
+#: A render with skill instructions loaded, and one with the key in effect.
+PROMPT_INPUT_LOADED = prompt_input("<skills_instructions>\n## Skills", "<permissions instructions>")
+PROMPT_INPUT_SUPPRESSED = prompt_input("<permissions instructions>")
 
 
 def codex_sessions(runner: Any) -> list[dict[str, Any]]:

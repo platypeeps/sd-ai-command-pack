@@ -499,9 +499,11 @@ def codex_skill_probe_argv(start: str) -> list[str]:
 
     `codex debug prompt-input` renders the model-visible prompt input as JSON.
     Measured on codex-cli 0.155.1 here: exit 0 in 1.44s, no API call, nothing
-    billed. The program comes from the entry's `start` line and the rest is
-    dropped, so a wrapper that speaks `codex-json` is probed rather than
-    whatever `codex` on PATH happens to be.
+    billed. The entry's `start` line is kept whole up to its `exec`, and that
+    one word is replaced: `python3 -m wrapper exec` probes `python3 -m wrapper
+    debug prompt-input`, so a launcher that speaks `codex-json` is probed as
+    it launches, not whatever `codex` on PATH happens to be. A start line
+    that does not end in `exec` derives no probe and reports `not_probed`.
 
     `--ignore-user-config` is absent because this subcommand rejects it:
     `unexpected argument '--ignore-user-config' found`, exit 2. So the probe
@@ -511,9 +513,31 @@ def codex_skill_probe_argv(start: str) -> list[str]:
     probe reads no project document either.
     """
 
-    program = shlex.split(start)[:1]
-    return [*program, "debug", "prompt-input", "-c", "project_doc_max_bytes=0",
-            "-c", "skills.include_instructions=false"] if program else []
+    launcher = shlex.split(start)
+    if not launcher or launcher[-1] != "exec":
+        return []
+    return [*launcher[:-1], "debug", "prompt-input", "-c", "project_doc_max_bytes=0",
+            "-c", "skills.include_instructions=false"]
+
+
+def rendered_prompt_text(stdout: str) -> str | None:
+    """The text of a `debug prompt-input` render, or None when stdout is not
+    one. Measured on 0.155.1: a JSON list of `message` items, each with a
+    `content` list whose parts hold `text`, and the block sits in one part."""
+
+    try:
+        items = json.loads(stdout)
+    except ValueError:
+        return None
+    if not isinstance(items, list) or not items:
+        return None
+    texts: list[str] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("type") != "message" or not isinstance(item.get("content"), list):
+            return None
+        texts.extend(part["text"] for part in item["content"]
+                     if isinstance(part, dict) and isinstance(part.get("text"), str))
+    return "\n".join(texts) if texts else None
 
 
 def codex_skill_state(provider: sd_registry.Provider, root: pathlib.Path, runner: Runner,
@@ -539,7 +563,10 @@ def codex_skill_state(provider: sd_registry.Provider, root: pathlib.Path, runner
 
     argv = codex_skill_probe_argv(provider.start or "")
     if not argv:
-        return skills_report(SKILLS_NOT_PROBED, "", f"{provider.name} names no program to probe")
+        return skills_report(SKILLS_NOT_PROBED, "", f"{provider.name} names no program to probe"
+                             if not (provider.start or "").strip() else
+                             f"{provider.name} starts with {provider.start!r}, which does not end in "
+                             "`exec`, so no probe command derives from it")
     # The lane's own child environment, including the `CODEX_HOME` the preflight
     # read: the skill roots are read from that home, so another home would
     # answer about another run.
@@ -551,9 +578,13 @@ def codex_skill_state(provider: sd_registry.Provider, root: pathlib.Path, runner
         return skills_report(SKILLS_UNKNOWN, printable, f"the probe exited {result.exit_code}, so this "
                              "build cannot be asked whether the key took effect: "
                              + " ".join((result.stderr or "").split())[:200])
-    if not result.stdout.strip():
-        return skills_report(SKILLS_UNKNOWN, printable, "the probe exited 0 and rendered no prompt input")
-    if SKILLS_BLOCK_MARKER in result.stdout:
+    rendered = rendered_prompt_text(result.stdout)
+    if rendered is None:
+        # A help page or `[]` on exit 0 is not a render, and a marker missing
+        # from it is not evidence; read as suppressed, it would hide the warning.
+        return skills_report(SKILLS_UNKNOWN, printable, "the probe exited 0 and rendered no prompt "
+                             "input list, so this build cannot be asked whether the key took effect")
+    if SKILLS_BLOCK_MARKER in rendered:
         return skills_report(SKILLS_UNSUPPRESSED, printable, f"the rendered prompt still carries "
                              f"{SKILLS_BLOCK_MARKER}, so this build ignores the key and every SKILL.md "
                              "body reaches the reviewing model")

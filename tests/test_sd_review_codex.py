@@ -21,10 +21,13 @@ import unittest
 from typing import Any
 
 from tests.test_sd_review import (
+    PROMPT_INPUT_LOADED,
+    PROMPT_INPUT_SUPPRESSED,
     FakeRunner,
     ReviewFixture,
     codex_sessions,
     namespace,
+    prompt_input,
     sd_review,
 )
 
@@ -263,13 +266,13 @@ class SkillSuppressionProbeTests(ReviewFixture):
     """sd:1248. The lane passes `-c skills.include_instructions=false`, and a
     build that does not know the key ignores it and exits 0. Every state below
     is pinned with an injected runner, so none of the three is reachable only
-    by accident: unscripted, the fixture's default stdout carries no block and
-    every probe would read as `suppressed`.
+    by accident: unscripted, the fixture answers the probe with a render that
+    carries no block, and every probe would read as `suppressed`.
     """
 
     #: What `codex debug prompt-input` renders when skill instructions load.
-    LOADED = '[{"type": "message", "content": "<skills_instructions>\\n## Skills"}]'
-    SUPPRESSED = '[{"type": "message", "content": "## Project"}]'
+    LOADED = PROMPT_INPUT_LOADED
+    SUPPRESSED = PROMPT_INPUT_SUPPRESSED
 
     def entry(self, start: str = "codex exec") -> Any:
         return sd_review.sd_registry.Provider(name="codex", vendor="openai", bill="first",
@@ -310,9 +313,43 @@ class SkillSuppressionProbeTests(ReviewFixture):
         state, _ = self.probe(sd_review.Completed(0, "   \n", ""))
         self.assertEqual(state["state"], sd_review.SKILLS_UNKNOWN)
 
+    def test_a_help_page_on_exit_0_reports_unknown(self) -> None:
+        """Found by the codex review of this change. A wrapper that does not
+        know `debug prompt-input` may print its help and exit 0. No marker in
+        a help page is not suppression, and reading it so removed the warning
+        the probe exists to raise."""
+
+        state, _ = self.probe(sd_review.Completed(0, "Usage: wrapper exec [OPTIONS]\n", ""))
+        self.assertEqual(state["state"], sd_review.SKILLS_UNKNOWN)
+        self.assertIn("no prompt input list", state["reason"])
+
+    def test_json_that_is_not_a_render_reports_unknown(self) -> None:
+        for stdout in ("[]", "{}", '{"findings": []}', '[{"type": "message", "content": "text"}]',
+                       '[{"type": "reasoning", "content": []}]'):
+            with self.subTest(stdout=stdout):
+                state, _ = self.probe(sd_review.Completed(0, stdout, ""))
+                self.assertEqual(state["state"], sd_review.SKILLS_UNKNOWN)
+
+    def test_the_marker_is_read_from_the_render_text_and_not_the_bytes(self) -> None:
+        """A block inside any message's text part counts, wherever it sits."""
+
+        state, _ = self.probe(sd_review.Completed(0, prompt_input("first", "x <skills_instructions> y"), ""))
+        self.assertEqual(state["state"], sd_review.SKILLS_UNSUPPRESSED)
+
     def test_an_entry_with_no_program_is_not_probed(self) -> None:
         state, runner = self.probe(sd_review.Completed(0, self.SUPPRESSED, ""), start="")
         self.assertEqual(state["state"], sd_review.SKILLS_NOT_PROBED)
+        self.assertIn("names no program", state["reason"])
+        self.assertEqual(runner.calls, [])
+
+    def test_a_start_line_without_exec_is_not_probed_and_says_so(self) -> None:
+        """No `exec` to replace means no probe command can be derived. That is
+        `not_probed` with the start line in the reason, never a guess."""
+
+        state, runner = self.probe(sd_review.Completed(0, self.SUPPRESSED, ""), start="codex review")
+        self.assertEqual(state["state"], sd_review.SKILLS_NOT_PROBED)
+        self.assertIn("'codex review'", state["reason"])
+        self.assertIn("does not end in `exec`", state["reason"])
         self.assertEqual(runner.calls, [])
 
     def test_the_probe_argv_is_the_entrys_program_and_not_the_lanes(self) -> None:
@@ -321,10 +358,19 @@ class SkillSuppressionProbeTests(ReviewFixture):
         for the entry's own program, not for whatever `codex` PATH resolves."""
 
         argv = sd_review.codex_skill_probe_argv("wrapped codex exec")
-        self.assertEqual(argv[:3], ["wrapped", "debug", "prompt-input"])
+        self.assertEqual(argv[:4], ["wrapped", "codex", "debug", "prompt-input"])
         self.assertNotIn("--ignore-user-config", argv)
         self.assertNotIn("exec", argv)
         self.assertEqual(argv[argv.index("skills.include_instructions=false") - 1], "-c")
+
+    def test_the_probe_keeps_a_launcher_prefix_whole(self) -> None:
+        """Found by the codex review of this change. Taking only the first
+        token turned `python3 -m codex_wrapper exec` into `python3 debug
+        prompt-input`, which probes the interpreter and not the provider."""
+
+        argv = sd_review.codex_skill_probe_argv("python3 -m codex_wrapper exec")
+        self.assertEqual(argv[:5], ["python3", "-m", "codex_wrapper", "debug", "prompt-input"])
+        self.assertEqual(sd_review.codex_skill_probe_argv("python3 -m codex_wrapper"), [])
 
     def test_the_probe_runs_in_the_lanes_scrubbed_child_environment(self) -> None:
         """A probe of another `CODEX_HOME` answers about another run, and one

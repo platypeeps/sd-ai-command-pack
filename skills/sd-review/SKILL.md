@@ -147,6 +147,8 @@ A build that does not know the key ignores it and exits 0.
 So `sd-review` probes the binary with its `debug prompt-input` subcommand, offline, at about 1.4 seconds.
 Read `codex_skill_suppression` in `--explain --json`, beside `codex_preflight`.
 Its `state` is `suppressed`, `unsuppressed`, `unknown`, or `not_probed`.
+The probe keeps the entry's start line whole and replaces its final `exec`.
+Only a render in the measured shape, a list of `message` items, counts as an answer.
 `unknown` means the binary could not be asked; never read it as either answer.
 `not_probed` means no `codex-json` process started, and the `reason` says why.
 An actual `codex-json` run carries its own measurement in that outcome's `diagnostic.skill_suppression`.
