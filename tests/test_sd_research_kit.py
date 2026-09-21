@@ -779,5 +779,106 @@ class InitClaudeMdTests(unittest.TestCase):
         self.assertIn("research.conf.py", result.stderr)
 
 
+class BuildFreshness(unittest.TestCase):
+    """The freshness gate, against the directory the renderer actually writes.
+
+    `sd_research_publish.DASHBOARD_DIR` replaced `build/` with
+    `docs/dashboard/`, and this check kept the old spelling. Nothing noticed,
+    because nothing tested it: every research repo has reported
+    `not rendered yet` ever since, and the "edited newer than its build" FAIL —
+    the half that actually stops a stale page being published — could not fire
+    at all. A gate that cannot fail is not a gate.
+
+    The three cases below are the whole contract: no build warns, a fresh build
+    is silent, a stale build fails. The middle one is what regressed; the last
+    one is what it cost.
+    """
+
+    #: A document that passes every *other* check, so a freshness finding is
+    #: the only thing these tests can be reading.
+    DOC = (
+        "# START HERE — A probe\n"
+        "\n"
+        "Compiled 2026-09-21 from `owner/repo` @ `abc1234`.\n"
+        "\n"
+        "---\n"
+        "\n"
+        "## 1. Body\n"
+        "\n"
+        "Text.\n"
+        "\n"
+        "## 2. Status\n"
+        "\n"
+        "**Verified.** The body. **Not verified.** Everything else.\n"
+    )
+
+    def make_repo(self, tmp: Path) -> Path:
+        (tmp / "research.conf.py").write_text(
+            "PROJECT = 'probe'\n"
+            "DOCS = [{'src': '00-overview/understanding.md', 'out': 'overview',"
+            " 'title': 'START HERE — A probe', 'h1': 'START HERE — A probe'}]\n"
+        )
+        (tmp / "CLAUDE.md").write_text(TEMPLATE.read_text(encoding="utf-8"))
+        src = tmp / "00-overview" / "understanding.md"
+        src.parent.mkdir(parents=True, exist_ok=True)
+        src.write_text(self.DOC)
+        subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+        return tmp
+
+    def build(self, repo: Path, *, older_than_source: bool) -> Path:
+        """Write `docs/dashboard/overview.html`, dated either side of the source."""
+        out = repo / "docs" / "dashboard" / "overview.html"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("<html></html>")
+        src = repo / "00-overview" / "understanding.md"
+        stamp = os.path.getmtime(src) + (-60 if older_than_source else 60)
+        os.utime(out, (stamp, stamp))
+        return out
+
+    def test_a_document_with_no_build_is_reported_as_unrendered(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            result = run("review", cwd=repo)
+        self.assertIn("not rendered yet", result.stdout)
+
+    def test_a_build_newer_than_its_source_is_silent(self) -> None:
+        """The regression: a rendered page read as never rendered."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            self.build(repo, older_than_source=False)
+            result = run("review", cwd=repo)
+        self.assertNotIn("not rendered yet", result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_source_edited_after_its_build_fails(self) -> None:
+        """The check the regression disabled outright."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            self.build(repo, older_than_source=True)
+            result = run("review", cwd=repo)
+        self.assertIn("newer than its build", result.stdout)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+
+    def test_the_checked_directory_is_the_one_the_renderer_writes(self) -> None:
+        """One spelling of the published directory, not two.
+
+        The two modules agreeing by coincidence is how this broke; asserting
+        the identity is what stops the next rename splitting them again.
+        """
+
+        bin_dir = str(REPO_ROOT / "bin")
+        if bin_dir not in sys.path:
+            sys.path.insert(0, bin_dir)
+        review = load_kit().load("sd_research_review")
+        spec = importlib.util.spec_from_file_location(
+            "sd_research_publish", REPO_ROOT / "bin" / "sd_research_publish.py"
+        )
+        publish = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(publish)
+        self.assertEqual(review.DASHBOARD_DIR, publish.DASHBOARD_DIR)
+
+
 if __name__ == "__main__":
     unittest.main()

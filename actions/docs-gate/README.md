@@ -15,7 +15,7 @@ An empty `verbs` is refused rather than treated as "nothing to do": a gate that 
 
 ## Trust
 
-This action executes `research.conf.py` from the checkout it runs against, because that is how `sd-research-kit` reads the document list (`bin/sd_research_review.py:45`).
+This action executes `research.conf.py` from the checkout it runs against, because that is how `sd-research-kit` reads the document list (`source:bin/sd_research_review.py::load_docs`).
 Run it only where the checked-out code is trusted.
 On a `pull_request` trigger that means the fork's code runs on your runner with the job's permissions, so keep `permissions: contents: read` and never combine this action with `pull_request_target` or with secrets the fork should not reach.
 
@@ -36,5 +36,5 @@ A consumer that checked this pack out into its own workspace had to move the che
 Both refs are full SHAs, as everything in this repository's own workflows is.
 
 `review` runs `sd-docs-lint` over `docs/work/` only in a repository that also has `research.conf.py`.
-`sd_research_review.check()` returns success at `bin/sd_research_review.py:172` when that file is absent, before it reaches the work items, so a checkout that follows `sd-plan` and not `sd-research-repo` is not linted by this action and should call `sd-docs-lint` directly.
+`sd_research_review.check()` returns success at `source:bin/sd_research_review.py::check` when that file is absent, before it reaches the work items, so a checkout that follows `sd-plan` and not `sd-research-repo` is not linted by this action and should call `sd-docs-lint` directly.
 A research repository with no `docs/work/` never pays for the lint.
