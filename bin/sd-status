@@ -2037,7 +2037,77 @@ def _disposition(text: str) -> str:
         verdict = _verdict(cell)
         if verdict:
             return verdict
+    declared = _declared_verdict(text)
+    if declared:
+        return declared
     return _verdict(text)
+
+
+#: Every vocabulary word, longest first so `does not pass` is tried before a
+#: shorter word inside it. Built from the five lists rather than restated, so
+#: a word added to `CLOSED_WORDS` reaches this tier without a second edit.
+_DECLARED_RE = re.compile(
+    r"(?<![A-Za-z])("
+    + "|".join(
+        re.escape(word)
+        for word in sorted(
+            PARKED_WORDS + OPEN_WORDS + CLOSED_WORDS + STANDING_WORDS,
+            key=len,
+            reverse=True,
+        )
+    )
+    + r")\s*:",
+    re.I,
+)
+
+#: Which verdict each word carries, with the tier order preserved: a word in
+#: two lists keeps the reading the earliest list gives it, exactly as
+#: `_verdict` would resolve it.
+_DECLARED_VERDICTS = {
+    word: verdict
+    for words, verdict in (
+        (CLOSED_WORDS, "closed"),
+        (STANDING_WORDS, "parked"),
+        (OPEN_WORDS, "open"),
+        (PARKED_WORDS, "parked"),
+    )
+    for word in words
+}
+
+
+def _declared_verdict(text: str) -> str:
+    """The verdict a row states outright, as `Addressed:` or `Corrected:`.
+
+    The same idea as the bold header and for the same reason: a row that
+    announces its disposition in a declarative position has answered the
+    question, and the prose after it is *about the defect*, full of the
+    subject's own vocabulary. The header tier only reaches a row with a bold
+    span; these rows have none, so they fell through to whole-text tier order
+    and lost to a word that was never a verdict.
+
+    **Capitalised and followed by a colon**, which is what makes it a
+    declaration rather than a mention. `Addressed: the index commit's tree
+    holds the raw index` is a verdict; `an unresolved merge` and `open means
+    unresolved` are the feature under discussion. The first match wins, so a
+    row that declares once and then discusses reads by its declaration.
+
+    Measured on the system corpus, where the shape is written: it moves 3
+    rows of 289, rescues 0 unreadable ones and breaks none. Two are `open`
+    to `closed` -- C-6 of the one-database item, whose row says `Addressed:`
+    and then `open means unresolved`, and C-33 of the runner item, which
+    says `Addressed:` and then restores `an unresolved merge`. The third is
+    `parked` to `closed`: C-133 of the runner item says `Corrected:`, and
+    reports the fixture running to `status=done`, after describing a row
+    that `parked at ending`. All three were read before the change was kept.
+
+    It cannot quieten a row that never declares, because a row with no
+    `<Word>:` falls through to the tiers unchanged -- the same property that
+    makes the header tier safe.
+    """
+    found = _DECLARED_RE.search(text)
+    if not found or not found.group(1)[0].isupper():
+        return ""
+    return _DECLARED_VERDICTS[found.group(1).lower()]
 
 
 def _verdict_cell(text: str) -> str | None:
