@@ -13,13 +13,20 @@ intention that never reaches `subprocess` bills the account anyway.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import pathlib
 import sys
 import unittest
 from typing import Any
 
-from tests.test_sd_review import FakeRunner, ReviewFixture, namespace, sd_review
+from tests.test_sd_review import (
+    FakeRunner,
+    ReviewFixture,
+    codex_sessions,
+    namespace,
+    sd_review,
+)
 
 
 def write_auth(home: pathlib.Path, payload: Any) -> pathlib.Path:
@@ -48,8 +55,12 @@ class StdinTransportTests(ReviewFixture):
         self.assertEqual(json.loads(receipt.read_text()), {"bytes":len(prompt.encode()),
             "sha256":hashlib.sha256(prompt.encode()).hexdigest(), "last_arg":"-"})
         self.assertNotIn(prompt, outcome.argv)
+        # `skill_suppression` is None because this call supplies no probe: the
+        # key is null here rather than absent, so a reader of one outcome can
+        # tell "not measured" from "measured and inert".
         self.assertEqual(outcome.diagnostic, {"prompt_transport": "stdin", "prompt_bytes": len(prompt.encode()),
-                         "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest()})
+                         "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+                         "skill_suppression": None})
 
 
 class PreflightTests(ReviewFixture):
@@ -142,11 +153,14 @@ class EnvironmentTests(ReviewFixture):
             root, namespace(), runner, parent, self.chatgpt_home()
         )
         codex_calls = [call for call in runner.calls if call["argv"][0] == "codex"]
-        self.assertEqual(len(codex_calls), 1)
-        handed = codex_calls[0]["env"]
-        self.assertNotIn("CODEX_API_KEY", handed)
-        self.assertNotIn("CODEX_ACCESS_TOKEN", handed)
-        self.assertNotIn("OPENAI_API_KEY", handed)
+        # Two now: the skill-suppression probe and the review. Asserted over
+        # every codex call rather than the first, so a third one cannot arrive
+        # unscrubbed behind a test that only ever read call zero.
+        self.assertEqual(len(codex_calls), 2, [call["argv"] for call in codex_calls])
+        for handed in (call["env"] for call in codex_calls):
+            self.assertNotIn("CODEX_API_KEY", handed)
+            self.assertNotIn("CODEX_ACCESS_TOKEN", handed)
+            self.assertNotIn("OPENAI_API_KEY", handed)
         self.assertEqual(
             result["outcomes"][0]["scrubbed_env_names"],
             ["CODEX_API_KEY", "CODEX_ACCESS_TOKEN"],
@@ -243,6 +257,153 @@ class NoCredentialReachesOutputTests(ReviewFixture):
         message = str(caught.exception)
         self.assertNotIn("sk-leak-DDDD", message)
         self.assertNotIn("jwt-EEEE", message)
+
+
+class SkillSuppressionProbeTests(ReviewFixture):
+    """sd:1248. The lane passes `-c skills.include_instructions=false`, and a
+    build that does not know the key ignores it and exits 0. Every state below
+    is pinned with an injected runner, so none of the three is reachable only
+    by accident: unscripted, the fixture's default stdout carries no block and
+    every probe would read as `suppressed`.
+    """
+
+    #: What `codex debug prompt-input` renders when skill instructions load.
+    LOADED = '[{"type": "message", "content": "<skills_instructions>\\n## Skills"}]'
+    SUPPRESSED = '[{"type": "message", "content": "## Project"}]'
+
+    def entry(self, start: str = "codex exec") -> Any:
+        return sd_review.sd_registry.Provider(name="codex", vendor="openai", bill="first",
+                                              reader="codex-json", start=start)
+
+    def probe(self, answer: Any, start: str = "codex exec") -> tuple[dict[str, Any], FakeRunner]:
+        runner = FakeRunner({"codex": answer})
+        state = sd_review.codex_skill_state(self.entry(start), self.tmp, runner,
+                                            self.environment(), self.chatgpt_home())
+        return state, runner
+
+    def test_a_rendered_block_reports_unsuppressed(self) -> None:
+        state, _ = self.probe(sd_review.Completed(0, self.LOADED, ""))
+        self.assertEqual(state["state"], sd_review.SKILLS_UNSUPPRESSED)
+        self.assertIn("<skills_instructions>", state["reason"])
+
+    def test_an_absent_block_reports_suppressed(self) -> None:
+        state, _ = self.probe(sd_review.Completed(0, self.SUPPRESSED, ""))
+        self.assertEqual(state["state"], sd_review.SKILLS_SUPPRESSED)
+        self.assertIn("took effect", state["reason"])
+
+    def test_a_build_without_the_subcommand_reports_unknown(self) -> None:
+        """The state sd:1248 exists for. An older codex has no `debug
+        prompt-input`, and "cannot tell" must not read as either answer."""
+
+        state, _ = self.probe(sd_review.Completed(2, "", "error: unrecognized subcommand 'prompt-input'"))
+        self.assertEqual(state["state"], sd_review.SKILLS_UNKNOWN)
+        self.assertIn("unrecognized subcommand", state["reason"])
+
+    def test_a_probe_that_never_started_reports_unknown(self) -> None:
+        state, _ = self.probe(sd_review.Completed(127, "", "codex: not found on PATH", launched=False))
+        self.assertEqual(state["state"], sd_review.SKILLS_UNKNOWN)
+
+    def test_a_clean_exit_with_nothing_rendered_reports_unknown(self) -> None:
+        """Exit 0 and empty output is not evidence of suppression. Read as
+        `suppressed` it would be the false belief this probe removes."""
+
+        state, _ = self.probe(sd_review.Completed(0, "   \n", ""))
+        self.assertEqual(state["state"], sd_review.SKILLS_UNKNOWN)
+
+    def test_an_entry_with_no_program_is_not_probed(self) -> None:
+        state, runner = self.probe(sd_review.Completed(0, self.SUPPRESSED, ""), start="")
+        self.assertEqual(state["state"], sd_review.SKILLS_NOT_PROBED)
+        self.assertEqual(runner.calls, [])
+
+    def test_the_probe_argv_is_the_entrys_program_and_not_the_lanes(self) -> None:
+        """`codex debug prompt-input` rejects `--ignore-user-config` with exit
+        2, so the probe cannot carry the lane's confinement flags. It answers
+        for the entry's own program, not for whatever `codex` PATH resolves."""
+
+        argv = sd_review.codex_skill_probe_argv("wrapped codex exec")
+        self.assertEqual(argv[:3], ["wrapped", "debug", "prompt-input"])
+        self.assertNotIn("--ignore-user-config", argv)
+        self.assertNotIn("exec", argv)
+        self.assertEqual(argv[argv.index("skills.include_instructions=false") - 1], "-c")
+
+    def test_the_probe_runs_in_the_lanes_scrubbed_child_environment(self) -> None:
+        """A probe of another `CODEX_HOME` answers about another run, and one
+        carrying a metered variable would hand it to a codex process."""
+
+        home = self.chatgpt_home()
+        runner = FakeRunner({"codex": sd_review.Completed(0, self.SUPPRESSED, "")})
+        sd_review.codex_skill_state(self.entry(), self.tmp, runner,
+                                    self.environment(CODEX_API_KEY="sk-metered"), home)
+        handed = runner.calls[0]["env"]
+        self.assertEqual(handed["CODEX_HOME"], str(home))
+        self.assertNotIn("CODEX_API_KEY", handed)
+
+    def review_with_probe(self, answer: Any, **options: Any) -> dict[str, Any]:
+        root = self.make_repo()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+
+        def codex(argv, env, cwd, timeout):
+            if argv[1:3] == ["debug", "prompt-input"]:
+                return answer
+            return sd_review.Completed(0, '{"findings": []}', "")
+
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""), "codex": codex})
+        return sd_review.review(root, namespace(**options), runner, self.environment(), self.chatgpt_home())
+
+    def test_an_inert_key_warns_on_the_run_it_ran_under_and_refuses_nothing(self) -> None:
+        """A refusal would turn a hardening flag into a review blocker, so the
+        measurement rides the outcome that ran under it and the review stands."""
+
+        result = self.review_with_probe(sd_review.Completed(0, self.LOADED, ""))
+        self.assertEqual(result["status"], "clean")
+        self.assertEqual(result["codex_skill_suppression"]["state"], sd_review.SKILLS_UNSUPPRESSED)
+        measured = result["outcomes"][0]["diagnostic"]["skill_suppression"]
+        self.assertEqual(measured["state"], sd_review.SKILLS_UNSUPPRESSED)
+        rendered = io.StringIO()
+        sd_review.render(result, rendered)
+        self.assertIn("warning: codex skill instructions unsuppressed", rendered.getvalue())
+
+    def test_a_suppressed_key_warns_about_nothing(self) -> None:
+        result = self.review_with_probe(sd_review.Completed(0, self.SUPPRESSED, ""))
+        self.assertEqual(result["codex_skill_suppression"]["state"], sd_review.SKILLS_SUPPRESSED)
+        rendered = io.StringIO()
+        sd_review.render(result, rendered)
+        self.assertNotIn("warning:", rendered.getvalue())
+
+    def test_explain_reports_the_probe_beside_the_auth_preflight(self) -> None:
+        """`.claude/rules/sd-operator-defaults.md` sends the operator to
+        `--explain --json` before an expensive check. The answer is there."""
+
+        result = self.review_with_probe(sd_review.Completed(0, self.LOADED, ""), explain=True)
+        self.assertEqual(result["status"], "explained")
+        self.assertTrue(result["codex_preflight"]["ok"])
+        self.assertEqual(result["codex_skill_suppression"]["state"], sd_review.SKILLS_UNSUPPRESSED)
+        self.assertIn("debug prompt-input", result["codex_skill_suppression"]["probe"])
+
+    def test_a_refused_auth_starts_no_probe_and_says_why(self) -> None:
+        root = self.make_repo()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        runner = FakeRunner()
+        home = write_auth(self.tmp / "apikey-probe-home", {"auth_mode": "apikey"})
+        result = sd_review.review(root, namespace(explain=True), runner, self.environment(), home)
+        self.assertEqual(result["codex_skill_suppression"]["state"], sd_review.SKILLS_NOT_PROBED)
+        self.assertIn("auth preflight refused", result["codex_skill_suppression"]["reason"])
+        self.assertEqual(runner.calls, [])
+
+    def test_the_probe_and_the_review_are_separate_codex_calls(self) -> None:
+        """One probe per codex dispatch, and the review session is unchanged:
+        the probe must not become an argument of the run it measures."""
+
+        root = self.make_repo()
+        (root / "src.py").write_text("x = 1\n", encoding="utf-8")
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""),
+                             "codex": sd_review.Completed(0, '{"findings": []}', "")})
+        sd_review.review(root, namespace(), runner, self.environment(), self.chatgpt_home())
+        sessions = codex_sessions(runner)
+        self.assertEqual(len(sessions), 1)
+        self.assertNotIn("debug", sessions[0]["argv"])
+        self.assertEqual([call["argv"][1:3] for call in runner.calls if call["argv"][0] == "codex"],
+                         [["debug", "prompt-input"], ["exec", "--sandbox"]])
 
 
 if __name__ == "__main__":

@@ -1088,7 +1088,7 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 SYMBOL_ANCHORED_CITATIONS = {
     "actions/docs-gate/README.md": 1,
     "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 35,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 52,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 50,
 }
 
 
