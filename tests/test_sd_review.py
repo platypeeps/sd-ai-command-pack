@@ -688,13 +688,12 @@ class PipelineTests(ReviewFixture):
             self.chatgpt_home(),
         )
 
-    def test_a_clean_codex_run_is_clean_and_posts_nothing(self) -> None:
+    def test_a_clean_codex_run_is_clean(self) -> None:
         root = self.make_repo()
         self.prepare(root)
         runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""), "codex": sd_review.Completed(0, '{"findings": []}', "")})
         result = self.run_review(root, runner)
         self.assertEqual(result["status"], "clean")
-        self.assertFalse(result["posted"])
         self.assertEqual(result["findings"], [])
         self.assertEqual(result["remote_reviews"]["copilot"], {
             "automatic": False, "tier": "standard"})
@@ -876,7 +875,6 @@ class CliTests(ReviewFixture):
     def test_explain_json_is_one_object(self) -> None:
         finished = self.run_cli(["--explain", "--json"], REPO_ROOT)
         payload = json.loads(finished.stdout)
-        self.assertFalse(payload["posted"])
         self.assertEqual(payload["status"], "explained")
 
     def test_outside_a_repository_is_a_usage_error(self) -> None:

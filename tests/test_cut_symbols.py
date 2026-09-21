@@ -11,7 +11,8 @@ prose symbols and flags, is `ProseSymbolsAndFlags` below: one grep per
 symbol, and a bounded set of the symbols the lane could not cut because the
 code behind them is live and load-bearing. 31(b2), the `authors` policy key,
 is cut and its symbol is in `PROSE_SYMBOLS` with the rest; 31(c), the bug
-regressions, lands in its own pull request and adds its symbols here.
+regressions and the one-definition greps, landed on 2026-09-19 in #1082,
+and its last cut -- the constant `posted` key -- is `PostedKeyCut` below.
 
 31(b2)'s key was declared in four places and read by none. Its schema said a
 CI lane hard-failed the logins it listed; no workflow, no action under
@@ -23,11 +24,16 @@ key". The grep is bounded to let that row and the assertion proving it name
 the key; `TheAuthorsBoundStillFindsAKey` is the control on the bound.
 
 31(a) also names `parked` and `archived`, scoped to the `sd_lib` item field
-and its readers. That cut is deferred to a later lane (team-lead decision
-2026-09-16, reversible by the owner): every reader is in `bin/sd-status`,
-which sd:431 slice D edits next, and a second writer on that file would
-collide. Until that lane, `ParkedAndArchivedReaders` freezes the reader set
-by file and text so it cannot grow while the cut waits.
+and its readers. The owner split the two on 2026-09-19: `parked` is cut --
+the field, the `--parked` flag, the parked section and every read -- and
+`archived` is kept. `ParkedAndArchivedReaders` holds both halves. It asserts
+the cut half has no reader again, and freezes the kept half by file and text
+so it cannot grow.
+
+`Requirement13ClosesLineByLine` reads the criterion's opening sentence
+literally. It enumerates requirement 13's cut list from the `prd.md` that
+states it, rather than reciting a list here, so a cut added to the document
+lands in this file's verdict without anyone remembering to copy it across.
 
 Two things the tree carries by name and this file leaves alone. `docs/work/`
 and `CHANGELOG.md` are history, excluded by the criterion's own definition of
@@ -534,6 +540,156 @@ class OneDefinitionEach(unittest.TestCase):
             f"ITEM_STATUSES = {live}",
             (REPO_ROOT / owner).read_text(encoding="utf-8"),
         )
+
+
+#: 31(c)'s last cut: the constant `posted` key of `bin/sd-review`'s result
+#: object. The pattern is the key form and not the word. `sd-review` says
+#: "nothing was posted" in its own output and `.github/sd-review.schema.json`
+#: says findings "are never posted", and a bare grep cannot tell a sentence
+#: about the boundary from the key that restated it. What the cut removed is
+#: the quoted key, so that is what the grep looks for.
+POSTED_KEY = r'"posted"'
+
+
+class PostedKeyCut(unittest.TestCase):
+    """31(c): the constant `posted` key is gone, and the prose is not."""
+
+    def test_no_governed_file_carries_the_posted_key(self) -> None:
+        rows = governed_grep(POSTED_KEY)
+        self.assertEqual(rows, [], "the `posted` key is back: " + "; ".join(rows))
+
+    def test_the_boundary_prose_is_not_what_the_grep_measures(self) -> None:
+        """The control on the bound. A pattern narrowed to the key must still
+        leave the sentences that state the boundary alone, or the cut would
+        read as achieved by deleting the promise instead of the constant."""
+        self.assertTrue(_matches(POSTED_KEY, '        "posted": False,'))
+        self.assertFalse(_matches(POSTED_KEY, "findings are never posted"))
+        self.assertTrue(governed_grep(r"[Nn]othing is ever posted"),
+                        "sd-review stopped stating the boundary")
+
+
+#: The heading requirement 13 is written under. The clause reader finds the
+#: page by this string rather than by a path, so the item's directory can be
+#: renamed or archived without breaking the test.
+REQUIREMENT_13 = "### Requirement 13"
+
+#: The markers requirement 13's cut list uses to dispose of a line. A clause
+#: carrying one states what became of the thing it names; a clause carrying
+#: none states a cut and leaves it open. The vocabulary is the document's own
+#: -- every word here is read off the list, not imposed on it.
+DISPOSITIONS = (
+    "cut", "rescinded", "kept", "remains", "not cuts", "moves to B",
+    "is taken", "gone", "imported", "no line is left to cite",
+)
+
+#: The markers that say a cut is named and unfinished. Criterion 31 opens
+#: "Requirement 13 is closed line by line", so one of these in the list is
+#: the criterion failing in the document that states it.
+PENDING = ("still pending", "not yet", "TODO")
+
+#: Clauses that state no cut of their own, keyed by a distinctive substring
+#: and carrying the reason they are dispositioned elsewhere. Two, and both
+#: are sentence structure rather than exemption: the semicolon that ends
+#: them falls inside a sentence, not between two cuts.
+STATES_NO_CUT = {
+    "the six helpers copied from":
+        "the list of names; the next clause disposes of them, `imported`",
+    "imports the vocabulary, the directory walk":
+        "a consistency line, not a cut: `bin/sd-docs-lint` gained an import",
+}
+
+#: Cuts requirement 13 names that are open at this commit, each with what it
+#: waits on. An entry here is the honest form of an open line: the reason is
+#: readable rather than absent. Adding a cut to the document with no
+#: disposition fails the test below until it is closed or recorded here.
+OPEN_CUTS = {
+    "`RESIDUE` and `residue_section`":
+        "waits on one clean fleet run, which is scheduled nowhere; criteria "
+        "18 and 21 both pass as written, so it blocks no criterion",
+    "the history comments in `Makefile`":
+        "criterion 31's symbol list omits them, so they block no criterion",
+}
+
+
+def requirement_13_cut_clauses() -> list[str]:
+    """Requirement 13's cut list, read from the `prd.md` that states it.
+
+    The page is found by its content and not by its path: every `prd.md`
+    under `docs/work/` is read and the one carrying the requirement wins.
+    Two such pages would be an ambiguity this refuses rather than resolves.
+
+    A clause is a semicolon-separated part of the `- Cuts:` bullet, which is
+    how the bullet is written: one cut per clause, its disposition in the
+    same clause. That is also what "line by line" means here -- the list has
+    no lines of its own, it is one wrapped bullet, and the semicolon is the
+    delimiter the author used.
+    """
+    found = [path for path in sorted((REPO_ROOT / "docs" / "work").rglob("prd.md"))
+             if REQUIREMENT_13 in path.read_text(encoding="utf-8")]
+    if len(found) != 1:
+        raise AssertionError(f"{len(found)} prd.md carry {REQUIREMENT_13!r}")
+    lines = found[0].read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(REQUIREMENT_13))
+    opening = next(i for i, line in enumerate(lines[start:], start)
+                   if line.startswith("- Cuts:"))
+    end = next(i for i, line in enumerate(lines[opening + 1:], opening + 1)
+               if re.match(r"^- \S", line))
+    bullet = " ".join(line.strip() for line in lines[opening:end])
+    return [clause.strip() for clause in bullet[len("- Cuts:"):].split(";")
+            if clause.strip()]
+
+
+class Requirement13ClosesLineByLine(unittest.TestCase):
+    """Criterion 31's opening sentence, enumerated from the document.
+
+    The rest of this file greps for the symbols criterion 31 lists, and that
+    list is copied here by hand. It is therefore blind in exactly one place:
+    a cut requirement 13 asks for that the criterion's list never picked up.
+    The `posted` key sat there, named open by the document and asserted by
+    nothing, while the suite read green.
+
+    These tests close that gap from the other end. They read requirement 13
+    itself and hold every clause of its cut list to a disposition, so the
+    document cannot say a cut is pending while the suite says the criterion
+    is closed.
+    """
+
+    def test_the_cut_list_parses_to_something(self) -> None:
+        """The control. A parser that returns nothing passes every assertion
+        below, so the shape of the list is asserted before it is read."""
+        clauses = requirement_13_cut_clauses()
+        self.assertGreater(len(clauses), 10, "the cut list parsed to too little")
+        self.assertTrue(any("`record_load`" in clause for clause in clauses),
+                        "the parser no longer reaches a clause known to be there")
+
+    def test_no_cut_is_still_pending(self) -> None:
+        for clause in requirement_13_cut_clauses():
+            with self.subTest(clause=clause[:60]):
+                marks = [mark for mark in PENDING if mark in clause]
+                self.assertEqual(marks, [], f"requirement 13 leaves a cut open: {clause}")
+
+    def test_every_clause_is_dispositioned_or_recorded_open(self) -> None:
+        recorded = {**STATES_NO_CUT, **OPEN_CUTS}
+        for clause in requirement_13_cut_clauses():
+            with self.subTest(clause=clause[:60]):
+                if any(mark in clause for mark in DISPOSITIONS):
+                    continue
+                reasons = [reason for key, reason in recorded.items() if key in clause]
+                self.assertTrue(
+                    reasons,
+                    "a clause of requirement 13 states a cut and disposes of "
+                    f"nothing, and no reason is recorded for it: {clause}",
+                )
+
+    def test_every_recorded_clause_is_still_in_the_document(self) -> None:
+        """The second control. A recorded reason outlives the clause it is
+        for unless something says otherwise, and a stale entry is how the
+        check above quietly stops covering the list."""
+        clauses = requirement_13_cut_clauses()
+        for key in {**STATES_NO_CUT, **OPEN_CUTS}:
+            with self.subTest(key=key):
+                self.assertTrue(any(key in clause for clause in clauses),
+                                f"no clause of requirement 13 carries {key!r}")
 
 
 if __name__ == "__main__":
