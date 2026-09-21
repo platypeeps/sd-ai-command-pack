@@ -506,7 +506,7 @@ class TheDemotionNote(Fixture):
         # policy is the operator's standing setting, and a remote that gained
         # a collaborator is a reason to stop this merge, not to rewrite it.
         upsert_repo(self.connection, str(self.root), remote="https://github.com/sven/thing.git",
-                    status_source="row", merge_policy="auto")
+                    status_source="row", runner_merge="auto")
         self.item = create_item(
             self.connection, kind="work", title="a thing", status="in_progress", repo=str(self.root), branch="topic"
         )
@@ -619,8 +619,8 @@ class TheDemotionNote(Fixture):
         self.assertEqual(len(self.notes()), 1, self.notes())
         self.assertEqual(
             self.connection.execute(
-                "SELECT merge_policy FROM repo WHERE path = ?", (str(self.root),)
-            ).fetchone()["merge_policy"],
+                "SELECT runner_merge FROM repo WHERE path = ?", (str(self.root),)
+            ).fetchone()["runner_merge"],
             "auto",
             "a demotion stops this merge; it does not rewrite the operator's standing policy",
         )
@@ -642,7 +642,7 @@ class TheDemotionNote(Fixture):
 
         self.git(self.root, "remote", "set-url", "origin", origin)
         upsert_repo(self.connection, str(self.root), remote=origin,
-                    status_source="row", merge_policy="auto")
+                    status_source="row", runner_merge="auto")
         self.remote(people, repo_json)
 
     def test_a_second_remote_whose_name_extends_the_first_still_gets_its_own_note(self) -> None:
