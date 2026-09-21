@@ -966,7 +966,9 @@ JEV_STAGE = "JEV_SD_DOCS_LINT"
 # pull request in both repositories, forever. That noise is exactly what this
 # sentinel was created to prevent, and the flip must not undo it by turning
 # "nobody opted in" into "nobody has the binary". Nor is `jev enabled` exiting
-# 3, which is the same machine saying so itself: unkeyed, or `jev off`.
+# 3, which is the same machine saying so itself. `jev` collapses every reason
+# into that one code -- switched off, unkeyed, a placeholder key, a malformed
+# timeout -- so it means "cannot answer here" and nothing more specific.
 # `bin/sd_jev.py` reaches the same three, and the two gates have to agree --
 # a flip that made the kill switch noisy here and silent there would be a
 # policy nobody could state.
@@ -1013,7 +1015,9 @@ def jev_command() -> tuple[str, str]:
     except (OSError, subprocess.SubprocessError) as error:
         return "", f"jev enabled did not run: {error}"
     # 3 is the only non-zero `jev enabled` returns, and it means "cannot answer
-    # here" -- unkeyed, or `jev off`. Naming it would make the documented fleet
+    # here": switched off, unkeyed, a placeholder key or a malformed timeout,
+    # all collapsed by `jev` into one code. This comment used to name two of
+    # those four and read as an enumeration. Naming it would make the fleet
     # kill switch print a line in every pull request in both repositories, which
     # is the cost the sentinel above exists to avoid, so it is silent too. A
     # code that is neither is something new and stays loud.
