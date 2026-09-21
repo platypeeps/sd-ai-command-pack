@@ -109,6 +109,91 @@ def paragraphs(text: str) -> list[str]:
     return [block for block in re.split(r"\n\s*\n", text) if block.strip()]
 
 
+#: The skill whose invocation modes decide whether the pass may run at all.
+#: `sd-prose-lint` has no modes, so this half of the module is `sd-humanizer`
+#: alone.
+MODE_SKILL = "sd-humanizer"
+
+#: A bold-led mode entry under `## Invocation Modes`, keyed by its own name.
+MODE_ENTRY = re.compile(r"^\*\*(.+?)\.?\*\*(.*?)(?=^\*\*|\Z)", re.S | re.M)
+
+#: A numbered step under `## Process and Output`, keyed by its number. It
+#: stops at the next step or at the blank line after the list: a step that ran
+#: to the end of the section would carry the paragraph below it, and a check
+#: over the step would then pass on words that paragraph happened to use.
+NUMBERED_STEP = re.compile(r"^(\d+)\. (.*?)(?=^\d+\. |^\s*$)", re.S | re.M)
+
+#: The mode that outputs prose and nothing else, lowercased for matching.
+SILENT_MODE = "embedded"
+
+#: The modes that report scores, so the modes the pass may run in.
+REPORTING_MODES = ("pasted", "file")
+
+#: A sentence granting the pass on a user request. It is what the introduction
+#: used to say before the mode condition reached it: a `when`, a user, and a
+#: score, inside one sentence. Any paragraph shaped like this is a second
+#: statement of the run rule and has to carry the mode condition or defer.
+GRANT = re.compile(r"\b(when|once|if)\b[^.]*\b(user|caller)\b[^.]*\bscor", re.I)
+
+#: A sentence end, for splitting a site into the sentence that states the rule
+#: and the sentences that do not.
+SENTENCE = re.compile(r"(?<=[.!?])\s+")
+
+
+def permission_sentences(body: str) -> str:
+    """The sentences of a site that state the condition, joined.
+
+    Most of a site is not the rule. The gate also says what to report, and the
+    step also says what to do next, and both name a mode in passing while
+    doing it. The condition is the sentence that names the probe, so that is
+    the sentence the mode has to be in. A check over the whole block passes on
+    a mode named in a neighbouring sentence, which is a check that cannot
+    fail.
+    """
+
+    return " ".join(one for one in SENTENCE.split(body) if "jev enabled" in one)
+
+
+def section(text: str, title: str) -> str:
+    """The body of a `## <title>` section, without its heading."""
+
+    match = re.search(r"^## " + re.escape(title) + r"\n(.*?)(?=^## |\Z)",
+                      text, re.S | re.M)
+    assert match is not None, f"{MODE_SKILL} has no '{title}' section"
+    return match.group(1)
+
+
+def modes(text: str) -> dict[str, str]:
+    """The invocation modes the skill defines, keyed by name."""
+
+    found = MODE_ENTRY.findall(section(text, "Invocation Modes"))
+    return {name.split("(")[0].strip().lower(): body for name, body in found}
+
+
+def run_condition_sites(text: str) -> dict[str, str]:
+    """The three places that say whether the scoring pass runs.
+
+    Each is located by what it is rather than by what it says: the gate is
+    the paragraph of `## OPTIONAL SCORES` that names the probe, the step is
+    the numbered step of `## Process and Output` that names it, and the mode
+    entry is the one `## Invocation Modes` calls embedded.
+    """
+
+    found = {}
+    for block in paragraphs(section(text, "OPTIONAL SCORES")):
+        if "jev enabled" in block:
+            found["the OPTIONAL SCORES gate"] = block
+            break
+    for number, body in NUMBERED_STEP.findall(section(text, "Process and Output")):
+        if "jev enabled" in body:
+            found[f"step {number}"] = body
+            break
+    for name, body in modes(text).items():
+        if SILENT_MODE in name:
+            found["the embedded mode entry"] = body
+    return found
+
+
 class TheRequest(unittest.TestCase):
     """The JSON block is a request the score primitive accepts."""
 
@@ -465,6 +550,114 @@ These skills do not say to report the raw per-dimension numbers: {missing}.
 
 Inference is the expensive part. Recording it lets a reader change a weight or
 a threshold and re-read the same numbers instead of paying again.
+""")
+
+
+class TheModeGate(unittest.TestCase):
+    """Embedded mode never sends the draft, and three sites say so.
+
+    The pass posts the draft to a third party. Embedded mode outputs prose
+    and nothing else, so a scored embedded run would transmit the text for
+    numbers it then throws away. That is the defect this class exists to
+    catch, and it got in because the rule was written four times and one copy
+    was missed. So the check is not that some sentence is present: it is that
+    every place stating when the pass runs carries the mode condition, and
+    that no fourth place quietly grants it again.
+    """
+
+    def setUp(self) -> None:
+        self.page = read(skill_page(MODE_SKILL))
+        self.sites = run_condition_sites(self.page)
+
+    def test_all_three_sites_are_there(self) -> None:
+        missing = [name for name in
+                   ("the OPTIONAL SCORES gate", "step 5",
+                    "the embedded mode entry")
+                   if name not in self.sites]
+        self.assertEqual(missing, [], f"""
+These statements of the scoring rule are gone from {MODE_SKILL}: {missing}.
+
+They are found by structure, not by wording, so a rename does not hide one.
+A site that disappeared took its half of the rule with it.
+""")
+
+    def test_the_modes_are_the_ones_this_module_knows(self) -> None:
+        named = set(modes(self.page))
+        self.assertEqual(named, {"pasted text", "file mode", "embedded mode"}, f"""
+{MODE_SKILL} defines these invocation modes: {sorted(named)}.
+
+A new mode has to state whether the scoring pass may run in it, because the
+pass transmits the draft. Decide that, then widen this test.
+""")
+
+    def test_each_permitting_site_names_the_modes_it_permits(self) -> None:
+        """A permission that names no mode is the bug that was shipped."""
+
+        thin = {}
+        for name, body in self.sites.items():
+            if name == "the embedded mode entry":
+                continue
+            stated = permission_sentences(body)
+            self.assertTrue(stated, f"{name} states no condition at all")
+            lowered = stated.lower()
+            absent = [mode for mode in REPORTING_MODES if mode not in lowered]
+            if absent:
+                thin[name] = {"missing": absent, "sentence": stated.strip()[:160]}
+        self.assertEqual(thin, {}, f"""
+These sites let the pass run without naming the modes it may run in: {thin}.
+
+Both reporting modes have to be named. A permission stated without them reads
+as permission in embedded mode too, and that is the draft leaving the machine.
+""")
+
+    def test_each_permitting_site_excludes_the_silent_mode(self) -> None:
+        silent = {}
+        for name, body in self.sites.items():
+            if name == "the embedded mode entry":
+                continue
+            if SILENT_MODE not in body.lower():
+                silent[name] = body.strip()[:120]
+        self.assertEqual(silent, {}, f"""
+These sites never mention embedded mode: {silent}.
+
+A reader who enters here has to be told the pass does not run there. Leaving
+it unsaid is how the rule was missed the first time.
+""")
+
+    def test_the_silent_mode_refuses_the_pass_itself(self) -> None:
+        body = self.sites["the embedded mode entry"]
+        self.assertRegex(body.lower(), r"never scor", f"""
+The embedded mode entry no longer refuses the pass:
+
+{body.strip()[:200]}
+
+A reader arriving at the mode description must be told there, not only in
+OPTIONAL SCORES. The rule has to sit where the mode is defined.
+""")
+
+    def test_no_fourth_site_grants_the_pass_on_a_user_request_alone(self) -> None:
+        """The introduction is where this leaked, and it named no mode."""
+
+        known = set(self.sites.values())
+        unguarded = {}
+        for block in paragraphs(self.page):
+            if block in known or "jev enabled" in block:
+                continue
+            if not GRANT.search(block):
+                continue
+            lowered = block.lower()
+            if any(mode in lowered for mode in REPORTING_MODES):
+                continue
+            if "optional scores" in lowered:
+                continue
+            unguarded[block.strip()[:160]] = "names no mode and defers to nothing"
+        self.assertEqual(unguarded, {}, f"""
+These paragraphs grant the scoring pass on a user request without a mode:
+{unguarded}
+
+A user request and an available command both hold for an embedded run, so a
+paragraph stating only those two sends the draft. Name the modes, or say the
+paragraph states no condition and point at OPTIONAL SCORES.
 """)
 
 

@@ -21,11 +21,11 @@ When given text to humanize:
 How you're invoked changes what you deliver (see Invocation Modes). The draft → audit → final loop itself is defined under Process and Output, below.
 
 The loop judges by eye, so it tells you a rewrite reads better without showing
-that it is. When the user asks for prose scores and `jev` is available,
-`references/prose-score-dimensions.md` scores the source and the rewrite on
-the same dimensions, and the difference is the evidence. That pass is
-optional and off by default; without it this skill behaves exactly as it does
-above.
+that it is. An optional pass scores the source and the rewrite on the same
+dimensions, from `references/prose-score-dimensions.md`, and the difference is
+the evidence. OPTIONAL SCORES states when that pass runs, and this paragraph
+states no condition of its own. The pass is off by default; without it this
+skill behaves exactly as it does above.
 
 ## Voice Calibration
 
@@ -392,10 +392,13 @@ The dimensions, the levels, the single request that runs them in parallel, and
 the privacy rule all live in `references/prose-score-dimensions.md`. Read that
 file before scoring anything. What follows is only how this skill uses it.
 
-**Run it when both hold.** The user asked for prose scores in this session,
-and `jev enabled` exits `0`. Otherwise skip the pass. Say nothing when the
-user never asked, and say so in one sentence when the user asked and `jev`
-cannot answer here. A reader without `jev` still gets the whole loop above.
+**Run it when all three hold.** The mode is pasted text or file, the user
+asked for prose scores in this session, and `jev enabled` exits `0`. Otherwise
+skip the pass. Embedded mode never scores, because it reports no numbers.
+Say nothing when the user never asked. In pasted-text and file modes, say so
+in one sentence when the user asked and `jev` cannot answer here. Embedded
+mode reports neither the scores nor their absence, because it outputs prose
+only. A reader without `jev` still gets the whole loop above.
 
 **Score twice, before and after.** Score the source text, run the loop, then
 score the final rewrite. A dimension that dropped is evidence the edit landed.
@@ -450,7 +453,7 @@ Follow the printed rule IDs. Cite them in the summary without restating them.
 Change prose only. Preserve code blocks, frontmatter, data, and link targets.
 Report a short change summary. Do not paste the full rewrite into the conversation.
 
-**Embedded mode.** Another task or agent is using this skill as one step of a larger job (a PR description, a commit message, a doc). Run the loop internally and output only the final text. No draft, no audit bullets, no summary. The caller wants prose, not ceremony.
+**Embedded mode.** Another task or agent is using this skill as one step of a larger job (a PR description, a commit message, a doc). Run the loop internally and output only the final text. No draft, no audit bullets, no summary. The caller wants prose, not ceremony. Never score in this mode. The mode reports no numbers, so a scored call would post the draft to a third party for nothing.
 
 ## Process and Output
 
@@ -458,9 +461,9 @@ Report a short change summary. Do not paste the full rewrite into the conversati
 2. Write a **draft rewrite**. Check that it reads naturally aloud, varies sentence length, prefers specific details and simple constructions (is/are/has), and keeps the appropriate register.
 3. Ask two questions: **"What makes the below so obviously AI generated?"** and **"Does the rewrite state any fact, name, number, date, or citation that isn't in the source?"** Answer briefly. A fabrication is a defect even when it sounds more human than the vague original.
 4. Revise into a **final rewrite** that addresses them and contains no em or en dashes (see §14).
-5. Score the source and the final rewrite only when the user asked for scores and `jev enabled` exits `0` (see OPTIONAL SCORES). Report both sets of raw numbers. Skip this step otherwise.
+5. Score the source and the final rewrite only in pasted-text or file mode, and only when the user asked for scores and `jev enabled` exits `0` (see OPTIONAL SCORES). Report both sets of raw numbers. Skip this step otherwise. Embedded mode never reaches it, so an embedded draft is never sent.
 
-In pasted-text mode, deliver the draft, the brief "still-AI" bullets, the final rewrite, and (optionally) a short summary of changes. In file and embedded modes, run the same loop but deliver only what the mode calls for (see Invocation Modes). Scores, where they ran, go in the summary in pasted-text and file modes; embedded mode outputs prose only, so they are omitted there.
+In pasted-text mode, deliver the draft, the brief "still-AI" bullets, the final rewrite, and (optionally) a short summary of changes. In file and embedded modes, run the same loop but deliver only what the mode calls for (see Invocation Modes). Scores, where they ran, go in the summary in pasted-text and file modes; embedded mode never runs the scoring step, so it has none.
 
 ## Reference
 

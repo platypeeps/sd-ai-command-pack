@@ -105,8 +105,10 @@ Unknown argument names are an error — stop and report them before starting.
    for inference again. Report how many dimensions answered against how many
    were asked, as two numbers, and name any that did not come back: a count of
    what you sent reads the same whether the pass worked or returned nothing.
-   Skip this step silently when the user did not ask for it, and report the
-   gap in one sentence when the user asked and `jev` cannot answer here.
+   Do not run the step when the user did not ask, when `jev` cannot answer
+   here, or when the draft is confidential. Name the reason in the **Scores**
+   bullet of the final report, in one sentence, and say nothing more about it
+   anywhere else. The report always accounts for an absent scoring pass.
 8. Hand rewrite-shaped findings back to whoever owns the prose, with the
    finding list attached, so the rewrite pass does not re-derive the
    deterministic results.
@@ -126,7 +128,7 @@ Unknown argument names are an error — stop and report them before starting.
   intentional examples of bad prose unless the user asks to lint them.
 - Never score a confidential draft. A scored call posts the draft text to a
   third party, so an embargoed, customer-naming, or secret-bearing draft is
-  linted without scores and the report says scoring was withheld.
+  linted without scores and the **Scores** bullet says scoring was withheld.
 - Send the draft text and nothing else. A file path, a repository name, a
   branch, or a credential never belongs in a scoring request.
 - This skill gates prose, not changes: review verdict authority stays with
@@ -143,8 +145,9 @@ Unknown argument names are an error — stop and report them before starting.
   locations;
 - **Scores** — when the scoring step ran, each dimension's raw score and
   confidence, how many dimensions answered out of how many were asked, and the
-  weighting used to combine them, or one sentence saying the user did not ask
-  or `jev` could not answer here;
+  weighting used to combine them; otherwise one sentence naming the reason it
+  did not run: the user did not ask, `jev` could not answer here, or the draft
+  is confidential and scoring was withheld;
 - **Handoffs** — rewrite-shaped findings handed back and proposed config
   promotions awaiting the gate owner; and
 - **Residue** — anything left unlinted and why.

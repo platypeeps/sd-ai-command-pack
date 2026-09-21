@@ -116,7 +116,8 @@ identify them before reading sources, profile content, or workspace artifacts.
     step is optional and off by default. Run it only when the user sets
     `judge=jev` and `jev enabled` exits 0. That probe costs nothing and makes
     no request. Exit 3 means the judgment is unavailable; continue unchanged
-    and record it as not run. Ask both questions in one `ask` request, over
+    and record it as not run. Leave the probe unrun when `judge` is off, and
+    record availability as `not checked`. Ask both questions in one `ask` request, over
     the same state:
     - a `score` for how well the draft matches the destination's register and
       length expectations. Describe each level as a concrete situation: wrong
@@ -224,9 +225,11 @@ identify them before reading sources, profile content, or workspace artifacts.
 - **Connector-ready handoff** — final target locator when supplied, exact
   preview, source/adaptation metadata, verification checks, and authority still
   required;
-- **Destination-fit judgment** — judge mode, whether `jev` was available,
-  questions sent and answers returned as separate numbers, the fit score, the
-  faithfulness probability, the action each number triggered, and `not run`
-  when the judgment was off, unavailable, or answered by a fallback; and
+- **Destination-fit judgment** — judge mode, whether `jev` was available, or
+  `not checked` when judging was off and the probe never ran,
+  questions sent and answers returned as separate numbers, the fit score,
+  the faithfulness probability, the action each number triggered, and
+  `not run` when the judgment was off, unavailable, or answered by a
+  fallback; and
 - **Execution boundary** — sending, publishing, scheduling, destination writes,
   connector validation, and media production marked `not run`.
