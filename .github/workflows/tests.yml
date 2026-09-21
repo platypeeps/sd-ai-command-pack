@@ -268,7 +268,14 @@ jobs:
       # spelling and red on every developer machine whose database had been
       # migrated -- the pin hiding a break rather than a bump causing one.
       #
-      # Of the other two `sd_db` commits in `55c4d691..341c5f2c`, #454 widens
+      # #458 also moves a dict key on a function this repository calls:
+      # `sd_db.runner.merge_authority` returns `runner_merge` where it
+      # returned `merge_policy`. `bin/sd-ship:869` reads `work_path` and
+      # `item` off that dict and neither spelling appears anywhere in `bin/`,
+      # so nothing here observes it -- but the rename is a column, a keyword
+      # and a returned key, not the first two alone.
+      #
+      # Of the other two `sd_db` commits in `55c4d691..341c5f2c`, #471 widens
       # `sd_db.calls` to a loopback entry that declares no key variable and
       # #453 touches `sd_db.backup`; no pack test constructs either. Nothing
       # under `local-sd-db` changes between this commit and system `main`, so
