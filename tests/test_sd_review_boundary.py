@@ -478,6 +478,20 @@ class LineBudgetTests(unittest.TestCase):
         # has to be able to check. `sd_lib` supplies the switch itself, so the
         # vocabulary is not spent here twice.
         #
+        # 2938 -> 2942 pays for four lines of comment that correct a false
+        # statement about what leaves the machine. Review of #1124 found the
+        # payload sentence claiming the tier names come from *this*
+        # repository's policy and that each carries a description. Neither
+        # holds: `load_policy` reads the checkout the command runs in, and a
+        # tier a repository invented is sent as a bare name -- so a private
+        # repo's `embargo-legal` goes to a third party with the name as the
+        # whole of the message. The fourth line says exit 3 collapses four
+        # reasons and not the two the comment named. Prose was tried first and
+        # cost the claim its precision, which is the wrong trade on a sentence
+        # a reader consults to decide whether to switch the stage off. This
+        # raise is its own commit, before the one that spends it. Shared-core
+        # classification and the complexity ceilings are unchanged.
+        #
         # **This raise is not its own commit and does not precede the spend.**
         # The convention above is the right one and this is a departure from
         # it: the flip was already committed when CI measured the lane, so the
@@ -489,7 +503,7 @@ class LineBudgetTests(unittest.TestCase):
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            2938,
+            2942,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
