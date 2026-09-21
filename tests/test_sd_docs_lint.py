@@ -2065,8 +2065,15 @@ class Rule6ClaimSupportTests(LintFixture):
     def jev(self, **extra: str):
         """The stub on PATH and nothing left behind.
 
-        The switch is not set: unset means on, so a fixture that set it would
-        no longer be testing the path every run takes.
+        The switch is unset unless a case sets it: unset means on, so a
+        fixture that set it would no longer be testing the path every run
+        takes. It is *removed* rather than merely not added, because
+        `patch.dict` layers over the real environment and `CONTRIBUTING.md`
+        now tells operators to export `JEV_SD_DOCS_LINT=0` -- a reader who
+        follows that advice would otherwise watch seven of these fail, and
+        conclude the suite is flaky rather than that the fixture is.
+        `patch.dict` restores the whole mapping on exit, so popping inside it
+        leaves nothing behind either.
         """
         environment = {
             "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
@@ -2074,6 +2081,8 @@ class Rule6ClaimSupportTests(LintFixture):
             **extra,
         }
         with mock.patch.dict(os.environ, environment):
+            if lint.JEV_STAGE not in extra:
+                os.environ.pop(lint.JEV_STAGE, None)
             yield
 
     def recorded_item(self) -> pathlib.Path:
@@ -2134,16 +2143,38 @@ class Rule6ClaimSupportTests(LintFixture):
         with mock.patch.dict(os.environ, {"PATH": str(gitless)}):
             self.assertNotIn("claim support", self.notes())
 
-    def test_a_jev_that_cannot_answer_is_named_and_asked_nothing(self) -> None:
-        """Loud, unlike the two above. A `jev` that is present and declines is
-        a machine that could have had the reading: unkeyed, or `jev off`. That
-        is worth one line, and it is bounded -- one run, one note."""
+    def test_a_jev_that_cannot_answer_is_silent_too(self) -> None:
+        """The third silent reason, and the one review caught.
+
+        Exit 3 is the only non-zero `jev enabled` returns, so a gate that
+        says "any non-zero is loud" is saying "every unkeyed machine is
+        loud". `jev off` is the documented fleet kill switch; using it would
+        then print a line in every pull request in both repositories, which
+        is what `NOT_ASKED` exists to prevent. `bin/sd_jev.py` already
+        treated 3 as silent, and two gates that disagree are a policy nobody
+        can state.
+        """
 
         self.recorded_item()
         with self.jev(JEV_STUB_ENABLED="3"):
             notes = self.notes()
-        self.assertIn("not run (jev enabled reports it cannot answer", notes)
+        self.assertNotIn("claim support", notes)
         self.assertFalse(self.capture.exists(), "a switched-off jev was sent a request")
+
+    def test_a_probe_that_fails_some_other_way_is_still_loud(self) -> None:
+        """The half that must not go silent with it.
+
+        0 and 3 are the codes `jev enabled` has today. Anything else is a
+        `jev` this gate does not understand -- a broken install, a shim, a
+        future version -- and that is a run that could have had a reading and
+        did not, which is the whole of what the note is for.
+        """
+
+        self.recorded_item()
+        with self.jev(JEV_STUB_ENABLED="4"):
+            notes = self.notes()
+        self.assertIn("not run (jev enabled exited 4)", notes)
+        self.assertFalse(self.capture.exists(), "a failing probe was sent a request")
 
     def test_a_weak_answer_is_a_note_and_never_a_failure(self) -> None:
         self.recorded_item()

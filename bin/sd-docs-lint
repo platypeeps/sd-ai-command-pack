@@ -956,7 +956,7 @@ def check_citations(work_root: pathlib.Path, report: Report) -> None:
 # reading at all, because it also needed an export nobody had written.
 JEV_STAGE = "JEV_SD_DOCS_LINT"
 
-# The two reasons that print nothing. Every other way this pass declines is a
+# The reasons that print nothing. Every other way this pass declines is a
 # run that could have had a reading and did not, and saying so is the whole of
 # how a reader tells "found nothing" from "never looked".
 #
@@ -965,7 +965,11 @@ JEV_STAGE = "JEV_SD_DOCS_LINT"
 # one will never have it, so announcing its absence would put a line in every
 # pull request in both repositories, forever. That noise is exactly what this
 # sentinel was created to prevent, and the flip must not undo it by turning
-# "nobody opted in" into "nobody has the binary".
+# "nobody opted in" into "nobody has the binary". Nor is `jev enabled` exiting
+# 3, which is the same machine saying so itself: unkeyed, or `jev off`.
+# `bin/sd_jev.py` reaches the same three, and the two gates have to agree --
+# a flip that made the kill switch noisy here and silent there would be a
+# policy nobody could state.
 NOT_ASKED = "not asked"
 CLAIM_CHARS = 400
 EVIDENCE_CHARS = 700
@@ -1008,8 +1012,15 @@ def jev_command() -> tuple[str, str]:
         )
     except (OSError, subprocess.SubprocessError) as error:
         return "", f"jev enabled did not run: {error}"
+    # 3 is the only non-zero `jev enabled` returns, and it means "cannot answer
+    # here" -- unkeyed, or `jev off`. Naming it would make the documented fleet
+    # kill switch print a line in every pull request in both repositories, which
+    # is the cost the sentinel above exists to avoid, so it is silent too. A
+    # code that is neither is something new and stays loud.
+    if probe.returncode == 3:
+        return "", NOT_ASKED
     if probe.returncode != 0:
-        return "", "jev enabled reports it cannot answer on this machine"
+        return "", f"jev enabled exited {probe.returncode}"
     return found, ""
 
 
