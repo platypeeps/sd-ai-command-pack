@@ -1511,7 +1511,6 @@ def review(
         "input_manifest": input_manifest,
         "local_block_prepended": prepended,
         "scrubbed_env_names": list(scrubbed_names(env)),
-        "posted": False,
         "check": None,
         "outcomes": [],
         "findings": [],

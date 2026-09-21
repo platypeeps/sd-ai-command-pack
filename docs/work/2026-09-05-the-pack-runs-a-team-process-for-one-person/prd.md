@@ -1132,7 +1132,7 @@ log, not here.
   and `.github/sd-status.json` (`bin/sd-status:224-862`) become one
   `protected: yes/no` line -- rescinded 2026-09-19, kept; see the Log.
   `bin/sd_sweep.py`, the `sweep` verb (`bin/sd:2704-2738,2916-2925`) and
-  `tests/test_sd_sweep.py`; the `parked` field and every reader of it, cut
+  `tests/test_sd_sweep.py` (cut 2026-09-16, 31(a), #995); the `parked` field and every reader of it, cut
   2026-09-19 under 31(a), which keeps `archived`, the archive walk
   (`bin/sd_lib.py:355-368`, `:271-282`, `:302-303`, `:350`) and their
   readers, so `work_item_dirs` still skips `archive` by name; `bin/sd_ledger.py` moves to B with the
@@ -1148,8 +1148,8 @@ log, not here.
   (cut by 31(b2): four declaring sites gone, and a `RETIRED_POLICY_KEYS` row
   in their place); the unreachable gito and kimi argv branches and their
   `except Refusal` (both gone, so no line is left to cite); the constant
-  `posted` key and its grep test (still pending: `bin/sd-review:1502`,
-  `tests/test_sd_review_boundary.py:214`); the second `BACKENDS` table
+  `posted` key and its grep test (cut 2026-09-20 under 31(c); no line is
+  left to cite); the second `BACKENDS` table
   (cut: the section enumerates the registry, so no line is left to cite);
   `RESIDUE` and `residue_section`
   (`source:bin/sd-status::residue_section`) after one clean fleet run;
@@ -5653,3 +5653,36 @@ a line that must stay a line points at the code the sentence describes. The
 requirement bullet now states the `planning`/`in_progress` contract. The
 ratchet falls to 35 and 54.
 
+### 2026-09-20 — the running list closes, and requirement 13 gets a reader
+
+The 2026-09-16 running list above named 18, 21 and 31 (a, b and c) open. All
+five are closed now, and the entry that named them stands as written because
+it was true on its date. This is the current list.
+
+- **18** — closed. `HELD` in `tests/test_no_trellis_residue.py:98` is empty,
+  which is what the criterion asks for.
+- **21** — closed in #1081, `408975f4`. Both archive clauses are assertions
+  over a real `prepare`, not greps.
+- **31(a)** — closed in #1079, `534b56dd`: `parked` cut, `archived` kept.
+- **31(b1)** — closed. Every prose symbol and flag is a grep in
+  `PROSE_SYMBOLS`, `tests/test_cut_symbols.py`, and the two held symbols
+  became a keep in #1078, `67ed5fda`.
+- **31(b2)** — closed in #1076, `84a46486`: the `authors` policy key.
+- **31(c)** — closed in #1082, `82027005`, on owner decision note 3006.
+
+One line of requirement 13 outlived the criterion that covers it. The cut
+list said the constant `posted` key was "still pending", and criterion 31's
+symbol list never named the key, so nothing grepped for it. A hand-copied
+list is blind exactly where it was not copied from. The key and its grep
+test are cut here, and `Requirement13ClosesLineByLine` in
+`tests/test_cut_symbols.py` now reads this requirement's cut list out of
+this page and fails on a clause that states a cut and disposes of nothing.
+
+Two clauses stay open and are recorded as open, with their reason, in that
+test's `OPEN_CUTS`. `RESIDUE` and `residue_section` wait on one clean fleet
+run that is scheduled nowhere; criteria 18 and 21 both pass as written, so
+the wait blocks no criterion. `Makefile`'s history comments are absent from
+criterion 31's symbol list, so they close no criterion either. Neither is a
+blocker on this item's delivery.
+
+**What this leaves.** Nothing. The delivery commit carries `Delivers: sd:10`.

@@ -215,9 +215,6 @@ class NeverPostsTests(unittest.TestCase):
         ]
         self.assertIn("subprocess_runner", enclosing)
 
-    def test_the_result_object_records_that_nothing_was_posted(self) -> None:
-        self.assertIn('"posted": False', SOURCE)
-
     def test_nothing_is_opened_for_writing_outside_the_attempt_directory(self) -> None:
         writes = [node for node in ast.walk(TREE) if isinstance(node, ast.Call)
                   and isinstance(node.func, ast.Attribute) and node.func.attr == "write_text"]
