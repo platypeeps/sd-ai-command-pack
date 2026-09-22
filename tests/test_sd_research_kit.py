@@ -101,12 +101,18 @@ class SecondReaderCommandTests(unittest.TestCase):
     def test_the_printed_codex_command_closes_stdin(self) -> None:
         self.assertIn("< /dev/null", self._codex_command())
 
-    def test_the_printed_codex_command_is_bounded_and_observable(self) -> None:
+    def test_the_printed_codex_command_is_observable_and_portable(self) -> None:
+        # The answer and the log go to files a reader can watch, in a folder
+        # git does not keep, so the command makes it first. No `timeout`: it
+        # is GNU coreutils, which macOS does not ship, and a command that
+        # fails with `command not found` loses the whole second-reader step.
         command = self._codex_command()
-        self.assertRegex(command, r"^\s*timeout \d+ codex exec -s read-only")
+        self.assertRegex(command, r"^\s*mkdir -p 90-scratch && codex exec -s read-only")
+        self.assertNotRegex(command, r"\btimeout\b")
         self.assertIn(" -o 90-scratch/", command)
         self.assertIn("> 90-scratch/", command)
         self.assertIn("2>&1", command)
+        self.assertIn("coreutils", self.checklist)
 
     def test_the_checklist_says_how_to_tell_a_hang(self) -> None:
         # "it buffers, so no output until it exits" told a reader a hang was

@@ -634,7 +634,7 @@ The half no script can do — work it before publishing, per document:
        shared, not retyped -- `adversarial-gate render --lens research-brief`
        prints it, from local-adversarial-gate in the `system` repo:
 
-         timeout 1500 codex exec -s read-only -o 90-scratch/codex-pass.md \
+         mkdir -p 90-scratch && codex exec -s read-only -o 90-scratch/codex-pass.md \
            "This is a markdown research brief, not code.
            Review the uncommitted working-tree changes (git status, git diff,
            plus untracked new files) as an adversarial reader.
@@ -650,9 +650,12 @@ The half no script can do — work it before publishing, per document:
        `Reading additional input from stdin...` and waits forever at 0% CPU.
        The prompt as an argument does not prevent that; only a closed stdin
        does (sd:1339). `-o` puts the answer in a file and the redirect keeps
-       the log readable while it runs; `timeout` bounds a run that hangs
-       anyway; both files sit in `90-scratch/`, which is never cited or
-       published. Run it in the background for anything past a page, and tell
+       the log readable while it runs; both sit in `90-scratch/`, which is
+       never cited or published, and the `mkdir -p` is there because git
+       keeps no empty folder, so a fresh clone has none. GNU `timeout 1500`
+       in front bounds the run where coreutils is installed (`brew install
+       coreutils` on macOS, which ships none); without it the check below is
+       the bound. Run it in the background for anything past a page, and tell
        a slow run from a hung one within a minute: a live run writes a new
        `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` and its log grows past
        the echoed prompt. No new rollout file, or a log ending at the stdin
