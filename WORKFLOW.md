@@ -242,13 +242,21 @@ that dispatches workers cites this section and restates nothing.
 - **Readers fan out.** Investigation, review, planning and audits run in
   parallel across read-only workers. A read-only worker needs no isolation.
 - **One integrator lands the work.** Several workers may produce patches or
-  pull requests. One lane merges them, one at a time. Shared metadata — an
-  item id, a session number, a journal or ledger entry — is allocated when
-  the work lands, never when the branch is cut.
+  pull requests. One lane merges them, one at a time. Metadata that orders
+  the landings — a session number, a journal or ledger entry, a changelog
+  position — is allocated when the work lands, never when the branch is cut,
+  because two branches cut in parallel would claim the same slot. An item id
+  is not that kind of metadata: `sd work register` allocates it at plan time,
+  before review and before any branch exists, and `sd runner prepare` and
+  `sd run` both require it to already exist.
 - **No worker fails silently.** Every worker gets a budget, in wall clock or
   tokens. It runs in the background and reports when it finishes. No report
-  by the deadline is a failure: respawn once, then escalate. Do not poll,
-  and do not assume success.
+  by the deadline is a failure. Do not poll, and do not assume success.
+  A missing report does not mean the worker stopped: cancel it and confirm
+  it is gone before starting a replacement, or two attempts run at once and
+  the second writer lands in a checkout the first still holds. When the
+  cancellation cannot be confirmed, escalate instead of respawning. Only a
+  read-only worker may be replaced on the deadline alone.
 - **Fan out only when three things hold.** The targets are independent, no
   mutable state is shared, and the results are cheap to verify. Work on the
   same files or the same metadata store stays in one lane, in sequence.

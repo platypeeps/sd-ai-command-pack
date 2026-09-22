@@ -94,8 +94,11 @@ Unknown argument names are an error — stop and report them before starting.
    batch that returns a diff for the parent to apply is the patch-only
    shape the pack prefers. `sd-rust-reviewer` is read-only and may run
    beside either. Give each agent a budget, run it in the background, and
-   treat no report by the deadline as a failure: respawn once, then
-   escalate. The rules are the sd-ai-command-pack checkout's
+   treat no report by the deadline as a failure. `sd-rust-reviewer` may be
+   respawned on the deadline alone. A silent `sd-rust-write` or
+   `sd-rust-fill` may not: cancel it and confirm it is gone before starting
+   a replacement, because its worktree is still its own, and escalate when
+   the cancellation cannot be confirmed. The rules are the sd-ai-command-pack checkout's
    `WORKFLOW.md`, section **Parallel work**.
 9. Close out: remove the remaining dead-code allowance, flip the hole
    lint to deny or show the grep returning nothing, and confirm the
