@@ -837,14 +837,164 @@ if __name__ == "__main__":
     sys.exit(main(sys.argv))
 '''
 
+#: Every earlier body this module released, byte for byte, so that an
+#: installation made by one of them can be recognised and replaced rather than
+#: refused. Without this the fix above reaches nobody: every repository that
+#: has the hook has one of these, `init-hook` would read it as somebody else's
+#: file, and the only installations that could ever get three triggers are the
+#: ones that do not exist yet.
+#:
+#: Exact bodies and not a "looks like ours" test, because the whole value of
+#: refusing a foreign file is that the refusal cannot be talked out of. A
+#: single byte that this pack did not write is still foreign and still refused.
+#:
+#: The list is the whole population, read out of this file's own history --
+#: `git rev-list --all --full-history -- bin/sd_research_publish.py`, every
+#: blob parsed for its `HOOK` assignment. Two distinct bodies ever reached
+#: `main`: the one `05d4b9d3` shipped, and the one `fa5f5576` replaced it with
+#: and `47d4d147` still carried. They differ in one comment word.
+#:
+#: Downward only in one direction: a body leaves this tuple when no machine can
+#: still be carrying it, which is not a thing this repository can know. Assume
+#: it never happens, and add to it whenever `HOOK` changes.
+SUPERSEDED_HOOKS = (
+    # `05d4b9d3`, the body the hook shipped with.
+    '''#!/usr/bin/env python3
+# Re-render this research repo after a commit that touched a document.
+#
+# Installed by `sd-research-kit init-hook`. Post-commit and not pre-commit:
+# `build/` is generated and not committed, so there is nothing to stage, and
+# the commit is the revision a queued Notion sync should name.
+#
+# Rendered output goes stale the moment its source changes, and a stale page is
+# worse than a missing one because it looks current. This is what keeps the
+# dashboard's Documents tab a statement about the render rather than about who
+# remembered to run it.
+#
+# Never fails the commit. The commit is already made when this runs, so exiting
+# non-zero would report a failure for work that succeeded. A render that cannot
+# run says so and leaves the commit alone.
+#
+# `SD_SKIP_RENDER=1 git commit` skips it.
+
+import os
+import shutil
+import subprocess
+import sys
+
+
+def main():
+    if os.environ.get("SD_SKIP_RENDER"):
+        return 0
+    try:
+        root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.strip()
+        if not os.path.isfile(os.path.join(root, "research.conf.py")):
+            return 0
+        # Only when the commit carried a document. A commit touching nothing
+        # but the config or a script still renders: both change the output.
+        changed = subprocess.run(
+            ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],
+            cwd=root, capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    if not any(name.endswith((".md", ".py")) for name in changed):
+        return 0
+
+    kit = shutil.which("sd-research-kit")
+    if kit is None:
+        print("post-commit: sd-research-kit not on PATH; build/ is now stale",
+              file=sys.stderr)
+        return 0
+    try:
+        subprocess.run([kit, "render"], cwd=root, timeout=600, check=True)
+    except (OSError, subprocess.SubprocessError):
+        print("post-commit: render failed; build/ is now stale", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+''',
+    # `fa5f5576`, one comment word later: the queue stopped being Notion's.
+    '''#!/usr/bin/env python3
+# Re-render this research repo after a commit that touched a document.
+#
+# Installed by `sd-research-kit init-hook`. Post-commit and not pre-commit:
+# `build/` is generated and not committed, so there is nothing to stage, and
+# the commit is the revision a queued mirror should name.
+#
+# Rendered output goes stale the moment its source changes, and a stale page is
+# worse than a missing one because it looks current. This is what keeps the
+# dashboard's Documents tab a statement about the render rather than about who
+# remembered to run it.
+#
+# Never fails the commit. The commit is already made when this runs, so exiting
+# non-zero would report a failure for work that succeeded. A render that cannot
+# run says so and leaves the commit alone.
+#
+# `SD_SKIP_RENDER=1 git commit` skips it.
+
+import os
+import shutil
+import subprocess
+import sys
+
+
+def main():
+    if os.environ.get("SD_SKIP_RENDER"):
+        return 0
+    try:
+        root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.strip()
+        if not os.path.isfile(os.path.join(root, "research.conf.py")):
+            return 0
+        # Only when the commit carried a document. A commit touching nothing
+        # but the config or a script still renders: both change the output.
+        changed = subprocess.run(
+            ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],
+            cwd=root, capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    if not any(name.endswith((".md", ".py")) for name in changed):
+        return 0
+
+    kit = shutil.which("sd-research-kit")
+    if kit is None:
+        print("post-commit: sd-research-kit not on PATH; build/ is now stale",
+              file=sys.stderr)
+        return 0
+    try:
+        subprocess.run([kit, "render"], cwd=root, timeout=600, check=True)
+    except (OSError, subprocess.SubprocessError):
+        print("post-commit: render failed; build/ is now stale", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+''',
+)
+
 
 def init_hook_main() -> int:
     """Install the re-render hook in this repo, under every trigger at once.
 
     Written and not symlinked: a research repo is not a worktree of the pack,
     and a symlink into a checkout the repo does not own breaks the moment the
-    pack moves. A file already at any of the paths is refused by name and left
-    alone -- the same rule `make hooks` follows for the pack's own hook.
+    pack moves. A file already at one of the paths is refused by name and left
+    alone -- the same rule `make hooks` follows for the pack's own hook --
+    unless it is byte-for-byte a body this pack released, in which case it is
+    this hook and is replaced. Every existing installation is an older body on
+    `post-commit` alone; without that reading, the one verb that upgrades them
+    would refuse every repository that already has the hook and serve only the
+    ones that do not exist yet.
 
     All or nothing. Every target is inspected before any is written, so a
     refusal leaves the repository exactly as it found it. A repo installed on
@@ -867,22 +1017,24 @@ def init_hook_main() -> int:
     targets = [Path(common) / "hooks" / name for name in HOOK_TRIGGERS]
     held = {t: t.read_text(encoding="utf-8", errors="replace")
             for t in targets if t.exists()}
-    foreign = [t for t, text in held.items() if text != HOOK]
+    ours = (HOOK,) + SUPERSEDED_HOOKS
+    foreign = [t for t, text in held.items() if text not in ours]
     if foreign:
         for target in foreign:
             print("error: %s exists and is not this hook; move it aside first"
                   % target, file=sys.stderr)
         return 1
-    missing = [t for t in targets if t not in held]
-    if not missing:
+    write = [t for t in targets if held.get(t) != HOOK]
+    if not write:
         print("hook: already installed at %s"
               % ", ".join(str(t) for t in targets))
         return 0
-    for target in missing:
+    for target in write:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(HOOK, encoding="utf-8")
         target.chmod(0o755)
-        print("hook: installed %s" % target)
+        print("hook: %s %s"
+              % ("upgraded" if target in held else "installed", target))
     return 0
 
 

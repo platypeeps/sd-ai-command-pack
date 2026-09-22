@@ -15,6 +15,7 @@ that would silently regress is the CSS going missing from the rendered page.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.machinery
 import importlib.util
 import io
@@ -56,6 +57,21 @@ def load_kit():
     sys.modules[name] = module
     loader.exec_module(module)
     return module
+
+
+def load_publish():
+    """Load `sd_research_publish` in process, for the two hook constants.
+
+    `bin/` is the script directory when the kit itself runs, which is how that
+    module reaches `sd_lib`; loaded from a test there is no such directory on
+    the path, so it is put there once. `load_kit` on its own is enough for a
+    module with no `bin/` sibling to import.
+    """
+
+    here = str(REPO_ROOT / "bin")
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    return load_kit().load("sd_research_publish")
 
 
 def run(*args, cwd=None):
@@ -1006,6 +1022,92 @@ class InitHookInstallTests(unittest.TestCase):
             for trigger, stamp in stamps.items():
                 self.assertEqual((self.hooks(repo) / trigger).stat().st_mtime_ns,
                                  stamp, f"{trigger} was rewritten")
+
+    def install(self, repo: Path, trigger: str, body: str) -> Path:
+        path = self.hooks(repo) / trigger
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        path.chmod(0o755)
+        return path
+
+    def test_an_installation_of_an_earlier_body_is_upgraded(self) -> None:
+        """The population this fix has to reach, and the one it nearly missed.
+
+        Every repository that has this hook today has an earlier body on
+        `post-commit` alone. Read as somebody else's file it is refused, and
+        then `init-hook` upgrades nobody: the only installations that could
+        ever hold three triggers would be the ones that do not exist yet.
+        """
+
+        module = load_publish()
+        for index, earlier in enumerate(module.SUPERSEDED_HOOKS):
+            with self.subTest(body=index):
+                with tempfile.TemporaryDirectory() as raw:
+                    repo = self.make_repo(Path(raw))
+                    self.install(repo, "post-commit", earlier)
+                    result = run("init-hook", cwd=repo)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("upgraded", result.stdout)
+                    for trigger in self.TRIGGERS:
+                        path = self.hooks(repo) / trigger
+                        self.assertTrue(path.is_file(), f"{trigger} was not written")
+                        self.assertTrue(os.access(path, os.X_OK),
+                                        f"{trigger} is not executable")
+                        self.assertEqual(path.read_text(encoding="utf-8"),
+                                         module.HOOK,
+                                         f"{trigger} still holds the earlier body")
+
+    def test_a_body_one_byte_off_ours_is_foreign_and_writes_nothing(self) -> None:
+        """What keeps the migration from becoming a licence to clobber.
+
+        The near miss is the case worth pinning: a file that is an earlier
+        body with one character changed is not a file this pack wrote, and a
+        test that only used an obviously foreign script could not tell a byte
+        comparison from a heuristic.
+        """
+
+        module = load_publish()
+        nearly = module.SUPERSEDED_HOOKS[-1].replace("build/", "build /", 1)
+        self.assertNotEqual(nearly, module.SUPERSEDED_HOOKS[-1])
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw))
+            held = self.install(repo, "post-commit", nearly)
+            result = run("init-hook", cwd=repo)
+            self.assertEqual(result.returncode, 1, result.stdout)
+            self.assertIn("post-commit", result.stderr)
+            self.assertEqual(held.read_text(encoding="utf-8"), nearly,
+                             "a foreign post-commit hook was overwritten")
+            for trigger in ("post-merge", "post-checkout"):
+                self.assertFalse(
+                    (self.hooks(repo) / trigger).exists(),
+                    f"{trigger} was written although the install was refused")
+
+    def test_every_superseded_body_is_one_this_pack_released(self) -> None:
+        """The list is a claim about history, so it is checked against history.
+
+        These digests are of the `HOOK` value at the two revisions that
+        carried it on `main`, read out with
+        `git rev-list --all --full-history -- bin/sd_research_publish.py`.
+        Recorded rather than recomputed from the file: the point is to catch
+        the day a reformat, a stripped trailing space or a tidy-up edits a
+        body here, which would leave the constant self-consistent and stop it
+        matching the bytes on any machine.
+        """
+
+        module = load_publish()
+        released = {
+            # `05d4b9d3`, "Publish finished documents to the dashboard by
+            # default (#1089)" -- the revision that added the hook.
+            "ba26cc1e36a2b84455a83be8f620118c900af468c02661ad9ff9177fad1bb95c",
+            # `fa5f5576`, "publish: add Google Drive as a destination, on
+            # Notion's terms (#1091)", still the body at `47d4d147`.
+            "01f8e364291b382813e7eee648ca36033880feca5b7f7b9afcb61a0ea1f9223b",
+        }
+        digests = {hashlib.sha256(body.encode("utf-8")).hexdigest()
+                   for body in module.SUPERSEDED_HOOKS}
+        self.assertEqual(digests, released)
+        self.assertNotIn(hashlib.sha256(module.HOOK.encode("utf-8")).hexdigest(),
+                         released, "the current body is listed as superseded")
 
 
 class HookTriggerTests(unittest.TestCase):

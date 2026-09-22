@@ -247,6 +247,14 @@
   one with no hook: `build/` then looks maintained. A partial install from an
   earlier run is completed. `SD_SKIP_RENDER=1` still skips, for all three.
 
+  **An existing installation upgrades in place.** Every repository that has
+  this hook has an earlier body on `post-commit` alone, and a refusal to
+  clobber it would have left this fix reaching only installations that do not
+  exist yet. `init-hook` now recognises each body this pack has released,
+  byte for byte, and replaces it. Exact bodies and not a "looks like ours"
+  test: a file one byte off one of them is still somebody else's, and is
+  still refused with nothing written.
+
 ## 1.0.0 - 2026-09-01
 
 ### Changed
