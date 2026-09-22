@@ -885,7 +885,7 @@ class Ship(SharedReview):
                 add_note(self.connection, self.args.item, sd_lib.DEMOTION_NOTE_KIND, body)
 
     def row_merges(self) -> bool:
-        """Whether this checkout's repository row says `runner_merge: auto`.
+        """Whether the row *for the repository this merge targets* says `auto`.
 
         The row is read through `sd_db`, the library this adapter already
         depends on, and resolved through `sd_db.repos.registered_for` rather
@@ -893,11 +893,32 @@ class Ship(SharedReview):
         that is not the row's path, so a lookup by path would refuse exactly
         the runs this override exists for.
 
-        Every way of not getting an explicit `auto` is a refusal, and they
-        are one branch on purpose. No row, an unreadable row, a library too
-        old to have the column, a database that will not open: none of those
-        is the operator deciding anything, and a grant that can be produced
-        by a failure is not a grant.
+        **The row that answers must be the row for the repository being
+        merged, and resolving it is not the same as proving it.**
+        `registered_for` returns the checkout's own row whenever its path is
+        registered, without ever consulting the origin -- so a row whose
+        `remote` went stale, which is one `git remote set-url origin` away
+        and nothing watches, would hand this gate an `auto` the operator set
+        for a different repository. The receipt could not show the
+        substitution either: it is built from the live remote answer, so it
+        would name the repository truthfully while the authority came from
+        another. Hence the comparison here, against `self.repository`, which
+        is the slug of the same origin `GitHub.owned` was asked about.
+
+        It is the slug and not `sd_db.repos.same_remote` on purpose.
+        `same_remote` normalises a `.git` suffix and a trailing slash and
+        nothing else, deliberately, so it reads the ssh and https forms of
+        one repository as two; the rows on a machine may hold one form while
+        the checkouts use the other. A slug is transport-insensitive, and
+        what this gate has to know is which repository, not which URL.
+
+        Every way of not getting an explicit `auto` for this repository is a
+        refusal, and they are one branch on purpose. No row, a row for
+        somebody else, a remote that names no GitHub repository, an
+        unreadable row, a library too old to have the column, a database
+        that will not open: none of those is the operator deciding
+        anything, and a grant that can be produced by a failure is not a
+        grant.
         """
         try:
             from sd_db.repos import registered_for
@@ -905,10 +926,12 @@ class Ship(SharedReview):
             origin = git(self.root, "config", "--get", "remote.origin.url")
             path = registered_for(self.connection, str(self.root.resolve()), origin)
             row = self.connection.execute(
-                "SELECT runner_merge FROM repo WHERE path = ?", (path,)).fetchone()
+                "SELECT remote, runner_merge FROM repo WHERE path = ?", (path,)).fetchone()
+            if row is None or row["runner_merge"] != "auto":
+                return False
+            return slug(row["remote"] or "") == self.repository
         except (ImportError, LookupError, OSError, Refusal, sqlite3.Error, ValueError):
             return False
-        return row is not None and row["runner_merge"] == "auto"
 
     def note_row_authority(self, answer) -> None:
         """Record in the durable receipt that the row, not ownership, allowed this merge.

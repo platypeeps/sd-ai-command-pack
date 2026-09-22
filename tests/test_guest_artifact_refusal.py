@@ -883,6 +883,51 @@ class TheRowAuthorizedMerge(ShipMergeFixture):
         delivery.connection = empty
         self.assertFalse(delivery.row_merges(), "no readable repo table is not a grant")
 
+    def test_a_row_for_another_repository_does_not_authorize_this_merge(self) -> None:
+        """The row that answers must be the row for the repository being merged.
+
+        `registered_for` returns the checkout's own row the moment its path is
+        registered, without consulting the origin, so a row whose `remote`
+        went stale -- one `git remote set-url origin` away, and nothing
+        watches for it -- would hand this gate an `auto` the operator set for
+        a different repository. The receipt cannot show the substitution: it
+        is built from the live remote answer, so it would name this
+        repository truthfully while the authority came from another. The row
+        is made stale after identity resolved, because `Ship.__init__`
+        refuses a checkout whose origin and item row disagree and a stale row
+        is what a later run finds.
+        """
+
+        self.runner_merge("auto")
+        self.remote(WITH_MALLORY)
+        delivery = self.operation("merge")
+        self.connection.execute("UPDATE repo SET remote = ? WHERE path = ?",
+                                ("https://github.com/sven/elsewhere.git", str(self.root)))
+        self.connection.commit()
+        self.assertFalse(delivery.row_merges(), "sven/elsewhere's policy does not speak for sven/thing")
+        with self.assertRaisesRegex(self.ship.Refusal, "mallory"):
+            delivery.merge_ownership()
+        self.assertNotIn("row_authorized_merge", delivery.state)
+
+    def test_an_ssh_checkout_matches_an_https_row_for_the_same_repository(self) -> None:
+        """One repository written two ways is still one repository.
+
+        The comparison is on the slug and not on `sd_db.repos.same_remote`,
+        which normalises a `.git` suffix and a trailing slash and nothing
+        else -- deliberately, so it reads these two forms as two repositories.
+        Rows on a machine may hold one form while the checkouts use the other,
+        which is the ordinary state here, so a stricter comparison would
+        refuse the common case rather than the wrong-row one.
+        """
+
+        self.git(self.root, "remote", "set-url", "origin", "git@github.com:sven/thing.git")
+        self.runner_merge("auto")  # stores the https form
+        self.remote(WITH_MALLORY)
+        delivery = self.operation("merge")
+        self.assertTrue(delivery.row_merges())
+        self.assertEqual(delivery.merge_ownership().get("full_name"), "sven/thing")
+        self.assertEqual(self.notes(), [])
+
     def test_a_repository_the_account_does_not_administer_still_refuses(self) -> None:
         """A row cannot grant admin the account does not hold; GitHub would refuse anyway."""
 
