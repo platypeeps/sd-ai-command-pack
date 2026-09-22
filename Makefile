@@ -35,6 +35,16 @@ PYTHON ?= $(shell if [ -x "$(BREW_PYTHON)" ]; then printf '%s' "$(BREW_PYTHON)";
 # for an environment nobody pointed it at, so an environment that cannot say
 # what it holds is refused rather than assumed to fit.
 #
+# The lenient half says so out loud, on stderr, once per make and without
+# touching an exit code. Every worktree on this machine reaches its
+# environment through an sd:1020 symlink and every one of those environments
+# predates the record, so today the rule is correct and covers nothing in the
+# case that actually occurs. A check whose passing output cannot be told from
+# the check not running is the failure this repository names by name. sd:1349
+# tracks re-provisioning that environment and whether the symlink convention
+# retires; the note is what makes that row findable from a `make` run instead
+# of from an exchange nobody reads.
+#
 # One shell for the whole decision, run once per make (`:=`), not once per
 # expansion. A checkout with a real `.venv` pays one `test -x` and one
 # `test -L`, and reaches neither git nor `cmp`.
@@ -51,7 +61,8 @@ BORROWED := $(shell \
   fi; \
   why=; \
   if [ -n "$$record" ] && [ ! -d "$$record" ]; then \
-    [ -n "$$strict" ] && why="$$name does not record what it was provisioned from"; \
+    if [ -n "$$strict" ]; then why="$$name does not record what it was provisioned from"; \
+    else printf '%s\n' "note: $$name records no provisioning; this worktree's requirements are unchecked. Run 'make setup' in $${name%/*} to cover it." >&2; fi; \
   elif [ -n "$$record" ]; then \
     for f in requirements-dev.txt requirements-security.txt; do \
       cmp -s "$$f" "$$record/$$f" \

@@ -1060,13 +1060,19 @@ class BorrowedEnvironmentTests(unittest.TestCase):
         # Named by what it points at, which is the environment at issue.
         self.assertIn(str(self.main / ".venv"), done.stderr)
 
-    def test_a_symlinked_environment_with_no_record_is_left_alone(self) -> None:
-        """Proven mismatch only, where the automatic borrow is strict.
+    def test_a_symlinked_environment_with_no_record_runs_and_says_so(self) -> None:
+        """Proven mismatch only, where the automatic borrow is strict -- and
+        a note, because a lenient pass has to be legible as one.
 
         The link is not this Makefile's doing, and refusing an environment
         that predates the record would strand every checkout carrying one.
         The day it is provisioned again the case is covered like any other,
         which `test_a_symlinked_environment_is_compared_too` is.
+
+        Until then the rule covers nothing in the case that actually occurs
+        on this machine, so it says so on stderr: an exit code that cannot be
+        told from the check having run is the shape this repository refuses
+        elsewhere. sd:1349 is the row; the note is how a reader finds it.
         """
 
         self.symlink_the_environment()
@@ -1075,6 +1081,17 @@ class BorrowedEnvironmentTests(unittest.TestCase):
         done = self.make("docs-lint")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn('".venv/bin/python"', done.stdout)
+        self.assertIn("records no provisioning", done.stderr)
+        self.assertIn(str(self.main / ".venv"), done.stderr)
+        self.assertIn(f"Run 'make setup' in {self.main}", done.stderr)
+
+    def test_a_matching_symlinked_environment_stays_quiet(self) -> None:
+        """The note is the absent-record case, not every symlink."""
+
+        self.symlink_the_environment()
+        done = self.make("docs-lint")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("records no provisioning", done.stderr)
 
     def test_a_checkout_with_its_own_environment_is_never_checked(self) -> None:
         """Nothing was borrowed, so there is nothing to be compatible with."""
