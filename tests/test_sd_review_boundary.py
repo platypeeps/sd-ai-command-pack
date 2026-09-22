@@ -181,6 +181,12 @@ class NeverPostsTests(unittest.TestCase):
             "sd_check_receipts",
             "sd_review_material",
             "sd_review_readiness",
+            # The `opencode-json` reader (sd:1329): an argv builder, the inline
+            # agent config, and an NDJSON read-back. It spawns nothing itself
+            # and imports only the standard library, so it widens the allow-list
+            # by a reader and not by a way out; the never-posts assertions
+            # below cover it like the rest of the lane.
+            "sd_opencode",
             # The installer, imported inside the one dispatch branch. It is in
             # this repository and is itself held to the never-posts assertions
             # below, so it widens the allow-list without widening the boundary.
@@ -543,11 +549,27 @@ class LineBudgetTests(unittest.TestCase):
         # reasons. This raise is its own commit, before the one that spends
         # it. Shared-core classification and the complexity ceilings are
         # unchanged.
+        # 3126 -> 3250 admits `opencode-json`, a fourth reader (sd:1329). The
+        # number is the argument once more: the lane measured exactly 3126
+        # before it, on its own floor, so any fourth reader busts the ratchet
+        # whatever it costs. Eight lines land in `bin/sd-review` -- the
+        # import, two tuple entries, and three two-line dispatch branches --
+        # and 116 in `bin/sd_opencode.py`, a new lane file: the argv builder,
+        # the inline agent whose permission map is what refuses a write, the
+        # NDJSON read-back, and the docstring that records what was measured
+        # (a denied write and bash, a denied read outside `--dir`, an attached
+        # subject read verbatim) and what stays open (the operator's global
+        # config still loads, and no event names the model that answered).
+        # The reader lives in its own file rather than beside `agy_answer`
+        # so the entry point gains dispatch and nothing else. This raise
+        # shares a commit with the spend at the integrator's request, and
+        # the exact resulting size keeps this a ratchet. Shared-core
+        # classification and the complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3126,
+            3250,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

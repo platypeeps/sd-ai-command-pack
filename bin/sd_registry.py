@@ -682,7 +682,9 @@ MODEL_VENDORS: tuple[tuple[str, str], ...] = (
 #: `agy-lint` would trip it. `codex-json` and `claude-json` are outside this
 #: set today because each command serves its own vendor; if either gains
 #: model selection across vendors, add it here and pin models in the entries.
-MULTIVENDOR_READERS: frozenset[str] = frozenset({"agy-json"})
+#: `opencode-json` is here for the same reason as `agy-json`: `opencode run
+#: -m provider/model` serves every vendor the client holds a credential for.
+MULTIVENDOR_READERS: frozenset[str] = frozenset({"agy-json", "opencode-json"})
 
 
 def model_vendor(model: str | None) -> str | None:

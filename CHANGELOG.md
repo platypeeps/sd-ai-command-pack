@@ -21,6 +21,18 @@
 
 ### Added
 
+- **`opencode` reviews, through a new `opencode-json` reader (sd:1329).**
+  The shipped registry gains an `opencode` entry third on the reviewer
+  order, after `codex` and `claude`. `opencode run -m provider/model`
+  serves every vendor the client holds a credential for, so the entry
+  pins a model and `vendor`/`bill` describe that pin -- `openai/gpt-5.5`
+  on the ChatGPT credential as shipped; repoint all three together in the
+  machine registry. The session runs as a private agent carried in
+  `OPENCODE_CONFIG_CONTENT` that denies edit, bash, fetch, delegation and
+  reads outside the checkout (each measured on 1.18.30); the operator's
+  global `opencode.json` still loads, and no event names the model that
+  answered -- both recorded in `bin/sd_opencode.py`.
+
 - **A Drive mirror defaults to `Briefs/<repo>`.** `drive=dict()` is now a
   complete designation: it mirrors to `Briefs/<repo>` in My Drive, the same
   shape the vault uses, so the copies agree on where a brief lives. The drain
