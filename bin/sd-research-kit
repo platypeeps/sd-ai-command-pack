@@ -49,9 +49,13 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
 
   render        render research.conf.py into docs/dashboard/, write the vault
                 copies, register with the dashboard, queue outward mirrors
+                for the documents that changed since they were last queued
+                (SD_MIRROR_REQUEUE=1 queues every designated document)
   publish       the registration and queueing half on its own, without
                 re-rendering
-  init-hook     install the post-commit hook that re-renders this repo
+  init-hook     install the hook that re-renders this repo after a commit, a
+                merge (so a pull) or a branch checkout changes a document;
+                upgrades an earlier install of its own
   checklinks    verify every relative markdown link and backticked in-repo path
                 resolves; exit 1 if anything is broken
   review        the mechanical half of the pre-publication adversarial review:

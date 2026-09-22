@@ -470,7 +470,11 @@ names a `subfolder`, the document goes in that page under the container, which
 the drain creates when it is missing. The source for every mirror is the
 Markdown, never the rendered HTML. One request file per document per destination, so a
 re-render replaces the pending request rather than queueing a second one; a
-request that is never drained stays on disk. `references/publication-contract.md`
+request that is never drained stays on disk. A document whose Markdown, title
+and container have not changed since it was last queued is not queued again,
+whether that request is still pending or has been drained: `render` keeps a
+receipt of what it queued beside the queue, and `SD_MIRROR_REQUEUE=1` queues
+every designated document regardless. `references/publication-contract.md`
 says how the status report surfaces one.
 
 Mirror shape — the full document minus its H1, opening with a pointer back to

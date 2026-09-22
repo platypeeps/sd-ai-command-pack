@@ -22,7 +22,9 @@ One queue for every destination rather than one queue each, and one request
 file per document *per destination*: a document designated for two places is
 two independent pieces of outstanding work, and either can drain while the
 other waits. The filename carries the repo, the document and the destination,
-so a re-render overwrites the pending request rather than queueing a second.
+so a re-render overwrites the pending request rather than queueing a second --
+and a re-render of an unchanged document writes nothing at all, pending or
+drained, because a receipt beside the queue remembers what was last queued.
 
 A request that is never drained stays on disk: the queue does not expire,
 because an expiring queue reports a mirror as done that was never written.
@@ -30,6 +32,7 @@ because an expiring queue reports a mirror as done that was never written.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -38,7 +41,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
-from sd_lib import git_output
+from sd_lib import git_output, main_worktree_root
 
 #: Where the dashboard checkout lives. Overridable because a fleet machine may
 #: hold it elsewhere; not discovered by searching, because a search that found
@@ -169,9 +172,9 @@ NOTION_SCOPES = {
                       "your team Notion briefs folder, under %s"),
 }
 
-#: The environment the folder settings are read out of. A module attribute for
-#: the same reason `QUEUE` and `VAULT` are: a test points it at a fixture
-#: rather than at the machine running the test.
+#: The environment the folder settings and `SD_MIRROR_REQUEUE` are read out
+#: of. A module attribute for the same reason `QUEUE` and `VAULT` are: a test
+#: points it at a fixture rather than at the machine running the test.
 ENVIRON: dict[str, str] = dict(os.environ)
 
 #: A Notion page id: 32 hex digits, dashed or not, alone or ending a page's
@@ -205,14 +208,34 @@ def documents_conf() -> Path:
     return DASHBOARD_HOME / "documents.conf"
 
 
+def repo_home(repo: Path) -> Path:
+    """The checkout that names this repository: `repo`, unless it is a linked
+    worktree, in which case the main checkout it was added from.
+
+    Everything derived from a repository's *name* -- the dashboard key, the
+    vault folder, a default Notion or Drive container, the queue filename --
+    reads it from here and never from the directory the render ran in. A
+    worktree is a scratch checkout with a scratch name, and a render from one
+    called `tc-pins` wrote `label|tc-pins|TRACE-CLASSIFIER` into the
+    dashboard's tracked `documents.conf` and a `Briefs/tc-pins/` folder into
+    the vault, both naming a directory that would be gone within the day.
+
+    The files a render reads and writes stay the worktree's own: what was
+    rendered is that checkout's content, and the request carries its paths.
+    Only the identity comes from the main checkout.
+    """
+    return main_worktree_root(repo)
+
+
 def repo_key(repo: Path) -> str:
-    """A short lowercase key from the directory name.
+    """A short lowercase key from the repository's directory name.
 
     Derived and not configured: a key the repo chose for itself could collide
     with another repo's, and the collision would surface as one repo's
-    documents silently replacing the other's in the listing.
+    documents silently replacing the other's in the listing. The name is the
+    main checkout's, whichever worktree is rendering; see `repo_home`.
     """
-    stem = repo.name.lower()
+    stem = repo_home(repo).name.lower()
     stem = re.sub(r"[^a-z0-9._-]+", "-", stem).strip("-.")
     return stem or "docs"
 
@@ -447,7 +470,7 @@ def vault_folder(repo: Path) -> Path | None:
     """
     if not VAULT:
         return None
-    return Path(VAULT).expanduser() / BRIEFS / repo.name
+    return Path(VAULT).expanduser() / BRIEFS / repo_home(repo).name
 
 
 def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
@@ -468,6 +491,7 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
         return ["obsidian: OBSIDIAN_VAULT is not set; no vault copy written"]
 
     rev = revision(repo)
+    home = repo_home(repo)
     reports: list[str] = []
     written = 0
     for cfg in docs:
@@ -488,7 +512,7 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
         # which is also why the vault copy is not the place to edit.
         front = "\n".join([
             "---",
-            "source_repo: %s" % repo.name,
+            "source_repo: %s" % home.name,
             "source_path: %s" % src,
             "revision: %s" % rev,
             "rendered_by: sd-research-kit",
@@ -651,12 +675,96 @@ def recorded(path: Path, wanted: dict[str, Any], what: str) -> str:
     return str(pending.get(what, "")).strip()
 
 
+def receipts() -> Path:
+    """Where the last-queued fingerprint of every request is kept.
+
+    Beside the queue and not in it: `bin/sd-status` globs `*.json` in the
+    queue, and a receipt inside it would read as one more pending mirror.
+    Derived from `QUEUE` rather than configured separately, so a test or an
+    operator who moves the queue moves the receipts with it and nothing here
+    can write beside the machine's real queue by mistake. One file per
+    request, under the request's own name, so two repositories rendering at
+    once never contend for one file.
+    """
+    return QUEUE.with_name(QUEUE.name + "-receipts")
+
+
+def mirror_fingerprint(request: dict[str, Any], target: dict[str, str], what: str) -> str:
+    """What a drain would write, as one digest: the same digest means the
+    same mirror.
+
+    The source bytes, because the mirror is the Markdown; the title, because
+    it is what the mirror is called; the identity `mirror_identity` compares,
+    because a document moved to another container is a new mirror; the
+    designation's own page or file id, because a `page=` the user wrote is an
+    instruction the drain has to see; and the source path, because the
+    request carries it and the mirror's pointer line names it.
+
+    Not the revision: a commit that touches nothing the mirror is made of
+    still moves HEAD, and re-queueing on every commit is the defect this
+    exists to close. Not a recorded id either: the drain writes one into the
+    request after the fact, and it must not make the next render see a
+    change.
+    """
+    source = request.get("source", "")
+    try:
+        body = Path(source).read_bytes() if source else b""
+    except OSError:
+        body = b""
+    named = mirror_identity(request, target, what)
+    named.update(title=request.get("title", ""), source=source,
+                 designated=request.get(what, ""))
+    digest = hashlib.sha256(json.dumps(named, sort_keys=True).encode("utf-8"))
+    digest.update(body)
+    return digest.hexdigest()
+
+
+def already_queued(path: Path, receipt: Path, wanted: str,
+                   identity: dict[str, Any]) -> str:
+    """`pending` when the request at `path` already says this, `drained` when
+    it was queued and has since been taken, or `""` when it must be written.
+
+    The receipt is what makes a drained mirror recognisable: the drain removes
+    the request, and without a record of what was queued the next render
+    cannot tell a delivered mirror from one never asked for. A pending
+    request is only "already queued" while it is readable and names the same
+    identity -- a truncated or hand-edited file is not a request anyone will
+    drain, and is rewritten.
+    """
+    try:
+        last = json.loads(receipt.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(last, dict) or last.get("fingerprint") != wanted:
+        return ""
+    if not path.exists():
+        return "drained"
+    try:
+        pending = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    if not isinstance(pending, dict):
+        return ""
+    if any(pending.get(field) != value for field, value in identity.items()):
+        return ""
+    return "pending"
+
+
 def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
-    """Write one sync request per document per designated destination."""
+    """Write one sync request per document per designated destination, for
+    every document whose mirror would differ from the one last queued.
+
+    Unchanged documents are skipped, and said to be. Every render used to
+    re-queue every designated document -- eight requests per commit in one
+    repository -- and each drain then rewrote eight mirrors nobody had
+    touched. `SD_MIRROR_REQUEUE=1` queues them all regardless, for a mirror
+    that was lost on the far side and has to be written again.
+    """
     reports: list[str] = []
+    home = repo_home(repo)
     wanted: list[tuple[dict[str, Any], dict[str, str]]] = []
     for cfg in docs:
-        targets, problems = mirror_targets(cfg, repo)
+        targets, problems = mirror_targets(cfg, home)
         reports += ["mirror: %s in %s" % (p, cfg.get("out", "?")) for p in problems]
         wanted += [(cfg, target) for target in targets]
     if not wanted:
@@ -664,13 +772,18 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
 
     QUEUE.mkdir(parents=True, exist_ok=True)
     rev = revision(repo)
-    key = repo_key(repo)
-    vault = vault_folder(repo)
+    key = repo_key(home)
+    vault = vault_folder(home)
+    force = bool(ENVIRON.get("SD_MIRROR_REQUEUE"))
     for cfg, target in wanted:
         out = str(cfg.get("out", "")).strip()
         src = str(cfg.get("src", "")).strip()
         request = {
-            "repo": str(repo),
+            # The repository, not the checkout: this is what `sd-status`
+            # resolves a row against and what a carried id is compared on.
+            # The three paths below are the checkout's, because that is where
+            # the rendered files are.
+            "repo": str(home),
             "revision": rev,
             "document": out,
             "title": cfg.get("title", out),
@@ -679,14 +792,35 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
             "markdown": str(vault / (out + ".md")) if vault else "",
         }
         request.update(target)
-        path = QUEUE / ("%s.%s.%s.json" % (key, out or "doc", target["destination"]))
+        name = "%s.%s.%s.json" % (key, out or "doc", target["destination"])
+        path = QUEUE / name
+        what = BY_NAME[target["destination"]].what
+        identity = mirror_identity(request, target, what)
+        digest = mirror_fingerprint(request, target, what)
+        state = "" if force else already_queued(path, receipts() / name, digest, identity)
+        if state == "pending":
+            reports.append("mirror: %s: already queued -> %s (unchanged since %s)"
+                           % (out, target["target"], rev[:12]))
+            continue
+        if state == "drained":
+            reports.append("mirror: %s: unchanged since it was last mirrored; "
+                           "not queued again" % out)
+            continue
         # The designation is the answer where it gives one; the queue records
         # what a drain did, and never overrides what the document says.
-        what = BY_NAME[target["destination"]].what
-        carried = "" if request[what] else recorded(
-            path, mirror_identity(request, target, what), what)
+        carried = "" if request[what] else recorded(path, identity, what)
         request[what] = request[what] or carried
         path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+        try:
+            receipts().mkdir(parents=True, exist_ok=True)
+            (receipts() / name).write_text(json.dumps({
+                "fingerprint": digest, "revision": rev, "repo": str(home),
+                "document": out, "destination": target["destination"],
+            }, indent=2) + "\n", encoding="utf-8")
+        except OSError as problem:
+            # The request is written; only the memory of it is not, and the
+            # cost of that is one more queue of this document next time.
+            reports.append("mirror: cannot write receipt for %s (%s)" % (out, problem))
         reports.append("mirror: queued %s -> %s%s" % (
             out, target["target"],
             ", updating the %s already recorded" % what if carried else ""))
@@ -702,7 +836,8 @@ def publish(repo: Path, project: str, docs: list[dict[str, Any]]) -> list[str]:
     """
     reports = write_obsidian(repo, docs)
     reports.append(ignore_dashboard(repo))
-    reports.append(register_root(repo, project or repo.name, repo / DASHBOARD_DIR))
+    reports.append(register_root(
+        repo, project or repo_home(repo).name, repo / DASHBOARD_DIR))
     # Before enqueueing, and here rather than inside `enqueue`: a repo that
     # designates nothing still runs on the machine holding the stranded queue,
     # and `enqueue` returns before touching the directory when it has no
@@ -712,23 +847,139 @@ def publish(repo: Path, project: str, docs: list[dict[str, Any]]) -> list[str]:
     return reports
 
 
-#: The hook that keeps `build/` current, as text rather than as a file beside
-#: the skill. Two rules put it here, both pinned by
+#: The hook that keeps `docs/dashboard/` current, as text rather than as a
+#: file beside the skill. Two rules put it here, both pinned by
 #: `tests/test_no_shipped_shell.py`: `skills/` is the render surface and is
 #: markdown only, because a file there is payload copied onto a platform home;
 #: and the pack ships no shell outside `.github/scripts/`. So the hook is
 #: Python, stdlib only, and it lives in the module that installs it. It carries
-#: `#` comments rather than a docstring because it is itself inside one.
-HOOK = '#!/usr/bin/env python3\n# Re-render this research repo after a commit that touched a document.\n#\n# Installed by `sd-research-kit init-hook`. Post-commit and not pre-commit:\n# `build/` is generated and not committed, so there is nothing to stage, and\n# the commit is the revision a queued mirror should name.\n#\n# Rendered output goes stale the moment its source changes, and a stale page is\n# worse than a missing one because it looks current. This is what keeps the\n# dashboard\'s Documents tab a statement about the render rather than about who\n# remembered to run it.\n#\n# Never fails the commit. The commit is already made when this runs, so exiting\n# non-zero would report a failure for work that succeeded. A render that cannot\n# run says so and leaves the commit alone.\n#\n# `SD_SKIP_RENDER=1 git commit` skips it.\n\nimport os\nimport shutil\nimport subprocess\nimport sys\n\n\ndef main():\n    if os.environ.get("SD_SKIP_RENDER"):\n        return 0\n    try:\n        root = subprocess.run(\n            ["git", "rev-parse", "--show-toplevel"],\n            capture_output=True, text=True, timeout=30, check=True,\n        ).stdout.strip()\n        if not os.path.isfile(os.path.join(root, "research.conf.py")):\n            return 0\n        # Only when the commit carried a document. A commit touching nothing\n        # but the config or a script still renders: both change the output.\n        changed = subprocess.run(\n            ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],\n            cwd=root, capture_output=True, text=True, timeout=30, check=True,\n        ).stdout.split()\n    except (OSError, subprocess.SubprocessError):\n        return 0\n    if not any(name.endswith((".md", ".py")) for name in changed):\n        return 0\n\n    kit = shutil.which("sd-research-kit")\n    if kit is None:\n        print("post-commit: sd-research-kit not on PATH; build/ is now stale",\n              file=sys.stderr)\n        return 0\n    try:\n        subprocess.run([kit, "render"], cwd=root, timeout=600, check=True)\n    except (OSError, subprocess.SubprocessError):\n        print("post-commit: render failed; build/ is now stale", file=sys.stderr)\n    return 0\n\n\nif __name__ == "__main__":\n    sys.exit(main())\n'
+#: `#` comments rather than a docstring because it is itself inside a string.
+#:
+#: One text under three names. Git tells the script which one it was called
+#: by, and the name says which two revisions to compare; see `HOOK_NAMES`.
+HOOK = '''#!/usr/bin/env python3
+# Re-render this research repo after git changes a document in it.
+#
+# Installed by `sd-research-kit init-hook` as post-commit, post-merge and
+# post-checkout: one file under three names, and the name git called it by
+# says what to compare. A commit is compared with its parent; a merge -- and
+# so a pull, which is a fetch and a merge -- compares ORIG_HEAD with HEAD; a
+# branch checkout compares the two revisions git hands it. Post-commit alone
+# missed every pulled change, and the page then went stale while looking
+# current, until a review demanded a render nobody had been told to run.
+#
+# After the fact and not before: `docs/dashboard/` is generated and not
+# committed, so there is nothing to stage, and the new HEAD is the revision a
+# queued mirror should name.
+#
+# Rendered output goes stale the moment its source changes, and a stale page is
+# worse than a missing one because it looks current. This is what keeps the
+# dashboard's Documents tab a statement about the render rather than about who
+# remembered to run it.
+#
+# Never fails the git command. It is already done when this runs, so exiting
+# non-zero would report a failure for work that succeeded. A render that cannot
+# run says so and leaves the repository alone.
+#
+# `SD_SKIP_RENDER=1 git commit` (or pull, or checkout) skips it.
+
+import os
+import shutil
+import subprocess
+import sys
+
+
+def git(root, *args):
+    return subprocess.run(
+        ["git", *args], cwd=root, capture_output=True, text=True,
+        timeout=30, check=True,
+    ).stdout.split()
+
+
+def changed(root, hook, args):
+    # The paths this git command changed. Every branch here compares two
+    # revisions, so an uncommitted edit is never what triggers a render.
+    if hook == "post-commit":
+        return git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+    if hook == "post-merge":
+        return git(root, "diff", "--name-only", "ORIG_HEAD", "HEAD")
+    if hook == "post-checkout":
+        # <previous HEAD> <new HEAD> <1 for a branch checkout, 0 for a file>.
+        # A file checkout moves no ref, so there is nothing to compare; and a
+        # previous HEAD of all zeros is a fresh clone or `git worktree add`,
+        # which has nothing rendered yet and nothing committed to it, so a
+        # render there would publish a checkout nobody has worked in.
+        if len(args) < 3 or args[2] != "1" or args[0] == args[1]:
+            return []
+        if set(args[0]) <= {"0"}:
+            return []
+        return git(root, "diff", "--name-only", args[0], args[1])
+    return []
+
+
+def main(argv):
+    if os.environ.get("SD_SKIP_RENDER"):
+        return 0
+    hook = os.path.basename(argv[0]) if argv else "post-commit"
+    try:
+        root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.strip()
+        if not os.path.isfile(os.path.join(root, "research.conf.py")):
+            return 0
+        # Only when a document moved. A change touching nothing but the
+        # config or a script still renders: both change the output.
+        paths = changed(root, hook, argv[1:])
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    if not any(name.endswith((".md", ".py")) for name in paths):
+        return 0
+
+    kit = shutil.which("sd-research-kit")
+    if kit is None:
+        print("%s: sd-research-kit not on PATH; docs/dashboard/ is now stale"
+              % hook, file=sys.stderr)
+        return 0
+    try:
+        subprocess.run([kit, "render"], cwd=root, timeout=600, check=True)
+    except (OSError, subprocess.SubprocessError):
+        print("%s: render failed; docs/dashboard/ is now stale" % hook,
+              file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+'''
+
+#: The names the one hook text is installed under. `post-merge` is what a
+#: `git pull` runs (every research repo pulls with `pull.rebase=false`), and
+#: `post-checkout` is a branch switch. A rebase runs neither after it
+#: finishes; `post-rewrite` is not installed, and a `pull --rebase` renders on
+#: the next commit.
+HOOK_NAMES = ("post-commit", "post-merge", "post-checkout")
+
+#: The line that says a hook file is this kit's to replace. Every version of
+#: the hook has carried it, so an install from before the three-name shape
+#: is upgraded rather than refused.
+HOOK_MARKER = "Installed by `sd-research-kit init-hook`"
 
 
 def init_hook_main() -> int:
-    """Install the post-commit re-render hook in this repo.
+    """Install the re-render hook in this repo, under each of `HOOK_NAMES`.
 
     Written and not symlinked: a research repo is not a worktree of the pack,
     and a symlink into a checkout the repo does not own breaks the moment the
-    pack moves. A file already at the path is refused by name and left alone --
-    the same rule `make hooks` follows for the pack's own hook.
+    pack moves. Three copies rather than one file and two links, for the same
+    reason: a copy is complete on its own, and the check below reads each one.
+
+    Idempotent, and an upgrade for its own earlier versions: a file carrying
+    `HOOK_MARKER` is this kit's and is rewritten to the current text. A file
+    at any of the names that is somebody else's is refused by name, and
+    nothing is written at all -- the same rule `make hooks` follows for the
+    pack's own hook, applied before the first write so a refusal never leaves
+    two names installed and one not.
     """
     repo = Path.cwd()
     if not (repo / "research.conf.py").is_file():
@@ -742,19 +993,29 @@ def init_hook_main() -> int:
         print("not a git repository: %s" % repo, file=sys.stderr)
         return 1
 
-    target = Path(common) / "hooks" / "post-commit"
-    wanted = HOOK
-    if target.exists():
-        if target.read_text(encoding="utf-8", errors="replace") == wanted:
-            print("hook: already installed at %s" % target)
-            return 0
-        print("error: %s exists and is not this hook; move it aside first" % target, file=sys.stderr)
-        return 1
+    hooks = Path(common) / "hooks"
+    plan: list[tuple[Path, str]] = []
+    for name in HOOK_NAMES:
+        target = hooks / name
+        if not target.exists():
+            plan.append((target, "installed"))
+            continue
+        existing = target.read_text(encoding="utf-8", errors="replace")
+        if existing == HOOK:
+            plan.append((target, "already installed"))
+        elif HOOK_MARKER in existing:
+            plan.append((target, "upgraded"))
+        else:
+            print("error: %s exists and is not this hook; move it aside first"
+                  % target, file=sys.stderr)
+            return 1
 
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(wanted, encoding="utf-8")
-    target.chmod(0o755)
-    print("hook: installed %s" % target)
+    hooks.mkdir(parents=True, exist_ok=True)
+    for target, verb in plan:
+        if verb != "already installed":
+            target.write_text(HOOK, encoding="utf-8")
+            target.chmod(0o755)
+        print("hook: %s %s" % (verb, target))
     return 0
 
 
