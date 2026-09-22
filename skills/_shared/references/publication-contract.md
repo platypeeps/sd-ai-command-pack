@@ -126,9 +126,11 @@ section looks the same as a report that was never generated.
 Rendered output goes stale the moment its source changes, and a stale page is
 worse than a missing one because it looks current.
 
-A repository that publishes re-renders on commit. For a research repo,
-`sd-research-kit init-hook` installs the post-commit hook that does it; the hook
-never fails the commit, because the commit has already been made when it runs.
+A repository that publishes re-renders when git changes a document. For a
+research repo, `sd-research-kit init-hook` installs the hook that does it, as
+post-commit, post-merge and post-checkout, so a pull or a branch switch renders
+too; the hook never fails the git command, because the change has already been
+made when it runs.
 The dashboard's freshness indicator is then a statement about the render, not
 about whether anyone remembered. A verification-only mode that fails on stale
 output is acceptable where a write hook is not wanted; silence is not.
