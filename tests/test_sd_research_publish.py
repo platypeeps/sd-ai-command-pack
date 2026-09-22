@@ -17,12 +17,14 @@ twice, which must be two independent requests -- one queue file per destination
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -1078,6 +1080,146 @@ class DrainRaceTests(ReceiptFixture):
                 [sys.executable, str(KIT), "delivered", *argv],
                 capture_output=True, text=True, timeout=60)
             self.assertEqual(result.returncode, 2, argv)
+
+
+class AcknowledgementRaceTests(ReceiptFixture):
+    """A render cannot land between the acknowledgement's read and its unlink.
+
+    The reviewer's reproduction against bdb6774f, `ACK_RACE: remote=A,
+    source=B, queue=False`: `mirror_delivered` read the request, wrote the
+    receipt, compared the record it had read *before* those writes, and
+    unlinked -- and a render that wrote B between the read and the unlink
+    had B removed with A's fingerprint on the receipt. Nothing serialised
+    the two writers. Now both take the queue lock, so the render lands
+    wholly before the read (and the comparison keeps it) or wholly after the
+    unlink (and nothing is left to remove).
+
+    Deterministic, with no sleep and no join timeout. The acknowledgement
+    runs in the main thread with its request read hooked; the hook starts
+    the render in a thread and waits for it to *report progress*: a render
+    that reaches the lock reports before it can hold it, and a render that
+    finds no lock to wait on reports when it has finished. Either way the
+    hook returns with the render's write either impossible until the
+    acknowledgement is done, or already done. Against bdb6774f there is no
+    lock, so the render finishes inside the window and the unlink takes B.
+    """
+
+    NAME = "my-research.a.notion.json"
+
+    def test_a_render_during_the_acknowledgement_keeps_its_request(self) -> None:
+        self.source("A\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        read = json.loads((PUBLISH.QUEUE / self.NAME).read_text())  # drain step 1
+        self.source("B\n")  # what the render during the drain will queue
+
+        progress = threading.Event()
+        failures: list[BaseException] = []
+
+        def render() -> None:
+            try:
+                PUBLISH.enqueue(self.repo, self.doc())
+            except BaseException as problem:  # noqa: BLE001 - re-raised below
+                failures.append(problem)
+            finally:
+                progress.set()
+
+        thread = threading.Thread(target=render, name="render")
+        real_lock = getattr(PUBLISH, "queue_locked", None)
+        if real_lock is not None:
+            @contextlib.contextmanager
+            def announced():
+                if threading.current_thread() is thread:
+                    progress.set()  # at the lock, and so not yet past it
+                with real_lock():
+                    yield
+            PUBLISH.queue_locked = announced
+            self.addCleanup(setattr, PUBLISH, "queue_locked", real_lock)
+
+        real_load = PUBLISH.load_record
+        started = threading.Event()
+
+        def hooked(path: Path) -> dict:
+            record = real_load(path)
+            if (path == PUBLISH.QUEUE / self.NAME
+                    and threading.current_thread() is threading.main_thread()
+                    and not started.is_set()):
+                started.set()
+                thread.start()
+                progress.wait()
+            return record
+
+        PUBLISH.load_record = hooked
+        self.addCleanup(setattr, PUBLISH, "load_record", real_load)
+
+        said = PUBLISH.mirror_delivered(self.NAME, read["fingerprint"])  # drain step 6
+        thread.join()
+        if failures:
+            raise failures[0]
+        self.assertTrue(started.is_set(), "the acknowledgement never read the request")
+        self.assertIn("request removed", said)
+        queued = (PUBLISH.QUEUE / self.NAME).is_file()
+        self.assertTrue(queued, "ACK_RACE: remote=A, source=B, queue=%s" % queued)
+        pending = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
+        self.assertNotEqual(pending["fingerprint"], read["fingerprint"], "B was not queued")
+        receipt = json.loads((PUBLISH.receipts() / self.NAME).read_text())
+        self.assertEqual(receipt["delivered"], read["fingerprint"])
+        self.assertEqual(receipt["queued"], pending["fingerprint"])
+
+    def test_the_lock_sits_beside_the_queue_and_survives_the_drain(self) -> None:
+        """Not in the queue, where `sd-status` would list it; not removed,
+        because a removed lock file is two inodes and two winners."""
+        self.source("A\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        lock = PUBLISH.queue_lock_path()
+        self.assertTrue(lock.is_file(), lock)
+        self.assertNotEqual(lock.parent, PUBLISH.QUEUE)
+        self.assertTrue(lock.is_relative_to(self.root), lock)
+        self.drain()
+        self.assertTrue(lock.is_file(), "the drain removed the lock")
+
+
+class RevertTests(ReceiptFixture):
+    """A pending request is reconciled before a delivered receipt is trusted.
+
+    The reviewer's reproduction against bdb6774f, `REVERT: desired_title=A,
+    pending_title=B`: `already_queued` consulted the receipt first, so a
+    document delivered as A, then queued as B, then reverted to A before any
+    drain, read as delivered -- and B stayed in the queue for the next drain
+    to rename the page with. The queue is now read first: a request asking
+    for a different generation is overwritten whatever the receipt says,
+    carrying the id a drain may have recorded in it.
+    """
+
+    NAME = "my-research.a.notion.json"
+
+    def test_a_reverted_designation_overwrites_the_pending_request(self) -> None:
+        self.source("body\n")
+        PUBLISH.enqueue(self.repo, self.doc(title="A"))
+        self.assertIn("request removed", self.drain())  # A delivered
+        PUBLISH.enqueue(self.repo, self.doc(title="B"))  # the rename, queued
+        path = PUBLISH.QUEUE / self.NAME
+        queued = json.loads(path.read_text())
+        queued["page"] = "page-a-drain-recorded"  # an interrupted drain's step 4
+        path.write_text(json.dumps(queued), encoding="utf-8")
+        said = PUBLISH.enqueue(self.repo, self.doc(title="A"))  # the revert
+        pending = json.loads(path.read_text())
+        self.assertEqual(
+            pending["title"], "A",
+            "REVERT: desired_title=A, pending_title=%s" % pending["title"])
+        self.assertTrue(any("queued a" in line for line in said), said)
+        self.assertEqual(pending["page"], "page-a-drain-recorded", "the recorded id was dropped")
+        # The next drain writes A, and only then is A read as delivered again.
+        self.assertIn("request removed", self.drain())
+        after = PUBLISH.enqueue(self.repo, self.doc(title="A"))
+        self.assertTrue(any("unchanged" in line for line in after), after)
+
+    def test_a_delivered_document_with_nothing_pending_is_still_skipped(self) -> None:
+        self.source("body\n")
+        PUBLISH.enqueue(self.repo, self.doc(title="A"))
+        self.drain()
+        said = PUBLISH.enqueue(self.repo, self.doc(title="A"))
+        self.assertTrue(any("unchanged" in line for line in said), said)
+        self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
 
 
 class WorktreeIdentityTests(Fixture):

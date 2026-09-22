@@ -32,11 +32,14 @@ because an expiring queue reports a mirror as done that was never written.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
 import re
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, NamedTuple
 from urllib.parse import urlsplit
@@ -723,6 +726,45 @@ def receipts() -> Path:
     return QUEUE.with_name(QUEUE.name + "-receipts")
 
 
+def queue_lock_path() -> Path:
+    """The sidecar every writer of the queue takes, beside it.
+
+    Beside the queue and not in it, for the reason `receipts()` gives; and
+    created once, never removed, because unlinking it would let a writer
+    that holds the lock be joined by one that creates a fresh inode and
+    locks that instead.
+    """
+    return QUEUE.with_name(QUEUE.name + ".lock")
+
+
+@contextlib.contextmanager
+def queue_locked() -> Iterator[None]:
+    """Hold the queue for one read-compare-write, against writers anywhere.
+
+    A render's enqueue and a drain's acknowledgement are each a read, a
+    comparison and a write of the same request file, and nothing serialised
+    them: an acknowledgement read generation A, a render wrote B, and the
+    acknowledgement's unlink then removed B with A on the receipt -- the
+    request lost until somebody rendered again. Under one lock the render
+    lands wholly before the acknowledgement's read, where the fingerprint
+    comparison keeps it, or wholly after its unlink, where nothing is left to
+    remove.
+
+    Blocking, as `bin/sd-review-ack`'s lock is and for the same reason: the
+    holder is a render or a drain's last step, nothing a session start waits
+    on, and each holds it for one document's worth of work. An `OSError`
+    here is the queue being unwritable, which is the caller's to report.
+    """
+    path = queue_lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
 def mirror_fingerprint(request: dict[str, Any], target: dict[str, str], what: str) -> str:
     """What a drain would write, as one digest: the same digest means the
     same mirror.
@@ -771,8 +813,19 @@ def load_record(path: Path) -> dict[str, Any]:
 
 def already_queued(path: Path, receipt: Path, wanted: str,
                    identity: dict[str, Any]) -> str:
-    """`delivered` when the destination already holds this, `pending` when
-    the request at `path` already asks for it, or `""` when it must be written.
+    """`pending` when the request at `path` already asks for exactly this,
+    `delivered` when nothing is pending and the destination already holds
+    it, or `""` when the request must be written.
+
+    The queue is read before the receipt, and a request that asks for a
+    different generation is overwritten whatever the receipt says. The
+    receipt describes the destination; the queue describes what the next
+    drain will do to it, and a request left asking for something the source
+    no longer says is a drain about to write it: deliver title A, queue the
+    rename to B, revert to A before any drain ran -- with the receipt read
+    first, A read as delivered and B stayed queued, and the next drain
+    renamed the page the source called A. Overwriting costs one rewrite of a
+    mirror that already matches; leaving it costs a wrong one.
 
     Two records, and neither is inferred from the other. `delivered` is what
     a drain wrote, recorded by `mirror_delivered()` at the moment it finished; the
@@ -788,14 +841,16 @@ def already_queued(path: Path, receipt: Path, wanted: str,
     content is already asking for exactly this. A truncated or hand-edited
     file is not a request anyone will drain, and is rewritten.
     """
+    if path.exists():
+        pending = load_record(path)
+        if pending.get("fingerprint") != wanted:
+            return ""
+        if any(pending.get(field) != value for field, value in identity.items()):
+            return ""
+        return "pending"
     if load_record(receipt).get("delivered") == wanted:
         return "delivered"
-    pending = load_record(path)
-    if not pending or pending.get("fingerprint") != wanted:
-        return ""
-    if any(pending.get(field) != value for field, value in identity.items()):
-        return ""
-    return "pending"
+    return ""
 
 
 def mirror_delivered(name: str, fingerprint: str) -> str:
@@ -813,6 +868,26 @@ def mirror_delivered(name: str, fingerprint: str) -> str:
     that says `delivered` with the request still present costs one skipped
     re-render at worst, while a removed request with nothing recorded is the
     defect this exists to close.
+
+    The read, the comparison and the unlink happen under the queue lock. The
+    comparison against a record read before the lock, or before the receipt
+    write, is the window a render fits in: it wrote B after the read, and
+    the unlink took B with A's fingerprint on the receipt.
+    """
+    try:
+        with queue_locked():
+            return acknowledge_request(name, fingerprint)
+    except OSError as problem:
+        return "delivered: cannot lock the queue at %s (%s); request left in place" % (
+            queue_lock_path(), problem)
+
+
+def acknowledge_request(name: str, fingerprint: str) -> str:
+    """The acknowledgement itself, for a caller holding the queue lock.
+
+    Read here, under the lock, and compared here: the record this reads is
+    the one the unlink acts on, because nothing can write the file between
+    the two while the lock is held.
     """
     path = QUEUE / name
     pending = load_record(path)
@@ -886,59 +961,60 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     key = repo_key(home)
     vault = vault_folder(home)
     force = bool(ENVIRON.get("SD_MIRROR_REQUEUE"))
-    for cfg, target in wanted:
-        out = str(cfg.get("out", "")).strip()
-        src = str(cfg.get("src", "")).strip()
-        request = {
-            # The repository, not the checkout: this is what `sd-status`
-            # resolves a row against and what a carried id is compared on.
-            # The three paths below are the checkout's, because that is where
-            # the rendered files are.
-            "repo": str(home),
-            "revision": rev,
-            "document": out,
-            "title": cfg.get("title", out),
-            "source": str(repo / src) if src else "",
-            "rendered": str(repo / DASHBOARD_DIR / (out + ".html")),
-            "markdown": str(vault / (out + ".md")) if vault else "",
-        }
-        request.update(target)
-        name = "%s.%s.%s.json" % (key, out or "doc", target["destination"])
-        path = QUEUE / name
-        what = BY_NAME[target["destination"]].what
-        identity = mirror_identity(request, target, what)
-        digest = mirror_fingerprint(request, target, what)
-        state = "" if force else already_queued(path, receipts() / name, digest, identity)
-        if state == "pending":
-            reports.append("mirror: %s: already queued -> %s (unchanged since %s)"
-                           % (out, target["target"], rev[:12]))
-            continue
-        if state == "delivered":
-            reports.append("mirror: %s: unchanged since it was last mirrored; "
-                           "not queued again" % out)
-            continue
-        # The designation is the answer where it gives one; the queue records
-        # what a drain did, and never overrides what the document says.
-        carried = "" if request[what] else recorded(path, identity, what)
-        request[what] = request[what] or carried
-        # The generation this request is: what `mirror_delivered()` acknowledges.
-        request["fingerprint"] = digest
-        path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
-        try:
-            receipts().mkdir(parents=True, exist_ok=True)
-            record = load_record(receipts() / name)
-            record.update(queued=digest, revision=rev, repo=str(home),
-                          document=out, destination=target["destination"])
-            record.pop("fingerprint", None)
-            (receipts() / name).write_text(
-                json.dumps(record, indent=2) + "\n", encoding="utf-8")
-        except OSError as problem:
-            # The request is written; only the memory of it is not, and the
-            # cost of that is one more queue of this document next time.
-            reports.append("mirror: cannot write receipt for %s (%s)" % (out, problem))
-        reports.append("mirror: queued %s -> %s%s" % (
-            out, target["target"],
-            ", updating the %s already recorded" % what if carried else ""))
+    with queue_locked():
+        for cfg, target in wanted:
+            out = str(cfg.get("out", "")).strip()
+            src = str(cfg.get("src", "")).strip()
+            request = {
+                # The repository, not the checkout: this is what `sd-status`
+                # resolves a row against and what a carried id is compared on.
+                # The three paths below are the checkout's, because that is where
+                # the rendered files are.
+                "repo": str(home),
+                "revision": rev,
+                "document": out,
+                "title": cfg.get("title", out),
+                "source": str(repo / src) if src else "",
+                "rendered": str(repo / DASHBOARD_DIR / (out + ".html")),
+                "markdown": str(vault / (out + ".md")) if vault else "",
+            }
+            request.update(target)
+            name = "%s.%s.%s.json" % (key, out or "doc", target["destination"])
+            path = QUEUE / name
+            what = BY_NAME[target["destination"]].what
+            identity = mirror_identity(request, target, what)
+            digest = mirror_fingerprint(request, target, what)
+            state = "" if force else already_queued(path, receipts() / name, digest, identity)
+            if state == "pending":
+                reports.append("mirror: %s: already queued -> %s (unchanged since %s)"
+                               % (out, target["target"], rev[:12]))
+                continue
+            if state == "delivered":
+                reports.append("mirror: %s: unchanged since it was last mirrored; "
+                               "not queued again" % out)
+                continue
+            # The designation is the answer where it gives one; the queue records
+            # what a drain did, and never overrides what the document says.
+            carried = "" if request[what] else recorded(path, identity, what)
+            request[what] = request[what] or carried
+            # The generation this request is: what `mirror_delivered()` acknowledges.
+            request["fingerprint"] = digest
+            path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+            try:
+                receipts().mkdir(parents=True, exist_ok=True)
+                record = load_record(receipts() / name)
+                record.update(queued=digest, revision=rev, repo=str(home),
+                              document=out, destination=target["destination"])
+                record.pop("fingerprint", None)
+                (receipts() / name).write_text(
+                    json.dumps(record, indent=2) + "\n", encoding="utf-8")
+            except OSError as problem:
+                # The request is written; only the memory of it is not, and the
+                # cost of that is one more queue of this document next time.
+                reports.append("mirror: cannot write receipt for %s (%s)" % (out, problem))
+            reports.append("mirror: queued %s -> %s%s" % (
+                out, target["target"],
+                ", updating the %s already recorded" % what if carried else ""))
     return reports
 
 

@@ -241,7 +241,12 @@ enqueue that is never drained stays visible rather than expiring.
 A render queues a document only when that fingerprint differs from the one a
 drain last recorded as delivered, and from the one a still-pending request
 carries. A receipt beside the queue holds both; `SD_MIRROR_REQUEUE=1` on the
-invocation queues every designated document regardless.
+invocation queues every designated document regardless. The queue is read
+before the receipt: a pending request that asks for a different generation is
+overwritten whatever the receipt says was delivered, because the queue says
+what the next drain will write and the source has moved on. A render and the
+drain's last step take one lock on the queue, `pending-mirror-syncs.lock`
+beside it, so neither can land between the other's read and its write.
 
 A render from a linked worktree queues nothing and writes no vault copy. Its
 `docs/dashboard/` is rendered, and the dashboard row it would register is the
