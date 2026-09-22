@@ -51,7 +51,9 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
                 copies, register with the dashboard, queue outward mirrors
   publish       the registration and queueing half on its own, without
                 re-rendering
-  init-hook     install the post-commit hook that re-renders this repo
+  init-hook     install the hook that re-renders this repo, under all three
+                triggers at once -- post-commit, post-merge and post-checkout,
+                so a pull and a branch switch render too
   checklinks    verify every relative markdown link and backticked in-repo path
                 resolves; exit 1 if anything is broken
   review        the mechanical half of the pre-publication adversarial review:

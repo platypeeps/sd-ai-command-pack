@@ -222,6 +222,28 @@
   spent once. Only the point where the automatic allowance runs out moved,
   from the second pass to the fifth.
 
+### Fixed
+
+- **`sd-research-kit init-hook` installs the re-render hook under every
+  trigger.** The publication contract promises a render after a commit, a
+  merge and a checkout; the installer wrote `post-commit` alone, so a pull or
+  a branch switch left `build/` holding the other tree's render -- stale, and
+  looking current. It now writes one source under `post-commit`, `post-merge`
+  and `post-checkout`, and the hook reads its own `argv[0]` to know which one
+  fired. Each asks git a different question, because the post-commit one is
+  unusable elsewhere: `diff-tree --no-commit-id -r HEAD` prints nothing at all
+  for a merge commit, and a checkout's HEAD says nothing about what the
+  checkout moved. So a merge is measured against `ORIG_HEAD`, and a checkout
+  against the two revisions git passes it -- and a file checkout, which git
+  flags with `0`, renders nothing.
+
+  The install is all or nothing. Every path is inspected before any is
+  written, so a foreign file at one of them refuses by name and leaves the
+  repository untouched, rather than installing the two triggers it can. A
+  repository rendering on a commit and silently not on a pull is worse than
+  one with no hook: `build/` then looks maintained. A partial install from an
+  earlier run is completed. `SD_SKIP_RENDER=1` still skips, for all three.
+
 ## 1.0.0 - 2026-09-01
 
 ### Changed
