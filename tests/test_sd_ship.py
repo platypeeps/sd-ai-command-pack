@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlsplit
 import sd_db
 from sd_db import connect, create_assignment, create_item, initialise, upsert_repo
 from sd_db import ship as receipts
+from sd_db.repos import set_runner_merge
 from sd_db.testing.github import GitHubDouble
 from sd_db.testing.remote import FixtureRemote, RemoteRefusal, _git
 
@@ -1101,6 +1102,43 @@ roles:
         self.assertEqual(_git(self.root, "branch", "--show-current"), "topic")
         self.assertTrue(self.root.exists())
 
+    def test_a_coowned_remote_merges_when_the_repository_row_says_auto(self):
+        """sd:1347 -- the defect, end to end: a merge that used to be impossible.
+
+        `sd-ship merge` refused sd:1337 in `answerbook/mezmo_benchmark` with
+        "lets adrianfurlong, ... push too" -- repository ownership, asked at
+        merge time, and its third question is false of every co-authored
+        repository. The row said `auto` and nothing read it, so the Mezmo lane
+        ended at `ready_to_send` and a human merged through the API by hand.
+
+        Here the same remote names a second collaborator, the row says `auto`,
+        and the merge lands. The receipt has to say why: a guard was loosened,
+        and a reader must be able to tell this from a merge this account owned
+        outright, without going back to the remote to find out who else may
+        push.
+        """
+
+        self.prepare()
+        self.remote.collaborators = [{"login": "fixture", "permissions": {"push": True}},
+                                     {"login": "someone", "permissions": {"push": True}}]
+        result = self.merge()
+        self.assertEqual(result["phase"], "merged")
+        authority = result["row_authorized_merge"]
+        self.assertEqual(authority["runner_merge"], "auto")
+        self.assertEqual(authority["other_pushers"], ["someone"])
+        self.assertIn("someone", authority["remote_said"])
+        self.assertEqual(authority["repository"], ship.slug(self.remote_url))
+        # And the same sentence when a separate process reconciles the receipt.
+        self.assertEqual(self.operation("reconcile").reconcile()["row_authorized_merge"], authority)
+
+    def test_a_merge_this_account_owns_outright_claims_no_row_authority(self):
+        """The regression guard: three yeses consult no row and claim none."""
+
+        self.prepare()
+        result = self.merge()
+        self.assertEqual(result["phase"], "merged")
+        self.assertNotIn("row_authorized_merge", result)
+
     def test_required_ci_failure_missing_wrong_head_or_app_cannot_merge(self):
         self.prepare()
         pull = self.remote.pull(1)
@@ -1121,9 +1159,15 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "administer"):
             self.merge()
         self.double.admin = True
+        # sd:1347 -- co-ownership is the one answer the repository row may
+        # override, and this fixture's row says `auto`. `manual` is what makes
+        # it a refusal again; the override's own case is
+        # `test_a_coowned_remote_merges_when_the_repository_row_says_auto`.
+        set_runner_merge(self.connection, str(self.operator), "manual")
         self.remote.collaborators = [{"login": "fixture", "permissions": {"push": True}}] * 100 + [{"login": "someone", "permissions": {"push": True}}]
         with self.assertRaisesRegex(ship.Refusal, "someone"):
             self.merge()
+        set_runner_merge(self.connection, str(self.operator), "auto")
         self.remote.collaborators = []
         saved = self.remote.protection
         self.remote.protection = None

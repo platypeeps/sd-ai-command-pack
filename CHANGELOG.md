@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **`sd-ship merge` reads the repository row, not repository ownership alone.**
+  Merge authority asked three questions of the remote, and the third -- "nobody
+  else may push" -- is false of every co-authored repository, so every such
+  merge was refused permanently and the lane ended at `ready_to_send` for a
+  human to finish by hand. `runner_merge: auto` on the matching row now answers
+  that third question, and only that one: admin you do not hold, a fork, and a
+  remote that could not answer still refuse, as do `manual`, an absent row and
+  an unreadable database. A merge the row allowed carries `row_authorized_merge`
+  on its receipt, naming the repository, the setting and who else may push.
+
 - **`sd.merge_authorization` is now `sd.assistant_merge`.** The old name said
   what the setting was about, not who reads it, and the one database's
   `repo.merge_policy` -- renamed to `repo.runner_merge` in the same sitting --
