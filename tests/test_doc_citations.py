@@ -1085,8 +1085,15 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 #: live-prose gate. A ratchet on violations, never a census: each entry may
 #: fall and may not rise, and an entry that reaches zero is deleted.
 #: Per document, so one page cannot offset a new violation in another.
+#:
+#: The implement.md entry fell from 35 on 2026-09-22. Nothing in that document
+#: changed: `bin/sd_lib.py` grew a function above the lines it cites, and
+#: `bin/sd_lib.py:1334` -- which the page introduces as `git fetch` and which
+#: has named the date parser for some time -- now lands in a comment block,
+#: where there is no symbol to prefer. That is the ratchet working: a
+#: `path:line` into code is worth less the moment the code moves.
 SYMBOL_ANCHORED_CITATIONS = {
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 35,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 34,
     "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 49,
 }
 

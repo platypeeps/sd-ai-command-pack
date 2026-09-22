@@ -6,8 +6,50 @@ PYTHON ?= $(shell if [ -x "$(BREW_PYTHON)" ]; then printf '%s' "$(BREW_PYTHON)";
 # directory, whose parent is the main checkout from any worktree -- so a
 # worktree borrows the virtualenv that was actually provisioned, and a
 # checkout with its own still uses its own. Overriding VENV skips all of it.
-MAIN_CHECKOUT = $(shell git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | xargs -I{} dirname {})
-VENV ?= $(shell if [ -x .venv/bin/python ] || [ -z "$(MAIN_CHECKOUT)" ] || [ ! -x "$(MAIN_CHECKOUT)/.venv/bin/python" ]; then printf '%s' .venv; else printf '%s' "$(MAIN_CHECKOUT)/.venv"; fi)
+#
+# Borrowing is sound only while the borrowed environment holds what this
+# working tree asks for. A branch that moves a pin would otherwise lint, test
+# and audit against another branch's versions, and `audit` would keep claiming
+# it ran the requirements-security.txt pin while running something else. So
+# `setup` leaves a copy of the two requirements files inside the environment it
+# provisions, and a borrow is allowed only where those copies are byte for byte
+# this tree's; anything else refuses by name instead of borrowing. Copies and
+# not hashes: `cmp` is on every machine and costs no interpreter start, the
+# comparison is the whole check, and whoever hits the refusal can `diff` the
+# two files to see what moved. An environment provisioned before this change
+# carries no copies, so it is refused rather than borrowed -- `make setup` in
+# the checkout that owns it is what gives it a record.
+#
+# This is the *automatic* borrow only. A VENV given on the command line or in
+# the environment is a deliberate choice and is never second-guessed, and so is
+# a `.venv` the checkout carries itself, symlink or directory: the first test
+# below answers before git is asked. That first test is also the common case,
+# so a checkout with its own environment pays one `test -x` and nothing else.
+# One shell for the whole decision, run once per make (`:=`), not once per
+# expansion.
+BORROWED := $(shell \
+  if [ -x .venv/bin/python ]; then printf '%s' .venv; else \
+    common=$$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); \
+    main=; [ -n "$$common" ] && main=$$(dirname "$$common"); \
+    if [ -z "$$main" ] || [ ! -x "$$main/.venv/bin/python" ]; then printf '%s' .venv; else \
+      why=; \
+      if [ ! -d "$$main/.venv/sd-requirements" ]; then \
+        why="$$main/.venv does not record what it was provisioned from"; \
+      else \
+        for f in requirements-dev.txt requirements-security.txt; do \
+          cmp -s "$$f" "$$main/.venv/sd-requirements/$$f" \
+            || { why="$$f here is not the file $$main/.venv was provisioned from"; break; }; \
+        done; \
+      fi; \
+      if [ -n "$$why" ]; then \
+        printf '%s' "refusing-to-borrow: $$why; run 'make setup VENV=.venv' to give this worktree its own environment"; \
+      else printf '%s' "$$main/.venv"; fi; \
+    fi; \
+  fi)
+# The refusal fires when a recipe asks for the interpreter, not at parse time:
+# `setup` is the remedy and must stay runnable in a worktree that is refused,
+# and SETUP_VENV below reaches `$(VENV)` only when VENV was set deliberately.
+VENV ?= $(if $(filter refusing-to-borrow:,$(firstword $(BORROWED))),$(error $(BORROWED)),$(BORROWED))
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
 # Borrowing is for commands that *consume* an environment. `setup` creates one,
@@ -20,10 +62,16 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 
 .PHONY: setup hooks fonts test lint audit docs-lint check
 
+# The last two lines record what this environment was provisioned from, which
+# is what BORROWED above reads. Last, so an install that failed leaves no
+# record claiming a match; and inside the environment, so the record cannot
+# outlive the thing it describes -- `rm -rf .venv` takes both.
 setup:
 	"$(PYTHON)" -m venv "$(SETUP_VENV)"
 	"$(SETUP_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
 	"$(SETUP_PYTHON)" bin/sd_install.py --provision-library
+	@mkdir -p "$(SETUP_VENV)/sd-requirements"
+	cp requirements-dev.txt requirements-security.txt "$(SETUP_VENV)/sd-requirements/"
 
 # The pre-commit tier of sd:431. `hooks/pre-commit` runs Ruff over the staged
 # Python and the two whole-tree test passes that walk the tree, with a

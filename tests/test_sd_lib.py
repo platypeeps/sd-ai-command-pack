@@ -918,6 +918,126 @@ class SetupStaysLocalTests(unittest.TestCase):
         self.assertIn(f'-m venv "{self.tmp}/chosen"', recipe)
 
 
+class BorrowedEnvironmentTests(unittest.TestCase):
+    """A worktree borrows the main checkout's virtualenv only when it fits.
+
+    The fallback that lets a linked worktree use the environment the main
+    checkout provisioned assumed the two were interchangeable. They are not.
+    A branch that moves a pin in requirements-dev.txt or
+    requirements-security.txt would lint, test and audit against another
+    branch's versions, and `make audit` would go on promising the
+    requirements-security.txt scanner while running whatever the other branch
+    installed -- a misleading pass or a misleading failure, with nothing said
+    either way.
+
+    So `make setup` leaves a copy of the two files inside the environment it
+    provisions, and the borrow is allowed only where those copies are this
+    tree's. Everything here reads `make -n`: the decision is a variable, so it
+    is settled before a recipe would run.
+    """
+
+    MAKEFILE = pathlib.Path(__file__).resolve().parents[1] / "Makefile"
+    REQUIREMENTS = ("requirements-dev.txt", "requirements-security.txt")
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = pathlib.Path(self._tmp.name).resolve()
+        self.main = self.tmp / "main"
+        self.main.mkdir()
+        self.git("init", "-q", "-b", "main", cwd=self.main)
+        (self.main / "Makefile").write_text(
+            self.MAKEFILE.read_text(encoding="utf-8"), encoding="utf-8")
+        for name in self.REQUIREMENTS:
+            (self.main / name).write_text(f"# {name}\n", encoding="utf-8")
+        self.git("add", "-A", cwd=self.main)
+        self.git("-c", "user.email=t@t", "-c", "user.name=t",
+                 "commit", "-q", "-m", "base", cwd=self.main)
+        # A real executable, because the fallback tests for one, and beside it
+        # the record a `make setup` of this same tree would have left.
+        venv_python = self.main / ".venv" / "bin" / "python"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
+        venv_python.chmod(0o755)
+        self.record = self.main / ".venv" / "sd-requirements"
+        self.record.mkdir()
+        for name in self.REQUIREMENTS:
+            (self.record / name).write_text(f"# {name}\n", encoding="utf-8")
+        self.linked = self.tmp / "linked"
+        self.git("worktree", "add", "-q", str(self.linked), cwd=self.main)
+
+    def git(self, *args: str, cwd: pathlib.Path) -> None:
+        subprocess.run(["git", *args], cwd=cwd, check=True,
+                       capture_output=True, text=True)
+
+    def make(self, *argv: str, cwd: pathlib.Path | None = None
+             ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["make", "-s", "-n", *argv],
+                              cwd=cwd or self.linked,
+                              capture_output=True, text=True)
+
+    def move_a_pin(self, name: str = "requirements-dev.txt") -> None:
+        (self.linked / name).write_text(f"# {name}\nmoved==2\n", encoding="utf-8")
+
+    def test_an_environment_that_matches_is_borrowed(self) -> None:
+        done = self.make("docs-lint")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(str(self.main / ".venv" / "bin" / "python"), done.stdout)
+
+    def test_a_moved_pin_refuses_and_names_the_file(self) -> None:
+        self.move_a_pin("requirements-security.txt")
+        done = self.make("docs-lint")
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertIn("requirements-security.txt", done.stderr)
+        self.assertIn("make setup VENV=.venv", done.stderr)
+        self.assertNotIn(str(self.main / ".venv"), done.stdout)
+
+    def test_an_environment_with_no_record_refuses(self) -> None:
+        """The case every machine is in the day this lands.
+
+        An environment provisioned before the record existed cannot say what
+        it holds, so it is refused rather than borrowed on the assumption
+        that it fits.
+        """
+
+        self.record.rename(self.main / ".venv" / "not-the-record")
+        done = self.make("docs-lint")
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertIn("does not record what it was provisioned from", done.stderr)
+
+    def test_an_explicit_venv_is_honoured_even_when_the_borrow_is_refused(self) -> None:
+        """`VENV=` is a deliberate choice; the check is on the automatic borrow."""
+
+        self.move_a_pin()
+        done = self.make("docs-lint", f"VENV={self.tmp}/chosen")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(f"{self.tmp}/chosen/bin/python", done.stdout)
+
+    def test_setup_is_still_runnable_in_a_worktree_that_was_refused(self) -> None:
+        """The refusal names `make setup`, so `make setup` must not refuse."""
+
+        self.move_a_pin()
+        done = self.make("setup")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn('-m venv ".venv"', done.stdout)
+
+    def test_setup_records_the_two_files_it_installed_from(self) -> None:
+        done = self.make("setup")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(
+            'cp requirements-dev.txt requirements-security.txt '
+            '".venv/sd-requirements/"', done.stdout)
+
+    def test_a_checkout_with_its_own_environment_is_never_checked(self) -> None:
+        """Nothing was borrowed, so there is nothing to be compatible with."""
+
+        (self.main / "requirements-dev.txt").write_text("moved==2\n",
+                                                        encoding="utf-8")
+        done = self.make("docs-lint", cwd=self.main)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn('".venv/bin/python"', done.stdout)
+
+
 class ProvisionedLibraryTests(unittest.TestCase):
     """Which checkouts the `sd_db` probe will look in.
 

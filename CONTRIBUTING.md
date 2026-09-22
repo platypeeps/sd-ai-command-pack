@@ -9,6 +9,9 @@ make setup
 ```
 
 This command creates `.venv`, installs the pinned requirements, and provisions the shared library.
+It also copies the two requirements files into `.venv/sd-requirements/`, which records what the environment was provisioned from.
+A linked worktree with no `.venv` borrows the main checkout's, and borrows it only while those copies match its own requirements files.
+A worktree that moved a pin is refused by name and told to run `make setup VENV=.venv` for an environment of its own.
 The requirements files use `--require-hashes` locally and in CI.
 To update a dependency, change its pin and run the compile command from that file's header:
 
