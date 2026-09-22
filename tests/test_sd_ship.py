@@ -494,6 +494,18 @@ roles:
         self.machine_copilot("never")
         self.assertFalse(ship.Ship.copilot_selected(pass_at("deep", 1)))
 
+    def test_a_delta_pass_of_a_later_push_does_not_hide_the_branch_tier(self):
+        """A later push is reviewed as a delta whose own tier says what the push
+        changed, not what Copilot would read: the deep pass behind it still
+        selects, two skip passes do not, and `never` stops the pair."""
+        def pass_at(tier, depth):
+            return {"report": {"route": {"tier": tier, "depth": depth},
+                               "remote_reviews": {"copilot": {"tier": tier, "repository": None}}}}
+        self.assertTrue(ship.Ship.copilot_selected([pass_at("deep", 1), pass_at("skip", 0)]))
+        self.assertFalse(ship.Ship.copilot_selected([pass_at("skip", 0), pass_at("skip", 0)]))
+        self.machine_copilot("never")
+        self.assertFalse(ship.Ship.copilot_selected([pass_at("deep", 1), pass_at("skip", 0)]))
+
     def test_a_report_from_before_the_key_keeps_its_recorded_opt_out(self):
         """A report written before `repository` travelled in it cannot say
         whether its `automatic: false` was the repository opting out, so that

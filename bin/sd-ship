@@ -420,26 +420,32 @@ class Ship(SharedReview):
         return entry
 
     def automatic_copilot_review(self) -> bool:
-        """Whether the policy as it stands now selects a Copilot review of the
-        tier the latest retained full-branch pass recorded (sd:1328)."""
+        """Whether the policy as it stands now selects a Copilot review of a
+        tier some retained pass recorded (sd:1328)."""
         return self.copilot_selected(self.history.native(self.state))
 
     @staticmethod
     def copilot_selected(passes: list[dict]) -> bool:
-        """Resolved at dispatch, not read back from the report.
+        """Resolved at dispatch, not read back from the reports.
 
-        The retained report is evidence of the tier and of what the
-        repository's own policy file said. Its `automatic` verdict was
-        computed against the machine setting of that moment and is not
-        authoritative here: the setting is the operator's cost lever, and a
-        lever that waited for the next paid review would not be one. A report
-        from before the `repository` key reads as a repository that did not
-        say, capped by the verdict of its day
+        A retained pass is evidence of the tier of what it reviewed and of
+        what the repository's own policy file said at that head. Its
+        `automatic` verdict was computed against the machine setting of that
+        moment and is not authoritative here: the setting is the operator's
+        cost lever, and a lever that waited for the next paid review would
+        not be one. Every pass is asked, not only the latest: a later push is
+        reviewed as a delta whose own tier says what the push changed and not
+        what Copilot would read, and a sensitive path reached in any segment
+        makes the branch deep. A pass from before the `repository` key reads
+        as a repository that did not say, capped by the verdict of its day
         (`copilot_ceiling_before_the_repository_key`).
         """
-        if not passes:
-            return False
-        report = passes[-1].get("report") or {}
+        selected = [Ship.copilot_pass_selected(review_pass) for review_pass in passes]
+        return any(selected)
+
+    @staticmethod
+    def copilot_pass_selected(review_pass: dict) -> bool:
+        report = review_pass.get("report") or {}
         route = report.get("route") or {}
         tier, depth = route.get("tier"), route.get("depth")
         if not isinstance(tier, str) or type(depth) is not int:

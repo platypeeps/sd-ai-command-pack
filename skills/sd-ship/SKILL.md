@@ -149,7 +149,7 @@ Results report `review_selection.requested_provider` and the actual `reviewed_by
 Read the recovery reference before retries, fix verification, or additional reviews with an explicit provider.
 
 `--copilot-review auto` is the prepare default.
-It resolves the decision at dispatch: the machine's `sd.copilot_review` as it stands then (`deep` when unset), overridden by the repository's `copilot_review.automatic_deep` as the retained review report recorded it, applied to the tier that report recorded.
+It resolves the decision at dispatch: the machine's `sd.copilot_review` as it stands then (`deep` when unset), overridden by the repository's `copilot_review.automatic_deep` as the retained review report recorded it, applied to the tiers the retained passes recorded, so a later push's delta pass does not hide the branch's.
 The report's own `automatic` verdict is what the policy said at review time, not the decision.
 A setting changed after the review takes effect on the next prepare without another local review.
 Each request binds one exact head and persists before merge.
@@ -168,7 +168,6 @@ No local receipt means there is nothing to abandon, and the command refuses.
 It preserves request history and records a separate abandonment.
 Only submitted, non-pending reviews mark matching request heads complete.
 Published Copilot findings still require disposition.
-A report retained from before `sd-review` wrote the repository's say into it is capped by the verdict it recorded: the setting may only subtract from that, so a `false` of its day never becomes a request.
 
 The additive `workflow` object reports `schema_version`, `phase`, `state`, `blocker`, and `next_action`.
 States are `success`, `retryable_failure`, `operator_decision`, and `policy_block`.

@@ -16,7 +16,7 @@
   `machine config`, `machine default`) and `repository` (what the file
   said), and `--explain` prints them on a `copilot` line. `sd-ship` resolves
   the decision again at dispatch, from the setting as it stands then and the
-  tier the retained review recorded, so `never` set after a deep review stops
+  tiers the retained passes recorded, so `never` set after a deep review stops
   the request and `always` set after one starts it; the report's own verdict
   is evidence, not the decision. `sd-ship --copilot-review request|skip` is
   unchanged.

@@ -435,8 +435,8 @@ The reserved `sd` namespace declares three settings:
   `.github/sd-review.json` gets Copilot on deep changes and on nothing else.
   A repository file that names `copilot_review.automatic_deep` overrides it; one that does not inherits.
   `sd-review` reports the effective policy, its source and the repository's say under `remote_reviews.copilot`.
-  `sd-ship` resolves the decision again at dispatch, from the setting as it stands then and the tier the
-  retained review recorded, so a setting changed after the review takes effect without another review.
+  `sd-ship` resolves the decision again at dispatch, from the setting as it stands then and the tiers the
+  retained passes recorded, so a setting changed after the review takes effect without another review.
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.
