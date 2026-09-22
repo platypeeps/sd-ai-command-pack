@@ -85,6 +85,50 @@ class VerbSurfaceTests(unittest.TestCase):
         self.assertEqual(run().returncode, 1)
 
 
+class SecondReaderCommandTests(unittest.TestCase):
+    """Step 9 of the printed checklist is a command a reader types by hand.
+
+    When stdin is not a terminal `codex exec` reads it as more prompt, and a
+    backgrounded shell call keeps it open, so a printed command without
+    `< /dev/null` hangs at `Reading additional input from stdin...` at 0% CPU
+    (sd:1339). The checklist is the one place the pack hands a reader that
+    command, so the guards live in the printed text, not in a wrapper.
+    """
+
+    def setUp(self) -> None:
+        self.checklist = load_kit().load("sd_research_review").CHECKLIST
+
+    def test_the_printed_codex_command_closes_stdin(self) -> None:
+        self.assertIn("< /dev/null", self._codex_command())
+
+    def test_the_printed_codex_command_is_bounded_and_observable(self) -> None:
+        command = self._codex_command()
+        self.assertRegex(command, r"^\s*timeout \d+ codex exec -s read-only")
+        self.assertIn(" -o 90-scratch/", command)
+        self.assertIn("> 90-scratch/", command)
+        self.assertIn("2>&1", command)
+
+    def test_the_checklist_says_how_to_tell_a_hang(self) -> None:
+        # "it buffers, so no output until it exits" told a reader a hang was
+        # normal; what replaced it is the rollout-file check.
+        self.assertNotIn("it buffers", self.checklist)
+        self.assertIn("rollout-*.jsonl", self.checklist)
+        self.assertIn("Reading additional input from stdin", self.checklist)
+
+    def _codex_command(self) -> str:
+        # The command is the indented block from the `codex exec` line to the
+        # next blank line; the prompt and the redirects are its continuation.
+        lines = self.checklist.splitlines()
+        start = next(i for i, line in enumerate(lines)
+                     if "codex exec -s read-only" in line)
+        block = []
+        for line in lines[start:]:
+            if not line.strip():
+                break
+            block.append(line)
+        return "\n".join(block)
+
+
 class RepositoryFromCwdTests(unittest.TestCase):
     """R10-D6, asserted on the surface that actually parses the argument."""
 

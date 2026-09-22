@@ -634,16 +634,30 @@ The half no script can do — work it before publishing, per document:
        shared, not retyped -- `adversarial-gate render --lens research-brief`
        prints it, from local-adversarial-gate in the `system` repo:
 
-         codex exec -s read-only "This is a markdown research brief, not code.
+         timeout 1500 codex exec -s read-only -o 90-scratch/codex-pass.md \
+           "This is a markdown research brief, not code.
            Review the uncommitted working-tree changes (git status, git diff,
            plus untracked new files) as an adversarial reader.
            Attack the argument, not the syntax: unsupported load-bearing claims,
            numbers missing a unit/date/denominator, the assumption the document
-           never states. Cite file and line. Do not modify any files."
+           never states. Cite file and line. Do not modify any files." \
+           < /dev/null > 90-scratch/codex-pass.log 2>&1
 
        `-s read-only` is not optional -- it is what stops an adversarial reader
-       editing the work it reviews. Run it in the background for anything past
-       a page; it buffers, so no output until it exits.
+       editing the work it reviews. Neither is `< /dev/null`: when stdin is not
+       a terminal, `codex exec` reads it as more prompt, and a backgrounded
+       shell call keeps stdin open, so Codex prints
+       `Reading additional input from stdin...` and waits forever at 0% CPU.
+       The prompt as an argument does not prevent that; only a closed stdin
+       does (sd:1339). `-o` puts the answer in a file and the redirect keeps
+       the log readable while it runs; `timeout` bounds a run that hangs
+       anyway; both files sit in `90-scratch/`, which is never cited or
+       published. Run it in the background for anything past a page, and tell
+       a slow run from a hung one within a minute: a live run writes a new
+       `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` and its log grows past
+       the echoed prompt. No new rollout file, or a log ending at the stdin
+       line, is a hang -- stop it and fix stdin. Do not pipe through `tail`:
+       it shows nothing until exit, so a hang and a slow run look the same.
 
        Not the `/codex:*` slash commands. The `codex@openai-codex` plugin is
        not a dependency of this kit and may not be installed; the CLI is the
