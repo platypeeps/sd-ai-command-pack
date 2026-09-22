@@ -578,9 +578,11 @@ class LineBudgetTests(unittest.TestCase):
         # `gate_failed_line` claim that no check ran only when `started` is
         # empty, naming the entrypoint otherwise; the 127 parsing moved to
         # `_not_found_report` to keep `classify_gate` under the branch
-        # ceiling. This raise is its own
-        # commit, before the one that spends it. Shared-core classification
-        # and the complexity ceilings are unchanged.
+        # ceiling. This raise is not its own commit: it landed inside
+        # 7bfda9bc, the commit that spends it, after the pre-commit hook
+        # refused the split twice and the second attempt carried the whole
+        # index; the number is still the measurement. Shared-core
+        # classification and the complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
