@@ -70,6 +70,8 @@ These run without being asked.
 - Expected branch protection requires pull requests, current CI, and up-to-date branches, with no required approvals.
   Configure it deliberately in GitHub; installation does not grant a protection exception.
   `sd-status` reports gaps; executable merge stops when required protection is absent.
+  Protection is read from both of GitHub's mechanisms: the classic object first, and when that is absent, the branch's active rulesets.
+  A ruleset with a `pull_request` or `required_status_checks` rule is the protection, held to the same guards; one that only forbids deletion or force-push is not.
   One accepted gap changes that gate: an `unprotected` entry in `.github/sd-status.json` at the reviewed commit.
   Under it, `sd-ship merge` requires every check run, every status, and a `pull_request` run of every workflow at the head to pass.
   The receipt records `declared_gap: unprotected`. Any other gap, and a declaration only in the working tree, do not change the gate.

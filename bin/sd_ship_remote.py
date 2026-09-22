@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import quote
 
 import sd_lib
+import sd_protection
 from sd_ship_workflow import blocked
 
 COPILOT_REVIEWER = "copilot-pull-request-reviewer[bot]"
@@ -74,9 +75,10 @@ class GitHub:
         """`(HTTP status, body)` for a GET whose non-2xx answer is still an answer.
 
         `api` folds every failure into one refusal, which is right everywhere
-        but the protection endpoint: there a 404 means "no protection object",
-        a fact the declared-gap rule reads, while a 401, 403 or 5xx means
-        "could not observe", which must stay a refusal. The status comes from
+        but the protection endpoints: there a 404 means "no classic protection
+        object", a fact the ruleset read and then the declared-gap rule act
+        on, while a 401, 403 or 5xx means "could not observe", which must
+        stay a refusal. The status comes from
         the response line `gh api --include` prints, not from the wording of
         gh's stderr, so a reworded message cannot turn a refusal into a fact.
         """
@@ -195,16 +197,27 @@ class GitHub:
 
     @staticmethod
     def validate_protection(value: Any) -> dict:
+        """The guards, over a classic object or the one `sd_protection.synthesize`
+        shapes from a ruleset. The ruleset spelling of the administrator guard
+        is `bypass_actors`: a ruleset that names anyone exempts them, and the
+        refusal names the ruleset rather than the derived `enforce_admins`."""
         if not isinstance(value, dict):
             raise Refusal("branch protection could not be observed")
         checks = value.get("required_status_checks") or {}
+        noun = "ruleset protection" if value.get("source") == sd_protection.RULESET_SOURCE else "branch protection"
+        if noun == "ruleset protection":
+            for entry in value.get("rulesets") or []:
+                if isinstance(entry, dict) and entry.get("bypass_actors"):
+                    raise Refusal(f"ruleset {entry.get('name')} (#{entry.get('id')}) has bypass actors",
+                                  code="protection_required",
+                                  next_action="Remove the bypass actors from the ruleset; this command cannot bypass it.")
         if value.get("enforce_admins", {}).get("enabled") is not True:
             raise Refusal("branch protection does not enforce administrators", code="protection_required",
                           next_action="Restore required branch protection; this command cannot bypass it.")
         if not isinstance(value.get("required_pull_request_reviews"), dict):
-            raise Refusal("branch protection does not require pull requests")
+            raise Refusal(f"{noun} does not require pull requests")
         if checks.get("strict") is not True or not (checks.get("contexts") or checks.get("checks")):
-            raise Refusal("branch protection requires strict, named CI checks")
+            raise Refusal(f"{noun} requires strict, named CI checks")
         allowances = value["required_pull_request_reviews"].get("bypass_pull_request_allowances") or {}
         if any(allowances.get(name) for name in ("users", "teams", "apps")):
             raise Refusal("pull-request protection has bypass allowances")
@@ -237,28 +250,64 @@ class GitHub:
         self.declaration_faults = [f"{where} at {head[:12]} carries no `unprotected` entry pinning branch_protection: false"]
         return None
 
+    def rulesets_observed(self, base: str) -> dict:
+        """The rules every ruleset evaluates for `base`, through the status-bearing read."""
+        return sd_protection.read_rulesets(self.api_status, self.prefix, base)
+
     def gate(self, base: str, head: str) -> dict:
         """What stands between this merge and `main`: the object, or the gap.
 
-        Only HTTP 404 is "absent". Anything else that is not 200 is "could
-        not observe" and refuses as `protection` always has.
+        Classic protection is read first. A 200 is the object (Path A). A 404
+        is "no classic object", which since sd:1327 is not yet "unprotected":
+        the branch's rulesets are read next, and an active ruleset that gates
+        the merge -- a `pull_request` or `required_status_checks` rule -- is
+        Path A too, validated by the same guards over the classic-shaped
+        object `sd_protection.synthesize` builds. A 404 with no such rule is
+        the declared gap (Path B) or today's refusal. A declaration beside
+        either kind of object is the same contradiction.
+
+        A 403 saying the plan lacks the feature (`Upgrade to GitHub Pro`) is
+        feature-absent, the fact a declaration pins, so it takes Path B or
+        refuses as `plan_limited`; any other non-200, non-404 answer, and any
+        rules read that is not a 200 list, is "could not observe" and refuses
+        as `protection` always has (sd:1323).
         """
         status, value = self.protection_observed(base)
         declaration = self.declared_gap(head)
+        message = value.get("message") if isinstance(value, dict) else None
+        where = sd_lib.ACKNOWLEDGEMENT_RELATIVE_PATH
         if status == 200:
             if declaration is not None:
-                raise Refusal(f"{sd_lib.ACKNOWLEDGEMENT_RELATIVE_PATH} at {head[:12]} declares main unprotected, "
+                raise Refusal(f"{where} at {head[:12]} declares main unprotected, "
                               "but GitHub returns a protection object; the declaration does not match the observed state")
             return self.validate_protection(value)
-        if status == 404 and declaration is not None:
-            return declaration
-        message = value.get("message") if isinstance(value, dict) else None
+        if status == 403 and sd_protection.plan_limited(message):
+            if declaration is not None:
+                return declaration
+            raise Refusal(f"{message} (HTTP 403)", code="plan_limited",
+                          next_action="This repository's plan does not offer branch protection. Move the repository "
+                                      "to an organization whose plan has it, or declare the accepted gap in "
+                                      f"{where} at the reviewed commit.")
+        if status == 404:
+            read = self.rulesets_observed(base)
+            if read["error"]:
+                raise Refusal(read["error"],
+                              next_action="Restore read access to the repository's rulesets, then retry merge.")
+            synthesized = sd_protection.synthesize(read["rules"], read["rulesets"])
+            if synthesized is not None:
+                if declaration is not None:
+                    names = ", ".join(f"{entry['name']} (#{entry['id']})" for entry in synthesized["rulesets"])
+                    raise Refusal(f"{where} at {head[:12]} declares main unprotected, but a ruleset gates it "
+                                  f"({names}); the declaration does not match the observed state")
+                return self.validate_protection(synthesized)
+            if declaration is not None:
+                return declaration
         detail = "; ".join(self.declaration_faults) if status == 404 else ""
         raise Refusal(f"{message or 'branch protection could not be observed'} (HTTP {status})"
                       + (f"; {detail}" if detail else ""),
                       code="protection_required" if status == 404 else "prerequisite_failed",
                       next_action="Restore branch protection, or declare the accepted gap in "
-                                  f"{sd_lib.ACKNOWLEDGEMENT_RELATIVE_PATH} at the reviewed commit.")
+                                  f"{where} at the reviewed commit.")
 
     def expected_workflows(self, head: str) -> list[tuple[str, str]]:
         """`(path, name)` for every workflow at `head` whose `on` includes `pull_request`.

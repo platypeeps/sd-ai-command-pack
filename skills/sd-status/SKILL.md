@@ -291,7 +291,11 @@ Three rules on that question:
 ## The protection section is the one that matters
 
 The doctrine is that merge authority is GitHub branch protection *wherever
-protection is actually enforcing*. Protection that exempts admins is prose, not
+protection is actually enforcing*. Protection is read from both of GitHub's
+mechanisms: the classic object, and when that answers 404, the branch's active
+rulesets -- a `pull_request` or `required_status_checks` rule there is
+protection and gets the same gap analysis; `deletion` alone is not, and the
+`unprotected` finding then names the rules it saw. Protection that exempts admins is prose, not
 authority: it stops collaborators and leaves the one account that does the
 merging entirely ungated. So this section reports enforcement state, and each
 missing leg prints as a named gap:

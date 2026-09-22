@@ -5579,5 +5579,107 @@ class MirrorSyncPendingTests(InventoryFixture):
         )
 
 
+class RulesetProtectionCase(unittest.TestCase):
+    """`protection_section` when classic protection is a 404 and a ruleset applies.
+
+    Measured on rwbp-website 2026-09-22 (sd:1323): the section read
+    `branches/main/protection` alone and reported a branch enforcing four
+    ruleset rules as `protected: false`. It now reads `rules/branches/main`
+    after the 404 and, when an active ruleset carries a merge-gating rule,
+    runs the same gap analysis over the object `sd_protection.synthesize`
+    shapes from it. A ruleset that gates no merge (`deletion` alone) keeps
+    the `unprotected` finding, with the rules named in `detail`.
+    """
+
+    SLUG = "acme/widget"
+    GH = {"available": True, "slug": SLUG, "reason": ""}
+    RULESET = {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}
+    REPO = {"default_branch": "main", "allow_rebase_merge": False,
+            "squash_merge_commit_title": "PR_TITLE", "squash_merge_commit_message": "PR_BODY"}
+
+    @staticmethod
+    def gating_rules() -> list[dict[str, Any]]:
+        return [
+            {"type": "deletion", "ruleset_id": 42},
+            {"type": "pull_request", "ruleset_id": 42,
+             "parameters": {"required_approving_review_count": 1}},
+            {"type": "required_status_checks", "ruleset_id": 42,
+             "parameters": {"strict_required_status_checks_policy": True,
+                            "required_status_checks": [{"context": "lint", "integration_id": 7}]}},
+        ]
+
+    def section(self, rules: Any, ruleset: Any = RULESET) -> dict[str, Any]:
+        seen: list[str] = []
+
+        def answer(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
+            path = args[1]
+            seen.append(path)
+            if path == f"repos/{self.SLUG}":
+                return dict(self.REPO), ""
+            if path.endswith("/branches/main/protection"):
+                return None, "gh: Branch not protected (HTTP 404)"
+            if path.endswith("/rules/branches/main"):
+                return (rules, "") if rules is not None else (None, "gh: Not Found (HTTP 404)")
+            if path.endswith("/rulesets/42"):
+                return (ruleset, "") if ruleset is not None else (None, "gh: Not Found (HTTP 404)")
+            raise AssertionError(f"unexpected read {path}")
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+                status.pr_state, "gh_json", answer):
+            result = status.protection_section(pathlib.Path(directory), self.GH)
+        result["_seen"] = seen
+        return result
+
+    def test_a_ruleset_that_gates_the_merge_is_reported_as_protection(self) -> None:
+        result = self.section(self.gating_rules())
+        self.assertTrue(result["protected"])
+        ids = [gap["id"] for gap in result["gaps"]]
+        self.assertNotIn("unprotected", ids)
+        self.assertNotIn("reviews", ids)
+        self.assertNotIn("strict", ids)
+        self.assertNotIn("enforce_admins", ids)
+        self.assertEqual(result["detail"]["required_contexts"], ["lint"])
+        self.assertEqual(result["detail"]["source"], "ruleset")
+        self.assertEqual(result["detail"]["rulesets"],
+                         [{"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}])
+        self.assertEqual(result["_seen"][-2:], [f"repos/{self.SLUG}/rules/branches/main",
+                                                f"repos/{self.SLUG}/rulesets/42"])
+
+    def test_a_ruleset_with_bypass_actors_is_protection_that_exempts_someone(self) -> None:
+        bypass = dict(self.RULESET, bypass_actors=[{"actor_id": 5, "actor_type": "RepositoryRole",
+                                                    "bypass_mode": "always"}])
+        result = self.section(self.gating_rules(), bypass)
+        self.assertTrue(result["protected"])
+        self.assertIn("enforce_admins", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["detail"]["rulesets"][0]["bypass_actors"], bypass["bypass_actors"])
+
+    def test_a_ruleset_that_gates_no_merge_keeps_the_unprotected_finding(self) -> None:
+        rules = [{"type": "deletion", "ruleset_id": 42}, {"type": "non_fast_forward", "ruleset_id": 42}]
+        result = self.section(rules)
+        self.assertFalse(result["protected"])
+        self.assertIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["detail"]["ruleset_rules"], ["deletion", "non_fast_forward"])
+        self.assertEqual(result["detail"]["read_error"], "gh: Branch not protected (HTTP 404)")
+
+    def test_a_ruleset_that_is_not_active_is_no_protection(self) -> None:
+        result = self.section(self.gating_rules(), dict(self.RULESET, enforcement="evaluate"))
+        self.assertFalse(result["protected"])
+        self.assertIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["detail"]["ruleset_rules"], [])
+
+    def test_no_rules_is_unprotected_and_says_the_rules_were_read(self) -> None:
+        result = self.section([])
+        self.assertFalse(result["protected"])
+        self.assertIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["detail"]["ruleset_rules"], [])
+        self.assertNotIn("rules_read_error", result["detail"])
+
+    def test_rules_that_cannot_be_read_are_named_not_assumed_absent(self) -> None:
+        result = self.section(None)
+        self.assertFalse(result["protected"])
+        self.assertIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["detail"]["rules_read_error"], "gh: Not Found (HTTP 404)")
+
+
 if __name__ == "__main__":
     unittest.main()

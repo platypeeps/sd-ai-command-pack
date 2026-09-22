@@ -65,6 +65,11 @@ class ShipDouble(GitHubDouble):
         self.copilot_requested_login = "copilot-pull-request-reviewer[bot]"
         self.lose_copilot_request = False
         self.create_draft = False
+        #: What `GET /rules/branches/{b}` and `GET /rulesets/{id}` answer: no
+        #: ruleset unless a test says so, the way the fixture's `main` had no
+        #: classic protection before sd:1110 said so (sd:1327).
+        self.rules = []
+        self.rulesets = {}
 
     def _pull(self, pull):
         head = getattr(pull, "merged_head", None) or pull.head_sha(self.remote)
@@ -116,6 +121,13 @@ class ShipDouble(GitHubDouble):
             return 200, self.statuses
         if method == "GET" and path.endswith("/protection") and isinstance(self.remote.protection, RemoteRefusal):
             raise self.remote.protection  # a 403 or 5xx, which is not "absent" (sd:1110)
+        if method == "GET" and "/rules/branches/" in path:
+            return 200, self.rules
+        if method == "GET" and "/rulesets/" in path:
+            ruleset_id = int(path.rsplit("/", 1)[1])
+            if ruleset_id not in self.rulesets:
+                raise RemoteRefusal(404, f"no ruleset {ruleset_id}")
+            return 200, self.rulesets[ruleset_id]
         if method == "GET" and path == f"{prefix}/actions/runs":
             wanted_sha = query.get("head_sha", [None])[0]
             wanted_event = query.get("event", [None])[0]
@@ -2898,6 +2910,43 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(result["protection"], {"declared_gap": "unprotected", "until": "a second account with push or merge rights exists"})
         key = receipts.receipt_key(self.remote.slug, "topic", self.item)
         self.assertEqual(receipts.read(self.connection, key)[1]["protection"]["declared_gap"], "unprotected")
+
+    def test_a_ruleset_that_gates_the_merge_is_path_a_without_a_declaration(self):
+        """answerbook/log-distiller's shape on the fixture: no classic object, one
+        active ruleset requiring a pull request and the strict `route` check
+        bound to app 7. No declaration, and the merge lands once; the receipt's
+        protection object says where it came from (sd:1327)."""
+        self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        self.double.rules = [
+            {"type": "deletion", "ruleset_id": 42},
+            {"type": "pull_request", "ruleset_id": 42, "parameters": {"required_approving_review_count": 0}},
+            {"type": "required_status_checks", "ruleset_id": 42,
+             "parameters": {"strict_required_status_checks_policy": True,
+                            "required_status_checks": [{"context": "route", "integration_id": 7}]}}]
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active"}}
+        self.green()
+        result = self.merge()
+        self.assertEqual(self.puts(), 1)
+        self.assertEqual(result["protection"]["source"], "ruleset")
+        self.assertEqual([entry["id"] for entry in result["protection"]["rulesets"]], [42])
+        self.assertEqual(result["protection"]["required_status_checks"]["checks"], [{"context": "route", "app_id": 7}])
+
+    def test_a_ruleset_that_only_forbids_deletion_is_not_protection(self):
+        """answerbook/mezmo-world-simulator's ruleset 21772988: `deletion` and
+        `non_fast_forward`, nothing a pull request must satisfy. Path B, so the
+        refusal is the present one and a declaration is honoured."""
+        self.double.rules = [{"type": "deletion", "ruleset_id": 42}, {"type": "non_fast_forward", "ruleset_id": 42}]
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active"}}
+        self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        self.green()
+        self.refuse("Branch not protected", "protection_required")
+        self.restart()
+        self.double.rules = [{"type": "deletion", "ruleset_id": 42}, {"type": "non_fast_forward", "ruleset_id": 42}]
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active"}}
+        self.declare()
+        self.green()
+        self.merge()
+        self.assertEqual(self.puts(), 1)
 
     def test_without_the_declaration_the_refusal_is_the_present_one(self):
         self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})

@@ -316,5 +316,196 @@ class ReadyCase(unittest.TestCase):
         self.assertEqual(requested[0], f"repos/fixture/repo/compare/main...{HEAD}")
 
 
+# --------------------------------------------------------------------------
+# Rulesets: the second mechanism the gate reads (sd:1327, sd:1323)
+# --------------------------------------------------------------------------
+
+RULESET = {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}
+
+
+def ruleset_rules(**changes: Any) -> list[dict]:
+    """The rules `repos/{slug}/rules/branches/main` lists for a ruleset that
+    gates a merge the way the classic fixture does: a review rule and a
+    strict, app-bound check. Shaped as answerbook/log-distiller's `main`
+    answered on 2026-09-22, ids and names aside."""
+    rules: dict[str, dict] = {
+        "deletion": {"type": "deletion", "ruleset_id": 42},
+        "pull_request": {"type": "pull_request", "ruleset_id": 42,
+                         "parameters": {"required_approving_review_count": 1, "dismiss_stale_reviews_on_push": False,
+                                        "require_code_owner_review": False, "require_last_push_approval": False,
+                                        "allowed_merge_methods": ["squash"]}},
+        "required_status_checks": {"type": "required_status_checks", "ruleset_id": 42,
+                                   "parameters": {"strict_required_status_checks_policy": True,
+                                                  "do_not_enforce_on_create": False,
+                                                  "required_status_checks": [{"context": "check", "integration_id": 7}]}},
+    }
+    for name, value in changes.items():
+        if value is None:
+            del rules[name]
+        else:
+            rules[name] = value
+    return list(rules.values())
+
+
+DECLARATION = {"declared_gap": "unprotected", "until": "a second account exists"}
+NOT_PROTECTED = (404, {"message": "Branch not protected"})
+PLAN_LIMITED = (403, {"message": "Upgrade to GitHub Pro or make this repository public to enable this feature."})
+
+
+class PathStubbedGitHub(sd_ship_remote.GitHub):
+    """The adapter with each path answered on its own, so `/protection` can
+    be a 404 while `/rules/branches/main` is a 200 with rules."""
+
+    def __init__(self, answers: dict[str, tuple[int, Any]], declaration: dict | None = None):
+        super().__init__(ROOT, "fixture/repo")
+        self.answers = answers
+        self.declaration = declaration
+        self.requested: list[str] = []
+
+    def api_status(self, path: str) -> tuple[int, Any]:
+        self.requested.append(path)
+        return self.answers.get(path, (404, {"message": f"no route for {path}"}))
+
+    def api(self, path: str, *, method: str = "GET", body: dict | None = None) -> Any:
+        return self.api_status(path)[1]
+
+    def declared_gap(self, head: str) -> dict | None:
+        self.declaration_faults = [] if self.declaration else [
+            ".github/sd-status.json at 0123456789ab carries no `unprotected` entry pinning branch_protection: false"]
+        return self.declaration
+
+
+class RulesetCase(unittest.TestCase):
+    """`GitHub.gate` when classic protection answers 404 and a ruleset applies.
+
+    Before sd:1327 the gate read `/protection` alone, so a ruleset-protected
+    branch was "unprotected" and the gate demanded a declaration that was
+    false. Now a 404 there is followed by the rules endpoint, and a ruleset
+    that gates the merge is Path A, validated by the same guards as a classic
+    object; one that gates nothing (`deletion` alone) is still Path B.
+    """
+
+    PREFIX = "repos/fixture/repo"
+
+    def remote(self, rules: list | None, ruleset: dict | None = RULESET, *, classic=NOT_PROTECTED,
+               declaration: dict | None = None) -> PathStubbedGitHub:
+        answers = {f"{self.PREFIX}/branches/main/protection": classic}
+        if rules is not None:
+            answers[f"{self.PREFIX}/rules/branches/main"] = (200, rules)
+        if ruleset is not None:
+            answers[f"{self.PREFIX}/rulesets/42"] = (200, ruleset)
+        return PathStubbedGitHub(answers, declaration)
+
+    def refused(self, remote: PathStubbedGitHub, message: str) -> sd_ship_remote.Refusal:
+        with self.assertRaisesRegex(sd_ship_remote.Refusal, message) as caught:
+            remote.gate("main", HEAD)
+        return caught.exception
+
+    def test_a_ruleset_that_gates_the_merge_is_the_protection_object(self) -> None:
+        """Path A through a ruleset: the object every later reader gets is
+        shaped like the classic one, marked `source: ruleset`, and names the
+        contributing ruleset. `ready` reads `required_status_checks.checks`
+        with `app_id`, so `integration_id` lands there."""
+        remote = self.remote(ruleset_rules())
+        value = remote.gate("main", HEAD)
+        self.assertEqual(value["source"], "ruleset")
+        self.assertEqual([entry["id"] for entry in value["rulesets"]], [42])
+        self.assertEqual(value["enforce_admins"], {"enabled": True})
+        self.assertEqual(value["required_pull_request_reviews"]["required_approving_review_count"], 1)
+        self.assertEqual(value["required_status_checks"],
+                         {"strict": True, "contexts": ["check"], "checks": [{"context": "check", "app_id": 7}]})
+        self.assertEqual(remote.requested, [f"{self.PREFIX}/branches/main/protection",
+                                            f"{self.PREFIX}/rules/branches/main", f"{self.PREFIX}/rulesets/42"])
+        # A second read of the same remote is the same object, which is what
+        # `still_gated`'s equality compares.
+        self.assertEqual(self.remote(ruleset_rules()).gate("main", HEAD), value)
+
+    def test_a_ruleset_without_a_pull_request_rule_is_refused_by_name(self) -> None:
+        self.refused(self.remote(ruleset_rules(pull_request=None)),
+                     r"^ruleset protection does not require pull requests$")
+
+    def test_a_ruleset_whose_checks_are_not_strict_is_refused_by_name(self) -> None:
+        lax = ruleset_rules()
+        lax[2]["parameters"]["strict_required_status_checks_policy"] = False
+        self.refused(self.remote(lax), r"^ruleset protection requires strict, named CI checks$")
+        unnamed = ruleset_rules()
+        unnamed[2]["parameters"]["required_status_checks"] = []
+        self.refused(self.remote(unnamed), r"^ruleset protection requires strict, named CI checks$")
+
+    def test_a_ruleset_with_bypass_actors_is_refused_naming_the_ruleset(self) -> None:
+        bypass = dict(RULESET, name="release", bypass_actors=[
+            {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}])
+        error = self.refused(self.remote(ruleset_rules(), bypass), r"^ruleset release \(#42\) has bypass actors$")
+        self.assertEqual(error.workflow["blocker"]["code"], "protection_required")
+
+    def test_a_ruleset_that_is_not_active_is_no_protection(self) -> None:
+        """`evaluate` and `disabled` enforce nothing: Path B, as if no rule
+        applied. Without a declaration that is today's refusal; with one the
+        declaration is the gate."""
+        for enforcement in ("evaluate", "disabled"):
+            with self.subTest(enforcement=enforcement):
+                idle = dict(RULESET, enforcement=enforcement)
+                error = self.refused(self.remote(ruleset_rules(), idle), r"^Branch not protected \(HTTP 404\); ")
+                self.assertEqual(error.workflow["blocker"]["code"], "protection_required")
+                self.assertEqual(self.remote(ruleset_rules(), idle, declaration=DECLARATION).gate("main", HEAD),
+                                 DECLARATION)
+
+    def test_a_ruleset_that_gates_no_merge_leaves_the_declaration_true(self) -> None:
+        """`deletion` and `non_fast_forward` alone -- answerbook/mezmo-world-simulator's
+        ruleset 21772988 -- gate nothing a pull request must satisfy, so the
+        branch is as unprotected as one with no ruleset: the declared gap holds."""
+        rules = ruleset_rules(pull_request=None, required_status_checks=None)
+        rules.append({"type": "non_fast_forward", "ruleset_id": 42})
+        self.assertEqual(self.remote(rules, declaration=DECLARATION).gate("main", HEAD), DECLARATION)
+        self.refused(self.remote(rules), r"^Branch not protected \(HTTP 404\); ")
+
+    def test_a_declaration_beside_a_gating_ruleset_is_the_same_mismatch_as_beside_a_classic_object(self) -> None:
+        error = self.refused(self.remote(ruleset_rules(), declaration=DECLARATION),
+                             r"declares main unprotected, but a ruleset gates it \(main \(#42\)\)")
+        # The same code the classic mismatch carries: the declaration is what
+        # needs correcting, not the protection.
+        self.assertEqual(error.workflow["blocker"]["code"], "prerequisite_failed")
+
+    def test_no_rules_at_all_is_still_path_b(self) -> None:
+        self.assertEqual(self.remote([], declaration=DECLARATION).gate("main", HEAD), DECLARATION)
+        error = self.refused(self.remote([]), r"^Branch not protected \(HTTP 404\); .*carries no `unprotected` entry")
+        self.assertEqual(error.workflow["blocker"]["code"], "protection_required")
+
+    def test_rules_that_cannot_be_read_are_not_absence(self) -> None:
+        """The rules endpoint answering anything but a 200 list, or a cited
+        ruleset not answering, is "could not observe": a refusal, with or
+        without a declaration, never Path B."""
+        unreadable = self.remote(None, declaration=DECLARATION)
+        error = self.refused(unreadable, r"^no route for repos/fixture/repo/rules/branches/main \(HTTP 404\)$")
+        self.assertEqual(error.workflow["blocker"]["code"], "prerequisite_failed")
+        gone = self.remote(ruleset_rules(), None, declaration=DECLARATION)
+        error = self.refused(gone, r"^ruleset 42: no route for repos/fixture/repo/rulesets/42 \(HTTP 404\)$")
+        self.assertEqual(error.workflow["blocker"]["code"], "prerequisite_failed")
+
+    def test_a_plan_limited_403_is_feature_absent_not_permission_denied(self) -> None:
+        """GitHub's `Upgrade to GitHub Pro` 403 says the plan has no branch
+        protection. That is the fact a declared gap pins, so a declaration
+        is honoured; without one the refusal is `plan_limited` and names
+        both remedies. The rules endpoint is not read: the same plan has no
+        rulesets either."""
+        remote = self.remote(None, None, classic=PLAN_LIMITED)
+        error = self.refused(remote, r"^Upgrade to GitHub Pro .* \(HTTP 403\)$")
+        self.assertEqual(error.workflow["blocker"]["code"], "plan_limited")
+        self.assertIn("plan does not offer branch protection", error.workflow["next_action"])
+        self.assertIn("organization", error.workflow["next_action"])
+        self.assertIn("declare the accepted gap", error.workflow["next_action"])
+        self.assertEqual(remote.requested, [f"{self.PREFIX}/branches/main/protection"])
+        self.assertEqual(self.remote(None, None, classic=PLAN_LIMITED, declaration=DECLARATION).gate("main", HEAD),
+                         DECLARATION)
+
+    def test_any_other_403_stays_a_failed_prerequisite(self) -> None:
+        for message in ("Resource not accessible by integration", "Must have admin rights to Repository.",
+                        "upgrade your token"):
+            with self.subTest(message=message):
+                remote = self.remote(None, None, classic=(403, {"message": message}), declaration=DECLARATION)
+                error = self.refused(remote, rf"^{re.escape(message)} \(HTTP 403\)$")
+                self.assertEqual(error.workflow["blocker"]["code"], "prerequisite_failed")
+
+
 if __name__ == "__main__":
     unittest.main()
