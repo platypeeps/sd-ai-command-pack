@@ -430,6 +430,79 @@ roles:
         self.assertEqual(result["copilot_review"]["decision"], "not_selected")
         self.assertEqual(self.double.copilot_requests, [])
 
+    # -- sd:1328: the Copilot decision is made at dispatch, from the policy as
+    # it stands then and the tier the retained review recorded. A review that
+    # already happened is evidence of the tier; its own `automatic` verdict is
+    # not authoritative, or the operator's cost lever would not move until
+    # the next review was paid for.
+
+    def machine_copilot(self, value: str | None) -> None:
+        """The fixture machine's `sd.copilot_review`, or no machine config at all."""
+        config = self.home / ".config/sd-ai-command-pack/config.json"
+        if value is None:
+            config.unlink(missing_ok=True)
+            return
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(json.dumps({"config": {"sd": {"copilot_review": value}}}))
+
+    def route_deep_saying_nothing_about_copilot(self) -> None:
+        """A policy file that escalates `src.py` and leaves Copilot to the machine."""
+        policy = self.root / ".github/sd-review.json"
+        policy.parent.mkdir(parents=True, exist_ok=True)
+        policy.write_text(json.dumps({"sensitive": ["src.py"]}))
+        _git(self.root, "add", str(policy.relative_to(self.root)))
+        _git(self.root, "commit", "-m", "route deep, say nothing about Copilot\n\nAuthored-with: human")
+
+    def test_never_set_after_a_deep_review_stops_the_automatic_request(self):
+        """The reviewer's scenario: a deep review is retained under the default,
+        the operator sets `never` because they just saw the bill, and the ship
+        must not request Copilot on the strength of the old report."""
+        self.route_deep_saying_nothing_about_copilot()
+        self.machine_copilot(None)
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.operation().review(head)
+        recorded = self.operation().state["passes"][-1]["report"]["remote_reviews"]["copilot"]
+        self.assertEqual((recorded["tier"], recorded["automatic"]), ("deep", True))
+        self.machine_copilot("never")
+        prepared = self.prepare()
+        self.assertEqual(prepared["copilot_review"]["decision"], "not_selected")
+        self.assertEqual(self.double.copilot_requests, [])
+
+    def test_always_set_after_a_review_under_never_requests_at_dispatch(self):
+        """The converse: the retained report said no, the policy now says
+        always, and the standard-tier change is requested at dispatch."""
+        self.machine_copilot("never")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.operation().review(head)
+        recorded = self.operation().state["passes"][-1]["report"]["remote_reviews"]["copilot"]
+        self.assertEqual((recorded["tier"], recorded["automatic"]), ("standard", False))
+        self.machine_copilot("always")
+        prepared = self.prepare()
+        self.assertEqual(prepared["copilot_review"]["selection"], "automatic")
+        self.assertEqual(len(self.double.copilot_requests), 1)
+
+    def test_always_leaves_a_retained_skip_tier_pass_alone(self):
+        """`always` means every reviewing tier; a `skip` pass has no local
+        reviewer, and the selector reads the recorded depth, not the word."""
+        self.machine_copilot("always")
+        def pass_at(tier, depth):
+            return [{"report": {"route": {"tier": tier, "depth": depth},
+                                "remote_reviews": {"copilot": {"tier": tier, "repository": None}}}}]
+        self.assertFalse(ship.Ship.copilot_selected(pass_at("skip", 0)))
+        self.assertTrue(ship.Ship.copilot_selected(pass_at("cheap", 1)))
+        self.assertTrue(ship.Ship.copilot_selected(pass_at("deep", 1)))
+        self.machine_copilot("never")
+        self.assertFalse(ship.Ship.copilot_selected(pass_at("deep", 1)))
+
+    def test_a_repository_that_named_the_key_still_wins_at_dispatch(self):
+        """The repository's say travels in the report; a machine flip does not
+        override a file that named `automatic_deep`."""
+        self.machine_copilot("never")
+        self.enable_automatic_copilot()
+        prepared = self.prepare()
+        self.assertEqual(prepared["copilot_review"]["selection"], "automatic")
+        self.assertEqual(len(self.double.copilot_requests), 1)
+
     def test_explicit_copilot_review_is_idempotent_while_the_request_is_present(self):
         first = self.prepare("--copilot-review", "request")
         second = self.prepare("--copilot-review", "request")

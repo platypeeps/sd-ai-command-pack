@@ -31,6 +31,38 @@ CONFIG_RELATIVE_PATH = pathlib.Path("sd-ai-command-pack") / "config.json"
 #: and `sd-review` resolves the effective policy against the same tuple.
 COPILOT_REVIEW_POLICIES = ("deep", "never", "always")
 COPILOT_REVIEW_DEFAULT = "deep"
+
+
+def copilot_policy(repository: bool | None, machine: str | None) -> tuple[str, str]:
+    """The effective Copilot policy word and who said it.
+
+    The repository's `.github/sd-review.json` wins when it named
+    `copilot_review.automatic_deep` (`True` is `deep`, `False` is `never`);
+    otherwise the machine's `sd.copilot_review`; otherwise the default, so a
+    repository with no file gets one Copilot review on a deep-tier change and
+    none on anything else (sd:1328). Pure on purpose: `sd-review` resolves it
+    when it reports, and `sd-ship` resolves it again when it dispatches,
+    against the setting as it stands then.
+    """
+    if repository is not None:
+        return ("deep" if repository else "never"), "repository"
+    if machine is not None:
+        return machine, "machine config"
+    return COPILOT_REVIEW_DEFAULT, "machine default"
+
+
+def copilot_automatic(policy: str, tier: str, depth: int) -> bool:
+    """Whether `policy` selects a Copilot review of a change routed to `tier`.
+
+    `depth` is the tier's own reviewer count from the route plan: `always`
+    means every reviewing tier, and a `skip` change nobody local reads is not
+    sent to a remote reader either.
+    """
+    if policy == "deep":
+        return tier == "deep"
+    if policy == "always":
+        return depth > 0
+    return False
 CORE_CONFIG = {
     "external_reviews": {"pattern": "configured|deny",
                          "description": "Standing private-code/context review authorization; unset uses local consent."},

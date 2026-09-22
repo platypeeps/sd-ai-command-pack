@@ -1918,9 +1918,9 @@ from a number the operator types.
   session. Verdicts: neither flow tight; about 1,780 cuttable lines in the
   scripts. Four plausible findings are not recorded as requirements until a
   fixture confirms them: `bin/sd-docs-lint:113,135` bare `read_text`,
-  `bin/sd-docs-lint:47` `\bBLOCKING\b` matching prose, `bin/sd_lib.py:92-99`
-  closing frontmatter on any `---` prefix, `bin/sd-review:341-342`
-  `validate_policy` mutating its argument. The full reports are in the
+  `bin/sd-docs-lint:47` `\bBLOCKING\b` matching prose, the frontmatter
+  reader in `bin/sd_lib.py` closing on any `---` prefix, `validate_policy` in
+  `bin/sd-review` mutating its argument. The full reports are in the
   session's scratchpad, not in the repository. Three open questions
   reopened; see that section. Requirement 13 is unreviewed by the lane
   until the next round runs.

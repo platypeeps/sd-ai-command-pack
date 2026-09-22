@@ -13,8 +13,13 @@
   no file get one Copilot review on a deep-tier change and none on anything
   else, without anybody writing nineteen files (sd:1328). The report's
   `remote_reviews.copilot` gains `policy` and `source` (`repository`,
-  `machine config`, `machine default`), and `--explain` prints them on a
-  `copilot` line. `sd-ship --copilot-review request|skip` is unchanged.
+  `machine config`, `machine default`) and `repository` (what the file
+  said), and `--explain` prints them on a `copilot` line. `sd-ship` resolves
+  the decision again at dispatch, from the setting as it stands then and the
+  tier the retained review recorded, so `never` set after a deep review stops
+  the request and `always` set after one starts it; the report's own verdict
+  is evidence, not the decision. `sd-ship --copilot-review request|skip` is
+  unchanged.
 
 - **`sd.merge_authorization` is now `sd.assistant_merge`.** The old name said
   what the setting was about, not who reads it, and the one database's

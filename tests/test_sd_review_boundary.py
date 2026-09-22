@@ -559,11 +559,20 @@ class LineBudgetTests(unittest.TestCase):
         # This raise is its own commit, before the one that spends it.
         # Shared-core classification and the complexity ceilings are
         # unchanged.
+        #
+        # 3176 -> 3148 is the review of sd:1328 finding that `sd-ship` read
+        # the report's `automatic` verdict back instead of the setting as it
+        # stood at dispatch, so `never` set after a deep review still bought
+        # one. The resolution (`copilot_policy`, `copilot_automatic`) is
+        # policy both lanes need and mechanics of neither, so it moved to
+        # `sd_lib`; the lane keeps the one call and gains the `repository`
+        # report key. Lowered to the measured size in the change that took
+        # the lines out, so the cap does not hide the next spend.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3176,
+            3148,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

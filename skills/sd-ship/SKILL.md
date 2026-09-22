@@ -149,9 +149,9 @@ Results report `review_selection.requested_provider` and the actual `reviewed_by
 Read the recovery reference before retries, fix verification, or additional reviews with an explicit provider.
 
 `--copilot-review auto` is the prepare default.
-It reads `remote_reviews.copilot.automatic` from the retained local review report.
-`sd-review` computes that from the machine's `sd.copilot_review` (`deep` when unset) unless the repository's `copilot_review.automatic_deep` overrides it.
-The report's `remote_reviews.copilot.policy` and `.source` say which one answered.
+It resolves the decision at dispatch: the machine's `sd.copilot_review` as it stands then (`deep` when unset), overridden by the repository's `copilot_review.automatic_deep` as the retained review report recorded it, applied to the tier that report recorded.
+The report's own `automatic` verdict is what the policy said at review time, not the decision.
+A setting changed after the review takes effect on the next prepare without another local review.
 Each request binds one exact head and persists before merge.
 Merge waits for a submitted review, stable review material, and verified finding dispositions.
 An automatic request occurs once per pull request.

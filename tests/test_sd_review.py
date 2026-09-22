@@ -756,7 +756,7 @@ class PipelineTests(ReviewFixture):
         self.assertEqual(result["status"], "clean")
         self.assertEqual(result["findings"], [])
         self.assertEqual(result["remote_reviews"]["copilot"], {
-            "automatic": False, "tier": "standard", "policy": "deep", "source": "machine default"})
+            "automatic": False, "tier": "standard", "policy": "deep", "source": "machine default", "repository": None})
 
     def test_automatic_deep_keeps_the_remote_review_report_shape(self) -> None:
         root = self.make_repo()
@@ -769,7 +769,7 @@ class PipelineTests(ReviewFixture):
                              "codex": sd_review.Completed(0, '{"findings": []}', "")})
         result = self.run_review(root, runner)
         self.assertEqual(result["remote_reviews"]["copilot"], {
-            "automatic": True, "tier": "deep", "policy": "deep", "source": "repository"})
+            "automatic": True, "tier": "deep", "policy": "deep", "source": "repository", "repository": True})
 
     def test_a_failing_gate_stops_before_any_provider(self) -> None:
         root = self.make_repo()
@@ -1994,22 +1994,22 @@ class CopilotPolicyTests(ReviewFixture):
         self.machine(None)
         deep = self.copilot(self.repo("deep", deep=True))
         self.assertEqual(deep, {"automatic": True, "tier": "deep",
-                                "policy": "deep", "source": "machine default"})
+                                "policy": "deep", "source": "machine default", "repository": None})
         standard = self.copilot(self.repo("standard", deep=False))
         self.assertEqual(standard, {"automatic": False, "tier": "standard",
-                                    "policy": "deep", "source": "machine default"})
+                                    "policy": "deep", "source": "machine default", "repository": None})
 
     def test_machine_never_requests_nothing_even_on_deep(self) -> None:
         self.machine("never")
         deep = self.copilot(self.repo("deep", deep=True))
         self.assertEqual(deep, {"automatic": False, "tier": "deep",
-                                "policy": "never", "source": "machine config"})
+                                "policy": "never", "source": "machine config", "repository": None})
 
     def test_machine_always_requests_on_standard(self) -> None:
         self.machine("always")
         standard = self.copilot(self.repo("standard", deep=False))
         self.assertEqual(standard, {"automatic": True, "tier": "standard",
-                                    "policy": "always", "source": "machine config"})
+                                    "policy": "always", "source": "machine config", "repository": None})
 
     def test_machine_always_still_skips_a_change_nobody_local_reviews(self) -> None:
         self.machine("always")
@@ -2024,11 +2024,11 @@ class CopilotPolicyTests(ReviewFixture):
         self.machine("always")
         off = self.copilot(self.repo("off", deep=True, policy={"copilot_review": {"automatic_deep": False}}))
         self.assertEqual(off, {"automatic": False, "tier": "deep",
-                               "policy": "never", "source": "repository"})
+                               "policy": "never", "source": "repository", "repository": False})
         self.machine("never")
         on = self.copilot(self.repo("on", deep=True, policy={"copilot_review": {"automatic_deep": True}}))
         self.assertEqual(on, {"automatic": True, "tier": "deep",
-                              "policy": "deep", "source": "repository"})
+                              "policy": "deep", "source": "repository", "repository": True})
 
     def test_a_repository_file_without_the_key_inherits_the_machine(self) -> None:
         self.machine("never")
@@ -2046,7 +2046,7 @@ class CopilotPolicyTests(ReviewFixture):
         explained = sd_review.review(root, namespace(explain=True), runner, self.environment(), self.chatgpt_home())
         self.assertEqual(explained["status"], "explained")
         self.assertEqual(explained["remote_reviews"]["copilot"], {
-            "automatic": True, "tier": "standard", "policy": "always", "source": "machine config"})
+            "automatic": True, "tier": "standard", "policy": "always", "source": "machine config", "repository": None})
         self.assert_no_session_started(runner)
         out = io.StringIO()
         sd_review.render(explained, out)
