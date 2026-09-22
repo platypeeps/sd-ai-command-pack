@@ -556,11 +556,23 @@ class LineBudgetTests(unittest.TestCase):
         # start rather than that it failed. This raise is its own commit,
         # before the one that spends it. Shared-core classification and the
         # complexity ceilings are unchanged.
+        #
+        # 3167 -> 3198 is sd:1343's second pass. The codex review of 23f2f429
+        # ran a recipe that passed its check and then lost a command on a
+        # later line; the lane read the 127, called it toolchain_missing and
+        # named /bin/sh. The 31 lines make the claim follow the evidence:
+        # `classify_gate` takes sd-check's own spawn failure (`exit_code:
+        # None`, `cannot run <program>`) as the one proof that no check ran,
+        # and reads any other 127 as `command_not_found`, naming the command
+        # and line from the shell's report; `gate_failed_line` says only
+        # what is known. This raise is its own commit, before the one that
+        # spends it. Shared-core classification and the complexity ceilings
+        # are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3167,
+            3198,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
