@@ -41,8 +41,8 @@ document nobody can find was not delivered.
 
 The HTML is written to `docs/dashboard/` in the producing repository, and the
 dashboard serves **everything it finds there**. That folder is gitignored: it is
-regenerated on every commit, and tracking it would put a generated diff in front
-of a reader on every render.
+regenerated whenever git moves the tree, and tracking it would put a generated
+diff in front of a reader on every render.
 
 The dashboard reads the directory and never writes to it, so the producing
 repository owns its own output. A report belongs to the repository that
@@ -309,20 +309,21 @@ Draining is six steps per request, and the order matters:
 
    **A re-render carries a recorded id forward rather than overwriting it.**
    A render rewrites the request for every designated document, and the
-   post-commit hook renders on every commit touching a document — so without
-   this, any commit landing between step 4 and step 5 erased the only record
-   of the created page, and the gap step 4 exists to close reopened by the
-   one route neither step watches. An id is carried only while the request
-   still names the same document, in the same repository, in the same
-   container. A page id belongs to the folder it was created under, so a
-   designation moved to another folder, or to the other Notion scope, drops it
-   and the drain resolves the new container afresh. The document and the
-   repository are compared because the queue filename says neither: it is keyed
-   on a repository's basename, and two checkouts of that name may designate a
-   document of the same name into the same default folder. How the container
-   was *spelled* is not compared — a folder written as a page URL and the same
-   folder written as its bare id are one container — and neither is the
-   document's title, since a renamed document keeps its page.
+   re-render hook renders on every commit, merge and checkout that touches a
+   document — so without this, any of the three landing between step 4 and
+   step 5 erased the only record of the created page, and the gap step 4
+   exists to close reopened by the one route neither step watches. An id is
+   carried only while the request still names the same document, in the same
+   repository, in the same container. A page id belongs to the folder it was
+   created under, so a designation moved to another folder, or to the other
+   Notion scope, drops it and the drain resolves the new container afresh. The
+   document and the repository are compared because the queue filename says
+   neither: it is keyed on a repository's basename, and two checkouts of that
+   name may designate a document of the same name into the same default
+   folder. How the container was *spelled* is not compared — a folder written
+   as a page URL and the same folder written as its bare id are one container
+   — and neither is the document's title, since a renamed document keeps its
+   page.
 5. Write the id into the document's designation, as `page=` for Notion and
    `file=` for Drive. In a research repo that designation is a key on the
    document's `research.conf.py` entry, and it is what the *next render* reads

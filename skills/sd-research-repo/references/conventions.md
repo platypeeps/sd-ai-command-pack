@@ -352,13 +352,13 @@ checkout owns it and that the note is not the place to edit.
 
 `render` also registers `docs/dashboard/` with the local dashboard's Documents
 tab, and the tab lists and serves **everything it finds there**. That folder is
-gitignored — it is regenerated on every commit — and `render` adds the ignore
-entry itself. Registration is one line in the dashboard's `documents.conf`,
-`label|<key>|<label>`, written once and idempotent. It carries no path: the
-dashboard enumerates `docs/dashboard/` from disk, so a path in the row would
-be the default location written down a second time and would go stale the
-moment the repo moved. The dashboard reads that file and never writes it, so
-the repo keeps owning its own output.
+gitignored — it is regenerated whenever git moves the tree — and `render` adds
+the ignore entry itself. Registration is one line in the dashboard's
+`documents.conf`, `label|<key>|<label>`, written once and idempotent. It
+carries no path: the dashboard enumerates `docs/dashboard/` from disk, so a
+path in the row would be the default location written down a second time and
+would go stale the moment the repo moved. The dashboard reads that file and
+never writes it, so the repo keeps owning its own output.
 
 The Documents tab serves under `default-src 'none'; style-src 'unsafe-inline';
 img-src data:; font-src data:`. The renderer already meets it — fonts are
