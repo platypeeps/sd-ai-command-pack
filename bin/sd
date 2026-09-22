@@ -178,6 +178,41 @@ def read_manifest(path: pathlib.Path) -> dict[str, object]:
     return loaded
 
 
+#: Every key `sd` reads out of a manifest. Each one is a `manifest.get()` call
+#: site in this file, and `validate_manifest_keys` is what keeps the two lists
+#: the same: a key added to one without the other either refuses a manifest
+#: that works or accepts one nothing reads.
+MANIFEST_KEYS = frozenset(
+    {"prefix", "interface", "kinds", "store", "config", "issues", "dashboard", "vendor"}
+)
+
+
+def validate_manifest_keys(manifest: dict[str, object]) -> None:
+    """Refuse a top-level key outside the closed vocabulary (R11-D14).
+
+    Every other block in this file refuses a key its table does not name. The
+    top level did not, and it is the one place where being ignored is silent
+    rather than loud: a misspelled *block* is not a malformed block, it is an
+    absent one. `add` runs one validator per key it knows, so `"configg"`
+    registered clean and `validate_config` returned `{}` -- a plugin that
+    declares nothing, and a `sd config get <prefix>.<key>` that refuses months
+    later with `declares no config keys`. That is the 2026-09-21 `hoa` outage,
+    and its cause was a manifest edit nothing read back.
+
+    This does not live in `read_manifest`. Two of its callers answer a refusal
+    with `continue`, so checking there would drop the whole plugin out of the
+    registry rather than name the typo -- the same silence one layer further
+    down.
+    """
+
+    unknown = sorted(set(manifest) - MANIFEST_KEYS)
+    if unknown:
+        raise Refusal(
+            f"manifest carries key(s) outside the closed vocabulary: "
+            f"{', '.join(unknown)} (the eight are {', '.join(sorted(MANIFEST_KEYS))})"
+        )
+
+
 def validate_prefix(manifest: dict[str, object], *, known: dict[str, pathlib.Path]) -> str:
     """The manifest's `prefix`, or a refusal naming why it cannot be used."""
 
@@ -213,6 +248,12 @@ def validate_dashboard(manifest: dict[str, object]) -> tuple[str, list[str]] | N
         return None
     if not isinstance(dashboard, dict):
         raise Refusal("`dashboard` is not an object")
+    # Before the `tile` read, not after: a plugin may declare `actions` and no
+    # tile, and that shape returns early. A typo checked after the return is a
+    # typo checked for tiles only.
+    unknown = sorted(set(dashboard) - {"tile", "tabs", "actions"})
+    if unknown:
+        raise Refusal(f"`dashboard` carries unknown key(s): {', '.join(unknown)}")
     tile = dashboard.get("tile")
     if tile is None:
         return None
@@ -779,6 +820,7 @@ def add(args: argparse.Namespace) -> int:
     plugin_root = str(manifest_path.parent)
     if plugin_root in roots:
         raise Refusal(f"{plugin_root} is already registered")
+    validate_manifest_keys(manifest)
     prefix = validate_prefix(manifest, known=registered(roots))
     validate_dashboard(manifest)
     validate_actions(manifest)
@@ -806,6 +848,7 @@ def describe(root: str) -> dict[str, object]:
     if isinstance(prefix, str):
         entry["prefix"] = prefix
     try:
+        validate_manifest_keys(manifest)
         declared = validate_dashboard(manifest)
         actions = validate_actions(manifest)
     except Refusal as refusal:
