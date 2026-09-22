@@ -232,10 +232,25 @@ in CI, neither of which can reach an MCP server, and the pack holds no
 credential for any of them.
 
 So a render enqueues. It writes one sync request per document per destination,
-naming the document, its container, the page or file to update and the source
-revision. An agent session drains the queue through that destination's connector
-and records the result. The request is durable: an enqueue that is never drained
-stays visible rather than expiring.
+naming the document, its container, the page or file to update, the source
+revision and a `fingerprint` -- the digest of what this generation of the
+request would write. An agent session drains the queue through that
+destination's connector and records the result. The request is durable: an
+enqueue that is never drained stays visible rather than expiring.
+
+A render queues a document only when that fingerprint differs from the one a
+drain last recorded as delivered, and from the one a still-pending request
+carries. A receipt beside the queue holds both; `SD_MIRROR_REQUEUE=1` on the
+invocation queues every designated document regardless.
+
+A render from a linked worktree queues nothing and writes no vault copy. Its
+`docs/dashboard/` is rendered, and the dashboard row it would register is the
+repository's own, but publication is the main checkout's: an unmerged branch
+that queued under the repository's name would replace the pending request,
+inherit the page id a drain recorded for it, and become the canonical mirror.
+The refusal names the checkout to run in. `SD_PUBLISH_FROM_WORKTREE=1` on the
+invocation is the operator saying, in words, that this branch's content is the
+canonical copy.
 
 One queue carries every destination, and `bin/sd-status` reports a pending
 request as `mirror-sync-pending`. A document designated for two places is two
@@ -255,8 +270,9 @@ where a person is present.
 Draining is six steps per request, and the order matters:
 
 1. Read the request. It names the destination, the document, its Markdown,
-   rendered and source paths, its container, the page or file to update and the
-   revision the render was made from. A Notion request also names its `scope`,
+   rendered and source paths, its container, the page or file to update, the
+   revision the render was made from and its `fingerprint`, which step 6
+   hands back. A Notion request also names its `scope`,
    `private` or `team`, how its container was resolved — `resolve: "id"` with
    the folder's page id in `space_id`, or `resolve: "name"` with the folder's
    name in `space` — and `subfolder`, the page under that container the
@@ -338,10 +354,17 @@ Draining is six steps per request, and the order matters:
    report it and stop, leaving the request in place with its id. The queue then
    still says work is owed, and the next drain updates the page it names rather
    than creating one.
-6. Delete the request file, once steps 4 and 5 have both succeeded. Deleting it
-   is what records that the mirror is current; a request left behind says the
-   sync still owes work, which is the safe thing for it to say if any earlier
-   step half-finished.
+6. Run `sd-research-kit delivered <request file name> <fingerprint>`, with the
+   fingerprint read in step 1, once steps 4 and 5 have both succeeded. It
+   records that fingerprint as delivered beside the queue and removes the
+   request only while the file is still that generation. A render that queued
+   newer content while steps 2 to 5 ran leaves its request in place, and the
+   next drain writes it. Do not delete the file by hand: that acknowledged
+   whatever the file held at that moment, which after such a render was
+   content the drain had not written -- and the next render, reading the
+   empty slot as delivered, then never queued it again. A request left behind
+   says the sync still owes work, which is the safe thing for it to say if
+   any earlier step half-finished.
 
 **What each failure leaves behind.** This is stated, not implied, because a
 procedure whose failure mode is the bug it prevents is not a fix.
@@ -350,7 +373,8 @@ procedure whose failure mode is the bug it prevents is not a fix.
 | --- | --- | --- |
 | step 3, before step 4 | a created page, its id recorded nowhere | adopts it by title under step 3 and carries on |
 | step 4, before step 5 | id in the request, not in the designation | updates that page, retries step 5 |
-| step 5, before step 6 | id recorded in both | updates that page, deletes the request |
+| step 5, before step 6 | id recorded in both | updates that page, runs step 6 |
+| a render during steps 2–5 | a newer request under the same name | step 6 leaves it; the next drain writes it |
 
 Every row survives a render in between, because a render carries a recorded id
 forward under step 4 rather than overwriting the request.
