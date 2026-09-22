@@ -90,7 +90,10 @@ create a PRD just to record routine progress or work already merged.
    through `sd_db`; a missing item row is reported as missing, never replaced
    by a status field or a GitHub issue.
 6. **Branch.** Create the branch and record it as `branch:` in the PRD
-   frontmatter when work starts. An `in_progress` item still needs a branch
+   frontmatter when work starts. The branch's checkout holds one writer:
+   this session in its own worktree (`--worktree`), or the runner in its
+   clone. See the sd-ai-command-pack checkout's `WORKFLOW.md`, section
+   **Parallel work**. An `in_progress` item still needs a branch
    (`sd-docs-lint` rule 2); in a checkout using row status, the status itself
    remains on the row.
 

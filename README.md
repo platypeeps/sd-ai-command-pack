@@ -197,6 +197,10 @@ branch before recording completion. Cancelling work requires a reason and
 completes immediately in the database. Neither operation writes a status file
 or creates a bookkeeping pull request.
 
+Parallel sessions and workers follow [Parallel work](WORKFLOW.md#parallel-work):
+one writer per checkout, read-only fan-out, one merge lane, and a budget on
+every worker.
+
 From the writing checkout, `sd writing list`, `sd writing readiness --piece
 YEAR/slug`, and `sd writing stage` share the dashboard's writing controls.
 Import and cutover have separate preview and verification commands. Once the
