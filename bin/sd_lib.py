@@ -26,11 +26,20 @@ LOCAL_BLOCK_START = "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->"
 LOCAL_BLOCK_END = "<!-- SD-AI-COMMAND-PACK:LOCAL:END -->"
 
 CONFIG_RELATIVE_PATH = pathlib.Path("sd-ai-command-pack") / "config.json"
+#: The words `sd.copilot_review` takes, and what an unset key reads as. One
+#: inventory: the pattern `sd config set` validates against is built from it,
+#: and `sd-review` resolves the effective policy against the same tuple.
+COPILOT_REVIEW_POLICIES = ("deep", "never", "always")
+COPILOT_REVIEW_DEFAULT = "deep"
 CORE_CONFIG = {
     "external_reviews": {"pattern": "configured|deny",
                          "description": "Standing private-code/context review authorization; unset uses local consent."},
     "assistant_merge": {"pattern": "controlled|ask",
                         "description": "Assistant merge permission for active controlled-repo work; unset asks, explicit wait wins."},
+    "copilot_review": {"pattern": "|".join(COPILOT_REVIEW_POLICIES),
+                       "description": "When sd-ship requests a Copilot review by itself: deep (unset reads deep) on deep-tier "
+                                      "changes only, always on every reviewing tier, never on none; a repository's "
+                                      ".github/sd-review.json copilot_review overrides it."},
 }
 
 #: `{current name: the name it was stored under before 1.1.0}`. A rename must

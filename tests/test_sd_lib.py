@@ -525,6 +525,20 @@ class CorePolicyReadTests(Fixture):
                 with self.assertRaises(sd_lib.ConfigError):
                     sd_lib.core_setting("external_reviews", env)
 
+    def test_copilot_review_reads_its_three_words_and_nothing_else(self):
+        env = {"HOME": str(self.tmp)}
+        path = self.tmp / ".config" / sd_lib.CONFIG_RELATIVE_PATH
+        path.parent.mkdir(parents=True)
+        self.assertIsNone(sd_lib.core_setting("copilot_review", env))
+        for value in ("deep", "never", "always"):
+            path.write_text(json.dumps({"config": {"sd": {"copilot_review": value}}}))
+            self.assertEqual(sd_lib.core_setting("copilot_review", env), value)
+        for value in ("Deep", "true", "", None, True):
+            with self.subTest(value=value):
+                path.write_text(json.dumps({"config": {"sd": {"copilot_review": value}}}))
+                with self.assertRaises(sd_lib.ConfigError):
+                    sd_lib.core_setting("copilot_review", env)
+
 
 class RowActivity(unittest.TestCase):
     """`Rows.activity`: what the database last recorded against an item.

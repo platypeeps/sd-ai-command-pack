@@ -2836,6 +2836,15 @@ class DeclaredGapCase(unittest.TestCase):
     def setUp(self):
         ShipCase.setUp(self)
         self.remote.protection = None
+        # Every declaration here commits `.github/workflows/*.yml`, a sensitive
+        # path that routes deep, and since sd:1328 a deep change asks Copilot
+        # unless something says otherwise. These tests are about check gaps,
+        # and the double never completes a Copilot review, so the fixture's
+        # machine says `never` rather than letting the default turn every
+        # merge below into a wait for a review nobody answers.
+        config = self.home / ".config" / ship.sd_lib.CONFIG_RELATIVE_PATH
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text('{"config":{"sd":{"copilot_review":"never"}}}')
 
     def commit(self, files: dict[str, str], message: str = "declare\n\nAuthored-with: human") -> str:
         """Commit `files` on `topic` at the remote and pull them into the clone.

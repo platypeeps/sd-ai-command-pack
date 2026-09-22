@@ -145,6 +145,10 @@ class Refusal(Exception):
 # The policy when `.github/sd-review.json` is absent, deliberately conservative:
 # documentation-only changes are free, everything else pays for codex, anything
 # sensitive or large escalates. A repository that wants otherwise writes the file.
+#
+# `copilot_review.automatic_deep` is `None` here on purpose: the repository has
+# not said, so the machine's `sd.copilot_review` answers (`deep` when unset).
+# A file that names the key says `true` or `false` and overrides the machine.
 DEFAULT_POLICY: dict[str, Any] = {
     "tier_order": ["skip", "cheap", "standard", "deep"],
     "default_tier": "standard",
@@ -155,7 +159,7 @@ DEFAULT_POLICY: dict[str, Any] = {
     "never_skip": ["docs/spec/**"],
     "sensitive": [".github/workflows/**"],
     "large_change_lines": 800,
-    "severity_floor": "medium", "copilot_review": {"automatic_deep": False},
+    "severity_floor": "medium", "copilot_review": {"automatic_deep": None},
 }
 
 POLICY_KEYS = frozenset(DEFAULT_POLICY) | {"$schema"}
@@ -253,7 +257,13 @@ def validate_policy(value: object, source: str) -> dict[str, Any]:
     floor = policy["severity_floor"]
     _require(isinstance(floor, str) and floor in BLOCKING_ORDER, f"{source}: severity_floor must be one of {', '.join(SEVERITIES)}")
 
-    return _validate_copilot_policy(policy, source)
+    # Only a file that names `copilot_review` is held to its grammar. One
+    # that does not keeps the default's `None` and inherits the machine's
+    # `sd.copilot_review`; running the check on the default would refuse
+    # every file that leaves Copilot to the machine.
+    if "copilot_review" in value:
+        return _validate_copilot_policy(policy, source)
+    return policy
 
 
 def read_json_file(path: pathlib.Path, refusal: type[Exception]) -> Any:
@@ -270,6 +280,39 @@ def read_json_file(path: pathlib.Path, refusal: type[Exception]) -> Any:
         return json.loads(text)
     except json.JSONDecodeError as error:
         raise refusal(f"{path}: not valid JSON ({error.msg}, line {error.lineno})") from None
+
+
+def copilot_policy(policy: dict[str, Any], env: Mapping[str, str]) -> tuple[str, str]:
+    """The effective Copilot policy -- `deep`, `never` or `always` -- and who said so.
+
+    The repository's `.github/sd-review.json` wins when it names
+    `copilot_review.automatic_deep`; otherwise the machine's
+    `sd.copilot_review`; otherwise `deep`, so a repository that carries no
+    file gets one Copilot review on a deep-tier change and none on anything
+    else, without anybody writing a file to say so (sd:1328). The source is
+    one of `repository`, `machine config` and `machine default`, and the
+    report carries it so `--explain` can name which one answered.
+    """
+    said = policy["copilot_review"]["automatic_deep"]
+    if said is not None:
+        return ("deep" if said else "never"), "repository"
+    machine = sd_lib.core_setting("copilot_review", dict(env))
+    if machine is not None:
+        return machine, "machine config"
+    return sd_lib.COPILOT_REVIEW_DEFAULT, "machine default"
+
+
+def copilot_automatic(policy_word: str, tier: str) -> bool:
+    """Whether `sd-ship` requests a Copilot review of a change at `tier` by itself.
+
+    `always` means every reviewing tier: a `skip`-tier change earns no local
+    reviewer, and a remote one is not asked to read what nobody local did.
+    """
+    if policy_word == "deep":
+        return tier == "deep"
+    if policy_word == "always":
+        return sd_route.TIER_DEPTH.get(tier, sd_route.DEFAULT_DEPTH) > 0
+    return False
 
 
 def load_policy(root: pathlib.Path) -> tuple[dict[str, Any], str]:
@@ -1611,6 +1654,7 @@ def review(
         raise sd_registry.RegistryError(registry_refusal)
     consent_source = "none"
     authorization = sd_lib.core_setting("external_reviews", dict(env))
+    copilot_word, copilot_source = copilot_policy(policy, env)
     try:
         consent, consent_source = sd_registry.resolve_consent(
             registry, sd_lib.local_block(root).get(sd_lib.CONSENT_KEY), authorization)
@@ -1749,8 +1793,10 @@ def review(
         "route": plan._asdict(),
         "remote_reviews": {
             "copilot": {
-                "automatic": plan.tier == "deep" and policy["copilot_review"]["automatic_deep"],
+                "automatic": copilot_automatic(copilot_word, plan.tier),
                 "tier": plan.tier,
+                "policy": copilot_word,
+                "source": copilot_source,
             }
         },
         "providers": list(providers),
@@ -1960,6 +2006,10 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
         write(f"  providers   {', '.join(result['providers']) or '(none)'}\n")
         if result.get("authorization"):
             write(f"  consent     {result['authorization']['source']} ({result['authorization']['path']})\n")
+    copilot = (result.get("remote_reviews") or {}).get("copilot")
+    if isinstance(copilot, dict) and "policy" in copilot:
+        asked = "requested" if copilot["automatic"] else "not requested"
+        write(f"  copilot     {copilot['policy']} ({copilot['source']}); tier {copilot['tier']}, {asked}\n")
     if result.get("fallback_candidates"):
         write(f"  fallbacks   {', '.join(result['fallback_candidates'])}\n")
     write(f"  authored    {result['authored_with_report']}\n")
