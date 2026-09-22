@@ -35,6 +35,9 @@ import subprocess
 import sys
 from typing import Any
 
+# Imported, not spelled again: the two spellings split once already.
+from sd_research_publish import DASHBOARD_DIR
+
 
 def load_docs(repo):
     """The DOCS list out of research.conf.py, same way render.py reads it."""
@@ -577,7 +580,7 @@ def check(repo):
             print(f"  FAIL {label}: {detail}")
             bad += 1
 
-        out = os.path.join(repo, "build", cfg.get("out", "") + ".html")
+        out = os.path.join(repo, DASHBOARD_DIR, cfg.get("out", "") + ".html")
         if not os.path.exists(out):
             print(f"  WARN {label}: not rendered yet")
         elif os.path.getmtime(src) > os.path.getmtime(out):
