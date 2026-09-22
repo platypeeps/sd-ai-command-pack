@@ -565,11 +565,21 @@ class LineBudgetTests(unittest.TestCase):
         # shares a commit with the spend at the integrator's request, and
         # the exact resulting size keeps this a ratchet. Shared-core
         # classification and the complexity ceilings are unchanged.
+        # 3250 -> 3271 turns that permission map default-deny (sd:1329,
+        # from review). The by-name denylist left the operator's global MCP
+        # servers' tools reachable under names it never held -- measured, a
+        # `github_get_me` completed -- so the map is now `*: deny` with a
+        # read-only allow-list, and `read` refuses the `mcp:*` patterns the
+        # built-in resource readers ask with. The 21 lines are the
+        # rule's comment and the docstring's record of what was measured
+        # (the escape, its closing, and the two grammar routes that cannot
+        # switch every server off without naming it). Shared-core
+        # classification and the complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3250,
+            3271,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

@@ -8,21 +8,38 @@ is why `sd_registry.MULTIVENDOR_READERS` names this reader and the entry has
 to pin a model. Everything below was measured against `opencode 1.18.30` on
 2026-09-22, not read off the help text.
 
-Confinement, and its gaps. `opencode run` has no sandbox flag. What refuses a
-write here is a private agent carried in `OPENCODE_CONFIG_CONTENT`, whose
-`permission` map denies `edit`, `bash`, `webfetch`, `websearch`, `task`,
-`skill`, `lsp`, `question` and `external_directory`. Under it a prompt
-ordering a file write and a `touch` through bash produced neither file, and
-the model answered that no such tool was available; a read of `/etc/hosts`
-from inside `--dir` was denied. The subject travels as `--file`, which the
-session reads verbatim from outside the project. Three gaps stay open, and an
-operator enabling the entry accepts them: the global
-`~/.config/opencode/opencode.json` is still read, so its MCP servers and
-instructions load into every review (the trivial prompt measured 122k input
-tokens, and `OPENCODE_CONFIG_DIR` pointed at an empty directory changed
-nothing); `--pure` drops external plugins only; and an `AGENTS.md` in the
-reviewed checkout is loaded as instructions, which no flag declines. `--auto`
-is never passed.
+Confinement is default-deny, and the map is the whole of it: `opencode run`
+has no sandbox flag. A private agent carried in `OPENCODE_CONFIG_CONTENT`
+denies `*` and allows `read`, `glob`, `grep` and `list` only, with `read`
+refusing every `mcp:*` pattern. The shape answers a review finding against
+the first cut, which denied nine built-in tools by name and let the
+operator's global `~/.config/opencode/opencode.json` -- still loaded, and
+`OPENCODE_CONFIG_DIR` pointed at an empty directory changes nothing -- offer
+its MCP servers' tools under names no denylist held: `github_get_me`
+completed, and a trivial prompt cost 122k input tokens. Under `"*": "deny"`
+no server tool is offered (the same prompt: `github_call: absent`, 4.7k
+input tokens), because opencode asks each MCP tool as its own permission
+named `<server>_<tool>`. The servers still connect, and their resources
+reach three built-in tools -- `list_mcp_resources`,
+`list_mcp_resource_templates`, `read_mcp_resource` -- that ask `read` with
+a `mcp:<server>:<uri>` pattern (`session/tools.ts` at v1.18.30); denying
+them by name did nothing (`list_mcp_resources` completed and listed 171
+resources across seven servers), which is what the `mcp:*` rule is for.
+Measured under this map: both were refused (`evaluated permission=read
+pattern=mcp:github:ui://github-mcp-server/get-me action.pattern=mcp:*
+action.action=deny` in the run's log), the project's `README.md` was read,
+and `github_get_me` was absent.
+No key switches every server off without naming it: `mcp.<name>.enabled` is
+per server, and an empty `XDG_CONFIG_HOME` bootstraps a config directory
+and did not return in five minutes. Open, and accepted by an operator who
+enables the entry: every configured server is started for each review;
+`--pure` drops external plugins only; an `AGENTS.md` in the reviewed
+checkout loads as instructions, which no flag declines. `--auto` is never
+passed. Under this map a prompt ordering a file write, a `touch` through
+bash and a read of `/etc/hosts` produced no file and answered `write:
+absent`, `bash: absent`, `hosts: denied` (`external_directory` fell to `*`
+in the log). The subject travels as `--file`, which the session reads
+verbatim from outside the project.
 
 Model confirmation is thinner than `agy_answer`'s. No event names the model
 that answered: `step_finish` carries tokens and cost only. What holds the pin
@@ -46,13 +63,17 @@ from typing import Any, Callable, Mapping
 #: this run inherits.
 AGENT = "sd-review"
 
-#: Every tool that writes, runs, fetches, delegates or leaves the project is
-#: denied; a denied tool is not offered to the model at all (measured).
-PERMISSION: dict[str, str] = {
-    "edit": "deny", "bash": "deny", "webfetch": "deny", "websearch": "deny",
-    "task": "deny", "skill": "deny", "lsp": "deny", "question": "deny",
-    "external_directory": "deny",
-    "read": "allow", "glob": "allow", "grep": "allow", "list": "allow",
+#: Default-deny, then a read-only allow-list. Order is load-bearing: opencode
+#: takes the last rule whose permission and pattern both match (`evaluate` in
+#: `permission/index.ts`), so `*` goes first and every allowance after it.
+#: Nothing here names a tool it refuses. An MCP server's tools ask as
+#: `<server>_<tool>` and fall to `*`; the built-in resource readers ask
+#: `read` with `mcp:<server>:<uri>` and fall to `mcp:*`, while a file path
+#: keeps `read`'s `*`. A denied tool is not offered to the model (measured).
+PERMISSION: dict[str, Any] = {
+    "*": "deny",
+    "read": {"*": "allow", "mcp:*": "deny"},
+    "glob": "allow", "grep": "allow", "list": "allow",
 }
 
 PROMPT = ("Read the attached review-subject.md for the review instructions and exact subject. "

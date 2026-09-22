@@ -13,6 +13,7 @@ produced it.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import pathlib
 import sys
@@ -125,19 +126,80 @@ class TheArgvIsConfined(unittest.TestCase):
         self.assertNotIn("--model", sd_opencode.opencode_argv(self.workdir, "opencode run", None))
 
 
-class TheEnvironmentCarriesTheAgent(unittest.TestCase):
-    """The private agent travels as inline config, and denies every tool
-    that writes, runs, fetches or leaves the project."""
+def _rules(permission: dict[str, object]) -> list[tuple[str, str, str]]:
+    """opencode's `fromConfig` (`permission/index.ts`, v1.18.30): a string
+    value is one rule on pattern `*`; an object is one rule per pattern, in
+    its own order."""
+    rules: list[tuple[str, str, str]] = []
+    for key, value in permission.items():
+        if isinstance(value, str):
+            rules.append((key, "*", value))
+        else:
+            rules.extend((key, pattern, action) for pattern, action in value.items())  # type: ignore[union-attr]
+    return rules
 
-    def test_the_agent_denies_writes_and_commands(self) -> None:
+
+def _decide(permission: dict[str, object], name: str, pattern: str = "*") -> str:
+    """opencode's `evaluate`: the last rule whose permission and pattern both
+    match wins, and no match is `ask`. An MCP server's tool asks as its own
+    name with pattern `*`; the resource readers ask `read` with
+    `mcp:<server>:<uri>` (`session/tools.ts`, v1.18.30)."""
+    hits = [action for key, rule, action in _rules(permission)
+            if fnmatch.fnmatchcase(name, key) and fnmatch.fnmatchcase(pattern, rule)]
+    return hits[-1] if hits else "ask"
+
+
+class TheEnvironmentCarriesTheAgent(unittest.TestCase):
+    """The private agent travels as inline config, and its map is
+    default-deny: `*` first, a read-only allow-list after it, decided the way
+    opencode decides. Nothing it refuses is refused by name."""
+
+    def permission(self) -> dict[str, object]:
         child = sd_opencode.opencode_environment({"PATH": "/usr/bin", "HOME": "/h"})
         self.assertEqual(child["PATH"], "/usr/bin")
         config = json.loads(child["OPENCODE_CONFIG_CONTENT"])
-        permission = config["agent"][sd_opencode.AGENT]["permission"]
-        for tool in ("edit", "bash", "webfetch", "websearch", "task", "skill", "external_directory"):
-            self.assertEqual(permission[tool], "deny", tool)
-        for tool in ("read", "glob", "grep"):
-            self.assertEqual(permission[tool], "allow", tool)
+        return dict(config["agent"][sd_opencode.AGENT]["permission"])
+
+    def test_the_default_is_deny_and_it_comes_first(self) -> None:
+        permission = self.permission()
+        self.assertEqual(list(permission)[0], "*", "a later `*` would outrank every allowance")
+        self.assertEqual(permission["*"], "deny")
+        self.assertEqual({key for key in permission if key != "*"}, {"read", "glob", "grep", "list"})
+        self.assertEqual({key: value for key, value in permission.items() if value == "allow"},
+                         {"glob": "allow", "grep": "allow", "list": "allow"})
+
+    def test_the_built_in_tools_are_denied_without_being_named(self) -> None:
+        permission = self.permission()
+        for tool in ("edit", "bash", "webfetch", "websearch", "task", "skill", "lsp", "question",
+                     "external_directory"):
+            self.assertEqual(_decide(permission, tool), "deny", tool)
+            self.assertNotIn(tool, permission, f"{tool} falls to `*`, not to a line of its own")
+        for tool in ("read", "glob", "grep", "list"):
+            self.assertEqual(_decide(permission, tool, "/repo/README.md"), "allow", tool)
+
+    def test_a_tool_outside_the_allow_list_is_refused_by_default(self) -> None:
+        permission = self.permission()
+        tool = "a_tool_this_module_never_heard_of"
+        self.assertNotIn(tool, json.dumps(permission))
+        self.assertEqual(_decide(permission, tool), "deny")
+
+    def test_a_configured_mutating_mcp_server_is_not_reachable(self) -> None:
+        """The operator's global config holds a server that writes, and the
+        reader's config names neither the server nor its tools: the tools
+        fall to `*`, the resources to `read`'s `mcp:*`, and a file read to
+        `read`'s `*`."""
+        operator = {"mcp": {"mutator": {"type": "local", "command": ["mutator-mcp"], "enabled": True}}}
+        child = sd_opencode.opencode_environment({"HOME": "/h"})
+        config = json.loads(child["OPENCODE_CONFIG_CONTENT"])
+        self.assertNotIn("mcp", config, "the reader disables nothing by name")
+        for server in operator["mcp"]:
+            self.assertNotIn(server, json.dumps(config))
+            permission = config["agent"][sd_opencode.AGENT]["permission"]
+            for tool in (f"{server}_write", f"{server}_delete", f"{server}_get"):
+                self.assertEqual(_decide(permission, tool), "deny", tool)
+            self.assertEqual(_decide(permission, "read", f"mcp:{server}:*"), "deny")
+            self.assertEqual(_decide(permission, "read", f"mcp:{server}:db://rows/1"), "deny")
+            self.assertEqual(_decide(permission, "read", "/repo/README.md"), "allow")
 
     def test_the_parent_is_not_mutated(self) -> None:
         parent = {"PATH": "/usr/bin"}
