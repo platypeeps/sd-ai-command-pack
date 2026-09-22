@@ -100,8 +100,8 @@ That `CLAUDE.local.md` block carries a `mode:` line with one of three values,
 and the workflow each selects is stated in [WORKFLOW.md](WORKFLOW.md):
 
 - `full` — planning artifacts live in `docs/work/` in the repository, and the
-  whole path runs; an unattended merge additionally needs `merge: auto` on the
-  item's row.
+  whole path runs; an unattended merge additionally needs `runner_merge: auto`
+  on the repository row, set with `sd-db.sh repo runner-merge <path> auto`.
 - `minimal` — no work items anywhere, and the small-change path only.
 - `guest` — planning artifacts go to the fork's integration branch, the loop
   stops at pull-request-ready, and nothing is posted upstream.

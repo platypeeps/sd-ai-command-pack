@@ -711,7 +711,7 @@ class TheAuthorStopsAtPullRequestReady(unittest.TestCase):
         lane = executable_section()
         self.assertIn("--run RUN-ID", lane)
         self.assertIn("exclusive", lane)
-        self.assertIn("merge: auto", lane)
+        self.assertIn("runner_merge: auto", lane)
         self.assertIn("An author assignment cannot use this authority", lane)
         self.assertIn("enforcing protection", lane)
 

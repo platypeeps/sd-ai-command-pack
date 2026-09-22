@@ -21,7 +21,7 @@ Shared contributors do not revoke permission; existing ownership, protection, re
 A refusal stops execution.
 Do not change gates to obtain a merge.
 An existing manual operator path needs separate authorization; a gate refusal does not grant it.
-Standing permission starts no background work and does not enable runner `merge: auto`.
+Standing permission starts no background work and does not enable `runner_merge: auto` on the repository row.
 
 Read `sd config get sd.external_reviews` separately.
 Apply the sd-ai-command-pack checkout's `.claude/rules/sd-operator-defaults.md`.
@@ -122,7 +122,7 @@ Never allocate another review ID to reset spent passes or discard history.
   Actual provider/vendor attribution belongs on the commit.
 - `sd-ship merge --item ID --expected-head SHA --manual --json` performs an explicit operator merge.
 - `sd-ship merge --item ID --expected-head SHA --run RUN-ID --json` requires its exclusive runner lease and matching clone.
-  Matching item/head and repository `merge: auto` are also required.
+  Matching item/head and `runner_merge: auto` on the repository row are also required.
   An author assignment cannot use this authority.
 - Both merge forms require fresh sole-operator ownership, enforcing protection, current default branch, exact reviewed head, and passing required checks.
   GitHub's merge rules must also pass.

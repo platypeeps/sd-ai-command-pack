@@ -819,7 +819,7 @@ class Ship(SharedReview):
 
         Merge authority is the same three questions `prepare` asks, put again
         at merge time and never at dispatch. A `no` here leaves the item at
-        `ready_to_send` with the row's `merge: auto` untouched, and it is the
+        `ready_to_send` with the row's `runner_merge: auto` untouched, and it is the
         same demotion as a refused push: the note is written by the same
         marker, so a remote that lowered the mode at both points leaves one.
 
