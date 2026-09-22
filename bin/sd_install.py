@@ -1298,9 +1298,10 @@ def write_local_block(
     except OSError:
         original = ""
     existing = migrated(original)
-    block = f"{BLOCK_BEGIN}\n{consent_body(consent)}{BLOCK_END}\n"
     start = existing.find(BLOCK_BEGIN)
     end = existing.find(BLOCK_END)
+    carried = carried_lines(existing[start + len(BLOCK_BEGIN) : end]) if start != -1 and end > start else {}
+    block = f"{BLOCK_BEGIN}\n{consent_body(consent, carried)}{BLOCK_END}\n"
     if start != -1 and end > start:
         updated = existing[:start] + block + existing[end + len(BLOCK_END) + 1 :]
         action = "refreshed"
@@ -1365,12 +1366,19 @@ CONSENT_KEY = "reviewers"
 BLOCK_KEY_LINE = re.compile(r"^(?P<indent>[ \t]*)(?P<key>[a-z][a-z_]*):(?P<value>.*)\n", re.MULTILINE)
 
 
-def consent_body(consent: str | None) -> str:
-    """The block's body: an answer this run was given, and nothing else.
+def consent_body(consent: str | None, carried: dict[str, str] | None = None) -> str:
+    """The block's body: the answers this repository has, and nothing else.
 
     Quote an answer using the reader's grammar; None inherits, empty denies.
     Quoting preserves # and backslashes in recipients. Callable replacement
     prevents re.sub from treating recipient backslashes as group references.
+
+    `carried` is the operator's own uncommented lines from the block being
+    refreshed (`carried_lines`), the text after each colon as written. Each
+    goes back out on its menu line uncommented, and a key the menu does not
+    list goes out after it; a `reviewers` line yields to `consent` when this
+    run was given one. Until sd:1340 only `reviewers` came across, and an
+    uncommented `mode:` went out commented again on every refresh.
 
     Every other key goes out commented, which the reader treats as unset.
     Uncommented, they were answers nobody gave: `--repo` wrote `mode: full`
@@ -1384,14 +1392,20 @@ def consent_body(consent: str | None) -> str:
     the one key this writes live -- and only when a grant was given.
     """
 
-    def commented_unless_granted(match: re.Match) -> str:
+    pending = dict(carried or {})
+
+    def commented_unless_answered(match: re.Match) -> str:
         indent, key, value = match["indent"], match["key"], match["value"]
         if key == CONSENT_KEY and consent is not None:
+            pending.pop(key, None)
             quoted = consent.replace("\\", "\\\\").replace('"', '\\"')
             return f'{indent}{CONSENT_KEY}: "{quoted}"\n'
+        if key in pending:
+            return f"{indent}{key}:{pending.pop(key)}\n"
         return f"{indent}# {key}:{value}\n"
 
-    return BLOCK_KEY_LINE.sub(commented_unless_granted, DEFAULT_BLOCK_BODY)
+    body = BLOCK_KEY_LINE.sub(commented_unless_answered, DEFAULT_BLOCK_BODY)
+    return body + "".join(f"    {key}:{raw}\n" for key, raw in pending.items())
 
 
 def without_legacy_prose(body: str) -> str:
@@ -1407,6 +1421,30 @@ def without_legacy_prose(body: str) -> str:
     line the operator got wrong is refused exactly as it was before.
     """
     return "\n".join(line for line in body.split("\n") if line.strip() not in LEGACY_BLOCK_PROSE)
+
+
+def carried_lines(body: str) -> dict[str, str]:
+    """The operator's uncommented `key: value` lines, keyed, the value verbatim.
+
+    A refresh rewrites the block from the template, and until sd:1340 it
+    carried one answer across: `reviewers`, read by `standing_consent` and
+    handed back in as `consent`. A `mode: guest` the operator had uncommented
+    went out commented again on every `--repo` run, and nothing said so.
+    Every uncommented line is an answer, so every one comes across, and the
+    text after the colon comes across as written: re-rendering it would turn
+    `guest` into `"guest"` on a line the operator typed. A line that only
+    repeats the template's own value is not an answer and is not carried --
+    `mode: full` and the `<placeholder>` values the installer once wrote are
+    exactly the copies `consent_body` exists to retire.
+    """
+    lib = sibling("sd_lib")
+    defaults = lib.parse_scalars(DEFAULT_BLOCK_BODY, comments=True)
+    carried: dict[str, str] = {}
+    for match in BLOCK_KEY_LINE.finditer(without_legacy_prose(body)):
+        key, raw = match["key"], match["value"]
+        if lib.parse_scalars(f"{key}:{raw}", comments=True).get(key) != defaults.get(key):
+            carried[key] = raw
+    return carried
 
 
 def standing_consent(repo: Path) -> str | None:

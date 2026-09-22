@@ -588,6 +588,52 @@ class TheSeamToTheReader(InstallerHarness):
                 self.assertIn(f"# {key}:", text)
                 self.assertNotIn(f"\n    {key}:", text)
 
+    def test_an_uncommented_answer_survives_the_refresh(self):
+        """An operator's `mode: guest` is an answer, and a refresh keeps it.
+
+        Until sd:1340 the refresh carried one key across, `reviewers`, read
+        by `standing_consent` and handed back in as `consent`, and rewrote
+        every other line from the template: the line the operator had
+        uncommented went out commented again, silently, on every `--repo`
+        run. The text after the colon comes across as written, inline
+        comment included, so a refresh never rewrites a line it did not
+        write.
+        """
+        repo = self.make_repo("answered")
+        sd_install.write_local_block(repo, consent="codex@codex")
+        target = repo / sd_install.LOCAL_BLOCK_FILE
+        text = target.read_text(encoding="utf-8")
+        self.assertIn("    # mode: full\n", text)
+        target.write_text(text.replace("    # mode: full\n", "    mode: guest  # a fork\n"),
+                          encoding="utf-8")
+        self.assertEqual(sd_install.write_local_block(repo, consent="codex@codex"),
+                         "refreshed")
+        refreshed = target.read_text(encoding="utf-8")
+        self.assertIn("    mode: guest  # a fork\n", refreshed,
+                      "the operator's line did not survive the refresh")
+        self.assertEqual(self.read_back(repo),
+                         {"mode": "guest", sd_install.CONSENT_KEY: "codex@codex"})
+
+    def test_a_line_that_only_repeats_the_template_is_still_retired(self):
+        """`mode: full` and a `<placeholder>` value are the copies `--repo`
+        once wrote, not answers; a refresh still puts them back commented."""
+        repo = self.make_repo("copied")
+        sd_install.write_local_block(repo)
+        target = repo / sd_install.LOCAL_BLOCK_FILE
+        text = target.read_text(encoding="utf-8")
+        target.write_text(text.replace("    # mode: full\n", "    mode: full\n")
+                          .replace("    # check:", "    check:"), encoding="utf-8")
+        self.assertEqual(sd_install.write_local_block(repo), "refreshed")
+        self.assertEqual(self.read_back(repo), {})
+
+    def test_the_standing_grant_survives_a_refresh_given_no_answer(self):
+        """No consent in hand means inherit, not revoke: the grant already on
+        the line is an uncommented key like any other."""
+        repo = self.make_repo("standing")
+        sd_install.write_local_block(repo, consent="codex@codex")
+        self.assertEqual(sd_install.write_local_block(repo), "refreshed")
+        self.assertEqual(self.read_back(repo), {sd_install.CONSENT_KEY: "codex@codex"})
+
     def test_an_empty_grant_is_written_and_denies(self):
         """Empty is an answer -- consent withheld -- and not the same as
         unset, which inherits the machine's standing authorization."""
