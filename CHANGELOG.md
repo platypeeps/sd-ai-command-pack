@@ -140,15 +140,20 @@
 
 ### Fixed
 
-- **sd-review names a gate that never started.** A linked worktree of this
-  pack has no `.venv`, and `make check` is the gate sd-review runs, so the
-  pass died on `/bin/sh: .venv/bin/python: No such file or directory` and
-  `make: *** [lint] Error 127` before any reviewer ran -- and the receipt
-  read as a failed review. Now, when a check exits 127 or a recipe reports
-  `Error 127`, the check report carries `reason: toolchain_missing` and
-  `interpreter: <path>` naming what it looked for, and the human line says
-  the gate could not start rather than that it failed. Finding the venv
-  from a worktree is the Makefile's own fix, on its own branch. sd:1343.
+- **sd-review says what a failed gate lacked, and no more.** A linked
+  worktree of this pack has no `.venv`, and `make check` is the gate
+  sd-review runs, so the pass died on `/bin/sh: .venv/bin/python: No such
+  file or directory` and `make: *** [lint] Error 127` before any reviewer
+  ran -- and the receipt read as a failed review. Now a check that exited
+  127, or whose recipe reported `Error 127`, carries
+  `reason: command_not_found` with `missing_command` and `missing_line`
+  from the shell's own report, and the human line names the command and
+  says the gate ran up to that point. When sd-check could not spawn the
+  check's own program (`exit_code: None`, `cannot run <program>`), and
+  only then, the report carries `reason: toolchain_missing` and
+  `interpreter: <program>`, because only that proves no check ran. Finding
+  the venv from a worktree is the Makefile's own fix, on its own branch.
+  sd:1343.
 
 - **A Notion default folder is a configured page id, not a folder name.**
   `NOTION_SCOPES` held `Briefs` and `R&D Briefs` as lookup keys, and the owner

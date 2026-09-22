@@ -780,8 +780,12 @@ class PipelineTests(ReviewFixture):
 
     # sd:1343 -- a worktree of this pack has no .venv, and `make check` died
     # on the toolchain before any reviewer ran. The receipt has to say what is
-    # missing, not just that the gate failed.
-    def test_a_gate_that_cannot_start_its_interpreter_names_it(self) -> None:
+    # missing, not just that the gate failed -- and no more than it can prove.
+    # The codex review of 23f2f429 ran a helper that passed its check and then
+    # hit a missing postprocessor, and this lane called /bin/sh a missing
+    # interpreter. What a shell's text proves is which command it could not
+    # find; what sd-check's own spawn failure proves is that nothing ran.
+    def test_a_make_gate_whose_interpreter_is_absent_names_the_path(self) -> None:
         root = self.make_repo()
         self.prepare(root)
         payload = json.dumps({"checks": [{
@@ -791,13 +795,18 @@ class PipelineTests(ReviewFixture):
         runner = FakeRunner({"sd-check": sd_review.Completed(1, payload, "")})
         result = self.run_review(root, runner)
         self.assertEqual(result["status"], "gate_failed")
-        self.assertEqual(result["check"]["reason"], "toolchain_missing")
-        self.assertEqual(result["check"]["interpreter"], ".venv/bin/python")
+        self.assertEqual(result["check"]["reason"], "command_not_found")
+        self.assertEqual(result["check"]["missing_command"], ".venv/bin/python")
+        self.assertIsNone(result["check"]["missing_line"])
+        self.assertNotIn("interpreter", result["check"])
         self.assertEqual([call["argv"][0] for call in runner.calls[1:]], [])
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        self.assertIn(".venv/bin/python was not found", stream.getvalue())
+        self.assertNotIn("no check ran", stream.getvalue())
 
-    def test_a_gate_command_that_exits_127_is_a_missing_toolchain(self) -> None:
-        """Through the real sd-check and a real process: a gate whose command
-        exits 127 the way /bin/sh does for a missing interpreter."""
+    def test_a_gate_command_that_exits_127_names_the_command_the_shell_reported(self) -> None:
+        """Through the real sd-check and a real process."""
         root = self.make_repo()
         (root / "gate.sh").write_text(
             "#!/bin/sh\nprintf '%s\\n' '/bin/sh: .venv/bin/python: No such file or directory' >&2\nexit 127\n",
@@ -806,19 +815,58 @@ class PipelineTests(ReviewFixture):
         report = sd_review.run_check(root, sd_review.subprocess_runner, self.environment(), 60)
         self.assertEqual(report["status"], "fail")
         self.assertEqual(report["checks"][0]["exit_code"], 127)
-        self.assertEqual(report["reason"], "toolchain_missing")
-        self.assertEqual(report["interpreter"], ".venv/bin/python")
+        self.assertEqual(report["reason"], "command_not_found")
+        self.assertEqual(report["missing_command"], ".venv/bin/python")
 
-    def test_a_gate_that_failed_on_its_own_is_not_a_missing_toolchain(self) -> None:
-        # A "No such file or directory" inside a failing suite's output is a
-        # finding, not a toolchain report: only exit 127 or a recipe's
-        # `Error 127` says the interpreter never started.
+    def test_a_gate_whose_own_program_cannot_be_spawned_is_a_missing_toolchain(self) -> None:
+        """The one proof that no check ran: sd-check could not spawn the
+        program the check names, and reports it as exit_code None."""
+        root = self.make_repo()
+        interpreter = root / "no-such-venv" / "bin" / "python"
+        self.local_block(root, f"check: {interpreter} -c pass")
+        report = sd_review.run_check(root, sd_review.subprocess_runner, self.environment(), 60)
+        self.assertEqual(report["status"], "fail")
+        self.assertIsNone(report["checks"][0]["exit_code"])
+        self.assertEqual(report["reason"], "toolchain_missing")
+        self.assertEqual(report["interpreter"], str(interpreter))
+        self.assertTrue(report["evidence"].startswith("cannot run "), report["evidence"])
+        self.assertIn("no check ran", sd_review.gate_failed_line(report))
+
+    def test_a_recipe_that_passed_its_check_then_lost_a_command_is_not_a_missing_toolchain(self) -> None:
+        """The reviewer's case against 23f2f429: exit 127 after a check ran."""
+        root = self.make_repo()
+        self.prepare(root)
+        (root / "helper.sh").write_text("#!/bin/sh\necho check passed\npostproc-sd1343\n", encoding="utf-8")
+        self.local_block(root, "check: sh helper.sh")
+        report = sd_review.run_check(root, sd_review.subprocess_runner, self.environment(), 60)
+        self.assertEqual(report["checks"][0]["exit_code"], 127)
+        self.assertEqual(report["checks"][0]["stdout"], "check passed\n")
+        self.assertEqual(report["reason"], "command_not_found")
+        self.assertEqual(report["missing_command"], "postproc-sd1343")
+        self.assertEqual(report["missing_line"], 3)
+        self.assertNotIn("interpreter", report)
+        runner = FakeRunner({"sd-check": sd_review.Completed(1, json.dumps({"checks": report["checks"]}), "")})
+        result = self.run_review(root, runner)
+        self.assertEqual(result["status"], "gate_failed")
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        text = stream.getvalue()
+        self.assertIn("postproc-sd1343 was not found at line 3", text)
+        self.assertNotIn("no check ran", text)
+        self.assertNotIn("interpreter", text)
+
+    def test_a_gate_that_failed_on_its_own_says_nothing_about_missing_tools(self) -> None:
+        # A "No such file or directory" inside a failing suite's output without
+        # a 127 is a finding, not a missing-command report.
         checks = [{"name": "test", "command": ["make", "test"], "status": "fail", "exit_code": 2,
                    "stderr": "cat: fixture.txt: No such file or directory\nmake: *** [test] Error 1\n"}]
-        self.assertIsNone(sd_review.missing_toolchain(checks))
-        self.assertIsNone(sd_review.missing_toolchain(None))
-        self.assertEqual(sd_review.missing_toolchain(
-            [{"name": "check", "command": ["make", "check"], "status": "fail", "exit_code": 127, "stderr": ""}]), "make")
+        self.assertIsNone(sd_review.classify_gate(checks))
+        self.assertIsNone(sd_review.classify_gate(None))
+        # A 127 with no shell report names nothing rather than guessing the
+        # program: `make` started, or there would be no exit code to read.
+        self.assertEqual(sd_review.classify_gate(
+            [{"name": "check", "command": ["make", "check"], "status": "fail", "exit_code": 127, "stderr": ""}]),
+            {"reason": "command_not_found", "missing_command": None, "missing_line": None, "evidence": "exit 127"})
 
     def test_a_blocking_finding_blocks(self) -> None:
         root = self.make_repo()
