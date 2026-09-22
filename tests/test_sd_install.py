@@ -651,6 +651,29 @@ class TheSeamToTheReader(InstallerHarness):
                 self.assertEqual(self.read_back(repo).get("mode"),
                                  None if before == "full" else before)
 
+    def test_a_key_the_reader_strips_is_the_same_key_to_the_carry(self):
+        """`check : make check` is `check` to the reader, so it is to the carry.
+
+        The carry matched keys with a regex of its own that ended a key at
+        the colon, while the reader strips the key: `check: obsolete-command`
+        over `check : make check` read as `make check` and refreshed to
+        `obsolete-command`, the override the reader had already applied
+        undone (codex review of sd:1340). The lines are split and the keys
+        normalized by the reader's own helper now, so the last occurrence
+        wins under every spelling the reader accepts.
+        """
+        repo = self.make_repo("spaced")
+        target = repo / sd_install.LOCAL_BLOCK_FILE
+        body = "    check: obsolete-command\n    check : make check\n"
+        target.write_text(f"{sd_install.BLOCK_BEGIN}\n{body}{sd_install.BLOCK_END}\n",
+                          encoding="utf-8")
+        self.assertEqual(self.read_back(repo).get("check"), "make check")
+        self.assertEqual(sd_install.write_local_block(repo), "refreshed")
+        refreshed = target.read_text(encoding="utf-8")
+        self.assertIn("    check: make check\n", refreshed)
+        self.assertNotIn("obsolete-command", refreshed)
+        self.assertEqual(self.read_back(repo), {"check": "make check"})
+
     def test_the_standing_grant_survives_a_refresh_given_no_answer(self):
         """No consent in hand means inherit, not revoke: the grant already on
         the line is an uncommented key like any other."""

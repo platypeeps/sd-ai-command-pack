@@ -1362,7 +1362,8 @@ def path_is_tracked(repo: Path, relative: str) -> bool:
 # through the canonical parser; malformed or unknown answers must not inherit.
 CONSENT_KEY = "reviewers"
 
-#: Any `key: value` line of the template, whole.
+#: Any `key: value` line of the template, whole. The template's own lines only:
+#: an operator's block is read by `sd_lib.scalar_lines`, the reader's grammar.
 BLOCK_KEY_LINE = re.compile(r"^(?P<indent>[ \t]*)(?P<key>[a-z][a-z_]*):(?P<value>.*)\n", re.MULTILINE)
 
 
@@ -1442,12 +1443,22 @@ def carried_lines(body: str) -> dict[str, str]:
     line by line would skip a final `mode: full` and carry the `mode: guest`
     above it, resurrecting a setting the reader had already retired (codex
     review of sd:1340).
+
+    The lines are split and the keys taken by the reader's own helper,
+    `scalar_lines`, not by `BLOCK_KEY_LINE`: that regex ends a key at the
+    colon, the reader strips it, and under the regex `check : make check`
+    was no occurrence of `check` at all, so a refresh carried the
+    `check: obsolete-command` above it -- the override undone (codex review
+    of sd:1340, second round). One parser decides what a key is. A line
+    that is not `key: value` is skipped here, not refused: `standing_consent`
+    has already read the block whole and refused such a line before a
+    `--repo` run gets this far, and the carry is not a second refusal.
     """
     lib = sibling("sd_lib")
     defaults = lib.parse_scalars(DEFAULT_BLOCK_BODY, comments=True)
     last: dict[str, str] = {}
-    for match in BLOCK_KEY_LINE.finditer(without_legacy_prose(body)):
-        last[match["key"]] = match["value"]
+    for key, raw in lib.scalar_lines(without_legacy_prose(body), comments=True, strict=False):
+        last[key] = raw
     return {key: raw for key, raw in last.items()
             if lib.parse_scalars(f"{key}:{raw}", comments=True).get(key) != defaults.get(key)}
 
