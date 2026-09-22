@@ -434,7 +434,8 @@ class Ship(SharedReview):
         authoritative here: the setting is the operator's cost lever, and a
         lever that waited for the next paid review would not be one. A report
         from before the `repository` key reads as a repository that did not
-        say, which inherits the machine.
+        say, capped by the verdict of its day
+        (`copilot_ceiling_before_the_repository_key`).
         """
         if not passes:
             return False
@@ -445,11 +446,32 @@ class Ship(SharedReview):
             return False
         remote = report.get("remote_reviews") or {}
         copilot = remote.get("copilot") if isinstance(remote, dict) else None
-        repository = copilot.get("repository") if isinstance(copilot, dict) else None
+        if not isinstance(copilot, dict):
+            copilot = {}
+        legacy = "repository" not in copilot
+        if legacy and not Ship.copilot_ceiling_before_the_repository_key(copilot):
+            return False
+        repository = None if legacy else copilot["repository"]
         if repository is not None and type(repository) is not bool:
             raise Refusal("retained review report carries a malformed Copilot policy")
         word, _source = sd_lib.copilot_policy(repository, sd_lib.core_setting("copilot_review"))
         return sd_lib.copilot_automatic(word, tier, depth)
+
+    @staticmethod
+    def copilot_ceiling_before_the_repository_key(copilot: dict) -> bool:
+        """Compatibility floor for reports written before
+        `remote_reviews.copilot` carried `repository` (sd:1328).
+
+        Such a report cannot say what the repository's file said, and its
+        `automatic` verdict folded that in: a recorded `false` may be a
+        repository that opted out of paid review. So the verdict of its day
+        is a ceiling the current policy may only subtract from -- `false`
+        stays `false` under any setting, `true` still yields to `never`, and
+        a missing verdict grants nothing, because a grant a missing field can
+        produce is not a grant. Delete this, and the `legacy` branch of
+        `copilot_selected`, once no retained report predates the key.
+        """
+        return copilot.get("automatic") is True
 
     def persist_copilot_direction(self) -> None:
         suppressed = self.state.get("copilot_review_suppressed", False)

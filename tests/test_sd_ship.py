@@ -494,6 +494,42 @@ roles:
         self.machine_copilot("never")
         self.assertFalse(ship.Ship.copilot_selected(pass_at("deep", 1)))
 
+    def test_a_report_from_before_the_key_keeps_its_recorded_opt_out(self):
+        """A report written before `repository` travelled in it cannot say
+        whether its `automatic: false` was the repository opting out, so that
+        verdict is a ceiling: the machine default does not turn it into a
+        request, and a report with no verdict at all grants nothing."""
+        self.route_deep_saying_nothing_about_copilot()
+        self.machine_copilot("never")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.operation().review(head)
+        operation = self.operation()
+        recorded = operation.state["passes"][-1]["report"]["remote_reviews"]["copilot"]
+        self.assertEqual((recorded["tier"], recorded["automatic"]), ("deep", False))
+        recorded.pop("repository", None)
+        self.machine_copilot(None)
+        prepared = operation.prepare()
+        self.assertEqual(prepared["copilot_review"]["decision"], "not_selected")
+        self.assertEqual(self.double.copilot_requests, [])
+        bare = [{"report": {"route": {"tier": "deep", "depth": 1}}}]
+        self.assertFalse(ship.Ship.copilot_selected(bare))
+
+    def test_a_report_from_before_the_key_still_yields_to_never(self):
+        """The verdict of its day is a ceiling and not a grant: `never` set
+        since subtracts from a recorded `true`."""
+        self.route_deep_saying_nothing_about_copilot()
+        self.machine_copilot(None)
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.operation().review(head)
+        operation = self.operation()
+        recorded = operation.state["passes"][-1]["report"]["remote_reviews"]["copilot"]
+        self.assertEqual((recorded["tier"], recorded["automatic"]), ("deep", True))
+        recorded.pop("repository", None)
+        self.machine_copilot("never")
+        prepared = operation.prepare()
+        self.assertEqual(prepared["copilot_review"]["decision"], "not_selected")
+        self.assertEqual(self.double.copilot_requests, [])
+
     def test_a_repository_that_named_the_key_still_wins_at_dispatch(self):
         """The repository's say travels in the report; a machine flip does not
         override a file that named `automatic_deep`."""

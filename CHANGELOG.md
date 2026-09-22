@@ -20,6 +20,9 @@
   the request and `always` set after one starts it; the report's own verdict
   is evidence, not the decision. `sd-ship --copilot-review request|skip` is
   unchanged.
+  A report retained from before `sd-review` wrote the repository's say into
+  it is capped by the verdict it recorded: the setting may only subtract
+  from that, so a `false` of its day never becomes a request.
 
 - **`sd.merge_authorization` is now `sd.assistant_merge`.** The old name said
   what the setting was about, not who reads it, and the one database's

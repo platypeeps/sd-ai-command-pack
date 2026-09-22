@@ -168,6 +168,7 @@ No local receipt means there is nothing to abandon, and the command refuses.
 It preserves request history and records a separate abandonment.
 Only submitted, non-pending reviews mark matching request heads complete.
 Published Copilot findings still require disposition.
+A report retained from before `sd-review` wrote the repository's say into it is capped by the verdict it recorded: the setting may only subtract from that, so a `false` of its day never becomes a request.
 
 The additive `workflow` object reports `schema_version`, `phase`, `state`, `blocker`, and `next_action`.
 States are `success`, `retryable_failure`, `operator_decision`, and `policy_block`.
