@@ -626,6 +626,31 @@ class TheSeamToTheReader(InstallerHarness):
         self.assertEqual(sd_install.write_local_block(repo), "refreshed")
         self.assertEqual(self.read_back(repo), {})
 
+    def test_a_repeated_key_carries_what_the_reader_reads(self):
+        """The reader takes the last occurrence; so does the carry.
+
+        Filtering line by line skipped a final `mode: full` as a template
+        copy and carried the `mode: guest` above it, so a refresh resurrected
+        a setting the reader had already retired (codex review of sd:1340).
+        """
+        sys.path.insert(0, str(REPO_ROOT / "bin"))
+        import sd_lib
+
+        for body, expected in (
+            ("    mode: guest\n    mode: full\n", {}),
+            ("    mode: full\n    mode: guest\n", {"mode": "guest"}),
+        ):
+            with self.subTest(body=body):
+                repo = self.make_repo(f"repeated-{len(expected)}")
+                target = repo / sd_install.LOCAL_BLOCK_FILE
+                target.write_text(f"{sd_install.BLOCK_BEGIN}\n{body}{sd_install.BLOCK_END}\n",
+                                  encoding="utf-8")
+                before = sd_lib.local_block(repo).get("mode")
+                self.assertEqual(sd_install.write_local_block(repo), "refreshed")
+                self.assertEqual(self.read_back(repo), expected)
+                self.assertEqual(self.read_back(repo).get("mode"),
+                                 None if before == "full" else before)
+
     def test_the_standing_grant_survives_a_refresh_given_no_answer(self):
         """No consent in hand means inherit, not revoke: the grant already on
         the line is an uncommented key like any other."""

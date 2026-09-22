@@ -1436,15 +1436,20 @@ def carried_lines(body: str) -> dict[str, str]:
     repeats the template's own value is not an answer and is not carried --
     `mode: full` and the `<placeholder>` values the installer once wrote are
     exactly the copies `consent_body` exists to retire.
+
+    The reader takes the last occurrence of a repeated key, so the last one
+    is resolved first and the template comparison runs on it alone: filtering
+    line by line would skip a final `mode: full` and carry the `mode: guest`
+    above it, resurrecting a setting the reader had already retired (codex
+    review of sd:1340).
     """
     lib = sibling("sd_lib")
     defaults = lib.parse_scalars(DEFAULT_BLOCK_BODY, comments=True)
-    carried: dict[str, str] = {}
+    last: dict[str, str] = {}
     for match in BLOCK_KEY_LINE.finditer(without_legacy_prose(body)):
-        key, raw = match["key"], match["value"]
-        if lib.parse_scalars(f"{key}:{raw}", comments=True).get(key) != defaults.get(key):
-            carried[key] = raw
-    return carried
+        last[match["key"]] = match["value"]
+    return {key: raw for key, raw in last.items()
+            if lib.parse_scalars(f"{key}:{raw}", comments=True).get(key) != defaults.get(key)}
 
 
 def standing_consent(repo: Path) -> str | None:
