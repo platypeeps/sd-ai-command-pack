@@ -45,6 +45,26 @@ PYTHON ?= $(shell if [ -x "$(BREW_PYTHON)" ]; then printf '%s' "$(BREW_PYTHON)";
 # retires; the note is what makes that row findable from a `make` run instead
 # of from an exchange nobody reads.
 #
+# `sd-provisioning` is the in-flight marker, and it answers a question the
+# record alone cannot. Since `setup` deletes the record before it mutates
+# anything, a missing record meant two different things: an environment
+# provisioned before this repository recorded anything, which is safe to
+# borrow, and one that is half-built right now or died half-built, which is
+# not. The marker separates them. It is written before the first mutation
+# and removed after the record is published, so every instant in which the
+# environment is inconsistent is an instant in which the marker is there.
+# Absence of the record *without* the marker keeps its old meaning exactly:
+# legacy, borrowed, and said out loud.
+#
+# A marked environment is refused by every path here -- the strict borrow,
+# the sd:1020 symlink, and a real local `.venv` alike -- because "this
+# environment is being rebuilt" is one fact, not three, and a reader who has
+# to remember which paths honour it will guess wrong. The refusal names the
+# checkout to finish it in, not `VENV=.venv`: the remedy is to run `make
+# setup` again, which rewrites the marker and clears it on success, so a
+# `make` killed mid-provision leaves a worktree that is refused and not one
+# that is bricked.
+#
 # One shell for the whole decision, run once per make (`:=`), not once per
 # expansion. A checkout with a real `.venv` pays one `test -x` and one
 # `test -L`, and reaches neither git nor `cmp`.
@@ -59,18 +79,22 @@ BORROWED := $(shell \
       venv="$$main/.venv"; name="$$venv"; record="$$venv/sd-requirements"; strict=yes; \
     fi; \
   fi; \
+  own="run 'make setup VENV=.venv' to give this worktree its own environment"; \
+  dir=$${name%/*}; where="in $$dir"; [ "$$dir" = "$$name" ] && where="here"; \
   why=; \
-  if [ -n "$$record" ] && [ ! -d "$$record" ]; then \
-    if [ -n "$$strict" ]; then why="$$name does not record what it was provisioned from"; \
-    else printf '%s\n' "note: $$name records no provisioning; this worktree's requirements are unchecked. Run 'make setup' in $${name%/*} to cover it." >&2; fi; \
+  if [ -x "$$venv/bin/python" ] && [ -f "$$venv/sd-provisioning" ]; then \
+    why="$$name is mid-provision, so nothing may be taken out of it; run 'make setup' $$where to finish it"; \
+  elif [ -n "$$record" ] && [ ! -d "$$record" ]; then \
+    if [ -n "$$strict" ]; then why="$$name does not record what it was provisioned from; $$own"; \
+    else printf '%s\n' "note: $$name records no provisioning; this worktree's requirements are unchecked. Run 'make setup' in $$dir to cover it." >&2; fi; \
   elif [ -n "$$record" ]; then \
     for f in requirements-dev.txt requirements-security.txt; do \
       cmp -s "$$f" "$$record/$$f" \
-        || { why="$$f here is not the file $$name was provisioned from"; break; }; \
+        || { why="$$f here is not the file $$name was provisioned from; $$own"; break; }; \
     done; \
   fi; \
   if [ -n "$$why" ]; then \
-    printf '%s' "refusing-to-borrow: $$why; run 'make setup VENV=.venv' to give this worktree its own environment"; \
+    printf '%s' "refusing-to-borrow: $$why"; \
   else printf '%s' "$$venv"; fi)
 # The refusal fires when a recipe asks for the interpreter, not at parse time:
 # `setup` is the remedy and must stay runnable in a worktree that is refused,
@@ -113,6 +137,15 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 # replacing somebody's deliberate link in silence is worse than the error it
 # repairs. It has to come before the record is removed, too: through a link,
 # `$(SETUP_VENV)/sd-requirements` is the *other* checkout's record.
+# The marker goes in with one write, before anything is touched: `mkdir -p`
+# then the file, and only then the `rm -rf` and the `python -m venv`. That
+# covers both windows at once. On a fresh provision the directory holds no
+# `bin/python` until `venv` runs, so nothing can borrow it before the marker
+# exists; on a re-provision `bin/python` is there from the start, but the
+# first mutation is the `rm -rf` below and the marker precedes it. CPython's
+# `venv` accepts a directory that already exists and leaves files it did not
+# write alone -- measured, not assumed -- which is why the marker survives
+# the step that rebuilds the interpreter around it.
 setup:
 	@venv="$(SETUP_VENV)"; \
 	  [ -n "$$venv" ] || { printf '%s\n' "error: VENV is empty; there is no path to provision" >&2; exit 1; }; \
@@ -120,6 +153,8 @@ setup:
 	    printf '%s\n' "detaching $$venv, a link to $$(readlink "$$venv"); the environment it points at is left alone" >&2; \
 	    rm "$$venv"; \
 	  fi; \
+	  mkdir -p "$$venv" || exit 1; \
+	  printf '%s\n' "make setup is building this environment; nothing may be taken out of it until this file is gone" > "$$venv/sd-provisioning"; \
 	  rm -rf "$$venv/sd-requirements" "$$venv/.sd-requirements.new"
 	"$(PYTHON)" -m venv "$(SETUP_VENV)"
 	"$(SETUP_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
@@ -127,6 +162,7 @@ setup:
 	@mkdir -p "$(SETUP_VENV)/.sd-requirements.new"
 	cp requirements-dev.txt requirements-security.txt "$(SETUP_VENV)/.sd-requirements.new/"
 	@mv "$(SETUP_VENV)/.sd-requirements.new" "$(SETUP_VENV)/sd-requirements"
+	@rm -f "$(SETUP_VENV)/sd-provisioning"
 
 # The pre-commit tier of sd:431. `hooks/pre-commit` runs Ruff over the staged
 # Python and the two whole-tree test passes that walk the tree, with a

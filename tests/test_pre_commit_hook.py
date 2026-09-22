@@ -620,6 +620,33 @@ class TheClonesCheckoutIsOnlyBorrowedWhenItIsOne(unittest.TestCase):
             (root / ".venv" / "bin" / "python").resolve(),
         )
 
+    def test_a_mid_provision_environment_is_not_the_interpreter(self):
+        """A `.venv` `make setup` is still building is skipped, not preferred.
+
+        `make setup` writes `MID_PROVISION` before its first mutation and
+        removes it only once the environment is complete, so while it is there
+        the interpreter under it may have no Ruff, half of it, or the previous
+        run's. The Makefile refuses to borrow such an environment; here the
+        candidate falls through, and the hook's own unprovisioned path then
+        reports the gates as unchecked instead of passing them.
+        """
+        root = self.tmp / "building"
+        root.mkdir()
+        git("init", "-q", cwd=root)
+        (root / ".venv" / "bin").mkdir(parents=True)
+        (root / ".venv" / "bin" / "python").write_text("#!/bin/sh\nexit 0\n")
+        (root / ".venv" / "bin" / "python").chmod(0o755)
+        self.assertEqual(
+            pathlib.Path(self.hook.interpreter(root)).resolve(),
+            (root / ".venv" / "bin" / "python").resolve(),
+            "the control: an unmarked environment is still chosen",
+        )
+        (root / ".venv" / self.hook.MID_PROVISION).write_text("building\n")
+        self.assertEqual(
+            self.hook.interpreter(root), "python3",
+            "a half-built environment was handed to the gates",
+        )
+
     def test_a_separated_git_directory_named_git_is_not_a_main_checkout_either(self):
         """The fixture the name test could not fail on (#1063 review).
 

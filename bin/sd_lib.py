@@ -693,6 +693,17 @@ def registered_base(root: pathlib.Path | str, sd_db: Any, connection: Any) -> st
     return str(registered_for(connection, base, origin or None))
 
 
+# The file `make setup` leaves inside a `.venv` while it is building it. The
+# Makefile writes it before its first mutation and removes it only once the
+# provisioning record is published, so an environment carrying it is
+# half-built -- by a run still going, or by one that died. Every place that
+# resolves a `.venv` treats it the same way: as an environment that is not
+# there. The name is shared by spelling and not by import, because the
+# Makefile is the writer and it cannot import either of us; a rename has to
+# be made in all three, and `tests/test_sd_lib.py` fails if one is missed.
+MID_PROVISION = "sd-provisioning"
+
+
 def _checkouts_that_may_hold_a_venv() -> list[pathlib.Path]:
     """This checkout, then the main worktree it was linked from.
 
@@ -708,6 +719,15 @@ def _checkouts_that_may_hold_a_venv() -> list[pathlib.Path]:
     worktree, and the checkout itself from the main one. Returned second, and
     only when it is somewhere else, so a worktree carrying its own virtualenv
     still answers from that one.
+
+    A checkout whose `.venv` carries `MID_PROVISION` drops out of the list.
+    `make setup` writes that file before its first mutation and removes it
+    only after the environment is complete, so while it is there the
+    `site-packages` under it may be from the run that is still going, from
+    one that died, or from neither. The caller's fallback -- answering from
+    git -- is worse than a good pinned library and better than a half-written
+    one, and it is the same answer this function already gives a checkout
+    that was never provisioned at all.
     """
 
     here = pathlib.Path(__file__).resolve().parent.parent
@@ -717,7 +737,7 @@ def _checkouts_that_may_hold_a_venv() -> list[pathlib.Path]:
         main = (here / common).resolve().parent
         if main != here and main.is_dir():
             roots.append(main)
-    return roots
+    return [root for root in roots if not (root / ".venv" / MID_PROVISION).exists()]
 
 
 def _provisioned_library_paths() -> list[str]:

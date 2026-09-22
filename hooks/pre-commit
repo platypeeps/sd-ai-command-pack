@@ -73,6 +73,16 @@ WHOLE_TREE_PASSES = ("tests.test_code_health", "tests.test_doc_citations")
 #: interpreter that cannot import it has not been provisioned, and `probe`
 #: reads that as the environment condition below rather than as a lint verdict.
 DEV_REQUIREMENT = "ruff"
+
+# The file `make setup` leaves inside a `.venv` while it is building it. The
+# Makefile writes it before its first mutation and removes it only once the
+# provisioning record is published, so an environment carrying it is
+# half-built -- by a run still going, or by one that died. Every place that
+# resolves a `.venv` treats it the same way: as an environment that is not
+# there. The name is shared by spelling and not by import, because the
+# Makefile is the writer and it cannot import either of us; a rename has to
+# be made in all three, and `tests/test_sd_lib.py` fails if one is missed.
+MID_PROVISION = "sd-provisioning"
 # The bound tests/test_code_health.py reads a shebang with: the whole first
 # line, capped so a binary is not read to its end.
 SHEBANG_LIMIT = 4096
@@ -160,9 +170,19 @@ def interpreter(root: pathlib.Path) -> str:
     worktree and its own `tests/` and `sd_lib/` shadow anything the other
     checkout installed. A hand-made `.venv` in the worktree still wins, so a
     worktree that wants its own is not overruled.
+
+    A `.venv` carrying `MID_PROVISION` is skipped as if it were not there:
+    `make setup` writes that file before it touches anything and removes it
+    only once the environment is complete, so its presence means the
+    interpreter behind it is half-built. The Makefile refuses to borrow such
+    an environment; here the same fact falls through to the next candidate
+    and then to `python3`, which the hook already handles -- an unprovisioned
+    interpreter reaches the reader as "unchecked", not as a clean pass.
     """
     for checkout in (root, main_checkout(root)):
         if checkout is None:
+            continue
+        if (checkout / ".venv" / MID_PROVISION).exists():
             continue
         venv = checkout / ".venv" / "bin" / "python"
         if venv.is_file():

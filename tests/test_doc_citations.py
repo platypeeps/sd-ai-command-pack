@@ -1093,6 +1093,14 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 #: parser for some time before that -- now lands in a comment block, where
 #: there is no symbol to prefer. That is the ratchet working: a `path:line`
 #: into code is worth less the moment the code moves.
+#:
+#: It stayed at 34 on the same day for the other half of the same lesson. The
+#: change that added `MID_PROVISION` would have pushed that citation back
+#: inside a symbol -- a different one again -- so the citation was repaired
+#: instead of the number: the page now names `delivered`, where the two
+#: `git fetch` calls it was talking about actually are. A count that a
+#: neighbouring edit can move in either direction is measuring the line
+#: numbers and not the claim.
 SYMBOL_ANCHORED_CITATIONS = {
     "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 34,
     "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 49,

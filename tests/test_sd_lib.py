@@ -985,6 +985,101 @@ class BorrowedEnvironmentTests(unittest.TestCase):
     def move_a_pin(self, name: str = "requirements-dev.txt") -> None:
         (self.linked / name).write_text(f"# {name}\nmoved==2\n", encoding="utf-8")
 
+    def mark_mid_provision(self) -> pathlib.Path:
+        """The file `make setup` leaves in an environment while it builds it."""
+
+        marker = self.main / ".venv" / "sd-provisioning"
+        marker.write_text("building\n", encoding="utf-8")
+        return marker
+
+    def test_a_mid_provision_environment_is_refused_through_the_link(self) -> None:
+        """The reviewer's state: record gone, marker present, sd:1020 link.
+
+        `setup` removes the record before it mutates anything, so from the
+        outside a half-built environment looks exactly like one provisioned
+        before the record existed -- and the symlink path treats that as
+        legacy and borrows it with a note. The marker is what tells the two
+        apart, and on this path it has to refuse and not merely say so: the
+        packages are being replaced while the borrower reads them.
+        """
+
+        self.symlink_the_environment()
+        self.record.rename(self.main / ".venv" / "not-the-record")
+        self.mark_mid_provision()
+        done = self.make("docs-lint")
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertIn("refusing-to-borrow", done.stderr)
+        self.assertIn("mid-provision", done.stderr)
+        self.assertNotIn("records no provisioning", done.stderr)
+        self.assertNotIn(str(self.main / ".venv" / "bin" / "python"), done.stdout)
+
+    def test_a_mid_provision_environment_is_refused_on_the_strict_path(self) -> None:
+        """The same fact on the other path, with the record still in place.
+
+        The record matching proves the requirements agree; it says nothing
+        about whether the packages behind them are the ones installed. So the
+        marker is checked before the record is compared, not after it fails.
+        """
+
+        self.mark_mid_provision()
+        done = self.make("docs-lint")
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertIn("mid-provision", done.stderr)
+
+    def test_the_refusal_names_the_checkout_to_finish_it_in(self) -> None:
+        """`make setup VENV=.venv` is the wrong remedy for a marked environment.
+
+        Forking a second environment out of a run that is still going is not
+        what the reader wants, and a marker left by a killed `make` has to be
+        recoverable rather than permanent: the way out is to finish the
+        provision where it started.
+        """
+
+        self.mark_mid_provision()
+        done = self.make("docs-lint")
+        self.assertIn(f"run 'make setup' in {self.main}", done.stderr)
+        self.assertNotIn("VENV=.venv", done.stderr)
+
+    def test_setup_still_runs_in_a_worktree_refused_for_the_marker(self) -> None:
+        """The refusal fires at expansion, and `setup` reaches SETUP_VENV."""
+
+        self.symlink_the_environment()
+        self.mark_mid_provision()
+        done = self.make("setup", "VENV=.venv")
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def test_an_unmarked_environment_with_no_record_is_still_legacy(self) -> None:
+        """The pin: absence of the record without the marker keeps its meaning.
+
+        This is every machine on the day the record landed, and the marker
+        must not turn it into a refusal. The note is the whole of the
+        difference, and it is the one this same state got before the marker
+        existed.
+        """
+
+        self.symlink_the_environment()
+        self.record.rename(self.main / ".venv" / "not-the-record")
+        self.assertFalse((self.main / ".venv" / "sd-provisioning").exists())
+        done = self.make("docs-lint")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("records no provisioning", done.stderr)
+        self.assertNotIn("refusing-to-borrow", done.stderr)
+
+    def test_every_implementation_spells_the_marker_the_same(self) -> None:
+        """Three writers of one name, and no import between them.
+
+        The Makefile writes the file; `bin/sd_lib.py` and `hooks/pre-commit`
+        read it. The Makefile cannot import either, so the name is shared by
+        spelling -- which is only safe while something fails when one of the
+        three is renamed alone.
+        """
+
+        root = pathlib.Path(__file__).resolve().parents[1]
+        self.assertEqual(sd_lib.MID_PROVISION, "sd-provisioning")
+        for path in (root / "Makefile", root / "hooks" / "pre-commit"):
+            self.assertIn(sd_lib.MID_PROVISION, path.read_text(encoding="utf-8"),
+                          f"{path.name} does not name the marker")
+
     def test_an_environment_that_matches_is_borrowed(self) -> None:
         done = self.make("docs-lint")
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -1259,6 +1354,47 @@ exit 0
         self.assertIn('".venv/bin/python"', after.stdout)
         self.assertNotIn("records no provisioning", after.stderr)
 
+    def test_a_killed_provision_is_refused_and_then_recoverable(self) -> None:
+        """The marker's full life: written, honoured, and cleared by a retry.
+
+        A marker that outlived its run would brick the worktree, since the
+        thing it refuses is the thing that would clear it. It does not: the
+        refusal sends the reader back to `make setup`, which rewrites the
+        marker over the dead one and removes it when the run completes.
+        """
+
+        failed = self.setup(STUB_PROVISION_EXIT="1")
+        self.assertNotEqual(failed.returncode, 0, failed.stdout)
+        marker = self.linked / ".venv" / "sd-provisioning"
+        self.assertTrue(marker.is_file(), "the marker should outlive the run")
+
+        refused = self.dry_run("docs-lint")
+        self.assertNotEqual(refused.returncode, 0, refused.stdout)
+        self.assertIn("mid-provision", refused.stderr)
+
+        done = self.setup()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertFalse(marker.exists(), "a completed run should clear it")
+        self.assertTrue(self.record.is_dir())
+        after = self.dry_run("docs-lint")
+        self.assertEqual(after.returncode, 0, after.stderr)
+
+    def test_the_marker_precedes_the_record_removal(self) -> None:
+        """Ordering, read off the state a failure leaves rather than the text.
+
+        The window the marker closes opens at the first mutation. Failing the
+        very next step is the narrowest way to ask whether the marker was
+        already there when that step ran.
+        """
+
+        self.assertEqual(self.setup().returncode, 0)
+        self.assertTrue(self.record.is_dir())
+        failed = self.setup(STUB_PIP_EXIT="1")
+        self.assertNotEqual(failed.returncode, 0, failed.stdout)
+        self.assertFalse(self.record.exists(), "the record should be gone")
+        self.assertTrue((self.linked / ".venv" / "sd-provisioning").is_file(),
+                        "the marker should have been written before the removal")
+
     def test_the_real_interpreter_refuses_a_symlinked_target(self) -> None:
         """The premise the stand-in mirrors, asked of the real interpreter.
 
@@ -1322,6 +1458,31 @@ class ProvisionedLibraryTests(unittest.TestCase):
         with unittest.mock.patch.object(
                 sd_lib, "__file__", str(main / "bin" / "sd_lib.py")):
             self.assertEqual(sd_lib._checkouts_that_may_hold_a_venv(), [main])
+
+    def test_a_mid_provision_checkout_is_not_offered(self) -> None:
+        """A marked `.venv` is skipped, so the probe never reads into it.
+
+        The `site-packages` under an environment `make setup` is rebuilding
+        belongs to the run that is still going, to one that died, or to
+        neither. Answering from git is the same fallback an unprovisioned
+        checkout already gets, and it is the better of the two.
+        """
+
+        main = self.tmp / "main"
+        main.mkdir()
+        self.git("init", "-q", "-b", "main", cwd=main)
+        self.git("-c", "user.email=t@t", "-c", "user.name=t",
+                 "commit", "-q", "--allow-empty", "-m", "root", cwd=main)
+        linked = self.tmp / "linked"
+        self.git("worktree", "add", "-q", str(linked), cwd=main)
+        for root in (main, linked):
+            (root / "bin").mkdir(exist_ok=True)
+        (main / ".venv").mkdir()
+        (main / ".venv" / sd_lib.MID_PROVISION).write_text("building\n",
+                                                           encoding="utf-8")
+        with unittest.mock.patch.object(
+                sd_lib, "__file__", str(linked / "bin" / "sd_lib.py")):
+            self.assertEqual(sd_lib._checkouts_that_may_hold_a_venv(), [linked])
 
     def test_a_local_environment_wins_an_equal_version_in_the_main_checkout(self) -> None:
         """Checkout order outranks the version sort, not the other way round.
