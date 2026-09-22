@@ -89,7 +89,14 @@ Unknown argument names are an error — stop and report them before starting.
    fills named holes against a fixed surface, and the `sd-rust-reviewer`
    agent examines each pass. When the work spans multiple units, split it
    as one skeleton unit plus one unit per fill batch, and gate each unit
-   with `sd-check`.
+   with `sd-check`. `sd-rust-write` and `sd-rust-fill` change files, so
+   each runs in its own worktree, and never two in one checkout; a fill
+   batch that returns a diff for the parent to apply is the patch-only
+   shape the pack prefers. `sd-rust-reviewer` is read-only and may run
+   beside either. Give each agent a budget, run it in the background, and
+   treat no report by the deadline as a failure: respawn once, then
+   escalate. The rules are the sd-ai-command-pack checkout's
+   `WORKFLOW.md`, section **Parallel work**.
 9. Close out: remove the remaining dead-code allowance, flip the hole
    lint to deny or show the grep returning nothing, and confirm the
    surface carries no marker whose reason is stale.

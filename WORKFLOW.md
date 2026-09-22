@@ -229,6 +229,47 @@ The item directory stays in place. Use `sd work relink <row-id> <path>` when an
 artifact moves: it preserves the row, notes and original source identity. No
 command automatically deletes or archives a completed item directory.
 
+## Parallel work
+
+The harness fans work out only when a `CLAUDE.md` or a skill asks for it.
+These rules say when to ask. They hold wherever a pack skill runs. A skill
+that dispatches workers cites this section and restates nothing.
+
+- **A writer runs alone in its checkout.** One checkout holds one writer. An
+  agent or session that changes files works in its own git worktree or clone.
+  Prefer a patch-only worker: it returns a diff, and one integrator applies
+  it. Never start a second writer in a checkout that already has one.
+- **Readers fan out.** Investigation, review, planning and audits run in
+  parallel across read-only workers. A read-only worker needs no isolation.
+- **One integrator lands the work.** Several workers may produce patches or
+  pull requests. One lane merges them, one at a time. Shared metadata — an
+  item id, a session number, a journal or ledger entry — is allocated when
+  the work lands, never when the branch is cut.
+- **No worker fails silently.** Every worker gets a budget, in wall clock or
+  tokens. It runs in the background and reports when it finishes. No report
+  by the deadline is a failure: respawn once, then escalate. Do not poll,
+  and do not assume success.
+- **Fan out only when three things hold.** The targets are independent, no
+  mutable state is shared, and the results are cheap to verify. Work on the
+  same files or the same metadata store stays in one lane, in sequence.
+
+The pack has two write lanes, and each holds one writer. A session writes on
+its own branch in its own worktree: `sd runner prepare <item> --branch <name>`
+prepares the item branch in the current repository, and `sd-plan --worktree`
+puts a new branch in a worktree of its own. The runner writes in a clone it
+makes for each run of an assignment, under its work root. It holds a lease on
+the repository branch for the run, so a second run on that branch waits until
+the first ends. `sd worktree resume <assignment>` resumes a run whose checkout
+the runner kept. `sd worktree restore <assignment> --destination <path>`
+copies a retained clone to a new absolute path that does not exist yet.
+Neither verb makes a worktree for a session; `git worktree add` does that.
+Merging is one lane: `sd-ship` merges one pull request per run, and the
+runner's unattended merge stays under **Development** above.
+
+Before writing a fix, look on the remote for a branch or pull request that
+already claims it, by the item id or by the changed path. Two sessions that
+land one defect waste one session's work; sd:1151 records the case.
+
 ## Modes
 
 `CLAUDE.local.md` carries one `mode:` line per repository. The installer writes
