@@ -588,6 +588,100 @@ class TheSeamToTheReader(InstallerHarness):
                 self.assertIn(f"# {key}:", text)
                 self.assertNotIn(f"\n    {key}:", text)
 
+    def test_an_uncommented_answer_survives_the_refresh(self):
+        """An operator's `mode: guest` is an answer, and a refresh keeps it.
+
+        Until sd:1340 the refresh carried one key across, `reviewers`, read
+        by `standing_consent` and handed back in as `consent`, and rewrote
+        every other line from the template: the line the operator had
+        uncommented went out commented again, silently, on every `--repo`
+        run. The text after the colon comes across as written, inline
+        comment included, so a refresh never rewrites a line it did not
+        write.
+        """
+        repo = self.make_repo("answered")
+        sd_install.write_local_block(repo, consent="codex@codex")
+        target = repo / sd_install.LOCAL_BLOCK_FILE
+        text = target.read_text(encoding="utf-8")
+        self.assertIn("    # mode: full\n", text)
+        target.write_text(text.replace("    # mode: full\n", "    mode: guest  # a fork\n"),
+                          encoding="utf-8")
+        self.assertEqual(sd_install.write_local_block(repo, consent="codex@codex"),
+                         "refreshed")
+        refreshed = target.read_text(encoding="utf-8")
+        self.assertIn("    mode: guest  # a fork\n", refreshed,
+                      "the operator's line did not survive the refresh")
+        self.assertEqual(self.read_back(repo),
+                         {"mode": "guest", sd_install.CONSENT_KEY: "codex@codex"})
+
+    def test_a_line_that_only_repeats_the_template_is_still_retired(self):
+        """`mode: full` and a `<placeholder>` value are the copies `--repo`
+        once wrote, not answers; a refresh still puts them back commented."""
+        repo = self.make_repo("copied")
+        sd_install.write_local_block(repo)
+        target = repo / sd_install.LOCAL_BLOCK_FILE
+        text = target.read_text(encoding="utf-8")
+        target.write_text(text.replace("    # mode: full\n", "    mode: full\n")
+                          .replace("    # check:", "    check:"), encoding="utf-8")
+        self.assertEqual(sd_install.write_local_block(repo), "refreshed")
+        self.assertEqual(self.read_back(repo), {})
+
+    def test_a_repeated_key_carries_what_the_reader_reads(self):
+        """The reader takes the last occurrence; so does the carry.
+
+        Filtering line by line skipped a final `mode: full` as a template
+        copy and carried the `mode: guest` above it, so a refresh resurrected
+        a setting the reader had already retired (codex review of sd:1340).
+        """
+        sys.path.insert(0, str(REPO_ROOT / "bin"))
+        import sd_lib
+
+        for body, expected in (
+            ("    mode: guest\n    mode: full\n", {}),
+            ("    mode: full\n    mode: guest\n", {"mode": "guest"}),
+        ):
+            with self.subTest(body=body):
+                repo = self.make_repo(f"repeated-{len(expected)}")
+                target = repo / sd_install.LOCAL_BLOCK_FILE
+                target.write_text(f"{sd_install.BLOCK_BEGIN}\n{body}{sd_install.BLOCK_END}\n",
+                                  encoding="utf-8")
+                before = sd_lib.local_block(repo).get("mode")
+                self.assertEqual(sd_install.write_local_block(repo), "refreshed")
+                self.assertEqual(self.read_back(repo), expected)
+                self.assertEqual(self.read_back(repo).get("mode"),
+                                 None if before == "full" else before)
+
+    def test_a_key_the_reader_strips_is_the_same_key_to_the_carry(self):
+        """`check : make check` is `check` to the reader, so it is to the carry.
+
+        The carry matched keys with a regex of its own that ended a key at
+        the colon, while the reader strips the key: `check: obsolete-command`
+        over `check : make check` read as `make check` and refreshed to
+        `obsolete-command`, the override the reader had already applied
+        undone (codex review of sd:1340). The lines are split and the keys
+        normalized by the reader's own helper now, so the last occurrence
+        wins under every spelling the reader accepts.
+        """
+        repo = self.make_repo("spaced")
+        target = repo / sd_install.LOCAL_BLOCK_FILE
+        body = "    check: obsolete-command\n    check : make check\n"
+        target.write_text(f"{sd_install.BLOCK_BEGIN}\n{body}{sd_install.BLOCK_END}\n",
+                          encoding="utf-8")
+        self.assertEqual(self.read_back(repo).get("check"), "make check")
+        self.assertEqual(sd_install.write_local_block(repo), "refreshed")
+        refreshed = target.read_text(encoding="utf-8")
+        self.assertIn("    check: make check\n", refreshed)
+        self.assertNotIn("obsolete-command", refreshed)
+        self.assertEqual(self.read_back(repo), {"check": "make check"})
+
+    def test_the_standing_grant_survives_a_refresh_given_no_answer(self):
+        """No consent in hand means inherit, not revoke: the grant already on
+        the line is an uncommented key like any other."""
+        repo = self.make_repo("standing")
+        sd_install.write_local_block(repo, consent="codex@codex")
+        self.assertEqual(sd_install.write_local_block(repo), "refreshed")
+        self.assertEqual(self.read_back(repo), {sd_install.CONSENT_KEY: "codex@codex"})
+
     def test_an_empty_grant_is_written_and_denies(self):
         """Empty is an answer -- consent withheld -- and not the same as
         unset, which inherits the machine's standing authorization."""

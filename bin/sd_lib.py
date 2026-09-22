@@ -17,6 +17,7 @@ import re
 import shlex
 import subprocess
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, NamedTuple
 
@@ -112,22 +113,45 @@ def parse_scalars(text: str, *, comments: bool, label: str = "block") -> dict[st
     taken to the end of the line, so a ``#`` inside quotes stays literal.
     """
     fields: dict[str, str] = {}
+    for key, raw in scalar_lines(text, comments=comments, label=label):
+        value = raw.strip()
+        if comments and value[:1] not in ('"', "'"):
+            value = value.split("#", 1)[0].strip()
+        fields[key] = _unquote(value)
+    return fields
+
+
+def scalar_lines(
+    text: str, *, comments: bool, label: str = "block", strict: bool = True
+) -> Iterator[tuple[str, str]]:
+    """Each `key: value` line of `text` as (key, raw): the key stripped, the
+    text after its first colon as written.
+
+    This is the line splitting and key normalization `parse_scalars` reads
+    by, on its own so a caller that needs the line rather than the value --
+    the installer carrying an operator's lines across a refresh -- takes
+    the same key from the same line. A second parser beside this one is
+    how `check : make check` came to be a different key to the carry than
+    to the reader, and a refresh reactivated the `check:` line the reader
+    had already overridden (codex review of sd:1340). The last line for a
+    key is the one `parse_scalars` keeps, under every spelling this accepts.
+
+    With ``comments`` a line that is neither blank, a comment nor
+    `key: value` is refused; ``strict=False`` skips it instead, for a caller
+    that runs after the reader has already refused the block it is in.
+    """
     for number, line in enumerate(text.split("\n"), start=1):
         stripped = line.strip()
         if not stripped:
             continue
         if comments and stripped.startswith("#"):
             continue
-        key, separator, value = line.partition(":")
+        key, separator, raw = line.partition(":")
         if not separator:
-            if comments:
+            if comments and strict:
                 raise ConfigError(f"{label} line {number}: {stripped!r} is not `key: value`")
             continue
-        value = value.strip()
-        if comments and value[:1] not in ('"', "'"):
-            value = value.split("#", 1)[0].strip()
-        fields[key.strip()] = _unquote(value)
-    return fields
+        yield key.strip(), raw
 
 
 def _unquote(value: str) -> str:
