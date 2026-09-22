@@ -1,6 +1,13 @@
 BREW_PYTHON ?= /opt/homebrew/bin/python3.13
 PYTHON ?= $(shell if [ -x "$(BREW_PYTHON)" ]; then printf '%s' "$(BREW_PYTHON)"; elif [ -x /usr/local/bin/python3.13 ]; then printf '%s' /usr/local/bin/python3.13; elif [ -x /opt/homebrew/bin/python3 ]; then printf '%s' /opt/homebrew/bin/python3; elif [ -x /usr/local/bin/python3 ]; then printf '%s' /usr/local/bin/python3; else command -v python3; fi)
-VENV ?= .venv
+# `make setup` provisions one virtualenv, into the checkout it ran in, so a
+# linked worktree has none and every recipe below died on `.venv/bin/python:
+# No such file or directory`. `--git-common-dir` names the shared git
+# directory, whose parent is the main checkout from any worktree -- so a
+# worktree borrows the virtualenv that was actually provisioned, and a
+# checkout with its own still uses its own. Overriding VENV skips all of it.
+MAIN_CHECKOUT = $(shell git rev-parse --path-format=absolute --git-common-dir 2>/dev/null | xargs -I{} dirname {})
+VENV ?= $(shell if [ -x .venv/bin/python ] || [ -z "$(MAIN_CHECKOUT)" ] || [ ! -x "$(MAIN_CHECKOUT)/.venv/bin/python" ]; then printf '%s' .venv; else printf '%s' "$(MAIN_CHECKOUT)/.venv"; fi)
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
 

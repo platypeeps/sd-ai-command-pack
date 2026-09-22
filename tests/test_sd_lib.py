@@ -866,5 +866,63 @@ class Touched(unittest.TestCase):
         self.assertEqual(sd_lib.touched(loose), {})
 
 
+class ProvisionedLibraryTests(unittest.TestCase):
+    """Which checkouts the `sd_db` probe will look in.
+
+    `make setup` provisions one virtualenv, into the checkout it ran in. The
+    doctrine puts every writer in a linked worktree, which has none, so until
+    2026-09-22 every entrypoint run in one found no `sd_db` and answered from
+    git instead -- `sd-review` reported `registry_unavailable` and asked for a
+    library that was already installed in the main checkout.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = pathlib.Path(self._tmp.name).resolve()
+
+    def git(self, *args: str, cwd: pathlib.Path) -> None:
+        subprocess.run(["git", *args], cwd=cwd, check=True,
+                       capture_output=True, text=True)
+
+    def test_a_linked_worktree_offers_the_main_checkout_too(self) -> None:
+        main = self.tmp / "main"
+        main.mkdir()
+        self.git("init", "-q", "-b", "main", cwd=main)
+        self.git("-c", "user.email=t@t", "-c", "user.name=t",
+                 "commit", "-q", "--allow-empty", "-m", "root", cwd=main)
+        linked = self.tmp / "linked"
+        self.git("worktree", "add", "-q", str(linked), cwd=main)
+
+        # The probe reads its own location, so it is asked from each checkout
+        # in turn by pointing `__file__` at that checkout's `bin/`.
+        for root in (main, linked):
+            (root / "bin").mkdir(exist_ok=True)
+        with unittest.mock.patch.object(
+                sd_lib, "__file__", str(linked / "bin" / "sd_lib.py")):
+            roots = sd_lib._checkouts_that_may_hold_a_venv()
+        self.assertEqual(roots, [linked, main])
+
+    def test_the_main_checkout_offers_only_itself(self) -> None:
+        """No second entry, so a checkout with its own virtualenv keeps it."""
+
+        main = self.tmp / "solo"
+        main.mkdir()
+        self.git("init", "-q", "-b", "main", cwd=main)
+        (main / "bin").mkdir()
+        with unittest.mock.patch.object(
+                sd_lib, "__file__", str(main / "bin" / "sd_lib.py")):
+            self.assertEqual(sd_lib._checkouts_that_may_hold_a_venv(), [main])
+
+    def test_outside_a_repository_it_is_still_one_root(self) -> None:
+        """Git refusing is not an error here; the probe just has one place."""
+
+        loose = self.tmp / "loose"
+        (loose / "bin").mkdir(parents=True)
+        with unittest.mock.patch.object(
+                sd_lib, "__file__", str(loose / "bin" / "sd_lib.py")):
+            self.assertEqual(sd_lib._checkouts_that_may_hold_a_venv(), [loose])
+
+
 if __name__ == "__main__":
     unittest.main()

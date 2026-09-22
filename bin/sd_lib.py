@@ -693,6 +693,33 @@ def registered_base(root: pathlib.Path | str, sd_db: Any, connection: Any) -> st
     return str(registered_for(connection, base, origin or None))
 
 
+def _checkouts_that_may_hold_a_venv() -> list[pathlib.Path]:
+    """This checkout, then the main worktree it was linked from.
+
+    `make setup` provisions one virtualenv, into the checkout it ran in. A
+    linked worktree is a checkout without one, so every entrypoint run inside
+    a worktree found no `sd_db` and answered from git instead -- `sd-review`
+    reported `registry_unavailable` and asked for a library that was already
+    installed twenty directories away. The doctrine puts every writer in a
+    worktree, so this was the common case rather than the edge one.
+
+    `--git-common-dir` is the question that distinguishes them: it answers the
+    *shared* git directory, so its parent is the main checkout from any linked
+    worktree, and the checkout itself from the main one. Returned second, and
+    only when it is somewhere else, so a worktree carrying its own virtualenv
+    still answers from that one.
+    """
+
+    here = pathlib.Path(__file__).resolve().parent.parent
+    roots = [here]
+    common = git_output(["rev-parse", "--git-common-dir"], here)
+    if common:
+        main = (here / common).resolve().parent
+        if main != here and main.is_dir():
+            roots.append(main)
+    return roots
+
+
 def _provisioned_library_paths() -> list[str]:
     """Where `make setup` put `sd_db`, for an interpreter that did not find it.
 
@@ -716,13 +743,13 @@ def _provisioned_library_paths() -> list[str]:
     `python3.10`, where the shorter name is a prefix of the longer and sorts
     first. Empty when there is no provisioned copy to offer.
     """
-    root = pathlib.Path(__file__).resolve().parent.parent
     found = []
-    for path in root.glob(".venv/lib/python*/site-packages"):
-        if not (path / "sd_db").is_dir():
-            continue
-        version = tuple(int(part) for part in re.findall(r"\d+", path.parent.name))
-        found.append((version, str(path)))
+    for root in _checkouts_that_may_hold_a_venv():
+        for path in root.glob(".venv/lib/python*/site-packages"):
+            if not (path / "sd_db").is_dir():
+                continue
+            version = tuple(int(part) for part in re.findall(r"\d+", path.parent.name))
+            found.append((version, str(path)))
     return [path for _, path in sorted(found, reverse=True)]
 
 
