@@ -1369,6 +1369,36 @@ def dispose(findings: Sequence[Mapping[str, Any]], floor: str) -> list[dict[str,
 
 # Pipeline
 
+#: A gate that could not start its interpreter is not a gate that failed:
+#: no check ran. 127 is the shell's "command not found", and `make` exits 2
+#: when a recipe dies, so its 127 sits in the recipe's own `Error 127` line
+#: while /bin/sh names the path it looked for on the line before it. sd:1343
+#: -- a fresh worktree of this pack has no .venv, and the receipt read as a
+#: failed review instead of a missing toolchain.
+TOOLCHAIN_MISSING = "toolchain_missing"
+_MISSING_INTERPRETER = re.compile(
+    r"(?m)^(?:\S+: )?(?P<path>\S+): (?:No such file or directory|command not found|not found)\s*$")
+_RECIPE_EXIT_127 = re.compile(r"\bError 127\b")
+
+
+def missing_toolchain(checks: Any) -> str | None:
+    """The interpreter a check looked for and could not start, or None."""
+    if not isinstance(checks, list):
+        return None
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        stderr = str(check.get("stderr") or "")
+        if check.get("exit_code") != 127 and not _RECIPE_EXIT_127.search(stderr):
+            continue
+        named = _MISSING_INTERPRETER.search(stderr)
+        if named:
+            return named.group("path")
+        command = check.get("command")
+        return str(command[0]) if isinstance(command, list) and command else str(check.get("name", "?"))
+    return None
+
+
 def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int) -> dict[str, Any]:
     """Step 1: the repository's own deterministic gate, through sd-check."""
 
@@ -1378,12 +1408,18 @@ def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeou
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
         payload = None
-    return {
+    checks = payload.get("checks") if isinstance(payload, dict) else None
+    report: dict[str, Any] = {
         "status": "pass" if result.exit_code == 0 else "fail",
         "exit_code": result.exit_code,
         "detail": (result.stderr or "").strip()[-2000:],
-        "checks": payload.get("checks") if isinstance(payload, dict) else None,
+        "checks": checks,
     }
+    interpreter = missing_toolchain(checks) if result.exit_code != 0 else None
+    if interpreter is not None:
+        report["reason"] = TOOLCHAIN_MISSING
+        report["interpreter"] = interpreter
+    return report
 
 
 #: Scopes that earn a reviewer whatever the tier said. `planning` is here
@@ -2015,9 +2051,14 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
 
     check = result.get("check")
     if check:
-        write(f"\ncheck: {check['status']} (exit {check['exit_code']})\n")
+        reason = f" reason={check['reason']}" if check.get("reason") else ""
+        write(f"\ncheck: {check['status']} (exit {check['exit_code']}){reason}\n")
     if result["status"] == "gate_failed":
-        write("sd-review: the repository's own gate failed; no provider was asked\n")
+        if check and check.get("reason") == TOOLCHAIN_MISSING:
+            write(f"sd-review: the gate could not start its interpreter ({check['interpreter']} is missing); "
+                  "no check ran and no provider was asked. Provision it, or point the gate at one.\n")
+        else:
+            write("sd-review: the repository's own gate failed; no provider was asked\n")
         return
 
     write("\noutcomes:\n")

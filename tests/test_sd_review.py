@@ -778,6 +778,48 @@ class PipelineTests(ReviewFixture):
         self.assertEqual(result["status"], "gate_failed")
         self.assertEqual([call["argv"][0] for call in runner.calls[1:]], [])
 
+    # sd:1343 -- a worktree of this pack has no .venv, and `make check` died
+    # on the toolchain before any reviewer ran. The receipt has to say what is
+    # missing, not just that the gate failed.
+    def test_a_gate_that_cannot_start_its_interpreter_names_it(self) -> None:
+        root = self.make_repo()
+        self.prepare(root)
+        payload = json.dumps({"checks": [{
+            "name": "check", "command": ["make", "check"], "status": "fail", "exit_code": 2,
+            "stderr": "/bin/sh: .venv/bin/python: No such file or directory\nmake: *** [lint] Error 127\n",
+        }]})
+        runner = FakeRunner({"sd-check": sd_review.Completed(1, payload, "")})
+        result = self.run_review(root, runner)
+        self.assertEqual(result["status"], "gate_failed")
+        self.assertEqual(result["check"]["reason"], "toolchain_missing")
+        self.assertEqual(result["check"]["interpreter"], ".venv/bin/python")
+        self.assertEqual([call["argv"][0] for call in runner.calls[1:]], [])
+
+    def test_a_gate_command_that_exits_127_is_a_missing_toolchain(self) -> None:
+        """Through the real sd-check and a real process: a gate whose command
+        exits 127 the way /bin/sh does for a missing interpreter."""
+        root = self.make_repo()
+        (root / "gate.sh").write_text(
+            "#!/bin/sh\nprintf '%s\\n' '/bin/sh: .venv/bin/python: No such file or directory' >&2\nexit 127\n",
+            encoding="utf-8")
+        self.local_block(root, "check: sh gate.sh")
+        report = sd_review.run_check(root, sd_review.subprocess_runner, self.environment(), 60)
+        self.assertEqual(report["status"], "fail")
+        self.assertEqual(report["checks"][0]["exit_code"], 127)
+        self.assertEqual(report["reason"], "toolchain_missing")
+        self.assertEqual(report["interpreter"], ".venv/bin/python")
+
+    def test_a_gate_that_failed_on_its_own_is_not_a_missing_toolchain(self) -> None:
+        # A "No such file or directory" inside a failing suite's output is a
+        # finding, not a toolchain report: only exit 127 or a recipe's
+        # `Error 127` says the interpreter never started.
+        checks = [{"name": "test", "command": ["make", "test"], "status": "fail", "exit_code": 2,
+                   "stderr": "cat: fixture.txt: No such file or directory\nmake: *** [test] Error 1\n"}]
+        self.assertIsNone(sd_review.missing_toolchain(checks))
+        self.assertIsNone(sd_review.missing_toolchain(None))
+        self.assertEqual(sd_review.missing_toolchain(
+            [{"name": "check", "command": ["make", "check"], "status": "fail", "exit_code": 127, "stderr": ""}]), "make")
+
     def test_a_blocking_finding_blocks(self) -> None:
         root = self.make_repo()
         self.prepare(root)

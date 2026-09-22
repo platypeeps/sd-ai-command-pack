@@ -140,6 +140,16 @@
 
 ### Fixed
 
+- **sd-review names a gate that never started.** A linked worktree of this
+  pack has no `.venv`, and `make check` is the gate sd-review runs, so the
+  pass died on `/bin/sh: .venv/bin/python: No such file or directory` and
+  `make: *** [lint] Error 127` before any reviewer ran -- and the receipt
+  read as a failed review. Now, when a check exits 127 or a recipe reports
+  `Error 127`, the check report carries `reason: toolchain_missing` and
+  `interpreter: <path>` naming what it looked for, and the human line says
+  the gate could not start rather than that it failed. Finding the venv
+  from a worktree is the Makefile's own fix, on its own branch. sd:1343.
+
 - **A Notion default folder is a configured page id, not a folder name.**
   `NOTION_SCOPES` held `Briefs` and `R&D Briefs` as lookup keys, and the owner
   has since renamed both folders. A name lookup that finds nothing returns an
