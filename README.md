@@ -35,6 +35,11 @@ six skills, thirteen, and eighty-one. What a path can say is which skills are
 steps in one sequence somebody actually runs, and that is what these three
 say. A skill in `contrib/` is one command away, and use is what moves it.
 
+A repository can extend the framework from the other side. `sd plugin add`
+registers a **domain pack** — its own manifest, its own `<prefix>-*` skills, its
+own rows — and three exist today. What a manifest may declare, and what the
+other halves are, is in [domain packs](docs/domain-packs.md).
+
 **What it writes on a machine:**
 
 - `~/.claude/skills/sd-*/SKILL.md`
