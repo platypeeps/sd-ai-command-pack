@@ -543,11 +543,24 @@ class LineBudgetTests(unittest.TestCase):
         # reasons. This raise is its own commit, before the one that spends
         # it. Shared-core classification and the complexity ceilings are
         # unchanged.
+        #
+        # 3126 -> 3167 is sd:1343. A linked worktree of this pack has no
+        # .venv, and `make check` is the gate this lane runs, so the pass
+        # died on `/bin/sh: .venv/bin/python: No such file or directory`
+        # (Error 127) before any reviewer ran and the receipt read as a
+        # failed review. The 41 lines are `missing_toolchain`, which reads
+        # the sd-check payload for a check that exited 127 or a recipe that
+        # reported `Error 127` and names the interpreter /bin/sh looked for;
+        # the two keys `run_check` adds (`reason: toolchain_missing`,
+        # `interpreter`); and the human line that says the gate could not
+        # start rather than that it failed. This raise is its own commit,
+        # before the one that spends it. Shared-core classification and the
+        # complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3126,
+            3167,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
