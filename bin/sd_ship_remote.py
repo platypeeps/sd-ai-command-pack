@@ -206,11 +206,7 @@ class GitHub:
         checks = value.get("required_status_checks") or {}
         noun = "ruleset protection" if value.get("source") == sd_protection.RULESET_SOURCE else "branch protection"
         if noun == "ruleset protection":
-            for entry in value.get("rulesets") or []:
-                if isinstance(entry, dict) and entry.get("bypass_actors"):
-                    raise Refusal(f"ruleset {entry.get('name')} (#{entry.get('id')}) has bypass actors",
-                                  code="protection_required",
-                                  next_action="Remove the bypass actors from the ruleset; this command cannot bypass it.")
+            GitHub.validate_ruleset_bypass(value)
         if value.get("enforce_admins", {}).get("enabled") is not True:
             raise Refusal("branch protection does not enforce administrators", code="protection_required",
                           next_action="Restore required branch protection; this command cannot bypass it.")
@@ -222,6 +218,24 @@ class GitHub:
         if any(allowances.get(name) for name in ("users", "teams", "apps")):
             raise Refusal("pull-request protection has bypass allowances")
         return value
+
+    @staticmethod
+    def validate_ruleset_bypass(value: dict) -> None:
+        """A named bypass actor refuses; a bypass list GitHub did not show
+        refuses too, as unknown rather than as none. GitHub returns
+        `bypass_actors` only to a caller who can edit the ruleset, so its
+        absence says what this token may see, not who can bypass, and a gate
+        that read absence as nobody would grant on a permission it lacks."""
+        for entry in value.get("rulesets") or []:
+            if isinstance(entry, dict) and entry.get("bypass_actors"):
+                raise Refusal(f"ruleset {entry.get('name')} (#{entry.get('id')}) has bypass actors",
+                              code="protection_required",
+                              next_action="Remove the bypass actors from the ruleset; this command cannot bypass it.")
+        for entry in sd_protection.hidden_bypass(value):
+            raise Refusal(f"ruleset {entry.get('name')} (#{entry.get('id')}) did not show its bypass actors, "
+                          "so whether anyone can bypass it is unknown",
+                          next_action="Read the ruleset with a token that can edit it, so GitHub returns "
+                                      "bypass_actors; this command cannot treat a bypass list it was not shown as empty.")
 
     def declared_gap(self, head: str) -> dict | None:
         """The `unprotected` acceptance at `head`, or `None` with the reasons.

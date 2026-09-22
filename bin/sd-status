@@ -498,7 +498,25 @@ def _protection_gaps(
     reviews = protection.get("required_pull_request_reviews")
     admins = protection.get("enforce_admins") or {}
 
-    if not (admins.get("enabled") if isinstance(admins, dict) else admins):
+    enabled = admins.get("enabled") if isinstance(admins, dict) else admins
+    if enabled is None and isinstance(admins, dict):
+        # A ruleset whose `bypass_actors` GitHub withheld: it shows that list
+        # only to a caller who can edit the ruleset. Unknown is reported as
+        # not enforced, never as enforced -- the same finding, naming the
+        # rulesets that hid their list rather than claiming admins are exempt.
+        hidden = ", ".join(
+            f"{entry.get('name')} (#{entry.get('id')})" for entry in sd_protection.hidden_bypass(protection)
+        )
+        gaps.append(
+            _gap(
+                "enforce_admins",
+                f"whether anyone can bypass the ruleset protecting {default_branch} is "
+                f"unknown: GitHub did not show bypass_actors for {hidden}, which it "
+                "withholds from a caller who cannot edit the ruleset. A bypass list "
+                "not shown is not an empty one.",
+            )
+        )
+    elif not enabled:
         gaps.append(
             _gap(
                 "enforce_admins",

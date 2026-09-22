@@ -2917,19 +2917,34 @@ class DeclaredGapCase(unittest.TestCase):
         bound to app 7. No declaration, and the merge lands once; the receipt's
         protection object says where it came from (sd:1327)."""
         self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
-        self.double.rules = [
-            {"type": "deletion", "ruleset_id": 42},
-            {"type": "pull_request", "ruleset_id": 42, "parameters": {"required_approving_review_count": 0}},
-            {"type": "required_status_checks", "ruleset_id": 42,
-             "parameters": {"strict_required_status_checks_policy": True,
-                            "required_status_checks": [{"context": "route", "integration_id": 7}]}}]
-        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active"}}
+        self.double.rules = self.gating_rules()
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}}
         self.green()
         result = self.merge()
         self.assertEqual(self.puts(), 1)
         self.assertEqual(result["protection"]["source"], "ruleset")
         self.assertEqual([entry["id"] for entry in result["protection"]["rulesets"]], [42])
         self.assertEqual(result["protection"]["required_status_checks"]["checks"], [{"context": "route", "app_id": 7}])
+
+    @staticmethod
+    def gating_rules() -> list:
+        return [
+            {"type": "deletion", "ruleset_id": 42},
+            {"type": "pull_request", "ruleset_id": 42, "parameters": {"required_approving_review_count": 0}},
+            {"type": "required_status_checks", "ruleset_id": 42,
+             "parameters": {"strict_required_status_checks_policy": True,
+                            "required_status_checks": [{"context": "route", "integration_id": 7}]}}]
+
+    def test_a_ruleset_that_does_not_show_its_bypass_actors_refuses_the_merge(self):
+        """The same ruleset with `bypass_actors` withheld, which is what GitHub
+        answers a token that cannot edit it: unknown, and unknown does not
+        merge. Nothing is pushed."""
+        self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
+        self.double.rules = self.gating_rules()
+        self.double.rulesets = {42: {"id": 42, "name": "main", "enforcement": "active"}}
+        self.green()
+        self.refuse("did not show its bypass actors", "prerequisite_failed")
+        self.assertEqual(self.puts(), 0)
 
     def test_a_ruleset_that_only_forbids_deletion_is_not_protection(self):
         """answerbook/mezmo-world-simulator's ruleset 21772988: `deletion` and

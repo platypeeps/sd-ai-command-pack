@@ -5653,6 +5653,23 @@ class RulesetProtectionCase(unittest.TestCase):
         self.assertIn("enforce_admins", [gap["id"] for gap in result["gaps"]])
         self.assertEqual(result["detail"]["rulesets"][0]["bypass_actors"], bypass["bypass_actors"])
 
+    def test_a_bypass_list_not_shown_is_unknown_not_enforcement(self) -> None:
+        """Absent `bypass_actors` is what GitHub answers a caller who cannot
+        edit the ruleset. The section reports it as the `enforce_admins` gap
+        naming the ruleset that withheld its list, never as enforced; `[]`
+        beside it stays enforced, so the two states do not collapse."""
+        result = self.section(self.gating_rules(), {"id": 42, "name": "main", "enforcement": "active"})
+        self.assertTrue(result["protected"])
+        gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
+        self.assertIn("enforce_admins", gaps)
+        self.assertIn("did not show bypass_actors for main (#42)", gaps["enforce_admins"])
+        self.assertNotIn("exempts the admins", gaps["enforce_admins"])
+        self.assertFalse(result["detail"]["enforce_admins"])
+        self.assertIsNone(result["detail"]["rulesets"][0]["bypass_actors"])
+        shown = self.section(self.gating_rules())
+        self.assertNotIn("enforce_admins", [gap["id"] for gap in shown["gaps"]])
+        self.assertTrue(shown["detail"]["enforce_admins"])
+
     def test_a_ruleset_that_gates_no_merge_keeps_the_unprotected_finding(self) -> None:
         rules = [{"type": "deletion", "ruleset_id": 42}, {"type": "non_fast_forward", "ruleset_id": 42}]
         result = self.section(rules)

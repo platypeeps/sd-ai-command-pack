@@ -18,9 +18,12 @@ with `required_approving_review_count`, `dismiss_stale_reviews_on_push`,
 `allowed_merge_methods`, and a `required_status_checks` rule with
 `strict_required_status_checks_policy` and `required_status_checks:
 [{context, integration_id}]`. The ruleset itself, `repos/{slug}/rulesets/{id}`,
-carries `enforcement` and `bypass_actors`; the latter key is absent on a
-ruleset that names nobody (log-distiller) and `[]` on another
-(answerbook/mezmo-world-simulator 21772988), so both spellings read as none.
+carries `enforcement` and, only for a caller who can edit the ruleset,
+`bypass_actors`: measured 2026-09-22, the key is absent on log-distiller read
+with a token that has `maintain` but not `admin` there, and `[]` on
+answerbook/mezmo-world-simulator 21772988 read with `admin`. An absent key is
+therefore *unknown*, never "nobody": the synthesized object carries it as
+`None` beside a real `[]`, and a gate refuses on it (sd:1327's review).
 
 `synthesize` reduces the active rules to the classic shape every consumer
 already reads -- `enforce_admins`, `required_pull_request_reviews`,
@@ -131,10 +134,15 @@ def synthesize(rules: list, rulesets: dict[int, dict]) -> dict[str, Any] | None:
     review counts take the maximum, booleans the disjunction, and required
     checks the union.
 
-    `enforce_admins` is `bypass_actors` asked the classic way round: a
-    ruleset that names nobody applies to the administrators too, and one
-    that names anyone exempts them. The contributing rulesets travel on the
-    object under `rulesets` so a refusal can name the one with the bypass.
+    `enforce_admins` is `bypass_actors` asked the classic way round, in
+    three states rather than two: `True` when every contributing ruleset
+    showed an empty list, `False` when any names someone, and `None` when
+    any did not show its list at all -- GitHub withholds `bypass_actors`
+    from a caller who cannot edit the ruleset, and a list this reader was
+    not shown is not an empty one. The contributing rulesets travel on the
+    object under `rulesets`, each with its `bypass_actors` as read (`None`
+    for withheld), so a refusal can name the one with the bypass or the one
+    that hid it.
     """
     gating = [rule for rule in active_rules(rules, rulesets) if rule.get("type") in MERGE_GATING_RULES]
     if not gating:
@@ -143,7 +151,7 @@ def synthesize(rules: list, rulesets: dict[int, dict]) -> dict[str, Any] | None:
     value: dict[str, Any] = {
         "source": RULESET_SOURCE,
         "rulesets": contributing,
-        "enforce_admins": {"enabled": not any(entry["bypass_actors"] for entry in contributing)},
+        "enforce_admins": {"enabled": _nobody_bypasses([entry["bypass_actors"] for entry in contributing])},
     }
     reviews = _reviews([_parameters(rule) for rule in gating if rule.get("type") == "pull_request"])
     if reviews is not None:
@@ -158,8 +166,28 @@ def _contributing(ids: list[int], rulesets: dict[int, dict]) -> list[dict[str, A
     return [{"id": ruleset_id,
              "name": str(rulesets[ruleset_id].get("name") or ruleset_id),
              "enforcement": rulesets[ruleset_id].get("enforcement"),
-             "bypass_actors": list(rulesets[ruleset_id].get("bypass_actors") or [])}
+             "bypass_actors": _bypass_actors(rulesets[ruleset_id])}
             for ruleset_id in ids]
+
+
+def _bypass_actors(ruleset: dict) -> list | None:
+    """The ruleset's bypass list as shown, or `None` when it was not shown."""
+    actors = ruleset.get("bypass_actors")
+    return list(actors) if isinstance(actors, list) else None
+
+
+def _nobody_bypasses(lists: list[list | None]) -> bool | None:
+    """`True` only when every list was shown and empty; `False` when one
+    names anyone; `None` when one was withheld and none names anyone."""
+    if any(lists):
+        return False
+    return None if any(actors is None for actors in lists) else True
+
+
+def hidden_bypass(value: dict[str, Any]) -> list[dict[str, Any]]:
+    """The contributing rulesets whose `bypass_actors` GitHub did not show."""
+    return [entry for entry in value.get("rulesets") or []
+            if isinstance(entry, dict) and entry.get("bypass_actors") is None]
 
 
 def _reviews(parameter_sets: list[dict[str, Any]]) -> dict[str, Any] | None:

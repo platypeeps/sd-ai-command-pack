@@ -40,7 +40,8 @@ from typing import Any
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bin"))
 
-import sd_ship_remote  # noqa: E402 - after the path insert
+import sd_protection  # noqa: E402 - after the path insert
+import sd_ship_remote  # noqa: E402
 
 
 def protection_document(**changes: Any) -> dict:
@@ -437,6 +438,30 @@ class RulesetCase(unittest.TestCase):
             {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}])
         error = self.refused(self.remote(ruleset_rules(), bypass), r"^ruleset release \(#42\) has bypass actors$")
         self.assertEqual(error.workflow["blocker"]["code"], "protection_required")
+
+    def test_a_bypass_list_not_shown_is_unknown_and_refuses_while_an_empty_one_validates(self) -> None:
+        """GitHub returns `bypass_actors` only to a caller who can edit the
+        ruleset: absent on log-distiller read with `maintain`, `[]` on
+        mezmo-world-simulator read with `admin` (2026-09-22). The pair is the
+        proof the default was not merely inverted: `[]` is nobody and
+        validates; absent, or `null`, is unknown and refuses, as a failed
+        prerequisite and not as a protection defect, because what is missing
+        is the token's view and not the ruleset's rule."""
+        shown = self.remote(ruleset_rules(), RULESET).gate("main", HEAD)
+        self.assertEqual(shown["enforce_admins"], {"enabled": True})
+        self.assertEqual(shown["rulesets"][0]["bypass_actors"], [])
+        for withheld in ({"id": 42, "name": "main", "enforcement": "active"}, dict(RULESET, bypass_actors=None)):
+            with self.subTest(ruleset=withheld):
+                error = self.refused(self.remote(ruleset_rules(), withheld),
+                                     r"^ruleset main \(#42\) did not show its bypass actors, "
+                                     r"so whether anyone can bypass it is unknown$")
+                self.assertEqual(error.workflow["blocker"]["code"], "prerequisite_failed")
+                self.assertIn("token that can edit it", error.workflow["next_action"])
+                # The synthesized object keeps the state apart from both
+                # answers, so a report reads it as unknown too.
+                value = sd_protection.synthesize(ruleset_rules(), {42: withheld})
+                self.assertEqual(value["enforce_admins"], {"enabled": None})
+                self.assertIsNone(value["rulesets"][0]["bypass_actors"])
 
     def test_a_ruleset_that_is_not_active_is_no_protection(self) -> None:
         """`evaluate` and `disabled` enforce nothing: Path B, as if no rule
