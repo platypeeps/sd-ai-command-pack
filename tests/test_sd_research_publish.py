@@ -1222,6 +1222,60 @@ class RevertTests(ReceiptFixture):
         self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
 
 
+class MutableSourceTests(ReceiptFixture):
+    """A request carries the Markdown it was queued with, and the fingerprint
+    describes that text and not the path.
+
+    The reviewer's reproduction against bdb6774f, `MUTABLE_SOURCE: remote=B,
+    source=A, queue=False`: the request named a mutable `source` path and the
+    fingerprint hashed the file's bytes at enqueue. Queue A, edit the file to
+    B without rendering, and the drain read the path, published B and
+    acknowledged A's fingerprint; restoring A then read as delivered, so A
+    was never published again. The request now carries `content`, read once
+    at enqueue, and the drain mirrors that; the fingerprint hashes the stored
+    text, so the two cannot disagree.
+    """
+
+    NAME = "my-research.a.notion.json"
+
+    def published(self, request: dict) -> str:
+        """What a drain mirrors: the request's `content`. A request without
+        one -- every request before this -- sent the drain to the path."""
+        if "content" in request:
+            return request["content"]
+        return Path(request["source"]).read_text(encoding="utf-8")
+
+    def test_the_drain_publishes_the_content_the_request_carries(self) -> None:
+        self.source("A\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        request = json.loads((PUBLISH.QUEUE / self.NAME).read_text())  # drain step 1
+        self.source("B\n")  # edited under the queued request, with no render
+        remote = self.published(request).strip()  # drain step 3
+        PUBLISH.mirror_delivered(self.NAME, request["fingerprint"])  # drain step 6
+        self.source("A\n")  # the edit reverted
+        PUBLISH.enqueue(self.repo, self.doc())
+        queued = (PUBLISH.QUEUE / self.NAME).is_file()
+        self.assertEqual(
+            (remote, queued), ("A", False),
+            "MUTABLE_SOURCE: remote=%s, source=A, queue=%s" % (remote, queued))
+
+    def test_the_fingerprint_hashes_the_stored_text_and_not_the_path(self) -> None:
+        self.source("A\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        request = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
+        self.assertEqual(request["content"], "A\n")
+        targets, problems = PUBLISH.mirror_targets(self.doc()[0], self.repo)
+        self.assertEqual(problems, [])
+        what = PUBLISH.BY_NAME["notion"].what
+        self.source("B\n")
+        self.assertEqual(
+            PUBLISH.mirror_fingerprint(request, targets[0], what), request["fingerprint"],
+            "the fingerprint followed the path")
+        self.assertNotEqual(
+            PUBLISH.mirror_fingerprint(dict(request, content="B\n"), targets[0], what),
+            request["fingerprint"], "the fingerprint ignores the content")
+
+
 class WorktreeIdentityTests(Fixture):
     """A render from a linked worktree names the repository, not the worktree.
 

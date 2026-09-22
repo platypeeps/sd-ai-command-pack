@@ -769,12 +769,19 @@ def mirror_fingerprint(request: dict[str, Any], target: dict[str, str], what: st
     """What a drain would write, as one digest: the same digest means the
     same mirror.
 
-    The source bytes, because the mirror is the Markdown; the title, because
-    it is what the mirror is called; the identity `mirror_identity` compares,
-    because a document moved to another container is a new mirror; the
-    designation's own page or file id, because a `page=` the user wrote is an
-    instruction the drain has to see; and the source path, because the
-    request carries it and the mirror's pointer line names it.
+    The request's `content`, because that is what the drain mirrors -- the
+    Markdown as it stood at enqueue, stored in the request, and not the file
+    at `source`, which may have changed by the time a drain reads it. With
+    the path hashed instead: queued as A, edited to B before any drain, the
+    drain read the path, published B and acknowledged A's fingerprint, and
+    restoring A then read as delivered (`MUTABLE_SOURCE: remote=B, source=A,
+    queue=False`). Hashing what the request stores keeps the fingerprint and
+    the payload from disagreeing. Then the title, because it is what the
+    mirror is called; the identity `mirror_identity` compares, because a
+    document moved to another container is a new mirror; the designation's
+    own page or file id, because a `page=` the user wrote is an instruction
+    the drain has to see; and the source path, because the request carries
+    it and the mirror's pointer line names it.
 
     Not the revision: a commit that touches nothing the mirror is made of
     still moves HEAD, and re-queueing on every commit is the defect this
@@ -782,17 +789,26 @@ def mirror_fingerprint(request: dict[str, Any], target: dict[str, str], what: st
     request after the fact, and it must not make the next render see a
     change.
     """
-    source = request.get("source", "")
-    try:
-        body = Path(source).read_bytes() if source else b""
-    except OSError:
-        body = b""
     named = mirror_identity(request, target, what)
-    named.update(title=request.get("title", ""), source=source,
+    named.update(title=request.get("title", ""), source=request.get("source", ""),
                  designated=request.get(what, ""))
     digest = hashlib.sha256(json.dumps(named, sort_keys=True).encode("utf-8"))
-    digest.update(body)
+    digest.update(str(request.get("content", "")).encode("utf-8"))
     return digest.hexdigest()
+
+
+def source_text(path: Path) -> str:
+    """The Markdown a request carries: the file's text as it stands now.
+
+    Read once, at enqueue, and stored in the request, so the drain mirrors
+    what was queued and not what the path holds when the drain gets to it.
+    Decoded with replacement rather than refused: a stray byte in a brief is
+    a brief with one odd character, not a brief that does not publish.
+    """
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
 
 
 def load_record(path: Path) -> dict[str, Any]:
@@ -977,6 +993,10 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
                 "source": str(repo / src) if src else "",
                 "rendered": str(repo / DASHBOARD_DIR / (out + ".html")),
                 "markdown": str(vault / (out + ".md")) if vault else "",
+                # What the drain mirrors, read once here. The three paths
+                # above say where it came from and where the copies sit;
+                # none of them is what gets published.
+                "content": source_text(repo / src) if src else "",
             }
             request.update(target)
             name = "%s.%s.%s.json" % (key, out or "doc", target["destination"])

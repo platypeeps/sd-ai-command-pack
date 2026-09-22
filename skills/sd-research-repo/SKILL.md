@@ -130,7 +130,7 @@ records the differences that are on purpose. Both are in
 
    For a document carrying a `notion=` or `drive=` key, `render` left a request
    in `~/.claude/pending-mirror-syncs/`. Drain it: read each JSON file, mirror
-   that document to the container the request names — through the Notion
+   the request's `content` to the container the request names — through the Notion
    connector for `destination: notion`, the Google Workspace connector for
    `destination: drive` — in the shape `references/conventions.md` gives.
    A request that names an existing page or file updates that one. A request
