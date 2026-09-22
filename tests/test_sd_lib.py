@@ -934,6 +934,12 @@ class BorrowedEnvironmentTests(unittest.TestCase):
     provisions, and the borrow is allowed only where those copies are this
     tree's. Everything here reads `make -n`: the decision is a variable, so it
     is settled before a recipe would run.
+
+    A `.venv` the checkout carries as a real directory is its own environment
+    and is not checked. A `.venv` that is a symlink into another checkout is
+    checked, because that is the same borrow under a local name, and it is
+    how sd:1020 says a worktree here gets an environment -- but on a proven
+    mismatch only, so an environment that predates the record goes on working.
     """
 
     MAKEFILE = pathlib.Path(__file__).resolve().parents[1] / "Makefile"
@@ -1027,6 +1033,48 @@ class BorrowedEnvironmentTests(unittest.TestCase):
         self.assertIn(
             'cp requirements-dev.txt requirements-security.txt '
             '".venv/sd-requirements/"', done.stdout)
+
+    def symlink_the_environment(self) -> None:
+        """What sd:1020 does by hand: a `.venv` link into the main checkout.
+
+        It passes `[ -x .venv/bin/python ]`, so it is a borrow wearing a local
+        name, and it is the usual way a worktree here gets an environment.
+        """
+
+        (self.linked / ".venv").symlink_to(self.main / ".venv")
+
+    def test_a_symlinked_environment_that_matches_is_used(self) -> None:
+        self.symlink_the_environment()
+        done = self.make("docs-lint")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn('".venv/bin/python"', done.stdout)
+
+    def test_a_symlinked_environment_is_compared_too(self) -> None:
+        """The hole a local-first test would leave: a link is not an own one."""
+
+        self.symlink_the_environment()
+        self.move_a_pin()
+        done = self.make("docs-lint")
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertIn("requirements-dev.txt", done.stderr)
+        # Named by what it points at, which is the environment at issue.
+        self.assertIn(str(self.main / ".venv"), done.stderr)
+
+    def test_a_symlinked_environment_with_no_record_is_left_alone(self) -> None:
+        """Proven mismatch only, where the automatic borrow is strict.
+
+        The link is not this Makefile's doing, and refusing an environment
+        that predates the record would strand every checkout carrying one.
+        The day it is provisioned again the case is covered like any other,
+        which `test_a_symlinked_environment_is_compared_too` is.
+        """
+
+        self.symlink_the_environment()
+        self.record.rename(self.main / ".venv" / "not-the-record")
+        self.move_a_pin()
+        done = self.make("docs-lint")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn('".venv/bin/python"', done.stdout)
 
     def test_a_checkout_with_its_own_environment_is_never_checked(self) -> None:
         """Nothing was borrowed, so there is nothing to be compatible with."""

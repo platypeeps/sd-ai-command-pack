@@ -20,32 +20,47 @@ PYTHON ?= $(shell if [ -x "$(BREW_PYTHON)" ]; then printf '%s' "$(BREW_PYTHON)";
 # carries no copies, so it is refused rather than borrowed -- `make setup` in
 # the checkout that owns it is what gives it a record.
 #
-# This is the *automatic* borrow only. A VENV given on the command line or in
-# the environment is a deliberate choice and is never second-guessed, and so is
-# a `.venv` the checkout carries itself, symlink or directory: the first test
-# below answers before git is asked. That first test is also the common case,
-# so a checkout with its own environment pays one `test -x` and nothing else.
+# A VENV given on the command line or in the environment is a deliberate
+# choice and is never second-guessed. A `.venv` the checkout carries as a real
+# directory is its own environment and is not checked either.
+#
+# A `.venv` that is a *symlink* into another checkout is neither: it is this
+# same borrow wearing a local name, and sd:1020 made it the usual way a
+# worktree here gets an environment. So it is compared too -- but only on a
+# proven mismatch. An environment with no record is left alone on that path,
+# because the link is not this Makefile's doing and refusing would strand
+# every checkout whose environment predates the record; the day that
+# environment is provisioned again, the symlink case is covered like any
+# other. The automatic borrow is strict instead: it is this Makefile reaching
+# for an environment nobody pointed it at, so an environment that cannot say
+# what it holds is refused rather than assumed to fit.
+#
 # One shell for the whole decision, run once per make (`:=`), not once per
-# expansion.
+# expansion. A checkout with a real `.venv` pays one `test -x` and one
+# `test -L`, and reaches neither git nor `cmp`.
 BORROWED := $(shell \
-  if [ -x .venv/bin/python ]; then printf '%s' .venv; else \
+  venv=.venv; name=.venv; record=; strict=; \
+  if [ -x .venv/bin/python ]; then \
+    if [ -L .venv ]; then record=.venv/sd-requirements; name=$$(readlink .venv); fi; \
+  else \
     common=$$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); \
     main=; [ -n "$$common" ] && main=$$(dirname "$$common"); \
-    if [ -z "$$main" ] || [ ! -x "$$main/.venv/bin/python" ]; then printf '%s' .venv; else \
-      why=; \
-      if [ ! -d "$$main/.venv/sd-requirements" ]; then \
-        why="$$main/.venv does not record what it was provisioned from"; \
-      else \
-        for f in requirements-dev.txt requirements-security.txt; do \
-          cmp -s "$$f" "$$main/.venv/sd-requirements/$$f" \
-            || { why="$$f here is not the file $$main/.venv was provisioned from"; break; }; \
-        done; \
-      fi; \
-      if [ -n "$$why" ]; then \
-        printf '%s' "refusing-to-borrow: $$why; run 'make setup VENV=.venv' to give this worktree its own environment"; \
-      else printf '%s' "$$main/.venv"; fi; \
+    if [ -n "$$main" ] && [ -x "$$main/.venv/bin/python" ]; then \
+      venv="$$main/.venv"; name="$$venv"; record="$$venv/sd-requirements"; strict=yes; \
     fi; \
-  fi)
+  fi; \
+  why=; \
+  if [ -n "$$record" ] && [ ! -d "$$record" ]; then \
+    [ -n "$$strict" ] && why="$$name does not record what it was provisioned from"; \
+  elif [ -n "$$record" ]; then \
+    for f in requirements-dev.txt requirements-security.txt; do \
+      cmp -s "$$f" "$$record/$$f" \
+        || { why="$$f here is not the file $$name was provisioned from"; break; }; \
+    done; \
+  fi; \
+  if [ -n "$$why" ]; then \
+    printf '%s' "refusing-to-borrow: $$why; run 'make setup VENV=.venv' to give this worktree its own environment"; \
+  else printf '%s' "$$venv"; fi)
 # The refusal fires when a recipe asks for the interpreter, not at parse time:
 # `setup` is the remedy and must stay runnable in a worktree that is refused,
 # and SETUP_VENV below reaches `$(VENV)` only when VENV was set deliberately.
