@@ -42,9 +42,17 @@ Two consequences worth knowing before you go looking for a re-register verb:
 
 ## The manifest
 
-`sd-plugin.json`, at the root of the checkout. The vocabulary is closed —
-R11-D14 — and enforced in one reader, so a key outside it refuses by name
-rather than being ignored.
+`sd-plugin.json`, at the root of the checkout. Each block below has a closed
+vocabulary — R11-D14 — enforced in one reader: a key inside `kinds`, `config`,
+`store`, `issues` or `vendor` that its table does not name refuses by name.
+
+**The top level itself is unchecked, and that is the trap.** `add` runs one
+validator per block it knows, and a block it does not know is never read. Spell
+`config` as `configg` and registration succeeds while `validate_config` returns
+`{}`: the manifest declares nothing, and the first sign is a skill refusing a
+setting months later. Registration proves a manifest parses. It does not prove
+your block arrived. Read it back with `sd plugin list --json`, or run the
+command your skills run — `sd config get <prefix>.<key>`.
 
 | Key | Required | What it buys | Validator |
 |---|---|---|---|
@@ -184,8 +192,9 @@ refusing with `hoa declares no config keys`; the value was in the machine config
 the whole time, so nothing was lost but the declaration. `check-skills.py`
 printed `FAIL(1)` three times a run and nobody read it.
 
-A manifest has no checker beyond registration and, until this page, no document
-to be read against. Two smaller versions of the same thing are on record in
+A manifest has no checker beyond registration — and registration would not have
+caught it, because `add` never reads a block it does not know — and, until this
+page, no document to be read against. Two smaller versions of the same thing are on record in
 `hoa`'s own log: a `protected-fields` entry that made a fact an agent should
 record unwritable, and field names with spaces that `FIELD_PATTERN` refuses.
 Declare the surface you use, read `sd plugin list` after editing, and run the
