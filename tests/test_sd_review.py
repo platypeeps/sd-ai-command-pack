@@ -866,7 +866,36 @@ class PipelineTests(ReviewFixture):
         # program: `make` started, or there would be no exit code to read.
         self.assertEqual(sd_review.classify_gate(
             [{"name": "check", "command": ["make", "check"], "status": "fail", "exit_code": 127, "stderr": ""}]),
-            {"reason": "command_not_found", "missing_command": None, "missing_line": None, "evidence": "exit 127"})
+            {"reason": "command_not_found", "missing_command": None, "missing_line": None, "evidence": "exit 127",
+             "entrypoint": "check", "started": ["check"]})
+
+    def test_one_entrypoint_that_cannot_spawn_does_not_say_no_check_ran(self) -> None:
+        """The fix-verification review of 30e45b6b: no aggregate `check`, a
+        `test` that runs and passes, a `lint` sd-check cannot spawn. The
+        sentence names lint and what it could not start; it may not say no
+        check ran, because test did."""
+        root = self.make_repo()
+        self.prepare(root)
+        interpreter = root / "no-such-venv" / "bin" / "python"
+        self.local_block(root, "test: sh -c 'echo test passed'", f"lint: {interpreter} -m ruff check .")
+        report = sd_review.run_check(root, sd_review.subprocess_runner, self.environment(), 60)
+        by_name = {record["name"]: record for record in report["checks"]}
+        self.assertEqual((by_name["test"]["status"], by_name["test"]["exit_code"]), ("pass", 0))
+        self.assertIsNone(by_name["lint"]["exit_code"])
+        line = sd_review.gate_failed_line(report)
+        self.assertNotIn("no check ran", line)
+        self.assertIn("lint could not start " + str(interpreter), line)
+        self.assertIn("test ran", line)
+        self.assertEqual(report["reason"], "toolchain_missing")
+        self.assertEqual(report["entrypoint"], "lint")
+        self.assertEqual(report["started"], ["test"])
+        runner = FakeRunner({"sd-check": sd_review.Completed(1, json.dumps({"checks": report["checks"]}), "")})
+        result = self.run_review(root, runner)
+        self.assertEqual(result["status"], "gate_failed")
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        self.assertNotIn("no check ran", stream.getvalue())
+        self.assertIn("lint could not start", stream.getvalue())
 
     def test_a_blocking_finding_blocks(self) -> None:
         root = self.make_repo()

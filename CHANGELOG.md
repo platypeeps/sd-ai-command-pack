@@ -151,9 +151,13 @@
   says the gate ran up to that point. When sd-check could not spawn the
   check's own program (`exit_code: None`, `cannot run <program>`), and
   only then, the report carries `reason: toolchain_missing` and
-  `interpreter: <program>`, because only that proves no check ran. Finding
-  the venv from a worktree is the Makefile's own fix, on its own branch.
-  sd:1343.
+  `interpreter: <program>`. The gate is up to three entrypoints run as
+  separate processes, so the report also carries `entrypoint`, the one the
+  reason came from, and `started`, every entrypoint whose record shows it
+  executing; the line says no check ran only when `started` is empty, and
+  otherwise names the entrypoint that could not start and the ones that
+  ran. Finding the venv from a worktree is the Makefile's own fix, on its
+  own branch. sd:1343.
 
 - **A Notion default folder is a configured page id, not a folder name.**
   `NOTION_SCOPES` held `Briefs` and `R&D Briefs` as lookup keys, and the owner

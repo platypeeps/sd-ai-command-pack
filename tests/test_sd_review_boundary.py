@@ -568,11 +568,24 @@ class LineBudgetTests(unittest.TestCase):
         # what is known. This raise is its own commit, before the one that
         # spends it. Shared-core classification and the complexity ceilings
         # are unchanged.
+        #
+        # 3198 -> 3233 is sd:1343's third pass. The fix-verification review of
+        # 30e45b6b ran a gate with no aggregate `check`: `test` passed and
+        # `lint` could not spawn, and the line said no check ran, from one
+        # record. The 35 lines make `classify_gate` read every record --
+        # `entrypoint`, the record the reason came from, and `started`, each
+        # entrypoint whose record shows it executing -- and make
+        # `gate_failed_line` claim that no check ran only when `started` is
+        # empty, naming the entrypoint otherwise; the 127 parsing moved to
+        # `_not_found_report` to keep `classify_gate` under the branch
+        # ceiling. This raise is its own
+        # commit, before the one that spends it. Shared-core classification
+        # and the complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3198,
+            3233,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

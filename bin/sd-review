@@ -1394,45 +1394,80 @@ _NOT_FOUND = re.compile(
 _RECIPE_EXIT_127 = re.compile(r"\bError 127\b")
 
 
+def _spawn_failed(check: Mapping[str, Any]) -> bool:
+    return check.get("exit_code") is None and str(check.get("reason") or "").startswith(_CANNOT_RUN)
+
+
+def _started(check: Mapping[str, Any]) -> bool:
+    """Whether sd-check's record shows the entrypoint's process executing: an
+    exit code, or a failure that is not the spawn (a timeout ran until it
+    was killed). Skipped and absent entrypoints, and one sd-check could not
+    spawn, did not."""
+    return isinstance(check.get("exit_code"), int) or (check.get("status") == "fail" and not _spawn_failed(check))
+
+
+def _not_found_report(check: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The missing-command diagnostic a 127 carries, or None without a 127."""
+    stderr = str(check.get("stderr") or "")
+    recipe = _RECIPE_EXIT_127.search(stderr)
+    if check.get("exit_code") != 127 and not recipe:
+        return None
+    # The last report is the command that ended the run; an earlier one was
+    # survived, or the shell would have stopped there.
+    named = next(reversed(list(_NOT_FOUND.finditer(stderr))), None)
+    return {
+        "reason": COMMAND_NOT_FOUND,
+        "missing_command": named.group("command") if named else None,
+        "missing_line": int(named.group("line")) if named and named.group("line") else None,
+        "evidence": named.group(0).strip() if named else (
+            recipe.group(0) if recipe else f"exit {check.get('exit_code')}"),
+    }
+
+
 def classify_gate(checks: Any) -> dict[str, Any] | None:
-    """What the failed gate lacked, or None when the evidence says nothing."""
+    """What the failed gate lacked, or None when the evidence says nothing.
+
+    The gate is up to three entrypoints (check, test, lint) that sd-check runs
+    as separate processes, so the answer carries `entrypoint`, the record it
+    was read from, and `started`, every entrypoint whose record shows it
+    executing. A sentence about the whole gate is written from `started`,
+    never from one record: the fix-verification review of 30e45b6b ran a
+    `test` that passed and a `lint` that could not spawn, and this lane said
+    no check ran."""
     if not isinstance(checks, list):
         return None
-    for check in checks:
-        if not isinstance(check, dict) or check.get("status") == "pass":
+    records = [check for check in checks if isinstance(check, dict)]
+    started = [str(check.get("name", "?")) for check in records if _started(check)]
+    for check in records:
+        if check.get("status") == "pass":
             continue
-        reason = str(check.get("reason") or "")
         command = check.get("command")
         program = str(command[0]) if isinstance(command, list) and command else None
-        if check.get("exit_code") is None and reason.startswith(_CANNOT_RUN) and program:
-            return {"reason": TOOLCHAIN_MISSING, "interpreter": program, "evidence": reason}
-        stderr = str(check.get("stderr") or "")
-        recipe = _RECIPE_EXIT_127.search(stderr)
-        if check.get("exit_code") != 127 and not recipe:
-            continue
-        # The last report is the command that ended the run; an earlier one
-        # was survived, or the shell would have stopped there.
-        named = next(reversed(list(_NOT_FOUND.finditer(stderr))), None)
-        return {
-            "reason": COMMAND_NOT_FOUND,
-            "missing_command": named.group("command") if named else None,
-            "missing_line": int(named.group("line")) if named and named.group("line") else None,
-            "evidence": named.group(0).strip() if named else (
-                recipe.group(0) if recipe else f"exit {check.get('exit_code')}"),
-        }
+        if _spawn_failed(check) and program:
+            found: dict[str, Any] | None = {
+                "reason": TOOLCHAIN_MISSING, "interpreter": program, "evidence": str(check.get("reason"))}
+        else:
+            found = _not_found_report(check)
+        if found is not None:
+            return {**found, "entrypoint": str(check.get("name", "?")), "started": started}
     return None
 
 
 def gate_failed_line(check: Mapping[str, Any] | None) -> str:
-    """What the failed gate is known to have lacked, and no more."""
+    """What the failed gate is known to have lacked, and no more: the claim
+    that no check ran is made only when `started` is empty."""
     if check and check.get("reason") == TOOLCHAIN_MISSING:
-        return (f"sd-review: the gate could not start {check['interpreter']} ({check['evidence']}); "
-                "no check ran and no provider was asked")
+        started = check.get("started") or []
+        if not started:
+            return (f"sd-review: the gate could not start {check['interpreter']} for {check['entrypoint']} "
+                    f"({check['evidence']}); no check ran and no provider was asked")
+        return (f"sd-review: the gate's {check['entrypoint']} could not start {check['interpreter']} "
+                f"({check['evidence']}); {', '.join(started)} ran; no provider was asked")
     if check and check.get("reason") == COMMAND_NOT_FOUND:
         what = f"{check['missing_command']} was not found" if check.get("missing_command") else "a command was not found"
         where = f" at line {check['missing_line']}" if check.get("missing_line") else ""
-        return (f"sd-review: the repository's own gate failed: {what}{where} ({check['evidence']}); "
-                "the gate ran up to that point, so a check may have run; no provider was asked")
+        return (f"sd-review: the gate's {check['entrypoint']} failed: {what}{where} ({check['evidence']}); "
+                "it ran up to that point, so a check may have run; no provider was asked")
     return "sd-review: the repository's own gate failed; no provider was asked"
 
 
