@@ -399,10 +399,16 @@ class PublicationContractDrainTests(unittest.TestCase):
         skill = (REPO_ROOT / "skills" / "sd-research-repo" / "SKILL.md").read_text(
             encoding="utf-8")
         records = skill.find("`page=`")
-        deletes = skill.lower().find("delete the request only after")
+        acknowledges = skill.lower().find(
+            "run `sd-research-kit delivered`\n   only after both")
         self.assertNotEqual(records, -1, "the skill states no write-back")
-        self.assertNotEqual(deletes, -1, "the skill does not order the delete last")
-        self.assertLess(records, deletes)
+        self.assertNotEqual(
+            acknowledges, -1, "the skill does not order the delivered verb last")
+        self.assertLess(records, acknowledges)
+        # The contract forbids the hand delete, so the skill may not order one
+        # either. Before sd:1330 this line read "Delete the request only after
+        # both writes succeed", which this assertion fails.
+        self.assertNotIn("delete the request only after", skill.lower())
 
 
 class WorkflowReferenceTests(unittest.TestCase):
