@@ -10,13 +10,20 @@ MAIN_CHECKOUT = $(shell git rev-parse --path-format=absolute --git-common-dir 2>
 VENV ?= $(shell if [ -x .venv/bin/python ] || [ -z "$(MAIN_CHECKOUT)" ] || [ ! -x "$(MAIN_CHECKOUT)/.venv/bin/python" ]; then printf '%s' .venv; else printf '%s' "$(MAIN_CHECKOUT)/.venv"; fi)
 VENV_PYTHON = $(VENV)/bin/python
 VENV_BIN = $(VENV)/bin
+# Borrowing is for commands that *consume* an environment. `setup` creates one,
+# and a borrowed path would make it rewrite the main checkout's virtualenv --
+# installing this branch's requirements over whatever another session is
+# running on. So setup provisions the checkout it stands in, unless VENV was
+# set deliberately, which `origin` is what distinguishes from our own default.
+SETUP_VENV = $(if $(filter command line environment,$(origin VENV)),$(VENV),.venv)
+SETUP_PYTHON = $(SETUP_VENV)/bin/python
 
 .PHONY: setup hooks fonts test lint audit docs-lint check
 
 setup:
-	"$(PYTHON)" -m venv "$(VENV)"
-	"$(VENV_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
-	"$(VENV_PYTHON)" bin/sd_install.py --provision-library
+	"$(PYTHON)" -m venv "$(SETUP_VENV)"
+	"$(SETUP_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
+	"$(SETUP_PYTHON)" bin/sd_install.py --provision-library
 
 # The pre-commit tier of sd:431. `hooks/pre-commit` runs Ruff over the staged
 # Python and the two whole-tree test passes that walk the tree, with a

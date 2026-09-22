@@ -866,6 +866,58 @@ class Touched(unittest.TestCase):
         self.assertEqual(sd_lib.touched(loose), {})
 
 
+class SetupStaysLocalTests(unittest.TestCase):
+    """`make setup` provisions the checkout it stands in, never a borrowed one.
+
+    The virtualenv fallback that lets a worktree *use* the main checkout's
+    environment must not let it *rewrite* one: `setup` would install this
+    branch's pinned requirements over the environment another session is
+    running on. Borrowing is for commands that consume an environment.
+    """
+
+    MAKEFILE = pathlib.Path(__file__).resolve().parents[1] / "Makefile"
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = pathlib.Path(self._tmp.name).resolve()
+        self.main = self.tmp / "main"
+        self.main.mkdir()
+        self.git("init", "-q", "-b", "main", cwd=self.main)
+        (self.main / "Makefile").write_text(
+            self.MAKEFILE.read_text(encoding="utf-8"), encoding="utf-8")
+        # A real executable, because the fallback tests for one.
+        venv_python = self.main / ".venv" / "bin" / "python"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
+        venv_python.chmod(0o755)
+        self.git("add", "Makefile", cwd=self.main)
+        self.git("-c", "user.email=t@t", "-c", "user.name=t",
+                 "commit", "-q", "-m", "makefile", cwd=self.main)
+        self.linked = self.tmp / "linked"
+        self.git("worktree", "add", "-q", str(self.linked), cwd=self.main)
+
+    def git(self, *args: str, cwd: pathlib.Path) -> None:
+        subprocess.run(["git", *args], cwd=cwd, check=True,
+                       capture_output=True, text=True)
+
+    def make(self, target: str, *extra: str) -> str:
+        done = subprocess.run(["make", "-s", "-n", target, *extra],
+                              cwd=self.linked, capture_output=True, text=True)
+        return done.stdout
+
+    def test_setup_in_a_worktree_does_not_touch_the_main_virtualenv(self) -> None:
+        recipe = self.make("setup")
+        self.assertIn('-m venv ".venv"', recipe)
+        self.assertNotIn(str(self.main / ".venv"), recipe)
+
+    def test_an_explicit_venv_is_still_honoured(self) -> None:
+        """`origin` distinguishes a deliberate VENV from this Makefile's default."""
+
+        recipe = self.make("setup", f"VENV={self.tmp}/chosen")
+        self.assertIn(f'-m venv "{self.tmp}/chosen"', recipe)
+
+
 class ProvisionedLibraryTests(unittest.TestCase):
     """Which checkouts the `sd_db` probe will look in.
 
@@ -913,6 +965,38 @@ class ProvisionedLibraryTests(unittest.TestCase):
         with unittest.mock.patch.object(
                 sd_lib, "__file__", str(main / "bin" / "sd_lib.py")):
             self.assertEqual(sd_lib._checkouts_that_may_hold_a_venv(), [main])
+
+    def test_a_local_environment_wins_an_equal_version_in_the_main_checkout(self) -> None:
+        """Checkout order outranks the version sort, not the other way round.
+
+        Ranking every candidate in one list sorts by version first, so two
+        equal versions fall back to comparing paths -- and a worktree that
+        deliberately provisioned its own copy loses to the main checkout on
+        nothing but the spelling of its directory. The names here are chosen
+        so that the wrong implementation fails: `z-main` sorts above
+        `a-linked`.
+        """
+
+        linked, main = self.tmp / "a-linked", self.tmp / "z-main"
+        for root in (linked, main):
+            (root / ".venv/lib/python3.13/site-packages/sd_db").mkdir(parents=True)
+        with unittest.mock.patch.object(
+                sd_lib, "_checkouts_that_may_hold_a_venv", lambda: [linked, main]):
+            found = sd_lib._provisioned_library_paths()
+        self.assertEqual(len(found), 2)
+        self.assertTrue(found[0].startswith(str(linked)), found)
+
+    def test_newest_first_still_holds_inside_one_checkout(self) -> None:
+        """The rebuilt-virtualenv case the version sort was written for."""
+
+        root = self.tmp / "one"
+        for version in ("3.9", "3.13"):
+            (root / f".venv/lib/python{version}/site-packages/sd_db").mkdir(parents=True)
+        with unittest.mock.patch.object(
+                sd_lib, "_checkouts_that_may_hold_a_venv", lambda: [root]):
+            found = sd_lib._provisioned_library_paths()
+        self.assertEqual([p.split("/lib/")[1].split("/")[0] for p in found],
+                         ["python3.13", "python3.9"])
 
     def test_outside_a_repository_it_is_still_one_root(self) -> None:
         """Git refusing is not an error here; the probe just has one place."""

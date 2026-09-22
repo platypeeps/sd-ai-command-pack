@@ -743,14 +743,21 @@ def _provisioned_library_paths() -> list[str]:
     `python3.10`, where the shorter name is a prefix of the longer and sorts
     first. Empty when there is no provisioned copy to offer.
     """
-    found = []
+    ordered: list[str] = []
     for root in _checkouts_that_may_hold_a_venv():
+        found = []
         for path in root.glob(".venv/lib/python*/site-packages"):
             if not (path / "sd_db").is_dir():
                 continue
             version = tuple(int(part) for part in re.findall(r"\d+", path.parent.name))
             found.append((version, str(path)))
-    return [path for _, path in sorted(found, reverse=True)]
+        # Sorted inside the checkout and concatenated in checkout order, not
+        # sorted across both. One list would rank by version first, so two
+        # equal versions fall back to comparing paths -- and a worktree that
+        # deliberately provisioned its own copy would lose to the main
+        # checkout on nothing but the spelling of its directory.
+        ordered.extend(path for _, path in sorted(found, reverse=True))
+    return ordered
 
 
 class Imported(NamedTuple):
