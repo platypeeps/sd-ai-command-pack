@@ -501,8 +501,8 @@ class TheDemotionNote(Fixture):
         self.root = self.make_repo()
         self.git(self.root, "checkout", "-b", "topic")
         self.write_mode(self.root, "full")
-        # `merge: auto` on the row, so the merge-time case can assert that a
-        # demotion changes the repository's merge policy not at all: the
+        # `runner_merge: auto` on the row, so the merge-time case can assert that
+        # a demotion changes the repository's `runner_merge` not at all: the
         # policy is the operator's standing setting, and a remote that gained
         # a collaborator is a reason to stop this merge, not to rewrite it.
         upsert_repo(self.connection, str(self.root), remote="https://github.com/sven/thing.git",

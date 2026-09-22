@@ -41,7 +41,7 @@ research kit lays out the repository; the item tracks what is open. You sit at
 the end: external publish or filing is the one gate, and it is yours.
 
 **Development.** Plan when warranted, then implement, test, review, push, and merge when authorized.
-Unattended merging requires repository `merge: auto` and a fresh sole-operator check before each merge.
+Unattended merging requires `runner_merge: auto` on the repository row and a fresh sole-operator check before each merge.
 This runner rule is separate from active task permission under **Standing authorization**.
 Without either applicable authority, stop at pull-request-ready.
 
@@ -236,7 +236,7 @@ the block; the file is untracked by construction.
 
 | Mode | Where planning artifacts go | What ships |
 |---|---|---|
-| `full` | `docs/work/` in the repository | everything above; merge only with `merge: auto` on the row |
+| `full` | `docs/work/` in the repository | everything above; merge only with `runner_merge: auto` on the row |
 | `minimal` | nowhere; no work items | the small-change path only |
 | `guest` | the fork's integration branch | the small-change path to pull-request-ready; no posts, no labels |
 
