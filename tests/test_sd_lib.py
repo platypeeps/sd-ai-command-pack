@@ -1027,12 +1027,12 @@ class BorrowedEnvironmentTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn('-m venv ".venv"', done.stdout)
 
-    def test_setup_records_the_two_files_it_installed_from(self) -> None:
-        done = self.make("setup")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn(
-            'cp requirements-dev.txt requirements-security.txt '
-            '".venv/sd-requirements/"', done.stdout)
+    # That `setup` records what it provisioned is asserted in
+    # `ProvisioningRecordTests`, against a `make setup` that actually runs.
+    # It was a `make -n` text match here until the recipe learned to publish
+    # the record by renaming a directory built beside it -- at which point the
+    # match broke while the behaviour it stood for was unchanged, which is
+    # what a test of a recipe's spelling is worth.
 
     def symlink_the_environment(self) -> None:
         """What sd:1020 does by hand: a `.venv` link into the main checkout.
@@ -1101,6 +1101,178 @@ class BorrowedEnvironmentTests(unittest.TestCase):
         done = self.make("docs-lint", cwd=self.main)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn('".venv/bin/python"', done.stdout)
+
+
+class ProvisioningRecordTests(unittest.TestCase):
+    """`make setup` and the record it leaves, in the two orders that matter.
+
+    The record is what lets a worktree borrow an environment, so a record
+    that is present while the environment is in motion is worse than none:
+    it is a claim of compatibility made about packages that are being
+    replaced. And the recipe has to be runnable in the state its own refusal
+    recommends it from, which is a worktree whose `.venv` is an sd:1020 link.
+
+    These run `make setup` for real, against a stand-in interpreter, because
+    what is under test is the order of the steps and the state each failure
+    leaves behind -- neither of which `make -n` can show.
+    """
+
+    MAKEFILE = pathlib.Path(__file__).resolve().parents[1] / "Makefile"
+    REQUIREMENTS = ("requirements-dev.txt", "requirements-security.txt")
+
+    #: Stands in for the interpreter the recipe calls. `-m venv <dir>` copies
+    #: it to <dir>/bin/python, so the steps after it run it too, and each
+    #: step's exit code is an environment variable the test sets. It mirrors
+    #: the one real behaviour the recipe now works around -- CPython's venv
+    #: refuses a path that is a symlink -- and
+    #: `test_the_real_interpreter_refuses_a_symlinked_target` is what keeps
+    #: that mirror honest rather than convenient.
+    STUB = """#!/bin/sh
+last=""
+for a in "$@"; do last="$a"; done
+case " $* " in
+  *" -m venv "*)
+    if [ -L "$last" ]; then
+      echo "Error: Unable to create directory '$last'" >&2
+      exit 1
+    fi
+    mkdir -p "$last/bin" || exit 1
+    cp "$0" "$last/bin/python" || exit 1
+    chmod +x "$last/bin/python"
+    exit 0
+    ;;
+  *" -m pip "*) exit "${STUB_PIP_EXIT:-0}" ;;
+  *"--provision-library"*) exit "${STUB_PROVISION_EXIT:-0}" ;;
+esac
+exit 0
+"""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = pathlib.Path(self._tmp.name).resolve()
+        self.stub = self.tmp / "stub-python"
+        self.stub.write_text(self.STUB, encoding="utf-8")
+        self.stub.chmod(0o755)
+
+        self.main = self.tmp / "main"
+        self.main.mkdir()
+        self.git("init", "-q", "-b", "main", cwd=self.main)
+        (self.main / "Makefile").write_text(
+            self.MAKEFILE.read_text(encoding="utf-8"), encoding="utf-8")
+        for name in self.REQUIREMENTS:
+            (self.main / name).write_text(f"# {name}\n", encoding="utf-8")
+        self.git("add", "-A", cwd=self.main)
+        self.git("-c", "user.email=t@t", "-c", "user.name=t",
+                 "commit", "-q", "-m", "base", cwd=self.main)
+        # An environment in the main checkout, with the record `make setup`
+        # would have left, so a worktree linking to it is the live shape.
+        self.main_venv = self.main / ".venv"
+        (self.main_venv / "bin").mkdir(parents=True)
+        (self.main_venv / "bin" / "python").write_text("#!/bin/sh\n",
+                                                       encoding="utf-8")
+        (self.main_venv / "bin" / "python").chmod(0o755)
+        (self.main_venv / "sd-requirements").mkdir()
+        for name in self.REQUIREMENTS:
+            (self.main_venv / "sd-requirements" / name).write_text(
+                f"# {name}\n", encoding="utf-8")
+
+        self.linked = self.tmp / "linked"
+        self.git("worktree", "add", "-q", str(self.linked), cwd=self.main)
+        self.record = self.linked / ".venv" / "sd-requirements"
+
+    def git(self, *args: str, cwd: pathlib.Path) -> None:
+        subprocess.run(["git", *args], cwd=cwd, check=True,
+                       capture_output=True, text=True)
+
+    def setup(self, **env: str) -> subprocess.CompletedProcess[str]:
+        """The command the borrow refusal recommends, verbatim."""
+
+        return subprocess.run(
+            ["make", "-s", "setup", f"PYTHON={self.stub}", "VENV=.venv"],
+            cwd=self.linked, capture_output=True, text=True,
+            env={**os.environ, **env})
+
+    def dry_run(self, target: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["make", "-s", "-n", target], cwd=self.linked,
+                              capture_output=True, text=True)
+
+    def move_a_pin(self) -> None:
+        (self.linked / "requirements-dev.txt").write_text(
+            "# requirements-dev.txt\nmoved==2\n", encoding="utf-8")
+
+    def test_a_successful_provision_publishes_the_record(self) -> None:
+        done = self.setup()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        for name in self.REQUIREMENTS:
+            self.assertEqual((self.record / name).read_text(encoding="utf-8"),
+                             (self.linked / name).read_text(encoding="utf-8"))
+        # Nothing is left of the directory the record was published from.
+        self.assertFalse((self.linked / ".venv" / ".sd-requirements.new").exists())
+
+    def test_a_failed_provision_leaves_no_record(self) -> None:
+        """A re-provision that dies mid-flight must not leave a stale claim.
+
+        The record used to be written last and nothing removed it first, so
+        the previous run's copy sat beside packages this run had already
+        changed. A worktree comparing against it matched, passed the borrow
+        check, and ran the versions the failed run had half-installed.
+        """
+
+        self.assertEqual(self.setup().returncode, 0)
+        self.assertTrue(self.record.is_dir(), "the first run should record")
+        self.move_a_pin()
+        done = self.setup(STUB_PROVISION_EXIT="1")
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertFalse(self.record.exists(),
+                         "a record survived a provision that failed")
+
+    def test_the_recovery_the_refusal_recommends_detaches_the_link(self) -> None:
+        """The combined case: a refused symlinked worktree, then the remedy.
+
+        `python -m venv` refuses a symlinked path, so the recommendation in
+        the refusal -- `make setup VENV=.venv` -- used to fail in exactly the
+        configuration that produced the refusal.
+        """
+
+        (self.linked / ".venv").symlink_to(self.main_venv)
+        self.move_a_pin()
+        refused = self.dry_run("docs-lint")
+        self.assertNotEqual(refused.returncode, 0, refused.stdout)
+        self.assertIn("refusing-to-borrow", refused.stderr)
+
+        done = self.setup()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("detaching .venv", done.stderr)
+        self.assertIn(str(self.main_venv), done.stderr)
+        self.assertFalse((self.linked / ".venv").is_symlink(),
+                         "the link should be gone")
+        self.assertTrue((self.linked / ".venv" / "bin" / "python").exists())
+        # The environment behind the link, and its record, are untouched --
+        # the detach precedes the record removal for this reason.
+        self.assertTrue((self.main_venv / "bin" / "python").exists())
+        for name in self.REQUIREMENTS:
+            self.assertTrue((self.main_venv / "sd-requirements" / name).is_file())
+
+        after = self.dry_run("docs-lint")
+        self.assertEqual(after.returncode, 0, after.stderr)
+        self.assertIn('".venv/bin/python"', after.stdout)
+        self.assertNotIn("records no provisioning", after.stderr)
+
+    def test_the_real_interpreter_refuses_a_symlinked_target(self) -> None:
+        """The premise the stand-in mirrors, asked of the real interpreter.
+
+        Nothing is built: venv refuses before it creates anything, which is
+        why this costs a process and not an environment.
+        """
+
+        target = self.tmp / "link-to-a-directory"
+        (self.tmp / "a-directory").mkdir()
+        target.symlink_to(self.tmp / "a-directory")
+        done = subprocess.run([sys.executable, "-m", "venv", str(target)],
+                              capture_output=True, text=True)
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertIn("Unable to create directory", done.stderr + done.stdout)
 
 
 class ProvisionedLibraryTests(unittest.TestCase):

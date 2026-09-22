@@ -88,16 +88,45 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 
 .PHONY: setup hooks fonts test lint audit docs-lint check
 
-# The last two lines record what this environment was provisioned from, which
-# is what BORROWED above reads. Last, so an install that failed leaves no
-# record claiming a match; and inside the environment, so the record cannot
-# outlive the thing it describes -- `rm -rf .venv` takes both.
+# The record BORROWED reads lives inside the environment, so `rm -rf .venv`
+# takes both and a record can never outlive what it describes. The rest of
+# this recipe is about the two moments where that is not enough.
+#
+# It is removed before the first mutation and published after the last, not
+# merely written last. Written last is right for a fresh environment and wrong
+# for a re-provision: the previous run's record sat there while pip and
+# `--provision-library` changed the packages under it, so a failing
+# `--provision-library` aborted `make` and left a record that still matched
+# requirements the environment no longer held. A worktree comparing against it
+# passed the borrow check and ran the wrong versions in silence -- the exact
+# failure the record exists to prevent, reached by the record itself.
+# Publication is a rename of a directory built beside it, so a record that
+# exists is a record that is complete.
+#
+# The symlink is detached first, and out loud. `python -m venv` refuses a path
+# that is a symlink -- `Error: Unable to create directory '<path>'`, exit 1,
+# pinned against the real interpreter in tests/test_sd_lib.py -- so
+# `make setup VENV=.venv`, which is what the borrow refusal above tells a
+# reader to run, failed in precisely the configuration that produced the
+# refusal: a worktree whose `.venv` is an sd:1020 link. Detaching removes the
+# link and never what it points at, and it says what it detached, because
+# replacing somebody's deliberate link in silence is worse than the error it
+# repairs. It has to come before the record is removed, too: through a link,
+# `$(SETUP_VENV)/sd-requirements` is the *other* checkout's record.
 setup:
+	@venv="$(SETUP_VENV)"; \
+	  [ -n "$$venv" ] || { printf '%s\n' "error: VENV is empty; there is no path to provision" >&2; exit 1; }; \
+	  if [ -L "$$venv" ]; then \
+	    printf '%s\n' "detaching $$venv, a link to $$(readlink "$$venv"); the environment it points at is left alone" >&2; \
+	    rm "$$venv"; \
+	  fi; \
+	  rm -rf "$$venv/sd-requirements" "$$venv/.sd-requirements.new"
 	"$(PYTHON)" -m venv "$(SETUP_VENV)"
 	"$(SETUP_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
 	"$(SETUP_PYTHON)" bin/sd_install.py --provision-library
-	@mkdir -p "$(SETUP_VENV)/sd-requirements"
-	cp requirements-dev.txt requirements-security.txt "$(SETUP_VENV)/sd-requirements/"
+	@mkdir -p "$(SETUP_VENV)/.sd-requirements.new"
+	cp requirements-dev.txt requirements-security.txt "$(SETUP_VENV)/.sd-requirements.new/"
+	@mv "$(SETUP_VENV)/.sd-requirements.new" "$(SETUP_VENV)/sd-requirements"
 
 # The pre-commit tier of sd:431. `hooks/pre-commit` runs Ruff over the staged
 # Python and the two whole-tree test passes that walk the tree, with a

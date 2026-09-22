@@ -14,6 +14,8 @@ A linked worktree with no `.venv` borrows the main checkout's, and borrows it on
 A worktree that moved a pin is refused by name and told to run `make setup VENV=.venv` for an environment of its own.
 A `.venv` that is a symlink into another checkout is the same borrow under a local name, so it is compared too, on a proven mismatch only.
 A symlinked environment that records nothing is used anyway, and `make` prints one note naming the checkout to re-provision (sd:1349).
+`make setup` detaches a symlink at the path it provisions, and says what it detached; the environment the link pointed at is left alone.
+It also removes the record before it changes anything and republishes it only after the last step, so a provision that failed leaves no record to match.
 A `.venv` the checkout carries as a real directory is its own environment and is never compared.
 The requirements files use `--require-hashes` locally and in CI.
 To update a dependency, change its pin and run the compile command from that file's header:
