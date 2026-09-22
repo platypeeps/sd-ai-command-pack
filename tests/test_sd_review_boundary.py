@@ -543,11 +543,27 @@ class LineBudgetTests(unittest.TestCase):
         # reasons. This raise is its own commit, before the one that spends
         # it. Shared-core classification and the complexity ceilings are
         # unchanged.
+        #
+        # 3126 -> 3176 is sd:1328, which makes Copilot-on-deep-changes the
+        # machine default instead of a per-repository opt-in. Nineteen of the
+        # twenty-one `runner_merge=auto` repositories carry no
+        # `.github/sd-review.json`, so `automatic_deep: false` in the built-in
+        # default meant no Copilot on any of them, and the alternative was
+        # nineteen files saying one thing. The 50 lines are `copilot_policy`
+        # (repository file when it names the key, else `sd.copilot_review`,
+        # else `deep`, with the source named for `--explain`),
+        # `copilot_automatic` (which also keeps `always` off the `skip` tier),
+        # the guard that holds only a file naming `copilot_review` to its
+        # grammar so an absent key inherits, two more report keys, one render
+        # line, and the comments that say why the default carries `None`.
+        # This raise is its own commit, before the one that spends it.
+        # Shared-core classification and the complexity ceilings are
+        # unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3126,
+            3176,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
