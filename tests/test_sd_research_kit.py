@@ -1122,17 +1122,41 @@ class HookTriggerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.renders(), ["render"])
 
-    def test_post_checkout_does_not_render_a_file_checkout(self) -> None:
-        """Flag 0 is `git checkout -- <path>`, which moves no branch."""
+    def test_post_checkout_renders_a_file_checkout(self) -> None:
+        """A document can change without HEAD moving, and usually on purpose.
 
-        before = self.sha()
+        `git checkout <rev> -- doc.md` is how a page is reverted. git fires
+        post-checkout with flag 0 and the same revision twice, so there is no
+        range to ask about -- and skipping on that ground leaves the mirror
+        holding the text the checkout just took away. The argv here is git's
+        own, read off a real file checkout.
+        """
+
         self.a_second_commit()
-        result = self.fire("post-checkout", before, self.sha(), "0")
+        here = self.sha()
+        self.git("checkout", "-q", "HEAD~1", "--", "doc.md")
+        self.assertEqual((self.repo / "doc.md").read_text(), "one\n")
+        self.assertEqual(self.sha(), here, "the file checkout moved HEAD")
+        result = self.fire("post-checkout", here, here, "0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.renders(), ["render"])
+
+    def test_post_checkout_does_not_render_a_file_checkout_of_nothing(self) -> None:
+        """Flag 0 with the tree already matching HEAD changed no document."""
+
+        self.a_second_commit()
+        here = self.sha()
+        result = self.fire("post-checkout", here, here, "0")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.renders(), [])
 
     def test_post_checkout_does_not_render_when_nothing_moved(self) -> None:
-        """`git checkout <the branch already checked out>`."""
+        """`git checkout <the branch already checked out>`, or `-b`.
+
+        Equal revisions leave no range, so this falls to the working tree
+        against HEAD -- which names nothing here, because a branch that did
+        not move wrote no file.
+        """
 
         self.a_second_commit()
         here = self.sha()

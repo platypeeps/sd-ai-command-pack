@@ -713,11 +713,12 @@ def publish(repo: Path, project: str, docs: list[dict[str, Any]]) -> list[str]:
 
 
 #: The git triggers the re-render hook installs under. A commit is not the only
-#: way a document changes: a pull rewrites the working tree and a branch switch
-#: replaces it outright, and `build/` left from the old tree is the stale render
-#: this hook exists to prevent. One source under three names, because three
-#: copies of one script drift; the script reads its own `argv[0]` to know which
-#: trigger fired and how to ask git what moved.
+#: way a document changes: a pull rewrites the working tree, a branch switch
+#: replaces it outright, and `git checkout <rev> -- doc.md` rewrites one
+#: document in place without moving HEAD at all. `build/` left from the old
+#: tree is the stale render this hook exists to prevent. One source under three
+#: names, because three copies of one script drift; the script reads its own
+#: `argv[0]` to know which trigger fired and how to ask git what moved.
 HOOK_TRIGGERS = ("post-commit", "post-merge", "post-checkout")
 
 #: The hook that keeps `build/` current, as text rather than as a file beside
@@ -732,11 +733,12 @@ HOOK = '''#!/usr/bin/env python3
 # Re-render this research repo when git changes a document.
 #
 # Installed by `sd-research-kit init-hook` under three names at once:
-# post-commit, post-merge and post-checkout. A pull and a branch switch change
-# the documents as surely as a commit does, and a `build/` left from the old
-# tree is the stale render this exists to prevent. Post-commit and not
-# pre-commit: `build/` is generated and not committed, so there is nothing to
-# stage, and the commit is the revision a queued mirror should name.
+# post-commit, post-merge and post-checkout. A pull, a branch switch and a
+# checkout of one path change the documents as surely as a commit does, and a
+# `build/` left from the old tree is the stale render this exists to prevent.
+# Post-commit and not pre-commit: `build/` is generated and not committed, so
+# there is nothing to stage, and the commit is the revision a queued mirror
+# should name.
 #
 # One source, three names, and the trigger is read from `argv[0]`, because each
 # one has to ask git a different question. `diff-tree ... HEAD` is
@@ -777,12 +779,20 @@ def diff_argv(trigger, argv):
         return ["diff", "--name-only", "ORIG_HEAD", "HEAD"]
     if trigger == "post-checkout":
         # git passes the previous HEAD, the new HEAD, and 1 for a branch
-        # checkout or 0 for a file checkout. A file checkout restores paths
-        # inside one tree and moves no branch, and `git checkout <current>`
-        # moves nothing at all; neither can have changed a document.
-        if len(argv) < 4 or argv[3] != "1" or argv[1] == argv[2]:
-            return None
-        return ["diff", "--name-only", argv[1], argv[2]]
+        # checkout or 0 for a file checkout. A branch checkout has a range,
+        # and the range is the only thing that names what it moved.
+        if len(argv) >= 4 and argv[3] == "1" and argv[1] != argv[2]:
+            return ["diff", "--name-only", argv[1], argv[2]]
+        # Everything else this trigger fires for moved no branch, so its two
+        # revisions are equal and there is no range to ask about --  but
+        # `git checkout <rev> -- doc.md` replaces a document's contents all
+        # the same, which is exactly the render this hook exists for. The
+        # honest question is then the working tree against HEAD, which names
+        # what the checkout just wrote. It also names unrelated uncommitted
+        # edits, so this renders slightly more often than it must; a render
+        # that finds nothing changed is cheap, and a mirror that silently
+        # keeps the superseded text is not.
+        return ["diff", "--name-only", "HEAD"]
     # An unrecognised name is not this hook's trigger. Guessing would run a
     # render on a git event nobody installed it for.
     return None

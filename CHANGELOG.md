@@ -233,9 +233,12 @@
   fired. Each asks git a different question, because the post-commit one is
   unusable elsewhere: `diff-tree --no-commit-id -r HEAD` prints nothing at all
   for a merge commit, and a checkout's HEAD says nothing about what the
-  checkout moved. So a merge is measured against `ORIG_HEAD`, and a checkout
-  against the two revisions git passes it -- and a file checkout, which git
-  flags with `0`, renders nothing.
+  checkout moved. So a merge is measured against `ORIG_HEAD`, and a branch
+  checkout against the two revisions git passes it. A file checkout --
+  `git checkout <rev> -- doc.md`, how a page is reverted -- moves no branch
+  and so has no range, and is measured against the working tree instead: it
+  changes a document without HEAD moving, which is precisely the render the
+  mirrors exist for.
 
   The install is all or nothing. Every path is inspected before any is
   written, so a foreign file at one of them refuses by name and leaves the
