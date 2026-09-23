@@ -1006,7 +1006,7 @@ branch, the commit, the push and the pull request are identical.
 
 **The seam is 40, not the flat 119 R11-D42 charged for `git push`.** Write-side
 git is already built — `git commit` at `bin/sd_lib.py` — and so is
-network git, `git fetch` at `bin/sd_lib.py:1334` and `:1340`, both through
+network git, the two `git fetch` calls in `source:bin/sd_lib.py::delivered`, both through
 `sd_lib.git_output` at `:143`, which takes arbitrary argv behind a timeout, no
 shell and a failure-is-None contract across 30 call sites. What is genuinely
 uncrossed is narrower and is not the push: **no `gh` call in `bin/` has ever

@@ -49,9 +49,20 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
 
   render        render research.conf.py into docs/dashboard/, write the vault
                 copies, register with the dashboard, queue outward mirrors
+                for the documents that changed since they were last queued
+                (SD_MIRROR_REQUEUE=1 queues every designated document). From
+                a linked worktree: docs/dashboard/ only, no vault copy and no
+                mirror, unless SD_PUBLISH_FROM_WORKTREE=1 is set
   publish       the registration and queueing half on its own, without
                 re-rendering
-  init-hook     install the post-commit hook that re-renders this repo
+  init-hook     install the hook that re-renders this repo after a commit, a
+                merge (so a pull) or a branch checkout changes a document;
+                upgrades an earlier install of its own
+  delivered <request file name> <fingerprint>
+                the drain's last step: record that generation of the request
+                as delivered and remove the request only while it is still
+                that generation. The one verb with arguments: it acts on the
+                machine's queue, not on a checkout
   checklinks    verify every relative markdown link and backticked in-repo path
                 resolves; exit 1 if anything is broken
   review        the mechanical half of the pre-publication adversarial review:
@@ -75,7 +86,8 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
                 that are deliberate
   conventions   print the path of the standard every research repo follows
 
-Every verb acts on the current working directory. There is no repo argument.
+Every verb acts on the current working directory. There is no repo argument;
+`delivered` names a request in the machine's queue, which is not a repository.
 """
 
 
@@ -147,6 +159,10 @@ def main(argv: list[str]) -> int:
     if verb in ("-h", "--help", "help"):
         print(USAGE, end="")
         return 0
+    if verb == "delivered":
+        # Before the no-argument guard: R10-D6 bars a checkout argument, and
+        # a request name is not one. See `sd_research_publish.delivered_main`.
+        return int(load("sd_research_publish").delivered_main(rest))
     if rest:
         print(f"sd-research-kit: {verb} takes no arguments\n", file=sys.stderr)
         print(USAGE, end="", file=sys.stderr)

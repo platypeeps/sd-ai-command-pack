@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import ast
 import fcntl
+import io
 import json
 import os
 import pathlib
@@ -745,7 +746,7 @@ esac
             f"sys.path.insert(0, {str(BIN)!r});"
             "import sd_lib;"
             "m = sd_lib.sibling('a', 'sd-review-ack');"
-            f"r, why = m.live_round(pathlib.Path({str(self.repo.root)!r}), None, 10);"
+            f"r, why, _ = m.live_round(pathlib.Path({str(self.repo.root)!r}), None, 10);"
             "print(json.dumps({'rounds': {str(k): v for k, v in r.items()}, 'why': why}))"
         )
         done = subprocess.run(
@@ -1236,7 +1237,7 @@ class ASquashIsALanding(unittest.TestCase):
                 return ({"merged": True} if args[1].endswith("/pulls/7") else []), ""
 
         with unittest.mock.patch.object(ack.sd_lib, "sibling", return_value=PrState):
-            rounds, error = ack.live_round(self.repo.root, 7, 5)
+            rounds, error, _ = ack.live_round(self.repo.root, 7, 5)
         self.assertEqual(error, "")
         self.assertEqual(rounds[7]["pull"], {"merged": True})
         self.assertIn(["api", "repos/acme/widget/pulls/7"], calls)
@@ -1750,6 +1751,261 @@ class TwoWritersAtOnce(unittest.TestCase):
             if "write_store" in text or ack.STORE_NAME in text:
                 elsewhere.append(path.name)
         self.assertEqual(elsewhere, [], "another module reaches the store directly")
+
+
+class TheUnlocatedSentinelIsNotALabel(unittest.TestCase):
+    """sd:1395: the value that means "no file" may not also be the file shown.
+
+    `"?"` is the `path` of a finding a review heading counted and the body
+    reader could not recover. It is read as a control value in
+    `answering_commit` -- a finding this reader could not place is one it may
+    not decide has been answered -- and it is printed as though it were a
+    path everywhere a finding is rendered or grouped. sd:1223 is titled
+    `11 live code-review findings remain in ?/` because of the second job.
+
+    The defect is the pairing, not either half: anyone improving the display
+    edits the two producers, leaves the guard comparing against the character,
+    and the guard stops recognising its own findings. So the literal is
+    written once, and every other site reads it by name.
+    """
+
+    SOURCE = (REPO_ROOT / "bin" / "sd-review-ack").read_text(encoding="utf-8")
+
+    def test_the_sentinel_is_spelled_once_in_the_whole_file(self):
+        """One constant, and every producer and guard reads it by name.
+
+        Counted from the parsed source rather than from a list of the sites
+        known today: a fourth producer added next year is inside this check
+        without anybody remembering to add it.
+        """
+        tree = ast.parse(self.SOURCE)
+        literals = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and node.value == ack.UNLOCATED
+        ]
+        self.assertEqual(
+            [node.lineno for node in literals], [self._constant_line(tree)],
+            "the unlocated sentinel is written by hand somewhere other than its "
+            "own definition; a display change there cannot reach the guard",
+        )
+
+    def _constant_line(self, tree: ast.Module) -> int:
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == "UNLOCATED"
+                for target in node.targets
+            ):
+                return node.value.lineno
+        self.fail("bin/sd-review-ack defines no UNLOCATED constant")
+
+    def test_both_producers_make_a_row_the_guard_recognises(self):
+        """The shortfall row and the reconciliation row are the two producers."""
+        shortfall = ack._shortfall(1, "2", 0, "bot")
+        reconciled = ack._reconciled(1, "(moderate, 2 votes) a thing", "bot", [])
+        self.assertTrue(ack.is_unlocated(shortfall["path"]))
+        self.assertEqual(len(reconciled), 1)
+        self.assertTrue(ack.is_unlocated(reconciled[0]["path"]))
+
+    def test_an_empty_path_is_not_an_unlocated_finding(self):
+        """Two states, kept apart: no path recorded, and a finding with no file."""
+        self.assertFalse(ack.is_unlocated(""))
+        self.assertFalse(ack.is_unlocated(None))
+
+    def test_the_guard_refuses_an_unlocated_finding_without_asking_git(self):
+        """`answering_commit` reads the sentinel by name, not by character."""
+        calls: list[list[str]] = []
+
+        def spy(args, root):
+            calls.append(args)
+            return ""
+
+        row = dict(ack._shortfall(1, "2", 0, "bot"), reviewed="c0ffee")
+        with unittest.mock.patch.object(ack.sd_lib, "git_output", spy):
+            self.assertEqual(ack.answering_commit(REPO_ROOT, row, "main"), "")
+            self.assertEqual(calls, [], "an unplaced finding asked git a question")
+            ack.answering_commit(REPO_ROOT, dict(row, path="bin/thing.py"), "main")
+        self.assertEqual(len(calls), 1, "a placed finding must still be asked about")
+
+    def test_a_rendered_unlocated_finding_does_not_read_as_a_file(self):
+        """The display half, which is the half sd:1223's title got wrong."""
+        row = dict(
+            ack._shortfall(1, "2", 0, "bot"), verdict="unread", replies=0, reviewed="",
+        )
+        stream = io.StringIO()
+        ack.render_findings(
+            {"findings": [row], "unsatisfied": [row], "pull_requests": [1],
+             "landing_ref": "origin/main", "store_error": ""},
+            stream,
+        )
+        self.assertIn(ack.UNLOCATED_LABEL, stream.getvalue())
+        self.assertNotIn(f" {ack.UNLOCATED} ", stream.getvalue())
+
+
+class AFindingKeepsItsNameWhenGitHubMovesIt(unittest.TestCase):
+    """sd:1388: the id is keyed on the coordinate the reviewer read, not the live one.
+
+    GitHub re-anchors an inline comment as the branch grows: `line` moves by
+    the hunk delta of every later push and becomes null once the comment goes
+    outdated. `original_line` does not move. `_reviewed_at` already prefers
+    `original_commit_id` for exactly this reason, in a docstring four lines
+    from the id, while the id itself keyed on the field that moves.
+
+    What that cost: a finding acknowledged as `carried` under id A is read
+    back under id B after an unrelated push, the store row under A is
+    orphaned, and `record_answers` writes `fixed` under B -- so the carried
+    finding's satisfaction can no longer be lost when the item holding it is
+    cancelled, and a human `dismissed <reason>` is silently replaced by an
+    automatic verdict under a new name.
+    """
+
+    COMMENT = {
+        "path": "bin/x.py", "body": "the finding, stated once", "author": "bot",
+        "id": 4242, "in_reply_to_id": None, "original_commit_id": "c0ffee",
+        "original_line": 47,
+    }
+
+    def _row(self, **extra) -> dict:
+        return ack.findings(1200, [], [dict(self.COMMENT, **extra)])[0]
+
+    def test_a_later_push_that_moves_the_line_does_not_rename_the_finding(self):
+        """The decisive case: one comment, read twice, across a line-moving edit."""
+        self.assertEqual(self._row(line=47)["id"], self._row(line=53)["id"])
+
+    def test_a_comment_gone_outdated_keeps_the_name_it_had(self):
+        """GitHub drops `line` to null once the hunk is gone; the finding stays itself."""
+        self.assertEqual(self._row(line=47)["id"], self._row(line=None)["id"])
+
+    def test_the_finding_is_placed_at_the_state_it_is_dated_to(self):
+        """One coordinate, not two: `original_commit_id` and `original_line` are a pair.
+
+        Showing the moved line beside the commit the reviewer read would name
+        a line that does not carry the finding in that commit.
+        """
+        row = self._row(line=53)
+        self.assertEqual((row["reviewed"], row["line"]), ("c0ffee", 47))
+
+    def test_a_payload_with_no_original_line_still_reads_the_line_it_has(self):
+        """The captured rounds and the older API shape carry only `line`.
+
+        Falling back to it keeps every id in `tests/fixtures/*-round.json`
+        exactly as it was, so this change renames no finding already on
+        record except one GitHub had already moved.
+        """
+        row = ack.findings(1200, [], [{"path": "bin/x.py", "body": "t", "author": "bot",
+                                       "line": 9, "in_reply_to_id": None}])[0]
+        self.assertEqual(row["line"], 9)
+        self.assertEqual(row["id"], ack.finding_id(1200, "inline", "bin/x.py", 9, "t"))
+
+    def test_an_acknowledgement_survives_the_push_that_moves_the_comment(self):
+        """The failure the item describes, end to end, without a repository.
+
+        The store is keyed by finding id. If the id moves, the row recorded
+        against the finding is not found when the finding is read again.
+        """
+        before, after = self._row(line=47), self._row(line=53)
+        store = {before["id"]: {"disposition": "carried", "item": 771}}
+        self.assertIn(after["id"], store)
+
+
+class TheVerdictSaysWhatItRead(unittest.TestCase):
+    """sd:1392: a clean verdict over the first 30 open pull requests.
+
+    `--check` listed open pull requests at `DEFAULT_LIMIT`, `gh` truncated
+    silently, and the report printed the number that came back -- so the size
+    of the sample was presented as the scope of the verdict. Thirty-four open
+    pull requests with unacknowledged findings on the four oldest exited 0 and
+    said `30 pull request(s)`, with nothing saying four were never read.
+
+    Bounded, and that is why the remedy is a refusal rather than an alarm:
+    `sd-ship`'s merge gate goes per pull request through `review_state` and
+    never through this path, so nothing downstream reads a capped verdict.
+    Only the standalone report does, and it is the one that has to say so.
+    """
+
+    def _pr_state(self, open_pulls: int) -> tuple[type, list[list[str]]]:
+        calls: list[list[str]] = []
+
+        class PrState:
+            @staticmethod
+            def probe(root):
+                return {"available": True, "slug": "acme/widget", "reason": ""}
+
+            @staticmethod
+            def gh_json(args, root):
+                calls.append(args)
+                if args[0] != "pr":
+                    return ([] if args[1].endswith(("/reviews", "/comments")) else {}), ""
+                asked = int(args[args.index("--limit") + 1])
+                return [{"number": n} for n in range(1, min(open_pulls, asked) + 1)], ""
+
+        return PrState, calls
+
+    def _round(self, open_pulls: int, limit: int) -> tuple[dict, str, int, list[list[str]]]:
+        state, calls = self._pr_state(open_pulls)
+        with unittest.mock.patch.object(ack.sd_lib, "sibling", return_value=state):
+            rounds, error, capped = ack.live_round(REPO_ROOT, None, limit)
+        return rounds, error, capped, calls
+
+    def test_a_read_that_stopped_at_its_limit_says_where_it_stopped(self):
+        rounds, error, capped, _ = self._round(34, 30)
+        self.assertEqual(error, "")
+        self.assertEqual(len(rounds), 30, "the limit is still the limit")
+        self.assertEqual(capped, 30)
+
+    def test_a_read_that_reached_the_end_is_not_reported_as_capped(self):
+        """Exactly `limit` open pull requests is a complete read, not a truncated one.
+
+        `len(payload) >= limit` would refuse here forever on a repository that
+        happens to sit on the number, which is a gate crying wolf at a read
+        that missed nothing. One extra row asked for answers it exactly.
+        """
+        rounds, _, capped, calls = self._round(30, 30)
+        self.assertEqual((len(rounds), capped), (30, 0))
+        listing = calls[0]
+        self.assertEqual(listing[listing.index("--limit") + 1], "31",
+                         "the cap is detected by asking for one more, in the same call")
+
+    def test_check_refuses_while_the_read_is_capped(self):
+        """Absence of evidence, the same direction `reason` already fails in.
+
+        A capped read cannot know whether a finding stands on a pull request it
+        never opened, and a gate that rules clean on that is the one that
+        passes hardest on the busiest repository.
+        """
+        args = ack.ack_parser().parse_args(["--check"])
+        with unittest.mock.patch.object(ack, "live_round", return_value=({}, "", 30)):
+            result, code = ack.review_report(args, REPO_ROOT)
+        self.assertEqual(code, 1)
+        self.assertEqual(result["capped"], 30)
+
+    def test_a_capped_read_without_check_still_reports(self):
+        """Reporting is not gating: the cap is said, and the exit stays 0."""
+        args = ack.ack_parser().parse_args([])
+        with unittest.mock.patch.object(ack, "live_round", return_value=({}, "", 30)):
+            _, code = ack.review_report(args, REPO_ROOT)
+        self.assertEqual(code, 0)
+
+    def test_a_captured_round_is_never_capped(self):
+        """A replayed file is the whole file; only a live listing can stop short."""
+        args = ack.ack_parser().parse_args(["--from", str(FIXTURE)])
+        self.assertEqual(ack._chosen_round(args, REPO_ROOT)[2], 0)
+
+    def test_the_header_does_not_print_the_sample_as_the_scope(self):
+        self.assertEqual("3 pull request(s)",
+                         ack.read_scope({"pull_requests": [1, 2, 3], "capped": 0}))
+        self.assertIn("not how many are open",
+                      ack.read_scope({"pull_requests": [1, 2, 3], "capped": 3}))
+
+    def test_the_report_names_the_cap_even_with_nothing_to_report(self):
+        """The clean-looking run is the one that needed telling."""
+        stream = io.StringIO()
+        ack.render_findings(
+            {"findings": [], "unsatisfied": [], "pull_requests": [1, 2, 3],
+             "landing_ref": "origin/main", "store_error": "", "capped": 3},
+            stream,
+        )
+        self.assertIn("--limit", stream.getvalue())
+        self.assertIn("read stopped at 3", stream.getvalue())
 
 
 if __name__ == "__main__":

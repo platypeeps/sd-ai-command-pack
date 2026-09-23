@@ -46,6 +46,10 @@ kept for, so the captures are excluded here by name, as history, and the
 exclusion is stated rather than buried in a pattern.
 """
 
+# This module reads the whole checkout, so no changed-files fast path may
+# narrow it away. `.github/scripts/select-tests.py` greps for the line below.
+# select-tests: always-run
+
 from __future__ import annotations
 
 import pathlib
@@ -55,25 +59,17 @@ import sys
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(REPO_ROOT / "bin") not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "bin"))
+for entry in (REPO_ROOT, REPO_ROOT / "bin"):
+    if str(entry) not in sys.path:
+        sys.path.insert(0, str(entry))
 
 import sd_lib  # noqa: E402
 import sd_rules  # noqa: E402
 
-#: What runs or governs. `docs/work/` and `CHANGELOG.md` are history.
-GOVERNED = (
-    "bin",
-    "skills",
-    "agents",
-    "tests",
-    ".claude",
-    ".github",
-    "CLAUDE.md",
-    "AGENTS.md",
-    "README.md",
-    "docs/spec",
-)
+#: What runs or governs, enumerated from the index rather than typed here.
+#: `tests/governed.py` holds the one definition and says what it excludes;
+#: `tests/test_governed_pathspec.py` is what stops a second copy appearing.
+from tests.governed import GOVERNED  # noqa: E402
 
 #: Excluded from every grep below. This file quotes each symbol it searches
 #: for, and the review captures are history, see the module docstring.

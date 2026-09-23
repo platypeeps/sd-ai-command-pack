@@ -25,8 +25,15 @@ Every doubt resolves to running more, never less:
 * The always-run set runs on every fast path. It is the modules that walk the
   whole tree rather than naming a file: shape, line caps, code health,
   citations, shell placement, the retired framework's name, verbs, workflow
-  policy, and the form every call to git's index lister declares. If one of them is missing, the set has
-  drifted and the answer is `full`.
+  policy, the governed pathspec, the cut symbols, and the form every call to
+  git's index lister declares. The set is not written here. A module that
+  walks the tree declares it, with `ALWAYS_RUN_MARKER` on a line of its own,
+  and this script greps for that -- so a whole-tree module joins the set by
+  existing rather than by being remembered. It was a hand-typed tuple of nine
+  names until sd:1389, and `tests/test_cut_symbols.py` was not one of them:
+  the same kind of grep over the same tree as `test_no_trellis_residue`,
+  which was. If no module carries the marker the set has drifted and the
+  answer is `full`.
 
 A test module is selected when its source names the changed path, its file
 name, or its module stem, as a whole token. A change under `bin/` or
@@ -52,17 +59,12 @@ import sys
 
 FULL = "full"
 
-ALWAYS_RUN = (
-    "tests.test_code_health",
-    "tests.test_doc_citations",
-    "tests.test_loc_caps",
-    "tests.test_ls_files_form",
-    "tests.test_no_shipped_shell",
-    "tests.test_no_trellis_residue",
-    "tests.test_suite_shape",
-    "tests.test_verb_inventory",
-    "tests.test_workflow_policy",
-)
+#: What a module writes, on a line of its own, to say it reads the whole tree
+#: and so cannot be narrowed away. Anchored to the start of a line, so a test
+#: that quotes the marker inside a string does not thereby join the set.
+ALWAYS_RUN_MARKER = "# select-tests: always-run"
+ALWAYS_RUN_PATTERN = re.compile(
+    rf"^{re.escape(ALWAYS_RUN_MARKER)}[^\S\n]*$", re.MULTILINE)
 
 # Paths whose change the full suite answers for, as exact names or prefixes.
 FULL_RUN_NAMES = frozenset({
@@ -107,6 +109,13 @@ def names_for(rel: str) -> set[str]:
     if path.suffix == ".py":
         names.add(path.stem)
     return names
+
+
+def always_run(modules: dict[str, str]) -> frozenset[str]:
+    """The modules declaring themselves whole-tree, read off their source."""
+
+    return frozenset(name for name, text in modules.items()
+                     if ALWAYS_RUN_PATTERN.search(text))
 
 
 def test_modules(root: pathlib.Path) -> dict[str, str]:
@@ -187,9 +196,10 @@ def select(root: pathlib.Path, changed: list[str]) -> tuple[list[str] | None, st
     if not changed:
         return None, "no path was given, so there is nothing to narrow to"
     modules = test_modules(root)
-    missing = [name for name in ALWAYS_RUN if name not in modules]
-    if missing:
-        return None, f"the always-run set names {', '.join(missing)}, which is not in tests/"
+    always = always_run(modules)
+    if not always:
+        return None, ("no test module declares itself whole-tree, so the "
+                      "always-run set has drifted")
     chosen: set[str] = set()
     for raw in changed:
         rel = relative(root, raw)
@@ -200,11 +210,11 @@ def select(root: pathlib.Path, changed: list[str]) -> tuple[list[str] | None, st
         found = modules_for(root, rel, modules)
         if not found:
             return None, f"no test module names {rel}"
-        chosen |= found - set(ALWAYS_RUN)
-    optional = len(modules) - len(ALWAYS_RUN)
+        chosen |= found - always
+    optional = len(modules) - len(always)
     if 2 * len(chosen) > optional:
         return None, f"the change selects {len(chosen)} of {optional} modules, so it is shared"
-    return sorted(chosen | set(ALWAYS_RUN)), f"{len(changed)} changed path(s)"
+    return sorted(chosen | always), f"{len(changed)} changed path(s)"
 
 
 def main(argv: list[str]) -> int:

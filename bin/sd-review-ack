@@ -161,6 +161,30 @@ LOCK_NAME = STORE_NAME + ".lock"
 
 DEFAULT_LIMIT = 30
 
+#: The `path` of a finding that has no file: one a review heading counted and
+#: the body reader could not recover (`_shortfall`, `_reconciled`).
+#:
+#: It does two jobs and they are separated here on purpose. It is a *control
+#: value*: `answering_commit` refuses to decide that a finding it could not
+#: place has been answered, and reads this to know which findings those are.
+#: It is also *displayed*, because it sits in the `path` of a row that gets
+#: rendered and grouped -- sd:1223 is titled `11 live code-review findings
+#: remain in ?/` because a grouping step took `os.path.dirname` of it.
+#:
+#: Before this constant existed the character was typed at both producers and
+#: at the guard, so improving the display meant editing the producers and
+#: leaving the guard comparing against a character nothing produced any more:
+#: the guard stops recognising its own findings and an unplaced finding starts
+#: reading as answered. Every site now reads the value by name -- producers
+#: from `UNLOCATED`, the guard through `is_unlocated`, readers through
+#: `UNLOCATED_LABEL` -- and `tests/test_sd_review_ack.py` counts the literal in
+#: the parsed source to keep it that way.
+UNLOCATED = "?"
+
+#: What a reader is shown in place of `UNLOCATED`. Changing it is a display
+#: change and cannot reach the guard, which is the whole point of the split.
+UNLOCATED_LABEL = "(unlocated finding)"
+
 #: The heading an automated reviewer writes above findings it chose not to
 #: leave on a line. Its number is the reviewer's own count, and it is read as
 #: an assertion to be checked rather than as a total to be trusted: when fewer
@@ -330,6 +354,12 @@ def finding_id(pull: int, source: str, path: str, line: Any, text: str) -> str:
     a captured round gets the same id, and a reviewer who edits a finding
     produces a new id, so an acknowledgement of the old wording does not
     silently cover new words.
+
+    `line` has to be the coordinate the reviewer stated the finding at and not
+    the one GitHub currently shows it at, or a push that moves the comment
+    renames the finding and orphans the record under its old name. For an
+    inline comment that is `_stated_line`, which prefers `original_line` the
+    way `_reviewed_at` prefers `original_commit_id`.
     """
     payload = "\0".join((str(pull), source, path or "", str(line or ""), normalise(text)))
     return hashlib.sha256(payload.encode()).hexdigest()[:12]
@@ -354,6 +384,30 @@ def _finding(pull: int, source: str, path: str, line: Any, text: str, author: st
         "author": author,
         "indeterminate": indeterminate,
     }
+
+
+def is_unlocated(path: Any) -> bool:
+    """True for a finding this reader counted and could not place.
+
+    The question `answering_commit` asks, put in one place so that it is
+    asked by name. An empty path is deliberately *not* unlocated: "no path
+    recorded" and "a finding with no file" are different states, and the
+    caller that cares checks `not path` separately.
+    """
+    return path == UNLOCATED
+
+
+def located_as(row: dict) -> str:
+    """One finding's location, as a reader should read it.
+
+    `UNLOCATED` is a control value that reads as a path only by accident, so
+    nothing renders it: a row with no file says so in words. A row with a path
+    and no line shows the path, which is a real locator and the reviewer's own.
+    """
+    path = str(row.get("path") or "")
+    if is_unlocated(path):
+        return UNLOCATED_LABEL
+    return f"{path}:{row['line']}" if row.get("line") else path
 
 
 # --------------------------------------------------------------------------
@@ -394,7 +448,7 @@ def _suppressed(pull: int, body: str, author: str) -> list[dict]:
 def _shortfall(pull: int, declared: str, index: int, author: str) -> dict:
     """A finding the heading counted and the body would not give up."""
     return _finding(
-        pull, "body", "?", None,
+        pull, "body", UNLOCATED, None,
         f"a review body declares {declared} suppressed comments and this one, "
         f"number {index + 1}, did not parse; open the review and read it",
         author,
@@ -488,7 +542,7 @@ def _reconciled(pull: int, body: str, author: str, located: list[dict]) -> list[
     stated = len(VOTE_MARKER.findall(body))
     return [
         _finding(
-            pull, "body", "?", None,
+            pull, "body", UNLOCATED, None,
             f"a review body states {stated} voted finding(s) and this one, number "
             f"{index + 1}, is in a shape this reader does not parse; open the review",
             author,
@@ -520,7 +574,7 @@ def findings(pull: int, reviews: Iterable[Any], comments: Iterable[Any]) -> list
     roots, answers = _threads(comments)
     for comment in roots:
         row = _finding(
-            pull, "inline", str(comment.get("path") or ""), comment.get("line"),
+            pull, "inline", str(comment.get("path") or ""), _stated_line(comment),
             comment.get("body") or "", _login(comment),
         )
         row["replies"] = len(answers.get(comment.get("id"), ()))
@@ -586,6 +640,40 @@ def _login(record: dict) -> str:
         if isinstance(value, dict) and isinstance(value.get("login"), str):
             return value["login"]
     return ""
+
+
+def _stated_line(record: dict) -> Any:
+    """The line the reviewer was reading when it stated this finding.
+
+    `original_line` first, for the same reason and against the same mechanism
+    as `_reviewed_at` taking `original_commit_id` first: GitHub re-anchors an
+    inline comment as the branch grows. `line` moves by the hunk delta of
+    every later push that touches the file and becomes null once the comment
+    goes outdated; `original_line` is the coordinate in the diff the reviewer
+    read and does not move.
+
+    This value is part of `finding_id`, which is why the distinction is not
+    cosmetic. Keyed on `line`, one unrelated push renamed a finding: the store
+    row recorded against the old id was orphaned, so an operator's
+    `dismissed <reason>` stopped being found and `record_answers` wrote an
+    automatic `fixed` under the new name, and a `carried` finding could no
+    longer lose its borrowed satisfaction when the item holding it was
+    cancelled. The merge gate passed on a finding nobody had answered.
+
+    It is also the line the row carries for display, so a finding is placed at
+    the state it is dated to. `original_commit_id` with the moved line would
+    name a pair that never existed: a line in one commit read against another.
+
+    Falls back to `line` when the payload carries no `original_line` -- a
+    captured round pruned to author and body, an older API shape -- which is
+    exactly what every fixture in `tests/fixtures/` does, so no id already on
+    record moves except one GitHub had already moved.
+    """
+    for field in ("original_line", "line"):
+        value = record.get(field)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return record.get("line")
 
 
 def _reviewed_at(record: dict) -> str:
@@ -835,8 +923,8 @@ def answering_commit(root: pathlib.Path, found: dict, head: str) -> str:
     The newest such commit is the one recorded, because a finding reopened and
     re-fixed is answered by the last word on the file, not the first.
 
-    Empty for a finding with no reviewed commit, no path, or the `?` path the
-    shortfall and reconciliation rows carry -- a finding this reader could not
+    Empty for a finding with no reviewed commit, no path, or the `UNLOCATED`
+    path the shortfall and reconciliation rows carry -- a finding this reader could not
     place is a finding it may not decide has been answered. Empty too when
     `git` cannot answer, which is the same direction: `unread` stands.
 
@@ -846,7 +934,7 @@ def answering_commit(root: pathlib.Path, found: dict, head: str) -> str:
     match the wrong file or none; `:(literal)` makes the name mean itself.
     """
     reviewed, path = str(found.get("reviewed") or ""), str(found.get("path") or "")
-    if not reviewed or not path or path == "?":
+    if not reviewed or not path or is_unlocated(path):
         return ""
     found_at = sd_lib.git_output(
         ["rev-list", "--max-count=1", f"{reviewed}..{head}", "--", f":(literal){path}"], root
@@ -1300,27 +1388,45 @@ def captured_round(path: pathlib.Path) -> dict[int, dict]:
     return out
 
 
-def live_round(root: pathlib.Path, only: int | None, limit: int) -> tuple[dict[int, dict], str]:
-    """Open pull requests read from GitHub, or the sentence saying why not.
+def live_round(root: pathlib.Path, only: int | None,
+               limit: int) -> tuple[dict[int, dict], str, int]:
+    """Open pull requests read from GitHub, the sentence saying why not, and the cap.
 
     Transport, authentication and the "no GitHub remote" case all belong to
     `sd-pr-state`, which already reports each of them in one sentence. Reusing
     it rather than re-deriving it is the same rule `sd-status` follows.
+
+    The third value is the limit the read stopped at, or ``0`` when the whole
+    open set was read. `gh pr list` truncates at `--limit` and says nothing,
+    so a report built from it printed the size of its own sample as the scope
+    of its verdict: thirty-four open pull requests with findings on the four
+    oldest read as `30 pull request(s)` and exited 0. A count that cannot tell
+    "all of them" from "as many as I asked for" is not evidence about the
+    ones nobody looked at.
+
+    It is measured by asking for one more than the caller wants, in the same
+    call, and keeping `limit` of what comes back. `sd-pr-state` approximates
+    the same fact as `len(payload) >= limit`, which is a repository sitting
+    exactly on its limit refused forever for a read that missed nothing. One
+    extra row costs nothing and answers exactly.
     """
     pr_state = sd_lib.sibling("sd_pr_state", "sd-pr-state")
     found = pr_state.probe(root)
     if not found["available"]:
-        return {}, str(found["reason"])
+        return {}, str(found["reason"]), 0
     slug = str(found["slug"])
+    capped = 0
     if only is not None:
         numbers = [only]
     else:
         payload, error = pr_state.gh_json(
-            ["pr", "list", "--state", "open", "--limit", str(limit), "--json", "number"], root
+            ["pr", "list", "--state", "open", "--limit", str(limit + 1), "--json", "number"], root
         )
         if error or not isinstance(payload, list):
-            return {}, error or "gh pr list did not return a list of pull requests"
+            return {}, error or "gh pr list did not return a list of pull requests", 0
         numbers = [row["number"] for row in payload if isinstance(row, dict) and "number" in row]
+        if len(numbers) > limit:
+            numbers, capped = numbers[:limit], limit
     out: dict[int, dict] = {}
     for number in numbers:
         record: dict[str, Any] = {}
@@ -1329,7 +1435,7 @@ def live_round(root: pathlib.Path, only: int | None, limit: int) -> tuple[dict[i
                 ["api", f"repos/{slug}/pulls/{number}/{field}", "--paginate"], root
             )
             if error:
-                return {}, error
+                return {}, error, 0
             # `gh` exited 0 and handed back something that is not a list: an
             # error object, a null, a rate-limit message. `payload or []` used
             # to stand here, and it turns any of those into a clean pull
@@ -1337,7 +1443,7 @@ def live_round(root: pathlib.Path, only: int | None, limit: int) -> tuple[dict[i
             # having trouble. The same refusal `pr list` above already makes.
             if not isinstance(payload, list):
                 return {}, (f"the {field} endpoint for #{number} returned "
-                            f"{type(payload).__name__}, not a list of {field}")
+                            f"{type(payload).__name__}, not a list of {field}"), 0
             record[field] = payload
         # The pull request itself, for `merged`, `merge_commit_sha` and
         # `head.sha`: what `fix_verdict` needs to see a squash as a landing.
@@ -1347,11 +1453,11 @@ def live_round(root: pathlib.Path, only: int | None, limit: int) -> tuple[dict[i
         # the one direction a gate may be wrong in on its own.
         payload, error = pr_state.gh_json(["api", f"repos/{slug}/pulls/{number}"], root)
         if error:
-            return {}, error
+            return {}, error, 0
         if isinstance(payload, dict):
             record["pull"] = payload
         out[int(number)] = record
-    return out, ""
+    return out, "", capped
 
 
 # --------------------------------------------------------------------------
@@ -1380,6 +1486,20 @@ def at_least_ids(ids: Iterable[str], many: Iterable[str]) -> str:
     return at_least([{"indeterminate": found in grouped} for found in rows], len(rows))
 
 
+def read_scope(result: dict) -> str:
+    """How many pull requests the verdict covers, and whether that is all of them.
+
+    The line this report opens with used to be `len(pull_requests)` alone,
+    which is the size of the sample and reads as the scope. When the listing
+    stopped at its limit the two are different numbers and only one of them is
+    the truth about the repository.
+    """
+    count = f"{len(result['pull_requests'])} pull request(s)"
+    if not result.get("capped"):
+        return count
+    return f"{count}, which is where the read stopped and not how many are open"
+
+
 def render_findings(result: dict, stream: TextIO, indent: str = "  ") -> None:
     write = stream.write
     if result.get("store_error"):
@@ -1388,6 +1508,11 @@ def render_findings(result: dict, stream: TextIO, indent: str = "  ") -> None:
         write(f"{indent}carried items unreadable: {result['library_error']}\n")
         write(f"{indent}that is a missing interpreter, not an unanswered finding; "
               f"run `make setup` and read this again\n")
+    if result.get("capped"):
+        write(f"{indent}read stopped at {result['capped']} open pull request(s), "
+              f"which is the limit and not the count; more are open and were not read\n")
+        write(f"{indent}--check refuses while the read is capped; raise --limit "
+              f"or name one with --pr N\n")
     if result.get("reason"):
         write(f"{indent}unavailable: {result['reason']}\n")
         write(f"{indent}nothing was read, so nothing is acknowledged; --check refuses\n")
@@ -1404,7 +1529,7 @@ def render_findings(result: dict, stream: TextIO, indent: str = "  ") -> None:
         write(f"{indent}#{pull}: {at_least(here, len(here))} finding(s), "
               f"{at_least(open_here, len(open_here))} unacknowledged\n")
         for row in here:
-            where = f"{row['path']}:{row['line']}" if row["line"] else row["path"]
+            where = located_as(row)
             answered = f"  (replied {row['replies']}x)" if row.get("replies") else ""
             many = "  (one marker, more than one finding)" if row.get("indeterminate") else ""
             write(f"{indent}  {row['id']}  {row['verdict']:<14} {row['source']:<6} "
@@ -1445,7 +1570,8 @@ def ack_parser() -> argparse.ArgumentParser:
     parser.add_argument("--landed-in", metavar="REF", dest="landed_in",
                         help="the ref a fix must reach (default: origin/HEAD, else origin/main)")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT, metavar="N",
-                        help=f"most pull requests to read (default: {DEFAULT_LIMIT})")
+                        help=(f"most pull requests to read (default: {DEFAULT_LIMIT}); "
+                              "--check refuses while more are open than this reads"))
     return parser
 
 
@@ -1466,13 +1592,18 @@ def _refuse_bad_arguments(args: argparse.Namespace) -> None:
         raise UsageError("--fixed, --dismiss and --carried say what to do with --ack ID")
 
 
-def _chosen_round(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict[int, dict], str]:
-    """The pull requests to read: a captured file, or GitHub."""
+def _chosen_round(args: argparse.Namespace,
+                  root: pathlib.Path) -> tuple[dict[int, dict], str, int]:
+    """The pull requests to read: a captured file, or GitHub.
+
+    A captured round is never capped. The file holds what it holds and every
+    pull request in it is read, so the count the report prints is the scope.
+    """
     if not args.source:
         return live_round(root, args.pr, args.limit)
     rounds = captured_round(pathlib.Path(args.source))
     if args.pr is None:
-        return rounds, ""
+        return rounds, "", 0
     if args.pr not in rounds:
         # Reporting "no findings" for a pull request the file never held is the
         # gate answering a question it was not asked, in the reassuring
@@ -1481,7 +1612,7 @@ def _chosen_round(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict[in
             f"{args.source} holds no pull request {args.pr}; "
             f"it has {', '.join(str(number) for number in sorted(rounds)) or 'none'}"
         )
-    return {args.pr: rounds[args.pr]}, ""
+    return {args.pr: rounds[args.pr]}, "", 0
 
 
 def _record_one(args: argparse.Namespace, root: pathlib.Path, rounds: dict[int, dict]) -> None:
@@ -1499,20 +1630,25 @@ def _record_one(args: argparse.Namespace, root: pathlib.Path, rounds: dict[int, 
 def review_report(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict, int]:
     """The whole run: validate, read a round, record a reading, report, rule."""
     _refuse_bad_arguments(args)
-    rounds, reason = _chosen_round(args, root)
+    rounds, reason, capped = _chosen_round(args, root)
     if reason:
         # Fail closed. `gh` missing, unauthenticated, rate-limited or erroring
         # is not evidence that a pull request has no findings -- it is the
         # absence of evidence either way, and a gate that passes on it is a
         # gate that passes hardest exactly when GitHub is having a bad day.
         # Without `--check` this stays exit 0: reporting is not gating.
-        return {"reason": reason, "findings": [], "unsatisfied": [],
+        return {"reason": reason, "findings": [], "unsatisfied": [], "capped": 0,
                 "pull_requests": [], "store_error": ""}, (1 if args.check else 0)
     if args.ack:
         _record_one(args, root, rounds)
     result = review_state(root, rounds, landing_ref(root, args.landed_in))
-    result.update(tool="sd-review-ack", schema=SCHEMA_VERSION, reason="", root=str(root))
-    return result, (1 if args.check and result["unsatisfied"] else 0)
+    result.update(tool="sd-review-ack", schema=SCHEMA_VERSION, reason="",
+                  root=str(root), capped=capped)
+    # A capped read refuses for the same reason an unavailable one does: it is
+    # the absence of evidence about the pull requests nobody opened, not
+    # evidence that they carry nothing. Without `--check` this stays exit 0 and
+    # the cap is reported, because reporting is not gating.
+    return result, (1 if args.check and (result["unsatisfied"] or capped) else 0)
 
 
 def ack_main(argv: list[str] | None = None) -> int:
@@ -1528,7 +1664,7 @@ def ack_main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
-        print(f"sd-review-ack: {len(result['pull_requests'])} pull request(s)")
+        print(f"sd-review-ack: {read_scope(result)}")
         render_findings(result, sys.stdout)
     return code
 

@@ -21,6 +21,11 @@ gate still covers. Adding a fourth there is ordinary work; adding one anywhere
 else is the change that needs a decision record.
 """
 
+# This module reads the whole checkout, so no changed-files fast path may
+# narrow it away. `.github/scripts/select-tests.py` greps for the line below.
+# select-tests: always-run
+
+
 import subprocess
 import tempfile
 import unittest

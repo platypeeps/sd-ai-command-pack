@@ -12,6 +12,10 @@ files that were wrong when it was written; the next file to grow a class after
 its runner block is the one a hand-kept list would miss.
 """
 
+# This module reads the whole checkout, so no changed-files fast path may
+# narrow it away. `.github/scripts/select-tests.py` greps for the line below.
+# select-tests: always-run
+
 from __future__ import annotations
 
 import ast

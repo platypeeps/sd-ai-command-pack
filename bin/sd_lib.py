@@ -770,6 +770,53 @@ def registered_base(root: pathlib.Path | str, sd_db: Any, connection: Any) -> st
     return str(registered_for(connection, base, origin or None))
 
 
+# The file `make setup` leaves inside a `.venv` while it is building it. The
+# Makefile writes it before its first mutation and removes it only once the
+# provisioning record is published, so an environment carrying it is
+# half-built -- by a run still going, or by one that died. Every place that
+# resolves a `.venv` treats it the same way: as an environment that is not
+# there. The name is shared by spelling and not by import, because the
+# Makefile is the writer and it cannot import either of us; a rename has to
+# be made in all three, and `tests/test_sd_lib.py` fails if one is missed.
+MID_PROVISION = "sd-provisioning"
+
+
+def _checkouts_that_may_hold_a_venv() -> list[pathlib.Path]:
+    """This checkout, then the main worktree it was linked from.
+
+    `make setup` provisions one virtualenv, into the checkout it ran in. A
+    linked worktree is a checkout without one, so every entrypoint run inside
+    a worktree found no `sd_db` and answered from git instead -- `sd-review`
+    reported `registry_unavailable` and asked for a library that was already
+    installed twenty directories away. The doctrine puts every writer in a
+    worktree, so this was the common case rather than the edge one.
+
+    `--git-common-dir` is the question that distinguishes them: it answers the
+    *shared* git directory, so its parent is the main checkout from any linked
+    worktree, and the checkout itself from the main one. Returned second, and
+    only when it is somewhere else, so a worktree carrying its own virtualenv
+    still answers from that one.
+
+    A checkout whose `.venv` carries `MID_PROVISION` drops out of the list.
+    `make setup` writes that file before its first mutation and removes it
+    only after the environment is complete, so while it is there the
+    `site-packages` under it may be from the run that is still going, from
+    one that died, or from neither. The caller's fallback -- answering from
+    git -- is worse than a good pinned library and better than a half-written
+    one, and it is the same answer this function already gives a checkout
+    that was never provisioned at all.
+    """
+
+    here = pathlib.Path(__file__).resolve().parent.parent
+    roots = [here]
+    common = git_output(["rev-parse", "--git-common-dir"], here)
+    if common:
+        main = (here / common).resolve().parent
+        if main != here and main.is_dir():
+            roots.append(main)
+    return [root for root in roots if not (root / ".venv" / MID_PROVISION).exists()]
+
+
 def _provisioned_library_paths() -> list[str]:
     """Where `make setup` put `sd_db`, for an interpreter that did not find it.
 
@@ -793,14 +840,21 @@ def _provisioned_library_paths() -> list[str]:
     `python3.10`, where the shorter name is a prefix of the longer and sorts
     first. Empty when there is no provisioned copy to offer.
     """
-    root = pathlib.Path(__file__).resolve().parent.parent
-    found = []
-    for path in root.glob(".venv/lib/python*/site-packages"):
-        if not (path / "sd_db").is_dir():
-            continue
-        version = tuple(int(part) for part in re.findall(r"\d+", path.parent.name))
-        found.append((version, str(path)))
-    return [path for _, path in sorted(found, reverse=True)]
+    ordered: list[str] = []
+    for root in _checkouts_that_may_hold_a_venv():
+        found = []
+        for path in root.glob(".venv/lib/python*/site-packages"):
+            if not (path / "sd_db").is_dir():
+                continue
+            version = tuple(int(part) for part in re.findall(r"\d+", path.parent.name))
+            found.append((version, str(path)))
+        # Sorted inside the checkout and concatenated in checkout order, not
+        # sorted across both. One list would rank by version first, so two
+        # equal versions fall back to comparing paths -- and a worktree that
+        # deliberately provisioned its own copy would lose to the main
+        # checkout on nothing but the spelling of its directory.
+        ordered.extend(path for _, path in sorted(found, reverse=True))
+    return ordered
 
 
 class Imported(NamedTuple):

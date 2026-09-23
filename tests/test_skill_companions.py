@@ -245,9 +245,19 @@ class PublicationContractDrainTests(unittest.TestCase):
     creating a second page on every render.
 
     What is pinned is the order, not the prose: the id is recorded before the
-    request is deleted. Reword any step freely; move the delete above a write
-    and this fails.
+    request is acknowledged. Reword any step freely; move the acknowledgement
+    above a write and this fails.
+
+    Since sd:1330 the acknowledgement is `sd-research-kit delivered`, which
+    removes the request only while it still carries the fingerprint the drain
+    read, and no step deletes the file by hand. A hand delete acknowledged
+    whatever the file held at that moment, so a render that queued newer
+    content during the drain lost it for good.
     """
+
+    #: The drain's acknowledging verb, as the contract spells it.
+    DELIVERED = re.compile(
+        r"`sd-research-kit delivered <request file name> <fingerprint>`")
 
     #: `Draining is <word> steps per request` -- the count the prose claims.
     COUNTS = {"three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8}
@@ -299,26 +309,81 @@ class PublicationContractDrainTests(unittest.TestCase):
     def test_the_step_count_matches_the_steps(self) -> None:
         self.assertEqual(len(self.steps), self.claimed)
 
-    def test_the_id_is_recorded_before_the_request_is_deleted(self) -> None:
+    def delivered_steps(self) -> list[int]:
+        """The indexes of the steps that run the acknowledging verb."""
+
+        return [i for i, step in enumerate(self.steps) if self.DELIVERED.search(step)]
+
+    @staticmethod
+    def flat(step: str) -> str:
+        """One line per step: the contract wraps at 80 columns, a regex does not."""
+
+        return " ".join(step.split())
+
+    def test_the_id_is_recorded_before_the_request_is_acknowledged(self) -> None:
         """The defect this contract shipped with, as a check.
 
-        A drain that deletes the request before recording the created id has
+        A drain that removes the request before recording the created id has
         thrown away the only durable trace of that page, and the next render
-        enqueues another create.
+        enqueues another create. The removal is the verb's, and conditional:
+        it takes the request only while the file is still the generation the
+        drain read, so a render that queued newer content meanwhile keeps its
+        request. Against the contract at 476c85db this fails at the first
+        assertion: no step ran the verb, and step 6 deleted the file itself.
         """
 
-        deletes = [i for i, step in enumerate(self.steps)
-                   if re.search(r"[Dd]elete the request file", step)]
-        self.assertEqual(len(deletes), 1, "one step deletes the request")
+        acknowledged = self.delivered_steps()
+        self.assertEqual(len(acknowledged), 1, "one step acknowledges the request")
+        self.assertRegex(
+            self.flat(self.steps[acknowledged[0]]),
+            r"removes the request only while the file is still that generation",
+            "the removal is not conditional on the generation still matching")
         records = [i for i, step in enumerate(self.steps)
                    if "page=" in step and "file=" in step]
         self.assertTrue(records, "no step records the created id")
         self.assertLess(
-            max(records), deletes[0],
-            "the drain deletes the request before recording the id it created")
+            max(records), acknowledged[0],
+            "the drain acknowledges the request before recording the id it created")
 
-    def test_the_delete_is_the_last_step(self) -> None:
-        self.assertRegex(self.steps[-1], r"[Dd]elete the request file")
+    def test_the_delivered_step_is_the_last_step(self) -> None:
+        """The acknowledgement closes the drain, and hands back what step 1 read.
+
+        The verb takes the fingerprint step 1 read out of the request, so the
+        first step and the last are pinned to each other: step 1 must read it,
+        and the last step must say it is the one from step 1. Against the
+        contract at 476c85db the last step was a delete, so the first assertion
+        fails there.
+        """
+
+        last = len(self.steps) - 1
+        self.assertEqual(
+            self.delivered_steps(), [last],
+            "the acknowledging verb is the last step, and no other step runs it")
+        self.assertIn(
+            "`fingerprint`", self.steps[0],
+            "step 1 does not read the fingerprint the last step hands back")
+        self.assertRegex(
+            self.flat(self.steps[last]), r"fingerprint read in step 1",
+            "the last step does not name the fingerprint step 1 read")
+
+    def test_no_step_instructs_a_bare_delete(self) -> None:
+        """Every sentence that says delete is a prohibition.
+
+        The contract at 476c85db ended `Delete the request file, once steps 4
+        and 5 have both succeeded`, which this fails on; the contract now says
+        `Do not delete the file by hand` in the same step, which it passes.
+        A step that told the drain to delete again, anywhere, would fail here
+        before its order was even looked at.
+        """
+
+        for number, step in enumerate(self.steps, 1):
+            for sentence in re.split(r"(?<=[.:;])\s+", self.flat(step)):
+                if not re.search(r"\bdelet", sentence, re.IGNORECASE):
+                    continue
+                with self.subTest(step=number, sentence=sentence):
+                    self.assertRegex(
+                        sentence, r"\b(?:[Dd]o not|[Nn]ever|not)\b[^.]*\bdelet",
+                        "a step instructs a delete that is not a prohibition")
 
     def test_the_recording_step_names_both_destinations(self) -> None:
         """A write-back stated for one destination leaves the other duplicating."""
@@ -334,10 +399,16 @@ class PublicationContractDrainTests(unittest.TestCase):
         skill = (REPO_ROOT / "skills" / "sd-research-repo" / "SKILL.md").read_text(
             encoding="utf-8")
         records = skill.find("`page=`")
-        deletes = skill.lower().find("delete the request only after")
+        acknowledges = skill.lower().find(
+            "run `sd-research-kit delivered`\n   only after both")
         self.assertNotEqual(records, -1, "the skill states no write-back")
-        self.assertNotEqual(deletes, -1, "the skill does not order the delete last")
-        self.assertLess(records, deletes)
+        self.assertNotEqual(
+            acknowledges, -1, "the skill does not order the delivered verb last")
+        self.assertLess(records, acknowledges)
+        # The contract forbids the hand delete, so the skill may not order one
+        # either. Before sd:1330 this line read "Delete the request only after
+        # both writes succeed", which this assertion fails.
+        self.assertNotIn("delete the request only after", skill.lower())
 
 
 class WorkflowReferenceTests(unittest.TestCase):
