@@ -231,6 +231,55 @@ The item directory stays in place. Use `sd work relink <row-id> <path>` when an
 artifact moves: it preserves the row, notes and original source identity. No
 command automatically deletes or archives a completed item directory.
 
+## Parallel work
+
+The harness fans work out only when a `CLAUDE.md` or a skill asks for it.
+These rules say when to ask. They hold wherever a pack skill runs. A skill
+that dispatches workers cites this section and restates nothing.
+
+- **A writer runs alone in its checkout.** One checkout holds one writer. An
+  agent or session that changes files works in its own git worktree or clone.
+  Prefer a patch-only worker: it returns a diff, and one integrator applies
+  it. Never start a second writer in a checkout that already has one.
+- **Readers fan out.** Investigation, review, planning and audits run in
+  parallel across read-only workers. A read-only worker needs no isolation.
+- **One integrator lands the work.** Several workers may produce patches or
+  pull requests. One lane merges them, one at a time. Metadata that orders
+  the landings — a session number, a journal or ledger entry, a changelog
+  position — is allocated when the work lands, never when the branch is cut,
+  because two branches cut in parallel would claim the same slot. An item id
+  is not that kind of metadata: `sd work register` allocates it at plan time,
+  before review and before any branch exists, and `sd runner prepare` and
+  `sd run` both require it to already exist.
+- **No worker fails silently.** Every worker gets a budget, in wall clock or
+  tokens. It runs in the background and reports when it finishes. No report
+  by the deadline is a failure. Do not poll, and do not assume success.
+  A missing report does not mean the worker stopped: cancel it and confirm
+  it is gone before starting a replacement, or two attempts run at once and
+  the second writer lands in a checkout the first still holds. When the
+  cancellation cannot be confirmed, escalate instead of respawning. Only a
+  read-only worker may be replaced on the deadline alone.
+- **Fan out only when three things hold.** The targets are independent, no
+  mutable state is shared, and the results are cheap to verify. Work on the
+  same files or the same metadata store stays in one lane, in sequence.
+
+The pack has two write lanes, and each holds one writer. A session writes on
+its own branch in its own worktree: `sd runner prepare <item> --branch <name>`
+prepares the item branch in the current repository, and `sd-plan --worktree`
+puts a new branch in a worktree of its own. The runner writes in a clone it
+makes for each run of an assignment, under its work root. It holds a lease on
+the repository branch for the run, so a second run on that branch waits until
+the first ends. `sd worktree resume <assignment>` resumes a run whose checkout
+the runner kept. `sd worktree restore <assignment> --destination <path>`
+copies a retained clone to a new absolute path that does not exist yet.
+Neither verb makes a worktree for a session; `git worktree add` does that.
+Merging is one lane: `sd-ship` merges one pull request per run, and the
+runner's unattended merge stays under **Development** above.
+
+Before writing a fix, look on the remote for a branch or pull request that
+already claims it, by the item id or by the changed path. Two sessions that
+land one defect waste one session's work; sd:1151 records the case.
+
 ## Modes
 
 `CLAUDE.local.md` carries one `mode:` line per repository. The installer writes
@@ -275,8 +324,9 @@ Cheap, standard, and deep changes require one completed independent local review
 Skip requires none; planning and challenged reviews retain their minimum of one.
 Tier selection still follows repository policy, without adding automatic local reviewers.
 Complete local review before any Copilot request.
-`copilot_review.automatic_deep` can select the `deep` tier for remote review during shipping.
-The value defaults to `false`.
+The machine's `sd.copilot_review` selects remote review during shipping: `deep` (unset reads `deep`), `always` or `never`.
+A repository's `copilot_review.automatic_deep` overrides it when the file names the key; a file that does not name it inherits.
+`sd-review --explain` names the effective policy and whether the repository, the machine config, or the machine default answered.
 Automatic review runs once per pull request after the local review and acknowledgement step.
 Later pushes still require exact-head local review and CI.
 A completed Copilot review must cover the exact merge head.
@@ -420,7 +470,7 @@ reviewer chain before vendor, transport, availability and spending gates run.
 
 Core settings use `sd config get|set|unset|list` and the existing atomic machine configuration writer.
 The file is `~/.config/sd-ai-command-pack/config.json`, honoring `XDG_CONFIG_HOME`.
-The reserved `sd` namespace declares two settings:
+The reserved `sd` namespace declares three settings:
 
 - `sd.external_reviews`: `configured` permits private code and scoped review context to eligible configured providers.
   It includes future registry entries; registry configuration chooses capability, while this explicit operator grant authorizes transmission.
@@ -431,6 +481,13 @@ The reserved `sd` namespace declares two settings:
   It was `sd.merge_authorization` until 1.1.0, which still reads that name; 1.2.0 stops.
   It is the assistant's grant, where `repo.runner_merge` in the one database is the runner's.
   Shared contributors do not revoke permission, but the current sole-operator ownership gate may still refuse execution.
+- `sd.copilot_review`: when `sd-ship` requests a Copilot review by itself. `deep` requests one on deep-tier changes only,
+  `always` on every reviewing tier, `never` on none. Absence reads `deep`, so a repository with no
+  `.github/sd-review.json` gets Copilot on deep changes and on nothing else.
+  A repository file that names `copilot_review.automatic_deep` overrides it; one that does not inherits.
+  `sd-review` reports the effective policy, its source and the repository's say under `remote_reviews.copilot`.
+  `sd-ship` resolves the decision again at dispatch, from the setting as it stands then and the tiers the
+  retained passes recorded, so a setting changed after the review takes effect without another review.
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.

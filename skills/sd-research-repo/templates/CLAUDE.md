@@ -176,6 +176,16 @@ Give each Notion page an icon and keep it stable across updates — a changed ic
 different page. Record every mirror in the README's **Notion pages** table, Drive included:
 document, destination, title, URL.
 
+## Parallel work
+
+Reading fans out; writing does not. Fan out source extraction, link sweeps and
+citation checks across read-only subagents. Every edit to this repo stays in one
+lane: one checkout, one writer, and a second writer takes its own worktree. Give
+each subagent a budget and a deadline, run it in the background, and treat no
+report by the deadline as a failure. The rules are the pack's `WORKFLOW.md`,
+section **Parallel work**; the filenames a subagent cannot write are in the
+`sd-research-repo` skill's `references/subagent-dispatch.md`.
+
 ## Style
 
 - Absolute paths when pointing at a local file: `file:///Users/...`, not a bare path.

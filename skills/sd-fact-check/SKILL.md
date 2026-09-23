@@ -113,6 +113,14 @@ scope, the verdict ladder, or the `## Final report` contract.
   optional: where no such role exists, run the claim inline exactly as above.
   Naming the role never changes the scope, the verdict ladder, or the
   `## Final report` contract, and inline platforms are unaffected.
+- **Spawn under the pack's parallel-work rules.** The sd-ai-command-pack
+  checkout's `WORKFLOW.md`, section **Parallel work**, decides when to fan
+  out: the units are independent, share no mutable state, and return results
+  the orchestrator can verify cheaply. Otherwise run them inline, in
+  sequence. Every worker here is read-only and needs no worktree. Give each
+  worker a budget in wall clock or tokens, run it in the background, and take
+  no report by the deadline as a failure: respawn it once, then escalate.
+  Never poll a worker, and never assume it succeeded.
 - **No recursion when already dispatched.** This skill may itself be running as
   a dispatched sub-agent. When it is already running as a dispatched sub-agent,
   run the units inline in its own context rather than dispatching further — do
