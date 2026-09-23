@@ -1388,27 +1388,45 @@ def captured_round(path: pathlib.Path) -> dict[int, dict]:
     return out
 
 
-def live_round(root: pathlib.Path, only: int | None, limit: int) -> tuple[dict[int, dict], str]:
-    """Open pull requests read from GitHub, or the sentence saying why not.
+def live_round(root: pathlib.Path, only: int | None,
+               limit: int) -> tuple[dict[int, dict], str, int]:
+    """Open pull requests read from GitHub, the sentence saying why not, and the cap.
 
     Transport, authentication and the "no GitHub remote" case all belong to
     `sd-pr-state`, which already reports each of them in one sentence. Reusing
     it rather than re-deriving it is the same rule `sd-status` follows.
+
+    The third value is the limit the read stopped at, or ``0`` when the whole
+    open set was read. `gh pr list` truncates at `--limit` and says nothing,
+    so a report built from it printed the size of its own sample as the scope
+    of its verdict: thirty-four open pull requests with findings on the four
+    oldest read as `30 pull request(s)` and exited 0. A count that cannot tell
+    "all of them" from "as many as I asked for" is not evidence about the
+    ones nobody looked at.
+
+    It is measured by asking for one more than the caller wants, in the same
+    call, and keeping `limit` of what comes back. `sd-pr-state` approximates
+    the same fact as `len(payload) >= limit`, which is a repository sitting
+    exactly on its limit refused forever for a read that missed nothing. One
+    extra row costs nothing and answers exactly.
     """
     pr_state = sd_lib.sibling("sd_pr_state", "sd-pr-state")
     found = pr_state.probe(root)
     if not found["available"]:
-        return {}, str(found["reason"])
+        return {}, str(found["reason"]), 0
     slug = str(found["slug"])
+    capped = 0
     if only is not None:
         numbers = [only]
     else:
         payload, error = pr_state.gh_json(
-            ["pr", "list", "--state", "open", "--limit", str(limit), "--json", "number"], root
+            ["pr", "list", "--state", "open", "--limit", str(limit + 1), "--json", "number"], root
         )
         if error or not isinstance(payload, list):
-            return {}, error or "gh pr list did not return a list of pull requests"
+            return {}, error or "gh pr list did not return a list of pull requests", 0
         numbers = [row["number"] for row in payload if isinstance(row, dict) and "number" in row]
+        if len(numbers) > limit:
+            numbers, capped = numbers[:limit], limit
     out: dict[int, dict] = {}
     for number in numbers:
         record: dict[str, Any] = {}
@@ -1417,7 +1435,7 @@ def live_round(root: pathlib.Path, only: int | None, limit: int) -> tuple[dict[i
                 ["api", f"repos/{slug}/pulls/{number}/{field}", "--paginate"], root
             )
             if error:
-                return {}, error
+                return {}, error, 0
             # `gh` exited 0 and handed back something that is not a list: an
             # error object, a null, a rate-limit message. `payload or []` used
             # to stand here, and it turns any of those into a clean pull
@@ -1425,7 +1443,7 @@ def live_round(root: pathlib.Path, only: int | None, limit: int) -> tuple[dict[i
             # having trouble. The same refusal `pr list` above already makes.
             if not isinstance(payload, list):
                 return {}, (f"the {field} endpoint for #{number} returned "
-                            f"{type(payload).__name__}, not a list of {field}")
+                            f"{type(payload).__name__}, not a list of {field}"), 0
             record[field] = payload
         # The pull request itself, for `merged`, `merge_commit_sha` and
         # `head.sha`: what `fix_verdict` needs to see a squash as a landing.
@@ -1435,11 +1453,11 @@ def live_round(root: pathlib.Path, only: int | None, limit: int) -> tuple[dict[i
         # the one direction a gate may be wrong in on its own.
         payload, error = pr_state.gh_json(["api", f"repos/{slug}/pulls/{number}"], root)
         if error:
-            return {}, error
+            return {}, error, 0
         if isinstance(payload, dict):
             record["pull"] = payload
         out[int(number)] = record
-    return out, ""
+    return out, "", capped
 
 
 # --------------------------------------------------------------------------
@@ -1468,6 +1486,20 @@ def at_least_ids(ids: Iterable[str], many: Iterable[str]) -> str:
     return at_least([{"indeterminate": found in grouped} for found in rows], len(rows))
 
 
+def read_scope(result: dict) -> str:
+    """How many pull requests the verdict covers, and whether that is all of them.
+
+    The line this report opens with used to be `len(pull_requests)` alone,
+    which is the size of the sample and reads as the scope. When the listing
+    stopped at its limit the two are different numbers and only one of them is
+    the truth about the repository.
+    """
+    count = f"{len(result['pull_requests'])} pull request(s)"
+    if not result.get("capped"):
+        return count
+    return f"{count}, which is where the read stopped and not how many are open"
+
+
 def render_findings(result: dict, stream: TextIO, indent: str = "  ") -> None:
     write = stream.write
     if result.get("store_error"):
@@ -1476,6 +1508,11 @@ def render_findings(result: dict, stream: TextIO, indent: str = "  ") -> None:
         write(f"{indent}carried items unreadable: {result['library_error']}\n")
         write(f"{indent}that is a missing interpreter, not an unanswered finding; "
               f"run `make setup` and read this again\n")
+    if result.get("capped"):
+        write(f"{indent}read stopped at {result['capped']} open pull request(s), "
+              f"which is the limit and not the count; more are open and were not read\n")
+        write(f"{indent}--check refuses while the read is capped; raise --limit "
+              f"or name one with --pr N\n")
     if result.get("reason"):
         write(f"{indent}unavailable: {result['reason']}\n")
         write(f"{indent}nothing was read, so nothing is acknowledged; --check refuses\n")
@@ -1533,7 +1570,8 @@ def ack_parser() -> argparse.ArgumentParser:
     parser.add_argument("--landed-in", metavar="REF", dest="landed_in",
                         help="the ref a fix must reach (default: origin/HEAD, else origin/main)")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT, metavar="N",
-                        help=f"most pull requests to read (default: {DEFAULT_LIMIT})")
+                        help=(f"most pull requests to read (default: {DEFAULT_LIMIT}); "
+                              "--check refuses while more are open than this reads"))
     return parser
 
 
@@ -1554,13 +1592,18 @@ def _refuse_bad_arguments(args: argparse.Namespace) -> None:
         raise UsageError("--fixed, --dismiss and --carried say what to do with --ack ID")
 
 
-def _chosen_round(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict[int, dict], str]:
-    """The pull requests to read: a captured file, or GitHub."""
+def _chosen_round(args: argparse.Namespace,
+                  root: pathlib.Path) -> tuple[dict[int, dict], str, int]:
+    """The pull requests to read: a captured file, or GitHub.
+
+    A captured round is never capped. The file holds what it holds and every
+    pull request in it is read, so the count the report prints is the scope.
+    """
     if not args.source:
         return live_round(root, args.pr, args.limit)
     rounds = captured_round(pathlib.Path(args.source))
     if args.pr is None:
-        return rounds, ""
+        return rounds, "", 0
     if args.pr not in rounds:
         # Reporting "no findings" for a pull request the file never held is the
         # gate answering a question it was not asked, in the reassuring
@@ -1569,7 +1612,7 @@ def _chosen_round(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict[in
             f"{args.source} holds no pull request {args.pr}; "
             f"it has {', '.join(str(number) for number in sorted(rounds)) or 'none'}"
         )
-    return {args.pr: rounds[args.pr]}, ""
+    return {args.pr: rounds[args.pr]}, "", 0
 
 
 def _record_one(args: argparse.Namespace, root: pathlib.Path, rounds: dict[int, dict]) -> None:
@@ -1587,20 +1630,25 @@ def _record_one(args: argparse.Namespace, root: pathlib.Path, rounds: dict[int, 
 def review_report(args: argparse.Namespace, root: pathlib.Path) -> tuple[dict, int]:
     """The whole run: validate, read a round, record a reading, report, rule."""
     _refuse_bad_arguments(args)
-    rounds, reason = _chosen_round(args, root)
+    rounds, reason, capped = _chosen_round(args, root)
     if reason:
         # Fail closed. `gh` missing, unauthenticated, rate-limited or erroring
         # is not evidence that a pull request has no findings -- it is the
         # absence of evidence either way, and a gate that passes on it is a
         # gate that passes hardest exactly when GitHub is having a bad day.
         # Without `--check` this stays exit 0: reporting is not gating.
-        return {"reason": reason, "findings": [], "unsatisfied": [],
+        return {"reason": reason, "findings": [], "unsatisfied": [], "capped": 0,
                 "pull_requests": [], "store_error": ""}, (1 if args.check else 0)
     if args.ack:
         _record_one(args, root, rounds)
     result = review_state(root, rounds, landing_ref(root, args.landed_in))
-    result.update(tool="sd-review-ack", schema=SCHEMA_VERSION, reason="", root=str(root))
-    return result, (1 if args.check and result["unsatisfied"] else 0)
+    result.update(tool="sd-review-ack", schema=SCHEMA_VERSION, reason="",
+                  root=str(root), capped=capped)
+    # A capped read refuses for the same reason an unavailable one does: it is
+    # the absence of evidence about the pull requests nobody opened, not
+    # evidence that they carry nothing. Without `--check` this stays exit 0 and
+    # the cap is reported, because reporting is not gating.
+    return result, (1 if args.check and (result["unsatisfied"] or capped) else 0)
 
 
 def ack_main(argv: list[str] | None = None) -> int:
@@ -1616,7 +1664,7 @@ def ack_main(argv: list[str] | None = None) -> int:
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
-        print(f"sd-review-ack: {len(result['pull_requests'])} pull request(s)")
+        print(f"sd-review-ack: {read_scope(result)}")
         render_findings(result, sys.stdout)
     return code
 

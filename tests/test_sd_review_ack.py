@@ -746,7 +746,7 @@ esac
             f"sys.path.insert(0, {str(BIN)!r});"
             "import sd_lib;"
             "m = sd_lib.sibling('a', 'sd-review-ack');"
-            f"r, why = m.live_round(pathlib.Path({str(self.repo.root)!r}), None, 10);"
+            f"r, why, _ = m.live_round(pathlib.Path({str(self.repo.root)!r}), None, 10);"
             "print(json.dumps({'rounds': {str(k): v for k, v in r.items()}, 'why': why}))"
         )
         done = subprocess.run(
@@ -1237,7 +1237,7 @@ class ASquashIsALanding(unittest.TestCase):
                 return ({"merged": True} if args[1].endswith("/pulls/7") else []), ""
 
         with unittest.mock.patch.object(ack.sd_lib, "sibling", return_value=PrState):
-            rounds, error = ack.live_round(self.repo.root, 7, 5)
+            rounds, error, _ = ack.live_round(self.repo.root, 7, 5)
         self.assertEqual(error, "")
         self.assertEqual(rounds[7]["pull"], {"merged": True})
         self.assertIn(["api", "repos/acme/widget/pulls/7"], calls)
@@ -1909,3 +1909,104 @@ class AFindingKeepsItsNameWhenGitHubMovesIt(unittest.TestCase):
         before, after = self._row(line=47), self._row(line=53)
         store = {before["id"]: {"disposition": "carried", "item": 771}}
         self.assertIn(after["id"], store)
+
+
+class TheVerdictSaysWhatItRead(unittest.TestCase):
+    """sd:1392: a clean verdict over the first 30 open pull requests.
+
+    `--check` listed open pull requests at `DEFAULT_LIMIT`, `gh` truncated
+    silently, and the report printed the number that came back -- so the size
+    of the sample was presented as the scope of the verdict. Thirty-four open
+    pull requests with unacknowledged findings on the four oldest exited 0 and
+    said `30 pull request(s)`, with nothing saying four were never read.
+
+    Bounded, and that is why the remedy is a refusal rather than an alarm:
+    `sd-ship`'s merge gate goes per pull request through `review_state` and
+    never through this path, so nothing downstream reads a capped verdict.
+    Only the standalone report does, and it is the one that has to say so.
+    """
+
+    def _pr_state(self, open_pulls: int) -> tuple[type, list[list[str]]]:
+        calls: list[list[str]] = []
+
+        class PrState:
+            @staticmethod
+            def probe(root):
+                return {"available": True, "slug": "acme/widget", "reason": ""}
+
+            @staticmethod
+            def gh_json(args, root):
+                calls.append(args)
+                if args[0] != "pr":
+                    return ([] if args[1].endswith(("/reviews", "/comments")) else {}), ""
+                asked = int(args[args.index("--limit") + 1])
+                return [{"number": n} for n in range(1, min(open_pulls, asked) + 1)], ""
+
+        return PrState, calls
+
+    def _round(self, open_pulls: int, limit: int) -> tuple[dict, str, int, list[list[str]]]:
+        state, calls = self._pr_state(open_pulls)
+        with unittest.mock.patch.object(ack.sd_lib, "sibling", return_value=state):
+            rounds, error, capped = ack.live_round(REPO_ROOT, None, limit)
+        return rounds, error, capped, calls
+
+    def test_a_read_that_stopped_at_its_limit_says_where_it_stopped(self):
+        rounds, error, capped, _ = self._round(34, 30)
+        self.assertEqual(error, "")
+        self.assertEqual(len(rounds), 30, "the limit is still the limit")
+        self.assertEqual(capped, 30)
+
+    def test_a_read_that_reached_the_end_is_not_reported_as_capped(self):
+        """Exactly `limit` open pull requests is a complete read, not a truncated one.
+
+        `len(payload) >= limit` would refuse here forever on a repository that
+        happens to sit on the number, which is a gate crying wolf at a read
+        that missed nothing. One extra row asked for answers it exactly.
+        """
+        rounds, _, capped, calls = self._round(30, 30)
+        self.assertEqual((len(rounds), capped), (30, 0))
+        listing = calls[0]
+        self.assertEqual(listing[listing.index("--limit") + 1], "31",
+                         "the cap is detected by asking for one more, in the same call")
+
+    def test_check_refuses_while_the_read_is_capped(self):
+        """Absence of evidence, the same direction `reason` already fails in.
+
+        A capped read cannot know whether a finding stands on a pull request it
+        never opened, and a gate that rules clean on that is the one that
+        passes hardest on the busiest repository.
+        """
+        args = ack.ack_parser().parse_args(["--check"])
+        with unittest.mock.patch.object(ack, "live_round", return_value=({}, "", 30)):
+            result, code = ack.review_report(args, REPO_ROOT)
+        self.assertEqual(code, 1)
+        self.assertEqual(result["capped"], 30)
+
+    def test_a_capped_read_without_check_still_reports(self):
+        """Reporting is not gating: the cap is said, and the exit stays 0."""
+        args = ack.ack_parser().parse_args([])
+        with unittest.mock.patch.object(ack, "live_round", return_value=({}, "", 30)):
+            _, code = ack.review_report(args, REPO_ROOT)
+        self.assertEqual(code, 0)
+
+    def test_a_captured_round_is_never_capped(self):
+        """A replayed file is the whole file; only a live listing can stop short."""
+        args = ack.ack_parser().parse_args(["--from", str(FIXTURE)])
+        self.assertEqual(ack._chosen_round(args, REPO_ROOT)[2], 0)
+
+    def test_the_header_does_not_print_the_sample_as_the_scope(self):
+        self.assertEqual("3 pull request(s)",
+                         ack.read_scope({"pull_requests": [1, 2, 3], "capped": 0}))
+        self.assertIn("not how many are open",
+                      ack.read_scope({"pull_requests": [1, 2, 3], "capped": 3}))
+
+    def test_the_report_names_the_cap_even_with_nothing_to_report(self):
+        """The clean-looking run is the one that needed telling."""
+        stream = io.StringIO()
+        ack.render_findings(
+            {"findings": [], "unsatisfied": [], "pull_requests": [1, 2, 3],
+             "landing_ref": "origin/main", "store_error": "", "capped": 3},
+            stream,
+        )
+        self.assertIn("--limit", stream.getvalue())
+        self.assertIn("read stopped at 3", stream.getvalue())
