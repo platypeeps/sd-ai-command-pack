@@ -625,11 +625,26 @@ class LineBudgetTests(unittest.TestCase):
         # exists to prevent. So the cap sits above the measurement here until
         # the next commit adds the lines it pays for. Shared-core
         # classification and the complexity ceilings are unchanged.
+        #
+        # 3399 -> 3506 is the merge-forward of `origin/main` at `30902a68`.
+        # This branch's opencode chain (3148 -> 3293 -> 3399) and main's
+        # sd:1343 chain (documented below, 3148 -> 3255) branched from the
+        # same 3148, so neither number is the size of the tree that carries
+        # both. The merged tree measures 3506: sd:1343 adds +107 to
+        # `bin/sd-review` (its `classify_gate`/`_not_found_report` receipt
+        # reasoning) and this branch adds the opencode reader (+145) and the
+        # isolation fix (+106), all on the one `bin/sd-review` and
+        # `bin/sd_opencode.py`. Measured, not carried: `sd-review` is 2310
+        # and `sd_opencode.py` is 223 on the merged tree. This raise is its
+        # own commit, before the merge commit that spends it -- the cap leads
+        # the merge, and at this commit the lane is still 3399, under 3506.
+        # Shared-core classification and the complexity ceilings are
+        # unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3399,
+            3506,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
