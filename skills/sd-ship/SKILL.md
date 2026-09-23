@@ -152,14 +152,17 @@ Results report `review_selection.requested_provider` and the actual `reviewed_by
 Read the recovery reference before retries, fix verification, or additional reviews with an explicit provider.
 
 `--copilot-review auto` is the prepare default.
-It resolves the decision at dispatch: the machine's `sd.copilot_review` as it stands then (`deep` when unset), overridden by the repository's `copilot_review.automatic_deep` as the retained review report recorded it, applied to the tiers the retained passes recorded, so a later push's delta pass does not hide the branch's.
+It resolves the decision at dispatch: the machine's `sd.copilot_review` as it stands then (`deep` when unset), overridden by the repository's `copilot_review.automatic_deep` as the latest retained report naming it recorded it, applied to the tiers every retained pass recorded, so a later push's delta pass does not hide the branch's.
 The report's own `automatic` verdict is what the policy said at review time, not the decision.
 A setting changed after the review takes effect on the next prepare without another local review.
 Each request binds one exact head and persists before merge.
 Merge waits for a submitted review, stable review material, and verified finding dispositions.
 An automatic request occurs once per pull request.
 Later pushes still require a local review for the exact head and exact-head CI.
-The completed Copilot review must cover the exact merge head.
+The completed Copilot review must cover the merge head, or an ancestor of it.
+An ancestor clears only when the diff from it to the merge head touches nothing outside `docs/`.
+`tests/` stays inside that surface, because a green suite cannot say a test still asserts what the reviewer approved.
+A cleared ancestor is recorded as a merge warning naming it.
 Use `--copilot-review request` when a later push makes the automatic review stale.
 The adapter permits at most three Copilot requests per pull request.
 At that cap, use existing history or a separately authorized manual abandonment.

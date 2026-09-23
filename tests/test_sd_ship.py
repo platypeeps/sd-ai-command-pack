@@ -654,6 +654,11 @@ roles:
         self.assertEqual(self.operation().state["copilot_reviews"][0]["status"], "completed")
 
     def test_later_push_keeps_one_automatic_review_but_requires_exact_head_review(self):
+        # The later push edits `src.py`, the shipped surface. It was an empty
+        # commit until sd:1366, which is now the case a reviewed ancestor
+        # clears (`test_a_docs_only_push_clears_the_gate_on_the_reviewed_ancestor`);
+        # what this test pins is the other half, that a shipped-surface change
+        # since the reviewed head still refuses the merge.
         self.enable_automatic_copilot()
         self.prepare()
         reviewed = _git(self.root, "rev-parse", "HEAD")
@@ -664,7 +669,9 @@ roles:
             "submitted_at": "2026-09-19T20:00:00Z",
             "body": "",
         }]
-        _git(self.root, "commit", "--allow-empty", "-m", "later fix\n\nAuthored-with: human")
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "add", "src.py")
+        _git(self.root, "commit", "-m", "later fix\n\nAuthored-with: human")
         head = _git(self.root, "rev-parse", "HEAD")
         repeated = self.prepare()
         self.assertNotEqual(head, reviewed)
@@ -675,7 +682,7 @@ roles:
         pull.checks = [{**row, "head_sha": head} for row in pull.checks]
         self.assertTrue(all(row["head_sha"] == head for row in pull.checks))
         with patch.object(ship.time, "sleep"):
-            with self.assertRaisesRegex(ship.Refusal, "not the exact merge head"):
+            with self.assertRaisesRegex(ship.Refusal, "change the shipped surface: src.py"):
                 self.merge()
         self.double.copilot_pending.clear()
         requested = self.prepare("--copilot-review", "request")
@@ -690,6 +697,73 @@ roles:
         }]
         with patch.object(ship.time, "sleep"):
             self.assertEqual(self.merge()["phase"], "merged")
+
+    def reviewed_at(self, head):
+        """The pull's one completed Copilot review, submitted against `head`."""
+        self.double.review_payload["reviews"] = [{
+            "user": {"login": "copilot-pull-request-reviewer[bot]"},
+            "commit_id": head,
+            "state": "COMMENTED",
+            "submitted_at": "2026-09-19T20:00:00Z",
+            "body": "",
+        }]
+
+    def test_a_docs_only_push_clears_the_gate_on_the_reviewed_ancestor(self):
+        """sd:1366. `prepare_copilot_review` buys one automatic review per pull
+        request and returns `not_repeated` at the new head; `copilot_reviewed_head`
+        demanded the exact merge head. A deep branch taking a second push could
+        satisfy neither, and answering a Copilot finding *is* a second push --
+        so the branch that did what the review asked was the one that could
+        never clear the gate on its own. A reviewed ancestor now stands when
+        the commits since it touch nothing outside `docs/`, and the merge
+        receipt carries a warning saying so rather than passing in silence.
+        """
+        self.enable_automatic_copilot()
+        self.prepare()
+        reviewed = _git(self.root, "rev-parse", "HEAD")
+        self.reviewed_at(reviewed)
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs/note.md").write_text("what the review asked for\n")
+        _git(self.root, "add", "docs/note.md")
+        _git(self.root, "commit", "-m", "answer the review\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        repeated = self.prepare()
+        self.assertNotEqual(head, reviewed)
+        self.assertEqual(repeated["copilot_review"]["decision"], "not_repeated")
+        pull = self.remote.pull(1)
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(len(self.double.copilot_requests), 1)
+        self.assertTrue(any(reviewed in warning and "ancestor of the merge head" in warning
+                            for warning in self.operation().state["warnings"]),
+                        self.operation().state.get("warnings"))
+
+    def test_the_shipped_surface_is_every_path_outside_docs(self):
+        """The definition, stated once and checked against the tree rather than
+        asserted in prose. `tests/` is deliberately inside the surface: CI
+        re-running a test proves it passes, not that it still asserts what the
+        reviewer approved, and this pack's own caps and shell guard live there.
+        """
+        operation = self.operation()
+        base = _git(self.root, "rev-parse", "HEAD")
+        for name, body in (("docs/note.md", "prose\n"),
+                           ("tests/test_answer.py", "def test_answer():\n    assert True\n"),
+                           ("skills/thing/SKILL.md", "payload\n"),
+                           ("README.md", "root prose\n"),
+                           ("src/docs/inner.md", "nested\n")):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body)
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "a bit of everything\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(
+            operation.unreviewed_shipped_surface(base, head),
+            ["README.md", "skills/thing/SKILL.md", "src/docs/inner.md", "tests/test_answer.py"])
+        _git(self.root, "commit", "--allow-empty", "-m", "nothing at all\n\nAuthored-with: human")
+        self.assertEqual(
+            operation.unreviewed_shipped_surface(head, _git(self.root, "rev-parse", "HEAD")), [])
 
     def test_later_push_accepts_the_single_automatic_review_on_the_new_head(self):
         self.enable_automatic_copilot()

@@ -324,10 +324,14 @@ Tier selection still follows repository policy, without adding automatic local r
 Complete local review before any Copilot request.
 The machine's `sd.copilot_review` selects remote review during shipping: `deep` (unset reads `deep`), `always` or `never`.
 A repository's `copilot_review.automatic_deep` overrides it when the file names the key; a file that does not name it inherits.
+Shipping reads that override once, from the latest retained review report that names it, and applies it to the tiers every retained pass recorded.
 `sd-review --explain` names the effective policy and whether the repository, the machine config, or the machine default answered.
 Automatic review runs once per pull request after the local review and acknowledgement step.
 Later pushes still require exact-head local review and CI.
-A completed Copilot review must cover the exact merge head.
+A completed Copilot review must cover the merge head, or an ancestor of it.
+An ancestor clears only when the diff from it to the merge head touches nothing outside `docs/`.
+`tests/` is inside that surface: a green suite does not say a test still asserts what the reviewer approved.
+The merge receipt carries a warning naming the ancestor whenever one clears the gate.
 Request an explicit later-head review only when the automatic review is stale.
 If that request cannot be recorded, a manual merge can abandon the latest request basis.
 An exact-head receipt replaces the latest prior receipt as that basis.
