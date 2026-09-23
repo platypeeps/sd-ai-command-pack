@@ -1379,6 +1379,108 @@ def dispose(findings: Sequence[Mapping[str, Any]], floor: str) -> list[dict[str,
 
 # Pipeline
 
+#: What a failed gate is known to have lacked, read from evidence and not
+#: from its exit code. sd-check reports a program it could not spawn as
+#: `exit_code: None` with `reason: cannot run <program>: <OSError>` (its
+#: `run_one`), and only that proves the gate's own program never started and
+#: no check ran. A child that ran and exited 127 proves nothing about its
+#: first line: a recipe that passed its check and then hit a missing
+#: postprocessor exits 127 too, and the codex review of 23f2f429 caught this
+#: lane naming /bin/sh as a missing interpreter on exactly that shape. So a
+#: 127 is a missing-command diagnostic -- the command the shell could not
+#: find and the line, from the shell's own report -- the gate failure stands,
+#: and nothing is claimed about what ran before it. The make-mediated case
+#: sd:1343 was filed on (`/bin/sh: .venv/bin/python: No such file or
+#: directory`, then `make: *** [lint] Error 127`) reaches sd-check as text,
+#: so it is reported this way, naming the path.
+TOOLCHAIN_MISSING = "toolchain_missing"
+COMMAND_NOT_FOUND = "command_not_found"
+_CANNOT_RUN = "cannot run "
+#: bash: `<src>: line N: <cmd>: command not found`; dash: `<src>: N: <cmd>:
+#: not found`; either, for a path: `<src>: <cmd>: No such file or directory`.
+_NOT_FOUND = re.compile(
+    r"(?m)^(?P<source>\S+?): (?:(?:line )?(?P<line>\d+): )?(?P<command>\S+): "
+    r"(?:command not found|not found|No such file or directory)\s*$")
+_RECIPE_EXIT_127 = re.compile(r"\bError 127\b")
+
+
+def _spawn_failed(check: Mapping[str, Any]) -> bool:
+    return check.get("exit_code") is None and str(check.get("reason") or "").startswith(_CANNOT_RUN)
+
+
+def _started(check: Mapping[str, Any]) -> bool:
+    """Whether sd-check's record shows the entrypoint's process executing: an
+    exit code, or a failure that is not the spawn (a timeout ran until it
+    was killed). Skipped and absent entrypoints, and one sd-check could not
+    spawn, did not."""
+    return isinstance(check.get("exit_code"), int) or (check.get("status") == "fail" and not _spawn_failed(check))
+
+
+def _not_found_report(check: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The missing-command diagnostic a 127 carries, or None without a 127."""
+    stderr = str(check.get("stderr") or "")
+    recipe = _RECIPE_EXIT_127.search(stderr)
+    if check.get("exit_code") != 127 and not recipe:
+        return None
+    # The last report is the command that ended the run; an earlier one was
+    # survived, or the shell would have stopped there.
+    named = next(reversed(list(_NOT_FOUND.finditer(stderr))), None)
+    return {
+        "reason": COMMAND_NOT_FOUND,
+        "missing_command": named.group("command") if named else None,
+        "missing_line": int(named.group("line")) if named and named.group("line") else None,
+        "evidence": named.group(0).strip() if named else (
+            recipe.group(0) if recipe else f"exit {check.get('exit_code')}"),
+    }
+
+
+def classify_gate(checks: Any) -> dict[str, Any] | None:
+    """What the failed gate lacked, or None when the evidence says nothing.
+
+    The gate is up to three entrypoints (check, test, lint) that sd-check runs
+    as separate processes, so the answer carries `entrypoint`, the record it
+    was read from, and `started`, every entrypoint whose record shows it
+    executing. A sentence about the whole gate is written from `started`,
+    never from one record: the fix-verification review of 30e45b6b ran a
+    `test` that passed and a `lint` that could not spawn, and this lane said
+    no check ran."""
+    if not isinstance(checks, list):
+        return None
+    records = [check for check in checks if isinstance(check, dict)]
+    started = [str(check.get("name", "?")) for check in records if _started(check)]
+    for check in records:
+        if check.get("status") == "pass":
+            continue
+        command = check.get("command")
+        program = str(command[0]) if isinstance(command, list) and command else None
+        if _spawn_failed(check) and program:
+            found: dict[str, Any] | None = {
+                "reason": TOOLCHAIN_MISSING, "interpreter": program, "evidence": str(check.get("reason"))}
+        else:
+            found = _not_found_report(check)
+        if found is not None:
+            return {**found, "entrypoint": str(check.get("name", "?")), "started": started}
+    return None
+
+
+def gate_failed_line(check: Mapping[str, Any] | None) -> str:
+    """What the failed gate is known to have lacked, and no more: the claim
+    that no check ran is made only when `started` is empty."""
+    if check and check.get("reason") == TOOLCHAIN_MISSING:
+        started = check.get("started") or []
+        if not started:
+            return (f"sd-review: the gate could not start {check['interpreter']} for {check['entrypoint']} "
+                    f"({check['evidence']}); no check ran and no provider was asked")
+        return (f"sd-review: the gate's {check['entrypoint']} could not start {check['interpreter']} "
+                f"({check['evidence']}); {', '.join(started)} ran; no provider was asked")
+    if check and check.get("reason") == COMMAND_NOT_FOUND:
+        what = f"{check['missing_command']} was not found" if check.get("missing_command") else "a command was not found"
+        where = f" at line {check['missing_line']}" if check.get("missing_line") else ""
+        return (f"sd-review: the gate's {check['entrypoint']} failed: {what}{where} ({check['evidence']}); "
+                "it ran up to that point, so a check may have run; no provider was asked")
+    return "sd-review: the repository's own gate failed; no provider was asked"
+
+
 def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int) -> dict[str, Any]:
     """Step 1: the repository's own deterministic gate, through sd-check."""
 
@@ -1388,12 +1490,16 @@ def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeou
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
         payload = None
-    return {
+    checks = payload.get("checks") if isinstance(payload, dict) else None
+    report: dict[str, Any] = {
         "status": "pass" if result.exit_code == 0 else "fail",
         "exit_code": result.exit_code,
         "detail": (result.stderr or "").strip()[-2000:],
-        "checks": payload.get("checks") if isinstance(payload, dict) else None,
+        "checks": checks,
     }
+    if result.exit_code != 0:
+        report.update(classify_gate(checks) or {})
+    return report
 
 
 #: Scopes that earn a reviewer whatever the tier said. `planning` is here
@@ -2037,9 +2143,10 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
 
     check = result.get("check")
     if check:
-        write(f"\ncheck: {check['status']} (exit {check['exit_code']})\n")
+        reason = f" reason={check['reason']}" if check.get("reason") else ""
+        write(f"\ncheck: {check['status']} (exit {check['exit_code']}){reason}\n")
     if result["status"] == "gate_failed":
-        write("sd-review: the repository's own gate failed; no provider was asked\n")
+        write(gate_failed_line(check) + "\n")
         return
 
     write("\noutcomes:\n")
