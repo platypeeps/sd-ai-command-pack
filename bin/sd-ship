@@ -420,14 +420,64 @@ class Ship(SharedReview):
         return entry
 
     def automatic_copilot_review(self) -> bool:
-        """Whether any retained full-branch pass selected remote review."""
-        for review_pass in self.history.native(self.state):
-            report = review_pass.get("report") or {}
-            remote = report.get("remote_reviews")
-            copilot = remote.get("copilot") if isinstance(remote, dict) else None
-            if isinstance(copilot, dict) and copilot.get("automatic") is True:
-                return True
-        return False
+        """Whether the policy as it stands now selects a Copilot review of a
+        tier some retained pass recorded (sd:1328)."""
+        return self.copilot_selected(self.history.native(self.state))
+
+    @staticmethod
+    def copilot_selected(passes: list[dict]) -> bool:
+        """Resolved at dispatch, not read back from the reports.
+
+        A retained pass is evidence of the tier of what it reviewed and of
+        what the repository's own policy file said at that head. Its
+        `automatic` verdict was computed against the machine setting of that
+        moment and is not authoritative here: the setting is the operator's
+        cost lever, and a lever that waited for the next paid review would
+        not be one. Every pass is asked, not only the latest: a later push is
+        reviewed as a delta whose own tier says what the push changed and not
+        what Copilot would read, and a sensitive path reached in any segment
+        makes the branch deep. A pass from before the `repository` key reads
+        as a repository that did not say, capped by the verdict of its day
+        (`copilot_ceiling_before_the_repository_key`).
+        """
+        selected = [Ship.copilot_pass_selected(review_pass) for review_pass in passes]
+        return any(selected)
+
+    @staticmethod
+    def copilot_pass_selected(review_pass: dict) -> bool:
+        report = review_pass.get("report") or {}
+        route = report.get("route") or {}
+        tier, depth = route.get("tier"), route.get("depth")
+        if not isinstance(tier, str) or type(depth) is not int:
+            return False
+        remote = report.get("remote_reviews") or {}
+        copilot = remote.get("copilot") if isinstance(remote, dict) else None
+        if not isinstance(copilot, dict):
+            copilot = {}
+        legacy = "repository" not in copilot
+        if legacy and not Ship.copilot_ceiling_before_the_repository_key(copilot):
+            return False
+        repository = None if legacy else copilot["repository"]
+        if repository is not None and type(repository) is not bool:
+            raise Refusal("retained review report carries a malformed Copilot policy")
+        word, _source = sd_lib.copilot_policy(repository, sd_lib.core_setting("copilot_review"))
+        return sd_lib.copilot_automatic(word, tier, depth)
+
+    @staticmethod
+    def copilot_ceiling_before_the_repository_key(copilot: dict) -> bool:
+        """Compatibility floor for reports written before
+        `remote_reviews.copilot` carried `repository` (sd:1328).
+
+        Such a report cannot say what the repository's file said, and its
+        `automatic` verdict folded that in: a recorded `false` may be a
+        repository that opted out of paid review. So the verdict of its day
+        is a ceiling the current policy may only subtract from -- `false`
+        stays `false` under any setting, `true` still yields to `never`, and
+        a missing verdict grants nothing, because a grant a missing field can
+        produce is not a grant. Delete this, and the `legacy` branch of
+        `copilot_selected`, once no retained report predates the key.
+        """
+        return copilot.get("automatic") is True
 
     def persist_copilot_direction(self) -> None:
         suppressed = self.state.get("copilot_review_suppressed", False)

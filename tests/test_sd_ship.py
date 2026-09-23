@@ -270,7 +270,11 @@ roles:
                          f"reviewers: {allowed}\n<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n")
         with (self.root / ".git/info/exclude").open("a") as stream:
             stream.write("\nCLAUDE.local.md\n")
-        self.environment = {**os.environ, "HOME": str(self.home), "SHIP_DOUBLE": self.double.base_url,
+        # `XDG_CONFIG_HOME` wins over `HOME` in `sd_lib.machine_config_path`, and
+        # a GitHub runner sets it: pointed at the fixture here, or a machine
+        # config written under `self.home` is never read (sd:1328).
+        self.environment = {**os.environ, "HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config"),
+                            "SHIP_DOUBLE": self.double.base_url,
                             "PATH": str(self.programs) + os.pathsep + os.environ["PATH"]}
         self.patch = patch.dict(os.environ, self.environment, clear=True)
         self.patch.start()
@@ -430,6 +434,127 @@ roles:
         result = self.prepare()
         self.assertEqual(result["copilot_review"]["decision"], "not_selected")
         self.assertEqual(self.double.copilot_requests, [])
+
+    # -- sd:1328: the Copilot decision is made at dispatch, from the policy as
+    # it stands then and the tier the retained review recorded. A review that
+    # already happened is evidence of the tier; its own `automatic` verdict is
+    # not authoritative, or the operator's cost lever would not move until
+    # the next review was paid for.
+
+    def machine_copilot(self, value: str | None) -> None:
+        """The fixture machine's `sd.copilot_review`, or no machine config at all."""
+        config = self.home / ".config/sd-ai-command-pack/config.json"
+        if value is None:
+            config.unlink(missing_ok=True)
+            return
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(json.dumps({"config": {"sd": {"copilot_review": value}}}))
+
+    def route_deep_saying_nothing_about_copilot(self) -> None:
+        """A policy file that escalates `src.py` and leaves Copilot to the machine."""
+        policy = self.root / ".github/sd-review.json"
+        policy.parent.mkdir(parents=True, exist_ok=True)
+        policy.write_text(json.dumps({"sensitive": ["src.py"]}))
+        _git(self.root, "add", str(policy.relative_to(self.root)))
+        _git(self.root, "commit", "-m", "route deep, say nothing about Copilot\n\nAuthored-with: human")
+
+    def test_never_set_after_a_deep_review_stops_the_automatic_request(self):
+        """The reviewer's scenario: a deep review is retained under the default,
+        the operator sets `never` because they just saw the bill, and the ship
+        must not request Copilot on the strength of the old report."""
+        self.route_deep_saying_nothing_about_copilot()
+        self.machine_copilot(None)
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.operation().review(head)
+        recorded = self.operation().state["passes"][-1]["report"]["remote_reviews"]["copilot"]
+        self.assertEqual((recorded["tier"], recorded["automatic"]), ("deep", True))
+        self.machine_copilot("never")
+        prepared = self.prepare()
+        self.assertEqual(prepared["copilot_review"]["decision"], "not_selected")
+        self.assertEqual(self.double.copilot_requests, [])
+
+    def test_always_set_after_a_review_under_never_requests_at_dispatch(self):
+        """The converse: the retained report said no, the policy now says
+        always, and the standard-tier change is requested at dispatch."""
+        self.machine_copilot("never")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.operation().review(head)
+        recorded = self.operation().state["passes"][-1]["report"]["remote_reviews"]["copilot"]
+        self.assertEqual((recorded["tier"], recorded["automatic"]), ("standard", False))
+        self.machine_copilot("always")
+        prepared = self.prepare()
+        self.assertEqual(prepared["copilot_review"]["selection"], "automatic")
+        self.assertEqual(len(self.double.copilot_requests), 1)
+
+    def test_always_leaves_a_retained_skip_tier_pass_alone(self):
+        """`always` means every reviewing tier; a `skip` pass has no local
+        reviewer, and the selector reads the recorded depth, not the word."""
+        self.machine_copilot("always")
+        def pass_at(tier, depth):
+            return [{"report": {"route": {"tier": tier, "depth": depth},
+                                "remote_reviews": {"copilot": {"tier": tier, "repository": None}}}}]
+        self.assertFalse(ship.Ship.copilot_selected(pass_at("skip", 0)))
+        self.assertTrue(ship.Ship.copilot_selected(pass_at("cheap", 1)))
+        self.assertTrue(ship.Ship.copilot_selected(pass_at("deep", 1)))
+        self.machine_copilot("never")
+        self.assertFalse(ship.Ship.copilot_selected(pass_at("deep", 1)))
+
+    def test_a_delta_pass_of_a_later_push_does_not_hide_the_branch_tier(self):
+        """A later push is reviewed as a delta whose own tier says what the push
+        changed, not what Copilot would read: the deep pass behind it still
+        selects, two skip passes do not, and `never` stops the pair."""
+        def pass_at(tier, depth):
+            return {"report": {"route": {"tier": tier, "depth": depth},
+                               "remote_reviews": {"copilot": {"tier": tier, "repository": None}}}}
+        self.assertTrue(ship.Ship.copilot_selected([pass_at("deep", 1), pass_at("skip", 0)]))
+        self.assertFalse(ship.Ship.copilot_selected([pass_at("skip", 0), pass_at("skip", 0)]))
+        self.machine_copilot("never")
+        self.assertFalse(ship.Ship.copilot_selected([pass_at("deep", 1), pass_at("skip", 0)]))
+
+    def test_a_report_from_before_the_key_keeps_its_recorded_opt_out(self):
+        """A report written before `repository` travelled in it cannot say
+        whether its `automatic: false` was the repository opting out, so that
+        verdict is a ceiling: the machine default does not turn it into a
+        request, and a report with no verdict at all grants nothing."""
+        self.route_deep_saying_nothing_about_copilot()
+        self.machine_copilot("never")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.operation().review(head)
+        operation = self.operation()
+        recorded = operation.state["passes"][-1]["report"]["remote_reviews"]["copilot"]
+        self.assertEqual((recorded["tier"], recorded["automatic"]), ("deep", False))
+        recorded.pop("repository", None)
+        self.machine_copilot(None)
+        prepared = operation.prepare()
+        self.assertEqual(prepared["copilot_review"]["decision"], "not_selected")
+        self.assertEqual(self.double.copilot_requests, [])
+        bare = [{"report": {"route": {"tier": "deep", "depth": 1}}}]
+        self.assertFalse(ship.Ship.copilot_selected(bare))
+
+    def test_a_report_from_before_the_key_still_yields_to_never(self):
+        """The verdict of its day is a ceiling and not a grant: `never` set
+        since subtracts from a recorded `true`."""
+        self.route_deep_saying_nothing_about_copilot()
+        self.machine_copilot(None)
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.operation().review(head)
+        operation = self.operation()
+        recorded = operation.state["passes"][-1]["report"]["remote_reviews"]["copilot"]
+        self.assertEqual((recorded["tier"], recorded["automatic"]), ("deep", True))
+        recorded.pop("repository", None)
+        self.machine_copilot("never")
+        prepared = operation.prepare()
+        self.assertEqual(prepared["copilot_review"]["decision"], "not_selected")
+        self.assertEqual(self.double.copilot_requests, [])
+
+    def test_a_repository_that_named_the_key_still_wins_at_dispatch(self):
+        """The repository's say travels in the report; a machine flip does not
+        override a file that named `automatic_deep`."""
+        self.machine_copilot("never")
+        self.enable_automatic_copilot()
+        prepared = self.prepare()
+        self.assertEqual(prepared["copilot_review"]["selection"], "automatic")
+        self.assertEqual(len(self.double.copilot_requests), 1)
 
     def test_explicit_copilot_review_is_idempotent_while_the_request_is_present(self):
         first = self.prepare("--copilot-review", "request")
@@ -1536,8 +1661,6 @@ roles:
         self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
 
     def test_standing_review_revocation_invalidates_receipt_but_unrelated_settings_do_not(self):
-        self.environment["XDG_CONFIG_HOME"] = str(self.home / ".config")
-        os.environ["XDG_CONFIG_HOME"] = self.environment["XDG_CONFIG_HOME"]
         config = self.home / ".config/sd-ai-command-pack/config.json"
         config.parent.mkdir(parents=True)
         config.write_text('{"config":{"sd":{"external_reviews":"configured"}}}')
@@ -1552,8 +1675,6 @@ roles:
         self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
 
     def test_absent_to_dangling_local_config_cannot_reuse_a_completed_review(self):
-        self.environment["XDG_CONFIG_HOME"] = str(self.home / ".config")
-        os.environ["XDG_CONFIG_HOME"] = self.environment["XDG_CONFIG_HOME"]
         config = self.home / ".config/sd-ai-command-pack/config.json"
         config.parent.mkdir(parents=True)
         config.write_text('{"config":{"sd":{"external_reviews":"configured"}}}')
@@ -2880,6 +3001,15 @@ class DeclaredGapCase(unittest.TestCase):
     def setUp(self):
         ShipCase.setUp(self)
         self.remote.protection = None
+        # Every declaration here commits `.github/workflows/*.yml`, a sensitive
+        # path that routes deep, and since sd:1328 a deep change asks Copilot
+        # unless something says otherwise. These tests are about check gaps,
+        # and the double never completes a Copilot review, so the fixture's
+        # machine says `never` rather than letting the default turn every
+        # merge below into a wait for a review nobody answers.
+        config = self.home / ".config" / ship.sd_lib.CONFIG_RELATIVE_PATH
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text('{"config":{"sd":{"copilot_review":"never"}}}')
 
     def commit(self, files: dict[str, str], message: str = "declare\n\nAuthored-with: human") -> str:
         """Commit `files` on `topic` at the remote and pull them into the clone.
