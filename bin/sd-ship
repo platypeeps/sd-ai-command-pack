@@ -63,6 +63,50 @@ REVIEW_CAPTURE_BYTES = 2_000_000
 COPILOT_REVIEW_LIMIT = 3
 COPILOT_MATERIALIZATION_ATTEMPTS = 3
 COPILOT_MATERIALIZATION_INTERVAL_SECONDS = 5
+#: **The shipped surface, by exclusion** (sd:1366). A Copilot review of an
+#: ancestor of the merge head may stand when the diff from that ancestor to the
+#: merge head touches nothing outside this tuple. Everything else -- `bin/`,
+#: `skills/`, `tests/`, `actions/`, `.github/`, the `Makefile`, every other root
+#: file -- is the shipped surface, and a change to it refuses as before.
+#:
+#: `docs/` is prose *about* the thing, and this pack's own default routing
+#: policy already calls a docs-only change unreviewable (`docs_skip` in
+#: `bin/sd-review`'s `DEFAULT_POLICY`).
+#:
+#: **That is not the whole of what the router says, and reading it as such was
+#: wrong.** `docs_skip` is qualified by `never_skip`, which beats it outright
+#: (`bin/sd_route.py`, "unless any path is in the ``never_skip`` deny-list,
+#: which always wins"). This repository's `.github/sd-review.json` puts
+#: `docs/spec/**` in that deny-list and the built-in default puts it there
+#: too, so a blanket `docs/` exemption here was not "strictly less than the
+#: router already does" -- it skipped the one directory inside `docs/` the
+#: repository had said may never be skipped. `repository_never_skip` reads
+#: that list and subtracts it from this tuple, so the gate is the blanket
+#: *and* the repository's word, never the blanket alone.
+#:
+#: **`tests/` is not in here, and the argument for putting it there does not
+#: survive.** It runs: a test is evidence the product works, and CI re-runs it
+#: on every push whether or not a remote reader saw it. CI re-running a test
+#: proves the test passes. It cannot prove the test still *asserts* what the
+#: reviewer approved -- a push that weakens an assertion, narrows a fixture,
+#: inverts an expectation to match the behaviour rather than the requirement,
+#: or deletes a case leaves CI green, greener in fact, because a weaker test
+#: fails less. Judging whether a test is strong enough is the reviewer's job
+#: and is exactly what CI cannot do, so the exemption would let a branch get
+#: reviewed and then gut the test pinning the defect with the gate none the
+#: wiser. And in this pack several tests *are* the product: `test_loc_caps.py`
+#: and `test_sd_review_boundary.py` cap what the review lane may grow to and
+#: `test_no_shipped_shell.py` keeps shell out of `bin/`, so changing them
+#: changes what the pack permits.
+#:
+#: Deliberately narrower than that `docs_skip`, which also lists `*.md`: this
+#: pack ships `skills/**/*.md` as its payload, so any extension-shaped rule
+#: would exempt the product itself. Matched as a path prefix anchored at the
+#: repository root, so a nested `src/docs/` stays inside the surface and a
+#: repository that wants a wider exemption does not get one by accident.
+UNSHIPPED_PREFIXES = ("docs/",)
+#: How many shipped paths a stale-review refusal names before it counts the rest.
+UNSHIPPED_NAMED = 5
 #: What a decoded value is called when the receipt refuses it for not being an
 #: object. JSON's names, not Python's: the reader is looking at a review's
 #: output. `bool` is looked up by exact type, so it does not fall into `int`.
@@ -291,6 +335,12 @@ class Ship(SharedReview):
     #: `__init__` line so that the `--no-item` construction, which returns
     #: early, has it too (sd:1347).
     row_authority: dict | None = None
+    #: The ancestor head a Copilot review cleared the merge gate on, when the
+    #: merge head itself was never reviewed and the difference is outside the
+    #: shipped surface (sd:1366). Set by `copilot_reviewed_head`, read once by
+    #: `require_copilot_clearance` so the relaxation reaches the merge receipt
+    #: as a warning rather than passing in silence.
+    copilot_ancestor_review: str | None = None
 
     def __init__(self, root: pathlib.Path, connection, database: pathlib.Path, args):
         from sd_db import ship
@@ -647,6 +697,13 @@ class Ship(SharedReview):
         return result
 
     def copilot_reviewed_head(self, reviews: list[dict], merge_head: str) -> str | None:
+        # `stable_copilot_material` calls this once per materialization attempt,
+        # and a review of the exact merge head can land between two of them. The
+        # receipt has to say what the *last* reading found, so the note is
+        # cleared here rather than only written: otherwise an ancestor that
+        # cleared attempt one would still be named in the warning after attempt
+        # two matched exactly.
+        self.copilot_ancestor_review = None
         completed = [review for review in reviews
                      if bool(review.get("submitted_at"))
                      and str(review.get("state") or "").upper() not in ("", "PENDING")]
@@ -672,12 +729,86 @@ class Ship(SharedReview):
                     code="copilot_review_stale", boundary="review", state="operator_decision",
                     next_action="Request one explicit Copilot review for the current branch, then retry merge.",
                 ) from None
-            raise Refusal(
-                "Latest Copilot-reviewed head is not the exact merge head",
-                code="copilot_review_stale", boundary="review", state="operator_decision",
-                next_action="Request one explicit Copilot review for the current branch, then retry merge.",
-            ) from None
+            unshipped = self.unreviewed_shipped_surface(candidate, merge_head)
+            if unshipped:
+                named = ", ".join(unshipped[:UNSHIPPED_NAMED])
+                extra = "" if len(unshipped) <= UNSHIPPED_NAMED else f" and {len(unshipped) - UNSHIPPED_NAMED} more"
+                raise Refusal(
+                    "Latest Copilot-reviewed head is not the exact merge head, and the commits "
+                    f"since it change the shipped surface: {named}{extra}",
+                    code="copilot_review_stale", boundary="review", state="operator_decision",
+                    next_action="Request one explicit Copilot review for the current branch, then retry merge.",
+                ) from None
+            self.copilot_ancestor_review = candidate
         return candidate
+
+    def unreviewed_shipped_surface(self, reviewed: str, merge_head: str) -> list[str]:
+        """The shipped paths the Copilot review of `reviewed` did not read.
+
+        A two-dot diff on purpose. The question is what the merge delivers
+        beyond the tree the reviewer saw, not what happened along the way, so
+        a later commit that reverts an earlier one leaves nothing here -- and
+        an empty commit, or one that only moves `docs/`, leaves nothing
+        either. `UNSHIPPED_PREFIXES` is the whole definition.
+
+        The caller has already proved `reviewed` is an ancestor of
+        `merge_head` in this checkout's own history, so a force-push or a
+        rewrite that detached the reviewed commit was refused before this
+        runs and the diff below is always between two commits on one line.
+
+        **`--no-renames` is load-bearing.** Rename detection is git's default
+        and `--name-only` renders a detected rename as its destination alone,
+        so `git mv bin/sd-review docs/sd-review` reported `docs/sd-review` and
+        nothing else: the source path -- a shipped file the reviewer had read,
+        now deleted -- left the set entirely and the gate cleared on it. The
+        filter is only ever as good as the set it filters.
+        """
+        changed = git(self.root, "diff", "--no-renames", "--name-only",
+                      reviewed, merge_head).splitlines()
+        paths = sorted({path for path in (line.strip() for line in changed) if path})
+        denied = self.repository_never_skip(paths)
+        return [path for path in paths
+                if not path.startswith(UNSHIPPED_PREFIXES) or path in denied]
+
+    def repository_never_skip(self, paths: list[str]) -> frozenset[str]:
+        """Which of `paths` the repository says may never be skipped.
+
+        `UNSHIPPED_PREFIXES` is this gate's own blanket and the repository is
+        allowed to be stricter than it. `never_skip` in `.github/sd-review.json`
+        is that deny-list, and `bin/sd_route.py` gives it the last word over
+        `docs_skip`: a change touching one of its paths is never routed to
+        `skip`, which is the whole reason the allow-list is safe to widen.
+        This pack's own file names `docs/spec/**`, and the built-in default
+        names it too, so a repository that says nothing still gets it.
+
+        Read through `sd-review`'s validated loader rather than by parsing the
+        file here: a malformed policy then refuses the merge instead of
+        silently widening the exemption, and the deny-list has exactly one
+        definition. The router's own matcher answers the globs for the same
+        reason -- `fnmatch` is wrong for these patterns, `_glob_to_regex` says
+        why, and a second implementation of `docs/spec/**` is the drift this
+        pack spends its lint budget on. It is reached through the loaded
+        module, so `bin/sd_route.py` keeps its single importer.
+
+        `PolicyError` is not in `main`'s caught tuple, and this is the first
+        caller in `sd-ship` that can raise one, so it is translated here. It
+        refuses rather than falling back to the built-in default: a repository
+        whose policy file will not parse has said nothing this gate may rely
+        on, and taking the default would hand it a deny-list it never wrote.
+        """
+        review = sd_lib.sibling("sd_review_policy_ship_gate", "sd-review")
+        try:
+            policy, _source = review.load_policy(self.root)
+        except review.PolicyError as error:
+            raise Refusal(
+                f"the repository's review policy does not parse, so the never-skip "
+                f"deny-list cannot be applied to the merge gate: {error}",
+                code="review_policy_malformed", boundary="review", state="operator_decision",
+                next_action="Fix .github/sd-review.json, then retry merge.",
+            ) from None
+        patterns = policy.get("never_skip") or ()
+        return frozenset(path for path in paths
+                         if review.sd_route._first_match([path], patterns) is not None)
 
     def stable_copilot_material(self, number: int, pull: dict, head: str,
                                 *, required: bool) -> tuple[list, list] | None:
@@ -720,6 +851,10 @@ class Ship(SharedReview):
         if material is None:
             return
         reviews, comments = material
+        if self.copilot_ancestor_review:
+            self.save(warnings=list(self.state.get("warnings") or []) + [
+                f"Copilot reviewed {self.copilot_ancestor_review}, an ancestor of the merge head "
+                f"{head}; the commits since it touch no shipped surface, so the gate cleared"])
         self.record_copilot_completion(entries, reviews)
         try:
             ack = sd_lib.sibling("sd_review_ack_ship_gate", "sd-review-ack")
