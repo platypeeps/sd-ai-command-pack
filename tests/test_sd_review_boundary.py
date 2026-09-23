@@ -544,6 +544,31 @@ class LineBudgetTests(unittest.TestCase):
         # it. Shared-core classification and the complexity ceilings are
         # unchanged.
         #
+        # 3126 -> 3176 is sd:1328, which makes Copilot-on-deep-changes the
+        # machine default instead of a per-repository opt-in. Nineteen of the
+        # twenty-one `runner_merge=auto` repositories carry no
+        # `.github/sd-review.json`, so `automatic_deep: false` in the built-in
+        # default meant no Copilot on any of them, and the alternative was
+        # nineteen files saying one thing. The 50 lines are `copilot_policy`
+        # (repository file when it names the key, else `sd.copilot_review`,
+        # else `deep`, with the source named for `--explain`),
+        # `copilot_automatic` (which also keeps `always` off the `skip` tier),
+        # the guard that holds only a file naming `copilot_review` to its
+        # grammar so an absent key inherits, two more report keys, one render
+        # line, and the comments that say why the default carries `None`.
+        # This raise is its own commit, before the one that spends it.
+        # Shared-core classification and the complexity ceilings are
+        # unchanged.
+        #
+        # 3176 -> 3148 is the review of sd:1328 finding that `sd-ship` read
+        # the report's `automatic` verdict back instead of the setting as it
+        # stood at dispatch, so `never` set after a deep review still bought
+        # one. The resolution (`copilot_policy`, `copilot_automatic`) is
+        # policy both lanes need and mechanics of neither, so it moved to
+        # `sd_lib`; the lane keeps the one call and gains the `repository`
+        # report key. Lowered to the measured size in the change that took
+        # the lines out, so the cap does not hide the next spend.
+        #
         # 3126 -> 3167 is sd:1343. A linked worktree of this pack has no
         # .venv, and `make check` is the gate this lane runs, so the pass
         # died on `/bin/sh: .venv/bin/python: No such file or directory`
@@ -587,7 +612,7 @@ class LineBudgetTests(unittest.TestCase):
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3233,
+            3148,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

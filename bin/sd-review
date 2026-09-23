@@ -145,6 +145,10 @@ class Refusal(Exception):
 # The policy when `.github/sd-review.json` is absent, deliberately conservative:
 # documentation-only changes are free, everything else pays for codex, anything
 # sensitive or large escalates. A repository that wants otherwise writes the file.
+#
+# `copilot_review.automatic_deep` is `None` here on purpose: the repository has
+# not said, so the machine's `sd.copilot_review` answers (`deep` when unset).
+# A file that names the key says `true` or `false` and overrides the machine.
 DEFAULT_POLICY: dict[str, Any] = {
     "tier_order": ["skip", "cheap", "standard", "deep"],
     "default_tier": "standard",
@@ -155,7 +159,7 @@ DEFAULT_POLICY: dict[str, Any] = {
     "never_skip": ["docs/spec/**"],
     "sensitive": [".github/workflows/**"],
     "large_change_lines": 800,
-    "severity_floor": "medium", "copilot_review": {"automatic_deep": False},
+    "severity_floor": "medium", "copilot_review": {"automatic_deep": None},
 }
 
 POLICY_KEYS = frozenset(DEFAULT_POLICY) | {"$schema"}
@@ -253,7 +257,13 @@ def validate_policy(value: object, source: str) -> dict[str, Any]:
     floor = policy["severity_floor"]
     _require(isinstance(floor, str) and floor in BLOCKING_ORDER, f"{source}: severity_floor must be one of {', '.join(SEVERITIES)}")
 
-    return _validate_copilot_policy(policy, source)
+    # Only a file that names `copilot_review` is held to its grammar. One
+    # that does not keeps the default's `None` and inherits the machine's
+    # `sd.copilot_review`; running the check on the default would refuse
+    # every file that leaves Copilot to the machine.
+    if "copilot_review" in value:
+        return _validate_copilot_policy(policy, source)
+    return policy
 
 
 def read_json_file(path: pathlib.Path, refusal: type[Exception]) -> Any:
@@ -1717,6 +1727,11 @@ def review(
         raise sd_registry.RegistryError(registry_refusal)
     consent_source = "none"
     authorization = sd_lib.core_setting("external_reviews", dict(env))
+    # Resolved here for the report, and again by `sd-ship` at dispatch against
+    # the machine setting as it stands then: the verdict below is what the
+    # policy said at review time, and the report carries the inputs.
+    copilot_word, copilot_source = sd_lib.copilot_policy(
+        policy["copilot_review"]["automatic_deep"], sd_lib.core_setting("copilot_review", dict(env)))
     try:
         consent, consent_source = sd_registry.resolve_consent(
             registry, sd_lib.local_block(root).get(sd_lib.CONSENT_KEY), authorization)
@@ -1855,8 +1870,11 @@ def review(
         "route": plan._asdict(),
         "remote_reviews": {
             "copilot": {
-                "automatic": plan.tier == "deep" and policy["copilot_review"]["automatic_deep"],
+                "automatic": sd_lib.copilot_automatic(copilot_word, plan.tier, plan.depth),
                 "tier": plan.tier,
+                "policy": copilot_word,
+                "source": copilot_source,
+                "repository": policy["copilot_review"]["automatic_deep"],
             }
         },
         "providers": list(providers),
@@ -2066,6 +2084,10 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
         write(f"  providers   {', '.join(result['providers']) or '(none)'}\n")
         if result.get("authorization"):
             write(f"  consent     {result['authorization']['source']} ({result['authorization']['path']})\n")
+    copilot = (result.get("remote_reviews") or {}).get("copilot")
+    if isinstance(copilot, dict) and "policy" in copilot:
+        asked = "requested" if copilot["automatic"] else "not requested"
+        write(f"  copilot     {copilot['policy']} ({copilot['source']}); tier {copilot['tier']}, {asked}\n")
     if result.get("fallback_candidates"):
         write(f"  fallbacks   {', '.join(result['fallback_candidates'])}\n")
     write(f"  authored    {result['authored_with_report']}\n")
