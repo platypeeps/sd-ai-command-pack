@@ -264,6 +264,12 @@
   test: a file one byte off one of them is still somebody else's, and is
   still refused with nothing written.
 
+  The list carries the bodies this change itself replaced as well as the two
+  released ones, because a branch owns the predecessors it creates: every
+  revision of it is one somebody can check out and install from, and all of
+  them are history once it lands. A body left off is an installation the verb
+  refuses for the rest of its life.
+
 ## 1.0.0 - 2026-09-01
 
 ### Changed
