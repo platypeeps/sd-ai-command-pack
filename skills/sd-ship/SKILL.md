@@ -57,7 +57,8 @@ Small changes need no placeholder work item.
 4. **Open or reconcile the pull request.**
    Include `Work:` only when an associated item exists.
    The line is absent otherwise; it is not a completion claim.
-   After exact-head confirmation, request Copilot when repository policy selects the final tier.
+   After exact-head confirmation, request Copilot when the effective policy selects the reviewed tier: `deep` (what unset reads) on deep-tier changes only, `always` on every reviewing tier, `never` on none.
+   A `skip` tier is not requested under any policy.
    `--copilot-review request` permits one explicit request.
    `--copilot-review skip` needs explicit task direction and suppresses automatic selection.
    Suppression persists for the task until a later explicit request replaces it.
@@ -200,7 +201,7 @@ Do not invent acceptance for the operator.
 ## Remote findings
 
 Complete local review before any Copilot request.
-Request automatically only through the configured `deep` tier.
+Request automatically as the effective policy selects: `deep` (what unset reads) on deep-tier changes only, `always` on every reviewing tier, `never` on none, and a `skip` tier under none of them.
 Honor repository restrictions and avoid repeated automatic requests after later pushes.
 Read and disposition findings posted independently.
 

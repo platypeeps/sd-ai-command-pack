@@ -269,7 +269,11 @@ roles:
                          f"reviewers: {allowed}\n<!-- SD-AI-COMMAND-PACK:LOCAL:END -->\n")
         with (self.root / ".git/info/exclude").open("a") as stream:
             stream.write("\nCLAUDE.local.md\n")
-        self.environment = {**os.environ, "HOME": str(self.home), "SHIP_DOUBLE": self.double.base_url,
+        # `XDG_CONFIG_HOME` wins over `HOME` in `sd_lib.machine_config_path`, and
+        # a GitHub runner sets it: pointed at the fixture here, or a machine
+        # config written under `self.home` is never read (sd:1328).
+        self.environment = {**os.environ, "HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config"),
+                            "SHIP_DOUBLE": self.double.base_url,
                             "PATH": str(self.programs) + os.pathsep + os.environ["PATH"]}
         self.patch = patch.dict(os.environ, self.environment, clear=True)
         self.patch.start()
@@ -1613,8 +1617,6 @@ roles:
         self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
 
     def test_standing_review_revocation_invalidates_receipt_but_unrelated_settings_do_not(self):
-        self.environment["XDG_CONFIG_HOME"] = str(self.home / ".config")
-        os.environ["XDG_CONFIG_HOME"] = self.environment["XDG_CONFIG_HOME"]
         config = self.home / ".config/sd-ai-command-pack/config.json"
         config.parent.mkdir(parents=True)
         config.write_text('{"config":{"sd":{"external_reviews":"configured"}}}')
@@ -1629,8 +1631,6 @@ roles:
         self.assertFalse(any(call.method == "PUT" for call in self.remote.calls))
 
     def test_absent_to_dangling_local_config_cannot_reuse_a_completed_review(self):
-        self.environment["XDG_CONFIG_HOME"] = str(self.home / ".config")
-        os.environ["XDG_CONFIG_HOME"] = self.environment["XDG_CONFIG_HOME"]
         config = self.home / ".config/sd-ai-command-pack/config.json"
         config.parent.mkdir(parents=True)
         config.write_text('{"config":{"sd":{"external_reviews":"configured"}}}')
