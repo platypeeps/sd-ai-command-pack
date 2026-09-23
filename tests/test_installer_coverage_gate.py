@@ -28,6 +28,7 @@ every `make check`, where the gate runs against combined data.
 """
 
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -231,6 +232,93 @@ class UnmergedIndexTests(unittest.TestCase):
             "below its own floor -- a gate failing open:\n"
             + result.stdout + result.stderr,
         )
+
+
+CONFIG_CHECK = REPO_ROOT / ".github/scripts/check-coverage-include.py"
+
+
+class CoveragercAgreesWithTheEnumeratedSurface(unittest.TestCase):
+    """The measured surface and the traced surface are two lists, so compare them.
+
+    The gate enumerates what it measures from the index. What coverage traced
+    was decided by `.coveragerc` `[run] include`, which is written by hand. A
+    path in one and not the other is a file the gate reports on and coverage
+    never executed, and the report is green either way -- the failure the
+    enumeration was added to prevent, one step earlier in the pipeline.
+    """
+
+    def _run(self, root, paths):
+        listing = Path(root) / "surface.txt"
+        listing.write_text("".join(f"{path}\n" for path in paths))
+        return subprocess.run(
+            [sys.executable, str(CONFIG_CHECK), "--root", str(root),
+             "--paths-from", str(listing)],
+            capture_output=True, text=True,
+        )
+
+    def test_this_checkout_traces_the_surface_it_measures(self):
+        listed = subprocess.run(
+            ["git", "ls-files", "--deduplicate", "--", PATHSPEC],
+            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+        ).stdout.split()
+        self.assertTrue(listed, "the installer surface enumerated to nothing")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            listing = Path(tmp) / "surface.txt"
+            listing.write_text("".join(f"{path}\n" for path in listed))
+            result = subprocess.run(
+                [sys.executable, str(CONFIG_CHECK), "--root", str(REPO_ROOT),
+                 "--paths-from", str(listing)],
+                capture_output=True, text=True,
+            )
+
+        self.assertEqual(
+            result.returncode, 0,
+            ".coveragerc does not trace every path the gate measures:\n"
+            + result.stdout + result.stderr,
+        )
+
+    def test_a_second_installer_module_outside_the_include_fails(self):
+        """The case the row is about: git enumerates it, coverage never traced it."""
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".coveragerc").write_text(
+                "[run]\ninclude =\n    bin/sd_install.py\n"
+                "[report]\ninclude =\n    bin/sd_install.py\n"
+            )
+
+            result = self._run(tmp, ["bin/sd_install.py", "bin/sd_install_hooks.py"])
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("bin/sd_install_hooks.py", result.stderr)
+        self.assertIn("[run] include", result.stderr)
+        self.assertIn("[report] include", result.stderr)
+
+    def test_a_matching_glob_passes(self):
+        """A glob that does reach the new module is the fix, and it is accepted."""
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".coveragerc").write_text(
+                "[run]\ninclude =\n    bin/sd_install*.py\n"
+                "[report]\ninclude =\n    bin/sd_install*.py\n"
+            )
+
+            result = self._run(tmp, ["bin/sd_install.py", "bin/sd_install_hooks.py"])
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_missing_include_section_is_refused(self):
+        """No `include` at all traces everything or nothing; either way the
+        gate's 100% stops meaning the installer."""
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".coveragerc").write_text("[run]\nbranch = True\n")
+
+            result = self._run(tmp, ["bin/sd_install.py"])
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("include is missing", result.stderr)
+
+    def test_the_gate_runs_the_comparison(self):
+        """The check is wired into the gate, not merely available beside it."""
+        self.assertIn("check-coverage-include.py", GATE.read_text())
 
 
 if __name__ == "__main__":

@@ -30,6 +30,10 @@ reads the cap from the one rule file, and none carries a cap of its own. The
 skills are enumerated from what their pages invoke, not from a list kept here.
 """
 
+# This module reads the whole checkout, so no changed-files fast path may
+# narrow it away. `.github/scripts/select-tests.py` greps for the line below.
+# select-tests: always-run
+
 from __future__ import annotations
 
 import pathlib
@@ -40,28 +44,19 @@ import tempfile
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(REPO_ROOT / "bin") not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT / "bin"))
+for entry in (REPO_ROOT, REPO_ROOT / "bin"):
+    if str(entry) not in sys.path:
+        sys.path.insert(0, str(entry))
 
 import sd_install  # noqa: E402
 import sd_lib  # noqa: E402
 
+#: What runs or governs, read off the index by `tests/governed.py`. This was a
+#: third hand-typed copy of the same ten names.
+from tests.governed import GOVERNED  # noqa: E402
+
 WORKFLOW = REPO_ROOT / "WORKFLOW.md"
 RULE = REPO_ROOT / ".claude/rules/sd-planning-adversarial-review.md"
-
-#: What runs or governs. `docs/work/` and `CHANGELOG.md` are history.
-GOVERNED = (
-    "bin",
-    "skills",
-    "agents",
-    "tests",
-    ".claude",
-    ".github",
-    "CLAUDE.md",
-    "AGENTS.md",
-    "README.md",
-    "docs/spec",
-)
 
 TABLE_HEADER = "| Flow | Point | What it checks | Cap |"
 
@@ -260,9 +255,15 @@ class OverrideKeys(unittest.TestCase):
 
 class ReviewTable(unittest.TestCase):
     def test_the_table_appears_in_exactly_two_files(self):
+        """Both copies are in the grep now. `WORKFLOW.md` used to sit outside
+        the governed pathspec -- the hand-typed copy named three top-level
+        markdown files and one of them, `CLAUDE.md`, is not even tracked here
+        -- so the page was asserted by a direct read beside a grep that could
+        not see it. The read stays as the control on the grep."""
         rows = governed_grep(re.escape(TABLE_HEADER))
         files = {row.split(":", 1)[0] for row in rows}
-        self.assertEqual(files, {".claude/rules/sd-planning-adversarial-review.md"})
+        self.assertEqual(files, {".claude/rules/sd-planning-adversarial-review.md",
+                                 "WORKFLOW.md"})
         self.assertTrue(TABLE_HEADER in WORKFLOW.read_text(encoding="utf-8"))
 
     def test_the_two_copies_are_identical(self):

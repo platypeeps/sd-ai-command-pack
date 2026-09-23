@@ -40,6 +40,11 @@ removed from the list. New code has no such exemption. That is the opposite of
 the cap's ratchet, which could only rise.
 """
 
+# This module reads the whole checkout, so no changed-files fast path may
+# narrow it away. `.github/scripts/select-tests.py` greps for the line below.
+# select-tests: always-run
+
+
 import ast
 import collections
 import copy
