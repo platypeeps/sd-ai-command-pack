@@ -676,6 +676,252 @@ class BothActionsTests(SetupFixture):
         self.assertIn("no-such-action", str(caught.exception))
 
 
+# A consumer that pins both actions: the docs-gate guard at the template
+# wording, and above -- ahead of it in the `ignore:` list -- nothing; the
+# review-route item comes second, carrying prose its own team wrote.
+HAND_WRITTEN_REVIEW_ROUTE = """\
+      # The sd-ai-command-pack pin is set by hand. Ask #platform before moving
+      # it: the release train pins the same sha in three sibling repositories.
+      - dependency-name: "platypeeps/sd-ai-command-pack/actions/review-route"
+"""
+
+
+def consumer(*blocks: str) -> str:
+    """One github-actions entry whose `ignore:` list holds `blocks`, in order."""
+
+    return (
+        'version: 2\nupdates:\n'
+        '  - package-ecosystem: "github-actions"\n'
+        '    directory: "/"\n'
+        '    schedule:\n'
+        '      interval: "weekly"\n'
+        "    open-pull-requests-limit: 5\n"
+        "    ignore:\n" + "".join(blocks)
+    )
+
+
+class GuardActionTests(SetupFixture):
+    """The write gate reads the guard for the action the installer writes.
+
+    `guard_state()` without an action answers about whichever of the pack's
+    actions the file guards first -- the reading a fleet census wants, and the
+    wrong question for a gate standing in front of a per-action write.
+    `rendered()` replaces the review-route block; the gate has to be asked
+    about the review-route block, or it reports on a different one.
+    """
+
+    def test_a_hand_written_review_route_guard_is_not_silently_replaced(self) -> None:
+        """docs-gate guard first, review-route guard second and hand-written.
+
+        The action-blind read stops at the docs-gate block, says `same`, and
+        lets the write through: the team's prose is replaced by the template
+        and the report calls the run unchanged.
+        """
+        root = self.make_repo()
+        text = consumer(guard.guard_block("      ", "docs-gate"), HAND_WRITTEN_REVIEW_ROUTE)
+        self.seed_dependabot(root, text)
+        with self.assertRaises(setup.Refusal) as caught:
+            install(root)
+        self.assertIn("--force", str(caught.exception))
+        self.assertEqual(self.dependabot(root).read_text(encoding="utf-8"), text)
+
+    def test_the_report_names_the_state_of_the_block_it_writes(self) -> None:
+        root = self.make_repo()
+        self.seed_dependabot(
+            root, consumer(guard.guard_block("      ", "docs-gate"), HAND_WRITTEN_REVIEW_ROUTE)
+        )
+        result = install(root, force=True)
+        self.assertEqual(result["guard"], "differs")
+        text = self.dependabot(root).read_text(encoding="utf-8")
+        self.assertIn(guard.guard_block("      ", "docs-gate"), text)
+        self.assertIn(guard.guard_block("      ", "review-route"), text)
+        self.assertNotIn("#platform", text)
+
+    def test_a_differing_docs_gate_guard_does_not_refuse_this_install(self) -> None:
+        """The other direction: a guard for an action this run does not write.
+
+        The file holds one item, for docs-gate, at a wording that differs from
+        the template. The action-blind read says `differs` and the run refuses
+        by naming a review-route guard the file does not carry.
+        """
+        root = self.make_repo()
+        stale = guard.guard_block("      ", "docs-gate").replace(
+            "actions/docs-gate/README.md", "actions/review-route/README.md"
+        )
+        self.seed_dependabot(root, consumer(stale))
+        result = install(root)
+        self.assertEqual(result["guard"], "absent")
+        text = self.dependabot(root).read_text(encoding="utf-8")
+        self.assertIn(stale, text)
+        self.assertIn(guard.guard_block("      ", "review-route"), text)
+
+    def test_the_gate_is_the_only_action_blind_read_left(self) -> None:
+        """Every `guard_state` call in the installer names its action."""
+
+        source = (REPO_ROOT / "bin" / "sd_setup_github.py").read_text(encoding="utf-8")
+        calls = [
+            line
+            for line in source.splitlines()
+            if "guard_state(" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertTrue(calls)
+        for line in calls:
+            self.assertIn("DEFAULT_ACTION", line, f"action-blind write gate: {line.strip()}")
+
+
+TWO_ENTRY_CONSUMER = """\
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    ignore:
+{guard}
+  - package-ecosystem: "github-actions"
+    directory: "/.github/actions/inner"
+    schedule:
+      interval: "weekly"
+    ignore:
+{second}
+"""
+
+SECOND_UNGUARDED = """\
+      # The inner action set is bumped by hand too.
+      - dependency-name: "actions/checkout"
+"""
+
+SECOND_STALE = """\
+      # Bump this by hand, in its own commit.
+      - dependency-name: "platypeeps/sd-ai-command-pack/actions/review-route"
+"""
+
+
+class EveryEntryTests(SetupFixture):
+    """A verdict about the file, not about whichever entry comes first.
+
+    Dependabot allows more than one `github-actions` entry -- separate
+    `directory:` scopes, or the same scope twice -- and each carries its own
+    `ignore:` list. The reader stopped at the first match and reported the
+    answer as though it covered the file, so a consumer whose second entry is
+    unguarded or carries a stale wording read `same`. The Copilot round in
+    `tests/fixtures/sd-543-review-round.json` named it: "aggregate verdicts
+    must inspect all matching action blocks."
+    """
+
+    def consumer(self, second: str) -> str:
+        return TWO_ENTRY_CONSUMER.format(
+            guard=guard.guard_block("      ").rstrip("\n"),
+            second=second.rstrip("\n"),
+        )
+
+    def test_a_second_unguarded_entry_is_not_reported_as_same(self) -> None:
+        text = self.consumer(SECOND_UNGUARDED)
+        self.assertEqual(guard.guard_states(text), ("same", "absent"))
+        self.assertEqual(guard.guard_state(text), "absent")
+
+    def test_a_second_entry_with_a_stale_wording_reports_differs(self) -> None:
+        """`differs` outranks `absent`: it is the verdict `--force` gates on."""
+        text = self.consumer(SECOND_STALE)
+        self.assertEqual(guard.guard_states(text), ("same", "differs"))
+        self.assertEqual(guard.guard_state(text), "differs")
+
+    def test_rendering_guards_every_entry_and_stays_idempotent(self) -> None:
+        for name, second in (("unguarded", SECOND_UNGUARDED), ("stale", SECOND_STALE)):
+            with self.subTest(name=name):
+                once = guard.rendered(self.consumer(second))
+                self.assertEqual(once.count(guard.guard_block("      ")), 2)
+                self.assertEqual(guard.guard_states(once), ("same", "same"))
+                self.assertEqual(guard.rendered(once), once)
+
+    def test_the_installer_refuses_a_stale_second_entry_without_force(self) -> None:
+        """The write gate reads the folded verdict, so the refusal reaches the
+        entry it used to walk past."""
+        root = self.make_repo()
+        text = self.consumer(SECOND_STALE)
+        self.seed_dependabot(root, text)
+        with self.assertRaises(setup.Refusal) as caught:
+            install(root)
+        self.assertIn("--force", str(caught.exception))
+        self.assertEqual(self.dependabot(root).read_text(encoding="utf-8"), text)
+
+    def test_force_converges_every_entry_on_the_template(self) -> None:
+        root = self.make_repo()
+        self.seed_dependabot(root, self.consumer(SECOND_STALE))
+        result = install(root, force=True)
+        self.assertEqual(result["guard"], "differs")
+        written = self.dependabot(root).read_text(encoding="utf-8")
+        self.assertEqual(written.count(guard.guard_block("      ")), 2)
+        self.assertEqual(guard.guard_state(written), "same")
+
+
+class FoldPrecedenceTests(SetupFixture):
+    """Why `differs` outranks `absent` in the fold, not merely that it does.
+
+    `guard_state()` folds one word out of every entry's verdict, and the
+    order it folds by (`_WORST_FIRST`) is a judgement rather than a
+    measurement. It was chosen for one caller --
+    `sd_setup_github.guard_after()`, which refuses without `--force` on
+    `differs` and installs silently on `absent`. A file with one entry this
+    build would overwrite and one entry that merely lacks the guard has to
+    fold to the verdict that stops the write, because the other one walks
+    past a wording somebody wrote by hand.
+
+    A future caller that gates on `absent` instead would want the opposite
+    order, and this is the test it has to argue with first. Reordering is
+    allowed; reordering without noticing what it costs is what this refuses.
+    A bare assertion on the constant would pin the order and lose the reason.
+    """
+
+    def mixed(self) -> str:
+        """Entry one carries a wording this build would replace; entry two
+        carries no pack guard at all."""
+
+        return TWO_ENTRY_CONSUMER.format(
+            guard=SECOND_STALE.rstrip("\n"), second=SECOND_UNGUARDED.rstrip("\n")
+        )
+
+    def test_a_stale_wording_beside_an_unguarded_entry_folds_to_differs(self) -> None:
+        text = self.mixed()
+        self.assertEqual(guard.guard_states(text), ("differs", "absent"))
+        self.assertEqual(guard.guard_state(text), "differs")
+
+    def test_the_reason_is_the_force_refusal_and_not_a_preference(self) -> None:
+        """The two verdicts sent to the same caller, and what each one costs.
+
+        `differs` refuses and the hand-written comment survives. `absent` --
+        the verdict the other fold order would have produced for this file --
+        does not refuse, and the render it returns has replaced that comment
+        with the template. That is the loss the order prevents, and it is why
+        the order is not a matter of taste.
+        """
+        text = self.mixed()
+        hand_written = "# Bump this by hand, in its own commit."
+        self.assertIn(hand_written, text)
+
+        # The fold's own answer, not a literal: flip `_WORST_FIRST` and this
+        # is the line that stops refusing.
+        found = guard.guard_state(text)
+        with self.assertRaises(setup.Refusal) as caught:
+            setup.guard_after(text, found, self_install=False, force=False)
+        self.assertIn("--force", str(caught.exception))
+
+        # And this is what the flip would cost: the verdict the other order
+        # produces for this file does not refuse, and the render it returns
+        # has already replaced the comment somebody wrote by hand.
+        walked_past = setup.guard_after(text, "absent", self_install=False, force=False)
+        self.assertNotIn(hand_written, walked_past)
+
+    def test_force_is_what_converges_the_wording_rather_than_the_fold(self) -> None:
+        """`--force` still reaches the same render the refusal was holding
+        back, so the order costs a consumer nothing it cannot ask for."""
+        text = self.mixed()
+        forced = setup.guard_after(text, guard.guard_state(text), self_install=False, force=True)
+        self.assertEqual(guard.guard_state(forced), "same")
+        self.assertEqual(forced.count(guard.guard_block("      ")), 2)
+
+
 class CheckTests(SetupFixture):
     """`--check` renders at the repository's own pin and writes nothing."""
 

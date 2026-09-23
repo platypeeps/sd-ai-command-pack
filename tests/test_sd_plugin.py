@@ -25,6 +25,7 @@ import importlib.machinery
 import importlib.util
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -326,6 +327,82 @@ class RefusalTests(PluginFixture):
         root = self.plugin()
         self.assertEqual(self.run_sd("plugin", "add", str(root)).returncode, 0)
         self.assert_refused("plugin", "add", str(root), because="already registered")
+
+
+class ManifestVocabularyTests(PluginFixture):
+    """The top level of a manifest, which was open until 2026-09-22.
+
+    Every nested block refused a key its table did not name. The top level did
+    not, and that is the one place the silence is total: a misspelled block is
+    not malformed, it is absent. `"configg"` registered clean, declared
+    nothing, and the first sign was `sd config get hoa.google_account`
+    refusing months later. Registration is where a typo costs one line.
+    """
+
+    def test_an_unknown_top_level_key_refuses(self) -> None:
+        result = self.run_sd("plugin", "add", str(self.plugin(configg={})))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("outside the closed vocabulary", result.stderr)
+        self.assertIn("configg", result.stderr)
+
+    def test_the_misspelling_that_caused_the_outage_refuses(self) -> None:
+        """The exact shape of the `hoa` regression, as a case.
+
+        A manifest that misspells `config` used to register with an exit code
+        of 0 and declare no settings at all. The refusal has to name the key,
+        because "a key is wrong" sends the reader back to a diff they already
+        read without seeing it.
+        """
+
+        manifest = {"configg": {"google_account": {"description": "d", "pattern": "^.+$"}}}
+        result = self.run_sd("plugin", "add", str(self.plugin(**manifest)))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("configg", result.stderr)
+
+    def test_the_vocabulary_is_the_keys_the_reader_reads(self) -> None:
+        """Enumerated from the source, not from a list written here.
+
+        `MANIFEST_KEYS` and the `manifest.get("...")` call sites are two
+        spellings of one fact, and a list maintained by hand drifts the moment
+        somebody adds a key to one of them. Reading the call sites is what
+        makes a key added without a validator -- or a validator for a key no
+        manifest may carry -- fail here instead of passing.
+        """
+
+        read = set(re.findall(r'manifest\.get\(\s*"([^"]+)"', SD.read_text(encoding="utf-8")))
+        self.assertEqual(set(load_sd().MANIFEST_KEYS), read)
+
+    def test_every_key_in_the_vocabulary_is_validated(self) -> None:
+        """A legal key handed junk must refuse, or it is a key nothing reads.
+
+        `interface` is excluded because an integer is what it is for; every
+        other key names a block, and a block that is an integer is malformed.
+        """
+
+        for key in sorted(load_sd().MANIFEST_KEYS - {"interface"}):
+            with self.subTest(key=key):
+                result = self.run_sd("plugin", "add", str(self.plugin(**{key: 12345})))
+                self.assertEqual(result.returncode, 1,
+                                 f"{key} accepted an integer: {result.stdout}")
+
+    def test_an_unknown_dashboard_key_refuses(self) -> None:
+        """`dashboard` is closed too, and checked before the `tile` shortcut.
+
+        A plugin may declare `actions` and no tile. That shape returns early,
+        so a vocabulary check placed after the return would guard tiles only.
+        """
+
+        result = self.run_sd(
+            "plugin", "add", str(self.plugin(dashboard={"actionz": []})))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("actionz", result.stderr)
+
+    def test_actions_without_a_tile_still_registers(self) -> None:
+        """The shape two registered plugins actually use. It must keep working."""
+
+        dashboard = {"actions": [{"id": "sync", "label": "Sync", "run": "true"}]}
+        result = self.run_sd("plugin", "add", str(self.plugin(dashboard=dashboard)))
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class KindTests(PluginFixture):

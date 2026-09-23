@@ -156,6 +156,28 @@ class SharedReview:
         self.history.validate_requests(self.state)
         self.history.aggregate(self.state)
 
+    def binding_moved(self) -> bool:
+        """The stored receipt was produced by review tools or policy now gone.
+
+        Reuse was decided on head equality alone and the receipt was then
+        rejected on this manifest inside `review_inputs`, with nothing between
+        them saying "the binding moved, therefore review again" -- so a branch
+        whose review completed and whose head then stopped moving was bricked
+        by the next unrelated landing on the default branch that touched a
+        review tool file, with no verb able to clear it (sd:1390, live on
+        #1140).
+
+        Read lazily and memoized, never eagerly. `review_binding` reaches
+        `sd_lib.main_worktree_root`, which shells out to `git rev-parse`, and
+        the cap refusal below has to come first: a pass past the cap is
+        refused before anything is dispatched or even asked, which is what
+        `test_the_pass_after_the_cap_refuses_and_an_explicit_request_still_admits_it`
+        pins by making every `subprocess.run` raise.
+        """
+        if not hasattr(self, "_binding_moved"):
+            self._binding_moved = bool(self.history.native(self.state)) and self.state.get("binding") != self.runtime.binding(self.root)
+        return self._binding_moved
+
     def reusable_review(self, head: str, prior: dict, retry: bool, additional: bool) -> bool:
         if additional:
             return False
@@ -165,11 +187,20 @@ class SharedReview:
             raise Refusal("completed receipt does not match the requested reviewer; selection cannot replace review evidence",
                           code="review_provider_mismatch", boundary="provider", state="operator_decision",
                           next_action="Reuse the recorded reviewer, or obtain a permitted additional-review request.")
+        # A receipt bound to tools or policy that have since changed is not
+        # reusable. The manifest is read here, inside each path that would
+        # otherwise reuse, rather than once above: each of these ends in
+        # `check_review`, which refuses on exactly this manifest, so reuse was
+        # being selected on head equality and then rejected on the binding.
         if not retry and prior.get("status") == "blocking" and prior.get("subject", {}).get("head") == head:
+            if self.binding_moved():
+                return False
             clearance = self.check_review(head, refresh_adjudication=True)
             self.save(reviewed_head=head, review_clearance=clearance)
             return True
         if self.state.get("reviewed_head") == head and (not retry or completed_depth(prior)):
+            if self.binding_moved():
+                return False
             self.check_review(head)
             return True
         return False
@@ -182,7 +213,14 @@ class SharedReview:
                           "further review requires an explicit new request")
         if retry and (not passes or completed_depth(prior)):
             raise Refusal("--retry-review can continue only an incomplete review")
-        if passes and not retry and not additional:
+        # A moved binding re-reviews the branch at the head it already covered,
+        # so neither refusal below applies: the fix-verification shape is not
+        # what is being dispatched, and the already-reviewed head is the whole
+        # point. Leaving them in place only moves the deadlock one line down.
+        # The cap above still holds and is read first -- a re-review spends a
+        # pass, and a pass past the cap is refused before the binding is even
+        # asked for, which is why `binding_moved` is last in this condition.
+        if passes and not retry and not additional and not self.binding_moved():
             if not completed_depth(prior):
                 raise Refusal("the preceding review did not complete its requested depth; use --retry-review for a full-branch retry")
             if passes[-1].get("head") == head:
@@ -201,7 +239,16 @@ class SharedReview:
         if self.reusable_review(head, prior, retry, additional):
             return
         self.validate_dispatch(head, prior, retry, additional)
-        base = passes[-1]["head"] if passes and not (retry or additional) else None
+        # Only past the cap check, so a spent item refuses before the manifest
+        # is read. A re-review forced by a moved binding is a full-branch pass,
+        # not a fix verification: `--base <previous head>` would be this same
+        # head and would review an empty range, which is a rubber stamp rather
+        # than a review. It resumes the complete prior history so no earlier
+        # blocker is dropped, exactly as a post-cap request does.
+        moved = not additional and self.binding_moved()
+        if moved:
+            prior = self.history.aggregate(self.state)
+        base = passes[-1]["head"] if passes and not (retry or additional or moved) else None
         argv = [sys.executable, str(self.runtime.bin_dir / "sd-review"), "--scope", "branch", "--challenge", "--json", "--database", str(self.database)]
         requested = getattr(self.args, "provider", None)
         if requested is not None:
@@ -214,11 +261,14 @@ class SharedReview:
                        "requested_provider": requested})
         if request:
             passes[-1]["additional_review_request"] = request
+        if moved:
+            passes[-1]["review_binding_change"] = {"head": head, "recorded_at": self.runtime.clock(),
+                                                   "superseded_binding": self.state.get("binding")}
         with tempfile.TemporaryDirectory(prefix="sd-ship-verify-") as directory:
             if prior:
                 prior_path = pathlib.Path(directory) / "prior-review.json"
                 prior_path.write_text(json.dumps(prior, sort_keys=True))
-                argv += ["--resume-report" if retry or additional else "--verify-report", str(prior_path)]
+                argv += ["--resume-report" if retry or additional or moved else "--verify-report", str(prior_path)]
             result = self.execute_review(argv, head, passes)
         self.record_review(result, head, passes)
 

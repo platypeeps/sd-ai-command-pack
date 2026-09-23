@@ -46,8 +46,15 @@ def load_selector() -> types.ModuleType:
     return module
 
 
+# The fixture's whole-tree modules. The names do not matter to the selector
+# any more -- it reads the marker each one carries, not a list of names -- but
+# they are kept as this checkout's, so a reader comparing the two sees the
+# same words. `test_cut_symbols` is here because sd:1389 is that it was not:
+# the same kind of whole-tree grep as `test_no_trellis_residue`, left out of
+# the hand-typed tuple and so narrowed away by every fast path.
 ALWAYS_RUN_NAMES = (
-    "test_code_health", "test_doc_citations", "test_loc_caps", "test_ls_files_form",
+    "test_code_health", "test_cut_symbols", "test_doc_citations",
+    "test_governed_pathspec", "test_loc_caps", "test_ls_files_form",
     "test_no_shipped_shell", "test_no_trellis_residue", "test_suite_shape",
     "test_verb_inventory", "test_workflow_policy",
 )
@@ -81,11 +88,16 @@ class Only(unittest.TestCase):
 
 COVERAGERC = "[run]\ninclude =\n    bin/nothing.py\nparallel = True\n"
 
+#: What a whole-tree module writes to join the always-run set. Read off the
+#: selector rather than spelled here: a fixture that declares the marker with
+#: its own copy of the text would pass while the two drifted apart.
+MARKER_LINE = load_selector().ALWAYS_RUN_MARKER
+
 
 def build_tree(root: pathlib.Path) -> None:
     (root / "tests").mkdir(parents=True)
     for name in ALWAYS_RUN_NAMES:
-        (root / "tests" / f"{name}.py").write_text(FIXTURE_TEST)
+        (root / "tests" / f"{name}.py").write_text(MARKER_LINE + "\n" + FIXTURE_TEST)
     for name, text in OPTIONAL_TESTS.items():
         (root / "tests" / f"{name}.py").write_text(text + FIXTURE_TEST)
     (root / "bin").mkdir()
@@ -163,8 +175,33 @@ class TheSelection(TreeCase):
     def select(self, *paths: str) -> list[str] | None:
         return self.selector.select(self.root, list(paths))[0]
 
-    def test_the_fixture_always_run_set_is_the_selectors(self) -> None:
-        self.assertEqual(set(self.selector.ALWAYS_RUN), self.always)
+    def always_run(self) -> set[str]:
+        return set(self.selector.always_run(self.selector.test_modules(self.root)))
+
+    def test_the_fixture_always_run_set_is_read_off_the_markers(self) -> None:
+        self.assertEqual(self.always_run(), self.always)
+
+    def test_a_module_joins_the_set_by_declaring_itself(self) -> None:
+        """The point of the marker: no edit to the selector, no list to add to.
+
+        `test_alpha` is an ordinary narrowable module. It carries the marker
+        here and is thereby always run -- which is what `test_cut_symbols`
+        could not do while the set was a tuple in the selector."""
+        path = self.root / "tests/test_alpha.py"
+        path.write_text(MARKER_LINE + "\n" + path.read_text())
+
+        self.assertIn("tests.test_alpha", self.always_run())
+        self.assertEqual(self.select("bin/sd_beta.py"),
+                         sorted(self.always | {"tests.test_alpha", "tests.test_beta",
+                                               "tests.test_epsilon"}))
+
+    def test_the_marker_must_be_a_line_of_its_own(self) -> None:
+        """A module quoting the marker inside a string does not join the set,
+        which is how this test module itself stays narrowable."""
+        path = self.root / "tests/test_alpha.py"
+        path.write_text(f'QUOTED = "{MARKER_LINE}"\n' + path.read_text())
+
+        self.assertNotIn("tests.test_alpha", self.always_run())
 
     def test_a_change_in_one_file_selects_its_tests(self) -> None:
         self.assertEqual(self.select("bin/sd-alpha"), sorted(self.always | {"tests.test_alpha"}))
@@ -201,18 +238,36 @@ class TheSelection(TreeCase):
 
         self.assertIsNone(self.select())
 
-    def test_a_missing_always_run_module_selects_the_full_run(self) -> None:
-        (self.root / "tests/test_loc_caps.py").unlink()
+    def test_a_tree_with_no_declared_module_selects_the_full_run(self) -> None:
+        """An empty always-run set is drift, not a narrow answer: every
+        whole-tree module lost its marker, or the marker changed shape."""
+        for name in ALWAYS_RUN_NAMES:
+            (self.root / "tests" / f"{name}.py").unlink()
+
         self.assertIsNone(self.select("bin/sd-alpha"))
 
 
 class TheSelectorHere(unittest.TestCase):
-    def test_every_always_run_module_exists_in_this_checkout(self) -> None:
+    def test_this_checkouts_declared_modules_are_the_expected_ones(self) -> None:
+        """Read off `tests/` here, not off a tuple in the selector. A module
+        that declares itself is in the set; the names above are what this
+        checkout currently declares, so losing one is visible."""
         selector = load_selector()
-        missing = [name for name in selector.ALWAYS_RUN
+        declared = selector.always_run(selector.test_modules(REPO_ROOT))
+
+        missing = [name for name in declared
                    if not (REPO_ROOT / "tests" / f"{name.split('.')[1]}.py").is_file()]
-        self.assertEqual(missing, [], "the always-run set names modules that are gone")
-        self.assertEqual(set(selector.ALWAYS_RUN), {f"tests.{name}" for name in ALWAYS_RUN_NAMES})
+        self.assertEqual(missing, [], "a declared module is not a file")
+        self.assertEqual(set(declared), {f"tests.{name}" for name in ALWAYS_RUN_NAMES})
+
+    def test_the_cut_symbols_grep_is_declared(self) -> None:
+        """sd:1389: it walks the same tree as `test_no_trellis_residue` and
+        was the one left out."""
+        selector = load_selector()
+        declared = selector.always_run(selector.test_modules(REPO_ROOT))
+
+        self.assertIn("tests.test_cut_symbols", declared)
+        self.assertIn("tests.test_no_trellis_residue", declared)
 
     def test_the_command_line_prints_full_or_module_names(self) -> None:
         load_selector()
