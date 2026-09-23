@@ -598,11 +598,38 @@ class LineBudgetTests(unittest.TestCase):
         # merged tree, in its own commit after the merge that spent it.
         # Shared-core classification and the complexity ceilings are
         # unchanged.
+        #
+        # 3293 -> 3399 closes the config-merge escape (sd:1375). The first
+        # cut confined the child with the permission map alone, but opencode
+        # deep-merges the reviewed checkout's own `opencode.json` over the
+        # inline config when it launches inside that checkout, and a hostile
+        # checkout's `{"bash": "allow", "<server>_<tool>": "allow"}` survives
+        # `*: deny` under last-match evaluation -- reproduced live, the merged
+        # config started the checkout's MCP server and a `bash touch` wrote
+        # into the tree. The fix launches opencode from a neutral directory,
+        # never the checkout: `IsolationError` and `assert_isolated_launch`
+        # in `bin/sd_opencode.py` refuse a launch dir the checkout could
+        # reach (it is the checkout, or an ancestor carries opencode config),
+        # `bin/sd-review` launches from `workdir` and records why `--dir` is
+        # not the way in, and the docstring records the second confinement
+        # layer and the residual: the material is embedded, so no checkout
+        # read is granted, and the residual paragraph names the cost of that
+        # (this reviewer cannot make an out-of-diff finding, with `#1146`'s
+        # `never_skip` override as the shape of what is lost) and the bounded
+        # way to reverse it. The 106 lines are the two new symbols and their
+        # comment in the module, the launch branch and its note in
+        # `bin/sd-review`, and the docstring's added paragraphs. This raise
+        # is its own commit, before the one that spends it: the rule this
+        # file states is that a cap is never raised in the change that busts
+        # it, and a raise nobody can read separately is the failure that rule
+        # exists to prevent. So the cap sits above the measurement here until
+        # the next commit adds the lines it pays for. Shared-core
+        # classification and the complexity ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3293,
+            3399,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
