@@ -42,26 +42,18 @@ from __future__ import annotations
 
 import pathlib
 import subprocess
+import sys
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 SELF = "tests/test_no_trellis_residue.py"
 
-#: What runs or governs, as `prd.md` criterion 4 of sd:10 defines it.
-#: `docs/work/` and `CHANGELOG.md` are history and are excluded by name.
-GOVERNED = (
-    "bin",
-    "skills",
-    "agents",
-    "tests",
-    ".claude",
-    ".github",
-    "CLAUDE.md",
-    "AGENTS.md",
-    "README.md",
-    "docs/spec",
-)
+#: What runs or governs, as `prd.md` criterion 4 of sd:10 defines it, read off
+#: the index by `tests/governed.py` rather than declared a second time here.
+from tests.governed import GOVERNED  # noqa: E402
 
 #: Criterion 18's three literals, dots escaped, as one alternation.
 PATTERN = r"Trellis|\.trellis|task\.py"
