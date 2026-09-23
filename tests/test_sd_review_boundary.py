@@ -568,11 +568,71 @@ class LineBudgetTests(unittest.TestCase):
         # `sd_lib`; the lane keeps the one call and gains the `repository`
         # report key. Lowered to the measured size in the change that took
         # the lines out, so the cap does not hide the next spend.
+        #
+        # 3126 -> 3167 is sd:1343. A linked worktree of this pack has no
+        # .venv, and `make check` is the gate this lane runs, so the pass
+        # died on `/bin/sh: .venv/bin/python: No such file or directory`
+        # (Error 127) before any reviewer ran and the receipt read as a
+        # failed review. The 41 lines are `missing_toolchain`, which reads
+        # the sd-check payload for a check that exited 127 or a recipe that
+        # reported `Error 127` and names the interpreter /bin/sh looked for;
+        # the two keys `run_check` adds (`reason: toolchain_missing`,
+        # `interpreter`); and the human line that says the gate could not
+        # start rather than that it failed. This raise is its own commit,
+        # before the one that spends it. Shared-core classification and the
+        # complexity ceilings are unchanged.
+        #
+        # 3167 -> 3198 is sd:1343's second pass. The codex review of 23f2f429
+        # ran a recipe that passed its check and then lost a command on a
+        # later line; the lane read the 127, called it toolchain_missing and
+        # named /bin/sh. The 31 lines make the claim follow the evidence:
+        # `classify_gate` takes sd-check's own spawn failure (`exit_code:
+        # None`, `cannot run <program>`) as the one proof that no check ran,
+        # and reads any other 127 as `command_not_found`, naming the command
+        # and line from the shell's report; `gate_failed_line` says only
+        # what is known. This raise is its own commit, before the one that
+        # spends it. Shared-core classification and the complexity ceilings
+        # are unchanged.
+        #
+        # 3198 -> 3233 is sd:1343's third pass. The fix-verification review of
+        # 30e45b6b ran a gate with no aggregate `check`: `test` passed and
+        # `lint` could not spawn, and the line said no check ran, from one
+        # record. The 35 lines make `classify_gate` read every record --
+        # `entrypoint`, the record the reason came from, and `started`, each
+        # entrypoint whose record shows it executing -- and make
+        # `gate_failed_line` claim that no check ran only when `started` is
+        # empty, naming the entrypoint otherwise; the 127 parsing moved to
+        # `_not_found_report` to keep `classify_gate` under the branch
+        # ceiling. This raise is not its own commit: it landed inside
+        # 7bfda9bc, the commit that spends it, after the pre-commit hook
+        # refused the split twice and the second attempt carried the whole
+        # index; the number is still the measurement. Shared-core
+        # classification and the complexity ceilings are unchanged.
+        #
+        # 3148 -> 3255 is sd:1343 landing after sd:1328. The three raises
+        # above were measured from a base without sd:1328's move of
+        # `copilot_policy` out of the lane, so on the merged tree neither
+        # chain's number is the size; 3255 is what the merged tree measures.
+        # The 107 lines are what lets a receipt say why a gate failed instead
+        # of `gate_failed`: `classify_gate` and `_not_found_report`, which
+        # read sd-check's records for the one proof that a program never
+        # started (`exit_code: None`, `cannot run <program>`) and otherwise
+        # name the command a 127 could not find and its line; `_started` and
+        # `_spawn_failed`, so `entrypoint` and `started` come from every
+        # record; `gate_failed_line`, which says no check ran only when
+        # nothing started and names the entrypoint otherwise; the keys
+        # `run_check` adds; and the comments that say why exit 127 alone is
+        # not evidence. A worktree without .venv is the case that needed it:
+        # `make check` died on the interpreter before any reviewer ran, and
+        # the receipt read as a failed review. This raise is its own commit,
+        # after the merge it measures and before nothing, since the merge
+        # already spends it. Shared-core classification and the complexity
+        # ceilings are unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3148,
+            3255,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
