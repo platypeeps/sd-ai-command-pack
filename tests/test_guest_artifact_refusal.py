@@ -54,6 +54,12 @@ OWN_JSON = (
     '{"full_name": "sven/thing", "fork": false, '
     '"permissions": {"admin": true, "push": true}}'
 )
+#: sd:1347 -- a repository this account may push to but does not administer.
+#: The first of the three questions, which no repository row may answer for.
+NOT_ADMIN_JSON = (
+    '{"full_name": "sven/thing", "fork": false, '
+    '"permissions": {"admin": false, "push": true}}'
+)
 
 
 def answers(*, full: bool) -> dict:
@@ -312,7 +318,8 @@ class TheDemotionAnswer(Fixture):
         self.write_mode(root, "full")
         resolved, lowered = sd_lib.mode_answer(root, ask=Asker(answers(full=False)))
         self.assertEqual(resolved, "guest")
-        self.assertEqual(lowered, sd_lib.RemoteAnswer(False, True, "sven/thing is a fork of acme/thing"))
+        self.assertEqual(lowered, sd_lib.RemoteAnswer(False, True, "sven/thing is a fork of acme/thing",
+                                                      sd_lib.FORK_QUESTION))
 
     def test_a_full_the_remote_confirms_was_not_lowered(self) -> None:
         root = self.make_repo()
@@ -469,8 +476,8 @@ class TheDemotionAnswer(Fixture):
         self.assertNotIn('"minimal"', body, "the list of settled modes lives in sd_lib, once")
 
 
-class TheDemotionNote(Fixture):
-    """sd:789 -- the note `sd-ship` writes on the item when the remote lowers the mode.
+class ShipMergeFixture(Fixture):
+    """The `Ship` harness the demotion and merge-authority cases share.
 
     Criterion 11 of sd:10: a `mode: full` repository gains a second
     collaborator, `sd-ship` refuses to push the triad to that remote, "and the
@@ -526,6 +533,14 @@ class TheDemotionNote(Fixture):
         self.patched.start()
         self.addCleanup(self.patched.stop)
 
+    def runner_merge(self, value: str) -> None:
+        """Set the repository row's `runner_merge`, the operator's standing decision."""
+
+        from sd_db import upsert_repo
+
+        upsert_repo(self.connection, str(self.root), remote="https://github.com/sven/thing.git",
+                    status_source="row", runner_merge=value)
+
     def remote(self, people: str, repo: str = OWN_JSON) -> None:
         stub = self.bindir / "gh"
         stub.write_text(SHIP_GH_STUB.replace("__PEOPLE__", people).replace("__REPO__", repo), encoding="utf-8")
@@ -550,6 +565,16 @@ class TheDemotionNote(Fixture):
         for row in rows:
             self.assertEqual(row["kind"], sd_lib.DEMOTION_NOTE_KIND)
         return [row["body"] for row in rows]
+
+
+class TheDemotionNote(ShipMergeFixture):
+    """sd:789 -- the note `sd-ship` writes on the item when the remote lowers the mode.
+
+    Criterion 11 of sd:10: a `mode: full` repository gains a second
+    collaborator, `sd-ship` refuses to push the triad to that remote, "and the
+    item carries a demotion note". `remote_permits_full` had two callers, the
+    mode resolver and the ownership check, and neither wrote one.
+    """
 
     def test_a_collaborator_the_remote_names_lowers_the_mode_and_the_item_carries_the_note(self) -> None:
         self.remote(WITH_MALLORY)
@@ -607,8 +632,16 @@ class TheDemotionNote(Fixture):
         self.assertEqual(self.notes(), [])
 
     def test_the_merge_time_refusal_names_the_collaborator_and_leaves_the_same_note(self) -> None:
-        """The ownership check `merge` runs is the other caller, and it shares the marker."""
+        """The ownership check `merge` runs is the other caller, and it shares the marker.
 
+        The row says `manual` here. Since sd:1347 the row is what decides
+        whether co-ownership stops a merge, so the refusing path is the one a
+        `manual` row selects; the `auto` row's override is
+        `TheRowAuthorizedMerge` below. The final assertion is unchanged in
+        substance: a demotion stops this merge and rewrites no policy.
+        """
+
+        self.runner_merge("manual")
         self.remote(WITH_MALLORY)
         delivery = self.operation("merge")
         with self.assertRaisesRegex(self.ship.Refusal, "mallory"):
@@ -621,7 +654,7 @@ class TheDemotionNote(Fixture):
             self.connection.execute(
                 "SELECT runner_merge FROM repo WHERE path = ?", (str(self.root),)
             ).fetchone()["runner_merge"],
-            "auto",
+            "manual",
             "a demotion stops this merge; it does not rewrite the operator's standing policy",
         )
 
@@ -681,6 +714,7 @@ class TheDemotionNote(Fixture):
         """
 
         self.write_mode(self.root, "guest")
+        self.runner_merge("manual")
         self.remote(WITH_MALLORY)
         delivery = self.operation("merge")
         with self.assertRaisesRegex(self.ship.Refusal, "mallory"):
@@ -702,6 +736,271 @@ class TheDemotionNote(Fixture):
         self.assertEqual(source.count("sd_lib.mode("), 0)
         self.assertEqual(source.count("self.merge_ownership()"), 2)
         self.assertEqual(source.count("self.api.owned()"), 1, "only the wrapper reads it now")
+
+
+
+class TheQuestionThatAnswered(Fixture):
+    """sd:1347 -- `RemoteAnswer` says *which* question said no, and `coownership_only` reads it.
+
+    The merge gate has to tell a co-ownership answer from the other two and
+    from no answer at all. Matching the refusal's wording would do neither: it
+    breaks when the sentence changes, and "lets ... push too" cannot be
+    distinguished from a question that was never put. So the question is a
+    named field, and the gate's test is a positive predicate over it.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.root = self.make_repo()
+
+    def answer_for(self, repo: dict, people: list) -> sd_lib.RemoteAnswer:
+        return sd_lib.remote_permits_full(self.root, ask=Asker({
+            sd_lib.VIEWER_QUERY: VIEWER,
+            sd_lib.REPOSITORY_QUERY: (repo, ""),
+            sd_lib.COLLABORATOR_QUERY: (people, ""),
+        }))
+
+    def test_each_refusing_question_names_itself(self) -> None:
+        alone = [{"login": "sven", "permissions": {"push": True}}]
+        crowd = alone + [{"login": "mallory", "permissions": {"push": True}}]
+        own = {"full_name": "sven/thing", "fork": False, "permissions": {"admin": True, "push": True}}
+
+        admin = self.answer_for({**own, "permissions": {"admin": False, "push": True}}, alone)
+        self.assertEqual(admin.question, sd_lib.ADMIN_QUESTION)
+        fork = self.answer_for({**own, "fork": True, "parent": {"full_name": "acme/thing"}}, alone)
+        self.assertEqual(fork.question, sd_lib.FORK_QUESTION)
+        coowned = self.answer_for(own, crowd)
+        self.assertEqual(coowned.question, sd_lib.COOWNED_QUESTION)
+        self.assertEqual(coowned.others, ("mallory",), "the receipt lists the names; it does not parse the sentence")
+        permitted = self.answer_for(own, alone)
+        self.assertEqual((permitted.full, permitted.question, permitted.others), (True, "", ()))
+
+    def test_only_an_answered_coownership_no_passes_the_predicate(self) -> None:
+        alone = [{"login": "sven", "permissions": {"push": True}}]
+        crowd = alone + [{"login": "mallory", "permissions": {"push": True}}]
+        own = {"full_name": "sven/thing", "fork": False, "permissions": {"admin": True, "push": True}}
+
+        self.assertTrue(sd_lib.coownership_only(self.answer_for(own, crowd)))
+        self.assertFalse(sd_lib.coownership_only(self.answer_for(own, alone)), "a yes is not an override")
+        self.assertFalse(sd_lib.coownership_only(
+            self.answer_for({**own, "permissions": {"admin": False, "push": True}}, alone)))
+        self.assertFalse(sd_lib.coownership_only(
+            self.answer_for({**own, "fork": True, "parent": {"full_name": "acme/thing"}}, alone)))
+        self.assertFalse(sd_lib.coownership_only(None))
+        # The unanswerable remote: `remote_permits_full`'s rule that a question
+        # nobody could put is not a permission has to survive this gate too.
+        unanswered = sd_lib.remote_permits_full(self.root, ask=Asker(
+            {sd_lib.VIEWER_QUERY: (None, "gh could not be run")}))
+        self.assertFalse(unanswered.answered)
+        self.assertEqual(unanswered.question, "")
+        self.assertFalse(sd_lib.coownership_only(unanswered))
+
+
+class TheRowAuthorizedMerge(ShipMergeFixture):
+    """sd:1347 -- the repository row overrides the co-ownership answer, and only that one.
+
+    Merge authority was repository ownership, and its third question --
+    "nobody else may push" -- is false of every co-authored repository, so
+    `sd-ship merge` refused sd:1337 in `answerbook/mezmo_benchmark` and the
+    whole Mezmo lane ended at `ready_to_send` for a human to finish by hand.
+    The row is the operator's per-repository decision about exactly that, so
+    `runner_merge: auto` answers the third question and nothing else.
+
+    The fixture is `TheDemotionNote`'s: a real repository, a real database in
+    a scratch HOME, a `gh` stub on PATH. The row it writes says `auto`.
+    """
+
+    def forget_the_row(self) -> None:
+        """Leave the gate with nothing to read, after identity has been resolved.
+
+        `item.repo` is `REFERENCES repo(path) ON DELETE RESTRICT`, so an
+        item-bound merge can never *reach* this gate with its row missing --
+        the database forbids removing it. The state is real all the same: a
+        `--no-item` merge runs from a checkout whose origin matches no row at
+        all, and lands on the same lookup with the same nothing to read. The
+        constraint is lifted for the delete alone, because the point here is
+        what the gate does when the answer is absent, not how it got absent.
+        """
+        self.connection.execute("PRAGMA foreign_keys = OFF")
+        self.connection.execute("DELETE FROM repo WHERE path = ?", (str(self.root),))
+        self.connection.commit()
+        self.connection.execute("PRAGMA foreign_keys = ON")
+
+    def test_a_coowned_repository_the_row_says_auto_for_merges(self) -> None:
+        self.runner_merge("auto")
+        self.remote(WITH_MALLORY)
+        delivery = self.operation("merge")
+        self.assertEqual(delivery.merge_ownership().get("full_name"), "sven/thing")
+        self.assertEqual(self.notes(), [], "nothing was lowered, so nothing was demoted")
+
+    def test_the_authority_names_the_other_pushers_and_is_not_durable_yet(self) -> None:
+        """The audit trail for a loosened guard, held until a merge is dispatched.
+
+        The record is complete here -- repository, row value, who else may
+        push, and what the remote said -- because a reader of the receipt must
+        be able to tell this from a merge the account owned outright without
+        going back to the remote. What it is not is written: ownership
+        clearing is not merging, and `merge` runs CI, the review gate and the
+        protection re-read after this point. `merge` stores it with the
+        dispatch phase, and `tests/test_sd_ship.py` takes that end to end.
+        """
+
+        self.runner_merge("auto")
+        self.remote(WITH_MALLORY)
+        delivery = self.operation("merge")
+        delivery.merge_ownership()
+        recorded = delivery.row_authority
+        self.assertEqual(recorded["repository"], "sven/thing")
+        self.assertEqual(recorded["runner_merge"], "auto")
+        self.assertEqual(recorded["other_pushers"], ["mallory"])
+        self.assertIn("mallory", recorded["remote_said"])
+        self.assertNotIn("row_authorized_merge", delivery.state)
+        self.assertNotIn("row_authorized_merge", delivery.merge_extras())
+        # Twice, because `merge` reads ownership twice: still the same answer,
+        # and still nothing durable.
+        delivery.merge_ownership()
+        self.assertEqual(delivery.row_authority, recorded)
+        self.assertNotIn("row_authorized_merge", self.operation("merge").state)
+
+    def test_an_ownership_only_read_retracts_an_earlier_read_s_authority(self) -> None:
+        """A second ownership read that needs no row takes the first one's claim back.
+
+        `merge` reads ownership more than once, and the reads can disagree: a
+        collaborator removed between them turns a row-authorized answer into
+        an ownership-only one. The dispatch stores whatever the last read
+        left, so the last read has to say `None` rather than say nothing, or
+        the merge would carry an authority it no longer needs.
+        """
+
+        self.runner_merge("auto")
+        self.remote(WITH_MALLORY)
+        delivery = self.operation("merge")
+        delivery.merge_ownership()
+        self.assertIsNotNone(delivery.row_authority)
+        self.remote(ALONE)
+        delivery.merge_ownership()
+        self.assertIsNone(delivery.row_authority)
+
+    def test_a_coowned_repository_the_row_says_manual_for_still_refuses(self) -> None:
+        self.runner_merge("manual")
+        self.remote(WITH_MALLORY)
+        with self.assertRaisesRegex(self.ship.Refusal, "mallory"):
+            self.operation("merge").merge_ownership()
+
+    def test_a_coowned_repository_with_no_row_still_refuses(self) -> None:
+        """An absent row is not a grant; neither is a database that cannot be read."""
+
+        self.runner_merge("auto")
+        self.remote(WITH_MALLORY)
+        delivery = self.operation("merge")
+        self.forget_the_row()
+        with self.assertRaisesRegex(self.ship.Refusal, "mallory"):
+            delivery.merge_ownership()
+        self.assertNotIn("row_authorized_merge", delivery.state)
+
+    def test_a_database_that_cannot_be_read_is_not_a_grant(self) -> None:
+        """Every way of not getting an explicit `auto` refuses, including a broken store."""
+
+        import sqlite3
+
+        self.runner_merge("auto")
+        self.remote(WITH_MALLORY)
+        delivery = self.operation("merge")
+        self.assertTrue(delivery.row_merges(), "the premise: this row does say auto")
+        empty = sqlite3.connect(":memory:")
+        self.addCleanup(empty.close)
+        delivery.connection = empty
+        self.assertFalse(delivery.row_merges(), "no readable repo table is not a grant")
+
+    def test_a_row_for_another_repository_does_not_authorize_this_merge(self) -> None:
+        """The row that answers must be the row for the repository being merged.
+
+        `registered_for` returns the checkout's own row the moment its path is
+        registered, without consulting the origin, so a row whose `remote`
+        went stale -- one `git remote set-url origin` away, and nothing
+        watches for it -- would hand this gate an `auto` the operator set for
+        a different repository. The receipt cannot show the substitution: it
+        is built from the live remote answer, so it would name this
+        repository truthfully while the authority came from another. The row
+        is made stale after identity resolved, because `Ship.__init__`
+        refuses a checkout whose origin and item row disagree and a stale row
+        is what a later run finds.
+        """
+
+        self.runner_merge("auto")
+        self.remote(WITH_MALLORY)
+        delivery = self.operation("merge")
+        self.connection.execute("UPDATE repo SET remote = ? WHERE path = ?",
+                                ("https://github.com/sven/elsewhere.git", str(self.root)))
+        self.connection.commit()
+        self.assertFalse(delivery.row_merges(), "sven/elsewhere's policy does not speak for sven/thing")
+        with self.assertRaisesRegex(self.ship.Refusal, "mallory"):
+            delivery.merge_ownership()
+        self.assertNotIn("row_authorized_merge", delivery.state)
+
+    def test_an_ssh_checkout_matches_an_https_row_for_the_same_repository(self) -> None:
+        """One repository written two ways is still one repository.
+
+        The comparison is on the slug and not on `sd_db.repos.same_remote`,
+        which normalises a `.git` suffix and a trailing slash and nothing
+        else -- deliberately, so it reads these two forms as two repositories.
+        Rows on a machine may hold one form while the checkouts use the other,
+        which is the ordinary state here, so a stricter comparison would
+        refuse the common case rather than the wrong-row one.
+        """
+
+        self.git(self.root, "remote", "set-url", "origin", "git@github.com:sven/thing.git")
+        self.runner_merge("auto")  # stores the https form
+        self.remote(WITH_MALLORY)
+        delivery = self.operation("merge")
+        self.assertTrue(delivery.row_merges())
+        self.assertEqual(delivery.merge_ownership().get("full_name"), "sven/thing")
+        self.assertEqual(self.notes(), [])
+
+    def test_a_repository_the_account_does_not_administer_still_refuses(self) -> None:
+        """A row cannot grant admin the account does not hold; GitHub would refuse anyway."""
+
+        self.runner_merge("auto")
+        self.remote(ALONE, NOT_ADMIN_JSON)
+        with self.assertRaisesRegex(self.ship.Refusal, "do not administer"):
+            self.operation("merge").merge_ownership()
+
+    def test_a_fork_still_refuses(self) -> None:
+        """Merging a fork's pull request is a different act with a different blast radius."""
+
+        self.runner_merge("auto")
+        self.remote(ALONE, FORK_JSON)
+        with self.assertRaisesRegex(self.ship.Refusal, "is a fork of"):
+            self.operation("merge").merge_ownership()
+
+    def test_an_unanswerable_remote_still_refuses(self) -> None:
+        """`answered=False` is not an answer about co-ownership, so no row overrides it."""
+
+        self.runner_merge("auto")
+        self.unreachable_remote()
+        with self.assertRaises(self.ship.Refusal):
+            self.operation("merge").merge_ownership()
+        self.assertNotIn("row_authorized_merge", self.operation("merge").state)
+
+    def test_a_repository_the_account_owns_outright_merges_with_no_row(self) -> None:
+        """The regression guard: three yeses need no row, and consult none."""
+
+        self.remote(ALONE)
+        delivery = self.operation("merge")
+        self.forget_the_row()
+        self.assertEqual(delivery.merge_ownership().get("full_name"), "sven/thing")
+        self.assertEqual(self.notes(), [])
+        self.assertNotIn("row_authorized_merge", delivery.state,
+                         "ownership answered; the receipt claims no override")
+
+    def test_a_written_guest_is_not_lowered_by_an_auto_row_either(self) -> None:
+        """sd:854 still holds on the overriding path: no demotion, so no note."""
+
+        self.write_mode(self.root, "guest")
+        self.runner_merge("auto")
+        self.remote(WITH_MALLORY)
+        self.assertEqual(self.operation("merge").merge_ownership().get("full_name"), "sven/thing")
+        self.assertEqual(self.notes(), [], "a written guest was not lowered by anyone")
 
 
 if __name__ == "__main__":

@@ -139,6 +139,7 @@ Providers still run as the operator and can read accessible files.
 
 The `claude-json` reader permits only Read, Grep, and Glob tools, with safe mode and no custom MCP servers.
 It saves no session.
+The `opencode-json` reader attaches that review file with `--file`, runs as a private agent whose permission map is default-deny with a read-only allow-list, so inherited MCP tools and every write, command and fetch are refused without being named, and takes its model from the registry entry, which must pin one.
 Its temporary review file contains the exact diff and required untracked or planning contents.
 URL providers receive equivalent material in the request.
 Neither these arguments nor protocol fixtures prove OS read confinement.

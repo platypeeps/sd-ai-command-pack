@@ -70,6 +70,8 @@ These run without being asked.
 - Expected branch protection requires pull requests, current CI, and up-to-date branches, with no required approvals.
   Configure it deliberately in GitHub; installation does not grant a protection exception.
   `sd-status` reports gaps; executable merge stops when required protection is absent.
+  Protection is read from both of GitHub's mechanisms: the classic object first, and when that is absent, the branch's active rulesets.
+  A ruleset with a `pull_request` or `required_status_checks` rule is the protection, held to the same guards; one that only forbids deletion or force-push is not.
   One accepted gap changes that gate: an `unprotected` entry in `.github/sd-status.json` at the reviewed commit.
   Under it, `sd-ship merge` requires every check run, every status, and a `pull_request` run of every workflow at the head to pass.
   The receipt records `declared_gap: unprotected`. Any other gap, and a declaration only in the working tree, do not change the gate.
@@ -309,9 +311,19 @@ item saying which answer lowered it, once per item and remote however many
 runs it takes, and `sd-status` names the planning artifacts the shared tree
 was already carrying, which are yours to move. Mode never decides merging.
 `runner_merge: auto` is a per-repository policy you set once with
-`sd-db.sh repo runner-merge <path> auto`, off by default, and nothing derives it. It is necessary, not sufficient: every merge
-asks the same three questions again, one function for both gates, and a no
-suspends it with the reason shown.
+`sd-db.sh repo runner-merge <path> auto`, off by default, and nothing derives it.
+Every merge asks the same three questions again, one function for both gates.
+Two of the three answers are final: a repository you do not administer, and a
+fork, are refusals no setting reaches, and so is a question the remote could
+not answer at all. The third -- "nobody else may push" -- is the one the row
+speaks for, because co-ownership is exactly what you decided about when you
+set the row. `auto` answers it and a merge proceeds; `manual`, no row, or a
+database that cannot be read suspends it with the reason shown. A merge the
+row let through says so on its receipt, naming the repository, the setting and
+who else may push, so an ownership merge and a row-authorized one are not one
+sentence. Without that, the third question refused every co-authored
+repository permanently and the lane ended at `ready_to_send` for a human to
+finish by hand.
 
 ## Providers
 
@@ -348,6 +360,8 @@ Only submitted, non-pending reviews mark matching request heads complete.
     providers:
       claude:  { start: "claude -p",  vendor: anthropic, bill: anthropic, roles: [author, reviewer], reader: claude-json }
       codex:   { start: "codex exec", vendor: openai,    bill: openai,    roles: [author, reviewer], reader: codex-json }
+      opencode: { start: "opencode run", model: openai/gpt-5.5, vendor: openai, bill: openai,
+                  roles: [reviewer], reader: opencode-json }
       kimi:    { url: "https://api.moonshot.ai/v1", model: kimi-k3, vendor: moonshot, bill: moonshot,
                  roles: [reviewer], max_tokens: 16384, price: { in: 3.00, out: 15.00 } }
       minimax: { url: "https://api.minimax.io/v1", model: MiniMax-M3, vendor: minimax, bill: minimax,
@@ -356,7 +370,7 @@ Only submitted, non-pending reviews mark matching request heads complete.
                  bill: baseten, roles: [reviewer], max_tokens: 16384, price: { in: 1.32, out: 3.96 } }
     roles:
       author:   [claude, codex]
-      reviewer: [codex, claude]
+      reviewer: [codex, claude, opencode]
 
 A capped bill takes `url` entries only, because the library makes those
 calls and can refuse one before it is sent; a `start` entry on a capped
@@ -422,7 +436,7 @@ run says which one reviewed and why the earlier ones did not. With none left,
 the review refuses by name rather than reading its own work.
 Only entries on the reviewer order participate in automatic fallback.
 Enabled reviewer-capable entries outside that order require an explicit `--provider` selection.
-The shipped order contains Codex, then Claude; other providers remain explicit-only.
+The shipped order contains Codex, then Claude, then opencode; other providers remain explicit-only.
 Existing provider files and database orders remain unchanged until the operator migrates them.
 The chain continues until the required count completes or eligible entries run out. A completed
 review with findings counts; it does not trigger a replacement. Consent, author

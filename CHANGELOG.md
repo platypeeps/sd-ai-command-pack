@@ -4,6 +4,16 @@
 
 ### Changed
 
+- **`sd-ship merge` reads the repository row, not repository ownership alone.**
+  Merge authority asked three questions of the remote, and the third -- "nobody
+  else may push" -- is false of every co-authored repository, so every such
+  merge was refused permanently and the lane ended at `ready_to_send` for a
+  human to finish by hand. `runner_merge: auto` on the matching row now answers
+  that third question, and only that one: admin you do not hold, a fork, and a
+  remote that could not answer still refuse, as do `manual`, an absent row and
+  an unreadable database. A merge the row allowed carries `row_authorized_merge`
+  on its receipt, naming the repository, the setting and who else may push.
+
 - **Copilot on deep changes is the machine default, not a per-repository
   opt-in.** `sd.copilot_review` is a third core setting: `deep` (what unset
   reads), `always` or `never`. `sd-review` resolves it under the repository's
@@ -40,6 +50,19 @@
   names it as no longer declared. 1.2.0 removes the alias.
 
 ### Added
+
+- **`opencode` reviews, through a new `opencode-json` reader (sd:1329).**
+  The shipped registry gains an `opencode` entry third on the reviewer
+  order, after `codex` and `claude`. `opencode run -m provider/model`
+  serves every vendor the client holds a credential for, so the entry
+  pins a model and `vendor`/`bill` describe that pin -- `openai/gpt-5.5`
+  on the ChatGPT credential as shipped; repoint all three together in the
+  machine registry. The session runs as a private agent carried in
+  `OPENCODE_CONFIG_CONTENT` whose permission map is default-deny with a
+  read-only allow-list, so the tools of the operator's still-loaded global
+  `opencode.json` MCP servers are refused without being named (measured on
+  1.18.30, where a by-name denylist had let `github_get_me` run); no event
+  names the model that answered -- both recorded in `bin/sd_opencode.py`.
 
 - **A Drive mirror defaults to `Briefs/<repo>`.** `drive=dict()` is now a
   complete designation: it mirrors to `Briefs/<repo>` in My Drive, the same
@@ -159,6 +182,25 @@
   action this tool is allowed to take.
 
 ### Fixed
+
+- **sd-review says what a failed gate lacked, and no more.** A linked
+  worktree of this pack has no `.venv`, and `make check` is the gate
+  sd-review runs, so the pass died on `/bin/sh: .venv/bin/python: No such
+  file or directory` and `make: *** [lint] Error 127` before any reviewer
+  ran -- and the receipt read as a failed review. Now a check that exited
+  127, or whose recipe reported `Error 127`, carries
+  `reason: command_not_found` with `missing_command` and `missing_line`
+  from the shell's own report, and the human line names the command and
+  says the gate ran up to that point. When sd-check could not spawn the
+  check's own program (`exit_code: None`, `cannot run <program>`), and
+  only then, the report carries `reason: toolchain_missing` and
+  `interpreter: <program>`. The gate is up to three entrypoints run as
+  separate processes, so the report also carries `entrypoint`, the one the
+  reason came from, and `started`, every entrypoint whose record shows it
+  executing; the line says no check ran only when `started` is empty, and
+  otherwise names the entrypoint that could not start and the ones that
+  ran. Finding the venv from a worktree is the Makefile's own fix, on its
+  own branch. sd:1343.
 
 - **A Notion default folder is a configured page id, not a folder name.**
   `NOTION_SCOPES` held `Briefs` and `R&D Briefs` as lookup keys, and the owner

@@ -28,6 +28,7 @@ if _BIN not in sys.path:
 import sd_check_receipts  # noqa: E402
 import sd_jev  # noqa: E402
 import sd_lib  # noqa: E402
+import sd_opencode  # noqa: E402
 import sd_registry  # noqa: E402
 import sd_review_material  # noqa: E402
 import sd_review_readiness  # noqa: E402
@@ -172,10 +173,10 @@ POLICY_KEYS = frozenset(DEFAULT_POLICY) | {"$schema"}
 #: The readers this build can run an entry with. The chain marks an entry
 #: whose `reader` is not here ineligible, so a tier's depth counts providers
 #: that can actually answer rather than slots an unrunnable entry occupied.
-READERS = ("codex-json", "claude-json", "agy-json")
+READERS = ("codex-json", "claude-json", "agy-json", "opencode-json")
 #: Readers whose command cannot resolve the subject from the checkout for
 #: itself, so the review material has to travel in the prompt.
-MATERIAL_READERS = ("claude-json", "agy-json")
+MATERIAL_READERS = ("claude-json", "agy-json", "opencode-json")
 
 RETIRED_POLICY_KEYS = {
     "tiers": "a tier now says how many reviewers a change earns, and the registry's "
@@ -859,6 +860,8 @@ def provider_argv(provider: sd_registry.Provider, root: pathlib.Path, workdir: p
     start = provider.start or ""
     if provider.reader == "agy-json":
         return agy_argv(workdir, start, provider.model)
+    if provider.reader == "opencode-json":
+        return sd_opencode.opencode_argv(workdir, start, provider.model)
     return claude_argv(workdir, start) if provider.reader == "claude-json" else codex_argv(root, workdir, start)
 
 
@@ -1320,7 +1323,7 @@ def run_provider(
             "transport" if result.exit_code else "schema" if parsed is None or parsed.error else None)
         return outcome._replace(diagnostic=diagnostic)
 
-    if provider.reader not in ("claude-json", "codex-json", "agy-json"):
+    if provider.reader not in ("claude-json", "codex-json", "agy-json", "opencode-json"):
         # Keep a missing implementation nonpassing if READERS ever gains a name.
         return _outcome(provider.name, NOT_RUN, f"{provider.name} reads back as {provider.reader!r}, "
                         "which this build lists but does not run here.")
@@ -1338,10 +1341,32 @@ def run_provider(
     with tempfile.TemporaryDirectory(prefix="sd-review-") as raw_dir:
         workdir = pathlib.Path(raw_dir)
         argv = provider_argv(provider, root, workdir)
+        launch_cwd = root
+        if provider.reader == "opencode-json":
+            child = sd_opencode.opencode_environment(child)
+            # opencode's project root is its launch directory: it merges that
+            # root's opencode.json over our inline config and injects the root's
+            # AGENTS.md as instructions. Launched inside the reviewed checkout
+            # (the shipped default was cwd=root), a hostile checkout's
+            # opencode.json deep-merges under our `*: deny` and its specific
+            # allowances survive -- reproduced live on 1.18.30: the checkout's
+            # MCP server started and a bash `touch` wrote a file (sd:1375). So
+            # opencode launches from the neutral workdir, which holds only the
+            # attached subject; the diff is embedded (MATERIAL_READER), so no
+            # checkout access is needed. `--dir <checkout>` is NOT the fix: it
+            # sets fromDirectory to the checkout and reloads its config,
+            # measured to reopen the escape (and `--dir` before `run` only
+            # prints help, which is not evidence it is harmless). The assertion
+            # refuses a workdir the checkout could reach by config discovery.
+            try:
+                sd_opencode.assert_isolated_launch(workdir, root)
+            except sd_opencode.IsolationError as error:
+                return _outcome(provider.name, REFUSED, str(error))
+            launch_cwd = workdir
         filename, content = ((CODEX_SCHEMA_FILE, json.dumps(CODEX_OUTPUT_SCHEMA)) if codex else
                              ("review-subject.md", request_prompt))
         (workdir / filename).write_text(content, encoding="utf-8")
-        result = runner(argv, child, root, timeout, prompt) if codex else runner(argv, child, root, timeout)
+        result = runner(argv, child, root, timeout, prompt) if codex else runner(argv, child, launch_cwd, timeout)
         if codex:
             answer = workdir / CODEX_ANSWER_FILE
             if answer.is_file():
@@ -1352,6 +1377,8 @@ def run_provider(
             parsed = parse_findings(text)
         elif provider.reader == "agy-json":
             result, parsed = agy_answer(result, provider.model)
+        elif provider.reader == "opencode-json":
+            result, parsed = sd_opencode.opencode_answer(result, parse=parse_findings, oversized=oversized_findings, limit=MAX_OUTPUT_BYTES)
         else:
             result, parsed = claude_answer(result)
     return _answer(provider.name, result, parsed, argv, removed)._replace(diagnostic=(
@@ -1379,6 +1406,108 @@ def dispose(findings: Sequence[Mapping[str, Any]], floor: str) -> list[dict[str,
 
 # Pipeline
 
+#: What a failed gate is known to have lacked, read from evidence and not
+#: from its exit code. sd-check reports a program it could not spawn as
+#: `exit_code: None` with `reason: cannot run <program>: <OSError>` (its
+#: `run_one`), and only that proves the gate's own program never started and
+#: no check ran. A child that ran and exited 127 proves nothing about its
+#: first line: a recipe that passed its check and then hit a missing
+#: postprocessor exits 127 too, and the codex review of 23f2f429 caught this
+#: lane naming /bin/sh as a missing interpreter on exactly that shape. So a
+#: 127 is a missing-command diagnostic -- the command the shell could not
+#: find and the line, from the shell's own report -- the gate failure stands,
+#: and nothing is claimed about what ran before it. The make-mediated case
+#: sd:1343 was filed on (`/bin/sh: .venv/bin/python: No such file or
+#: directory`, then `make: *** [lint] Error 127`) reaches sd-check as text,
+#: so it is reported this way, naming the path.
+TOOLCHAIN_MISSING = "toolchain_missing"
+COMMAND_NOT_FOUND = "command_not_found"
+_CANNOT_RUN = "cannot run "
+#: bash: `<src>: line N: <cmd>: command not found`; dash: `<src>: N: <cmd>:
+#: not found`; either, for a path: `<src>: <cmd>: No such file or directory`.
+_NOT_FOUND = re.compile(
+    r"(?m)^(?P<source>\S+?): (?:(?:line )?(?P<line>\d+): )?(?P<command>\S+): "
+    r"(?:command not found|not found|No such file or directory)\s*$")
+_RECIPE_EXIT_127 = re.compile(r"\bError 127\b")
+
+
+def _spawn_failed(check: Mapping[str, Any]) -> bool:
+    return check.get("exit_code") is None and str(check.get("reason") or "").startswith(_CANNOT_RUN)
+
+
+def _started(check: Mapping[str, Any]) -> bool:
+    """Whether sd-check's record shows the entrypoint's process executing: an
+    exit code, or a failure that is not the spawn (a timeout ran until it
+    was killed). Skipped and absent entrypoints, and one sd-check could not
+    spawn, did not."""
+    return isinstance(check.get("exit_code"), int) or (check.get("status") == "fail" and not _spawn_failed(check))
+
+
+def _not_found_report(check: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The missing-command diagnostic a 127 carries, or None without a 127."""
+    stderr = str(check.get("stderr") or "")
+    recipe = _RECIPE_EXIT_127.search(stderr)
+    if check.get("exit_code") != 127 and not recipe:
+        return None
+    # The last report is the command that ended the run; an earlier one was
+    # survived, or the shell would have stopped there.
+    named = next(reversed(list(_NOT_FOUND.finditer(stderr))), None)
+    return {
+        "reason": COMMAND_NOT_FOUND,
+        "missing_command": named.group("command") if named else None,
+        "missing_line": int(named.group("line")) if named and named.group("line") else None,
+        "evidence": named.group(0).strip() if named else (
+            recipe.group(0) if recipe else f"exit {check.get('exit_code')}"),
+    }
+
+
+def classify_gate(checks: Any) -> dict[str, Any] | None:
+    """What the failed gate lacked, or None when the evidence says nothing.
+
+    The gate is up to three entrypoints (check, test, lint) that sd-check runs
+    as separate processes, so the answer carries `entrypoint`, the record it
+    was read from, and `started`, every entrypoint whose record shows it
+    executing. A sentence about the whole gate is written from `started`,
+    never from one record: the fix-verification review of 30e45b6b ran a
+    `test` that passed and a `lint` that could not spawn, and this lane said
+    no check ran."""
+    if not isinstance(checks, list):
+        return None
+    records = [check for check in checks if isinstance(check, dict)]
+    started = [str(check.get("name", "?")) for check in records if _started(check)]
+    for check in records:
+        if check.get("status") == "pass":
+            continue
+        command = check.get("command")
+        program = str(command[0]) if isinstance(command, list) and command else None
+        if _spawn_failed(check) and program:
+            found: dict[str, Any] | None = {
+                "reason": TOOLCHAIN_MISSING, "interpreter": program, "evidence": str(check.get("reason"))}
+        else:
+            found = _not_found_report(check)
+        if found is not None:
+            return {**found, "entrypoint": str(check.get("name", "?")), "started": started}
+    return None
+
+
+def gate_failed_line(check: Mapping[str, Any] | None) -> str:
+    """What the failed gate is known to have lacked, and no more: the claim
+    that no check ran is made only when `started` is empty."""
+    if check and check.get("reason") == TOOLCHAIN_MISSING:
+        started = check.get("started") or []
+        if not started:
+            return (f"sd-review: the gate could not start {check['interpreter']} for {check['entrypoint']} "
+                    f"({check['evidence']}); no check ran and no provider was asked")
+        return (f"sd-review: the gate's {check['entrypoint']} could not start {check['interpreter']} "
+                f"({check['evidence']}); {', '.join(started)} ran; no provider was asked")
+    if check and check.get("reason") == COMMAND_NOT_FOUND:
+        what = f"{check['missing_command']} was not found" if check.get("missing_command") else "a command was not found"
+        where = f" at line {check['missing_line']}" if check.get("missing_line") else ""
+        return (f"sd-review: the gate's {check['entrypoint']} failed: {what}{where} ({check['evidence']}); "
+                "it ran up to that point, so a check may have run; no provider was asked")
+    return "sd-review: the repository's own gate failed; no provider was asked"
+
+
 def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeout: int) -> dict[str, Any]:
     """Step 1: the repository's own deterministic gate, through sd-check."""
 
@@ -1388,12 +1517,16 @@ def run_check(root: pathlib.Path, runner: Runner, env: Mapping[str, str], timeou
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
         payload = None
-    return {
+    checks = payload.get("checks") if isinstance(payload, dict) else None
+    report: dict[str, Any] = {
         "status": "pass" if result.exit_code == 0 else "fail",
         "exit_code": result.exit_code,
         "detail": (result.stderr or "").strip()[-2000:],
-        "checks": payload.get("checks") if isinstance(payload, dict) else None,
+        "checks": checks,
     }
+    if result.exit_code != 0:
+        report.update(classify_gate(checks) or {})
+    return report
 
 
 #: Scopes that earn a reviewer whatever the tier said. `planning` is here
@@ -1685,6 +1818,7 @@ def review(
     prompt, prepended, context = ("", False, []) if preflight else prepared_prompt(root, subject, args, previous, env)
     overheads = {"codex-json": None, "claude-json": "\n\nReview input:\n",
                  "agy-json": "\n\nReview input:\n",
+                 "opencode-json": "\n\nReview input:\n",
                  "url": f"\nSchema: {json.dumps(CODEX_OUTPUT_SCHEMA)}\n\nReview input:\n{URL_OUTPUT_CONTRACT}"}
     try:
         _material, inventory = ("", []) if preflight else sd_review_material.collect_review_material(root, subject)
@@ -2037,9 +2171,10 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
 
     check = result.get("check")
     if check:
-        write(f"\ncheck: {check['status']} (exit {check['exit_code']})\n")
+        reason = f" reason={check['reason']}" if check.get("reason") else ""
+        write(f"\ncheck: {check['status']} (exit {check['exit_code']}){reason}\n")
     if result["status"] == "gate_failed":
-        write("sd-review: the repository's own gate failed; no provider was asked\n")
+        write(gate_failed_line(check) + "\n")
         return
 
     write("\noutcomes:\n")
