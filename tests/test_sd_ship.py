@@ -427,6 +427,37 @@ roles:
         self.assertEqual(after["body"], before["body"])
         self.assertEqual(len(after["passes"]), 2)
 
+    def test_a_moved_binding_re_reviews_the_same_head_instead_of_bricking_it(self):
+        # sd:1390, live on #1140. Reuse was decided on head equality and the
+        # receipt then rejected on the binding, with nothing between them, so
+        # a branch that already contained the default branch -- and therefore
+        # never needed a merge-forward to move its head -- had no verb left
+        # once an unrelated landing touched a review tool file. Prepare and
+        # merge both refused, `--retry-review` refused a completed review, and
+        # the post-cap operator request refuses below the cap.
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        before = self.operation().state["passes"]
+        self.assertEqual(len(before), 1)
+        operation = self.operation()
+        operation.state["binding"] = "a review tool file landed on the default branch"
+        operation.save()
+        self.assertEqual(self.prepare()["phase"], "ready_to_send")
+        state = self.operation().state
+        self.assertEqual(state["binding"], ship.binding(self.root))
+        self.assertEqual(len(state["passes"]), 2, "the re-review spends one pass")
+        fresh = state["passes"][-1]
+        # A full-branch pass at the same head, not a fix verification of it:
+        # `--base <previous head>` would name this head and review nothing.
+        self.assertEqual(fresh["head"], before[0]["head"])
+        self.assertIsNone(fresh["base"])
+        self.assertFalse(fresh["retry"])
+        self.assertEqual(fresh["review_binding_change"]["superseded_binding"],
+                         "a review tool file landed on the default branch")
+        self.assertEqual(fresh["report"]["resume_report_digest"],
+                         ship.digest(ship.review_history(before)))
+        # The receipt reads back through the same coverage walk that merge uses.
+        self.assertEqual(self.merge()["phase"], "merged")
+
     def test_prepare_hands_the_pull_request_body_to_the_docs_lint(self):
         # Rule 5 only runs with a body. The skill says the PR link is checked
         # locally in step 2, and until this test the call passed no body, so
