@@ -1513,7 +1513,15 @@ class HookTests(unittest.TestCase):
 
     def test_a_worktree_add_does_not_render(self) -> None:
         """`git worktree add` runs post-checkout with no previous HEAD. A
-        render there would publish a checkout nobody has committed to yet."""
+        render there would publish a checkout nobody has committed to yet.
+
+        This test is older than the guard it now covers. It passed under the
+        merge commit too, by a different route: `git diff 0000000 <new>`
+        failed and the hook's error arm returned 0. Same answer, but that arm
+        returns 0 for any failure of that command, so the day something else
+        throws in it a fresh clone stops rendering and this goes on passing.
+        `diff_argv` says it now.
+        """
         self.assertEqual(self.init_hook().returncode, 0)
         self.git("worktree", "add", "-q", str(self.root / "wt-y"), "-b", "y")
         self.assertEqual(self.calls(), [])

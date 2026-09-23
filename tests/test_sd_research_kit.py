@@ -1067,8 +1067,14 @@ class InitHookInstallTests(unittest.TestCase):
         """
 
         module = load_publish()
-        nearly = module.SUPERSEDED_HOOKS[-1].replace(
-            "docs/dashboard/", "docs/ dashboard/", 1)
+        # Through `init-hook`, which every body carries and every body will:
+        # it is the phrase that names the verb that writes the file. A probe
+        # keyed on a word only some bodies contain -- `build/` was, until
+        # `9ff7c73c` removed the folder -- goes vacuous on the day a new body
+        # arrives without it, and a probe that stops probing while still
+        # passing is worse than no probe.
+        nearly = module.SUPERSEDED_HOOKS[-1].replace("init-hook", "init- hook", 1)
+        self.assertIn("init-hook", module.SUPERSEDED_HOOKS[-1])
         self.assertNotEqual(nearly, module.SUPERSEDED_HOOKS[-1])
         with tempfile.TemporaryDirectory() as raw:
             repo = self.make_repo(Path(raw))
@@ -1100,7 +1106,13 @@ class InitHookInstallTests(unittest.TestCase):
         the installer against the base revision's own hook and it was refused.
         The fifth is sd:1352's, which this branch merges rather than wrote: a
         merge inherits the other branch's predecessors, because its revisions
-        become checkouts somebody can run `init-hook` from here.
+        become checkouts somebody can run `init-hook` from here. The sixth is
+        the merge commit's own body.
+
+        "Released" is the tempting reading of this set and it is the wrong
+        one. Three of these six name commits that never reached `main`. What
+        puts a body on a machine is a checkout, and an ancestor commit is a
+        checkout.
         """
 
         module = load_publish()
@@ -1121,6 +1133,9 @@ class InitHookInstallTests(unittest.TestCase):
             # merged tree and its body is not, because those revisions are
             # ancestors here and a checkout of one can install it.
             "aac6c83677dc4cf11b778e012afdec33c126107efd34935ac2c1ca6de6271b0c",
+            # This branch's merge commit, superseded by the commit that gave
+            # the hook `docs/dashboard/` and an explicit all-zeros guard.
+            "8f3224d961a7d0394c47648684d9e5ad5c6ce85b7f563917e8f9e6b76881afb7",
         }
         digests = {hashlib.sha256(body.encode("utf-8")).hexdigest()
                    for body in module.SUPERSEDED_HOOKS}
