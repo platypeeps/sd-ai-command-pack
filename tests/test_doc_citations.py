@@ -1103,7 +1103,7 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 #: numbers and not the claim.
 SYMBOL_ANCHORED_CITATIONS = {
     "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 34,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 49,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 46,
 }
 
 

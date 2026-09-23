@@ -935,7 +935,8 @@ class ListTests(PluginFixture):
 class CorePolicyConfigTests(PluginFixture):
     def test_core_policy_round_trips_without_a_plugin_and_preserves_unrelated_settings(self):
         self.write_config({"plugins": [], "config": {"pp": {"kept": "value"}}})
-        for key, value in (("external_reviews", "configured"), ("assistant_merge", "controlled")):
+        for key, value in (("external_reviews", "configured"), ("assistant_merge", "controlled"),
+                           ("copilot_review", "never")):
             with self.subTest(key=key):
                 result = self.run_sd("config", "set", "sd." + key, value)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -983,7 +984,8 @@ class CorePolicyConfigTests(PluginFixture):
 
     def test_new_user_has_no_grant_and_invalid_policy_writes_nothing(self):
         self.assertNotEqual(self.run_sd("config", "get", "sd.external_reviews").returncode, 0)
-        for key, value in (("external_reviews", "true"), ("assistant_merge", "all"), ("typo", "configured")):
+        for key, value in (("external_reviews", "true"), ("assistant_merge", "all"), ("copilot_review", "sometimes"),
+                           ("typo", "configured")):
             with self.subTest(key=key):
                 self.assertNotEqual(self.run_sd("config", "set", "sd." + key, value).returncode, 0)
                 self.assertFalse(self.config_path.exists())

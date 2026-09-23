@@ -322,8 +322,9 @@ Cheap, standard, and deep changes require one completed independent local review
 Skip requires none; planning and challenged reviews retain their minimum of one.
 Tier selection still follows repository policy, without adding automatic local reviewers.
 Complete local review before any Copilot request.
-`copilot_review.automatic_deep` can select the `deep` tier for remote review during shipping.
-The value defaults to `false`.
+The machine's `sd.copilot_review` selects remote review during shipping: `deep` (unset reads `deep`), `always` or `never`.
+A repository's `copilot_review.automatic_deep` overrides it when the file names the key; a file that does not name it inherits.
+`sd-review --explain` names the effective policy and whether the repository, the machine config, or the machine default answered.
 Automatic review runs once per pull request after the local review and acknowledgement step.
 Later pushes still require exact-head local review and CI.
 A completed Copilot review must cover the exact merge head.
@@ -467,7 +468,7 @@ reviewer chain before vendor, transport, availability and spending gates run.
 
 Core settings use `sd config get|set|unset|list` and the existing atomic machine configuration writer.
 The file is `~/.config/sd-ai-command-pack/config.json`, honoring `XDG_CONFIG_HOME`.
-The reserved `sd` namespace declares two settings:
+The reserved `sd` namespace declares three settings:
 
 - `sd.external_reviews`: `configured` permits private code and scoped review context to eligible configured providers.
   It includes future registry entries; registry configuration chooses capability, while this explicit operator grant authorizes transmission.
@@ -478,6 +479,13 @@ The reserved `sd` namespace declares two settings:
   It was `sd.merge_authorization` until 1.1.0, which still reads that name; 1.2.0 stops.
   It is the assistant's grant, where `repo.runner_merge` in the one database is the runner's.
   Shared contributors do not revoke permission, but the current sole-operator ownership gate may still refuse execution.
+- `sd.copilot_review`: when `sd-ship` requests a Copilot review by itself. `deep` requests one on deep-tier changes only,
+  `always` on every reviewing tier, `never` on none. Absence reads `deep`, so a repository with no
+  `.github/sd-review.json` gets Copilot on deep changes and on nothing else.
+  A repository file that names `copilot_review.automatic_deep` overrides it; one that does not inherits.
+  `sd-review` reports the effective policy, its source and the repository's say under `remote_reviews.copilot`.
+  `sd-ship` resolves the decision again at dispatch, from the setting as it stands then and the tiers the
+  retained passes recorded, so a setting changed after the review takes effect without another review.
 
 Installation supplies neither grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.

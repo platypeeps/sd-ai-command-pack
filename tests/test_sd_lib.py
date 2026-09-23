@@ -525,6 +525,40 @@ class CorePolicyReadTests(Fixture):
                 with self.assertRaises(sd_lib.ConfigError):
                     sd_lib.core_setting("external_reviews", env)
 
+    def test_copilot_review_reads_its_three_words_and_nothing_else(self):
+        env = {"HOME": str(self.tmp)}
+        path = self.tmp / ".config" / sd_lib.CONFIG_RELATIVE_PATH
+        path.parent.mkdir(parents=True)
+        self.assertIsNone(sd_lib.core_setting("copilot_review", env))
+        for value in ("deep", "never", "always"):
+            path.write_text(json.dumps({"config": {"sd": {"copilot_review": value}}}))
+            self.assertEqual(sd_lib.core_setting("copilot_review", env), value)
+        for value in ("Deep", "true", "", None, True):
+            with self.subTest(value=value):
+                path.write_text(json.dumps({"config": {"sd": {"copilot_review": value}}}))
+                with self.assertRaises(sd_lib.ConfigError):
+                    sd_lib.core_setting("copilot_review", env)
+
+
+class CopilotPolicyResolution(unittest.TestCase):
+    """The two pure halves both lanes share (sd:1328): who decides, and
+    whether the decided word selects a review of this tier."""
+
+    def test_repository_then_machine_then_default(self):
+        self.assertEqual(sd_lib.copilot_policy(True, "never"), ("deep", "repository"))
+        self.assertEqual(sd_lib.copilot_policy(False, "always"), ("never", "repository"))
+        self.assertEqual(sd_lib.copilot_policy(None, "always"), ("always", "machine config"))
+        self.assertEqual(sd_lib.copilot_policy(None, "never"), ("never", "machine config"))
+        self.assertEqual(sd_lib.copilot_policy(None, None), (sd_lib.COPILOT_REVIEW_DEFAULT, "machine default"))
+
+    def test_the_word_selects_by_tier_and_always_respects_skip(self):
+        self.assertTrue(sd_lib.copilot_automatic("deep", "deep", 1))
+        self.assertFalse(sd_lib.copilot_automatic("deep", "standard", 1))
+        self.assertFalse(sd_lib.copilot_automatic("never", "deep", 1))
+        self.assertTrue(sd_lib.copilot_automatic("always", "cheap", 1))
+        self.assertTrue(sd_lib.copilot_automatic("always", "deep", 1))
+        self.assertFalse(sd_lib.copilot_automatic("always", "skip", 0))
+
 
 class RowActivity(unittest.TestCase):
     """`Rows.activity`: what the database last recorded against an item.
