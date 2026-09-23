@@ -856,6 +856,72 @@ class EveryEntryTests(SetupFixture):
         self.assertEqual(guard.guard_state(written), "same")
 
 
+class FoldPrecedenceTests(SetupFixture):
+    """Why `differs` outranks `absent` in the fold, not merely that it does.
+
+    `guard_state()` folds one word out of every entry's verdict, and the
+    order it folds by (`_WORST_FIRST`) is a judgement rather than a
+    measurement. It was chosen for one caller --
+    `sd_setup_github.guard_after()`, which refuses without `--force` on
+    `differs` and installs silently on `absent`. A file with one entry this
+    build would overwrite and one entry that merely lacks the guard has to
+    fold to the verdict that stops the write, because the other one walks
+    past a wording somebody wrote by hand.
+
+    A future caller that gates on `absent` instead would want the opposite
+    order, and this is the test it has to argue with first. Reordering is
+    allowed; reordering without noticing what it costs is what this refuses.
+    A bare assertion on the constant would pin the order and lose the reason.
+    """
+
+    def mixed(self) -> str:
+        """Entry one carries a wording this build would replace; entry two
+        carries no pack guard at all."""
+
+        return TWO_ENTRY_CONSUMER.format(
+            guard=SECOND_STALE.rstrip("\n"), second=SECOND_UNGUARDED.rstrip("\n")
+        )
+
+    def test_a_stale_wording_beside_an_unguarded_entry_folds_to_differs(self) -> None:
+        text = self.mixed()
+        self.assertEqual(guard.guard_states(text), ("differs", "absent"))
+        self.assertEqual(guard.guard_state(text), "differs")
+
+    def test_the_reason_is_the_force_refusal_and_not_a_preference(self) -> None:
+        """The two verdicts sent to the same caller, and what each one costs.
+
+        `differs` refuses and the hand-written comment survives. `absent` --
+        the verdict the other fold order would have produced for this file --
+        does not refuse, and the render it returns has replaced that comment
+        with the template. That is the loss the order prevents, and it is why
+        the order is not a matter of taste.
+        """
+        text = self.mixed()
+        hand_written = "# Bump this by hand, in its own commit."
+        self.assertIn(hand_written, text)
+
+        # The fold's own answer, not a literal: flip `_WORST_FIRST` and this
+        # is the line that stops refusing.
+        found = guard.guard_state(text)
+        with self.assertRaises(setup.Refusal) as caught:
+            setup.guard_after(text, found, self_install=False, force=False)
+        self.assertIn("--force", str(caught.exception))
+
+        # And this is what the flip would cost: the verdict the other order
+        # produces for this file does not refuse, and the render it returns
+        # has already replaced the comment somebody wrote by hand.
+        walked_past = setup.guard_after(text, "absent", self_install=False, force=False)
+        self.assertNotIn(hand_written, walked_past)
+
+    def test_force_is_what_converges_the_wording_rather_than_the_fold(self) -> None:
+        """`--force` still reaches the same render the refusal was holding
+        back, so the order costs a consumer nothing it cannot ask for."""
+        text = self.mixed()
+        forced = setup.guard_after(text, guard.guard_state(text), self_install=False, force=True)
+        self.assertEqual(guard.guard_state(forced), "same")
+        self.assertEqual(forced.count(guard.guard_block("      ")), 2)
+
+
 class CheckTests(SetupFixture):
     """`--check` renders at the repository's own pin and writes nothing."""
 
