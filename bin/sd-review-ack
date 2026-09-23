@@ -354,6 +354,12 @@ def finding_id(pull: int, source: str, path: str, line: Any, text: str) -> str:
     a captured round gets the same id, and a reviewer who edits a finding
     produces a new id, so an acknowledgement of the old wording does not
     silently cover new words.
+
+    `line` has to be the coordinate the reviewer stated the finding at and not
+    the one GitHub currently shows it at, or a push that moves the comment
+    renames the finding and orphans the record under its old name. For an
+    inline comment that is `_stated_line`, which prefers `original_line` the
+    way `_reviewed_at` prefers `original_commit_id`.
     """
     payload = "\0".join((str(pull), source, path or "", str(line or ""), normalise(text)))
     return hashlib.sha256(payload.encode()).hexdigest()[:12]
@@ -568,7 +574,7 @@ def findings(pull: int, reviews: Iterable[Any], comments: Iterable[Any]) -> list
     roots, answers = _threads(comments)
     for comment in roots:
         row = _finding(
-            pull, "inline", str(comment.get("path") or ""), comment.get("line"),
+            pull, "inline", str(comment.get("path") or ""), _stated_line(comment),
             comment.get("body") or "", _login(comment),
         )
         row["replies"] = len(answers.get(comment.get("id"), ()))
@@ -634,6 +640,40 @@ def _login(record: dict) -> str:
         if isinstance(value, dict) and isinstance(value.get("login"), str):
             return value["login"]
     return ""
+
+
+def _stated_line(record: dict) -> Any:
+    """The line the reviewer was reading when it stated this finding.
+
+    `original_line` first, for the same reason and against the same mechanism
+    as `_reviewed_at` taking `original_commit_id` first: GitHub re-anchors an
+    inline comment as the branch grows. `line` moves by the hunk delta of
+    every later push that touches the file and becomes null once the comment
+    goes outdated; `original_line` is the coordinate in the diff the reviewer
+    read and does not move.
+
+    This value is part of `finding_id`, which is why the distinction is not
+    cosmetic. Keyed on `line`, one unrelated push renamed a finding: the store
+    row recorded against the old id was orphaned, so an operator's
+    `dismissed <reason>` stopped being found and `record_answers` wrote an
+    automatic `fixed` under the new name, and a `carried` finding could no
+    longer lose its borrowed satisfaction when the item holding it was
+    cancelled. The merge gate passed on a finding nobody had answered.
+
+    It is also the line the row carries for display, so a finding is placed at
+    the state it is dated to. `original_commit_id` with the moved line would
+    name a pair that never existed: a line in one commit read against another.
+
+    Falls back to `line` when the payload carries no `original_line` -- a
+    captured round pruned to author and body, an older API shape -- which is
+    exactly what every fixture in `tests/fixtures/` does, so no id already on
+    record moves except one GitHub had already moved.
+    """
+    for field in ("original_line", "line"):
+        value = record.get(field)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return record.get("line")
 
 
 def _reviewed_at(record: dict) -> str:

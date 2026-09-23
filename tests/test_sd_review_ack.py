@@ -1843,3 +1843,69 @@ class TheUnlocatedSentinelIsNotALabel(unittest.TestCase):
         )
         self.assertIn(ack.UNLOCATED_LABEL, stream.getvalue())
         self.assertNotIn(f" {ack.UNLOCATED} ", stream.getvalue())
+
+
+class AFindingKeepsItsNameWhenGitHubMovesIt(unittest.TestCase):
+    """sd:1388: the id is keyed on the coordinate the reviewer read, not the live one.
+
+    GitHub re-anchors an inline comment as the branch grows: `line` moves by
+    the hunk delta of every later push and becomes null once the comment goes
+    outdated. `original_line` does not move. `_reviewed_at` already prefers
+    `original_commit_id` for exactly this reason, in a docstring four lines
+    from the id, while the id itself keyed on the field that moves.
+
+    What that cost: a finding acknowledged as `carried` under id A is read
+    back under id B after an unrelated push, the store row under A is
+    orphaned, and `record_answers` writes `fixed` under B -- so the carried
+    finding's satisfaction can no longer be lost when the item holding it is
+    cancelled, and a human `dismissed <reason>` is silently replaced by an
+    automatic verdict under a new name.
+    """
+
+    COMMENT = {
+        "path": "bin/x.py", "body": "the finding, stated once", "author": "bot",
+        "id": 4242, "in_reply_to_id": None, "original_commit_id": "c0ffee",
+        "original_line": 47,
+    }
+
+    def _row(self, **extra) -> dict:
+        return ack.findings(1200, [], [dict(self.COMMENT, **extra)])[0]
+
+    def test_a_later_push_that_moves_the_line_does_not_rename_the_finding(self):
+        """The decisive case: one comment, read twice, across a line-moving edit."""
+        self.assertEqual(self._row(line=47)["id"], self._row(line=53)["id"])
+
+    def test_a_comment_gone_outdated_keeps_the_name_it_had(self):
+        """GitHub drops `line` to null once the hunk is gone; the finding stays itself."""
+        self.assertEqual(self._row(line=47)["id"], self._row(line=None)["id"])
+
+    def test_the_finding_is_placed_at_the_state_it_is_dated_to(self):
+        """One coordinate, not two: `original_commit_id` and `original_line` are a pair.
+
+        Showing the moved line beside the commit the reviewer read would name
+        a line that does not carry the finding in that commit.
+        """
+        row = self._row(line=53)
+        self.assertEqual((row["reviewed"], row["line"]), ("c0ffee", 47))
+
+    def test_a_payload_with_no_original_line_still_reads_the_line_it_has(self):
+        """The captured rounds and the older API shape carry only `line`.
+
+        Falling back to it keeps every id in `tests/fixtures/*-round.json`
+        exactly as it was, so this change renames no finding already on
+        record except one GitHub had already moved.
+        """
+        row = ack.findings(1200, [], [{"path": "bin/x.py", "body": "t", "author": "bot",
+                                       "line": 9, "in_reply_to_id": None}])[0]
+        self.assertEqual(row["line"], 9)
+        self.assertEqual(row["id"], ack.finding_id(1200, "inline", "bin/x.py", 9, "t"))
+
+    def test_an_acknowledgement_survives_the_push_that_moves_the_comment(self):
+        """The failure the item describes, end to end, without a repository.
+
+        The store is keyed by finding id. If the id moves, the row recorded
+        against the finding is not found when the finding is read again.
+        """
+        before, after = self._row(line=47), self._row(line=53)
+        store = {before["id"]: {"disposition": "carried", "item": 771}}
+        self.assertIn(after["id"], store)
