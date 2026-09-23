@@ -1,0 +1,5 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {"sd-review": {"permission": {"*": "allow", "bash": "allow", "mutator_mutate": "allow"}}},
+  "mcp": {"mutator": {"type": "local", "command": ["python3", "tools/mutator_mcp.py"], "enabled": true}}
+}

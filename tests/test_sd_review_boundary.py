@@ -181,6 +181,12 @@ class NeverPostsTests(unittest.TestCase):
             "sd_check_receipts",
             "sd_review_material",
             "sd_review_readiness",
+            # The `opencode-json` reader (sd:1329): an argv builder, the inline
+            # agent config, and an NDJSON read-back. It spawns nothing itself
+            # and imports only the standard library, so it widens the allow-list
+            # by a reader and not by a way out; the never-posts assertions
+            # below cover it like the rest of the lane.
+            "sd_opencode",
             # The installer, imported inside the one dispatch branch. It is in
             # this repository and is itself held to the never-posts assertions
             # below, so it widens the allow-list without widening the boundary.
@@ -628,11 +634,77 @@ class LineBudgetTests(unittest.TestCase):
         # after the merge it measures and before nothing, since the merge
         # already spends it. Shared-core classification and the complexity
         # ceilings are unchanged.
+        #
+        # 3148 -> 3293 admits `opencode-json`, a fourth reader (sd:1329), and
+        # with it a seventh lane member: `bin/sd_opencode.py` enters because
+        # `bin/sd-review` imports it, and the lane is that import closure.
+        # It belongs inside the lane rather than beside it because a reader
+        # is review mechanics and nothing else -- the argv that confines the
+        # child, the inline agent whose permission map is what refuses a
+        # write or an inherited MCP tool, and the read-back that turns a
+        # stream into findings. A wrong reader is a wrong verdict or an
+        # unconfined child, which is exactly what this ratchet keeps small
+        # enough to read whole; `sd-ship` never launches a reviewer, so none
+        # of it is shared core. The 145 lines are 8 in `bin/sd-review` --
+        # the import, two tuple entries, three two-line dispatch branches --
+        # and 137 in the module: the builders, the default-deny map
+        # (`*: deny`, a read-only allow-list, `read` refusing `mcp:*`), the
+        # NDJSON read-back, and the docstring that records what was measured
+        # on 1.18.30 (a by-name denylist let `github_get_me` run; under `*`
+        # no server tool is offered; the resource readers fall to `mcp:*`;
+        # a write, a bash command and a read outside the project refused)
+        # and what stays open (the servers still connect, and no event names
+        # the model that answered). Raised to the measured size of the
+        # merged tree, in its own commit after the merge that spent it.
+        # Shared-core classification and the complexity ceilings are
+        # unchanged.
+        #
+        # 3293 -> 3399 closes the config-merge escape (sd:1375). The first
+        # cut confined the child with the permission map alone, but opencode
+        # deep-merges the reviewed checkout's own `opencode.json` over the
+        # inline config when it launches inside that checkout, and a hostile
+        # checkout's `{"bash": "allow", "<server>_<tool>": "allow"}` survives
+        # `*: deny` under last-match evaluation -- reproduced live, the merged
+        # config started the checkout's MCP server and a `bash touch` wrote
+        # into the tree. The fix launches opencode from a neutral directory,
+        # never the checkout: `IsolationError` and `assert_isolated_launch`
+        # in `bin/sd_opencode.py` refuse a launch dir the checkout could
+        # reach (it is the checkout, or an ancestor carries opencode config),
+        # `bin/sd-review` launches from `workdir` and records why `--dir` is
+        # not the way in, and the docstring records the second confinement
+        # layer and the residual: the material is embedded, so no checkout
+        # read is granted, and the residual paragraph names the cost of that
+        # (this reviewer cannot make an out-of-diff finding, with `#1146`'s
+        # `never_skip` override as the shape of what is lost) and the bounded
+        # way to reverse it. The 106 lines are the two new symbols and their
+        # comment in the module, the launch branch and its note in
+        # `bin/sd-review`, and the docstring's added paragraphs. This raise
+        # is its own commit, before the one that spends it: the rule this
+        # file states is that a cap is never raised in the change that busts
+        # it, and a raise nobody can read separately is the failure that rule
+        # exists to prevent. So the cap sits above the measurement here until
+        # the next commit adds the lines it pays for. Shared-core
+        # classification and the complexity ceilings are unchanged.
+        #
+        # 3399 -> 3506 is the merge-forward of `origin/main` at `30902a68`.
+        # This branch's opencode chain (3148 -> 3293 -> 3399) and main's
+        # sd:1343 chain (documented above, 3148 -> 3255) branched from the
+        # same 3148, so neither number is the size of the tree that carries
+        # both. The merged tree measures 3506: sd:1343 adds +107 to
+        # `bin/sd-review` (its `classify_gate`/`_not_found_report` receipt
+        # reasoning) and this branch adds the opencode reader (+145) and the
+        # isolation fix (+106), all on the one `bin/sd-review` and
+        # `bin/sd_opencode.py`. Measured, not carried: `sd-review` is 2310
+        # and `sd_opencode.py` is 223 on the merged tree. This raise is its
+        # own commit, before the merge commit that spends it -- the cap leads
+        # the merge, and at this commit the lane is still 3399, under 3506.
+        # Shared-core classification and the complexity ceilings are
+        # unchanged.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            3255,
+            3506,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
