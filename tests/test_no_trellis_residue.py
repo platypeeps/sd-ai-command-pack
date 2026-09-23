@@ -38,6 +38,10 @@ branch or after it. `test_every_allowed_row_names_at_most_one_line` keeps the
 set from widening: a row that matches two lines fails.
 """
 
+# This module reads the whole checkout, so no changed-files fast path may
+# narrow it away. `.github/scripts/select-tests.py` greps for the line below.
+# select-tests: always-run
+
 from __future__ import annotations
 
 import pathlib

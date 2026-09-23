@@ -46,6 +46,10 @@ kept for, so the captures are excluded here by name, as history, and the
 exclusion is stated rather than buried in a pattern.
 """
 
+# This module reads the whole checkout, so no changed-files fast path may
+# narrow it away. `.github/scripts/select-tests.py` greps for the line below.
+# select-tests: always-run
+
 from __future__ import annotations
 
 import pathlib
