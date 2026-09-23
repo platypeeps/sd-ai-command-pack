@@ -2241,5 +2241,99 @@ class Rule6ClaimSupportTests(LintFixture):
         self.assertLessEqual(len(payload["citations"]["c1"]["claim"]), lint.CLAIM_CHARS)
 
 
+WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tests.yml"
+
+
+def docs_lint_step_code(text: str) -> str:
+    """The `Docs lint` step with its comment lines removed.
+
+    Comments are dropped because the step's own comment names the spellings
+    it rejects, and a test that greps the whole block would read the
+    explanation as the code.
+    """
+    lines = text.splitlines(keepends=True)
+    start = next(i for i, line in enumerate(lines)
+                 if line.strip().startswith("- name: Docs lint"))
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        stripped = lines[index].lstrip()
+        if (stripped.startswith("- name:")
+                and len(lines[index]) - len(stripped) == indent):
+            end = index
+            break
+    return "".join(line for line in lines[start:end]
+                   if not line.lstrip().startswith("#"))
+
+
+class ChangedPathsComeFromTheMergeRefTests(unittest.TestCase):
+    """Rule 8 reads `--changed`, and CI computes it from the merge ref.
+
+    `github.event.pull_request.base.sha` is frozen in the stored payload at
+    the base tip the pull request was opened against. It does not move when
+    the base does, so on a busy base every merge adds that merge's paths to
+    an older pull request's apparent scope, and rule 8 demands a scope class
+    for a file the branch never touched. That is sd:1401, and #1151 could not
+    be made to pass: two files of its own, nineteen in the computed set.
+
+    The merge ref does not drift. Its first parent is the base as it stands,
+    its second the pull request's head, so the diff between the first parent
+    and the merge is exactly what the pull request adds. The first test here
+    is the reproduction -- it builds both diffs over one history and shows
+    them disagreeing -- and the second pins the workflow to the right one.
+    """
+
+    def git(self, *args: str) -> str:
+        return subprocess.run(("git", *args), cwd=self.repo, check=True,
+                              capture_output=True, text=True).stdout
+
+    def commit(self, path: str, message: str) -> str:
+        target = self.repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(message + "\n", encoding="utf-8")
+        self.git("add", path)
+        self.git("commit", "-q", "-m", message)
+        return self.git("rev-parse", "HEAD").strip()
+
+    def changed(self, *revisions: str) -> list[str]:
+        out = self.git("diff", "--name-only", "--no-renames", *revisions)
+        return sorted(line for line in out.splitlines() if line)
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = pathlib.Path(tmp.name)
+        self.git("init", "-q", "-b", "main")
+        self.git("config", "user.email", "lint@example.invalid")
+        self.git("config", "user.name", "Lint")
+        self.git("config", "commit.gpgsign", "false")
+        # The base as it stood when the pull request was opened. This is the
+        # sha the event payload freezes.
+        self.opened_against = self.commit("README.md", "base")
+        self.git("checkout", "-q", "-b", "feature")
+        self.commit("bin/mine.py", "the branch's own change")
+        self.git("checkout", "-q", "main")
+        # Somebody else's pull request lands while this one waits.
+        self.commit("other/theirs.py", "a later merge into the base")
+        # What GitHub serves as refs/pull/N/merge: base first, head second.
+        self.git("checkout", "-q", "-b", "merge-ref")
+        self.git("merge", "-q", "--no-ff", "-m", "merge ref", "feature")
+
+    def test_the_frozen_base_sha_widens_the_set_with_somebody_elses_file(self) -> None:
+        self.assertEqual(
+            self.changed(f"{self.opened_against}...HEAD"),
+            ["bin/mine.py", "other/theirs.py"],
+        )
+
+    def test_the_merge_refs_first_parent_reads_the_branchs_own_change_alone(self) -> None:
+        self.assertEqual(self.changed("HEAD^1", "HEAD"), ["bin/mine.py"])
+
+    def test_the_workflow_diffs_the_first_parent_and_refuses_a_plain_checkout(self) -> None:
+        code = docs_lint_step_code(WORKFLOW.read_text(encoding="utf-8"))
+        self.assertIn("git diff --name-only --no-renames HEAD^1 HEAD", code)
+        self.assertIn("HEAD^2", code)
+        self.assertNotIn("pull_request.base.sha", code)
+
+
 if __name__ == "__main__":
     unittest.main()
