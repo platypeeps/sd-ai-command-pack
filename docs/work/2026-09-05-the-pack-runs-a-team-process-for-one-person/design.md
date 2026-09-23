@@ -9,7 +9,7 @@ the payload contradicts is the stale-document failure this item exists to
 remove, so the page moves to the root in the commit that makes it true.
 
 The Overrides section carries the keys `sd_lib.py` already reads, `mode:`
-plus `CHECK_NAMES` at `bin/sd_lib.py:36`, consumed together at
+plus `CHECK_NAMES` in `bin/sd_lib.py`, consumed together at
 `_local_block_entrypoints` (`:391-414`), and one more, `reviewers:`, added on
 2026-09-05 because consent to disclose a repository's diff is per repository
 and per machine and belongs in the file the operator writes by hand. Three

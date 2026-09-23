@@ -160,7 +160,10 @@ lane. A subagent returns findings **as text** — and cannot write a file whose
 basename begins `REPORT`, `SUMMARY`, `FINDINGS` or `ANALYSIS`, which collides
 with this standard's own `SUMMARY-` prefix. Both rules, with the verified
 mechanism behind them, are in `references/subagent-dispatch.md`; read it before
-planning a fan-out that ends in a written file.
+planning a fan-out that ends in a written file. When to fan out, and the
+budget and deadline every worker carries, are the sd-ai-command-pack
+checkout's `WORKFLOW.md`, section **Parallel work**. The one write lane here
+is this session's own checkout; a second writer takes its own worktree.
 
 ## Safety rules
 

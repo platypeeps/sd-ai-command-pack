@@ -11,6 +11,12 @@ checks and web sweeps parallelise freely across read-only subagents. Anything
 that mutates a checkout stays in one lane, because two agents editing one
 checkout is how a document loses a paragraph nobody notices.
 
+The policy those two sentences apply is the sd-ai-command-pack checkout's
+`WORKFLOW.md`, section **Parallel work**: writers isolate, readers fan out, one
+integrator lands, every worker carries a budget and a deadline, and the test
+for whether to fan out at all. This page records the harness mechanics under
+it and restates none of the rules.
+
 A subagent's findings come back **as text**, in its final response. That is the
 default, and for most fan-out it is the whole story. Where a report is too long
 to hand back that way, it goes in a scratch location the orchestrator names, and
