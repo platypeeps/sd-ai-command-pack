@@ -1116,8 +1116,8 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 #: comment records for a diamond -- re-measure on the tree that exists, do
 #: not pick a side.
 SYMBOL_ANCHORED_CITATIONS = {
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 35,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 44,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 34,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 45,
 }
 
 

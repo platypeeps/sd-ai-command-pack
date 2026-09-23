@@ -240,6 +240,84 @@ class WorkflowCheckNameTests(unittest.TestCase):
         self.assertEqual(produced, set())
         self.assertTrue(any("expression" in note for note in notes))
 
+    def test_a_name_reading_only_the_matrix_resolves_per_combination(self) -> None:
+        """sd:1420: platypeeps/system's `system-native.yml`, as it stands.
+
+        GitHub reports `system-native (shared)` and three more for this job,
+        and appends no suffix of its own to a name that interpolates the
+        matrix. Before the fix all four required contexts read
+        `required_not_produced` beside an expression note.
+        """
+        self.write(
+            "system-native.yml",
+            "name: System native tests\n"
+            "on:\n  pull_request:\n  push:\n    branches: [main]\n"
+            "jobs:\n  system-native:\n"
+            "    name: system-native (${{ matrix.leg }})\n"
+            "    runs-on: macos-15\n"
+            "    strategy:\n      fail-fast: false\n      matrix:\n"
+            "        leg: [shared, dashboard, runner, tools]\n"
+            "    steps:\n      - run: true\n",
+        )
+        produced, notes = status.workflow_checks(self.repo)
+        self.assertEqual(
+            produced,
+            {"system-native (shared)", "system-native (dashboard)",
+             "system-native (runner)", "system-native (tools)"},
+        )
+        self.assertEqual(notes, [])
+
+    def test_include_and_exclude_follow_githubs_documented_merge(self) -> None:
+        """Exclude first, then include: an entry joins every original
+        combination whose axis values it does not overwrite -- a value an
+        earlier include added may be -- else it becomes its own."""
+        self.write(
+            "merge.yml",
+            "on: [pull_request]\njobs:\n  build:\n"
+            "    name: ${{ matrix.os }}/${{ matrix.py }}-${{ matrix.tag }}\n"
+            "    strategy:\n      matrix:\n"
+            "        os:\n          - linux\n          - mac\n"
+            "        py: ['3.10', 3.13]\n"
+            "        exclude:\n          - os: mac\n            py: '3.10'\n"
+            "        include:\n          - tag: plain\n"
+            "          - os: mac\n            tag: arm\n"
+            "          - os: linux\n            py: '3.11'\n            tag: extra\n"
+            "          - os: windows\n            py: '3.12'\n            tag: win\n"
+            "    steps:\n      - run: true\n",
+        )
+        produced, notes = status.workflow_checks(self.repo)
+        self.assertEqual(
+            produced,
+            {"linux/3.10-plain", "linux/3.13-plain", "mac/3.13-arm",
+             "linux/3.11-extra", "windows/3.12-win"},
+        )
+        self.assertEqual(notes, [])
+
+    def test_a_matrix_name_this_reader_cannot_resolve_keeps_its_note(self) -> None:
+        """Anything not a static literal matrix stays the runner's to name."""
+        cases = {
+            "another context": ("x (${{ matrix.os }}, ${{ github.ref }})", "        os: [a, b]\n"),
+            "a computed matrix": ("x (${{ matrix.os }})", "        os: ${{ fromJSON(inputs.os) }}\n"),
+            "a retyped value": ("x (${{ matrix.py }})", "        py: [3.10, 3.12]\n"),
+            "a boolean": ("x (${{ matrix.ok }})", "        ok: [true, false]\n"),
+            "a key one combination lacks": (
+                "x (${{ matrix.tag }})",
+                "        os: [a]\n        include:\n          - other: b\n",
+            ),
+        }
+        for index, (label, (name, axes)) in enumerate(cases.items()):
+            with self.subTest(label):
+                self.write(
+                    f"unresolved{index}.yml",
+                    "on: [pull_request]\njobs:\n  build:\n"
+                    f"    name: {name}\n    strategy:\n      matrix:\n{axes}"
+                    "    steps:\n      - run: true\n",
+                )
+                produced, notes = status.workflow_checks(self.repo)
+                self.assertEqual(produced, set())
+                self.assertTrue(any("expression" in note for note in notes))
+                (self.workflows / f"unresolved{index}.yml").unlink()
+
     def test_a_conditional_job_is_reported_because_a_skip_pends_forever(self) -> None:
         self.write(
             "cond.yml",
