@@ -309,9 +309,19 @@ item saying which answer lowered it, once per item and remote however many
 runs it takes, and `sd-status` names the planning artifacts the shared tree
 was already carrying, which are yours to move. Mode never decides merging.
 `runner_merge: auto` is a per-repository policy you set once with
-`sd-db.sh repo runner-merge <path> auto`, off by default, and nothing derives it. It is necessary, not sufficient: every merge
-asks the same three questions again, one function for both gates, and a no
-suspends it with the reason shown.
+`sd-db.sh repo runner-merge <path> auto`, off by default, and nothing derives it.
+Every merge asks the same three questions again, one function for both gates.
+Two of the three answers are final: a repository you do not administer, and a
+fork, are refusals no setting reaches, and so is a question the remote could
+not answer at all. The third -- "nobody else may push" -- is the one the row
+speaks for, because co-ownership is exactly what you decided about when you
+set the row. `auto` answers it and a merge proceeds; `manual`, no row, or a
+database that cannot be read suspends it with the reason shown. A merge the
+row let through says so on its receipt, naming the repository, the setting and
+who else may push, so an ownership merge and a row-authorized one are not one
+sentence. Without that, the third question refused every co-authored
+repository permanently and the lane ended at `ready_to_send` for a human to
+finish by hand.
 
 ## Providers
 
