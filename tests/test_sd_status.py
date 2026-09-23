@@ -31,8 +31,15 @@ import unittest
 from types import SimpleNamespace
 from typing import Any
 from unittest import mock
+from urllib.parse import parse_qs, urlsplit
 
-from tests.test_sd_pr_state import BIN, SD_STATUS, ToolFixture, tree_digest
+from tests.test_sd_pr_state import (
+    BIN,
+    REPO_SETTINGS,
+    SD_STATUS,
+    ToolFixture,
+    tree_digest,
+)
 
 #: The other half of the pin in `SkillSurfaceTests`. Imported as the function
 #: alone so this module collects its own tests and not that file's.
@@ -350,6 +357,27 @@ class ProtectionGapTests(unittest.TestCase):
         found = self.gaps(self.enforcing(enforce_admins={"enabled": False}), {"lint"})
         self.assertEqual(found, ["enforce_admins"])
 
+    def test_a_bypass_that_does_not_reach_administrators_is_its_own_gap(self) -> None:
+        """Codex on #1140: every bypass actor was folded into `enforce_admins`,
+        so a ruleset one app could walk past printed "exempts the admins who
+        do the merging" on a repository whose administrators are subject to
+        every rule. It is the `bypass` gap, naming the ruleset and the actor,
+        and `enforce_admins` stays what `synthesize` said."""
+        rulesets = [{"id": 42, "name": "release", "enforcement": "active",
+                     "bypass_actors": [{"actor_id": 77, "actor_type": "Integration", "bypass_mode": "pull_request"}, {"actor_id": 9, "actor_type": "Team", "bypass_mode": "always"}]}]
+        found, detail = status._protection_gaps(
+            self.enforcing(source="ruleset", rulesets=rulesets), "main", {"lint"}, [])
+        self.assertEqual([gap["id"] for gap in found], ["bypass"])
+        self.assertIn("release (#42): Integration 77 (pull_request); release (#42): Team 9 (always)", found[0]["gap"])
+        self.assertIn("administrators stay subject to release (#42)", found[0]["gap"])
+        self.assertEqual(detail["admin_bypass"], [])
+        self.assertNotIn("exempts the admins", found[0]["gap"])
+        self.assertTrue(detail["enforce_admins"])
+        self.assertEqual(detail["bypass"],
+                         ["release (#42): Integration 77 (pull_request)", "release (#42): Team 9 (always)"])
+        # Classic protection has no ruleset to bypass: the fact is empty, not absent.
+        self.assertEqual(status._protection_gaps(self.enforcing(), "main", {"lint"}, [])[1]["bypass"], [])
+
     def test_non_strict_checks_are_a_gap(self) -> None:
         protection = self.enforcing(
             required_status_checks={"strict": False, "contexts": ["lint"]}
@@ -539,6 +567,55 @@ class AcknowledgementTests(unittest.TestCase):
         self.assertIn("no pull-request review is required on main", still_open[0]["gap"])
         self.assertIn("no longer matches", still_open[0]["acknowledgement_stale"])
 
+    def test_a_bypass_acknowledgement_pins_the_actors_and_stops_when_one_is_added(self) -> None:
+        """The `bypass` fact is the list the gap prints, not a boolean: an
+        entry that accepted the release app goes on accepting nothing once a
+        team is added beside it."""
+        app, team = {"actor_id": 77, "actor_type": "Integration", "bypass_mode": "pull_request"}, {"actor_id": 9, "actor_type": "Team", "bypass_mode": "always"}
+        def protection(*actors: dict[str, Any]) -> dict[str, Any]:
+            return self.enforcing(source="ruleset", rulesets=[
+                {"id": 42, "name": "release", "enforcement": "active", "bypass_actors": list(actors)}])
+        entry = {"id": "bypass", "state": {"bypass": ["release (#42): Integration 77 (pull_request)"]},
+                 "because": "the release app opens the version bump", "since": "2026-09-22",
+                 "until": "the release app is retired"}
+        still_open, accepted = self.split(protection(app), [self.ZERO_APPROVALS, entry])
+        self.assertEqual(sorted(gap["id"] for gap in accepted), ["bypass", "reviews"])
+        self.assertEqual(still_open, [])
+        still_open, accepted = self.split(protection(app, team), [self.ZERO_APPROVALS, entry])
+        self.assertEqual([gap["id"] for gap in accepted], ["reviews"])
+        stale = [gap for gap in still_open if gap["id"] == "bypass"][0]
+        self.assertIn("no longer matches", stale["acknowledgement_stale"])
+        self.assertIn("Team 9 (always)", stale["acknowledgement_stale"])
+        _, problems = self.written(json.dumps({"accepted_gaps": [entry]}))
+        self.assertEqual(problems, [])
+
+    def test_an_enforce_admins_acknowledgement_pins_the_exempting_rulesets(self) -> None:
+        """`enforce_admins: false` alone accepts every admin bypass at once:
+        an entry written for the release ruleset went on accepting a second
+        exemption added on the checks ruleset. `admin_bypass` is the list
+        per ruleset with the rules each reaches, and the entry that pins it
+        stops applying when the list grows."""
+        admin = {"actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}
+        def protection(*exempt: int) -> dict[str, Any]:
+            return self.enforcing(source="ruleset", enforce_admins={"enabled": False}, rulesets=[
+                {"id": 42, "name": "release", "rules": ["pull_request"], "bypass_actors": [admin] if 42 in exempt else []},
+                {"id": 43, "name": "checks", "rules": ["required_status_checks"],
+                 "bypass_actors": [admin] if 43 in exempt else []}])
+        entry = {"id": "enforce_admins",
+                 "state": {"enforce_admins": False, "admin_bypass": ["release (#42) [pull_request]: OrganizationAdmin 1 (always)"]},
+                 "because": "admins ship the release bump; CI still gates", "since": "2026-09-22",
+                 "until": "the release ruleset loses its bypass"}
+        still_open, accepted = self.split(protection(42), [entry])
+        self.assertEqual([gap["id"] for gap in accepted], ["enforce_admins"])
+        self.assertEqual([gap["id"] for gap in still_open], ["reviews"])  # 0 approvals, unacknowledged here
+        still_open, accepted = self.split(protection(42, 43), [entry])
+        self.assertEqual(accepted, [])
+        stale = [gap for gap in still_open if gap["id"] == "enforce_admins"][0]
+        self.assertIn("no longer matches", stale["acknowledgement_stale"])
+        self.assertIn("checks (#43) [required_status_checks]", stale["acknowledgement_stale"])
+        _, problems = self.written(json.dumps({"accepted_gaps": [entry]}))
+        self.assertEqual(problems, [])
+
     def test_an_unrelated_gap_is_untouched_by_an_acknowledgement(self) -> None:
         protection = self.enforcing(
             required_status_checks={"strict": False, "contexts": ["lint"]}
@@ -620,6 +697,8 @@ class AcknowledgementTests(unittest.TestCase):
             (self.enforcing(), {"lint", "a-check-nothing-requires"}),
             (self.enforcing(required_status_checks={"contexts": ["nobody-reports-this"]}), set()),
             (self.enforcing(required_pull_request_reviews=None), {"lint"}),
+            (self.enforcing(source="ruleset", rulesets=[{"id": 42, "name": "release", "enforcement": "active",
+                                                          "bypass_actors": [{"actor_id": 77, "actor_type": "Integration", "bypass_mode": "pull_request"}]}]), {"lint"}),
         ):
             gaps, _ = status._protection_gaps(protection, "main", produced, [])
             emitted.update(gap["id"] for gap in gaps)
@@ -843,6 +922,20 @@ class ProtectionSectionTests(StatusFixture):
         self.assertEqual(section["detail"]["required_not_produced"], [])
         self.assertEqual(section["detail"]["produced_not_required"], [])
         self.assertIn("fully enforcing", self.run_tool(SD_STATUS).stdout)
+
+    def test_a_classic_404_to_a_token_without_admin_prints_as_unknown(self) -> None:
+        """The same 404, from a token without `admin` on the repository: the
+        classic side is unseen, so the report says unknown and why, raises no
+        `unprotected` finding, and does not claim the all-clear either."""
+        self.with_github(pulls=[], protection=None, repo=dict(REPO_SETTINGS, permissions={"admin": False}))
+        section = self.report()["protection"]
+        self.assertIsNone(section["protected"])
+        self.assertEqual(section["gaps"], [])
+        self.assertIn("admin", section["reason"])
+        text = self.run_tool(SD_STATUS).stdout
+        self.assertIn("protection unknown -- classic protection on main is not visible to this token", text)
+        self.assertNotIn("fully enforcing", text)
+        self.assertNotIn("no branch protection at all", text)
 
     def test_an_unprotected_default_branch_is_one_named_gap(self) -> None:
         self.with_github(pulls=[], protection=None)
@@ -5577,6 +5670,289 @@ class MirrorSyncPendingTests(InventoryFixture):
             f"`{kind.source}` | {kind.what} |",
             table,
         )
+
+
+class RulesetProtectionCase(unittest.TestCase):
+    """`protection_section` when classic protection is a 404 and a ruleset applies.
+
+    Measured on rwbp-website 2026-09-22 (sd:1323): the section read
+    `branches/main/protection` alone and reported a branch enforcing four
+    ruleset rules as `protected: false`. It now reads `rules/branches/main`
+    after the 404 and, when an active ruleset carries a merge-gating rule,
+    runs the same gap analysis over the object `sd_protection.synthesize`
+    shapes from it. A ruleset that gates no merge (`deletion` alone) keeps
+    the `unprotected` finding, with the rules named in `detail`.
+    """
+
+    SLUG = "acme/widget"
+    GH = {"available": True, "slug": SLUG, "reason": ""}
+    RULESET = {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}
+    #: An operator's own repository: `admin`, so a 404 on classic protection
+    #: is GitHub saying there is none, not that this token may not look.
+    REPO = {"default_branch": "main", "allow_rebase_merge": False, "permissions": {"admin": True},
+            "squash_merge_commit_title": "PR_TITLE", "squash_merge_commit_message": "PR_BODY"}
+
+    @staticmethod
+    def gating_rules() -> list[dict[str, Any]]:
+        return [
+            {"type": "deletion", "ruleset_id": 42},
+            {"type": "pull_request", "ruleset_id": 42,
+             "parameters": {"required_approving_review_count": 1}},
+            {"type": "required_status_checks", "ruleset_id": 42,
+             "parameters": {"strict_required_status_checks_policy": True,
+                            "required_status_checks": [{"context": "lint", "integration_id": 7}]}},
+        ]
+
+    def section(self, rules: Any, ruleset: Any = RULESET, *, repo: dict[str, Any] | None = None,
+                extra: dict[int, Any] | None = None) -> dict[str, Any]:
+        seen: list[str] = []
+
+        def answer(args: list[str], root: pathlib.Path) -> tuple[Any, str]:
+            seen.append(args[1])
+            url = urlsplit(args[1])
+            path, query = url.path, parse_qs(url.query)
+            if path == f"repos/{self.SLUG}":
+                return dict(self.REPO if repo is None else repo), ""
+            if path.endswith("/branches/main/protection"):
+                return None, "gh: Branch not protected (HTTP 404)"
+            if path.endswith("/rules/branches/main"):
+                if rules is None:
+                    return None, "gh: Not Found (HTTP 404)"
+                # Paged the way the endpoint pages: `per_page` and `page`,
+                # thirty a page when neither is asked.
+                size, page = int(query.get("per_page", ["30"])[0]), int(query.get("page", ["1"])[0])
+                return rules[(page - 1) * size:page * size], ""
+            if path.endswith("/rulesets/42"):
+                return (ruleset, "") if ruleset is not None else (None, "gh: Not Found (HTTP 404)")
+            for ruleset_id, entry in (extra or {}).items():
+                if path.endswith(f"/rulesets/{ruleset_id}"):
+                    return entry, ""
+            raise AssertionError(f"unexpected read {path}")
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(
+                status.pr_state, "gh_json", answer):
+            result = status.protection_section(pathlib.Path(directory), self.GH)
+        result["_seen"] = seen
+        return result
+
+    def test_a_ruleset_that_gates_the_merge_is_reported_as_protection(self) -> None:
+        result = self.section(self.gating_rules())
+        self.assertTrue(result["protected"])
+        ids = [gap["id"] for gap in result["gaps"]]
+        self.assertNotIn("unprotected", ids)
+        self.assertNotIn("reviews", ids)
+        self.assertNotIn("strict", ids)
+        self.assertNotIn("enforce_admins", ids)
+        self.assertEqual(result["detail"]["required_contexts"], ["lint"])
+        self.assertEqual(result["detail"]["source"], "ruleset")
+        self.assertEqual(result["detail"]["rulesets"],
+                         [{"id": 42, "name": "main", "enforcement": "active", "bypass_actors": [],
+                           "rules": ["pull_request", "required_status_checks"]}])
+        self.assertEqual(result["_seen"][-2:], [status.sd_protection.rules_path(f"repos/{self.SLUG}", "main", 1),
+                                                f"repos/{self.SLUG}/rulesets/42"])
+
+    def test_every_page_of_rules_reaches_the_gap_analysis(self) -> None:
+        """Thirty rules fill the endpoint's first page. The gating rules on
+        the second must reach the analysis, or the branch reads as
+        `unprotected` -- the weaker picture, the wrong direction."""
+        size = status.sd_protection.PAGE_SIZE
+        filler = [{"type": "tag_name_pattern", "ruleset_id": 42, "parameters": {"pattern": f"v{n}"}}
+                  for n in range(size)]
+        result = self.section(filler + self.gating_rules())
+        self.assertTrue(result["protected"])
+        self.assertNotIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["detail"]["required_contexts"], ["lint"])
+        rules_reads = [path for path in result["_seen"] if "/rules/branches/" in path]
+        self.assertEqual(rules_reads, [status.sd_protection.rules_path(f"repos/{self.SLUG}", "main", 1),
+                                       status.sd_protection.rules_path(f"repos/{self.SLUG}", "main", 2)])
+
+    def test_a_bypass_that_reaches_administrators_is_enforce_admins_off(self) -> None:
+        """`OrganizationAdmin` is the actor an administrator merges as, so its
+        bypass is the classic finding, in the classic words."""
+        bypass = dict(self.RULESET, bypass_actors=[{"actor_id": 1, "actor_type": "OrganizationAdmin",
+                                                    "bypass_mode": "always"}])
+        result = self.section(self.gating_rules(), bypass)
+        self.assertTrue(result["protected"])
+        gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
+        self.assertIn("main (#42) [pull_request, required_status_checks] by OrganizationAdmin 1 (always)",
+                      gaps["enforce_admins"])
+        self.assertIn("Every rule below stops collaborators and exempts the admins who do the merging",
+                      gaps["enforce_admins"])
+        self.assertNotIn("bypass", gaps)
+        self.assertFalse(result["detail"]["enforce_admins"])
+        self.assertEqual(result["detail"]["bypass"], [])
+        self.assertEqual(result["detail"]["admin_bypass"],
+                         ["main (#42) [pull_request, required_status_checks]: OrganizationAdmin 1 (always)"])
+        self.assertEqual(result["detail"]["rulesets"][0]["bypass_actors"], bypass["bypass_actors"])
+
+    def test_a_bypass_on_one_ruleset_leaves_the_other_rulesets_rules_binding(self) -> None:
+        """GitHub layers rulesets: a bypass on the review ruleset exempts
+        its holder from the review rule and from nothing the checks ruleset
+        requires. Folded into one boolean, the sentence said "every rule
+        below ... exempts the admins" of a branch whose CI requirement still
+        bound them (Codex on #521, the system half of this change). Now it
+        names each exempting ruleset with its actor and rules, then the
+        rulesets still binding administrators, then the ones not known
+        either way; "every rule below" only when neither is left."""
+        admin = {"actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}
+        rules = [{"type": "deletion", "ruleset_id": 42},
+                 {"type": "pull_request", "ruleset_id": 42, "parameters": {"required_approving_review_count": 1}},
+                 {"type": "required_status_checks", "ruleset_id": 43,
+                  "parameters": {"strict_required_status_checks_policy": True,
+                                 "required_status_checks": [{"context": "lint", "integration_id": 7}]}}]
+        review = dict(self.RULESET, bypass_actors=[admin])
+        checks = {"id": 43, "name": "checks", "enforcement": "active"}
+        for actors, expect, absent in (
+                ([], "Still binding them: checks (#43) [required_status_checks].", "very rule below"),
+                ([admin], "checks (#43) [required_status_checks] by OrganizationAdmin 1 (always). Every rule below",
+                 "Still binding"),
+                (None, "Not known either way: checks (#43) [required_status_checks]", "very rule below")):
+            with self.subTest(actors=actors):
+                shown = dict(checks, bypass_actors=actors) if actors is not None else checks
+                result = self.section(rules, review, extra={43: shown})
+                self.assertTrue(result["protected"])
+                gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
+                self.assertNotIn("bypass", gaps)
+                self.assertIn("enforce_admins is off on main: main (#42) [pull_request] by OrganizationAdmin 1 (always)",
+                              gaps["enforce_admins"])
+                self.assertIn(expect, gaps["enforce_admins"])
+                self.assertNotIn(absent, gaps["enforce_admins"])
+                self.assertFalse(result["detail"]["enforce_admins"])
+                self.assertIn("main (#42) [pull_request]: OrganizationAdmin 1 (always)", result["detail"]["admin_bypass"])
+                self.assertEqual([entry["rules"] for entry in result["detail"]["rulesets"]],
+                                 [["pull_request"], ["required_status_checks"]])
+
+    def test_a_role_bypass_is_unknown_until_the_role_is_confirmed(self) -> None:
+        """A `RepositoryRole` actor carries a numeric id, and which role it
+        names is confirmed nowhere here -- no ruleset a registered token can
+        read carries one. Guessing the admin id would pick which of two
+        sentences an operator reads, and the wrong guess prints
+        "administrators stay subject" on a branch they can walk past. So it
+        is `enforce_admins` unknown, naming the role, in neither sentence."""
+        for role_id in (5, 4):
+            with self.subTest(role_id=role_id):
+                actor = {"actor_id": role_id, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+                result = self.section(self.gating_rules(), dict(self.RULESET, bypass_actors=[actor]))
+                self.assertTrue(result["protected"])
+                gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
+                self.assertNotIn("bypass", gaps)
+                self.assertIn(f"main (#42) [pull_request, required_status_checks] lets RepositoryRole {role_id} "
+                              "(always) bypass it", gaps["enforce_admins"])
+                self.assertIn("not confirmed here", gaps["enforce_admins"])
+                self.assertNotIn("exempts the admins", gaps["enforce_admins"])
+                self.assertNotIn("stay subject", gaps["enforce_admins"])
+                self.assertFalse(result["detail"]["enforce_admins"])
+                self.assertEqual(result["detail"]["bypass"], [])
+                self.assertEqual(status.sd_protection.synthesize(self.gating_rules(), {42: dict(
+                    self.RULESET, bypass_actors=[actor])})["enforce_admins"], {"enabled": None})
+
+    def test_a_bypass_for_one_app_is_its_own_gap_and_administrators_stay_subject(self) -> None:
+        """Codex on #1140: an app's bypass printed as `enforce_admins` off,
+        "exempts the admins who do the merging", on a repository whose
+        administrators are subject to every rule. The section reports it as
+        the `bypass` gap naming the actor, with `enforce_admins` on."""
+        bypass = dict(self.RULESET, bypass_actors=[{"actor_id": 77, "actor_type": "Integration", "bypass_mode": "pull_request"}, {"actor_id": 9, "actor_type": "Team", "bypass_mode": "always"}])
+        result = self.section(self.gating_rules(), bypass)
+        self.assertTrue(result["protected"])
+        gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
+        self.assertNotIn("enforce_admins", gaps)
+        self.assertIn("main (#42) [pull_request, required_status_checks]: Integration 77 (pull_request); "
+                      "main (#42) [pull_request, required_status_checks]: Team 9 (always)", gaps["bypass"])
+        self.assertIn("administrators stay subject to main (#42) [pull_request, required_status_checks]", gaps["bypass"])
+        self.assertTrue(result["detail"]["enforce_admins"])
+        self.assertEqual(result["detail"]["bypass"],
+                         ["main (#42) [pull_request, required_status_checks]: Integration 77 (pull_request)",
+                          "main (#42) [pull_request, required_status_checks]: Team 9 (always)"])
+        self.assertEqual(result["detail"]["admin_bypass"], [])
+        # A withheld list beside a shown one stays unknown: the app's bypass
+        # is reported, and so is the list nobody was shown.
+        hidden = {"id": 43, "name": "ops", "enforcement": "active"}
+        rules = self.gating_rules() + [{"type": "pull_request", "ruleset_id": 43,
+                                        "parameters": {"required_approving_review_count": 1}}]
+        result = self.section(rules, bypass, extra={43: hidden})
+        gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
+        self.assertIn("did not show bypass_actors for ops (#43) [pull_request]", gaps["enforce_admins"])
+        self.assertIn("Integration 77 (pull_request)", gaps["bypass"])
+        # The withheld ruleset is not one administrators are known to stay subject to.
+        self.assertIn("administrators stay subject to main (#42) [pull_request, required_status_checks].", gaps["bypass"])
+
+    def test_a_bypass_list_not_shown_is_unknown_not_enforcement(self) -> None:
+        """Absent `bypass_actors` is what GitHub answers a caller who cannot
+        edit the ruleset. The section reports it as the `enforce_admins` gap
+        naming the ruleset that withheld its list, never as enforced; `[]`
+        beside it stays enforced, so the two states do not collapse."""
+        result = self.section(self.gating_rules(), {"id": 42, "name": "main", "enforcement": "active"})
+        self.assertTrue(result["protected"])
+        gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
+        self.assertIn("enforce_admins", gaps)
+        self.assertIn("did not show bypass_actors for main (#42)", gaps["enforce_admins"])
+        self.assertNotIn("exempts the admins", gaps["enforce_admins"])
+        self.assertFalse(result["detail"]["enforce_admins"])
+        self.assertIsNone(result["detail"]["rulesets"][0]["bypass_actors"])
+        shown = self.section(self.gating_rules())
+        self.assertNotIn("enforce_admins", [gap["id"] for gap in shown["gaps"]])
+        self.assertTrue(shown["detail"]["enforce_admins"])
+
+    def test_a_ruleset_that_gates_no_merge_keeps_the_unprotected_finding(self) -> None:
+        rules = [{"type": "deletion", "ruleset_id": 42}, {"type": "non_fast_forward", "ruleset_id": 42}]
+        result = self.section(rules)
+        self.assertFalse(result["protected"])
+        self.assertIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["detail"]["ruleset_rules"], ["deletion", "non_fast_forward"])
+        self.assertEqual(result["detail"]["read_error"], "gh: Branch not protected (HTTP 404)")
+
+    def test_a_ruleset_that_is_not_active_is_no_protection(self) -> None:
+        result = self.section(self.gating_rules(), dict(self.RULESET, enforcement="evaluate"))
+        self.assertFalse(result["protected"])
+        self.assertIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["detail"]["ruleset_rules"], [])
+
+    def test_a_404_from_a_token_without_admin_is_unknown_not_unprotected(self) -> None:
+        """GitHub answers 404 `Not Found` on classic protection to a caller
+        without `admin` on the repository, whether or not the branch is
+        protected -- measured 2026-09-22 on home-assistant/core and
+        gohugoio/hugo, both protected. So a 404 is "no protection" only when
+        the token administers the repository; otherwise the classic side is
+        unknown, the section says why, and no `unprotected` finding is raised
+        on it. `permissions` missing altogether is the same unknown."""
+        for permissions in ({"admin": False}, {"push": True}, None):
+            with self.subTest(permissions=permissions):
+                repo = dict(self.REPO)
+                repo.pop("permissions")
+                if permissions is not None:
+                    repo["permissions"] = permissions
+                result = self.section([], repo=repo)
+                self.assertTrue(result["available"])
+                self.assertIsNone(result["protected"])
+                self.assertNotIn("unprotected", [gap["id"] for gap in result["gaps"]])
+                self.assertIn("admin", result["reason"])
+                self.assertIn(self.SLUG, result["reason"])
+                self.assertEqual(result["detail"]["classic_visibility"], "hidden")
+                self.assertEqual(result["detail"]["ruleset_rules"], [])
+                # The rulesets were still read: they are visible without admin.
+                self.assertTrue(any("/rules/branches/" in path for path in result["_seen"]))
+
+    def test_a_gating_ruleset_is_protection_even_when_classic_is_hidden(self) -> None:
+        """The rules endpoint answers a non-admin (log-distiller, read with
+        `maintain`), so a ruleset that gates the merge is the protection
+        object whatever the classic endpoint would not show."""
+        result = self.section(self.gating_rules(), repo=dict(self.REPO, permissions={"admin": False}))
+        self.assertTrue(result["protected"])
+        self.assertEqual(result["detail"]["source"], "ruleset")
+        self.assertEqual(result["detail"]["classic_visibility"], "hidden")
+
+    def test_no_rules_is_unprotected_and_says_the_rules_were_read(self) -> None:
+        result = self.section([])
+        self.assertFalse(result["protected"])
+        self.assertIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["detail"]["ruleset_rules"], [])
+        self.assertNotIn("rules_read_error", result["detail"])
+
+    def test_rules_that_cannot_be_read_are_named_not_assumed_absent(self) -> None:
+        result = self.section(None)
+        self.assertFalse(result["protected"])
+        self.assertIn("unprotected", [gap["id"] for gap in result["gaps"]])
+        self.assertEqual(result["detail"]["rules_read_error"], "gh: Not Found (HTTP 404)")
 
 
 if __name__ == "__main__":
