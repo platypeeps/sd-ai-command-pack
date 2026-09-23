@@ -59,7 +59,8 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
 4. **Open or reconcile the pull request.**
    Include `Work:` only when an associated item exists.
    The line is absent otherwise; it is not a completion claim.
-   After exact-head confirmation, request Copilot when repository policy selects the final tier.
+   After exact-head confirmation, request Copilot when the effective policy selects the reviewed tier: `deep` (what unset reads) on deep-tier changes only, `always` on every reviewing tier, `never` on none.
+   A `skip` tier is not requested under any policy.
    `--copilot-review request` permits one explicit request.
    `--copilot-review skip` needs explicit task direction and suppresses automatic selection.
    Suppression persists for the task until a later explicit request replaces it.
@@ -151,8 +152,9 @@ Results report `review_selection.requested_provider` and the actual `reviewed_by
 Read the recovery reference before retries, fix verification, or additional reviews with an explicit provider.
 
 `--copilot-review auto` is the prepare default.
-It reads `copilot_review.automatic_deep` through the retained local review report.
-An absent policy defaults to `false` and keeps Copilot explicit-only.
+It resolves the decision at dispatch: the machine's `sd.copilot_review` as it stands then (`deep` when unset), overridden by the repository's `copilot_review.automatic_deep` as the retained review report recorded it, applied to the tiers the retained passes recorded, so a later push's delta pass does not hide the branch's.
+The report's own `automatic` verdict is what the policy said at review time, not the decision.
+A setting changed after the review takes effect on the next prepare without another local review.
 Each request binds one exact head and persists before merge.
 Merge waits for a submitted review, stable review material, and verified finding dispositions.
 An automatic request occurs once per pull request.
@@ -201,7 +203,7 @@ Do not invent acceptance for the operator.
 ## Remote findings
 
 Complete local review before any Copilot request.
-Request automatically only through the configured `deep` tier.
+Request automatically as the effective policy selects: `deep` (what unset reads) on deep-tier changes only, `always` on every reviewing tier, `never` on none, and a `skip` tier under none of them.
 Honor repository restrictions and avoid repeated automatic requests after later pushes.
 Read and disposition findings posted independently.
 

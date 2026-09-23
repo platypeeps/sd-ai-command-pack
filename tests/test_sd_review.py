@@ -278,7 +278,8 @@ class PolicyTests(ReviewFixture):
         policy, source = sd_review.load_policy(root)
         self.assertEqual(policy["severity_floor"], "high")
         self.assertEqual(policy["large_change_lines"], 800)
-        self.assertEqual(policy["copilot_review"], {"automatic_deep": False})
+        # Not said by the file, so not decided by the file: the machine answers.
+        self.assertEqual(policy["copilot_review"], {"automatic_deep": None})
         self.assertTrue(source.endswith("sd-review.json"))
 
     def test_this_repository_ships_a_policy_that_validates(self) -> None:
@@ -755,7 +756,7 @@ class PipelineTests(ReviewFixture):
         self.assertEqual(result["status"], "clean")
         self.assertEqual(result["findings"], [])
         self.assertEqual(result["remote_reviews"]["copilot"], {
-            "automatic": False, "tier": "standard"})
+            "automatic": False, "tier": "standard", "policy": "deep", "source": "machine default", "repository": None})
 
     def test_automatic_deep_keeps_the_remote_review_report_shape(self) -> None:
         root = self.make_repo()
@@ -768,7 +769,7 @@ class PipelineTests(ReviewFixture):
                              "codex": sd_review.Completed(0, '{"findings": []}', "")})
         result = self.run_review(root, runner)
         self.assertEqual(result["remote_reviews"]["copilot"], {
-            "automatic": True, "tier": "deep"})
+            "automatic": True, "tier": "deep", "policy": "deep", "source": "repository", "repository": True})
 
     def test_a_failing_gate_stops_before_any_provider(self) -> None:
         root = self.make_repo()
@@ -1949,6 +1950,112 @@ class TimingPlanTests(ReviewFixture):
         self.assertEqual(actual["timing"], report["timing"])
         self.assertEqual(actual["status"], "gate_failed")
         self.assertEqual(len(runner.calls), 1)
+
+
+class CopilotPolicyTests(ReviewFixture):
+    """Where `remote_reviews.copilot.automatic` comes from (sd:1328).
+
+    The machine's `sd.copilot_review` is the default for every repository;
+    unset it reads `deep`, so a repository with no `.github/sd-review.json`
+    gets Copilot on deep-tier changes and on nothing else. The repository's
+    own `copilot_review.automatic_deep` wins when the file names it, and a
+    file that does not name it inherits. `--explain` says which one answered.
+    """
+
+    def machine(self, value: str | None) -> None:
+        path = self.registry_home / ".config" / sd_review.sd_lib.CONFIG_RELATIVE_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        config = {"config": {"sd": {"external_reviews": "configured"}}}
+        if value is not None:
+            config["config"]["sd"]["copilot_review"] = value
+        path.write_text(json.dumps(config))
+
+    def repo(self, name: str, *, deep: bool, policy: dict[str, Any] | None = None) -> pathlib.Path:
+        """A repository whose one change routes deep (a sensitive path under
+        the built-in policy) or standard, with or without a policy file."""
+        root = self.make_repo(name)
+        if policy is not None:
+            (root / ".github").mkdir(exist_ok=True)
+            (root / ".github" / "sd-review.json").write_text(json.dumps(policy))
+        if deep:
+            (root / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+            (root / ".github" / "workflows" / "ci.yml").write_text("on: push\n")
+        else:
+            (root / "src.py").write_text("x = 1\n")
+        return root
+
+    def copilot(self, root: pathlib.Path, **overrides: Any) -> dict[str, Any]:
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""),
+                             "codex": sd_review.Completed(0, '{"findings": []}', "")})
+        result = sd_review.review(root, namespace(**overrides), runner, self.environment(), self.chatgpt_home())
+        return result["remote_reviews"]["copilot"]
+
+    def test_unset_machine_and_no_file_requests_on_deep_and_not_on_standard(self) -> None:
+        self.machine(None)
+        deep = self.copilot(self.repo("deep", deep=True))
+        self.assertEqual(deep, {"automatic": True, "tier": "deep",
+                                "policy": "deep", "source": "machine default", "repository": None})
+        standard = self.copilot(self.repo("standard", deep=False))
+        self.assertEqual(standard, {"automatic": False, "tier": "standard",
+                                    "policy": "deep", "source": "machine default", "repository": None})
+
+    def test_machine_never_requests_nothing_even_on_deep(self) -> None:
+        self.machine("never")
+        deep = self.copilot(self.repo("deep", deep=True))
+        self.assertEqual(deep, {"automatic": False, "tier": "deep",
+                                "policy": "never", "source": "machine config", "repository": None})
+
+    def test_machine_always_requests_on_standard(self) -> None:
+        self.machine("always")
+        standard = self.copilot(self.repo("standard", deep=False))
+        self.assertEqual(standard, {"automatic": True, "tier": "standard",
+                                    "policy": "always", "source": "machine config", "repository": None})
+
+    def test_machine_always_still_skips_a_change_nobody_local_reviews(self) -> None:
+        self.machine("always")
+        root = self.make_repo("docs-only")
+        (root / "README.md").write_text("seed\nmore\n")
+        skipped = self.copilot(root)
+        self.assertEqual(skipped["tier"], "skip")
+        self.assertEqual(skipped["policy"], "always")
+        self.assertFalse(skipped["automatic"])
+
+    def test_a_repository_file_that_names_the_key_overrides_the_machine(self) -> None:
+        self.machine("always")
+        off = self.copilot(self.repo("off", deep=True, policy={"copilot_review": {"automatic_deep": False}}))
+        self.assertEqual(off, {"automatic": False, "tier": "deep",
+                               "policy": "never", "source": "repository", "repository": False})
+        self.machine("never")
+        on = self.copilot(self.repo("on", deep=True, policy={"copilot_review": {"automatic_deep": True}}))
+        self.assertEqual(on, {"automatic": True, "tier": "deep",
+                              "policy": "deep", "source": "repository", "repository": True})
+
+    def test_a_repository_file_without_the_key_inherits_the_machine(self) -> None:
+        self.machine("never")
+        inherited = self.copilot(self.repo("inherit", deep=True, policy={"severity_floor": "high"}))
+        self.assertEqual(inherited["source"], "machine config")
+        self.assertEqual(inherited["policy"], "never")
+        self.assertFalse(inherited["automatic"])
+        policy, _ = sd_review.load_policy(self.tmp / "inherit")
+        self.assertIsNone(policy["copilot_review"]["automatic_deep"])
+
+    def test_explain_names_the_policy_and_its_source(self) -> None:
+        self.machine("always")
+        root = self.repo("explained", deep=False)
+        runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", "")})
+        explained = sd_review.review(root, namespace(explain=True), runner, self.environment(), self.chatgpt_home())
+        self.assertEqual(explained["status"], "explained")
+        self.assertEqual(explained["remote_reviews"]["copilot"], {
+            "automatic": True, "tier": "standard", "policy": "always", "source": "machine config", "repository": None})
+        self.assert_no_session_started(runner)
+        out = io.StringIO()
+        sd_review.render(explained, out)
+        self.assertIn("copilot     always (machine config)", out.getvalue())
+
+    def test_a_malformed_machine_value_stops_the_run(self) -> None:
+        self.machine("sometimes")
+        with self.assertRaises(sd_review.sd_lib.ConfigError):
+            self.copilot(self.repo("bad", deep=True))
 
 
 if __name__ == "__main__":
