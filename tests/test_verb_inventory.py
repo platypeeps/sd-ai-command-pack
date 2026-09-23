@@ -16,6 +16,10 @@ is to convert *another* checkout must be able to name it. Those are temporary
 and deleted at steps 7 and 11.
 """
 
+# This module reads the whole checkout, so no changed-files fast path may
+# narrow it away. `.github/scripts/select-tests.py` greps for the line below.
+# select-tests: always-run
+
 from __future__ import annotations
 
 import ast

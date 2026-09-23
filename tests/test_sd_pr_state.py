@@ -79,6 +79,9 @@ PROTECTED = {
 }
 
 REPO_SETTINGS = {
+    # The operator's own repository: `admin`, so a 404 on classic
+    # protection is GitHub saying there is none, not that it may not look.
+    "permissions": {"admin": True},
     "default_branch": "main",
     "squash_merge_commit_title": "PR_TITLE",
     "squash_merge_commit_message": "PR_BODY",

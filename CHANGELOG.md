@@ -51,6 +51,19 @@
 
 ### Added
 
+- **`opencode` reviews, through a new `opencode-json` reader (sd:1329).**
+  The shipped registry gains an `opencode` entry third on the reviewer
+  order, after `codex` and `claude`. `opencode run -m provider/model`
+  serves every vendor the client holds a credential for, so the entry
+  pins a model and `vendor`/`bill` describe that pin -- `openai/gpt-5.5`
+  on the ChatGPT credential as shipped; repoint all three together in the
+  machine registry. The session runs as a private agent carried in
+  `OPENCODE_CONFIG_CONTENT` whose permission map is default-deny with a
+  read-only allow-list, so the tools of the operator's still-loaded global
+  `opencode.json` MCP servers are refused without being named (measured on
+  1.18.30, where a by-name denylist had let `github_get_me` run); no event
+  names the model that answered -- both recorded in `bin/sd_opencode.py`.
+
 - **A Drive mirror defaults to `Briefs/<repo>`.** `drive=dict()` is now a
   complete designation: it mirrors to `Briefs/<repo>` in My Drive, the same
   shape the vault uses, so the copies agree on where a brief lives. The drain
@@ -169,6 +182,19 @@
   action this tool is allowed to take.
 
 ### Fixed
+
+- **The Dependabot guard reader inspects every `github-actions` entry, not
+  the first one.** `guard_state()` stopped at the first matching entry and
+  reported that entry's verdict as though it covered the file, so a consumer
+  whose second entry was unguarded or carried a stale wording read `same` --
+  and nothing in the output distinguished "one entry, checked" from "three
+  entries, one checked". The verdict is now folded from every entry, worst
+  first, so `differs` reaches the `--force` gate and `absent` reaches the
+  installer. `rendered()` guards every entry for the same reason, in the
+  same change: a read that folds all of them and a write that touches one
+  have no fixed point, and `--check` compares that render with the tracked
+  bytes. `guard_states()` is the enumerated form, for a census that has to
+  say how many entries it read.
 
 - **sd-review says what a failed gate lacked, and no more.** A linked
   worktree of this pack has no `.venv`, and `make check` is the gate

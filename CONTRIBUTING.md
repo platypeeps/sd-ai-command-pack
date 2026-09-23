@@ -9,6 +9,17 @@ make setup
 ```
 
 This command creates `.venv`, installs the pinned requirements, and provisions the shared library.
+It also copies the two requirements files into `.venv/sd-requirements/`, which records what the environment was provisioned from.
+A linked worktree with no `.venv` borrows the main checkout's, and borrows it only while those copies match its own requirements files.
+A worktree that moved a pin is refused by name and told to run `make setup VENV=.venv` for an environment of its own.
+A `.venv` that is a symlink into another checkout is the same borrow under a local name, so it is compared too, on a proven mismatch only.
+A symlinked environment that records nothing is used anyway, and `make` prints one note naming the checkout to re-provision (sd:1349).
+`make setup` detaches a symlink at the path it provisions, and says what it detached; the environment the link pointed at is left alone.
+It also removes the record before it changes anything and republishes it only after the last step, so a provision that failed leaves no record to match.
+Because a missing record would otherwise mean both "provisioned before this was recorded" and "being built right now", `make setup` writes `.venv/sd-provisioning` before its first change and removes it after the record is published.
+An environment carrying that file is refused by every path -- the borrow, the symlink and a real local `.venv` alike -- and the refusal names the checkout to run `make setup` in, which rewrites the marker and clears it on success.
+`bin/sd_lib.py` and `hooks/pre-commit` read the same file and treat such an environment as absent.
+A `.venv` the checkout carries as a real directory is its own environment and is never compared against the record.
 The requirements files use `--require-hashes` locally and in CI.
 To update a dependency, change its pin and run the compile command from that file's header:
 

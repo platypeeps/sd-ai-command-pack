@@ -82,6 +82,16 @@ done <"$tracked_list"
 printf 'diagnostic: installer coverage over %s tracked file(s) (floor %s)\n' \
   "$file_count" "$MIN_FILES" >&2
 
+# What is enumerated here is what the report covers. What was *traced* was
+# decided by `.coveragerc` [run] include before this script ran, and that is a
+# hand-written list. A path this gate measures that coverage never traced
+# carries no data, never reaches the report, and the remaining files then score
+# 100% on their own -- green, over less than it says. Compare the two.
+if ! "$PYTHON_BIN" "$REPO_ROOT/.github/scripts/check-coverage-include.py" \
+  --root "$REPO_ROOT" --paths-from "$tracked_list"; then
+  exit 1
+fi
+
 # Run the report once and reuse it for both the pass/fail gate and the
 # statement floor. Reporting twice would let a flaky read pass one and fail the
 # other, and it doubles the work for no gain.

@@ -101,10 +101,10 @@ class TheShippedRegistry(unittest.TestCase):
         self.assertNotEqual(author.name, reviewer.name)
         self.assertNotEqual(author.vendor, reviewer.vendor)
 
-    def test_only_codex_and_claude_enter_the_default_reviewer_order(self) -> None:
+    def test_only_the_local_clients_enter_the_default_reviewer_order(self) -> None:
         self.assertEqual(
             [provider.name for provider in self.registry.order("reviewer")],
-            ["codex", "claude"],
+            ["codex", "claude", "opencode"],
         )
         for name in ("minimax", "baseten"):
             with self.subTest(provider=name):
@@ -224,8 +224,8 @@ class TheTwoReadersAgree(unittest.TestCase):
         from sd_db.workflow import StaleItem  # noqa: PLC0415
 
         original = SHIPPED.read_text()
-        legacy = original.replace("reviewer: [codex, claude]",
-            "reviewer: [codex, claude, minimax, baseten]")
+        legacy = original.replace("reviewer: [codex, claude, opencode]",
+            "reviewer: [codex, claude, opencode, minimax, baseten]")
         self.assertNotEqual(legacy, original)
         with tempfile.TemporaryDirectory() as directory:
             path = pathlib.Path(directory) / "providers.yaml"
@@ -235,7 +235,7 @@ class TheTwoReadersAgree(unittest.TestCase):
             with closing(connect(database)) as connection:
                 baseline = provider_controls.snapshot(connection, path=path)
                 enabled = {entry["name"]: entry["enabled"] for entry in baseline["providers"]}
-                orders = {**baseline["orders"], "reviewer": ["codex", "claude"]}
+                orders = {**baseline["orders"], "reviewer": ["codex", "claude", "opencode"]}
                 changed = provider_controls.configure(connection, enabled=enabled, orders=orders,
                     expected_revision=baseline["revision"], path=path, who="fixture")
                 adapted = sd_registry.read(path, connection=connection)
@@ -245,7 +245,7 @@ class TheTwoReadersAgree(unittest.TestCase):
                 with (unittest.mock.patch.object(sd_registry._OPENER, "open", side_effect=AssertionError("no provider calls")),
                       unittest.mock.patch.object(sd_registry._DIRECT_OPENER, "open", side_effect=AssertionError("no provider calls"))):
                     self.assertEqual([entry.name for entry in sd_registry.select_reviewers(adapted, consent=consent)],
-                        ["codex", "claude"])
+                        ["codex", "claude", "opencode"])
                     for name in ("minimax", "baseten"):
                         with self.subTest(provider=name):
                             self.assertTrue(adapted.providers[name].enabled)
@@ -263,7 +263,7 @@ class TheTwoReadersAgree(unittest.TestCase):
                     expected_revision=fresh["revision"], path=path, who="fixture")
                 self.assertEqual(restored["providers"], baseline["providers"])
                 self.assertEqual([entry.name for entry in sd_registry.read(path, connection=connection).order("reviewer")],
-                    ["codex", "claude", "minimax", "baseten"])
+                    ["codex", "claude", "opencode", "minimax", "baseten"])
 
 
 class TheReasoningControls(unittest.TestCase):
@@ -965,7 +965,7 @@ class TheReviewerChain(unittest.TestCase):
         ]
 
     def test_with_everything_allowed_the_chain_is_the_registry_order(self) -> None:
-        self.assertEqual(self.names(), ["codex", "claude"])
+        self.assertEqual(self.names(), ["codex", "claude", "opencode"])
 
     def test_unranked_reviewers_never_enter_automatic_fallback(self) -> None:
         self.assertEqual(self.names(author_vendors=("openai", "anthropic")), [])
@@ -973,7 +973,7 @@ class TheReviewerChain(unittest.TestCase):
             [candidate.provider.name for candidate in sd_registry.reviewer_chain(
                 self.registry, consent=self.all,
             )],
-            ["codex", "claude"],
+            ["codex", "claude", "opencode"],
         )
 
     def test_an_entry_of_the_author_s_vendor_is_skipped(self) -> None:
@@ -990,7 +990,7 @@ class TheReviewerChain(unittest.TestCase):
         for a capped bill it carries the month's total the caller measured
         (sd:788 slice 3: `capped_bills` is bill name to exposure line)."""
         self.registry.providers["baseten"] = replace(
-            self.registry.providers["baseten"], ranks={"reviewer": 2},
+            self.registry.providers["baseten"], ranks={"reviewer": 3},
         )
         chain = sd_registry.reviewer_chain(
             self.registry,
@@ -1000,8 +1000,9 @@ class TheReviewerChain(unittest.TestCase):
         )
         skipped = {c.provider.name: c.reason for c in chain if not c.eligible}
         self.assertIn("openai", skipped["codex"])
+        self.assertIn("openai", skipped["opencode"])
         self.assertEqual(skipped["baseten"], f"baseten is billed to baseten: {AT_CAP}")
-        self.assertEqual(len(chain), 3)
+        self.assertEqual(len(chain), 4)
 
     def test_consent_bounds_the_chain_absolutely(self) -> None:
         """Two allowed, the author's vendor is one of them: one candidate, and

@@ -44,6 +44,10 @@ covers tracked, non-prose files, so an untracked scratch file and a page under
 refuse the absence of one, which is the part that was drifting.
 """
 
+# This module reads the whole checkout, so no changed-files fast path may
+# narrow it away. `.github/scripts/select-tests.py` greps for the line below.
+# select-tests: always-run
+
 from __future__ import annotations
 
 import dataclasses
@@ -579,7 +583,10 @@ class TheFastPathCannotSkipThisGuard(unittest.TestCase):
 
     def test_a_narrowed_run_over_an_unrelated_path_still_runs_this_module(self) -> None:
         selector = self.selector()
-        self.assertIn(self.MODULE, selector.ALWAYS_RUN)
+        declared = selector.always_run(selector.test_modules(REPO_ROOT))
+        self.assertIn(self.MODULE, declared,
+                      "this module no longer declares itself whole-tree; the "
+                      f"line the selector greps for is {selector.ALWAYS_RUN_MARKER!r}")
         probes = self.probes()
         self.assertNotEqual(probes, [], "no tracked path under bin/ is unrelated")
         for probe in probes:
