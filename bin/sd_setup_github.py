@@ -236,7 +236,7 @@ def setup_github(
     existing = _read(target)
     dependabot = root / sd_setup_guard.DEPENDABOT_RELATIVE_PATH
     current = _read(dependabot)
-    found = sd_setup_guard.guard_state(current)
+    found = sd_setup_guard.guard_state(current, sd_setup_guard.DEFAULT_ACTION)
 
     result: dict[str, Any] = {
         "repo": str(root),
