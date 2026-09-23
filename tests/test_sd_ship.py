@@ -839,6 +839,67 @@ roles:
         self.assertEqual(
             operation.unreviewed_shipped_surface(head, _git(self.root, "rev-parse", "HEAD")), [])
 
+    def test_a_move_out_of_the_shipped_surface_still_names_its_source(self):
+        """A rename reports its destination only, and the source vanished.
+
+        Rename detection is git's default, and `--name-only` renders a
+        detected rename as the destination path alone. So `git mv bin/tool.py
+        docs/tool.py` yielded exactly `docs/tool.py`, the prefix filter
+        dropped it as prose, and the gate cleared on a commit that deleted a
+        shipped file the reviewer had read. `--no-renames` is what puts the
+        deletion back in the set. The first assertion pins the premise: if
+        git ever stops detecting the rename, this test has to say so rather
+        than pass for the wrong reason.
+        """
+        operation = self.operation()
+        shipped = self.root / "bin/tool.py"
+        shipped.parent.mkdir(parents=True, exist_ok=True)
+        shipped.write_text("A = 1\nB = 2\nC = 3\nD = 4\nE = 5\n")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "ship a tool\n\nAuthored-with: human")
+        base = _git(self.root, "rev-parse", "HEAD")
+        (self.root / "docs").mkdir(exist_ok=True)
+        _git(self.root, "mv", "bin/tool.py", "docs/tool.py")
+        _git(self.root, "commit", "-m", "move it out of the surface\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(
+            _git(self.root, "diff", "--name-only", base, head).splitlines(), ["docs/tool.py"],
+            "the premise: git renders a detected rename as its destination alone")
+        self.assertEqual(operation.unreviewed_shipped_surface(base, head), ["bin/tool.py"])
+
+    def test_a_path_the_repository_never_skips_stays_in_the_surface(self):
+        """`UNSHIPPED_PREFIXES` is this gate's blanket; `never_skip` is the
+        repository's deny-list over it.
+
+        `bin/sd_route.py` makes that list beat `docs_skip` outright -- a change
+        touching one of its paths is never routed to `skip`, which is the whole
+        reason the allow-list is safe to widen. A merge gate that exempted
+        those paths anyway would skip exactly what the repository said may not
+        be skipped. The default carries `docs/spec/**` even when the file does
+        not name the key, and a file that names its own list is read instead
+        of the constant.
+        """
+        self.enable_automatic_copilot()
+        operation = self.operation()
+        base = _git(self.root, "rev-parse", "HEAD")
+        for name in ("docs/spec/contract.md", "docs/note.md", "docs/handbook/how.md"):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("prose\n")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "spec and prose\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(operation.unreviewed_shipped_surface(base, head),
+                         ["docs/spec/contract.md"])
+        policy = self.root / ".github/sd-review.json"
+        policy.write_text(json.dumps({
+            "sensitive": ["src.py"],
+            "never_skip": ["docs/handbook/**"],
+            "copilot_review": {"automatic_deep": True},
+        }))
+        self.assertEqual(operation.unreviewed_shipped_surface(base, head),
+                         ["docs/handbook/how.md"])
+
     def test_later_push_accepts_the_single_automatic_review_on_the_new_head(self):
         self.enable_automatic_copilot()
         self.prepare()
