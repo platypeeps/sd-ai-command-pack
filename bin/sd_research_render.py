@@ -72,7 +72,7 @@ except ImportError:
 
 from sd_lib import GIT_TIMEOUT_SECONDS
 from sd_research_fonts import FONTS_CSS
-from sd_research_publish import publish
+from sd_research_publish import publish, repo_home
 from sd_research_tokens import TOKENS_CSS
 
 CSS = TOKENS_CSS
@@ -229,15 +229,17 @@ def main():
     # same trust level as this script, and the format needs execution: at least
     # one live config builds its DOCS list with a loop.
     exec(compile(open(conf).read(), conf, "exec"), ns)  # nosec B102
-    project = ns.get("PROJECT", os.path.basename(repo).split("-")[0].upper())
+    # The fallback badge comes from the repository's name, not the checkout's:
+    # a worktree is called after its branch, and its name is nobody's project.
+    project = ns.get("PROJECT", repo_home(Path(repo)).name.split("-")[0].upper())
     print("%s  ->  docs/dashboard/" % os.path.basename(repo))
     for cfg in ns["DOCS"]:
         build_one(repo, cfg, project)
 
     # Publication is the default, not a step the user asks for: a document
     # nobody can find was not delivered. Registration is idempotent and
-    # enqueueing overwrites, so re-rendering costs nothing and leaves no
-    # duplicates.
+    # enqueueing skips what is unchanged, so re-rendering costs nothing and
+    # leaves no duplicates.
     for line in publish(Path(repo), project, ns["DOCS"]):
         print("  %s" % line)
 

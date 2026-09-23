@@ -130,7 +130,7 @@ records the differences that are on purpose. Both are in
 
    For a document carrying a `notion=` or `drive=` key, `render` left a request
    in `~/.claude/pending-mirror-syncs/`. Drain it: read each JSON file, mirror
-   that document to the container the request names — through the Notion
+   the request's `content` to the container the request names — through the Notion
    connector for `destination: notion`, the Google Workspace connector for
    `destination: drive` — in the shape `references/conventions.md` gives.
    A request that names an existing page or file updates that one. A request
@@ -138,8 +138,10 @@ records the differences that are on purpose. Both are in
    title, adopts a match, and creates one only when nothing matches. The
    created id is then written twice, in this order: into the request file, then
    into that document's `notion=` or `drive=` entry in `research.conf.py`, as
-   `page=` for Notion and `file=` for Drive. Delete the request only after both
-   writes succeed. If the second write fails, report it and leave the request
+   `page=` for Notion and `file=` for Drive. Run `sd-research-kit delivered`
+   only after both writes succeed; it removes the request only while the file
+   is still that generation, so a render that queued newer content while the
+   drain ran keeps its request. Never delete the request by hand. If the second write fails, report it and leave the request
    in place carrying the id; the queue still says work is owed, and the next
    drain updates that page instead of creating one. A `notion=True` designation
    is amended into `notion=dict(page="<id>")`; a `None` or `False` one enqueues
