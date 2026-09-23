@@ -867,9 +867,19 @@ if __name__ == "__main__":
 #:
 #: The list is the whole population, read out of this file's own history --
 #: `git rev-list --all --full-history -- bin/sd_research_publish.py`, every
-#: blob parsed for its `HOOK` assignment. Two distinct bodies ever reached
-#: `main`: the one `05d4b9d3` shipped, and the one `fa5f5576` replaced it with
-#: and `47d4d147` still carried. They differ in one comment word.
+#: blob parsed for its `HOOK` assignment. Two bodies were released: the one
+#: `05d4b9d3` shipped, and the one `fa5f5576` replaced it with and `47d4d147`
+#: still carried. They differ in one comment word.
+#:
+#: The other two are this branch's own. A branch owns the predecessors it
+#: creates: each of its commits is a revision somebody can check out and run
+#: `init-hook` from, and each is history the moment the branch lands, so a
+#: body left off here is an installation this verb refuses for the rest of its
+#: life. "Released as of today" is the wrong reading and does not survive its
+#: own criterion -- it is the reading that left `4d20574b`'s body off, and the
+#: review that caught it ran the installer against the body of the very
+#: revision it was reviewing. A body from a branch that has not landed belongs
+#: to that branch, which adds it when it does.
 #:
 #: Downward only in one direction: a body leaves this tuple when no machine can
 #: still be carrying it, which is not a thing this repository can know. Assume
@@ -996,6 +1006,216 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+''',
+    # `4d20574b`, this branch: one source under three names, with the
+    # trigger read from `argv[0]`.
+    '''#!/usr/bin/env python3
+# Re-render this research repo when git changes a document.
+#
+# Installed by `sd-research-kit init-hook` under three names at once:
+# post-commit, post-merge and post-checkout. A pull and a branch switch change
+# the documents as surely as a commit does, and a `build/` left from the old
+# tree is the stale render this exists to prevent. Post-commit and not
+# pre-commit: `build/` is generated and not committed, so there is nothing to
+# stage, and the commit is the revision a queued mirror should name.
+#
+# One source, three names, and the trigger is read from `argv[0]`, because each
+# one has to ask git a different question. `diff-tree ... HEAD` is
+# commit-shaped: it prints nothing at all for a merge commit, and a checkout's
+# HEAD says nothing about what the checkout moved. So a copy of the
+# post-commit body under the other two names would never render.
+#
+# Rendered output goes stale the moment its source changes, and a stale page is
+# worse than a missing one because it looks current. This is what keeps the
+# dashboard's Documents tab a statement about the render rather than about who
+# remembered to run it.
+#
+# Never fails the git command. The commit, the merge or the checkout is already
+# made when this runs, so exiting non-zero would report a failure for work that
+# succeeded. A render that cannot run says so and leaves git alone.
+#
+# `SD_SKIP_RENDER=1` skips it, for all three.
+
+import os
+import shutil
+import subprocess
+import sys
+
+
+def diff_argv(trigger, argv):
+    # The git command that names what this trigger moved, or None for an
+    # invocation that renders nothing. None rather than an empty list: "ask
+    # git nothing" and "git answered nothing" are different, and only the
+    # second is a statement about the tree.
+    if trigger == "post-commit":
+        # Only when the commit carried a document. A commit touching nothing
+        # but the config or a script still renders: both change the output.
+        return ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]
+    if trigger == "post-merge":
+        # HEAD is the merge commit and `diff-tree` prints nothing for one, so
+        # the post-commit question is unusable here. ORIG_HEAD is where this
+        # branch stood before the merge, which is what the pull changed from.
+        return ["diff", "--name-only", "ORIG_HEAD", "HEAD"]
+    if trigger == "post-checkout":
+        # git passes the previous HEAD, the new HEAD, and 1 for a branch
+        # checkout or 0 for a file checkout. A file checkout restores paths
+        # inside one tree and moves no branch, and `git checkout <current>`
+        # moves nothing at all; neither can have changed a document.
+        if len(argv) < 4 or argv[3] != "1" or argv[1] == argv[2]:
+            return None
+        return ["diff", "--name-only", argv[1], argv[2]]
+    # An unrecognised name is not this hook's trigger. Guessing would run a
+    # render on a git event nobody installed it for.
+    return None
+
+
+def main(argv):
+    if os.environ.get("SD_SKIP_RENDER"):
+        return 0
+    trigger = os.path.basename(argv[0]) if argv else ""
+    query = diff_argv(trigger, argv)
+    if query is None:
+        return 0
+    try:
+        root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.strip()
+        if not os.path.isfile(os.path.join(root, "research.conf.py")):
+            return 0
+        changed = subprocess.run(
+            ["git"] + query,
+            cwd=root, capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    if not any(name.endswith((".md", ".py")) for name in changed):
+        return 0
+
+    kit = shutil.which("sd-research-kit")
+    if kit is None:
+        print("%s: sd-research-kit not on PATH; build/ is now stale" % trigger,
+              file=sys.stderr)
+        return 0
+    try:
+        subprocess.run([kit, "render"], cwd=root, timeout=600, check=True)
+    except (OSError, subprocess.SubprocessError):
+        print("%s: render failed; build/ is now stale" % trigger, file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
+''',
+    # `dd14d501`, this branch: a file checkout measured against the
+    # working tree, which `8b575695` replaced with an unconditional
+    # render.
+    '''#!/usr/bin/env python3
+# Re-render this research repo when git changes a document.
+#
+# Installed by `sd-research-kit init-hook` under three names at once:
+# post-commit, post-merge and post-checkout. A pull, a branch switch and a
+# checkout of one path change the documents as surely as a commit does, and a
+# `build/` left from the old tree is the stale render this exists to prevent.
+# Post-commit and not pre-commit: `build/` is generated and not committed, so
+# there is nothing to stage, and the commit is the revision a queued mirror
+# should name.
+#
+# One source, three names, and the trigger is read from `argv[0]`, because each
+# one has to ask git a different question. `diff-tree ... HEAD` is
+# commit-shaped: it prints nothing at all for a merge commit, and a checkout's
+# HEAD says nothing about what the checkout moved. So a copy of the
+# post-commit body under the other two names would never render.
+#
+# Rendered output goes stale the moment its source changes, and a stale page is
+# worse than a missing one because it looks current. This is what keeps the
+# dashboard's Documents tab a statement about the render rather than about who
+# remembered to run it.
+#
+# Never fails the git command. The commit, the merge or the checkout is already
+# made when this runs, so exiting non-zero would report a failure for work that
+# succeeded. A render that cannot run says so and leaves git alone.
+#
+# `SD_SKIP_RENDER=1` skips it, for all three.
+
+import os
+import shutil
+import subprocess
+import sys
+
+
+def diff_argv(trigger, argv):
+    # The git command that names what this trigger moved, or None for an
+    # invocation that renders nothing. None rather than an empty list: "ask
+    # git nothing" and "git answered nothing" are different, and only the
+    # second is a statement about the tree.
+    if trigger == "post-commit":
+        # Only when the commit carried a document. A commit touching nothing
+        # but the config or a script still renders: both change the output.
+        return ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"]
+    if trigger == "post-merge":
+        # HEAD is the merge commit and `diff-tree` prints nothing for one, so
+        # the post-commit question is unusable here. ORIG_HEAD is where this
+        # branch stood before the merge, which is what the pull changed from.
+        return ["diff", "--name-only", "ORIG_HEAD", "HEAD"]
+    if trigger == "post-checkout":
+        # git passes the previous HEAD, the new HEAD, and 1 for a branch
+        # checkout or 0 for a file checkout. A branch checkout has a range,
+        # and the range is the only thing that names what it moved.
+        if len(argv) >= 4 and argv[3] == "1" and argv[1] != argv[2]:
+            return ["diff", "--name-only", argv[1], argv[2]]
+        # Everything else this trigger fires for moved no branch, so its two
+        # revisions are equal and there is no range to ask about --  but
+        # `git checkout <rev> -- doc.md` replaces a document's contents all
+        # the same, which is exactly the render this hook exists for. The
+        # honest question is then the working tree against HEAD, which names
+        # what the checkout just wrote. It also names unrelated uncommitted
+        # edits, so this renders slightly more often than it must; a render
+        # that finds nothing changed is cheap, and a mirror that silently
+        # keeps the superseded text is not.
+        return ["diff", "--name-only", "HEAD"]
+    # An unrecognised name is not this hook's trigger. Guessing would run a
+    # render on a git event nobody installed it for.
+    return None
+
+
+def main(argv):
+    if os.environ.get("SD_SKIP_RENDER"):
+        return 0
+    trigger = os.path.basename(argv[0]) if argv else ""
+    query = diff_argv(trigger, argv)
+    if query is None:
+        return 0
+    try:
+        root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.strip()
+        if not os.path.isfile(os.path.join(root, "research.conf.py")):
+            return 0
+        changed = subprocess.run(
+            ["git"] + query,
+            cwd=root, capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    if not any(name.endswith((".md", ".py")) for name in changed):
+        return 0
+
+    kit = shutil.which("sd-research-kit")
+    if kit is None:
+        print("%s: sd-research-kit not on PATH; build/ is now stale" % trigger,
+              file=sys.stderr)
+        return 0
+    try:
+        subprocess.run([kit, "render"], cwd=root, timeout=600, check=True)
+    except (OSError, subprocess.SubprocessError):
+        print("%s: render failed; build/ is now stale" % trigger, file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
 ''',
 )
 

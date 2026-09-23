@@ -1085,13 +1085,18 @@ class InitHookInstallTests(unittest.TestCase):
     def test_every_superseded_body_is_one_this_pack_released(self) -> None:
         """The list is a claim about history, so it is checked against history.
 
-        These digests are of the `HOOK` value at the two revisions that
-        carried it on `main`, read out with
+        These digests are of the `HOOK` value at every revision that has
+        carried one, read out with
         `git rev-list --all --full-history -- bin/sd_research_publish.py`.
         Recorded rather than recomputed from the file: the point is to catch
         the day a reformat, a stripped trailing space or a tidy-up edits a
         body here, which would leave the constant self-consistent and stop it
         matching the bytes on any machine.
+
+        A commit that changes `HOOK` adds the body it replaces, and this set
+        is where it is noticed if it does not. The two from this branch are
+        here because a branch owns the predecessors it creates: a review ran
+        the installer against the base revision's own hook and it was refused.
         """
 
         module = load_publish()
@@ -1102,6 +1107,11 @@ class InitHookInstallTests(unittest.TestCase):
             # `fa5f5576`, "publish: add Google Drive as a destination, on
             # Notion's terms (#1091)", still the body at `47d4d147`.
             "01f8e364291b382813e7eee648ca36033880feca5b7f7b9afcb61a0ea1f9223b",
+            # `4d20574b`, this branch: three triggers, one source.
+            "6d81532bca2b30dabfdedee4a5bd022c8eb0f181599d0580753b825d665cfb89",
+            # `dd14d501`, this branch: a file checkout measured against the
+            # working tree, replaced by `8b575695`.
+            "aae11a2a3b271585039918aad528278ff5aebf617dd32a1ca52947d5114b7a3e",
         }
         digests = {hashlib.sha256(body.encode("utf-8")).hexdigest()
                    for body in module.SUPERSEDED_HOOKS}
