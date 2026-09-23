@@ -15,6 +15,9 @@ Instructions for AI assistants working in this repository.
   That file is the one statement of the rule and holds the review table every
   review point reads its cap from; this bullet states nothing of its own, so
   there is no second copy to drift.
+- Before dispatching a worker or opening a second checkout, follow
+  [WORKFLOW.md § Parallel work](WORKFLOW.md#parallel-work). That section is
+  the one statement of the rule; this bullet states nothing of its own.
 - `skills/**` holds the one copy of the payload. Nothing renders into this
   repository, so there are no copies to keep synchronized: change the skill and
   you have changed the

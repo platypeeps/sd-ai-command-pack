@@ -35,6 +35,8 @@ First verify the actual scope and inspect its check output.
 A slice may ship with later item criteria open.
 Only `--deliver` claims the whole item; every acceptance criterion then needs evidence.
 Small changes need no placeholder work item.
+The checkout holds one writer: this session in its own worktree, or the runner in its clone.
+The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is the rule; do not ship from a checkout another session is writing in.
 
 1. **Commit enumerated paths only.**
    In the pack, system repository, and writing repository, follow `WORKFLOW.md` for the `Needed-by:` trailer.
