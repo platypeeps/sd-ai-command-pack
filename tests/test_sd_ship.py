@@ -700,6 +700,11 @@ roles:
         self.assertEqual(self.operation().state["copilot_reviews"][0]["status"], "completed")
 
     def test_later_push_keeps_one_automatic_review_but_requires_exact_head_review(self):
+        # The later push edits `src.py`, the shipped surface. It was an empty
+        # commit until sd:1366, which is now the case a reviewed ancestor
+        # clears (`test_a_docs_only_push_clears_the_gate_on_the_reviewed_ancestor`);
+        # what this test pins is the other half, that a shipped-surface change
+        # since the reviewed head still refuses the merge.
         self.enable_automatic_copilot()
         self.prepare()
         reviewed = _git(self.root, "rev-parse", "HEAD")
@@ -710,7 +715,9 @@ roles:
             "submitted_at": "2026-09-19T20:00:00Z",
             "body": "",
         }]
-        _git(self.root, "commit", "--allow-empty", "-m", "later fix\n\nAuthored-with: human")
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "add", "src.py")
+        _git(self.root, "commit", "-m", "later fix\n\nAuthored-with: human")
         head = _git(self.root, "rev-parse", "HEAD")
         repeated = self.prepare()
         self.assertNotEqual(head, reviewed)
@@ -721,7 +728,7 @@ roles:
         pull.checks = [{**row, "head_sha": head} for row in pull.checks]
         self.assertTrue(all(row["head_sha"] == head for row in pull.checks))
         with patch.object(ship.time, "sleep"):
-            with self.assertRaisesRegex(ship.Refusal, "not the exact merge head"):
+            with self.assertRaisesRegex(ship.Refusal, "change the shipped surface: src.py"):
                 self.merge()
         self.double.copilot_pending.clear()
         requested = self.prepare("--copilot-review", "request")
@@ -736,6 +743,183 @@ roles:
         }]
         with patch.object(ship.time, "sleep"):
             self.assertEqual(self.merge()["phase"], "merged")
+
+    def reviewed_at(self, head):
+        """The pull's one completed Copilot review, submitted against `head`."""
+        self.double.review_payload["reviews"] = [{
+            "user": {"login": "copilot-pull-request-reviewer[bot]"},
+            "commit_id": head,
+            "state": "COMMENTED",
+            "submitted_at": "2026-09-19T20:00:00Z",
+            "body": "",
+        }]
+
+    def test_a_docs_only_push_clears_the_gate_on_the_reviewed_ancestor(self):
+        """sd:1366. `prepare_copilot_review` buys one automatic review per pull
+        request and returns `not_repeated` at the new head; `copilot_reviewed_head`
+        demanded the exact merge head. A deep branch taking a second push could
+        satisfy neither, and answering a Copilot finding *is* a second push --
+        so the branch that did what the review asked was the one that could
+        never clear the gate on its own. A reviewed ancestor now stands when
+        the commits since it touch nothing outside `docs/`, and the merge
+        receipt carries a warning saying so rather than passing in silence.
+        """
+        self.enable_automatic_copilot()
+        self.prepare()
+        reviewed = _git(self.root, "rev-parse", "HEAD")
+        self.reviewed_at(reviewed)
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs/note.md").write_text("what the review asked for\n")
+        _git(self.root, "add", "docs/note.md")
+        _git(self.root, "commit", "-m", "answer the review\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        repeated = self.prepare()
+        self.assertNotEqual(head, reviewed)
+        self.assertEqual(repeated["copilot_review"]["decision"], "not_repeated")
+        pull = self.remote.pull(1)
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(len(self.double.copilot_requests), 1)
+        self.assertTrue(any(reviewed in warning and "ancestor of the merge head" in warning
+                            for warning in self.operation().state["warnings"]),
+                        self.operation().state.get("warnings"))
+
+    def test_an_exact_head_review_landing_mid_wait_drops_the_ancestor_note(self):
+        """`stable_copilot_material` reads the reviews once per attempt, so the
+        exact-head review can land between two of them. The merge receipt has
+        to say what the last reading found: an ancestor that cleared the first
+        attempt must not still be named after the second matched exactly."""
+        self.enable_automatic_copilot()
+        self.prepare()
+        reviewed = _git(self.root, "rev-parse", "HEAD")
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs/note.md").write_text("what the review asked for\n")
+        _git(self.root, "add", "docs/note.md")
+        _git(self.root, "commit", "-m", "answer the review\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.prepare()
+        base = {"user": {"login": "copilot-pull-request-reviewer[bot]"},
+                "state": "COMMENTED", "body": ""}
+        exact = {**base, "commit_id": head, "submitted_at": "2026-09-19T20:01:00Z"}
+        self.double.review_sequences["reviews"] = [
+            [{**base, "commit_id": reviewed, "submitted_at": "2026-09-19T20:00:00Z"}],
+            [exact], [exact],
+        ]
+        pull = self.remote.pull(1)
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual([warning for warning in (self.operation().state.get("warnings") or [])
+                          if "ancestor of the merge head" in warning], [])
+
+    def test_the_shipped_surface_is_every_path_outside_docs(self):
+        """The definition, stated once and checked against the tree rather than
+        asserted in prose. `tests/` is deliberately inside the surface: CI
+        re-running a test proves it passes, not that it still asserts what the
+        reviewer approved, and this pack's own caps and shell guard live there.
+        """
+        operation = self.operation()
+        base = _git(self.root, "rev-parse", "HEAD")
+        for name, body in (("docs/note.md", "prose\n"),
+                           ("tests/test_answer.py", "def test_answer():\n    assert True\n"),
+                           ("skills/thing/SKILL.md", "payload\n"),
+                           ("README.md", "root prose\n"),
+                           ("src/docs/inner.md", "nested\n")):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body)
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "a bit of everything\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(
+            operation.unreviewed_shipped_surface(base, head),
+            ["README.md", "skills/thing/SKILL.md", "src/docs/inner.md", "tests/test_answer.py"])
+        _git(self.root, "commit", "--allow-empty", "-m", "nothing at all\n\nAuthored-with: human")
+        self.assertEqual(
+            operation.unreviewed_shipped_surface(head, _git(self.root, "rev-parse", "HEAD")), [])
+
+    def test_a_move_out_of_the_shipped_surface_still_names_its_source(self):
+        """A rename reports its destination only, and the source vanished.
+
+        Rename detection is git's default, and `--name-only` renders a
+        detected rename as the destination path alone. So `git mv bin/tool.py
+        docs/tool.py` yielded exactly `docs/tool.py`, the prefix filter
+        dropped it as prose, and the gate cleared on a commit that deleted a
+        shipped file the reviewer had read. `--no-renames` is what puts the
+        deletion back in the set. The first assertion pins the premise: if
+        git ever stops detecting the rename, this test has to say so rather
+        than pass for the wrong reason.
+        """
+        operation = self.operation()
+        shipped = self.root / "bin/tool.py"
+        shipped.parent.mkdir(parents=True, exist_ok=True)
+        shipped.write_text("A = 1\nB = 2\nC = 3\nD = 4\nE = 5\n")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "ship a tool\n\nAuthored-with: human")
+        base = _git(self.root, "rev-parse", "HEAD")
+        (self.root / "docs").mkdir(exist_ok=True)
+        _git(self.root, "mv", "bin/tool.py", "docs/tool.py")
+        _git(self.root, "commit", "-m", "move it out of the surface\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(
+            _git(self.root, "diff", "--name-only", base, head).splitlines(), ["docs/tool.py"],
+            "the premise: git renders a detected rename as its destination alone")
+        self.assertEqual(operation.unreviewed_shipped_surface(base, head), ["bin/tool.py"])
+
+    def test_a_path_the_repository_never_skips_stays_in_the_surface(self):
+        """`UNSHIPPED_PREFIXES` is this gate's blanket; `never_skip` is the
+        repository's deny-list over it.
+
+        `bin/sd_route.py` makes that list beat `docs_skip` outright -- a change
+        touching one of its paths is never routed to `skip`, which is the whole
+        reason the allow-list is safe to widen. A merge gate that exempted
+        those paths anyway would skip exactly what the repository said may not
+        be skipped. The default carries `docs/spec/**` even when the file does
+        not name the key, and a file that names its own list is read instead
+        of the constant.
+        """
+        self.enable_automatic_copilot()
+        operation = self.operation()
+        base = _git(self.root, "rev-parse", "HEAD")
+        for name in ("docs/spec/contract.md", "docs/note.md", "docs/handbook/how.md"):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("prose\n")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "spec and prose\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(operation.unreviewed_shipped_surface(base, head),
+                         ["docs/spec/contract.md"])
+        policy = self.root / ".github/sd-review.json"
+        policy.write_text(json.dumps({
+            "sensitive": ["src.py"],
+            "never_skip": ["docs/handbook/**"],
+            "copilot_review": {"automatic_deep": True},
+        }))
+        self.assertEqual(operation.unreviewed_shipped_surface(base, head),
+                         ["docs/handbook/how.md"])
+
+    def test_a_policy_that_does_not_parse_refuses_the_gate_rather_than_guessing(self):
+        """The deny-list read is the first `load_policy` call in `sd-ship`, and
+        `PolicyError` is not in `main`'s caught tuple, so an unreadable file
+        would have escaped as a traceback. It refuses as a receipt instead --
+        and it refuses rather than falling back to the built-in list, because a
+        repository whose policy will not parse has said nothing this gate may
+        rely on.
+        """
+        self.enable_automatic_copilot()
+        operation = self.operation()
+        base = _git(self.root, "rev-parse", "HEAD")
+        (self.root / "docs").mkdir(exist_ok=True)
+        (self.root / "docs/note.md").write_text("prose\n")
+        _git(self.root, "add", "-A")
+        _git(self.root, "commit", "-m", "prose\n\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        (self.root / ".github/sd-review.json").write_text("{ not json")
+        with self.assertRaisesRegex(ship.Refusal, "review policy does not parse") as raised:
+            operation.unreviewed_shipped_surface(base, head)
+        self.assertEqual(raised.exception.workflow["blocker"]["code"], "review_policy_malformed")
 
     def test_later_push_accepts_the_single_automatic_review_on_the_new_head(self):
         self.enable_automatic_copilot()
