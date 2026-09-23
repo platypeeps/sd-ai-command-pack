@@ -127,7 +127,10 @@ Never allocate another review ID to reset spent passes or discard history.
 - `sd-ship merge --item ID --expected-head SHA --run RUN-ID --json` requires its exclusive runner lease and matching clone.
   Matching item/head and `runner_merge: auto` on the repository row are also required.
   An author assignment cannot use this authority.
-- Both merge forms require fresh sole-operator ownership, enforcing protection, current default branch, exact reviewed head, and passing required checks.
+- Both merge forms require fresh ownership, enforcing protection, current default branch, exact reviewed head, and passing required checks.
+  `runner_merge: auto` on the repository row answers the sole-operator question, and only that one.
+  Admin you do not hold, a fork, and a remote that cannot answer still refuse.
+  A merge the row allowed records that on its receipt as `row_authorized_merge`.
   GitHub's merge rules must also pass.
   A refusal returns `manualRequired: true`; it changes no protection and requests no reviewer.
 - `--watch --wait-seconds 900` starts one bounded fail-fast CI watcher.
