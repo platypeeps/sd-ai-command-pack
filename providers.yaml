@@ -28,6 +28,12 @@ providers:
              roles: [author, reviewer], reader: claude-json, env: [] }
   codex:   { start: "codex exec", vendor: openai,    bill: openai,
              roles: [author, reviewer], reader: codex-json, env: [OPENAI_API_KEY] }
+  # A client, not a vendor: `-m provider/model` picks the model per run, so
+  # the pin below is what `vendor` and `bill` describe (a ChatGPT credential
+  # in opencode's own auth store). Repoint the model in the machine registry
+  # and rename both to match; the reader refuses an entry that pins none.
+  opencode: { start: "opencode run", model: openai/gpt-5.5, vendor: openai, bill: openai,
+              roles: [reviewer], reader: opencode-json, env: [] }
   kimi:    { url: "https://api.moonshot.ai/v1", model: kimi-k3, vendor: moonshot,
              bill: moonshot, roles: [reviewer], max_tokens: 16384,
              price: { in: 3.00, out: 15.00 }, env: [MOONSHOT_API_KEY] }
@@ -42,4 +48,4 @@ providers:
 roles:
   author:   [claude, codex]
   # Unranked reviewer-capable entries require an explicit --provider request.
-  reviewer: [codex, claude]
+  reviewer: [codex, claude, opencode]

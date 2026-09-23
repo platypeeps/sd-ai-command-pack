@@ -104,6 +104,23 @@ def validate_additional_requests(passes: list[dict]) -> None:
             raise Refusal("additional review request does not bind its exact prior history and head")
 
 
+def full_branch_pass(entry: dict) -> bool:
+    """A pass that reviews the whole branch again rather than a fix delta.
+
+    Two things put a pass in this shape: an explicit post-cap request, and a
+    review binding that moved out from under a completed receipt. Both dispatch
+    with no `--base` and resume the complete prior history, so both are checked
+    by `full_branch_coverage` and both supersede what came before them.
+
+    The marker needs no separate authentication. What it selects is a rule that
+    digests the exact prefix it claims to cover -- `resume_report_digest` over
+    `review_history(passes[:index])` -- so a marker written onto a fix
+    verification refuses instead of passing, and tampering with a covered pass
+    changes the digest the covering pass has to carry.
+    """
+    return bool(entry.get("additional_review_request") or entry.get("review_binding_change"))
+
+
 def verification_link(previous: dict, report: dict) -> bool:
     """`report` verifies `previous`: same head reviewed, same evidence carried."""
     return (report.get("subject", {}).get("base") == previous.get("head")
@@ -238,7 +255,7 @@ class ItemHistory(ReviewHistory):
         # Only a successful one counts; a failed or reportless pass covers
         # nothing, and the pass that renews it is where the report arrives.
         covered = [index for index, entry in enumerate(passes)
-                   if entry.get("additional_review_request")
+                   if full_branch_pass(entry)
                    and completed_depth(self.stored_report(passes, index, report))]
         checkpoint = covered[-1] if covered else -1
         for index in range(len(passes)):
@@ -252,7 +269,7 @@ class ItemHistory(ReviewHistory):
     def validate_entry(self, passes: list[dict], index: int, current: dict, checkpoint: int) -> None:
         """One stored pass against its predecessor, by what the entry says it is."""
         entry = passes[index]
-        if entry.get("additional_review_request"):
+        if full_branch_pass(entry):
             # The pass being read now is always checked, as it always was.
             if index == len(passes) - 1 or completed_depth(current):
                 full_branch_coverage(current, self.aggregate_prefix(passes[:index]))

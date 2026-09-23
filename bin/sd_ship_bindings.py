@@ -12,11 +12,15 @@ from sd_ship_remote import Refusal
 BIN = pathlib.Path(__file__).resolve().parent
 # Review dispatch, report validation, history, identity, and clearance all matter.
 # Keep the original members even where an indirect dependency appears redundant.
+# The tuple is hand-maintained, so a module the gate grows a dependency on is
+# a silent gap until a line is added here -- `sd_protection.py` was one for a
+# day (sd:1327 review, finding 3). `tests/test_sd_workflow_state.py` now walks
+# `sd-ship`'s imports and fails naming any that this tuple lacks.
 REVIEW_TOOL_FILES = (
     "sd-review", "sd_lib.py", "sd_registry.py", "sd_route.py", "sd_codex.py", "sd-check", "sd-docs-lint",
     "sd-ship", "sd_ship_dispositions.py", "sd_ship_remote.py", "sd_ship_review.py",
     "sd_ship_history.py", "sd_ship_identity.py", "sd_ship_item.py", "sd_ship_no_item.py",
-    "sd_ship_evidence.py", "sd_ship_bindings.py", "sd_ship_workflow.py",
+    "sd_ship_evidence.py", "sd_ship_bindings.py", "sd_ship_workflow.py", "sd_protection.py",
     "sd_check_receipts.py", "sd_review_material.py", "sd_review_readiness.py",
 )
 ADJUDICATOR_POLICY_FILES = (

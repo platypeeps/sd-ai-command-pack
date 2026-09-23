@@ -390,7 +390,10 @@ accepted and stops accepting it the moment the live state stops matching what
 the file pins. While protection is gone there are no required contexts, and
 `sd-ship merge` refuses to run: it reads the protection object before it
 reads the pull request's checks and refuses a missing one
-(`bin/sd_ship_remote.py`, `protection()`). Merges land by hand with
+(`bin/sd_ship_remote.py`, `gate()`). The object is the classic one or, when
+classic answers 404, the branch's active rulesets reduced to the same shape
+(`bin/sd_protection.py`); this repository's own ruleset forbids only
+deletion and force-push, which gates no merge, so it stays unprotected here. Merges land by hand with
 `gh pr merge` after the maintainer reads the checks.
 
 **Installer coverage is gated at 100% line and branch.** The gate enumerates its

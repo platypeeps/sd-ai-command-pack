@@ -57,6 +57,7 @@ if str(_BIN) not in sys.path:
     sys.path.insert(0, str(_BIN))
 
 import sd_lib  # noqa: E402
+import sd_protection  # noqa: E402
 import sd_registry  # noqa: E402
 
 # Nothing here imports from `dashboard/`. The issues section used to fall
@@ -431,6 +432,13 @@ def _observed_state(protection: dict[str, Any] | None) -> dict[str, Any]:
     checks = (protection or {}).get("required_status_checks") or {}
     return {
         "branch_protection": protection is not None,
+        # The actors an acknowledgement of the `bypass` gap accepted, by
+        # name: one added later un-matches the entry and the gap returns.
+        "bypass": sd_protection.bypass_words(protection or {}),
+        # The administrators' own exemptions, per ruleset with the rules each
+        # reaches: an acknowledgement of `enforce_admins` off that pins them
+        # stops applying when a second ruleset grows one.
+        "admin_bypass": sd_protection.bypass_words(protection or {}, True),
         "enforce_admins": (
             bool(admins.get("enabled")) if isinstance(admins, dict) else bool(admins)
         ),
@@ -497,15 +505,8 @@ def _protection_gaps(
     reviews = protection.get("required_pull_request_reviews")
     admins = protection.get("enforce_admins") or {}
 
-    if not (admins.get("enabled") if isinstance(admins, dict) else admins):
-        gaps.append(
-            _gap(
-                "enforce_admins",
-                f"enforce_admins is off on {default_branch}: every rule below stops "
-                "collaborators and exempts the admins who do the merging. "
-                "Protection that exempts admins is prose, not authority.",
-            )
-        )
+    admin_gaps, bypass = _admin_gaps(protection, default_branch)
+    gaps.extend(admin_gaps)
     if not isinstance(checks, dict) or not checks:
         gaps.append(
             _gap(
@@ -570,6 +571,8 @@ def _protection_gaps(
             )
     detail = {
         "enforce_admins": bool(admins.get("enabled")) if isinstance(admins, dict) else False,
+        "bypass": bypass,
+        "admin_bypass": sd_protection.bypass_words(protection, True),
         "strict": bool(checks.get("strict")) if isinstance(checks, dict) else False,
         "required_contexts": sorted(contexts),
         "produced_contexts": sorted(produced),
@@ -579,6 +582,57 @@ def _protection_gaps(
         "workflow_notes": notes,
     }
     return gaps, detail
+
+
+def _admin_gaps(protection: dict[str, Any], default_branch: str) -> tuple[list[dict[str, str]], list[str]]:
+    """The `enforce_admins` and `bypass` findings, and the bypass list the
+    detail carries: the one decision of `_protection_gaps` with more than
+    two answers, kept out of it so that function stays under the ceiling."""
+    gaps: list[dict[str, str]] = []
+    admins = protection.get("enforce_admins") or {}
+    enabled = admins.get("enabled") if isinstance(admins, dict) else admins
+    if enabled is None and isinstance(admins, dict):
+        # Unknown, reported as not enforced and never as enforced, for one
+        # of two reasons, each named: a ruleset whose `bypass_actors` GitHub
+        # withheld (it shows that list only to a caller who can edit the
+        # ruleset), or a `RepositoryRole` bypass, whose numeric id nothing
+        # here resolves to admin or not -- so neither "exempts the admins"
+        # nor "administrators stay subject" is said of it (sd:1327 review).
+        gaps.append(_gap("enforce_admins", sd_protection.unknown_admins_words(protection, default_branch)))
+    elif not enabled and protection.get("source") == sd_protection.RULESET_SOURCE:
+        # Per ruleset, with the rules each bypass reaches, and which
+        # rulesets still bind the administrators: GitHub layers rulesets,
+        # and "every rule below" was said of a branch whose checks ruleset
+        # nobody bypassed (Codex on #521).
+        gaps.append(_gap("enforce_admins", sd_protection.exempt_admins_words(protection, default_branch)))
+    elif not enabled:
+        gaps.append(
+            _gap(
+                "enforce_admins",
+                f"enforce_admins is off on {default_branch}: every rule below stops "
+                "collaborators and exempts the admins who do the merging. "
+                "Protection that exempts admins is prose, not authority.",
+            )
+        )
+    bypass = sd_protection.bypass_words(protection)
+    if bypass:
+        # A bypass that does not reach administrators is not their
+        # exemption: a ruleset one app or team can walk past leaves every
+        # admin subject to every rule, and folding it into `enforce_admins`
+        # printed "exempts the admins who do the merging" on a repository
+        # where they are not (Codex on #1140). Its own finding, naming the
+        # ruleset and the actor, and its own fact to acknowledge.
+        subject = "; ".join(sd_protection.scope(entry) for entry in sd_protection.ruleset_states(protection)
+                            if entry["admins"] == "enforced")
+        gaps.append(
+            _gap(
+                "bypass",
+                f"a ruleset protecting {default_branch} can be bypassed: {'; '.join(bypass)}. "
+                "That actor is not subject to the rules in brackets, and a merge it makes "
+                "lands past them" + (f"; administrators stay subject to {subject}." if subject else "."),
+            )
+        )
+    return gaps, bypass
 
 
 def _merge_settings(repo: dict[str, Any]) -> list[dict[str, Any]]:
@@ -659,12 +713,23 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
     default_branch = str(repo.get("default_branch") or "main")
     result.update(available=True, reason="", default_branch=default_branch)
     result["merge_settings"] = _merge_settings(repo)
+    admin = isinstance(repo.get("permissions"), dict) and repo["permissions"].get("admin") is True
 
     protection, error = pr_state.gh_json(
         ["api", f"repos/{slug}/branches/{default_branch}/protection"], root
     )
+    ruleset_detail: dict[str, Any] = {}
     if not isinstance(protection, dict):
-        # 404 is the answer, not an outage: this branch has no protection.
+        # 404 is the answer, not an outage: this branch has no *classic*
+        # protection. That used to be the whole answer, and on 2026-09-22 it
+        # reported rwbp-website's main as unprotected while a ruleset was
+        # enforcing four rules on it (sd:1323). Rulesets are GitHub's other
+        # mechanism, on their own endpoint, so they are read next through the
+        # reader `sd-ship`'s gate shares, and an active ruleset that gates the
+        # merge is the protection object from here on. One that gates nothing
+        # -- `deletion` and `non_fast_forward` alone -- keeps the finding
+        # below, with its rules named in `detail` so the reader can tell the
+        # two apart.
         #
         # This branch used to return here, one line before the acknowledgements
         # it had already loaded were applied -- so `unprotected`, the only
@@ -672,23 +737,50 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
         # the one finding `.github/sd-status.json` could not accept. The file
         # was read and its path was reported in `detail`, which is precisely
         # what made the omission read as a working feature.
-        result["protected"] = False
-        still_open, accepted = _apply_acknowledgements(
-            [
-                _gap(
-                    "unprotected",
-                    f"{default_branch} has no branch protection at all: nothing "
-                    "that can push is stopped by anything, and no local lane can "
-                    "supply the authority the config does not",
-                )
-            ],
-            _observed_state(None),
-            acknowledgements,
-        )
-        result["gaps"] = unreadable + still_open
-        result["accepted"] = accepted
-        result["detail"]["read_error"] = error
-        return result
+        read = sd_protection.read_rulesets(_gh_fetch(root), f"repos/{slug}", default_branch)
+        synthesized = None if read["error"] else sd_protection.synthesize(read["rules"], read["rulesets"])
+        # Whose 404 it is decides what it means. GitHub answers 404 `Not
+        # Found` on classic protection to a caller without `admin` on the
+        # repository whether or not the branch is protected -- measured
+        # 2026-09-22 on home-assistant/core and gohugoio/hugo, both protected
+        # -- and 404 `Branch not protected` to an admin of a bare branch. So
+        # only an admin's 404 is "no protection"; any other is the classic
+        # side unseen, reported as unknown with the reason and never as the
+        # `unprotected` finding, which would be a verdict on no evidence.
+        result["detail"]["classic_visibility"] = "absent" if admin else "hidden"
+        result["detail"]["ruleset_rules"] = sd_protection.rule_types(read["rules"], read["rulesets"])
+        if read["error"]:
+            result["detail"]["rules_read_error"] = read["error"]
+        if synthesized is None and not admin:
+            result["protected"] = None
+            result["reason"] = (
+                f"classic protection on {default_branch} is not visible to this token: GitHub "
+                f"answers 404 to a caller without admin on {slug} whether or not the branch is "
+                "protected, so this 404 is not \"no protection\""
+            )
+            result["detail"]["read_error"] = error
+            return result
+        if synthesized is None:
+            result["protected"] = False
+            still_open, accepted = _apply_acknowledgements(
+                [
+                    _gap(
+                        "unprotected",
+                        f"{default_branch} has no branch protection at all: nothing "
+                        "that can push is stopped by anything, and no local lane can "
+                        "supply the authority the config does not",
+                    )
+                ],
+                _observed_state(None),
+                acknowledgements,
+            )
+            result["gaps"] = unreadable + still_open
+            result["accepted"] = accepted
+            result["detail"]["read_error"] = error
+            return result
+        protection = synthesized
+        ruleset_detail = {"source": sd_protection.RULESET_SOURCE, "rulesets": synthesized["rulesets"],
+                          "classic_visibility": result["detail"]["classic_visibility"]}
     result["protected"] = True
     gaps, detail = _protection_gaps(protection, default_branch, produced, notes)
     still_open, accepted = _apply_acknowledgements(
@@ -697,8 +789,30 @@ def protection_section(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]
     result["gaps"] = unreadable + still_open
     result["accepted"] = accepted
     detail["acknowledgement_source"] = result["detail"]["acknowledgement_source"]
+    detail.update(ruleset_detail)
     result["detail"] = detail
     return result
+
+
+def _gh_fetch(root: pathlib.Path) -> sd_protection.Fetch:
+    """`gh_json` in the `(status, body)` shape `sd_protection` reads.
+
+    `gh_json` folds a non-2xx into one error sentence ending in `(HTTP nnn)`;
+    the status is lifted back out so the reader can tell a 404 from a 403,
+    and the sentence keeps its wording minus that suffix, which the reader
+    puts back.
+    """
+
+    def fetch(path: str) -> tuple[int, Any]:
+        payload, error = pr_state.gh_json(["api", path], root)
+        if not error:
+            return 200, payload
+        match = re.search(r"^(.*?)\s*\(HTTP (\d{3})\)$", error)
+        if match:
+            return int(match[2]), {"message": match[1]}
+        return 0, {"message": error}
+
+    return fetch
 
 
 # --------------------------------------------------------------------------
@@ -3268,7 +3382,11 @@ def _render_protection(section: dict[str, Any], write: Any) -> None:
         # report. An accepted finding is not an absent one, and printing
         # "fully enforcing" over the top of one would be the tool lying about
         # a state the repository deliberately wrote down.
-        if not section["gaps"] and not accepted:
+        if section.get("protected") is None:
+            # The classic endpoint answered a token that may not look. Not
+            # the all-clear and not the `unprotected` finding: unknown, said.
+            write(f"  {branch}: protection unknown -- {section['reason']}\n")
+        elif not section["gaps"] and not accepted:
             write(f"  {branch}: protection is fully enforcing -- admins included, "
                   "checks strict and matched, review required\n")
         for gap in section["gaps"]:

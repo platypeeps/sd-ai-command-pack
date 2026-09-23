@@ -1101,9 +1101,19 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 #: `git fetch` calls it was talking about actually are. A count that a
 #: neighbouring edit can move in either direction is measuring the line
 #: numbers and not the claim.
+#:
+#: 35 and 44 are the merge of sd:1303 with `main` at `6ae7e416`, and they are
+#: the measurement rather than either parent's number. The branch recorded
+#: 34/46 and `main` recorded 36/44; the two were measured from bases that do
+#: not contain each other's edits to `bin/sd_lib.py`, so on the merged tree
+#: neither pair is the size. Nothing here raises a violation: the merged
+#: `implement.md` sits below the 36 `main` already records, and `prd.md` is
+#: unchanged from it. This is the same arithmetic the review lane's cap
+#: comment records for a diamond -- re-measure on the tree that exists, do
+#: not pick a side.
 SYMBOL_ANCHORED_CITATIONS = {
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 34,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 46,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 35,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 44,
 }
 
 
