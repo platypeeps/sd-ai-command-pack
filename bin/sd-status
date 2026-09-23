@@ -435,6 +435,10 @@ def _observed_state(protection: dict[str, Any] | None) -> dict[str, Any]:
         # The actors an acknowledgement of the `bypass` gap accepted, by
         # name: one added later un-matches the entry and the gap returns.
         "bypass": sd_protection.bypass_words(protection or {}),
+        # The administrators' own exemptions, per ruleset with the rules each
+        # reaches: an acknowledgement of `enforce_admins` off that pins them
+        # stops applying when a second ruleset grows one.
+        "admin_bypass": sd_protection.bypass_words(protection or {}, True),
         "enforce_admins": (
             bool(admins.get("enabled")) if isinstance(admins, dict) else bool(admins)
         ),
@@ -501,40 +505,8 @@ def _protection_gaps(
     reviews = protection.get("required_pull_request_reviews")
     admins = protection.get("enforce_admins") or {}
 
-    enabled = admins.get("enabled") if isinstance(admins, dict) else admins
-    if enabled is None and isinstance(admins, dict):
-        # Unknown, reported as not enforced and never as enforced, for one
-        # of two reasons, each named: a ruleset whose `bypass_actors` GitHub
-        # withheld (it shows that list only to a caller who can edit the
-        # ruleset), or a `RepositoryRole` bypass, whose numeric id nothing
-        # here resolves to admin or not -- so neither "exempts the admins"
-        # nor "administrators stay subject" is said of it (sd:1327 review).
-        gaps.append(_gap("enforce_admins", sd_protection.unknown_admins_words(protection, default_branch)))
-    elif not enabled:
-        gaps.append(
-            _gap(
-                "enforce_admins",
-                f"enforce_admins is off on {default_branch}: every rule below stops "
-                "collaborators and exempts the admins who do the merging. "
-                "Protection that exempts admins is prose, not authority.",
-            )
-        )
-    bypass = sd_protection.bypass_words(protection)
-    if bypass:
-        # A bypass that does not reach administrators is not their
-        # exemption: a ruleset one app or team can walk past leaves every
-        # admin subject to every rule, and folding it into `enforce_admins`
-        # printed "exempts the admins who do the merging" on a repository
-        # where they are not (Codex on #1140). Its own finding, naming the
-        # ruleset and the actor, and its own fact to acknowledge.
-        gaps.append(
-            _gap(
-                "bypass",
-                f"a ruleset protecting {default_branch} can be bypassed: {'; '.join(bypass)}. "
-                "Administrators stay subject to its rules; that actor does not, and a "
-                "merge it makes lands past every rule.",
-            )
-        )
+    admin_gaps, bypass = _admin_gaps(protection, default_branch)
+    gaps.extend(admin_gaps)
     if not isinstance(checks, dict) or not checks:
         gaps.append(
             _gap(
@@ -600,6 +572,7 @@ def _protection_gaps(
     detail = {
         "enforce_admins": bool(admins.get("enabled")) if isinstance(admins, dict) else False,
         "bypass": bypass,
+        "admin_bypass": sd_protection.bypass_words(protection, True),
         "strict": bool(checks.get("strict")) if isinstance(checks, dict) else False,
         "required_contexts": sorted(contexts),
         "produced_contexts": sorted(produced),
@@ -609,6 +582,57 @@ def _protection_gaps(
         "workflow_notes": notes,
     }
     return gaps, detail
+
+
+def _admin_gaps(protection: dict[str, Any], default_branch: str) -> tuple[list[dict[str, str]], list[str]]:
+    """The `enforce_admins` and `bypass` findings, and the bypass list the
+    detail carries: the one decision of `_protection_gaps` with more than
+    two answers, kept out of it so that function stays under the ceiling."""
+    gaps: list[dict[str, str]] = []
+    admins = protection.get("enforce_admins") or {}
+    enabled = admins.get("enabled") if isinstance(admins, dict) else admins
+    if enabled is None and isinstance(admins, dict):
+        # Unknown, reported as not enforced and never as enforced, for one
+        # of two reasons, each named: a ruleset whose `bypass_actors` GitHub
+        # withheld (it shows that list only to a caller who can edit the
+        # ruleset), or a `RepositoryRole` bypass, whose numeric id nothing
+        # here resolves to admin or not -- so neither "exempts the admins"
+        # nor "administrators stay subject" is said of it (sd:1327 review).
+        gaps.append(_gap("enforce_admins", sd_protection.unknown_admins_words(protection, default_branch)))
+    elif not enabled and protection.get("source") == sd_protection.RULESET_SOURCE:
+        # Per ruleset, with the rules each bypass reaches, and which
+        # rulesets still bind the administrators: GitHub layers rulesets,
+        # and "every rule below" was said of a branch whose checks ruleset
+        # nobody bypassed (Codex on #521).
+        gaps.append(_gap("enforce_admins", sd_protection.exempt_admins_words(protection, default_branch)))
+    elif not enabled:
+        gaps.append(
+            _gap(
+                "enforce_admins",
+                f"enforce_admins is off on {default_branch}: every rule below stops "
+                "collaborators and exempts the admins who do the merging. "
+                "Protection that exempts admins is prose, not authority.",
+            )
+        )
+    bypass = sd_protection.bypass_words(protection)
+    if bypass:
+        # A bypass that does not reach administrators is not their
+        # exemption: a ruleset one app or team can walk past leaves every
+        # admin subject to every rule, and folding it into `enforce_admins`
+        # printed "exempts the admins who do the merging" on a repository
+        # where they are not (Codex on #1140). Its own finding, naming the
+        # ruleset and the actor, and its own fact to acknowledge.
+        subject = "; ".join(sd_protection.scope(entry) for entry in sd_protection.ruleset_states(protection)
+                            if entry["admins"] == "enforced")
+        gaps.append(
+            _gap(
+                "bypass",
+                f"a ruleset protecting {default_branch} can be bypassed: {'; '.join(bypass)}. "
+                "That actor is not subject to the rules in brackets, and a merge it makes "
+                "lands past them" + (f"; administrators stay subject to {subject}." if subject else "."),
+            )
+        )
+    return gaps, bypass
 
 
 def _merge_settings(repo: dict[str, Any]) -> list[dict[str, Any]]:

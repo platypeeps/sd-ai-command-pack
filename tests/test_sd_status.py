@@ -369,7 +369,8 @@ class ProtectionGapTests(unittest.TestCase):
             self.enforcing(source="ruleset", rulesets=rulesets), "main", {"lint"}, [])
         self.assertEqual([gap["id"] for gap in found], ["bypass"])
         self.assertIn("release (#42): Integration 77 (pull_request); release (#42): Team 9 (always)", found[0]["gap"])
-        self.assertIn("Administrators stay subject", found[0]["gap"])
+        self.assertIn("administrators stay subject to release (#42)", found[0]["gap"])
+        self.assertEqual(detail["admin_bypass"], [])
         self.assertNotIn("exempts the admins", found[0]["gap"])
         self.assertTrue(detail["enforce_admins"])
         self.assertEqual(detail["bypass"],
@@ -585,6 +586,33 @@ class AcknowledgementTests(unittest.TestCase):
         stale = [gap for gap in still_open if gap["id"] == "bypass"][0]
         self.assertIn("no longer matches", stale["acknowledgement_stale"])
         self.assertIn("Team 9 (always)", stale["acknowledgement_stale"])
+        _, problems = self.written(json.dumps({"accepted_gaps": [entry]}))
+        self.assertEqual(problems, [])
+
+    def test_an_enforce_admins_acknowledgement_pins_the_exempting_rulesets(self) -> None:
+        """`enforce_admins: false` alone accepts every admin bypass at once:
+        an entry written for the release ruleset went on accepting a second
+        exemption added on the checks ruleset. `admin_bypass` is the list
+        per ruleset with the rules each reaches, and the entry that pins it
+        stops applying when the list grows."""
+        admin = {"actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}
+        def protection(*exempt: int) -> dict[str, Any]:
+            return self.enforcing(source="ruleset", enforce_admins={"enabled": False}, rulesets=[
+                {"id": 42, "name": "release", "rules": ["pull_request"], "bypass_actors": [admin] if 42 in exempt else []},
+                {"id": 43, "name": "checks", "rules": ["required_status_checks"],
+                 "bypass_actors": [admin] if 43 in exempt else []}])
+        entry = {"id": "enforce_admins",
+                 "state": {"enforce_admins": False, "admin_bypass": ["release (#42) [pull_request]: OrganizationAdmin 1 (always)"]},
+                 "because": "admins ship the release bump; CI still gates", "since": "2026-09-22",
+                 "until": "the release ruleset loses its bypass"}
+        still_open, accepted = self.split(protection(42), [entry])
+        self.assertEqual([gap["id"] for gap in accepted], ["enforce_admins"])
+        self.assertEqual([gap["id"] for gap in still_open], ["reviews"])  # 0 approvals, unacknowledged here
+        still_open, accepted = self.split(protection(42, 43), [entry])
+        self.assertEqual(accepted, [])
+        stale = [gap for gap in still_open if gap["id"] == "enforce_admins"][0]
+        self.assertIn("no longer matches", stale["acknowledgement_stale"])
+        self.assertIn("checks (#43) [required_status_checks]", stale["acknowledgement_stale"])
         _, problems = self.written(json.dumps({"accepted_gaps": [entry]}))
         self.assertEqual(problems, [])
 
@@ -5718,7 +5746,8 @@ class RulesetProtectionCase(unittest.TestCase):
         self.assertEqual(result["detail"]["required_contexts"], ["lint"])
         self.assertEqual(result["detail"]["source"], "ruleset")
         self.assertEqual(result["detail"]["rulesets"],
-                         [{"id": 42, "name": "main", "enforcement": "active", "bypass_actors": []}])
+                         [{"id": 42, "name": "main", "enforcement": "active", "bypass_actors": [],
+                           "rules": ["pull_request", "required_status_checks"]}])
         self.assertEqual(result["_seen"][-2:], [status.sd_protection.rules_path(f"repos/{self.SLUG}", "main", 1),
                                                 f"repos/{self.SLUG}/rulesets/42"])
 
@@ -5745,11 +5774,53 @@ class RulesetProtectionCase(unittest.TestCase):
         result = self.section(self.gating_rules(), bypass)
         self.assertTrue(result["protected"])
         gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
-        self.assertIn("exempts the admins who do the merging", gaps["enforce_admins"])
+        self.assertIn("main (#42) [pull_request, required_status_checks] by OrganizationAdmin 1 (always)",
+                      gaps["enforce_admins"])
+        self.assertIn("Every rule below stops collaborators and exempts the admins who do the merging",
+                      gaps["enforce_admins"])
         self.assertNotIn("bypass", gaps)
         self.assertFalse(result["detail"]["enforce_admins"])
         self.assertEqual(result["detail"]["bypass"], [])
+        self.assertEqual(result["detail"]["admin_bypass"],
+                         ["main (#42) [pull_request, required_status_checks]: OrganizationAdmin 1 (always)"])
         self.assertEqual(result["detail"]["rulesets"][0]["bypass_actors"], bypass["bypass_actors"])
+
+    def test_a_bypass_on_one_ruleset_leaves_the_other_rulesets_rules_binding(self) -> None:
+        """GitHub layers rulesets: a bypass on the review ruleset exempts
+        its holder from the review rule and from nothing the checks ruleset
+        requires. Folded into one boolean, the sentence said "every rule
+        below ... exempts the admins" of a branch whose CI requirement still
+        bound them (Codex on #521, the system half of this change). Now it
+        names each exempting ruleset with its actor and rules, then the
+        rulesets still binding administrators, then the ones not known
+        either way; "every rule below" only when neither is left."""
+        admin = {"actor_id": 1, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}
+        rules = [{"type": "deletion", "ruleset_id": 42},
+                 {"type": "pull_request", "ruleset_id": 42, "parameters": {"required_approving_review_count": 1}},
+                 {"type": "required_status_checks", "ruleset_id": 43,
+                  "parameters": {"strict_required_status_checks_policy": True,
+                                 "required_status_checks": [{"context": "lint", "integration_id": 7}]}}]
+        review = dict(self.RULESET, bypass_actors=[admin])
+        checks = {"id": 43, "name": "checks", "enforcement": "active"}
+        for actors, expect, absent in (
+                ([], "Still binding them: checks (#43) [required_status_checks].", "very rule below"),
+                ([admin], "checks (#43) [required_status_checks] by OrganizationAdmin 1 (always). Every rule below",
+                 "Still binding"),
+                (None, "Not known either way: checks (#43) [required_status_checks]", "very rule below")):
+            with self.subTest(actors=actors):
+                shown = dict(checks, bypass_actors=actors) if actors is not None else checks
+                result = self.section(rules, review, extra={43: shown})
+                self.assertTrue(result["protected"])
+                gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
+                self.assertNotIn("bypass", gaps)
+                self.assertIn("enforce_admins is off on main: main (#42) [pull_request] by OrganizationAdmin 1 (always)",
+                              gaps["enforce_admins"])
+                self.assertIn(expect, gaps["enforce_admins"])
+                self.assertNotIn(absent, gaps["enforce_admins"])
+                self.assertFalse(result["detail"]["enforce_admins"])
+                self.assertIn("main (#42) [pull_request]: OrganizationAdmin 1 (always)", result["detail"]["admin_bypass"])
+                self.assertEqual([entry["rules"] for entry in result["detail"]["rulesets"]],
+                                 [["pull_request"], ["required_status_checks"]])
 
     def test_a_role_bypass_is_unknown_until_the_role_is_confirmed(self) -> None:
         """A `RepositoryRole` actor carries a numeric id, and which role it
@@ -5765,7 +5836,8 @@ class RulesetProtectionCase(unittest.TestCase):
                 self.assertTrue(result["protected"])
                 gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
                 self.assertNotIn("bypass", gaps)
-                self.assertIn(f"main (#42) lets RepositoryRole {role_id} (always) bypass it", gaps["enforce_admins"])
+                self.assertIn(f"main (#42) [pull_request, required_status_checks] lets RepositoryRole {role_id} "
+                              "(always) bypass it", gaps["enforce_admins"])
                 self.assertIn("not confirmed here", gaps["enforce_admins"])
                 self.assertNotIn("exempts the admins", gaps["enforce_admins"])
                 self.assertNotIn("stay subject", gaps["enforce_admins"])
@@ -5784,10 +5856,14 @@ class RulesetProtectionCase(unittest.TestCase):
         self.assertTrue(result["protected"])
         gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
         self.assertNotIn("enforce_admins", gaps)
-        self.assertIn("main (#42): Integration 77 (pull_request); main (#42): Team 9 (always)", gaps["bypass"])
+        self.assertIn("main (#42) [pull_request, required_status_checks]: Integration 77 (pull_request); "
+                      "main (#42) [pull_request, required_status_checks]: Team 9 (always)", gaps["bypass"])
+        self.assertIn("administrators stay subject to main (#42) [pull_request, required_status_checks]", gaps["bypass"])
         self.assertTrue(result["detail"]["enforce_admins"])
         self.assertEqual(result["detail"]["bypass"],
-                         ["main (#42): Integration 77 (pull_request)", "main (#42): Team 9 (always)"])
+                         ["main (#42) [pull_request, required_status_checks]: Integration 77 (pull_request)",
+                          "main (#42) [pull_request, required_status_checks]: Team 9 (always)"])
+        self.assertEqual(result["detail"]["admin_bypass"], [])
         # A withheld list beside a shown one stays unknown: the app's bypass
         # is reported, and so is the list nobody was shown.
         hidden = {"id": 43, "name": "ops", "enforcement": "active"}
@@ -5795,8 +5871,10 @@ class RulesetProtectionCase(unittest.TestCase):
                                         "parameters": {"required_approving_review_count": 1}}]
         result = self.section(rules, bypass, extra={43: hidden})
         gaps = {gap["id"]: gap["gap"] for gap in result["gaps"]}
-        self.assertIn("did not show bypass_actors for ops (#43)", gaps["enforce_admins"])
+        self.assertIn("did not show bypass_actors for ops (#43) [pull_request]", gaps["enforce_admins"])
         self.assertIn("Integration 77 (pull_request)", gaps["bypass"])
+        # The withheld ruleset is not one administrators are known to stay subject to.
+        self.assertIn("administrators stay subject to main (#42) [pull_request, required_status_checks].", gaps["bypass"])
 
     def test_a_bypass_list_not_shown_is_unknown_not_enforcement(self) -> None:
         """Absent `bypass_actors` is what GitHub answers a caller who cannot

@@ -53,7 +53,12 @@
               "bypass": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Every bypass of a ruleset that does not reach administrators, as `<ruleset> (#<id>): <actor type> <actor id> (<bypass mode>)`, sorted -- the list the `bypass` gap prints. Empty for classic protection and for a ruleset only administrators can bypass. A list rather than a boolean so that an actor added later un-matches the entry and the gap returns."
+                "description": "Every bypass of a ruleset that does not reach administrators, as `<ruleset> (#<id>) [<rules it carries>]: <actor type> <actor id> (<bypass mode>)`, sorted -- the list the `bypass` gap prints. Empty for classic protection and for a ruleset only administrators can bypass. A list rather than a boolean so that an actor added later un-matches the entry and the gap returns."
+              },
+              "admin_bypass": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Every bypass of a ruleset that reaches administrators (`OrganizationAdmin`), in the same shape as `bypass` -- the exemptions the `enforce_admins` gap names, one a ruleset with the rules it carries. Empty for classic protection. Pinned beside `enforce_admins: false` so that an exemption added on a second ruleset un-matches the entry and the gap returns."
               }
             }
           },

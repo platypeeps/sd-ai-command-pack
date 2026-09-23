@@ -2617,6 +2617,7 @@ ACKNOWLEDGEMENT_RELATIVE_PATH = pathlib.Path(".github") / "sd-status.json"
 #: count: an entry that accepted "an app can bypass" as a yes/no would go on
 #: accepting the branch after a team was added beside the app.
 ACKNOWLEDGED_FACTS = (
+    "admin_bypass",
     "branch_protection",
     "bypass",
     "enforce_admins",

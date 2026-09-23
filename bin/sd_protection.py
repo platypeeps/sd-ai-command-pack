@@ -184,7 +184,7 @@ def synthesize(rules: list, rulesets: dict[int, dict]) -> dict[str, Any] | None:
     gating = [rule for rule in active_rules(rules, rulesets) if rule.get("type") in MERGE_GATING_RULES]
     if not gating:
         return None
-    contributing = _contributing(sorted({rule["ruleset_id"] for rule in gating}), rulesets)
+    contributing = _contributing(sorted({rule["ruleset_id"] for rule in gating}), rulesets, gating)
     value: dict[str, Any] = {
         "source": RULESET_SOURCE,
         "rulesets": contributing,
@@ -199,11 +199,15 @@ def synthesize(rules: list, rulesets: dict[int, dict]) -> dict[str, Any] | None:
     return value
 
 
-def _contributing(ids: list[int], rulesets: dict[int, dict]) -> list[dict[str, Any]]:
+def _contributing(ids: list[int], rulesets: dict[int, dict], gating: list) -> list[dict[str, Any]]:
+    """Each cited ruleset with the merge-gating rule types it contributes:
+    a bypass of one ruleset reaches those rules and no other ruleset's, so
+    a finding that names the bypass names the rules with it (`scope`)."""
     return [{"id": ruleset_id,
              "name": str(rulesets[ruleset_id].get("name") or ruleset_id),
              "enforcement": rulesets[ruleset_id].get("enforcement"),
-             "bypass_actors": _bypass_actors(rulesets[ruleset_id])}
+             "bypass_actors": _bypass_actors(rulesets[ruleset_id]),
+             "rules": sorted({str(rule["type"]) for rule in gating if rule.get("ruleset_id") == ruleset_id})}
             for ruleset_id in ids]
 
 
@@ -262,13 +266,13 @@ def unknown_admins_words(value: dict[str, Any], default_branch: str) -> str:
     Unknown is a statement about this reader's knowledge; the alternative
     sentences are claims about the repository, and neither is made."""
     reasons: list[str] = []
-    hidden = ", ".join(f"{entry.get('name')} (#{entry.get('id')})" for entry in hidden_bypass(value))
+    hidden = ", ".join(scope(entry) for entry in hidden_bypass(value))
     if hidden:
         reasons.append(
             f"whether anyone can bypass the ruleset protecting {default_branch} is unknown: GitHub "
             f"did not show bypass_actors for {hidden}, which it withholds from a caller who cannot "
             "edit the ruleset. A bypass list not shown is not an empty one.")
-    roles = "; ".join(f"{entry.get('name')} (#{entry.get('id')}) lets {actor_words(actor)} bypass it"
+    roles = "; ".join(f"{scope(entry)} lets {actor_words(actor)} bypass it"
                       for entry, actor in bypass_pairs(value, None))
     if roles:
         reasons.append(
@@ -278,12 +282,70 @@ def unknown_admins_words(value: dict[str, Any], default_branch: str) -> str:
     return " ".join(reasons) or f"whether anyone can bypass the ruleset protecting {default_branch} is unknown."
 
 
-def bypass_words(value: dict[str, Any]) -> list[str]:
-    """`main (#42): Integration 77 (pull_request)`, one a bypass that does
-    not reach administrators, sorted: the words the `bypass` finding prints
-    and the fact an acknowledgement of it pins."""
-    return sorted(f"{entry.get('name')} (#{entry.get('id')}): {actor_words(actor)}"
-                  for entry, actor in bypass_pairs(value, False))
+def bypass_words(value: dict[str, Any], reaching: bool = False) -> list[str]:
+    """`main (#42) [pull_request]: Integration 77 (pull_request)`, one a
+    bypass whose `reaches_admins` is `reaching`, sorted: with `False` the
+    words the `bypass` finding prints and the fact an acknowledgement of it
+    pins; with `True` the administrators' own exemptions, the `admin_bypass`
+    fact an acknowledgement of `enforce_admins` pins per ruleset, so one
+    added on a second ruleset un-matches the entry."""
+    return sorted(f"{scope(entry)}: {actor_words(actor)}"
+                  for entry, actor in bypass_pairs(value, reaching))
+
+
+def scope(entry: dict[str, Any]) -> str:
+    """One ruleset for a sentence, with the merge-gating rules it carries:
+    `main (#42) [pull_request]`. GitHub layers rulesets, and a bypass of
+    one exempts its holder from that ruleset's rules and from no other's,
+    so a bypass named without the rules it reaches reads as wider than it
+    is (Codex on #521: "every rule below" said of a branch whose checks
+    ruleset still bound the administrators). An entry without `rules` --
+    `_contributing` records them; a hand-shaped one may not -- is named
+    without the brackets."""
+    named = f"{entry.get('name')} (#{entry.get('id')})"
+    rules = entry.get("rules")
+    return f"{named} [{', '.join(str(rule) for rule in rules)}]" if rules else named
+
+
+def ruleset_states(value: dict[str, Any]) -> list[dict[str, Any]]:
+    """Each contributing ruleset with `admins`: `exempt` when a shown actor
+    reaches administrators, `unknown` when its list was withheld or a shown
+    actor is a role nothing resolves and none reaches them, `enforced` when
+    the list was shown and none does. Kept apart per ruleset: the one
+    `enforce_admins` boolean `_admins_subject` gives the object answers
+    "subject to every rule", and says nothing about which."""
+    states = []
+    for entry in value.get("rulesets") or []:
+        if not isinstance(entry, dict):
+            continue
+        verdict = _admins_subject([entry.get("bypass_actors")])
+        states.append({**entry, "admins": "unknown" if verdict is None else ("enforced" if verdict else "exempt")})
+    return states
+
+
+def exempt_admins_words(value: dict[str, Any], default_branch: str) -> str:
+    """`enforce_admins` off, the ruleset way round: which ruleset exempts
+    administrators, through which actor, from which rules -- then the
+    rulesets still binding them, then the ones not known either way.
+    "Every rule below" is said only when no ruleset is left in either: a
+    review ruleset the admins bypass beside a checks ruleset nobody does
+    leaves the CI requirement enforced, and a sentence exempting them from
+    everything is a false finding on it."""
+    states = ruleset_states(value)
+    binding = "; ".join(scope(entry) for entry in states if entry["admins"] == "enforced")
+    unknown = "; ".join(scope(entry) for entry in states if entry["admins"] == "unknown")
+    named = "; ".join(f"{scope(entry)} by {actor_words(actor)}" for entry, actor in bypass_pairs(value, True))
+    words = f"enforce_admins is off on {default_branch}: {named}. "
+    if not binding and not unknown:
+        return words + ("Every rule below stops collaborators and exempts the admins who do the "
+                        "merging. Protection that exempts admins is prose, not authority.")
+    words += "The rules in brackets stop collaborators and exempt the admins who do the merging."
+    if binding:
+        words += f" Still binding them: {binding}."
+    if unknown:
+        words += (f" Not known either way: {unknown}, whose bypass list was withheld or names a "
+                  "role nothing here resolves.")
+    return words
 
 
 def _admins_subject(lists: list[list | None]) -> bool | None:
